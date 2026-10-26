@@ -604,10 +604,12 @@ const std::vector<Tool>& tools()
             "and files (NEW, OPEN, SAVE, IMPORT, EXPORT). Each command is one undoable step. By "
             "default the batch stops at the first command that fails. Returns each command's "
             "output and the drawing's status afterwards. PLOT, PLOTSHEETS, SNAPSHOT, ONLINE, "
-            "SCRIPT, GRID, EXAGGERATION, VIEWS and ZOOM are the desktop window's verbs and are "
+            "SCRIPT, GRID, EXAGGERATION and ZOOM, and VIEWS except SCALE, are the desktop window's verbs and are "
             "refused here, saying so: plotting, view pictures, online data and the views need "
             "the window (or katana run headless with --command); a script file is "
-            "katana_run_script's. UPDATE lines are refused here too, so that this tool reaches "
+            "katana_run_script's. VIEWS SCALE id AUTO|1:N edits a saved plan view's paper "
+            "linestyle and symbol scale independently of zoom and ANNOSCALE. "
+            "UPDATE lines are refused here too, so that this tool reaches "
             "no network: katana_check_update is the tool that checks for a newer Katana.",
             objectSchema(
                 Json{{"commands",

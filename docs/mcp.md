@@ -115,6 +115,10 @@ a read is no line in the session's history
 scope and filter under the names `katana_import` uses (`scope`, `area`,
 `scope_layers`, `only`, `scope_where`) and says how many leaders the scope took
 (`McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`).
+Leader records from `katana_leaders` and `LEADER LIST JSON` may also include
+`landing_angle`, in radians, when an imported leader carries an explicit
+landing direction. Its absence retains the usual direction inferred from
+the leader geometry.
 
 An entity's attributes are read a level at a time through
 `katana_run_commands` with `PROP TREE` (`docs/cad.md`, "Properties as a tree:
@@ -216,6 +220,27 @@ rules tab's Preview is `AUTOLABEL PREVIEW` of the rules named, which answers
 the counts and a `rule=NAME labels=N` record a rule, and `LABELSTYLE VALUES
 kind` lists what a template may say
 (`McpServer.ChosenLabelRulesArePreviewedByNameWithACountForEach`).
+
+Paper-based library linestyles and symbols have a separate **per-plan-view
+style scale**, not `ANNOSCALE` or camera zoom (`docs/plan_view.md`, "Paper
+style scale"). After a desktop view has recorded its scale and saved the
+project, open that project and run, through `katana_run_commands`:
+
+```json
+{"commands":["VIEWS SCALE LIST","VIEWS SCALE 1 1:500","VIEWS SCALE 1","SAVE"]}
+```
+
+Use the actual id from the list, not a guessed `1`. A fixed scale replies
+`view=1 kind=plan paper_scale=500 changed=yes`; `VIEWS SCALE 1 AUTO` restores
+fixed screen sizing. Each changed assignment is one normal undo step,
+reachable through `katana_undo` or `UNDO`; an unchanged value records no
+step. The project keeps versioned JSON and the window applies the assignment
+when that view id exists. This changes neither the entities nor annotation
+or plot scales. MCP and CLI have no live views: only previously saved plan
+view assignments may be named here, and a new session lists `views=0`.
+An unknown id, zero, non-finite or out-of-range denominator is refused with
+the specific error and no edit. `tests/app/test_view_scale.cpp` exercises the
+MCP result records, undo and the refusal to invent a view.
 
 Each tool that runs commands answers with a transcript (`> command`, then what
 it printed and any error or warning) and, to clients of MCP 2025-06-18 or later,
@@ -989,7 +1014,9 @@ watching the window:
   desktop window (its painter is Qt's; its online workbench keeps the
   provider keys; a script is `katana_run_script`'s here; the grid and the
   exaggeration are how its views draw), and so do `VIEWS` and `ZOOM`, which
-  act on its views (`docs/cad.md`, "The window's views: VIEWS and ZOOM") -
+  act on its views (`docs/cad.md`, "The window's views: VIEWS and ZOOM").
+  The exception is `VIEWS SCALE`: it edits the saved assignments by explicit
+  view id, as described above, and creates no live view. For the other operations,
   the interpreter refuses those two itself, having no views here, as it
   refuses `ROADMODEL SHOW`, the one word of the road model's verb that is the
   window's (it switches whether the window's views draw the model;

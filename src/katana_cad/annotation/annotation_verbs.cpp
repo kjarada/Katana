@@ -1821,6 +1821,9 @@ std::string describeLeader(const katana::entity::Model& model, const Entity& ent
     line << " arrow=" << katana::entity::toString(leader.arrow)
          << " callout=" << katana::entity::toString(leader.callout)
          << " text=" << field(ann::leaderSays(model, leader, context));
+    if (leader.landingAngle) {
+        line << " landing_angle=" << real(*leader.landingAngle);
+    }
     return line.str();
 }
 

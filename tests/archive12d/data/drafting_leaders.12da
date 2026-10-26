@@ -1,0 +1,47 @@
+model "Test/Services"
+string super {
+  name "Service line"
+  colour "test utility amber"
+  style "TEST Service"
+  breakline line
+  data_2d { 100 200 120 200 }
+  symbol_value { style "" colour "no_colour" size 0.3 rotation 0 offset 0 raise 0 }
+}
+string super {
+  name "Survey mark"
+  colour "test utility amber"
+  style "0"
+  breakline point
+  data_2d { 110 205 }
+  symbol_value { style "TEST Mark" colour "test utility green" size 2 rotation 0 offset 0 raise 0 }
+}
+model "Test/Notes"
+drafting_element {
+  time_created "01-Jan-2026 00:00:00"
+  leader {
+    style_name ""
+    hook_angle 0
+    justify_x Left_Justify
+    display_text "Service note\nFirst line"
+    format_text "Service note\nFirst line"
+    arrow_x 100
+    arrow_y 200
+    hook_x 100
+    hook_y 208
+    overrides { arrow_size 1 hook_length 2.5 text_size 1.25 }
+  }
+}
+drafting_element {
+  leader {
+    style_name ""
+    hook_angle 0
+    justify_x Right_Justify
+    display_text "Other note"
+    format_text "{source.attribute}"
+    arrow_x 110
+    arrow_y 210
+    hook_x 105
+    hook_y 215
+    overrides { arrow_size 2 hook_length 5 text_size 2 }
+  }
+}

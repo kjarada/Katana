@@ -228,9 +228,12 @@ class Exporter {
         // entity's colour must not be used to second-guess the name.
         const bool colourIsTheSymbols =
             textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "colour") != nullptr;
-        if (named != nullptr && (colourIsTheSymbols || !entity.color ||
-                                 standardColour(*named) == entity.color ||
-                                 !standardColour(*named))) {
+        const auto* importedRgb = textOf(entity.metadata, kMetaColourRgb);
+        const auto standard = named != nullptr ? standardColour(*named) : std::nullopt;
+        const bool colourUnchanged =
+            importedRgb != nullptr ? (entity.color && entity.color->toHex() == *importedRgb)
+                                   : (!entity.color || !standard || standard == entity.color);
+        if (named != nullptr && (colourIsTheSymbols || colourUnchanged)) {
             header.colour = *named;
         } else if (rgb) {
             header.colour = nearestStandardColour(*rgb);

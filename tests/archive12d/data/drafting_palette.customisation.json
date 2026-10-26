@@ -1,0 +1,19 @@
+{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "Drafting test palette",
+  "colours": {
+    "test utility amber": "#E08020",
+    "test utility green": "#207050"
+  },
+  "linestyles": [
+    {"name": "TEST Service", "units": "paper", "length": 4, "strokes": [
+      ["pen", "view_colour"], ["move", 0, 0], ["draw", 3, 0], ["move", 4, 0]
+    ]}
+  ],
+  "symbols": [
+    {"name": "TEST Mark", "units": "paper", "strokes": [
+      ["move", -1, 0], ["draw", 1, 0], ["move", 0, -1], ["draw", 0, 1]
+    ]}
+  ]
+}

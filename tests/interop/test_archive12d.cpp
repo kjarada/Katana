@@ -77,6 +77,25 @@ katana::entity::Model smallDrawing()
 
 } // namespace
 
+TEST(ArchiveImport, ZippedLeadersAndCustomColoursReachTheDomainTogether)
+{
+    const TempDir dir("drafting-colours");
+    const auto file = dir / "notes.12daz";
+    ASSERT_TRUE(katana::gis::writeZip(file, "notes.12da", bytesOf(fixture("drafting_leaders.12da"))).ok());
+    interop::Archive12dImportOptions options;
+    ASSERT_TRUE(options.colours.add("test utility amber", {224, 128, 32, 255}).ok());
+    ASSERT_TRUE(options.colours.add("test utility green", {32, 112, 80, 255}).ok());
+    const auto imported = interop::importArchive12d(file, options);
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    ASSERT_EQ(imported->entities.size(), 4u);
+    EXPECT_EQ(imported->entities[0].color, (katana::entity::Color{224, 128, 32, 255}));
+    EXPECT_EQ(imported->entities[1].color, (katana::entity::Color{32, 112, 80, 255}));
+    EXPECT_TRUE(std::holds_alternative<katana::entity::LeaderGeometry>(imported->entities[2].geometry));
+    EXPECT_TRUE(std::holds_alternative<katana::entity::LeaderGeometry>(imported->entities[3].geometry));
+    EXPECT_EQ(imported->memberName, "notes.12da");
+    EXPECT_TRUE(imported->warnings.empty());
+}
+
 TEST(ZipContainer, WhatIsWrittenIsReadBackAndTheSecondWritingReplacesTheFirst)
 {
     const TempDir dir("zip");

@@ -29,7 +29,7 @@ PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source,
 |---|---|
 | `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the drawing's surfaces and their display styles, the window's reference data and meshes. `planSourceOf(document)` fills the document's part. Every pointer but the model may be null; each null leaves out only what it provides. |
 | `PlanFrame` | How it is looked at: the `ViewTransform` sized to the viewport, a `rotation` (counter-clockwise, radians, about the viewport's centre), the viewport's `origin` on the device, whether to `clip` to it, and the view's hidden layers (`LayerOverrides`) and hidden reference layers. |
-| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`rasterDpiCap`, `rasterPixelCap`); and the screen-only speed switches (`thinLines`, `symbolSprites`, `clipLines`). |
+| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; the screen's optional paper-style denominator (`paperStyleScale`); what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`rasterDpiCap`, `rasterPixelCap`); and the screen-only speed switches (`thinLines`, `symbolSprites`, `clipLines`). |
 | `PlanPaintCache` | What is kept between paints, owned by the CALLER (below). |
 
 It returns `PlanPaintStats`: entities drawn, symbol stamps and how many came
@@ -53,6 +53,105 @@ Other entry points in the same header:
   given and the painter scale that makes the sheet's exact dpi land on it.
 * `plotPlanToPdf(path, settings, source, layers, hiddenReferences, cache,
   title)` - one page, titled, `Katana` as its creator.
+
+### Paper style scale: see the marks without moving the camera
+
+**View > Paper Style Scale...**, also on the View toolbar and the plan
+view's own Paper Style Scale icon button, sizes paper-based library
+linestyles and symbols.
+The non-modal dialog chooses an open plan view, **Auto** or **Fixed 1:N**,
+and a denominator. It only builds and runs a command; it edits neither the
+view nor the drawing itself.
+
+* **Auto**, the default for old and new drawings, keeps the previous screen
+  behaviour: one library paper millimetre is one screen millimetre, whatever
+  the camera zoom.
+* **Fixed 1:N** makes one library paper millimetre **N/1000 model metres**.
+  A 2 mm square at 1:500 is 1 m across, hence 20 pixels at a camera zoom of
+  20 pixels/metre. At 1:1000 it is 2 m, or 40 pixels at the same zoom.
+  A larger denominator makes the marks larger; wheel zoom still works
+  independently.
+
+Only paper-sized library marks change. Ground-sized definitions, built-in
+point marks and symbols with an explicit model-unit size retain their model
+size. Entity coordinates, selection, camera centre and zoom, linked views'
+own style scales, `ANNOSCALE`, text, leaders and dimensions do not change.
+Plots and sheet viewports ignore this screen option and keep their own
+paper scale. Reusing camera zoom or changing the document's annotation
+scale was rejected: either would move or resize things the user did not
+ask to change.
+
+The shared interpreter's command is **`VIEWS`**, plural; `VIEW` remains the
+plotting viewport verb:
+
+```text
+VIEWS SCALE LIST
+VIEWS SCALE 1
+VIEWS SCALE 1 1:500
+VIEWS SCALE 1 1000
+VIEWS SCALE 1 AUTO
+UNDO
+REDO
+```
+
+An id is the `view=` id from `VIEWS`, not the number in "Plan 2". The query
+answers `view=1 kind=plan paper_scale=500` (or `paper_scale=auto`); a set
+adds `changed=yes` or `changed=no`. The list gives one record per plan view,
+then `views=N`; an empty list is `views=0`. A fixed scale also appears as
+`paper_scale=N` in the ordinary `VIEWS` record. Its absence there means Auto.
+Zero, negative, non-finite and underflowing denominators are refused, as are
+values above 10,000,000,000: a millimetre there reaches the same 10,000,000 m
+envelope as a pixel at `ViewTransform::kMinimumScale`. Unknown ids,
+non-plan views and extra arguments are refused without an edit.
+
+One changed scale is one normal document undo step, including the first
+change from Auto. Choosing the same value is no step. Only its assignment
+is persisted, as version-1 JSON in the project's `view_paper_scales`
+metadata key:
+
+```json
+{"version":1,"views":[{"view":1,"paper_scale":500.0},{"view":2,"paper_scale":null}]}
+```
+
+`null` is Auto; a project without the key is all Auto. The assignments
+follow view ids when those views exist again: this does **not** save or
+reconstruct the dock layout, cameras or hidden layers. Closing a view does
+not destroy its saved assignment, and undo after closing it holds no stale
+widget or view pointer. Damaged or newer JSON is reported and preserved,
+not overwritten by a scale edit.
+
+`katana_cli` and `katana_mcp` have no live views. They can list and edit the
+saved assignments after opening the project, naming a real saved id:
+
+```text
+katana_cli -c "OPEN site.katana" -c "VIEWS SCALE LIST" -c "VIEWS SCALE 1 1:500" -c SAVE
+```
+
+A new headless session lists none and refuses an invented id; it never
+silently creates or chooses a view. Set a scale in a desktop plan view and
+save first. MCP uses the same lines through `katana_run_commands`
+(`docs/mcp.md`), with the same errors and undo.
+
+Stable controls: `viewPaperScale` (the menu and View-toolbar action),
+`ViewScaleButton` (each plan view's title-bar tool), `viewScaleDialog`,
+`viewScaleView`, `viewScaleMode`, `viewScaleDenominator`, `viewScaleLine`,
+`viewScaleApply`, `viewScaleStatus`, `viewScaleClose`. The title-bar duplicate
+yields before the optional zoom tools when space is short; the main toolbar
+and menu still reach it. It uses the standard title-bar icon-button dimensions,
+not a wider text button, so showing it never raises the dock's minimum width.
+The action is disabled for an active non-plan view.
+
+The kept plan image includes `ViewState::paperStyleScale` in its key;
+symbol sprites already key on the effective paper-to-model scale.
+`tests/qt_widgets/test_view_scale.cpp` checks independent marker and tick
+sizes, zoom versus Auto, unchanged ground marks and plots, both caches,
+and the dialog-to-command path. `tests/cad/test_view_set.cpp` and
+`tests/cad/test_view_verbs.cpp` cover validation, versioned persistence,
+project reopen, undo and saved headless ids. `tests/app/test_view_scale.cpp`
+exercises the shared CLI session and the MCP command tool. The headless
+window tests drive the menu, read the exact command, save and reopen, then
+the `cli.a_saved_plan_views_paper_scale_is_editable_and_undoable` test reads
+that project in another process.
 
 ### Annotation
 
@@ -160,6 +259,7 @@ place, the painter:
 | Selection, locked-layer fading | shown | not printed (audit QT-26) |
 | Ghosts of the selection | drawn when the view asks (below) | never |
 | Plain point cross | 4 px either side | 1 mm either side |
+| Library paper marks | Auto: screen millimetres; Fixed 1:N: N/1000 model metres per millimetre | the plot or sheet viewport's own scale |
 | Alignment overlay | 2 px line, 1 px ticks 6 px long, 11 px labels | 0.5 mm line, 0.25 mm ticks 1.5 mm long, 2.5 mm labels |
 | Hatch lines | cosmetic hairline | 0.13 mm |
 | Solid hatch | alpha 90, so the drawing under it shows | opaque |

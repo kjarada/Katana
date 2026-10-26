@@ -195,6 +195,35 @@ TEST(DomainExport, AnElevationListThatNoLongerFitsTheGeometryIsNotWrittenAsIfItD
     }
 }
 
+TEST(DomainExport, AResolvedCustomColourKeepsItsNameUntilTheUserChangesTheColour)
+{
+    const auto archive = a12::readArchive(
+        "string super { colour \"test utility amber\" data_2d { 1 2 } }");
+    ASSERT_TRUE(archive.ok());
+    a12::ImportOptions options;
+    ASSERT_TRUE(options.colours.add("test utility amber", {224, 128, 32, 255}).ok());
+    const auto imported = a12::toDomain(*archive, options);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 1u);
+    katana::entity::Model model;
+    Entity unchanged = imported->entities.front();
+    unchanged.layer = "0";
+    add(model, unchanged);
+    Entity edited = unchanged;
+    edited.color = katana::entity::Color{0, 0, 255, 255};
+    add(model, edited);
+    Entity inherited = unchanged;
+    inherited.color.reset();
+    add(model, inherited);
+    const auto exported = a12::fromDomain(model, {});
+    ASSERT_TRUE(exported.ok());
+    ASSERT_EQ(exported->archive.elements.size(), 3u);
+    EXPECT_EQ(std::get<a12::VertexString>(exported->archive.elements[0]).header.colour,
+              "test utility amber");
+    EXPECT_EQ(std::get<a12::VertexString>(exported->archive.elements[1]).header.colour, "blue");
+    EXPECT_EQ(std::get<a12::VertexString>(exported->archive.elements[2]).header.colour, "white");
+}
+
 TEST(DomainExport, TheColourWrittenIsTheNameItCameWithUnlessTheColourHasChanged)
 {
     katana::entity::Model model;

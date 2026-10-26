@@ -32,7 +32,7 @@ constexpr const char* kViewsUsage =
     "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id | LINK id[,id...] [TO id] | "
     "UNLINK id[,id...]|ALL | HIDE id layer[,layer...]|LAYER name...|REFERENCE ref[,ref...] | "
     "SHOW id layer[,layer...]|LAYER name...|REFERENCE ref[,ref...]|ALL | "
-    "ISOLATE id layer|LAYER name | SET id ghosts=on|off";
+    "ISOLATE id layer|LAYER name | SET id ghosts=on|off | SCALE id [AUTO|N|1:N] | SCALE LIST";
 constexpr const char* kZoomUsage =
     "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE s] | "
     "SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] "
@@ -274,6 +274,99 @@ std::string placeOf(const ViewState& view, bool withLinked)
         break;
     }
     return framed ? text : text + " framed=no";
+}
+
+std::string paperScaleRecord(ViewId id, std::optional<double> scale)
+{
+    return "view=" + std::to_string(id) + " kind=plan paper_scale=" +
+           (scale ? real(*scale) : "auto");
+}
+
+Result<std::string> paperScaleVerb(Document& document, ViewVerbHost* host,
+                                   const std::vector<std::string>& args)
+{
+    constexpr const char* usage =
+        "VIEWS SCALE takes a view id and optionally AUTO, N or 1:N; VIEWS SCALE LIST lists them";
+    if (args.size() < 2 || args.size() > 3) {
+        return makeError(ErrorCode::ParseFailure, usage);
+    }
+    auto scales = viewPaperScales(document);
+    if (!scales) {
+        return scales.error();
+    }
+    if (uppered(args[1]) == "LIST") {
+        if (args.size() != 2) {
+            return makeError(ErrorCode::ParseFailure, usage);
+        }
+        std::string reply;
+        std::size_t count = 0;
+        if (host != nullptr) {
+            for (const ViewState* view : host->views().views()) {
+                if (view->kind == ViewKind::Plan) {
+                    reply += paperScaleRecord(view->id, view->paperStyleScale) + "\n";
+                    ++count;
+                }
+            }
+        } else {
+            for (const auto& [id, scale] : *scales) {
+                reply += paperScaleRecord(id, scale) + "\n";
+                ++count;
+            }
+        }
+        return reply + "views=" + std::to_string(count);
+    }
+    const auto id = parseViewId(args[1]);
+    if (!id) {
+        return id.error();
+    }
+    std::optional<double> before;
+    if (host != nullptr) {
+        const ViewState* view = host->views().find(*id);
+        if (view == nullptr) {
+            return notOpen(*id);
+        }
+        if (view->kind != ViewKind::Plan) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "paper style scale applies to a plan view, not " +
+                                 kindWord(view->kind),
+                             std::to_string(*id));
+        }
+        before = view->paperStyleScale;
+    } else {
+        const auto found = scales->find(*id);
+        if (found == scales->end()) {
+            return makeError(ErrorCode::NotFound,
+                             "no saved plan view " + std::to_string(*id) +
+                                 " has a paper style scale; VIEWS SCALE LIST lists saved views. "
+                                 "Set the scale on a real desktop plan view and save the project first",
+                             std::to_string(*id));
+        }
+        before = found->second;
+    }
+    if (args.size() == 2) {
+        return paperScaleRecord(*id, before);
+    }
+    const auto scale = parsePaperStyleScale(args[2]);
+    if (!scale) {
+        return scale.error();
+    }
+    const bool changed = before != *scale;
+    if (changed) {
+        scales->insert_or_assign(*id, *scale);
+        if (const Status status = setViewPaperScales(document, *scales); !status) {
+            return status.error();
+        }
+        if (host != nullptr) {
+            const auto restored = restoreViewPaperScales(document, host->views());
+            if (!restored) {
+                return restored.error();
+            }
+            for (const ViewId restoredId : *restored) {
+                host->settingsChanged(restoredId);
+            }
+        }
+    }
+    return paperScaleRecord(*id, *scale) + " changed=" + (changed ? "yes" : "no");
 }
 
 // ---- VIEWS --------------------------------------------------------------------------------
@@ -951,12 +1044,22 @@ bool applyPlanZoom(ViewTransform& view, const ZoomRequest& request)
 
 bool isViewVerb(std::string_view verb) { return verb == "VIEWS" || verb == "ZOOM"; }
 
-Result<std::string> runViewVerb(const Document& document, std::string_view verb,
+Result<std::string> runViewVerb(Document& document, std::string_view verb,
                                 const std::vector<std::string>& args,
                                 const ViewHostProvider& provider,
                                 const ScopeViewProvider& scopeViews)
 {
     ViewVerbHost* host = provider ? provider() : nullptr;
+    if (host != nullptr) {
+        if (const auto restored = restoreViewPaperScales(document, host->views()); restored) {
+            for (const ViewId id : *restored) {
+                host->settingsChanged(id);
+            }
+        }
+    }
+    if (verb == "VIEWS" && !args.empty() && uppered(args[0]) == "SCALE") {
+        return paperScaleVerb(document, host, args);
+    }
     if (host == nullptr) {
         return makeError(ErrorCode::Unsupported,
                          std::string(verb) +
@@ -975,6 +1078,8 @@ std::string viewRecord(const ViewSet& views, const ViewState& view)
     return "view=" + std::to_string(view.id) + " kind=" + kindWord(view.kind) +
            " title=" + recordValue(ViewSet::title(view)) +
            " active=" + (views.activeId() == view.id ? "yes" : "no") + placeOf(view, true) +
+           (view.kind == ViewKind::Plan && view.paperStyleScale
+                ? " paper_scale=" + real(*view.paperStyleScale) : "") +
            " ghosts=" + (view.selectionGhosts ? "on" : "off") + hiddenOf(view);
 }
 

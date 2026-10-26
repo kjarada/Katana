@@ -359,6 +359,14 @@ kinds went on after Label and Leader and no kind byte means two things; any
 later kind goes after 11. All five are written in version 2 of the geometry
 blob (`geometry_blob.hpp`), since a version-1 reader knows none of them.
 
+An explicit leader landing direction, needed by archive drafting leaders,
+uses geometry blob version 4, still kind 8: the version-3 leader payload
+followed by its angle in radians. It is optional in the model and JSON; the
+writer emits version 4 only for a leader with an explicit direction. This
+changes no entity-kind index or database table, and older blobs keep their
+original layouts. An older reader refuses this new blob version rather than
+silently turning a right-justified or rotated note the wrong way.
+
 ### Two rules that are not negotiable
 
 **Append only. Never insert in the middle, never reorder.** The variant *index*

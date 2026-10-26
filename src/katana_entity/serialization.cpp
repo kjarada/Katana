@@ -199,6 +199,9 @@ Json toJsonValue(const Geometry& geometry)
             if (!g.labelStyle.empty()) {
                 j["labelStyle"] = g.labelStyle;
             }
+            if (g.landingAngle) {
+                j["landingAngle"] = *g.landingAngle;
+            }
             return j;
         }
         // Bulges and heights as lists beside the vertices, a null height for
@@ -359,6 +362,9 @@ Result<Geometry> geometryFromJsonValue(const Json& j)
         }
         leader.fields = j.value("fields", false);
         leader.labelStyle = j.value("labelStyle", std::string{});
+        if (j.contains("landingAngle")) {
+            leader.landingAngle = j.at("landingAngle").get<double>();
+        }
         geometry = std::move(leader);
         break;
     }

@@ -11,12 +11,16 @@
 
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/view_set.hpp"
+#include "katana/cad/document.hpp"
 
 using katana::cad::kNoView;
 using katana::cad::ViewId;
@@ -97,6 +101,155 @@ TEST(ViewSet, AnEmptySetHasNoActiveView)
     EXPECT_EQ(set.activeId(), kNoView);
     EXPECT_EQ(set.active(), nullptr);
     EXPECT_TRUE(set.views().empty());
+}
+
+TEST(ViewSet, PaperStyleScaleStartsAutomaticAndSurvivesAChangeOfViewKind)
+{
+    ViewSet set;
+    ViewState& view = set.add(ViewKind::Plan);
+    EXPECT_FALSE(view.paperStyleScale.has_value());
+    view.paperStyleScale = 500.0;
+    const auto centre = view.plan.center;
+    const double zoom = view.plan.scale;
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Model3D).ok());
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Plan).ok());
+    EXPECT_EQ(view.paperStyleScale, 500.0);
+    EXPECT_EQ(view.plan.center, centre);
+    EXPECT_EQ(view.plan.scale, zoom);
+}
+
+TEST(ViewSet, PaperStyleScalesRoundTripInVersionedJsonIncludingAutomaticAndFractionalScales)
+{
+    const katana::cad::ViewPaperScales scales{{1, 500.125}, {3, std::nullopt}};
+    const auto json = katana::cad::viewPaperScalesToJson(scales);
+    ASSERT_TRUE(json.ok());
+    EXPECT_NE(json->find("\"version\":1"), std::string::npos);
+    const auto read = katana::cad::viewPaperScalesFromJson(*json);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(*read, scales);
+    const auto empty = katana::cad::viewPaperScalesFromJson(R"({"version":1,"views":[]})");
+    ASSERT_TRUE(empty.ok());
+    EXPECT_TRUE(empty->empty());
+}
+
+TEST(ViewSet, PaperStyleScaleRejectsNonpositiveNonfiniteUnrepresentableAndEnormousValues)
+{
+    for (const double value : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                               std::numeric_limits<double>::quiet_NaN(), 1.0e300,
+                               std::numeric_limits<double>::denorm_min()}) {
+        EXPECT_FALSE(katana::cad::validatePaperStyleScale(value).ok()) << value;
+        EXPECT_FALSE(katana::cad::viewPaperScalesToJson({{1, value}}).ok()) << value;
+    }
+    EXPECT_TRUE(katana::cad::validatePaperStyleScale(std::nullopt).ok());
+    EXPECT_TRUE(katana::cad::validatePaperStyleScale(0.5).ok());
+    EXPECT_TRUE(katana::cad::validatePaperStyleScale(katana::cad::kMaximumPaperStyleScale).ok());
+    EXPECT_FALSE(
+        katana::cad::validatePaperStyleScale(katana::cad::kMaximumPaperStyleScale + 1.0).ok());
+    EXPECT_FALSE(katana::cad::viewPaperScalesToJson({{0, 500.0}}).ok());
+}
+
+TEST(ViewSet, InvalidOrNewerPaperStyleScaleJsonIsRefusedRatherThanReinterpreted)
+{
+    for (const char* text : {
+             "", "{}", "[]", R"({"version":1,"views":{}})",
+             R"({"version":1,"views":[{"view":0,"paper_scale":500}]})",
+             R"({"version":1,"views":[{"view":-1,"paper_scale":500}]})",
+             R"({"version":1,"views":[{"view":1.5,"paper_scale":500}]})",
+             R"({"version":1,"views":[{"view":4294967296,"paper_scale":500}]})",
+             R"({"version":1,"views":[{"view":1,"paper_scale":0}]})",
+             R"({"version":1,"views":[{"view":1,"paper_scale":1e300}]})",
+             R"({"version":1,"views":[{"view":1,"paper_scale":"500"}]})",
+             R"({"version":1,"views":[{"view":1},{"view":1}]})"}) {
+        EXPECT_FALSE(katana::cad::viewPaperScalesFromJson(text).ok()) << text;
+    }
+    const auto newer =
+        katana::cad::viewPaperScalesFromJson(R"({"version":2,"views":[]})");
+    ASSERT_FALSE(newer.ok());
+    EXPECT_EQ(newer.error().code, ErrorCode::Unsupported);
+}
+
+TEST(ViewSet, PaperStyleScaleIsOneUndoStepAndDoesNotChangeGeometryAnnotationOrOtherMetadata)
+{
+    katana::cad::Document document;
+    auto metadata = document.metadata();
+    metadata.description = "keep this";
+    metadata.unknownKeys["unrelated"] = "unchanged";
+    document.setMetadata(metadata);
+    ASSERT_TRUE(document.execute(katana::commands::createLine(
+        katana::geometry::Point2(-4.0, 2.0), katana::geometry::Point2(7.0, 3.0))).ok());
+    const double annotation = document.annotationScale();
+    const katana::cad::ViewPaperScales scales{{1, 250.5}, {2, std::nullopt}};
+    ASSERT_TRUE(katana::cad::setViewPaperScales(document, scales).ok());
+    EXPECT_EQ(document.history().undoCount(), 2U);
+    ASSERT_TRUE(katana::cad::setViewPaperScales(document, scales).ok());
+    EXPECT_EQ(document.history().undoCount(), 2U) << "an unchanged setting is not an edit";
+    ASSERT_EQ(document.model().entities.size(), 1U);
+    const auto* entity = document.model().entities.find(1);
+    ASSERT_NE(entity, nullptr);
+    const auto* line = std::get_if<katana::geometry::Segment2>(&entity->geometry);
+    ASSERT_NE(line, nullptr);
+    EXPECT_EQ(line->start, katana::geometry::Point2(-4.0, 2.0));
+    EXPECT_EQ(line->end, katana::geometry::Point2(7.0, 3.0));
+    EXPECT_EQ(document.annotationScale(), annotation);
+    EXPECT_EQ(document.metadata().description, "keep this");
+    EXPECT_EQ(document.metadata().unknownKeys.at("unrelated"), "unchanged");
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_EQ(document.metadata(), metadata);
+    ASSERT_TRUE(document.redo().ok());
+    const auto after = katana::cad::viewPaperScales(document);
+    ASSERT_TRUE(after.ok());
+    EXPECT_EQ(*after, scales);
+}
+
+TEST(ViewSet, PaperStyleScaleSavedWithTheProjectRestoresAndUndoBackToASaveIsClean)
+{
+    const auto path = std::filesystem::current_path() / "view-paper-scale-roundtrip.katana";
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{path};
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
+    {
+        katana::cad::Document document;
+        ASSERT_TRUE(katana::cad::setViewPaperScales(document, {{1, 500.125}}).ok());
+        ASSERT_TRUE(document.saveAs(path).ok());
+        EXPECT_FALSE(document.isModified());
+        ASSERT_TRUE(katana::cad::setViewPaperScales(document, {{1, 1000.0}}).ok());
+        ASSERT_TRUE(document.undo().ok());
+        EXPECT_FALSE(document.isModified());
+        katana::cad::Document reopened;
+        ASSERT_TRUE(reopened.open(path).ok());
+        const auto kept = katana::cad::viewPaperScales(reopened);
+        ASSERT_TRUE(kept.ok());
+        EXPECT_EQ(kept->at(1), 500.125);
+        ViewSet views;
+        ViewState& view = views.add(ViewKind::Plan);
+        view.plan.scale = 8.0;
+        const auto restored = katana::cad::restoreViewPaperScales(reopened, views);
+        ASSERT_TRUE(restored.ok());
+        EXPECT_EQ(*restored, (std::vector<ViewId>{1}));
+        EXPECT_EQ(view.paperStyleScale, 500.125);
+        EXPECT_EQ(view.plan.scale, 8.0);
+    }
+    std::filesystem::remove_all(path, ignored);
+}
+
+TEST(ViewSet, DamagedOrNewerSavedPaperScalesAreKeptAndEditsAreRefused)
+{
+    for (const char* text : {"not JSON", R"({"version":2,"views":[]})"}) {
+        katana::cad::Document document;
+        auto metadata = document.metadata();
+        metadata.unknownKeys["view_paper_scales"] = text;
+        document.setMetadata(metadata);
+        EXPECT_FALSE(katana::cad::setViewPaperScales(document, {{1, 500.0}}).ok());
+        EXPECT_EQ(document.metadata(), metadata);
+        EXPECT_EQ(document.history().undoCount(), 0U);
+    }
 }
 
 TEST(ViewSet, IdsCountUpFromOneAndAreNeverReusedAfterARemove)

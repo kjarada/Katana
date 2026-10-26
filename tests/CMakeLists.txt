@@ -533,6 +533,11 @@ foreach(_suite IN LISTS _suites)
     endif()
 endforeach()
 
+# The saved plan-view paper scales are shared by CLI and MCP sessions.
+if(TARGET katana_app_tests)
+    target_sources(katana_app_tests PRIVATE app/test_view_scale.cpp)
+endif()
+
 # The geoprocessing suite (tests/geo/, docs/geoprocessing.md) belongs to no
 # single module: the bridge, the bindings and the executor are three, so it is
 # configured whenever the session that runs them is, with GDAL.
@@ -1190,6 +1195,21 @@ if(TARGET katana)
             "-DTOGGLE_LAYER=Cadastre"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_import_12da_then_toggle_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
+    add_test(NAME qt_archive_palette_and_drafting_leaders_are_imported_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${PROJECT_SOURCE_DIR}/tests/archive12d/data"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/drafting_leaders.12da"
+            "-DDRIVE=>MODIFY DRAWING WHERE COLOUR=#E08020 SET COLOUR=#E08020 PREVIEW|>LEADER LIST DRAWING"
+            "-DEXPECT=entities=4.*preview: 1 entity matched.*scope=drawing matched=2"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/archive_drafting_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_archive_palette_and_drafting_leaders_are_imported_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
@@ -3029,6 +3049,64 @@ if(TARGET katana)
             "-DEXPECT=1 entity selected: Lines on any layer, in the drawing"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quick_select_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # View scale is separate from camera zoom and is one persisted undo step.
+    # The saved drawing is also read by the CLI in a separate process below.
+    set(_view_scale_project "${CMAKE_CURRENT_BINARY_DIR}/view-scale-cli.katana")
+    add_test(NAME qt_view_scale_project_prepare
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_view_scale_project}")
+    set_tests_properties(qt_view_scale_project_prepare PROPERTIES FIXTURES_SETUP view_scale_clean)
+    add_test(NAME qt_paper_style_scale_dialog_uses_the_shared_command_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE 0,0 10,0|>ZOOM CENTRE 5,0 SCALE 20 view=1|@viewPaperScale|viewScaleMode=Fixed 1:N|viewScaleDenominator=500|?viewScaleLine|!viewScaleApply|?viewScaleStatus|>VIEWS|>UNDO|>VIEWS SCALE 1|>REDO|>SAVE \"${_view_scale_project}\""
+            "-DEXPECT=viewScaleLine: VIEWS SCALE 1 500.*view=1 kind=plan paper_scale=500 changed=yes.*viewScaleStatus: .*paper_scale=500.*view=1 kind=plan title=\"Plan 1\" active=yes linked=no centre=5,0 scale=20 .*paper_scale=500.*view=1 kind=plan paper_scale=auto"
+            "-DFORBID=unknown command|does not take|InvalidArgument|--press: .* is hidden"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/paper_style_scale_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_paper_style_scale_dialog_uses_the_shared_command_headless PROPERTIES
+        FIXTURES_REQUIRED view_scale_clean FIXTURES_SETUP view_scale_saved)
+    add_test(NAME qt_paper_style_scale_is_restored_with_the_project_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${_view_scale_project}"
+            "-DDRIVE=>VIEWS SCALE 1|@viewPaperScale|?viewScaleLine|?viewScaleDenominator"
+            "-DEXPECT=view=1 kind=plan paper_scale=500.*viewScaleLine: VIEWS SCALE 1 500.*viewScaleDenominator: 500"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/paper_style_scale_restored_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_paper_style_scale_is_restored_with_the_project_headless PROPERTIES
+        FIXTURES_REQUIRED view_scale_saved)
+    add_test(NAME qt_paper_style_scale_is_disabled_for_a_model_view_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN 3d|*viewPaperScale"
+            "-DREFUSED=--trigger viewPaperScale failed: [^\r\n]*that menu item is disabled"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/paper_style_scale_model_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_paper_style_scale_dialog_uses_the_shared_command_headless
+        qt_paper_style_scale_is_restored_with_the_project_headless
+        qt_paper_style_scale_is_disabled_for_a_model_view_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    if(TARGET katana_cli)
+        add_test(NAME cli.a_saved_plan_views_paper_scale_is_editable_and_undoable
+            COMMAND $<TARGET_FILE:katana_cli>
+                -c "OPEN \"${_view_scale_project}\"" -c "VIEWS SCALE LIST"
+                -c "VIEWS SCALE 1 250" -c "UNDO" -c "VIEWS SCALE 1"
+                -c "VIEWS SCALE 1 AUTO")
+        set_tests_properties(cli.a_saved_plan_views_paper_scale_is_editable_and_undoable PROPERTIES
+            FIXTURES_REQUIRED view_scale_saved
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
+            PASS_REGULAR_EXPRESSION
+                "view=1 kind=plan paper_scale=500[\r\n]+views=1.*view=1 kind=plan paper_scale=250 changed=yes.*view=1 kind=plan paper_scale=500.*view=1 kind=plan paper_scale=auto changed=yes"
+            FAIL_REGULAR_EXPRESSION "error")
+    endif()
+    add_test(NAME qt_view_scale_project_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_view_scale_project}")
+    set_tests_properties(qt_view_scale_project_cleanup PROPERTIES FIXTURES_CLEANUP view_scale_saved)
+
     # Linked plan views (cad/view_link.hpp, docs/desktop.md "Linked views"):
     # a second plan view opened and linked with the first, the first zoomed
     # by its line, and the second is where the first is - the ZOOM's reply

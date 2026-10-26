@@ -818,6 +818,11 @@ before inspecting or copying anything. They scan only their own completed
 executable, not another program that Ninja may still be linking. This
 replaces the earlier choice to deploy only through an `ALL` target: that
 avoided concurrent copies, but missed individual-target builds.
+The lock waits for the preceding deployment without a fixed timeout. A
+300-second limit failed during a large parallel rebuild while the other
+programs' dependency scans were still progressing; that is contention, not
+a missing runtime. There is only one lock per deployment, and its
+process-scoped guard releases it on both success and failure.
 
 The `runtime_deployment_*` tests build small DLL chains in a path containing
 spaces, build the CLI and MCP targets separately and together, relink with a

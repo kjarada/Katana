@@ -216,6 +216,27 @@ TEST(LeaderDraw, CalloutsFrameTheirNote)
     ASSERT_EQ(boxed.masks.size(), 1u) << "the frame is filled behind the note";
 }
 
+TEST(LeaderDraw, AnExplicitLandingDirectionDoesNotGuessTheNoteSideFromTheLastLeg)
+{
+    const Model model;
+    LeaderGeometry leader{.vertices = {Point2(0, 0), Point2(10, 10)}, .text = "AB",
+                          .paperHeight = 2, .landing = 4};
+    leader.landingAngle = kPi;
+    const auto left = ann::buildLeader(model, leader, 500, ann::estimatedMeasure());
+    ASSERT_FALSE(left.strokes.empty());
+    EXPECT_NEAR(left.strokes.front().back().x, 8, 1e-12);
+    EXPECT_NEAR(left.strokes.front().back().y, 10, 1e-12);
+    ASSERT_EQ(left.texts.size(), 1u);
+    EXPECT_LT(left.texts[0].origin.x, 8);
+    leader.landingAngle = kPi / 2;
+    const auto up = ann::buildLeader(model, leader, 500, ann::estimatedMeasure());
+    ASSERT_FALSE(up.strokes.empty());
+    EXPECT_NEAR(up.strokes.front().back().x, 10, 1e-12);
+    EXPECT_NEAR(up.strokes.front().back().y, 12, 1e-12);
+    ASSERT_EQ(up.texts.size(), 1u);
+    EXPECT_NEAR(up.texts[0].rotation, kPi / 2, 1e-12);
+}
+
 TEST(LeaderDraw, ArrowSizesArePaperMillimetres)
 {
     const Model model;

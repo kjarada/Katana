@@ -167,6 +167,96 @@ TEST_F(ViewVerbsTest, ViewsListsEveryOpenViewAsOneRecordInCreationOrder)
     EXPECT_EQ(ok("VIEWS LIST"), reply);
 }
 
+TEST_F(ViewVerbsTest, PaperScaleChangesOnlyTheNamedPlanViewsPaperMarksAndIsUndoable)
+{
+    ViewState& first = plan();
+    ViewState& second = plan();
+    const auto centre = first.plan.center;
+    const double zoom = first.plan.scale;
+    const double annotation = document.annotationScale();
+    EXPECT_EQ(ok("VIEWS SCALE 1"), "view=1 kind=plan paper_scale=auto");
+    EXPECT_EQ(ok("VIEWS SCALE 1 1:500"), "view=1 kind=plan paper_scale=500 changed=yes");
+    EXPECT_EQ(first.paperStyleScale, 500.0);
+    EXPECT_FALSE(second.paperStyleScale.has_value());
+    EXPECT_EQ(first.plan.center, centre);
+    EXPECT_EQ(first.plan.scale, zoom);
+    EXPECT_EQ(document.annotationScale(), annotation);
+    EXPECT_EQ(document.history().undoCount(), 1U);
+    EXPECT_EQ(ok("VIEWS SCALE 1 500"), "view=1 kind=plan paper_scale=500 changed=no");
+    EXPECT_EQ(document.history().undoCount(), 1U);
+    EXPECT_TRUE(contains(ok("VIEWS"), " paper_scale=500"));
+    (void)ok("UNDO");
+    EXPECT_EQ(ok("VIEWS SCALE 1"), "view=1 kind=plan paper_scale=auto");
+    EXPECT_FALSE(first.paperStyleScale.has_value());
+    (void)ok("REDO");
+    EXPECT_EQ(ok("VIEWS SCALE 1"), "view=1 kind=plan paper_scale=500");
+    EXPECT_EQ(ok("views scale 1 auto"), "view=1 kind=plan paper_scale=auto changed=yes");
+    EXPECT_FALSE(first.paperStyleScale.has_value());
+}
+
+TEST_F(ViewVerbsTest, PaperScaleRefusesInvalidValuesUnknownViewsAndNonPlanViewsWithoutAnEdit)
+{
+    const ViewState& view = plan();
+    host.set.add(ViewKind::Model3D);
+    for (const char* word : {"0", "-5", "nan", "inf", "1e300", "1e-323", "1:0", "2:500",
+                              "1:500:2", "500 extra"}) {
+        EXPECT_FALSE(interpreter.run(std::string("VIEWS SCALE 1 ") + word).ok()) << word;
+        EXPECT_FALSE(view.paperStyleScale.has_value());
+        EXPECT_EQ(document.history().undoCount(), 0U);
+    }
+    EXPECT_EQ(refused("VIEWS SCALE 99 500").code, ErrorCode::NotFound);
+    EXPECT_TRUE(contains(refused("VIEWS SCALE 2 500").message, "plan view"));
+    EXPECT_TRUE(contains(refused("VIEWS SCALE").message, "view id"));
+    EXPECT_TRUE(contains(refused("VIEWS SCALE 0 500").message, "view id"));
+    EXPECT_TRUE(host.settingChanges.empty());
+    EXPECT_EQ(ok("VIEWS SCALE LIST"), "view=1 kind=plan paper_scale=auto\nviews=1");
+}
+
+TEST_F(ViewVerbsTest, LinkedViewsKeepIndependentPaperScalesWhenTheirZoomFollows)
+{
+    ViewState& first = plan();
+    ViewState& second = plan();
+    (void)ok("VIEWS LINK 1,2");
+    (void)ok("VIEWS SCALE 1 250");
+    (void)ok("VIEWS SCALE 2 500");
+    (void)ok("ZOOM IN view=1");
+    EXPECT_EQ(first.plan.scale, second.plan.scale);
+    EXPECT_EQ(first.paperStyleScale, 250.0);
+    EXPECT_EQ(second.paperStyleScale, 500.0);
+}
+
+TEST_F(ViewVerbsTest, UndoingAScaleAfterItsViewClosesNeverDereferencesTheClosedView)
+{
+    const ViewId id = plan().id;
+    (void)ok("VIEWS SCALE 1 500");
+    ASSERT_TRUE(host.set.remove(id).ok());
+    (void)ok("UNDO");
+    (void)ok("REDO");
+    EXPECT_EQ(ok("VIEWS SCALE LIST"), "views=0");
+}
+
+TEST(ViewVerbs, HeadlessPaperScaleNamesAnExistingSavedViewRatherThanInventingOne)
+{
+    Document document;
+    CommandInterpreter interpreter(document);
+    auto missing = interpreter.run("VIEWS SCALE 1 500");
+    ASSERT_FALSE(missing.ok());
+    EXPECT_EQ(missing.error().code, ErrorCode::NotFound);
+    EXPECT_TRUE(contains(missing.error().message, "saved plan view"));
+    EXPECT_EQ(*interpreter.run("VIEWS SCALE LIST"), "views=0");
+    ASSERT_TRUE(katana::cad::setViewPaperScales(document, {{7, 250.0}}).ok());
+    EXPECT_EQ(*interpreter.run("VIEWS SCALE LIST"),
+              "view=7 kind=plan paper_scale=250\nviews=1");
+    EXPECT_EQ(*interpreter.run("VIEWS SCALE 7 1:500"),
+              "view=7 kind=plan paper_scale=500 changed=yes");
+    EXPECT_EQ(*interpreter.run("VIEWS SCALE 7 AUTO"),
+              "view=7 kind=plan paper_scale=auto changed=yes");
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(*interpreter.run("VIEWS SCALE 7"), "view=7 kind=plan paper_scale=500");
+    EXPECT_FALSE(interpreter.run("VIEWS SCALE 8 500").ok());
+    EXPECT_FALSE(interpreter.run("VIEWS SCALE").ok());
+}
+
 TEST_F(ViewVerbsTest, ViewsOpenAndActivateReplyTheViewsRecord)
 {
     plan();

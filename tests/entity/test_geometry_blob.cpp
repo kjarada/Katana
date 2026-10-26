@@ -581,6 +581,30 @@ TEST(GeometryBlobWireFormat, ASmartLeadersVersionThreeLayoutIsPinned)
     EXPECT_EQ(*written, stored.bytes()) << "the on-disk layout changed";
 }
 
+TEST(GeometryBlobWireFormat, AnExplicitLeaderLandingAppendsItsAngleInVersionFourOnly)
+{
+    LeaderGeometry leader{.vertices = {Point2(1, 2), Point2(3, 4)}, .text = "Note"};
+    leader.landingAngle = 1.25;
+    HandWritten stored;
+    stored.u8(4).u8(8).u32(2).f64(1).f64(2).f64(3).f64(4);
+    stored.text("Note").text("").u8(2).u8(0);
+    stored.f64(0).f64(2.5).f64(2.5);
+    stored.u64(0).u8(0).u32(0).f64(0).u8(0).text("").f64(1.25);
+    const auto blob = geometryToBlob(leader);
+    ASSERT_TRUE(blob.ok());
+    EXPECT_EQ(*blob, stored.bytes());
+    const auto back = geometryFromBlob(stored.bytes());
+    ASSERT_TRUE(back.ok());
+    EXPECT_EQ(std::get<LeaderGeometry>(*back), leader);
+    for (std::size_t length = blob->size() - sizeof(double); length < blob->size(); ++length) {
+        EXPECT_FALSE(geometryFromBlob(std::span(*blob).first(length)).ok());
+    }
+    leader.landingAngle.reset();
+    const auto old = geometryToBlob(leader);
+    ASSERT_TRUE(old.ok());
+    EXPECT_EQ(static_cast<std::uint8_t>((*old)[0]), katana::entity::kBlobVersionAnnotation);
+}
+
 TEST(GeometryBlobWireFormat, TheDrawingKindsAreReadInVersionThreeAsInVersionTwo)
 {
     // The writer never puts them in version 3 (they hold no anchor), but a

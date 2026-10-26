@@ -230,6 +230,37 @@ TEST_F(GisVerbs, ImportOfAnArchiveAddsItsSurfacesToTheDrawingInTheImportsOneStep
     EXPECT_EQ(front.surfaces.find("TIN SOUTH WEST (2)"), nullptr);
 }
 
+TEST_F(GisVerbs, ArchiveImportUsesTheActivePaletteAndAddsNativeLeadersInOneUndoStep)
+{
+    type("CUSTOMISE " + quoted(kArchives + "/drafting_palette.customisation.json"));
+    const std::size_t before = front.document.history().undoCount();
+    const auto imported = run("IMPORT " + quoted(kArchives + "/drafting_leaders.12da") + " LOCAL");
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    ASSERT_EQ(front.document.model().entities.size(), 4u);
+    EXPECT_EQ(front.document.history().undoCount(), before + 1);
+    const auto* line = front.document.model().entities.find(1);
+    const auto* symbol = front.document.model().entities.find(2);
+    const auto* note = front.document.model().entities.find(3);
+    ASSERT_NE(line, nullptr);
+    ASSERT_NE(symbol, nullptr);
+    ASSERT_NE(note, nullptr);
+    EXPECT_EQ(line->color, (katana::entity::Color{224, 128, 32, 255}));
+    EXPECT_EQ(symbol->color, (katana::entity::Color{32, 112, 80, 255}));
+    ASSERT_TRUE(std::holds_alternative<katana::entity::LeaderGeometry>(note->geometry));
+    const auto& leader = std::get<katana::entity::LeaderGeometry>(note->geometry);
+    EXPECT_EQ(leader.text, "Service note\nFirst line");
+    EXPECT_EQ(leader.vertices.front(), katana::geometry::Point2(0, 0));
+    EXPECT_EQ(leader.vertices.back(), katana::geometry::Point2(0, 8));
+    EXPECT_EQ(leader.landingAngle, 0.0);
+    EXPECT_NE(imported->find("read=2 imported=2"), std::string::npos);
+    EXPECT_EQ(imported->find("not read: drafting_element"), std::string::npos);
+    ASSERT_TRUE(front.document.undo().ok());
+    EXPECT_EQ(front.document.model().entities.size(), 0u);
+    EXPECT_FALSE(front.document.model().layers.contains("Test/Notes"));
+    ASSERT_TRUE(front.document.redo().ok());
+    EXPECT_EQ(front.document.model().entities.size(), 4u);
+}
+
 TEST_F(GisVerbs, AnArchivesMeshesGoToTheFrontEndThatShowsThem)
 {
     // all_geometries.12da holds one primitive_3d of 4 triangles and two

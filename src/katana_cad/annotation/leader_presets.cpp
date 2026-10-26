@@ -379,6 +379,7 @@ LeadersReport leadersReport(const Document& document,
         }
         record.arrow = std::string(katana::entity::toString(leader->arrow));
         record.callout = std::string(katana::entity::toString(leader->callout));
+        record.landingAngle = leader->landingAngle;
         record.text = leaderSays(model, *leader, context);
         if (!record.text.empty()) {
             for (const std::string_view line : katana::entity::textLines(record.text)) {
@@ -423,6 +424,9 @@ std::string leadersJsonOf(const LeadersReport& report)
         record["callout"] = leader.callout;
         record["text"] = leader.text;
         record["lines"] = leader.lines;
+        if (leader.landingAngle) {
+            record["landing_angle"] = *leader.landingAngle;
+        }
         leaders.push_back(std::move(record));
     }
     Json presets = Json::array();

@@ -174,6 +174,10 @@ struct PlanPaintOptions {
     // what a paper linestyle's millimetres are, a screen line being a hairline
     // whatever its weight.
     double pixelsPerMillimetre = 96.0 / 25.4;
+    // Screen only: the denominator N of 1:N for paper-sized library
+    // linestyles and symbols (mm * N / 1000 model metres). Null keeps the
+    // automatic fixed screen size. Neither annotation nor plot scale.
+    std::optional<double> paperStyleScale;
     // On paper, the plot's settings, for the paper colour rule (D7). Required
     // on paper; ignored on screen.
     const katana::cad::PlotSettings* plot = nullptr;

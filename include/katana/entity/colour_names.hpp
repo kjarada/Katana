@@ -67,10 +67,8 @@ class ColourTable {
     // and separators, or is not valid UTF-8; for a name whose fold another
     // entry already has ("SUI Gas" beside "sui_gas": a lookup could not say
     // which was meant); and for a name whose fold is a standard name. That
-    // last one is the rule that keeps one name one colour: an archive import
-    // colours its strings from the standard names alone, having no
-    // customisation to ask, so a table that redefined "red" would draw two
-    // reds in one drawing.
+    // last one keeps a standard name stable with or without a customisation,
+    // including a headless archive import with an empty palette.
     [[nodiscard]] katana::core::Status add(std::string name, const Color& colour);
 
     // The colour of `name`, compared by foldColourName; nullopt when the table

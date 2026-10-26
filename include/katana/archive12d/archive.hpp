@@ -255,6 +255,25 @@ struct TextString {
     friend bool operator==(const TextString&, const TextString&) = default;
 };
 
+struct DraftingReference {
+    std::string name;
+    FieldList fields;
+    std::vector<DraftingReference> blocks;
+
+    friend bool operator==(const DraftingReference&, const DraftingReference&) = default;
+};
+
+struct DraftingLeader {
+    StringHeader header;
+    Vertex arrow;
+    Vertex hook;
+    FieldList fields;
+    FieldList overrides;
+    std::optional<DraftingReference> arrowReference;
+
+    friend bool operator==(const DraftingLeader&, const DraftingLeader&) = default;
+};
+
 struct PlotFrame {
     StringHeader header;
     // title_file border viewport title_1 title_2 plot_file text_size sheet_code
@@ -468,7 +487,8 @@ struct Trimesh {
 };
 
 using Element = std::variant<VertexString, ArcString, CircleString, TextString, PlotFrame,
-                             DrainageString, SuperAlignment, LasCloud, Tin, SuperTin, Trimesh>;
+                             DrainageString, SuperAlignment, LasCloud, Tin, SuperTin, Trimesh,
+                             DraftingLeader>;
 
 // The keyword an element is written under: "string super", "full_tin" ...
 [[nodiscard]] std::string elementKeyword(const Element& element);

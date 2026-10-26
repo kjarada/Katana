@@ -13,6 +13,7 @@ katana_add_test_suite(archive12d
         test_writer.cpp
         test_coverage.cpp
         test_domain_import.cpp
+        test_drafting_leaders.cpp
         test_domain_alignment.cpp
         test_domain_export.cpp
         test_review_findings.cpp

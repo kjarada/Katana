@@ -45,7 +45,7 @@ set(_qt_plugins "@KATANA_QT_PLUGIN_DIR@")
 if(_build_tree)
     file(MAKE_DIRECTORY "${_prefix}/CMakeFiles")
     file(LOCK "${_prefix}/CMakeFiles/katana_runtime.lock"
-         GUARD PROCESS TIMEOUT 300 RESULT_VARIABLE _lock_result)
+         GUARD PROCESS RESULT_VARIABLE _lock_result)
     if(NOT "${_lock_result}" STREQUAL "0")
         message(FATAL_ERROR "Katana runtime: could not lock ${_bin}: ${_lock_result}")
     endif()

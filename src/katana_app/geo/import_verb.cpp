@@ -133,6 +133,7 @@ bool placeable(Kind kind)
 
 // What a line asked of the read and of the apply, beside the placement.
 struct Request {
+    katana::entity::ColourTable archiveColours;
     interop::VectorImportOptions vector;
     interop::RasterImportOptions raster;
     interop::PointCloudImportOptions cloud;
@@ -162,6 +163,7 @@ Result<Read> readAt(Kind kind, const std::filesystem::path& file, std::optional<
     }
     case Kind::Archive: {
         interop::Archive12dImportOptions options;
+        options.colours = request.archiveColours;
         options.originShift = shift;
         auto read = interop::importArchive12d(file, options);
         return read ? Result<Read>(Read(std::move(*read))) : Result<Read>(read.error());
@@ -838,6 +840,7 @@ Result<Prepared> prepareImport(Context& context, const Tokens& tokens, std::stri
 
     Request request;
     request.preview = words->has("PREVIEW");
+    request.archiveColours = context.document.customisationState().colours;
     interop::VectorImportOptions& vector = request.vector;
     vector.openOptions = std::move(openOptions);
     if (const std::string* layers = words->option("layers")) {

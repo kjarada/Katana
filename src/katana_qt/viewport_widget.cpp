@@ -1280,11 +1280,10 @@ PlanPaintOptions ViewportWidget::screenOptions() const
 {
     PlanPaintOptions options;
     options.medium = PlanMedium::Screen;
-    // A paper linestyle's millimetre on screen is a millimetre OF SCREEN. It
-    // used to be one pixel, which made every paper linestyle about four
-    // times too small: the ticks of a fence style came out a pixel tall and
-    // vanished into the line they sit on.
+    // Auto keeps library paper marks in screen millimetres; the view's
+    // explicit 1:N instead gives them a model size, independently of zoom.
     options.pixelsPerMillimetre = std::max(1.0, logicalDpiX() / 25.4);
+    options.paperStyleScale = state_.paperStyleScale;
     options.grid = gridVisible_;
     options.thinLines = thinScreenLines();
     options.symbolSprites = true;
@@ -1340,6 +1339,7 @@ ViewportWidget::DrawingKey ViewportWidget::drawingKey(double deviceRatio) const
     key.centreX = state_.plan.center.x;
     key.centreY = state_.plan.center.y;
     key.scale = state_.plan.scale;
+    key.paperStyleScale = state_.paperStyleScale;
     key.width = state_.plan.widthPixels;
     key.height = state_.plan.heightPixels;
     key.deviceRatio = deviceRatio;

@@ -13,8 +13,9 @@
 // The Document holds no views - the window's workspace does, in a ViewSet -
 // so the verbs reach them through a ViewVerbHost the front end supplies, as
 // the scope word VIEW reaches its view through a ScopeViewProvider. katana_cli
-// and katana_mcp have no views, and there both verbs are refused by name,
-// never as unknown commands.
+// and katana_mcp have no live views, and there those operations are refused by
+// name, never as unknown commands. VIEWS SCALE alone can read or change the
+// saved scale assignments, naming a real view recorded by the desktop.
 //
 //   VIEWS [LIST]                          a record per open view, in the order
 //                                         they were opened; then views=N linked=M
@@ -36,6 +37,10 @@
 //                                         view hides of its own
 //   VIEWS SET <id> ghosts=on|off          whether that view shows the selection
 //                                         faintly where it hides the layer
+//   VIEWS SCALE <id> [AUTO|N|1:N]        query or set its paper-style scale,
+//                                         one persisted, undoable edit
+//   VIEWS SCALE LIST                    plan views and their paper-style scales;
+//                                         headless: the saved assignments only
 //   ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 //   ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
 //        | CENTRE x,y [SCALE s]  [view=<id>]
@@ -81,7 +86,7 @@
 //
 // HIDE, SHOW and ISOLATE are the view's own layer filter, its Layers button's
 // (cad::LayerOverrides): subtractive, so a view never shows what the document
-// hides, and like the rest of a view's state not saved and not undoable. A
+// hides; unlike its paper-style scale, not saved and not undoable. A
 // layer is a layer of the drawing or a node of the layer tree above one
 // ("design" when only "design/road" is a layer); one the drawing lacks is
 // refused, naming it, and nothing changes. SHOW of a layer beneath one the
@@ -234,7 +239,7 @@ class ViewVerbHost {
 
 // Asked at each VIEWS or ZOOM line, so a front end can hand over a host that
 // did not exist when the interpreter was made. Unset, or answering null, is
-// no window: both verbs are refused by name.
+// no window: only VIEWS SCALE's saved assignments remain available.
 using ViewHostProvider = std::function<ViewVerbHost*()>;
 
 // VIEWS or ZOOM, after the interpreter's aliases (Z is ZOOM).
@@ -245,7 +250,7 @@ using ViewHostProvider = std::function<ViewVerbHost*()>;
 // VIEW, as it does for every verb that takes the shared scope. The reply is
 // the records above; refusals name the word, the view or the kind at fault.
 [[nodiscard]] katana::core::Result<std::string>
-runViewVerb(const Document& document, std::string_view verb, const std::vector<std::string>& args,
+runViewVerb(Document& document, std::string_view verb, const std::vector<std::string>& args,
             const ViewHostProvider& host, const ScopeViewProvider& scopeViews = {});
 
 // The record VIEWS gives for `view`, a view of `views`.

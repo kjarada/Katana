@@ -25,6 +25,8 @@ const std::map<std::string, std::string>& minimalInstances()
         {"null", "null -1 string super { data_3d { 0 0 -1 } }"},
         {"attributes", "string super { attributes { text \"a\" \"b\" } data_2d { 0 0 } }"},
         {"project_attributes", "project_attributes { text \"a\" \"b\" }"},
+        {"drafting_element/leader",
+         "drafting_element { leader { arrow_x 0 arrow_y 0 hook_x 3 hook_y 4 display_text Note } }"},
         {"tin", "tin { name \"T\" points { 0 0 0 1 0 0 0 1 0 } triangles { 1 3 2 } }"},
         {"full_tin", "full_tin { name \"T\" points { 0 0 0 0 9 0 9 9 0 9 0 0 1 1 1 2 1 1 1 2 1 }"
                      " triangles { 5 7 6 } neighbours { 0 0 0 } nulling { 2 } }"},

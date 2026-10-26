@@ -159,6 +159,7 @@ struct LeaderReport {
     // What the note says now, whole and line by line.
     std::string text{};
     std::vector<std::string> lines{};
+    std::optional<double> landingAngle{};
 };
 
 // The scope the leaders were chosen by: its record (cad::scopeRecord, as the

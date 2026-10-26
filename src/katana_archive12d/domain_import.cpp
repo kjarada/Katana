@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "katana/archive12d/domain.hpp"
+#include "katana/core/text.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/terrain/super_surface.hpp"
 #include "katana/archive12d/reader.hpp"
 #include "katana/entity/entity_geometry.hpp"
@@ -212,6 +214,19 @@ class Importer {
     }
     [[nodiscard]] Point2 plan(const Vertex& vertex) const { return plan(vertex.x, vertex.y); }
 
+    std::optional<katana::entity::Color> colourFor(std::string_view name)
+    {
+        const auto rgb = katana::entity::resolveColour(options_.colours, name);
+        const std::string folded = katana::entity::foldColourName(name);
+        if (!rgb && !folded.empty() && folded != "no colour" &&
+            noted_.insert("colour:" + folded).second) {
+            problem("colour \"" + std::string(name) +
+                    "\" is not in the standard or active customisation palette; "
+                    "its name is kept and the inherited colour is used");
+        }
+        return rgb;
+    }
+
     const std::string& layerFor(const std::string& model, const std::string& colour)
     {
         const auto found = layerOfModel_.find(model);
@@ -220,7 +235,7 @@ class Importer {
         }
         katana::entity::Layer layer;
         layer.name = layerPathForModel(model, options_.layerPrefix);
-        if (const auto rgb = standardColour(colour)) {
+        if (const auto rgb = colourFor(colour)) {
             layer.color = *rgb;
         }
         const bool known = std::any_of(
@@ -284,7 +299,7 @@ class Importer {
         entity.style = styleFor(header.style).name;
         // A 12d string has a colour of its own; there is no ByLayer in 12d.
         // A name Katana has no RGB for is left to the layer, and kept below.
-        entity.color = standardColour(header.colour);
+        entity.color = colourFor(header.colour);
         if (options_.attributesAsProperties) {
             flattenAttributes(header.attributes, {}, entity.properties);
         }
@@ -297,6 +312,9 @@ class Importer {
         }
         if (!header.colour.empty()) {
             meta(kMetaColour, header.colour);
+            if (entity.color && !standardColour(header.colour)) {
+                meta(kMetaColourRgb, entity.color->toHex());
+            }
         }
         if (header.chainage != 0.0) {
             meta(kMetaChainage, header.chainage);
@@ -452,7 +470,7 @@ class Importer {
         // means take the string's, which the entity already has.
         const std::string colour = annotation->text("colour", annotation->text("text_colour"));
         if (!colour.empty() && colour != "no_colour") {
-            if (const auto rgb = standardColour(colour)) {
+            if (const auto rgb = colourFor(colour)) {
                 entity.color = rgb;
             }
             entity.metadata.insert_or_assign(std::string(kMetaTextPrefix) + "colour", colour);
@@ -761,7 +779,7 @@ class Importer {
             // 12d.colour: the two are the same name in every sample archive,
             // but the format allows two and neither may be lost.
             const std::string symbolColour = first.text("colour");
-            if (const auto rgb = standardColour(symbolColour)) {
+            if (const auto rgb = colourFor(symbolColour)) {
                 entity.color = rgb;
             }
             for (const Field& field : first.fields()) {
@@ -802,7 +820,11 @@ class Importer {
             }
             meta(std::string(kMetaSymbolPrefix) + key, joinList(values));
         }
-        ++symbolsLeft_;
+        if (std::ranges::any_of(blocks, [](const FieldList* block) {
+                return !block->text("style").empty();
+            })) {
+            ++symbolsLeft_;
+        }
     }
 
     // Text on a segment is drawn at its middle (manual 1.5.8.4.9 gives it an
@@ -885,6 +907,86 @@ class Importer {
         applyAnnotation(entity, geometry, &text.annotation);
         entity.geometry = std::move(geometry);
         return add(std::move(entity), describe(text.header, "string text")) ? 1 : 0;
+    }
+
+    static void keepDraftingReference(Entity& entity, const DraftingReference& reference,
+                                      const std::string& prefix)
+    {
+        for (const Field& field : reference.fields.fields()) {
+            entity.metadata.insert_or_assign(prefix + "." + field.key, propertyOf(field));
+        }
+        for (std::size_t i = 0; i < reference.blocks.size(); ++i) {
+            const auto& block = reference.blocks[i];
+            keepDraftingReference(entity, block, prefix + "." + block.name +
+                                  "[" + std::to_string(i) + "]");
+        }
+    }
+
+    std::size_t import(const DraftingLeader& leader)
+    {
+        const std::string what = describe(leader.header, "drafting_element/leader");
+        katana::entity::LeaderGeometry geometry;
+        geometry.vertices = {plan(leader.arrow), plan(leader.hook)};
+        const double length = geometry.vertices[0].distanceTo(geometry.vertices[1]);
+        if (!std::isfinite(length)) {
+            problem(what + " skipped: its arrow-to-hook distance is too large");
+            return 0;
+        }
+        // Paragraph escapes belong to drafting notes, not to file paths in general tokens.
+        geometry.text = katana::core::unescapeTyped(
+            leader.fields.text("display_text", leader.fields.text("format_text")));
+        for (const auto& [key, value] :
+             {std::pair{"arrow_size", &geometry.arrowSize},
+              std::pair{"hook_length", &geometry.landing},
+              std::pair{"text_size", &geometry.paperHeight}}) {
+            const FieldList& fields = leader.overrides.find(key) != nullptr ? leader.overrides
+                                                                           : leader.fields;
+            if (fields.find(key) != nullptr) {
+                const auto size = fields.real(key);
+                if (!size || !std::isfinite(*size) || *size < 0.0) {
+                    problem(what + " skipped: " + key + " must be finite and non-negative");
+                    return 0;
+                }
+                *value = *size;
+            }
+        }
+        const auto angle = leader.fields.find("hook_angle") == nullptr
+                               ? std::optional<double>(0.0)
+                               : leader.fields.real("hook_angle");
+        if (!angle || !std::isfinite(*angle)) {
+            problem(what + " skipped: hook_angle must be finite");
+            return 0;
+        }
+        const std::string justify = detail::lowered(leader.fields.text("justify_x", "Left_Justify"));
+        if (justify != "left_justify" && justify != "right_justify") {
+            problem(what + " skipped: justify_x must be Left_Justify or Right_Justify");
+            return 0;
+        }
+        geometry.landingAngle = radians(std::remainder(*angle, 360.0)) +
+                                (justify == "right_justify" ? kPi : 0.0);
+        Entity entity = makeEntity(leader.header, "drafting_element/leader");
+        entity.style.clear();
+        for (const Field& field : leader.fields.fields()) {
+            entity.metadata.insert_or_assign(std::string(kMetaLeaderPrefix) + field.key,
+                                             propertyOf(field));
+        }
+        for (const Field& field : leader.overrides.fields()) {
+            entity.metadata.insert_or_assign(std::string(kMetaLeaderPrefix) + "overrides." + field.key,
+                                             propertyOf(field));
+        }
+        if (leader.arrowReference) {
+            keepDraftingReference(entity, *leader.arrowReference,
+                                  std::string(kMetaLeaderPrefix) + "arrow");
+            ++leaderReferences_;
+        }
+        const std::string namedStyle = leader.fields.text("style_name");
+        if (!namedStyle.empty() && noted_.insert("drafting-style:" + namedStyle).second) {
+            problem("drafting style \"" + namedStyle +
+                    "\" is not defined in the archive; leaders use the default text appearance "
+                    "with their explicit size overrides");
+        }
+        entity.geometry = std::move(geometry);
+        return add(std::move(entity), what) ? 1 : 0;
     }
 
     std::size_t import(const PlotFrame& frame)
@@ -1571,7 +1673,7 @@ class Importer {
         imported.name = trimesh.name.empty() ? "trimesh" : trimesh.name;
         imported.layer = layerPathForModel(trimesh.model, options_.layerPrefix);
         imported.colourName = trimesh.colour;
-        imported.color = standardColour(trimesh.colour);
+        imported.color = colourFor(trimesh.colour);
         imported.edgesInFile = trimesh.edges.size();
         imported.vertexInfosInFile = trimesh.vertexInfos.size();
         imported.edgeInfosInFile = trimesh.edgeInfos.size();
@@ -1608,7 +1710,7 @@ class Importer {
                 }
             }
             imported.faceColourNames.push_back(colour);
-            imported.faceColors.push_back(colour.empty() ? std::nullopt : standardColour(colour));
+            imported.faceColors.push_back(colour.empty() ? std::nullopt : colourFor(colour));
         }
         // All or nothing: a table of face colours with a gap in it would be
         // read by position, so if no face was coloured it is no table.
@@ -1766,6 +1868,11 @@ class Importer {
         for (const auto& [path, count] : archive_.unrecognised) {
             warnings.push_back("not read: " + path + " (" + std::to_string(count) + ")");
         }
+        if (leaderReferences_ != 0) {
+            warnings.push_back(std::to_string(leaderReferences_) +
+                               " leaders carry external arrow references, retained as metadata; "
+                               "their recorded arrow coordinates are used without guessing a target entity");
+        }
         warnings.insert(warnings.begin(), archive_.warnings.begin(), archive_.warnings.end());
     }
 
@@ -1784,6 +1891,7 @@ class Importer {
     std::size_t trimeshFacesDropped_ = 0;
     std::size_t partlyInvisible_ = 0;
     std::size_t symbolsLeft_ = 0;
+    std::size_t leaderReferences_ = 0;
     std::size_t annotationsLeft_ = 0;
     std::size_t colouredTins_ = 0;
     std::size_t pointStringsSplit_ = 0;

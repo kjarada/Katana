@@ -710,8 +710,9 @@ std::string Session::helpText()
     // The program's own update, which the window's HELP lists too.
     text += katana::app::updateHelpText();
     text += "Window    PLOT, PLOTSHEETS, SNAPSHOT, ONLINE, SCRIPT, GRID and EXAGGERATION are the\n"
-            "          desktop window's verbs, and VIEWS and ZOOM act on its views: all are\n"
-            "          refused here. katana --plot, --plot-sheets and --command run them\n"
+            "          desktop window's verbs. ZOOM and VIEWS other than SCALE also need\n"
+            "          the window. VIEWS SCALE id AUTO|1:N edits saved plan-view style scale.\n"
+            "          katana --plot, --plot-sheets and --command run desktop verbs\n"
             "          headless; a script is katana_cli's argument, or katana_mcp's\n"
             "          katana_run_script\n";
     return text;

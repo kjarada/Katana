@@ -517,6 +517,37 @@ class Writer {
         close();
     }
 
+    void draftingReference(const DraftingReference& reference)
+    {
+        open(reference.name);
+        fields(reference.fields);
+        for (const DraftingReference& block : reference.blocks) {
+            draftingReference(block);
+        }
+        close();
+    }
+
+    void write(const DraftingLeader& leader)
+    {
+        model(leader.header.model);
+        open("drafting_element");
+        header(leader.header);
+        open("leader");
+        fields(leader.fields);
+        vertexFields(leader.arrow, "arrow_x", "arrow_y", "arrow_z");
+        vertexFields(leader.hook, "hook_x", "hook_y", "hook_z");
+        if (leader.arrowReference) {
+            draftingReference(*leader.arrowReference);
+        }
+        if (!leader.overrides.fields().empty()) {
+            open("overrides");
+            fields(leader.overrides);
+            close();
+        }
+        close();
+        close();
+    }
+
     void drainageRecord(std::string_view keyword, const DrainageRecord& record)
     {
         open(keyword);
@@ -883,6 +914,11 @@ class Writer {
         }
         void operator()(const CircleString& c) const { one(c.centre.z); }
         void operator()(const TextString& t) const { one(t.position.z); }
+        void operator()(const DraftingLeader& leader) const
+        {
+            one(leader.arrow.z);
+            one(leader.hook.z);
+        }
         void operator()(const PlotFrame&) const {}
         void operator()(const DrainageString& d) const
         {

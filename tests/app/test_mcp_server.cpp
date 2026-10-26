@@ -971,6 +971,29 @@ TEST_F(McpServer, TheImportToolRefusesAPlacementItCannotSay)
 }
 
 #if defined(KATANA_TEST_WITH_INTEROP)
+TEST_F(McpServer, ArchiveImportMakesItsColouredLineAndMultilineLeadersAvailableToAgents)
+{
+    const auto fixtures = std::filesystem::path(KATANA_GIS_SAMPLES).parent_path().parent_path() /
+                          "tests" / "archive12d" / "data";
+    initialize();
+    const auto palette = call("katana_run_commands",
+        Json{{"commands", {"CUSTOMISE \"" + (fixtures / "drafting_palette.customisation.json").generic_string() + "\""}}});
+    ASSERT_FALSE(palette["isError"].get<bool>()) << textOf(palette);
+    const auto imported = call("katana_import",
+        Json{{"path", (fixtures / "drafting_leaders.12da").generic_string()}, {"local", true}});
+    ASSERT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    EXPECT_EQ(session.document().model().entities.find(1)->color,
+              (katana::entity::Color{224, 128, 32, 255}));
+    const Json report = call("katana_leaders", Json{{"scope", "drawing"}});
+    ASSERT_FALSE(report["isError"].get<bool>()) << textOf(report);
+    const Json& leaders = report["structuredContent"]["leaders"];
+    ASSERT_EQ(leaders.size(), 2u);
+    EXPECT_EQ(leaders[0]["text"], "Service note\nFirst line");
+    EXPECT_EQ(leaders[0]["lines"], (Json{"Service note", "First line"}));
+    EXPECT_DOUBLE_EQ(leaders[0]["landing_angle"].get<double>(), 0.0);
+    EXPECT_EQ(leaders[1]["text"], "Other note");
+}
+
 TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
 {
     // The tool quotes the path and adds LOCAL; the session once took LOCAL

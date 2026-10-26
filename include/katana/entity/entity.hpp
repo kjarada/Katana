@@ -328,6 +328,9 @@ struct LeaderGeometry {
     // like is the leader's, as it is for every other leader.
     std::string labelStyle{};
 
+    // Explicit outward direction, in radians; absent follows the last leg.
+    std::optional<double> landingAngle{};
+
     friend bool operator==(const LeaderGeometry&, const LeaderGeometry&) = default;
 };
 

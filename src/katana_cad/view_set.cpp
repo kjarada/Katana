@@ -1,8 +1,16 @@
 #include "katana/cad/view_set.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
+#include <limits>
 
+#include <nlohmann/json.hpp>
+
+#include "katana/cad/document.hpp"
 #include "katana/cad/view_link.hpp"
+#include "katana/core/text.hpp"
+#include "katana/math/unit_ratio.hpp"
 
 namespace katana::cad {
 
@@ -10,6 +18,203 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
 using katana::core::Status;
+
+namespace {
+
+constexpr std::string_view kPaperScalesKey = "view_paper_scales";
+constexpr int kPaperScalesVersion = 1;
+
+class ViewPaperScaleCommand final : public katana::commands::Command {
+  public:
+    explicit ViewPaperScaleCommand(std::function<void(bool)> apply) : apply_(std::move(apply)) {}
+
+    std::string_view name() const override { return "SET_VIEW_PAPER_SCALE"; }
+    Status validate(const katana::commands::CommandContext&) const override { return {}; }
+    Status execute(katana::commands::CommandContext&) override
+    {
+        apply_(true);
+        return {};
+    }
+    Status undo(katana::commands::CommandContext&) override
+    {
+        apply_(false);
+        return {};
+    }
+    Status redo(katana::commands::CommandContext&) override
+    {
+        apply_(true);
+        return {};
+    }
+
+  private:
+    std::function<void(bool)> apply_;
+};
+
+} // namespace
+
+// Like the sheet-set command, the step changes only its own metadata key.
+// setMetadata would also mark the metadata independently dirty, leaving an
+// undo back to a saved position incorrectly modified.
+class ViewPaperScaleAccess {
+  public:
+    static void apply(Document& document, const std::optional<std::string>& text)
+    {
+        if (text) {
+            document.metadata_.unknownKeys.insert_or_assign(std::string(kPaperScalesKey), *text);
+        } else {
+            document.metadata_.unknownKeys.erase(std::string(kPaperScalesKey));
+        }
+    }
+};
+
+Status validatePaperStyleScale(std::optional<double> scale)
+{
+    if (scale && (!std::isfinite(*scale) || *scale <= 0.0 ||
+                  *scale > kMaximumPaperStyleScale ||
+                  katana::math::toMetres(*scale, katana::math::units::kMillimetre) <= 0.0)) {
+        return makeError(
+            ErrorCode::InvalidArgument,
+            "paper style scale must be Auto or a positive finite denominator (1:N), at most " +
+                katana::core::formatExactReal(kMaximumPaperStyleScale) +
+                ", with a nonzero millimetre in model units");
+    }
+    return {};
+}
+
+Result<std::optional<double>> parsePaperStyleScale(std::string_view text)
+{
+    if (katana::core::equalsIgnoringCase(text, "AUTO")) {
+        return std::optional<double>{};
+    }
+    if (text.starts_with("1:")) {
+        text.remove_prefix(2);
+    }
+    const auto value = katana::core::parseFiniteDouble(text);
+    if (!value) {
+        return makeError(ErrorCode::ParseFailure,
+                         "paper style scale takes AUTO or a positive finite denominator N or 1:N",
+                         std::string(text));
+    }
+    if (const Status status = validatePaperStyleScale(value); !status) {
+        return status.error();
+    }
+    return value;
+}
+
+Result<std::string> viewPaperScalesToJson(const ViewPaperScales& scales)
+{
+    using Json = nlohmann::json;
+    Json records = Json::array();
+    for (const auto& [id, scale] : scales) {
+        if (id == kNoView) {
+            return makeError(ErrorCode::InvalidArgument, "a saved paper-scale view id cannot be zero");
+        }
+        if (const Status status = validatePaperStyleScale(scale); !status) {
+            return status.error();
+        }
+        records.push_back(Json{{"view", id}, {"paper_scale", scale ? Json(*scale) : Json(nullptr)}});
+    }
+    return Json{{"version", kPaperScalesVersion}, {"views", std::move(records)}}.dump();
+}
+
+Result<ViewPaperScales> viewPaperScalesFromJson(std::string_view text)
+{
+    using Json = nlohmann::json;
+    try {
+        const Json json = Json::parse(text);
+        if (!json.is_object() || !json.contains("version") ||
+            !json.at("version").is_number_integer()) {
+            return makeError(ErrorCode::ParseFailure, "view paper scales JSON needs an integer version");
+        }
+        if (json.at("version") != kPaperScalesVersion) {
+            return makeError(ErrorCode::Unsupported, "unsupported view paper scales JSON version");
+        }
+        if (!json.contains("views") || !json.at("views").is_array()) {
+            return makeError(ErrorCode::ParseFailure, "view paper scales JSON needs a views array");
+        }
+        ViewPaperScales scales;
+        for (const Json& record : json.at("views")) {
+            if (!record.is_object() || !record.contains("view") ||
+                !record.at("view").is_number_integer() || record.at("view") <= 0 ||
+                record.at("view") > std::numeric_limits<ViewId>::max()) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "a saved paper-scale view id is a whole number from 1");
+            }
+            const ViewId id = record.at("view").get<ViewId>();
+            std::optional<double> scale;
+            if (record.contains("paper_scale") && !record.at("paper_scale").is_null()) {
+                if (!record.at("paper_scale").is_number()) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "paper_scale in view paper scales JSON is a number or null");
+                }
+                scale = record.at("paper_scale").get<double>();
+            }
+            if (const Status status = validatePaperStyleScale(scale); !status) {
+                return status.error();
+            }
+            if (!scales.emplace(id, scale).second) {
+                return makeError(ErrorCode::ParseFailure, "duplicate view id in view paper scales JSON",
+                                 std::to_string(id));
+            }
+        }
+        return scales;
+    } catch (const Json::exception& error) {
+        return makeError(ErrorCode::ParseFailure, "invalid view paper scales JSON", error.what());
+    }
+}
+
+Result<ViewPaperScales> viewPaperScales(const Document& document)
+{
+    const auto& keys = document.metadata().unknownKeys;
+    const auto found = keys.find(std::string(kPaperScalesKey));
+    return found == keys.end() ? Result<ViewPaperScales>(ViewPaperScales{})
+                               : viewPaperScalesFromJson(found->second);
+}
+
+Status setViewPaperScales(Document& document, const ViewPaperScales& scales)
+{
+    const auto current = viewPaperScales(document);
+    if (!current) {
+        return current.error();
+    }
+    auto encoded = viewPaperScalesToJson(scales);
+    if (!encoded) {
+        return encoded.error();
+    }
+    if (*current == scales) {
+        return {};
+    }
+    std::optional<std::string> before;
+    const auto& keys = document.metadata().unknownKeys;
+    if (const auto found = keys.find(std::string(kPaperScalesKey)); found != keys.end()) {
+        before = found->second;
+    }
+    const std::optional<std::string> after = scales.empty()
+                                                ? std::nullopt
+                                                : std::optional<std::string>(std::move(*encoded));
+    auto apply = [&document, before, after](bool toAfter) {
+        ViewPaperScaleAccess::apply(document, toAfter ? after : before);
+    };
+    return document.execute(std::make_unique<ViewPaperScaleCommand>(std::move(apply)));
+}
+
+Result<std::vector<ViewId>> restoreViewPaperScales(const Document& document, ViewSet& views)
+{
+    const auto scales = viewPaperScales(document);
+    if (!scales) {
+        return scales.error();
+    }
+    std::vector<ViewId> changed;
+    for (ViewState* view : views.views()) {
+        const auto found = scales->find(view->id);
+        const std::optional<double> scale = found == scales->end() ? std::nullopt : found->second;
+        if (view->paperStyleScale != scale) {
+            view->paperStyleScale = scale;
+            changed.push_back(view->id);
+        }
+    }
+    return changed;
+}
 
 ViewState& ViewSet::add(ViewKind kind)
 {

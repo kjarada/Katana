@@ -1325,6 +1325,91 @@ class Reader {
         addElement(std::move(text));
     }
 
+    void readDraftingReference(DraftingReference& reference)
+    {
+        if (!expectOpen(reference.name)) {
+            return;
+        }
+        const Scope scope(*this, reference.name);
+        while (!atBlockEnd()) {
+            const Token key = next();
+            const std::string word = lowered(key.raw);
+            if (key.isWord() && peek().kind == TokenKind::Open) {
+                DraftingReference child;
+                child.name = word;
+                readDraftingReference(child);
+                reference.blocks.push_back(std::move(child));
+            } else {
+                readUnknown(key, word, reference.fields, true);
+            }
+        }
+        expectClose(reference.name);
+    }
+
+    void readDraftingElement()
+    {
+        if (!expectOpen("drafting_element")) {
+            return;
+        }
+        const Scope scope(*this, "drafting_element");
+        DraftingLeader leader;
+        leader.header = newHeader();
+        bool found = false;
+        while (!atBlockEnd()) {
+            const Token key = next();
+            const std::string word = lowered(key.raw);
+            if (key.isWord() && word == "leader" && peek().kind == TokenKind::Open) {
+                if (found) {
+                    fail(key.line, "a drafting_element contains more than one leader");
+                    return;
+                }
+                found = true;
+                (void)next();
+                const Scope leaderScope(*this, "leader");
+                while (!atBlockEnd()) {
+                    const Token field = next();
+                    const std::string name = lowered(field.raw);
+                    if (field.isWord() && name == "overrides" && peek().kind == TokenKind::Open) {
+                        readFieldBlock(name, leader.overrides);
+                    } else if (field.isWord() && name == "arrow" && peek().kind == TokenKind::Open) {
+                        if (leader.arrowReference) {
+                            fail(field.line, "a drafting leader contains more than one arrow reference");
+                            return;
+                        }
+                        leader.arrowReference.emplace();
+                        leader.arrowReference->name = name;
+                        readDraftingReference(*leader.arrowReference);
+                    } else {
+                        readUnknown(field, name, leader.fields, true);
+                    }
+                }
+                expectClose("leader");
+            } else if (!key.isWord() || !readHeaderField(leader.header, word)) {
+                readUnknown(key, word, leader.header.extras);
+            }
+        }
+        expectClose("drafting_element");
+        if (failed()) {
+            return;
+        }
+        if (!found) {
+            incomplete(leader.header, "drafting_element", "its leader");
+            return;
+        }
+        const auto arrow = takeVertex(leader.fields, "arrow_x", "arrow_y", "arrow_z");
+        const auto hook = takeVertex(leader.fields, "hook_x", "hook_y", "hook_z");
+        if (!arrow || !hook) {
+            incomplete(leader.header, "drafting_element/leader", !arrow ? "its arrow" : "its hook");
+            return;
+        }
+        leader.arrow = *arrow;
+        leader.hook = *hook;
+        const double nullValue = nullValueFor(leader.header.extras);
+        applyNull(leader.arrow.z, nullValue);
+        applyNull(leader.hook.z, nullValue);
+        addElement(std::move(leader));
+    }
+
     // `text "label" x y [z]` on one line: not in the manual, but written by
     // other tools and read by 12d-compatible viewers.
     void readShortText(std::uint32_t line)
@@ -2403,6 +2488,9 @@ class Reader {
             } else if (word == "primitive_3d" && block) {
                 lexer_.collectComments = false;
                 readPrimitive3d();
+            } else if (word == "drafting_element" && block) {
+                lexer_.collectComments = false;
+                readDraftingElement();
             } else if (word == "project_attributes" && block) {
                 readAttributes(archive_.projectAttributes);
             } else if (word == "text" && peek().kind == TokenKind::Quoted) {
@@ -2478,6 +2566,9 @@ class Reader {
                                         detail::CaseFoldedEqual>
             keywords = {
             "name", "model", "colour", "color", "style", "chainage", "breakline", "attributes",
+            "drafting_element", "leader", "overrides", "hook_angle", "justify_x", "display_text",
+            "format_text", "style_name", "arrow_x", "arrow_y", "arrow_z", "hook_x", "hook_y",
+            "hook_z", "arrow_size", "hook_length", "text_size",
             "closed", "z", "data", "data_2d", "data_3d", "radius_data", "major_data",
             "geometry_data", "colour_data", "point_data", "diameter", "diameter_value",
             "diameter_data", "pipe_value", "pipe_data", "culvert_value", "culvert_data",

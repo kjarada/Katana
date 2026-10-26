@@ -202,6 +202,7 @@ Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& pat
     }
 
     katana::archive12d::ImportOptions mapping;
+    mapping.colours = options.colours;
     mapping.originShift = options.originShift;
     mapping.layerPrefix = options.layerPrefix;
     mapping.curveTolerance = options.curveTolerance;

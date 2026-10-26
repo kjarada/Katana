@@ -780,9 +780,9 @@ it is written in upper case. `entity::ColourTable` refuses
 
 - a name that is empty, or nothing but blanks and separators, or not UTF-8;
 - two names with one fold: a lookup could not say which was meant;
-- a name whose fold is a STANDARD name. An archive import colours its strings
-  from the standard names alone, having no customisation to ask, so a table
-  that redefined `red` would draw two reds in one drawing.
+- a name whose fold is a STANDARD name. A standard name must keep its meaning
+  with or without a customisation, including a headless archive import with
+  an empty palette.
 
 **One fold.** A colour name is compared after `entity::foldColourName` and in
 no other way. In this order: ASCII letters to lower case; `_` and `-` read as
@@ -805,6 +805,21 @@ where that name used to match no standard colour and leave the colour alone.
 names, and gives nothing for a name neither knows - which leaves a colour
 alone rather than guessing (`pen 901` is such a name, and a pen that does not
 resolve draws in the entity's own colour).
+
+Archive imports use this resolver too. The shared `IMPORT` executor snapshots
+the active customisation's palette into its read options, including a second
+read for LOCAL or ALONGSIDE placement. It reaches entity and layer colours,
+symbol and text overrides, and mesh face colours through `katana_archive12d`,
+without that layer depending on `cad`. Previously the importer asked only
+the standard table: a valid custom colour became ByLayer even while the same
+name inside a library definition rendered correctly. Load or choose the
+customisation **before importing**; the imported RGB is kept with the drawing.
+Names absent from both tables are retained and reported, not guessed from a
+pen number or silently treated as successfully resolved.
+For a resolved custom string colour, `12d.colour_rgb` records the imported
+RGB beside its original name. Export can then retain that name unchanged or
+write a standard name after an explicit recolour, without needing the
+original palette to remain loaded.
 
 ### Linework codes
 

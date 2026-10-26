@@ -692,6 +692,9 @@ struct Validator {
                                  katana::core::formatExactReal(size));
             }
         }
+        if (leader.landingAngle && !std::isfinite(*leader.landingAngle)) {
+            return makeError(ErrorCode::InvalidGeometry, "a leader's landing angle must be finite");
+        }
         if (static_cast<int>(leader.arrow) > static_cast<int>(ArrowHead::Dot) ||
             static_cast<int>(leader.callout) > static_cast<int>(CalloutShape::Circle)) {
             return makeError(ErrorCode::InvalidGeometry, "a leader's arrow or callout is unknown");
@@ -1091,6 +1094,9 @@ Result<Geometry> transformed(const Geometry& geometry, const Mat3& transform)
             LeaderGeometry result = leader;
             for (Point2& vertex : result.vertices) {
                 vertex = s.point(vertex);
+            }
+            if (result.landingAngle) {
+                result.landingAngle = s.angle(*result.landingAngle);
             }
             return result;
         }

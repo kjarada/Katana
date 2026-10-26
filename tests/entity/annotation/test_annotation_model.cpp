@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 
 #include "katana/entity/anchor.hpp"
@@ -322,6 +323,30 @@ TEST(AnnotationGeometry, JsonAndBlobRoundTripEveryNewMember)
         ASSERT_TRUE(fromBlob.ok()) << fromBlob.error().describe();
         EXPECT_EQ(*fromBlob, geometry);
     }
+}
+
+TEST(AnnotationGeometry, ExplicitLeaderLandingsSurviveStorageAndFollowRotationsAndMirrors)
+{
+    LeaderGeometry leader{.vertices = {Point2(0, 0), Point2(3, 4)}, .text = "Note"};
+    leader.landingAngle = 0.0;
+    EXPECT_TRUE(validate(leader).ok());
+    const auto turned = transformed(leader, katana::math::Mat3::rotation(kPi / 2));
+    ASSERT_TRUE(turned.ok());
+    EXPECT_NEAR(*std::get<LeaderGeometry>(*turned).landingAngle, kPi / 2, 1e-12);
+    const auto mirrored = transformed(leader, katana::math::Mat3::scaling(-1, 1));
+    ASSERT_TRUE(mirrored.ok());
+    EXPECT_NEAR(std::abs(*std::get<LeaderGeometry>(*mirrored).landingAngle), kPi, 1e-12);
+
+    const auto json = geometryToJson(leader);
+    ASSERT_TRUE(json.ok());
+    EXPECT_NE(json->find("\"landingAngle\":0"), std::string::npos);
+    const auto back = geometryFromJson(*json);
+    ASSERT_TRUE(back.ok());
+    EXPECT_EQ(std::get<LeaderGeometry>(*back), leader);
+    leader.landingAngle = std::numeric_limits<double>::infinity();
+    EXPECT_FALSE(validate(leader).ok());
+    leader.landingAngle = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_FALSE(validate(leader).ok());
 }
 
 TEST(AnnotationGeometry, AnOldTextOrDimensionIsStoredExactlyAsBefore)

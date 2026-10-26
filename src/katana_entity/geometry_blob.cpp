@@ -288,7 +288,10 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
     // Two header bytes plus the largest fixed payload; a polyline grows from
     // here. Reserving keeps a save from reallocating per entity.
     out.reserve(48);
-    const std::uint8_t version = fitsVersionOne(geometry)   ? kBlobVersion
+    const auto* leader = std::get_if<LeaderGeometry>(&geometry);
+    const std::uint8_t version = leader != nullptr && leader->landingAngle
+                                    ? kBlobVersionLeaderLanding
+                                : fitsVersionOne(geometry)   ? kBlobVersion
                                  : fitsVersionTwo(geometry) ? kBlobVersionAnnotation
                                                             : kBlobVersionSmartLeader;
     const bool annotation = version >= kBlobVersionAnnotation;
@@ -380,6 +383,9 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
                     putU8(out, shape.fields ? 1u : 0u);
                     status = putString(out, shape.labelStyle);
                 }
+                if (status && version >= kBlobVersionLeaderLanding) {
+                    putDouble(out, *shape.landingAngle);
+                }
             } else if constexpr (std::is_same_v<Shape, katana::geometry::CurvePolyline2>) {
                 // 32 bytes a vertex: x, y, bulge, height - a NaN height for
                 // "not surveyed", which validation keeps from meaning anything
@@ -450,7 +456,7 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
         return truncated();
     }
     if (version != kBlobVersion && version != kBlobVersionAnnotation &&
-        version != kBlobVersionSmartLeader) {
+        version != kBlobVersionSmartLeader && version != kBlobVersionLeaderLanding) {
         return makeError(ErrorCode::ParseFailure, "unknown geometry blob version",
                          std::to_string(version));
     }
@@ -603,6 +609,13 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
                 return truncated();
             }
             leader.fields = fields != 0;
+        }
+        if (version >= kBlobVersionLeaderLanding) {
+            double angle = 0.0;
+            if (!reader.readDouble(angle)) {
+                return truncated();
+            }
+            leader.landingAngle = angle;
         }
         leader.arrow = static_cast<ArrowHead>(arrow);
         leader.callout = static_cast<CalloutShape>(callout);

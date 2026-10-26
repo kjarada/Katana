@@ -613,7 +613,7 @@ Linework  LINEWORK [scope] [WHERE k=v ...] [PROPERTY name] [ORDER number|entity]
           codes and their control codes, one undo step; no scope word: the selection, else
           the drawing. Points their survey job has strung, and lines already drawn, are left out
           and counted (HELP LINEWORK)
-Views     the desktop window's views (katana_cli and katana_mcp have none, and refuse these):
+Views     the desktop window's views, except SCALE also edits saved plan views headlessly:
           VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id   a record per view;
           id is the view= a record gives, not its title's number
           VIEWS LINK id[,id...] [TO id]   linked plan views pan and zoom together: every one
@@ -627,6 +627,9 @@ Views     the desktop window's views (katana_cli and katana_mcp have none, and r
           that view hides of its own, by the id the Reference Data panel gives them
           VIEWS SET id ghosts=on|off   whether that view shows the selection faintly where it
           hides the layer (on when a view opens)
+          VIEWS SCALE id AUTO|1:N   paper linestyles and symbols at a reference scale,
+          independent of zoom and ANNOSCALE; AUTO keeps their screen size. Saved plan-view
+          ids are available to katana_cli and katana_mcp; other view operations need the window
 Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTENTS (E, ALL,
           A) | IN [f] | OUT [f] | f | fX | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE
           pixels-per-unit]   [view=id]; IN and OUT are by 2 about the view's centre;
@@ -1017,8 +1020,7 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (verb == "LIST" || verb == "INFO" || verb == "STATUS") {
         return inspect(verb, args);
     }
-    // VIEWS and ZOOM: the window's views, which the Document does not hold;
-    // without a window they are refused by name (view_verbs.hpp).
+    // SCALE also edits the document's saved view assignments without a window.
     if (isViewVerb(verb)) {
         return runViewVerb(document_, verb, args, viewHost_, scopeViews_);
     }

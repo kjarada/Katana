@@ -77,6 +77,9 @@ namespace katana::entity {
 inline constexpr std::uint8_t kBlobVersion = 1;
 inline constexpr std::uint8_t kBlobVersionAnnotation = 2;
 inline constexpr std::uint8_t kBlobVersionSmartLeader = 3;
+// Version 4 appends an explicit landing angle to a leader's version-3
+// payload. Only a leader that specifies one needs this version.
+inline constexpr std::uint8_t kBlobVersionLeaderLanding = 4;
 
 // Encodes `geometry`. Fails with InvalidArgument for text that is not valid
 // UTF-8 or a string longer than the format can express - both of which are

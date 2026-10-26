@@ -186,6 +186,32 @@ TEST(DomainImport, AStandardColourColoursTheEntityAndAnyOtherIsLeftToTheLayerBut
 
 // ---- geometry and heights ---------------------------------------------------------
 
+TEST(DomainImport, CustomColourNamesReachLinesLayersSymbolsAndTextThroughTheOneResolver)
+{
+    a12::ImportOptions options;
+    ASSERT_TRUE(options.colours.add("test utility amber", {224, 128, 32, 255}).ok());
+    ASSERT_TRUE(options.colours.add("test utility green", {32, 112, 80, 255}).ok());
+    const auto domain = import(R"(
+        model Lines
+        string super { colour "TEST_UTILITY_AMBER" data_2d { 0 0 10 0 } }
+        string super { colour "test utility amber" data_2d { 2 3 }
+          symbol_value { style Mark colour "test utility green" size 1 } }
+        string text { colour red x 4 y 5 text Note text_colour "test utility green" }
+        string super { colour blue data_2d { 6 7 } }
+        string super { colour "missing project colour" data_2d { 8 9 } }
+    )", options);
+    ASSERT_EQ(domain.entities.size(), 5u);
+    EXPECT_EQ(domain.entities[0].color, (katana::entity::Color{224, 128, 32, 255}));
+    EXPECT_EQ(domain.layersNeeded[0].color, (katana::entity::Color{224, 128, 32, 255}));
+    EXPECT_EQ(domain.entities[1].color, (katana::entity::Color{32, 112, 80, 255}));
+    EXPECT_EQ(domain.entities[2].color, (katana::entity::Color{32, 112, 80, 255}));
+    EXPECT_EQ(domain.entities[3].color, katana::entity::standardColour("blue"));
+    EXPECT_FALSE(domain.entities[4].color.has_value());
+    EXPECT_TRUE(anyWarningContains(domain, "missing project colour"));
+    EXPECT_EQ(std::get<std::string>(domain.entities[0].metadata.at("12d.colour")),
+              "TEST_UTILITY_AMBER");
+}
+
 TEST(DomainImport, OneVertexIsAPointTwoALineMoreAPolyline)
 {
     const auto domain = import("string super { data_3d { 1 2 3 } }\n"

@@ -682,6 +682,18 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "PLOT a.pdf")
     set_tests_properties(cli.a_window_verb_in_a_batch_fails_it PROPERTIES WILL_FAIL TRUE)
 
+    add_test(NAME cli.paper_style_scale_lists_no_invented_views_in_a_new_session
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "VIEWS SCALE LIST")
+    set_tests_properties(cli.paper_style_scale_lists_no_invented_views_in_a_new_session PROPERTIES
+        PASS_REGULAR_EXPRESSION "views=0" FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.paper_style_scale_refuses_an_unsaved_view_by_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "VIEWS SCALE 1 500" -c "POINT 1,1")
+    set_tests_properties(cli.paper_style_scale_refuses_an_unsaved_view_by_name PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: NotFound: no saved plan view 1"
+        FAIL_REGULAR_EXPRESSION "unknown command|point created")
+
     # STATUS and STATUS JSON: the record katana_mcp's katana_status gives,
     # here as a verb (cad/document_status.hpp). One rectangle, selected, one
     # undo step.
@@ -1360,6 +1372,14 @@ endif()
 # counts 40 000 points in survey_scan.las.
 if(KATANA_BUILD_TESTS AND TARGET katana_interop)
     set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
+    add_test(NAME cli.archive_custom_colours_and_native_leaders_are_imported
+        COMMAND ${CMAKE_COMMAND}
+            "-DPROGRAM=$<TARGET_FILE:katana_cli>"
+            "-DFIXTURES=${PROJECT_SOURCE_DIR}/tests/archive12d/data"
+            -P "${PROJECT_SOURCE_DIR}/tests/archive12d/check_drafting_import.cmake")
+    set_tests_properties(cli.archive_custom_colours_and_native_leaders_are_imported PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
+        TIMEOUT 90)
     set(_copc "${CMAKE_CURRENT_BINARY_DIR}/cli-scan.copc.laz")
     add_test(NAME cli.info_raster
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"

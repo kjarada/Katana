@@ -45,6 +45,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/geometry/polygon.hpp"
+#include "katana/math/unit_ratio.hpp"
 #include "plotting/plot_style.hpp"
 // Surface display (docs/surface_display.md): the drawing's surfaces in plan.
 #include "drawing/feedback_painter.hpp"
@@ -462,12 +463,15 @@ class PlanPainter {
     }
     [[nodiscard]] int widthPixels() const { return static_cast<int>(view_.widthPixels); }
     [[nodiscard]] int heightPixels() const { return static_cast<int>(view_.heightPixels); }
-    // Model units to one plot millimetre, which is what a paper linestyle is
-    // measured in. Dividing by the view scale is what makes such a mark keep
-    // its size on the PAGE as you zoom, which is the whole point of one. On
-    // screen a millimetre is a millimetre OF SCREEN.
+    // Plots keep their own paper size. Auto on screen uses a millimetre of
+    // screen; a fixed display denominator gives library paper marks a model
+    // size instead, without changing the camera or annotation scale.
     [[nodiscard]] double paperScale() const
     {
+        if (!paper() && options_.paperStyleScale) {
+            return katana::math::toMetres(*options_.paperStyleScale,
+                                          katana::math::units::kMillimetre);
+        }
         return options_.pixelsPerMillimetre / std::max(view_.scale, 1e-12);
     }
     // A mark `pixels` wide on screen and `millimetres` wide on paper, in

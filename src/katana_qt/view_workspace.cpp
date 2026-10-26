@@ -17,8 +17,10 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/scope_verbs.hpp"
 #include "katana/cad/view_link.hpp"
+#include "katana/core/text.hpp"
 #include "tools/tool_host.hpp"
 #include "view_layers_popup.hpp"
+#include "view_scale_dialog.hpp"
 
 namespace katana::qt {
 
@@ -65,6 +67,8 @@ constexpr std::array kKinds{ViewKind::Plan, ViewKind::Model3D, ViewKind::Section
 // Zoom to Selection outlasts In and Out, which the wheel does as well.
 constexpr int kZoomInOutPriority = 1;
 constexpr int kZoomSelectionPriority = 2;
+// Also on the main View toolbar, so this duplicate yields before the zoom tools.
+constexpr int kPaperScalePriority = 0;
 
 // The ZOOM line a transparent command typed while a tool runs stands for -
 // ZOOM, Z, 'ZOOM or 'Z and whatever follows - or "" for one ZOOM is not
@@ -192,10 +196,18 @@ ViewWorkspace::ViewWorkspace(katana::cad::Document& document, QWidget* parent)
     // for a title, rather than under the drawing.
     setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
     openView(ViewKind::Plan);
+    paperScaleListener_ = document_.addListener([this](const katana::cad::DocumentChange& change) {
+        if (change.has(katana::cad::DocumentChange::History | katana::cad::DocumentChange::Metadata |
+                       katana::cad::DocumentChange::Replaced)) {
+            refreshPaperScales();
+        }
+    });
 }
 
 ViewWorkspace::~ViewWorkspace()
 {
+    paperScaleListener_.reset();
+    delete scaleDialog_.data();
     for (View& view : docks_) {
         delete view.dock;
     }
@@ -343,7 +355,11 @@ void ViewWorkspace::updateTitle(const View& view)
     }
     // Which tools the bar shows follows what the view shows.
     updateLinkButton(view);
+    updateScaleButton(view);
     updateZoomTools(view);
+    if (scaleDialog_ != nullptr) {
+        scaleDialog_->refresh();
+    }
 }
 
 void ViewWorkspace::setChrome(DockChrome* chrome)
@@ -424,6 +440,12 @@ void ViewWorkspace::installChrome(View& view)
     bar->addTool(layers);
     view.layersButton = layers;
 
+    QToolButton* scale = makeTitleBarButton(bar, Icon::ViewPlan, "ViewScaleButton",
+                                            "Paper Style Scale", {});
+    connect(scale, &QToolButton::clicked, this, [this, id] { (void)showScaleDialog(id); });
+    bar->addTool(scale, kPaperScalePriority);
+    view.scaleButton = scale;
+
     // The zoom tools, each a ZOOM line through the command runner, so a
     // click is logged as the line it is and the linked views follow it as
     // they follow the wheel. In, Out and Zoom to Selection are optional: a
@@ -461,7 +483,7 @@ void ViewWorkspace::installChrome(View& view)
     // view, and a view maximised while another stayed active hid the very
     // view they act on. On `pressed`, not `clicked`, so that the view is
     // active before the button acts. Not Minimise or Close: they put it away.
-    for (QToolButton* button : {kind, link, layers, zoomIn, zoomOut, zoomSelection, extents,
+    for (QToolButton* button : {kind, link, layers, scale, zoomIn, zoomOut, zoomSelection, extents,
                                 bar->floatButton(), bar->maximiseButton()}) {
         if (button != nullptr) {
             connect(button, &QToolButton::pressed, this, [this, id] { activate(id); });
@@ -483,6 +505,7 @@ void ViewWorkspace::installChrome(View& view)
 
     updateLayersButton(view);
     updateLinkButton(view);
+    updateScaleButton(view);
     updateZoomTools(view);
 }
 
@@ -605,6 +628,63 @@ ViewLayersPopup* ViewWorkspace::showLayersPopup(ViewId id)
     return popup;
 }
 
+ViewScaleDialog* ViewWorkspace::showScaleDialog(ViewId id)
+{
+    const auto* state = views_.find(id);
+    if (state == nullptr || state->kind != ViewKind::Plan) {
+        return nullptr;
+    }
+    if (scaleDialog_ == nullptr) {
+        scaleDialog_ = new ViewScaleDialog(
+            views_, id, [this](const QString& line) { return runner_(line); }, this);
+        scaleDialog_->setAttribute(Qt::WA_DeleteOnClose);
+    } else {
+        scaleDialog_->refresh(id);
+    }
+    scaleDialog_->show();
+    scaleDialog_->raise();
+    scaleDialog_->activateWindow();
+    return scaleDialog_;
+}
+
+void ViewWorkspace::updateScaleButton(const View& view)
+{
+    if (view.scaleButton == nullptr) {
+        return;
+    }
+    const auto* state = views_.find(view.id);
+    if (view.titleBar != nullptr) {
+        view.titleBar->setToolWanted(view.scaleButton, state != nullptr && state->kind == ViewKind::Plan);
+    }
+    const QString scale = state != nullptr && state->paperStyleScale
+                              ? "1:" + QString::fromStdString(
+                                           katana::core::formatExactReal(*state->paperStyleScale))
+                              : QStringLiteral("Auto");
+    setTitleBarTip(view.scaleButton, "Paper Style Scale: " + scale,
+                   "Size paper-based linestyles and symbols without changing the camera zoom, "
+                   "annotation scale or plots (VIEWS SCALE).");
+}
+
+void ViewWorkspace::refreshPaperScales()
+{
+    const auto restored = katana::cad::restoreViewPaperScales(document_, views_);
+    if (!restored) {
+        const QString problem = QString::fromStdString(restored.error().describe());
+        if (problem != paperScaleProblem_ && onError) {
+            onError(problem);
+        }
+        paperScaleProblem_ = problem;
+        return;
+    }
+    paperScaleProblem_.clear();
+    for (const ViewId id : *restored) {
+        viewSettingsChanged(id);
+    }
+    if (!restored->empty() && scaleDialog_ != nullptr) {
+        scaleDialog_->refresh();
+    }
+}
+
 ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
 {
     if (chrome_ != nullptr) {
@@ -623,6 +703,7 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
     View& added = docks_.back();
     buildContent(added, state);
     installChrome(added);
+    refreshPaperScales();
 
     // Splitting the active view when it is docked here, so a new view shares
     // the space the user was looking at rather than squeezing in at an edge.
@@ -698,6 +779,9 @@ Status ViewWorkspace::closeView(ViewId id)
     removeDockWidget(dock);
     delete dock;
     (void)views_.remove(id);
+    if (scaleDialog_ != nullptr) {
+        scaleDialog_->refresh();
+    }
     // It left the link, and a view it leaves alone left with it.
     updateLinkButtons();
     if (wasActive == id) {
@@ -1722,6 +1806,7 @@ void ViewWorkspace::viewSettingsChanged(ViewId id)
         view->section->update();
     }
     updateLayersButton(*view);
+    updateScaleButton(*view);
     if (onViewSettingsChanged) {
         onViewSettingsChanged();
     }

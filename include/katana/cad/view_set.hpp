@@ -20,11 +20,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/cad/layer_overrides.hpp"
@@ -36,10 +38,24 @@
 
 namespace katana::cad {
 
+class Document;
+
 // Monotonic and never reused, like entity ids: a dock that outlives its view
 // by a queued event must not find a different view under the same id.
 using ViewId = std::uint32_t;
 inline constexpr ViewId kNoView = 0;
+
+// At the minimum camera zoom, one screen pixel represents 1e7 model metres.
+// A millimetre at this denominator reaches that same numerical envelope:
+// 1000 mm/m divided by ViewTransform's minimum pixels/m.
+inline constexpr double kMaximumPaperStyleScale = 1000.0 / ViewTransform::kMinimumScale;
+
+// Null is Auto: paper-sized library marks keep their screen size. A fixed
+// denominator N makes each paper millimetre N/1000 model metres, independently
+// of the camera zoom, ANNOSCALE and the plot's scale.
+[[nodiscard]] katana::core::Status validatePaperStyleScale(std::optional<double> scale);
+[[nodiscard]] katana::core::Result<std::optional<double>>
+parsePaperStyleScale(std::string_view text);
 
 struct ViewState {
     ViewId id = kNoView;
@@ -67,6 +83,7 @@ struct ViewState {
     // nothing yet.
     bool cameraFramed = false;
     ViewTransform plan;            // Plan: pan and zoom
+    std::optional<double> paperStyleScale;
     // False until the plan view has been framed once. The plan widget frames
     // at its first paint, not its first resize, because a dock's first resize
     // may be provisional; and until the user pans or zooms it refits that
@@ -110,6 +127,20 @@ struct ViewState {
     // its layer. Its Layers popup and VIEWS SET <id> ghosts=on|off set it.
     bool selectionGhosts = true;
 };
+
+// Only the paper-style scale assignments are persisted, not cameras, links or
+// hidden layers. IDs are real plan views when assigned; headless commands may
+// name only an assignment already recorded by the desktop.
+using ViewPaperScales = std::map<ViewId, std::optional<double>>;
+[[nodiscard]] katana::core::Result<std::string>
+viewPaperScalesToJson(const ViewPaperScales& scales);
+[[nodiscard]] katana::core::Result<ViewPaperScales>
+viewPaperScalesFromJson(std::string_view text);
+[[nodiscard]] katana::core::Result<ViewPaperScales> viewPaperScales(const Document& document);
+// One document undo step, preserving unrelated metadata and refusing to
+// overwrite damaged or newer JSON. An unchanged set is not an edit.
+[[nodiscard]] katana::core::Status setViewPaperScales(Document& document,
+                                                      const ViewPaperScales& scales);
 
 class ViewSet {
   public:
@@ -238,5 +269,11 @@ class ViewSet {
     // The clock ViewState::lastMoved is read on: one tick per user move.
     std::uint64_t moves_ = 0;
 };
+
+// Re-reads the assignments after open, undo or redo. Only existing views are
+// updated; it never invents a view or moves its camera. Returns the changed
+// IDs, for their widgets to invalidate their kept image.
+[[nodiscard]] katana::core::Result<std::vector<ViewId>>
+restoreViewPaperScales(const Document& document, ViewSet& views);
 
 } // namespace katana::cad

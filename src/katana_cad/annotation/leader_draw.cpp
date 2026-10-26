@@ -92,7 +92,14 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
     // The landing's direction: away from the line's last stretch.
     const Vec2 last = v.back() - v[v.size() - 2];
     const double sign = last.x < -tol::kGeometric * std::max(1.0, last.length()) ? -1.0 : 1.0;
-    const Vec2 landingDirection(sign, 0.0);
+    const Vec2 landingDirection = leader.landingAngle
+                                      ? Vec2(std::cos(*leader.landingAngle),
+                                             std::sin(*leader.landingAngle))
+                                      : Vec2(sign, 0.0);
+    const Readable textDirection = leader.landingAngle
+                                       ? readableRotation(*leader.landingAngle, TextJustify::MiddleLeft)
+                                       : Readable{0.0, sign > 0.0 ? TextJustify::MiddleLeft
+                                                                : TextJustify::MiddleRight, false};
     const double landing = katana::entity::annotationModelSize(leader.landing, scale);
     Point2 end = v.back();
     if (landing > 0.0) {
@@ -109,7 +116,7 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
         const double margin = kCalloutMargin * height;
         if (leader.callout == CalloutShape::Circle) {
             // Measure first, then centre the note in the circle that clears it.
-            Drawing probe = layoutText(note, Point2(0.0, 0.0), 0.0, TextJustify::MiddleCentre,
+            Drawing probe = layoutText(note, Point2(0.0, 0.0), textDirection.rotation, TextJustify::MiddleCentre,
                                        appearance, measure);
             double radius = 0.0;
             for (const auto& box : probe.textBoxes) {
@@ -120,7 +127,7 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
             radius += margin;
             const Point2 centre = end + landingDirection * radius;
             Drawing noteDrawing =
-                layoutText(note, centre, 0.0, TextJustify::MiddleCentre, appearance, measure);
+                layoutText(note, centre, textDirection.rotation, TextJustify::MiddleCentre, appearance, measure);
             noteDrawing.masks.push_back(circlePolygon(centre, radius));
             noteDrawing.outlines.push_back(circlePolygon(centre, radius));
             drawing.append(noteDrawing);
@@ -128,19 +135,23 @@ Drawing buildLeader(const katana::entity::Model& model, const katana::entity::Le
             const Point2 at = end + landingDirection * (leader.callout == CalloutShape::Box
                                                             ? gap + margin
                                                             : gap);
-            const TextJustify justify =
-                sign > 0.0 ? TextJustify::MiddleLeft : TextJustify::MiddleRight;
-            Drawing noteDrawing = layoutText(note, at, 0.0, justify, appearance, measure);
+            Drawing noteDrawing = layoutText(note, at, textDirection.rotation,
+                                             textDirection.justify, appearance, measure);
             if (leader.callout == CalloutShape::Box && !noteDrawing.textBoxes.empty()) {
+                const Vec2 along(std::cos(textDirection.rotation), std::sin(textDirection.rotation));
+                const Vec2 up = along.perpendicular();
                 const Box2 box = [&] {
                     Box2 b;
                     for (const Point2& p : noteDrawing.textBoxes.front()) {
-                        b.expand(p);
+                        const Vec2 delta = p - at;
+                        b.expand(Point2(delta.dot(along), delta.dot(up)));
                     }
                     return b.inflated(margin);
                 }();
-                const std::vector<Point2> frame = {box.min, Point2(box.max.x, box.min.y), box.max,
-                                                   Point2(box.min.x, box.max.y)};
+                const auto corner = [&](double x, double y) { return at + along * x + up * y; };
+                const std::vector<Point2> frame = {
+                    corner(box.min.x, box.min.y), corner(box.max.x, box.min.y),
+                    corner(box.max.x, box.max.y), corner(box.min.x, box.max.y)};
                 noteDrawing.masks.push_back(frame);
                 noteDrawing.outlines.push_back(frame);
             }

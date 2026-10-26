@@ -1761,17 +1761,62 @@ The mapping is documented in full at the head of
   visibility, tinability, segment colours, interface modes - travels in
   `12d.*` metadata and is written back, so a string imported and exported
   unchanged is the string it was.
-- **Colours.** A 12da carries colour *names*; the RGB behind a name lives in
-  the 12d project and can be redefined there, so no table can be "right".
-  The standard names 12d ships with get the X11 values of the same names
-  (with grey's shades set either side of grey, since X11's DarkGray is
-  lighter than its Gray); an unknown name (`pen 025`, `vis concrete`) leaves
-  the entity ByLayer and is kept as metadata. On export the name is written
+- **Colours.** An archive carries colour *names*, not its project's palette.
+  Import uses the active customisation's `ColourTable` and then the standard
+  table through `entity::resolveColour`, the same resolver the library
+  linestyles and survey coding use (`docs/customisation.md`, "Colour names").
+  The shared executor passes a snapshot of the palette through the file
+  reader to the domain mapper, including a read repeated for placement.
+  It applies to lines, layers, text and symbol overrides, and mesh faces.
+  Previously an imported line whose name existed only in the customisation
+  was left ByLayer, so its `view_colour` linestyle strokes drew the wrong
+  colour despite the correct library being loaded. A still-unknown name
+  (`pen 025`, `vis concrete`) is kept as metadata and reported; its RGB is
+  not inferred from the name. Load the customisation before importing.
+  On export the name is written
   back unless the colour has been changed since, when the nearest standard
   name is written instead - the old name would be a lie. The standard names
   are listed by `archive12d::standardColourNames()`, read from the same table
   `standardColour` draws with, which is what the Survey Code Manager's colour
   field offers; the dialog keeps no copy of the table.
+- **Drafting leaders.** `drafting_element { leader { ... } }` is read as a
+  typed `DraftingLeader`, not skipped as an unknown top-level block. It
+  becomes one native `LeaderGeometry`: arrow and hook coordinates, the
+  displayed note (paragraph `\n` escapes decoded only for this text), the
+  explicit arrow, landing and text sizes in paper millimetres, and the
+  landing's direction from `hook_angle` and `justify_x`. LOCAL and OFFSET
+  move both vertices together. The note uses `display_text` rather than
+  attempting to evaluate `format_text` against a project the archive did
+  not bring; the original fields and overrides remain in `12d.leader.*`
+  metadata. Unknown nested blocks are still counted. Missing or non-finite
+  coordinates, invalid sizes or justification, and zero-length leaders are
+  reported rather than fabricated at the origin.
+  Nested `arrow` reference blocks are retained as structured archive data and
+  metadata too. Their original project/model identifiers are not Katana
+  entity identifiers, so their recorded arrow coordinates are used and the
+  lack of a live association is reported, not guessed from a matching name.
+
+  A drafting style's **name is not its definition**. External fonts, borders
+  and other settings not carried in the archive are not guessed from that
+  name: the import reports the missing definition and uses the default note
+  appearance with the sizes explicitly supplied. The archive read/write
+  path preserves the typed fields; drawing export keeps the existing
+  annotation-flattening path (`docs/annotation.md`, "Exchange").
+
+  Evidence from the supplied compressed archive, without tracking its
+  contents: 774 drafting leader blocks had all been skipped; 116 also carry
+  these external arrow references. The hand-written
+  fixture `tests/archive12d/data/drafting_leaders.12da` checks the same shape,
+  both justifications, multiline display text, local placement and two
+  explicit size sets. The sample's 1,106 empty single `symbol_value` blocks
+  were also falsely reported as differing per-vertex symbols; an empty
+  symbol name now means no symbol, with its fields retained and no such
+  warning.
+  The corrected import has 2,740 entities including all 774 leaders.
+  Independent counts from the source headers and symbol overrides match
+  all 1,144 entities using the six custom colours present in this file.
+  Saving and reopening without the palette keeps those RGB values and the
+  leaders; only the library definitions need the customisation loaded again.
 - **Drainage.** The line becomes a polyline carrying its pipes as properties
   (pipe *i* joins pit *i* to *i+1* and has no position of its own), each pit
   a point at its top with its name, type and size, each house connection a

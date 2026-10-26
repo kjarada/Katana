@@ -446,6 +446,7 @@ class ViewportWidget final : public QWidget {
         double centreX = 0.0;
         double centreY = 0.0;
         double scale = 0.0;
+        std::optional<double> paperStyleScale;
         double width = 0.0;
         double height = 0.0;
         double deviceRatio = 0.0;

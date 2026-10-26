@@ -44,6 +44,7 @@ struct Archive12dImportOptions {
     // 58 MB (29 MB of text once decoded). A gigabyte is room for anything
     // plausible and a bound on what a hostile zip can ask for.
     std::uint64_t maxBytes = 1ull << 30;
+    katana::entity::ColourTable colours;
 };
 
 struct Archive12dImportResult {

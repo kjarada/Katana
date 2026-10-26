@@ -20,6 +20,8 @@ const std::vector<ElementCoverage>& elementCoverage()
          "typed entity properties; a group flattens into Group/Name and is rebuilt on export"},
         {"project_attributes", "-", Handling::ReadOnly,
          "read into the archive; a Katana project has no attributes of its own"},
+        {"drafting_element/leader", "-", Handling::ImportOnly,
+         "a native leader with its note, arrow, landing and explicit paper sizes"},
         {"tin", "1.4.7.2", Handling::Full, "a surface (terrain::TinSurface)"},
         {"full_tin", "1.4.7.1", Handling::ImportOnly,
          "a surface of its visible, non-construction triangles; written back as a tin"},

@@ -59,6 +59,7 @@ class CommandInterpreter;
 namespace katana::qt {
 
 class ViewLayersPopup;
+class ViewScaleDialog;
 
 // A view's dock. Closing it closes the VIEW (the panels only hide), and it is
 // asked for rather than done inside the close event: the close may come from
@@ -108,6 +109,9 @@ class ViewWorkspace final : public QMainWindow {
     // title bar when it has no chrome. Null for an id that is not open. The
     // popup deletes itself when it closes.
     ViewLayersPopup* showLayersPopup(katana::cad::ViewId id);
+    // The same non-modal command builder for View > Paper Style Scale and
+    // the plan view's own bar. Null unless id is an open plan view.
+    ViewScaleDialog* showScaleDialog(katana::cad::ViewId id);
     // How many layers and reference layers a view hides that still exist:
     // what its Layers button reports. 0 for an id that is not open.
     [[nodiscard]] std::size_t hiddenCount(katana::cad::ViewId id) const;
@@ -399,6 +403,7 @@ class ViewWorkspace final : public QMainWindow {
         QToolButton* kindButton = nullptr;
         QToolButton* linkButton = nullptr;
         QToolButton* layersButton = nullptr;
+        QToolButton* scaleButton = nullptr;
         QToolButton* zoomInButton = nullptr;
         QToolButton* zoomOutButton = nullptr;
         QToolButton* zoomSelectionButton = nullptr;
@@ -438,6 +443,8 @@ class ViewWorkspace final : public QMainWindow {
     void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
+    void updateScaleButton(const View& view);
+    void refreshPaperScales();
     // The Link button shows on a plan view's bar alone; checked, with the
     // closed chain, while the view is linked, and its tooltip names the
     // views it moves with. Set from the link, never from a click.
@@ -489,6 +496,9 @@ class ViewWorkspace final : public QMainWindow {
     QPointer<DockChrome> chrome_;
     katana::cad::ViewSet views_;
     std::vector<View> docks_;
+    QPointer<ViewScaleDialog> scaleDialog_;
+    katana::cad::Document::ListenerHandle paperScaleListener_;
+    QString paperScaleProblem_;
 
     katana::interop::ReferenceData* reference_ = nullptr;
     const std::vector<katana::cad::SceneSurface>* surfaces_ = nullptr;

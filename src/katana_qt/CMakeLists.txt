@@ -57,6 +57,8 @@ add_library(katana_qt_ui OBJECT
     dock_chrome.hpp
     view_layers_popup.cpp
     view_layers_popup.hpp
+    view_scale_dialog.cpp
+    view_scale_dialog.hpp
     plan_context_menu.cpp
     plan_context_menu.hpp
     select_by_id_dialog.cpp

@@ -197,6 +197,7 @@ std::string elementKeyword(const Element& element)
             return c.feature ? "string feature" : "string circle";
         }
         std::string operator()(const TextString&) const { return "string text"; }
+        std::string operator()(const DraftingLeader&) const { return "drafting_element/leader"; }
         std::string operator()(const PlotFrame&) const { return "string plot_frame"; }
         std::string operator()(const DrainageString&) const { return "string drainage"; }
         std::string operator()(const SuperAlignment& a) const

@@ -43,6 +43,7 @@ add_executable(katana_qt_widget_tests
     test_sheet_editor.cpp
     test_plan_cloud.cpp
     test_view_chrome.cpp
+    test_view_scale.cpp
     # Linked plan views, their Link button and the VIEWS and ZOOM lines the
     # workspace answers (test_view_links).
     test_view_links.cpp

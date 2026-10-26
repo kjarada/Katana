@@ -608,6 +608,7 @@ class Document {
 
   private:
     friend class SurveyJobAccess;
+    friend class ViewPaperScaleAccess;
 
     void rebuildStack();
     // The model, the metadata and the survey jobs into `store` in one save,

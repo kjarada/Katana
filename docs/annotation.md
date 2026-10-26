@@ -423,6 +423,18 @@ and paper height;
 it used to draw a polyline, an arrowhead and a text per line, which drifted
 apart when one was moved.
 
+Imported drafting leaders may specify `LeaderGeometry::landingAngle`, the
+outward direction in radians, rather than asking it to be inferred from the
+last leg. The builder honours it for the landing and readable text, including
+a rotated callout; rotating or mirroring the entity transforms the direction
+as well as the vertices. Absent, existing leaders behave exactly as before.
+The optional geometry JSON member is `landingAngle`; `LEADER LIST` and the
+MCP leader report give it as `landing_angle` when present. Geometry blob version 4 appends
+one double to the version-3 leader payload and is written only when this
+direction is present; old plain and smart leaders retain their existing
+versions and byte layouts. Tests pin the new bytes and reject a truncated
+angle (`docs/model.md`, "The kinds appended since").
+
 ## Smart leaders
 
 Built on 2026-09-25 at the owner's request for "more functionality for
@@ -1330,4 +1342,3 @@ it skipped dimensions, and so does the archive exporter.
   The project-wide limit, as for sheets (`docs/plotting.md`). The Leaders
   manager says so in its problem line, naming the field, rather than send a
   line that sets something else.
-

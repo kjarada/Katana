@@ -102,6 +102,7 @@ inline constexpr std::string_view kMetaName = "12d.name";
 // the order the string had them.
 inline constexpr std::string_view kMetaVertex = "12d.vertex";
 inline constexpr std::string_view kMetaColour = "12d.colour";
+inline constexpr std::string_view kMetaColourRgb = "12d.colour_rgb";
 inline constexpr std::string_view kMetaChainage = "12d.chainage";
 inline constexpr std::string_view kMetaBreakline = "12d.breakline";
 inline constexpr std::string_view kMetaElement = "12d.element";
@@ -133,6 +134,7 @@ inline constexpr std::string_view kMetaSymbolPrefix = "12d.symbol.";
 // paper millimetres, which has no model-unit meaning without a plot scale.
 // Kept so that a text imported and exported unchanged is the text it was.
 inline constexpr std::string_view kMetaTextPrefix = "12d.text.";
+inline constexpr std::string_view kMetaLeaderPrefix = "12d.leader.";
 inline constexpr std::string_view kMetaStringStyle = "12d.string_style";
 
 struct ImportOptions {
@@ -153,6 +155,8 @@ struct ImportOptions {
     bool attributesAsProperties = true;
     // Written into every entity's metadata as `source`.
     std::string sourceName;
+    // The active customisation's palette; an empty table still resolves standard names.
+    katana::entity::ColourTable colours;
 };
 
 struct ImportedSurface {

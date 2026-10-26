@@ -948,6 +948,16 @@ void MainWindow::buildActions()
     // What the headless --dialog step opens it by (main.cpp, openDialog).
     zoomToAction->setData(QStringLiteral("zoomToDialog"));
     connect(zoomToAction, &QAction::triggered, this, [this] { showZoomTo(); });
+    QAction* paperScaleAction = makeAction(
+        Icon::ViewPlan, "Paper Style Sc&ale...",
+        "Size paper-based linestyles and symbols in the active plan view without zooming "
+        "(VIEWS SCALE)", {}, "viewPaperScale");
+    paperScaleAction->setData(QStringLiteral("viewScaleDialog"));
+    connect(paperScaleAction, &QAction::triggered, this, [this] {
+        if (views_->showScaleDialog(views_->viewSet().activeId()) == nullptr) {
+            logMessage("Paper Style Scale needs an open plan view. VIEWS lists the views.", true);
+        }
+    });
     gridAction_ = makeAction(Icon::Grid, "&Grid", "Show or hide the grid", QKeySequence(Qt::Key_F7),
                              "viewGrid");
     gridAction_->setCheckable(true);
@@ -963,6 +973,7 @@ void MainWindow::buildActions()
     viewMenu_->addSection("Display");
     viewMenu_->addAction(extentsAction);
     viewMenu_->addActions({zoomInAction, zoomOutAction, zoomSelectionAction, zoomToAction});
+    viewMenu_->addAction(paperScaleAction);
     viewMenu_->addActions({gridAction_, snapAction_});
     // Plan-view lines as a cosmetic pixel instead of the 1.5 px hairline:
     // measured 5-8x cheaper to stroke (docs/plan_view.md), so on by default,
@@ -1034,6 +1045,7 @@ void MainWindow::buildActions()
 
     QToolBar* viewBar = makeToolBar("View", Qt::TopToolBarArea);
     viewBar->addAction(extentsAction);
+    viewBar->addAction(paperScaleAction);
     viewBar->addSeparator();
     viewBar->addActions({gridAction_, snapAction_});
 
@@ -5355,6 +5367,9 @@ void MainWindow::refreshViewMenu()
         action->setChecked(action->data().toInt() == static_cast<int>(views_->activeViewKind()));
     }
     const cad::ViewState* active = views_->viewSet().find(views_->viewSet().activeId());
+    if (QAction* paperScale = findChild<QAction*>("viewPaperScale")) {
+        paperScale->setEnabled(active != nullptr && active->kind == cad::ViewKind::Plan);
+    }
     if (linkAction_ != nullptr) {
         // The active view's link, as the zoom items below follow its kind.
         const bool linkable = active != nullptr && cad::linkable(active->kind);
