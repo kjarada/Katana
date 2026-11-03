@@ -47,6 +47,7 @@
 // onChanged. It never touches the Document; reload is given the model to read
 // the layers from.
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <utility>
@@ -133,6 +134,16 @@ class ScopeFilterWidget final : public QWidget {
     // and for the fallback view, which is no view a line can name.
     [[nodiscard]] katana::core::Result<katana::cad::ScopeWords> words() const;
     [[nodiscard]] katana::core::Result<QString> verbWords() const;
+
+    // Puts beside each type box how many of that kind `counts` holds -
+    // "Leader (774)", "Arc (0)" for a kind it lacks - so a person sees what
+    // the scope holds before ticking one. A dialog that knows what its scope
+    // takes gives them, counted by cad::countByType as SELECT's types= is.
+    // The boxes keep their object names and what they filter.
+    void showTypeCounts(
+        const std::vector<std::pair<katana::entity::EntityType, std::size_t>>& counts);
+    // Takes the numbers off again: the plain kind names.
+    void hideTypeCounts();
 
   private:
     [[nodiscard]] std::vector<ScopeFilterView> openViews() const;

@@ -252,6 +252,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `STYLE NEW <name> [field value]` | a style made with one field set as `STYLE SET` would set it, one undo step - the Hatch Patterns tab's New Style Using This (`STYLE NEW name HATCH pattern`); a second word that is no field is still refused as a name that wanted quotes, and so is a word after a one-word field's value (`colour`, `weight`, `hatch`, `symbolsize`, in `SET` too), which was once dropped without a word |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 | `MODIFY [SELECTION\|DRAWING\|VIEW [id] [EXTENTS]\|AREA x0,y0,x1,y1\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter ("Scope and filter"), the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
+| `SELECT SELECTION\|DRAWING\|VIEW [id] [EXTENTS]\|AREA x0,y0,x1,y1\|LAYERS a,b [ONLY] [WHERE k=v ...]`, `SELECT WHERE k=v ...` | selects what a scope and filter take - `SELECT DRAWING WHERE TYPE=leader` - and answers the scope's record with `selected=`, `unselectable=` (when any were left out) and `types=` (what was matched, by kind: `types=point:3,leader:2`); Global Modify's Select Matches runs it ("Select by kind", below) |
 
 The annotation verbs (2026-09-25; `docs/annotation.md`, "The verbs") are
 `ANNOSCALE`, `TEXTSTYLE` (`TS`), `TEXT` and `MTEXT` with `style=`, `paper=`,
@@ -1171,8 +1172,9 @@ the leader verbs (since 2026-10-15: `LEADER LIST`, `VALUES`, `SET`, `FREEZE`,
 and not entities (`cad::road::matchRoadObjects`, built from the pieces
 `matchEntities` shares - `docs/road_objects.md`, "Scope and filter"); the
 standing rule is that every verb that reads or changes drawing data
-is to take them too, and the others - `ERASE`, `CHLAYER`, `SELECT` and the
-rest - still act on the selection or their own arguments until they do.
+is to take them too, and the others - `ERASE`, `CHLAYER` and the rest -
+still act on the selection or their own arguments until they do. `SELECT`
+took them on 2026-11-03 ("Select by kind", below).
 
 ```
 SELECTION | DRAWING | VIEW [<view id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b[,c] [ONLY]
@@ -1292,6 +1294,42 @@ The window's side is `ScopeFilterWidget`
 to" and "Only those that match" as one widget every dialog shares, whose
 `verbWords()` are these words (`docs/desktop.md`, "Global Modify"), and the
 window answering `VIEW` through `scopeViewOf`.
+
+### Select by kind: `SELECT` takes the scope and filter
+
+The owner asked on 2026-11-03 to "select elements by their type such as
+selecting leaders" from Global Modify. The matcher could always do it - the
+dialog had a box for every kind - but no line could, and Select Matches did
+the work in the widget. `SELECT` now reads the shared words, so the window,
+`katana_cli` and `katana_mcp` select by kind the same way:
+
+```
+SELECT DRAWING WHERE TYPE=leader
+scope=drawing where="TYPE=leader" matched=774 selected=774 types=leader:774
+```
+
+- **What a click could take.** As every other `SELECT` form, it selects only
+  what `isSelectable` allows: an entity that is hidden, or on a hidden or
+  locked layer, is matched and counted but not selected, and the reply adds
+  `unselectable=N`. Selecting it would let the next verb change what the
+  person cannot see or has locked; Global Modify's own Apply still reaches
+  them, because its plan counts locked entities and says so.
+- **`types=`** is what was matched, by kind, in the kind byte's order
+  (`cad::countByType`, `cad::typeTally` in `scope_verbs.hpp`) - the same
+  count the Global Modify dialog shows beside each type box, so an agent
+  reads what a person sees. Empty, it is left out.
+- **The old forms keep their meaning.** `ALL` and `LAYER` are scope words
+  too (`DRAWING`, `LAYERS`), so `SELECT ALL` alone and `SELECT LAYER name`
+  stay `SELECT`'s own, with their `N selected` reply: `LAYER name` is that one
+  layer, where the scope word `LAYERS` takes the layers beneath it, and a
+  script's `SELECT LAYER` must not come to take more. `ZOOM ALL` alone keeps
+  Zoom All for the same reason. With more words after it, `ALL` is the scope.
+- **A scope that takes nothing is an answer**, not a refusal, and leaves
+  nothing selected. `WHERE` alone filters the selection, as for every verb.
+
+Tested in `tests/cad/test_scope_verbs.cpp` (`SelectTakes...`,
+`SelectCounts...`, `TheTypeTally...`), the `cli.select_takes_a_kind_...` test
+and `McpServer.AnAgentSelectsTheLeadersByKindAndRecoloursOnlyThem`.
 
 ## The window's views: VIEWS and ZOOM
 

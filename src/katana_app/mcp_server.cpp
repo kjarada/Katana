@@ -73,7 +73,8 @@ const char* const kInstructions =
     "directory or draw into it. Every change is an undoable command, exactly as typed at "
     "Katana's command line. Start with katana_status; katana_help lists every command and "
     "its syntax. Points are x,y (easting,northing), @dx,dy relative or @dist<angle polar; "
-    "angles in degrees. Most edits act on the selection, so SELECT first. Nothing is "
+    "angles in degrees. Most edits act on the selection, so SELECT first - by id, or by "
+    "kind and filter across a scope: SELECT DRAWING WHERE TYPE=leader. Nothing is "
     "written to disk until katana_save_project (or SAVE): open a COPY of a project you "
     "care about, since opening can back up or migrate it in place.";
 

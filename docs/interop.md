@@ -2065,6 +2065,16 @@ are read as fields and not interpreted; such an alignment arrives through its
 solved geometry, which is what the manual says a reader should use. A 12da
 declares no coordinate system, so nothing is reprojected.
 
+Unverified, found on 2026-11-03 (`docs/plan_view.md`, "Why an imported
+archive's symbols do not change with it"): whether a symbol block's `size`
+is a width, as Katana reads it, or a factor on the definition's own size. No
+document available here says which. The two readings differ by the
+definition's width: the NSW library draws a manhole cover 2 m across and a
+fire hydrant 4 m across (factor 10 applied), so the archive's 0.3 makes
+both 0.3 m wide as a width, and 0.6 m and 1.2 m as a factor. Settle it
+against a plot of a known archive from the program that wrote it before
+changing anything; until then the width reading stands.
+
 ## Reading a large 12da archive
 
 A 62.8 MB archive of 100 000 elements took two seconds to read and now takes

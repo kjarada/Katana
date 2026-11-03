@@ -82,6 +82,33 @@ With no `CMAKE_BUILD_TYPE` the root `CMakeLists.txt` chooses RelWithDebInfo.
 Judge a build by its exit code, never by filtering its output ("Working
 rules" in `docs/architecture.md`).
 
+### A build someone can watch: `tools/build_visible.sh`
+
+On Windows, an agent's build and test runs go through `tools/build_visible.sh`
+(the owner's instruction of 2026-11-03, to see every build "including the test
+phase"). It opens a console window of its own, runs the `release` preset's
+configure, build and `ctest` there, and returns at once; each line goes to the
+window and, through `tee`, to `build/release/visible_build.log`. When the run
+ends it writes `build/release/visible_build.status` (`exit=<code>`), which is
+what an agent waits for and judges the run by, and the window stays open until
+it is closed.
+
+```sh
+bash tools/build_visible.sh                    # configure, build, the whole suite
+bash tools/build_visible.sh build katana_cli   # configure, then only those targets
+bash tools/build_visible.sh test -R ViewScale  # the suite only, ctest's arguments after it
+```
+
+Why a window rather than the agent's own shell: that shell moves a command
+still running after ten minutes to the background, and the IDE does not show
+the owner a command's output, so the long runs - a full build, the whole
+suite - were the ones nobody saw. A log file alone was rejected for the same
+reason: the owner would have to know to open it. The script refuses a second
+run in the same build directory while one is going (two ninjas in one
+directory corrupt `.ninja_deps`), and takes `KATANA_BUILD_JOBS` to cap the
+compile when several worktrees build at once. `.gitattributes` keeps every
+`*.sh` file LF, since Git Bash reads a carriage return as part of each line.
+
 ## Linux
 
 Katana builds, and its whole suite passes, on Linux x86-64. What makes that
@@ -529,13 +556,13 @@ The reference folder is that of `KATANA_REFERENCE_CUSTOMISATION_DIR` (the root
 one value): two style libraries and two survey code files in the legacy
 formats, with their colour table in a `support` folder beside them. It is
 third-party material under its author's own licence: on the owner's machine
-and in no clone, and nothing committed needs it. Two kinds of test read it:
-the legacy readers' and writers' own reference tests, which skip where the
-folder is absent or holds fewer than four files, and
-`TheReferenceCustomisationConvertsToTheFiguresOfItsCensus`, which skips where
-the folder holds no file in the legacy formats and FAILS where it holds some
-that are not the four - a file missing, or one too many, is a mistake to be
-told of. Point the variable elsewhere to convert a customisation kept
+and in no clone, and nothing committed needs it. Only the legacy readers' and
+writers' own reference tests read it, and they skip where the folder is
+absent or holds fewer than four files. The test that converted the folder to
+its census's figures was removed on 2026-11-03, by the owner's decision: the
+NSW built-in is the committed JSON file, and the legacy files are no longer
+needed (the owner had stripped their notices, which the conversion requires,
+so it failed). Point the variable elsewhere to convert a customisation kept
 elsewhere:
 
 ```sh

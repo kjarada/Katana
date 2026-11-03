@@ -2813,9 +2813,12 @@ void MainWindow::showPlanContextMenu(const QPoint& globalPos)
         };
     }
     // popup, not exec: nothing waits on it. It goes when it hides, by
-    // deleteLater: a menu hides BEFORE it triggers the item chosen, and the
-    // deferred delete waits for the item to finish - even for a colour
-    // dialog's own event loop, which does not run it.
+    // deleteLater: a menu hides BEFORE it triggers the item chosen. The
+    // delete does NOT always wait for the item to finish: since Qt 6.7 a
+    // deleteLater posted deep in an event's handling is run by a nested
+    // event loop, such as the colour dialog's below, so the menu can be gone
+    // while its Choose item is still running. Each item therefore holds its
+    // own copies of what it calls (plan_context_menu.cpp).
     auto* menu = new PlanContextMenu(std::move(context), this);
     connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
     menu->popup(globalPos);

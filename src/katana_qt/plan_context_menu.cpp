@@ -144,16 +144,20 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
     const std::string hex = sharedBy(document, [](const katana::entity::Entity& e) {
         return e.color ? e.color->toHex() : std::string();
     });
-    connect(choose, &QAction::triggered, this, [this, hex] {
-        if (!context_.chooseColour) {
-            return;
-        }
-        const QColor initial = hex.empty() ? QColor(Qt::white) : QColor(qs(hex));
-        if (const std::optional<QColor> colour = context_.chooseColour(initial)) {
-            (void)context_.run(QStringLiteral("COLOR ") +
-                               colour->name(QColor::HexRgb).toUpper());
-        }
-    });
+    // Copies, not `this`: the window's chooser is a modal colour dialog with
+    // an event loop of its own, and Qt 6.7 and later run the menu's pending
+    // deleteLater inside that loop. Reaching context_ after it called a
+    // destroyed std::function (the crash recolouring 774 leaders, 2026-11-03).
+    connect(choose, &QAction::triggered, this,
+            [chooseColour = context_.chooseColour, run = context_.run, hex] {
+                if (!chooseColour) {
+                    return;
+                }
+                const QColor initial = hex.empty() ? QColor(Qt::white) : QColor(qs(hex));
+                if (const std::optional<QColor> colour = chooseColour(initial); colour && run) {
+                    (void)run(QStringLiteral("COLOR ") + colour->name(QColor::HexRgb).toUpper());
+                }
+            });
     addExisting(*this, "editAttributes");
     addSeparator();
 
@@ -297,8 +301,10 @@ QAction* PlanContextMenu::addTool(const QString& text, const QString& objectName
                                     ? QStringLiteral("vertex")
                                     : QStringLiteral("segment")));
     const katana::cad::Grip grip = *context_.grip;
+    // A copy, as every item holds: the menu may be gone when it runs (the
+    // colour item, above).
     connect(item, &QAction::triggered, this,
-            [this, grip, toolId] { context_.startToolOn(toolId, grip); });
+            [start = context_.startToolOn, grip, toolId] { start(toolId, grip); });
     return item;
 }
 
@@ -327,9 +333,11 @@ QAction* PlanContextMenu::addLine(QMenu& menu, const QString& text, const QStrin
     const QString line = *written;
     // The line itself in the status bar, so a person learns the verb.
     item->setStatusTip(line);
-    connect(item, &QAction::triggered, this, [this, line] {
-        if (context_.run) {
-            (void)context_.run(line); // what it said, refusals too, is in the log
+    // The runner copied, as the colour item's is: a line whose verb opens a
+    // modal dialog would otherwise outlive the menu it reads the runner from.
+    connect(item, &QAction::triggered, this, [run = context_.run, line] {
+        if (run) {
+            (void)run(line); // what it said, refusals too, is in the log
         }
     });
     return item;

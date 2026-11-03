@@ -330,6 +330,24 @@ shares is ticked. A name is written by `namedLine`, through `commandWord`
 it is empty or holds a blank (`CHLAYER 0`, `CHLAYER "Site Boundary"`), and a
 name holding a double quote or a line break is offered disabled.
 
+**The menu may be gone before its item finishes.** The window deletes the
+menu as it hides (`deleteLater`), and a menu hides before it triggers the
+item chosen. Colour > Choose then opens a modal colour dialog, whose event
+loop - since Qt 6.7, which tracks a deferred delete's event scope as well as
+its loop level - runs that delete while the item is still waiting for the
+colour. The item then reached its runner through the destroyed menu: the
+crash of 2026-11-03, recolouring 774 selected leaders (the dump showed a
+call to `0x200000003` from this item). It was never about leaders; any
+selection crashed the same way. So every item holds its own copies of what it
+calls - the runner, the colour chooser, the tool starter - and never reads the
+menu after it is triggered.
+`PlanContextMenu.ChoosingAColourRunsColorEvenWhenTheMenuIsDestroyedWhileItAsks`
+destroys the menu inside the chooser, as the colour dialog's loop does, with
+a runner that says when it is called through a destroyed copy. Rejected:
+keeping the menu alive until the item returns (a `QPointer` check, or
+deleting it from the item): every item would have to remember to do it,
+where a copy cannot be forgotten.
+
 **On a grip.** Opened on a selected polyline's grip (`ViewportWidget::gripAt`,
 the grip within the pick aperture of the right-click), the menu begins with
 that vertex's or segment's own items, under a section naming it ("Vertex 2
@@ -4310,12 +4328,39 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
   protects" states for the attribute manager).
 - **The summary** under the form is the plan's own, refreshed as the form is
   edited (coalesced to one preview per 150 ms) and as the drawing or the
-  selection changes. Apply is one undo step and logs the summary; Select
-  Matches selects what the scope and filter take and frames it in the active
-  plan view. Text that does not read - a colour that is not `#RRGGBB` or
-  ByLayer - is said in the summary, in red, and nothing runs.
+  selection changes. Apply is one undo step and logs the summary. Text that
+  does not read - a colour that is not `#RRGGBB` or ByLayer - is said in the
+  summary, in red, and nothing runs.
+- **Selecting by kind** (the owner's "select elements by their type such as
+  selecting leaders", 2026-11-03):
+  - Each type box says how many of its kind the scope and the REST of the
+    filter take - "Leader (774)", "Arc (0)" - refreshed with the preview:
+    what ticking that box would select. A ticked box does not count itself
+    out. The numbers are `cad::countByType`, which `SELECT`'s `types=` uses
+    too; the shared widget shows them only when a dialog gives them
+    (`ScopeFilterWidget::showTypeCounts`), so the other dialogs keep plain
+    names.
+  - Select Matches runs `SELECT <the scope words>` through the window's
+    executor - `SELECT DRAWING WHERE TYPE=leader` - so the line is in the log
+    and typeable, and selects by `SELECT`'s rule (`docs/cad.md`, "Select by
+    kind"): what is hidden or locked is counted and left out, and the summary
+    says how many ("1 entity selected. 2 hidden or on a locked layer left
+    out."). It then frames the selection in the active plan view. It used to
+    call the matcher itself, selecting locked entities no click could, with
+    no line in the log.
+  - Opened with nothing selected, "Apply to" is the whole drawing: with the
+    selection as the scope, ticking Leader found nothing, which is how the
+    type boxes went unnoticed. It is AutoCAD's Quick Select rule, and it is
+    applied only as the dialog opens, never to a scope chosen while it is
+    open.
 
 Tested in `tests/qt_widgets/customisation/test_global_modify_dialog.cpp`.
+
+Not done: Apply still runs the plan itself (`document().execute`) rather
+than a `MODIFY` line through the executor, as a dialog is to ("One
+executor: the command runner", above). Every field has a `MODIFY ... SET` key but one: `SET PROP=key:value`
+infers the value's type from its text, where the dialog lets it be chosen
+(text "12" or the integer 12), so that needs a word of its own first.
 
 ## Terrain > Alignment Manager
 

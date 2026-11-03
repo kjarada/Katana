@@ -75,17 +75,18 @@ set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs,
 # src/katana_cad/CMakeLists.txt.) Only the converter of those formats
 # (src/katana_archive12d/legacy; docs/customisation.md, "Converting a
 # customisation from the legacy formats") is run on it, and only the tests of
-# the legacy readers and writers and of what the converter makes of it read
-# it (tests/archive12d): they skip when the folder is absent or holds no file
-# in those formats, and the conversion test FAILS when it holds some and they
-# are not the four. The program reads none of it. Defined here, above the
-# modules and the tests, because both the converter's module and its test
-# suite are to see one value.
+# the legacy readers and writers read it (tests/archive12d): they skip when the
+# folder is absent or holds no file in those formats. The test that converted
+# it to the census's figures was removed on 2026-11-03, the owner's decision:
+# the built-in is the committed JSON file, and the legacy files are no longer
+# needed. The program reads none of it. Defined here, above the modules and
+# the tests, because both the converter's module and its test suite are to see
+# one value.
 # The owner's folder is named for the program its files came from; the name is
 # assembled so that no tracked file spells it (CLAUDE.md, section 9).
 string(CONCAT _katana_reference_folder "1" "2d Refrence Files")
 set(KATANA_REFERENCE_CUSTOMISATION_DIR "${PROJECT_SOURCE_DIR}/docs/${_katana_reference_folder}" CACHE PATH
-    "Folder of the reference customisation in the legacy formats; the converter's reference test reads it and skips when it is absent or holds no such file")
+    "Folder of the reference customisation in the legacy formats; the legacy readers' reference tests read it and skip when it is absent or holds no such file")
 
 # ---------------------------------------------------------------------------
 # Where things are built.

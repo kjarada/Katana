@@ -21,6 +21,7 @@
 
 #include "customisation/customisation_context.hpp"
 #include "customisation/global_modify_dialog.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -42,10 +43,14 @@ namespace {
 constexpr Color kGreen{0, 128, 0, 255};
 
 // Two points on "survey" (p1 coded TREE, p2 coded POLE), a line on "roads".
+// The runner is the window's in miniature: each line kept, then run by an
+// interpreter on the same Document.
 struct DialogFixture {
     Document document;
+    katana::cad::CommandInterpreter interpreter{document};
     CustomisationContext context;
     std::vector<std::pair<QString, bool>> logged;
+    std::vector<QString> lines;
     EntityId p1 = 0, p2 = 0, road = 0;
 
     DialogFixture()
@@ -65,6 +70,13 @@ struct DialogFixture {
         context.document = &document;
         context.log = [this](const QString& text, bool isError) {
             logged.emplace_back(text, isError);
+        };
+        context.run = [this](const QString& line) {
+            lines.push_back(line);
+            const auto reply = interpreter.run(line.toStdString());
+            return reply ? katana::qt::VerbOutcome{true, QString::fromStdString(*reply), {}}
+                         : katana::qt::VerbOutcome{
+                               false, {}, QString::fromStdString(reply.error().describe())};
         };
     }
 
@@ -181,15 +193,98 @@ TEST(GlobalModifyDialog, AViewScopeTakesTheViewsOwnHiddenLayersAndItsAreaOnScree
     EXPECT_FALSE(dialog.scope().ok());
 }
 
-TEST(GlobalModifyDialog, SelectMatchesSelectsWhatTheScopeAndFilterTake)
+TEST(GlobalModifyDialog, SelectMatchesRunsTheSelectLineTheScopeAndFilterSay)
 {
     DialogFixture fixture;
     GlobalModifyDialog dialog(fixture.context);
     find<QRadioButton>(dialog, "globalModifyScopeDrawing")->setChecked(true);
     find<QCheckBox>(dialog, "globalModifyTypePoint")->setChecked(true);
     EXPECT_TRUE(dialog.selectMatches());
+    EXPECT_EQ(fixture.lines, (std::vector<QString>{"SELECT DRAWING WHERE TYPE=point"}));
     EXPECT_EQ(fixture.document.selection().ids(), (std::vector<EntityId>{fixture.p1, fixture.p2}));
     EXPECT_EQ(dialog.summaryText(), "2 entities selected.");
+
+    // "Selected entities" with a type narrows the selection to that kind.
+    fixture.document.selection().set({fixture.p2, fixture.road});
+    find<QRadioButton>(dialog, "globalModifyScopeSelection")->setChecked(true);
+    EXPECT_TRUE(dialog.selectMatches());
+    EXPECT_EQ(fixture.lines.back(), "SELECT SELECTION WHERE TYPE=point");
+    EXPECT_EQ(fixture.document.selection().ids(), (std::vector<EntityId>{fixture.p2}));
+}
+
+// SELECT's rule: what is on a locked layer is matched but not selected, and
+// the summary says how many were left out.
+TEST(GlobalModifyDialog, SelectMatchesSaysWhatALockedLayerLeftOut)
+{
+    DialogFixture fixture;
+    Layer survey = *fixture.document.model().layers.find("survey");
+    survey.locked = true;
+    ASSERT_TRUE(fixture.document.execute(cmd::updateLayer(survey)).ok());
+    GlobalModifyDialog dialog(fixture.context);
+    find<QRadioButton>(dialog, "globalModifyScopeDrawing")->setChecked(true);
+    EXPECT_TRUE(dialog.selectMatches());
+    EXPECT_EQ(fixture.document.selection().ids(), (std::vector<EntityId>{fixture.road}));
+    EXPECT_EQ(dialog.summaryText(), "1 entity selected. 2 hidden or on a locked layer left out.");
+
+    // Only the locked points: nothing selected, and selectMatches says so.
+    find<QCheckBox>(dialog, "globalModifyTypePoint")->setChecked(true);
+    EXPECT_FALSE(dialog.selectMatches());
+    EXPECT_TRUE(fixture.document.selection().ids().empty());
+}
+
+TEST(GlobalModifyDialog, WithNoRunnerSelectMatchesSaysTheLineAndSelectsNothing)
+{
+    DialogFixture fixture;
+    fixture.context.run = {};
+    GlobalModifyDialog dialog(fixture.context);
+    find<QRadioButton>(dialog, "globalModifyScopeDrawing")->setChecked(true);
+    find<QCheckBox>(dialog, "globalModifyTypeLine")->setChecked(true);
+    EXPECT_FALSE(dialog.selectMatches());
+    EXPECT_TRUE(dialog.summaryText().contains("SELECT DRAWING WHERE TYPE=line"))
+        << dialog.summaryText().toStdString();
+    EXPECT_TRUE(fixture.document.selection().ids().empty());
+}
+
+// Each type box says how many of its kind the scope and the rest of the
+// filter take - what ticking it would select - counted off the fixture's
+// two points and one line.
+TEST(GlobalModifyDialog, EachTypeBoxSaysHowManyOfItsKindTheScopeTakes)
+{
+    DialogFixture fixture;
+    GlobalModifyDialog dialog(fixture.context);
+    find<QRadioButton>(dialog, "globalModifyScopeDrawing")->setChecked(true);
+    ASSERT_TRUE(dialog.preview());
+    const auto label = [&dialog](const char* name) { return find<QCheckBox>(dialog, name)->text(); };
+    EXPECT_EQ(label("globalModifyTypePoint"), "Point (2)");
+    EXPECT_EQ(label("globalModifyTypeLine"), "Line (1)");
+    EXPECT_EQ(label("globalModifyTypeLeader"), "Leader (0)");
+
+    // A ticked type does not count itself out: the boxes count the rest.
+    find<QCheckBox>(dialog, "globalModifyTypePoint")->setChecked(true);
+    find<QLineEdit>(dialog, "globalModifyFilterLayer")->setText("roads");
+    ASSERT_TRUE(dialog.preview());
+    EXPECT_EQ(label("globalModifyTypePoint"), "Point (0)");
+    EXPECT_EQ(label("globalModifyTypeLine"), "Line (1)");
+
+    // A filter that does not read counts nothing: the plain names.
+    find<QLineEdit>(dialog, "globalModifyFilterColour")->setText("greenish");
+    EXPECT_FALSE(dialog.preview());
+    EXPECT_EQ(label("globalModifyTypeLine"), "Line");
+}
+
+TEST(GlobalModifyDialog, OpenedWithNothingSelectedItAppliesToTheWholeDrawing)
+{
+    DialogFixture fixture;
+    {
+        GlobalModifyDialog dialog(fixture.context);
+        dialog.show();
+        EXPECT_TRUE(find<QRadioButton>(dialog, "globalModifyScopeDrawing")->isChecked());
+    }
+    // With a selection it opens on the selection, as it always did.
+    fixture.document.selection().set({fixture.p1});
+    GlobalModifyDialog dialog(fixture.context);
+    dialog.show();
+    EXPECT_TRUE(find<QRadioButton>(dialog, "globalModifyScopeSelection")->isChecked());
 }
 
 TEST(GlobalModifyDialog, TextThatDoesNotReadIsSaidInTheSummaryAndChangesNothing)

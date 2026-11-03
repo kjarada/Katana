@@ -3153,3 +3153,27 @@ TEST_F(McpServer, TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItToo
     EXPECT_TRUE(call("katana_road_objects", Json{{"layers", {"road"}}})["isError"].get<bool>());
 }
 // ---- end road objects ----
+
+// Selecting by kind is a line, so an agent selects a drawing's leaders and
+// recolours them with the lines a person types (the owner's "select elements
+// by their type such as selecting leaders", 2026-11-03): two leaders and a
+// line, of which SELECT takes the two leaders and COLOR changes only them.
+TEST_F(McpServer, AnAgentSelectsTheLeadersByKindAndRecoloursOnlyThem)
+{
+    initialize();
+    const Json result = call(
+        "katana_run_commands",
+        Json{{"commands", {"LEADER 0,0 5,5 text=A", "LEADER 0,10 5,15 text=B", "LINE 0,0 10,0",
+                           "SELECT DRAWING WHERE TYPE=leader", "COLOR #00FF00", "LIST"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 6U);
+    const std::string selected = lines[3]["output"].get<std::string>();
+    EXPECT_NE(selected.find("scope=drawing where=\"TYPE=leader\" matched=2 selected=2 "
+                            "types=leader:2"),
+              std::string::npos)
+        << selected;
+    EXPECT_NE(lines[4]["output"].get<std::string>().find("2 recoloured"), std::string::npos)
+        << lines[4];
+    EXPECT_EQ(call("katana_status")["structuredContent"]["selected"], 2);
+}

@@ -1,14 +1,17 @@
 #include "katana/cad/scope_verbs.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/view_set.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/model.hpp"
 
 namespace katana::cad {
 
@@ -563,6 +566,37 @@ std::string scopeRecord(const ResolvedScope& resolved, std::size_t matched)
         record += " where=" + recordValue(joined(*conditions, " "));
     }
     return record + " matched=" + std::to_string(matched);
+}
+
+std::vector<std::pair<EntityType, std::size_t>>
+countByType(const katana::entity::Model& model, const std::vector<katana::entity::EntityId>& ids)
+{
+    // Indexed by the kind byte, so the order is the variant's whatever order
+    // the ids come in, and a kind appended to the variant is counted too.
+    std::array<std::size_t, std::variant_size_v<katana::entity::Geometry>> tally{};
+    for (const katana::entity::EntityId id : ids) {
+        if (const katana::entity::Entity* entity = model.entities.find(id)) {
+            ++tally[entity->geometry.index()];
+        }
+    }
+    std::vector<std::pair<EntityType, std::size_t>> counts;
+    for (std::size_t kind = 0; kind < tally.size(); ++kind) {
+        if (tally[kind] > 0) {
+            counts.emplace_back(static_cast<EntityType>(kind), tally[kind]);
+        }
+    }
+    return counts;
+}
+
+std::string typeTally(const katana::entity::Model& model,
+                      const std::vector<katana::entity::EntityId>& ids)
+{
+    std::vector<std::string> parts;
+    for (const auto& [type, count] : countByType(model, ids)) {
+        parts.push_back(katana::core::lowered(katana::entity::toString(type)) + ":" +
+                        std::to_string(count));
+    }
+    return joined(parts, ",");
 }
 
 std::string recordValue(std::string_view value)

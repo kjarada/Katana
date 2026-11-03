@@ -76,6 +76,19 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.leader_point_edits_refuse_an_out_of_range_vertex PROPERTIES
         PASS_REGULAR_EXPRESSION "error: InvalidArgument: leader vertex index is out of range"
         FAIL_REGULAR_EXPRESSION "point created")
+    # SELECT by kind across a scope (docs/cad.md, "Scope and filter"): of two
+    # leaders and a line, SELECT DRAWING WHERE TYPE=leader takes the two
+    # leaders, so COLOR recolours those two and not the line.
+    add_test(NAME cli.select_takes_a_kind_across_the_drawing_and_colour_changes_only_those
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "LEADER 0,0 5,5 text=A" -c "LEADER 0,10 5,15 text=B" -c "LINE 0,0 10,0"
+            -c "SELECT DRAWING WHERE TYPE=leader" -c "COLOR #00FF00")
+    set_tests_properties(cli.select_takes_a_kind_across_the_drawing_and_colour_changes_only_those
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "scope=drawing where=\"TYPE=leader\" matched=2 selected=2 types=leader:2[\r\n]+2 recoloured"
+        FAIL_REGULAR_EXPRESSION "error")
 
     # End-to-end: draw, save, reopen in a second process, and query.
     set(_project "${CMAKE_CURRENT_BINARY_DIR}/cli-smoke.katana")

@@ -37,9 +37,8 @@ target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_CUSTOMISATION_TEST_DATA="${PROJECT_SOURCE_DIR}/tests/data/customisation")
 # The reference customisation in the legacy formats (the top-level
 # CMakeLists.txt says what it is and why it is in no clone): the readers' and
-# writers' reference tests and the conversion test read it and SKIP when the
-# folder is absent or holds no such file; the conversion test fails when it
-# holds some that are not the four.
+# writers' reference tests read it and SKIP when the folder is absent or holds
+# no such file.
 target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_REFERENCE_CUSTOMISATION_FILES="${KATANA_REFERENCE_CUSTOMISATION_DIR}")
 # The program itself: that its command line reaches the functions the suite

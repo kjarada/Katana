@@ -72,10 +72,42 @@ view nor the drawing itself.
   A larger denominator makes the marks larger; wheel zoom still works
   independently.
 
-Only paper-sized library marks change. Ground-sized definitions, built-in
-point marks and symbols with an explicit model-unit size retain their model
-size. Entity coordinates, selection, camera centre and zoom, linked views'
-own style scales, `ANNOSCALE`, text, leaders and dimensions do not change.
+Only paper-sized marks change: library definitions in paper units, and
+(since 2026-11-03) a built-in symbol shape whose style gives it no size,
+which a plot draws `kPointMarkerPaperMillimetres` (1 mm) either side, so a
+fixed scale draws it N/1000 m either side as the plot at 1:N does. Until then
+it kept its 4 screen pixels, the one paper mark the scale left alone
+(`PlanPainter::symbolFallbackHalfWidth`). Ground-sized definitions and
+symbols with an explicit model-unit size keep their model size, and the
+plain point cross of a point with no symbol, the screen's own marker, keeps
+its pixels. Entity coordinates, selection, camera centre and zoom, linked
+views' own style scales, `ANNOSCALE`, text, leaders and dimensions do not
+change.
+
+**Why an imported archive's symbols do not change with it.** The owner found
+on 2026-11-03 that the scale "only works for linestyles". That is the data,
+not the scale. A symbol follows the scale only when its definition is in
+paper units AND its style gives it no size; a style's size is a width in
+metres on the ground (`Style::symbolSize`, `docs/cad.md`, "Point symbols"),
+and it overrides the definition's own units. Counted on 2026-11-03:
+
+| Where the symbols come from | Definitions | Sizes the styles give | Follows the scale |
+|---|---|---|---|
+| Katana Standard, survey codes | 123 of 123 in paper units | none (all 203 codes) | yes |
+| NSW built-in, survey codes | 471 of 471 in ground units (`worldstyle`) | metres | no |
+| The compressed `.12da` archive of 774 leaders the owner tested | whichever library is loaded | 0.3 m on 34 styles, 1 m on 1 | no |
+
+A ground-sized mark is the same size on the ground at every plot scale: the
+plot at 1:500 and at 1:2000 draws it the same number of metres wide, so a
+screen preview of either must too. The linestyles visibly follow the scale
+because they are paper definitions with no size of their own (237 of the NSW
+library's 321, all 98 of Katana Standard's). To make an archive's symbols
+paper-sized, set their styles' symbol size to "own size" (Global Modify,
+Their Styles, Symbol size; or `MODIFY ... SET STYLE.SYMBOLSIZE=0`): a paper
+definition then draws at its own millimetres, and a name no library defines
+at the built-in shape's 1 mm either side, both following the scale. Scaling
+ground symbols by the denominator was rejected: the screen would show a size
+no plot prints, and the scale it would take as 1:1 has no source.
 Plots and sheet viewports ignore this screen option and keep their own
 paper scale. Reusing camera zoom or changing the document's annotation
 scale was rejected: either would move or resize things the user did not
@@ -259,7 +291,7 @@ place, the painter:
 | Selection, locked-layer fading | shown | not printed (audit QT-26) |
 | Ghosts of the selection | drawn when the view asks (below) | never |
 | Plain point cross | 4 px either side | 1 mm either side |
-| Library paper marks | Auto: screen millimetres; Fixed 1:N: N/1000 model metres per millimetre | the plot or sheet viewport's own scale |
+| Library paper marks, and a built-in symbol shape with no size | Auto: screen millimetres (the shape: the plain mark's 4 px); Fixed 1:N: N/1000 model metres per millimetre | the plot or sheet viewport's own scale |
 | Alignment overlay | 2 px line, 1 px ticks 6 px long, 11 px labels | 0.5 mm line, 0.25 mm ticks 1.5 mm long, 2.5 mm labels |
 | Hatch lines | cosmetic hairline | 0.13 mm |
 | Solid hatch | alpha 90, so the drawing under it shows | opaque |

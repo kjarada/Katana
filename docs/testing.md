@@ -230,8 +230,9 @@ committed and never needed by a test. A test that reads the git-ignored
 reference customisation, or the compiled-in one, must pass without it
 (`docs/building.md`, "The built-in customisation and the reference folder").
 
-**The suites that read third-party data** are three: the legacy readers' and
-writers' reference tests and the converter's (`tests/archive12d`), which read
+**The suites that read third-party data** are these: the legacy readers' and
+writers' reference tests (`tests/archive12d`; the converter's was removed on
+2026-11-03, `docs/customisation.md`), which read
 the reference folder `KATANA_REFERENCE_CUSTOMISATION_DIR` names, and
 `BuiltInCensus.*`, the NSW half of `BuiltInRenames.*` and the NSW cases of
 `BuiltInLibrary.*` (`tests/cad/customisation`), which read the NSW customisation

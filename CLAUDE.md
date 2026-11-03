@@ -128,7 +128,9 @@ labelling, coding, export, modify, measure, and drawing from data.
 
 ## 3. Building - MANDATORY, the owner's standing instructions
 
-Build and test like this:
+A build and a test run are these three commands. On Windows they are run by
+`tools/build_visible.sh`, in a console window the owner watches (below,
+"Show the build"); never type them into Claude's shell there.
 
 ```sh
 cmake --preset release                       # configure: build/release
@@ -155,19 +157,47 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 14 --output-
     program, and the hand-off build (section 7).
   - Everything else in this section says how to build when it is time to.
 - **Always `--parallel`.**
-- **Show the build.** Run cmake, ninja and ctest in the foreground, with
-  their output reaching the terminal:
-  - no `> log` redirection and no backgrounding;
-  - no pipe through `grep`, `tail`, `head` or `Select-String` that hides the
-    progress. If a copy is needed, use `tee`.
-  - Before a long build, say in one line what is being built. Afterwards,
-    state the exit code and the test counts.
+- **Show the build, in its own window, every time - the owner's standing
+  instruction (2026-11-03): "show the build process everytime on cmd line so
+  i can see it including the test phase".** Claude's shell moves a command
+  still running after 10 minutes to the background, and the IDE does not show
+  the owner a command's output, so a build run there is one the owner never
+  sees. Every configure, build and ctest run - a one-test `-R` run too - goes
+  through `tools/build_visible.sh`:
+  - Start it from the checkout or worktree root. It opens the window and
+    returns at once:
+    - `bash tools/build_visible.sh` - configure, build everything, the whole
+      suite;
+    - `bash tools/build_visible.sh build [target...]` - configure and build,
+      only the named targets if any;
+    - `bash tools/build_visible.sh test [ctest arguments]` - the suite only,
+      e.g. `test -R PlanContextMenu`.
+  - Then wait with ONE Bash command run with `run_in_background`, which
+    notifies you when the run ends:
+
+    ```sh
+    until [ -f build/release/visible_build.status ]; do sleep 15; done; cat build/release/visible_build.status
+    ```
+
+  - Judge the run by the `exit=` in the status file. Read
+    `build/release/visible_build.log` - every line the window showed - for
+    the failures and the test counts.
+  - Show everything: no `> log` redirection, and no pipe through `grep`,
+    `tail`, `head` or `Select-String` in front of the owner's view. The
+    script's `tee` is the copy.
+  - Before starting, say in one line what is being built. Afterwards, state
+    the exit code and the test counts.
+  - The window stays open after the run until the owner closes it.
+  - Allowed in Claude's shell still: a syntax-only compile of a file (not a
+    build, see above) and reading the log.
+  - On Linux (a cloud session) there is no owner's desktop: run the three
+    commands above in the shell as they are.
 - **Never pipe a build into PowerShell's `Select-Object -First N`.** It stops
   the pipeline and can kill ninja mid-write.
-- **Never run two builds in one build directory at once.** A build that passes
-  the tool's 10-minute limit is moved to the background and KEEPS RUNNING.
-  Wait for its notification before starting another. Two ninjas in one
-  directory corrupt `.ninja_deps`.
+- **Never run two builds in one build directory at once.** Two ninjas in one
+  directory corrupt `.ninja_deps`. `tools/build_visible.sh` refuses a second
+  run while one is going in the same `build/release`; wait for the status
+  file before starting another.
 - **If a running Katana stops the build, kill it and build again.** This is
   the owner's standing instruction (2026-09-30), so do not ask first.
   - The sign is a link that fails with `cannot open output file
@@ -335,8 +365,10 @@ win.
   before configuring if the configure tries to download GoogleTest. Copy the
   reference customisation in only when the work needs it, and never add those
   files to git.
-- **Cap the parallelism** when several agents build at once (`-j 4` each), or
-  build only the targets the part needs.
+- **Cap the parallelism** when several agents build at once (`-j 4` each:
+  `KATANA_BUILD_JOBS=4 bash tools/build_visible.sh ...`), or build only the
+  targets the part needs. Each worktree's run opens its own window, titled
+  with the worktree's folder.
 - **Ask agents for evidence**: what changed, which tests ran, the output.
   Then verify centrally, by building the merged result and running the WHOLE
   suite yourself.
@@ -368,7 +400,10 @@ that is tracked is `resources/customisation/nsw.customisation.json`, the
 converted NSW built-in, committed on the owner's decision of 2026-10-08. The
 converter copies the libraries' notice into its `notice` member; the owner
 removed that text from the committed file by hand (two rows of dashes are all
-that is left of it), so the file is not what the converter writes. Tracked
+that is left of it), so the file is not what the converter writes. On
+2026-11-03 the owner stripped the notices from the reference copies too and
+had the test that converted them removed: the NSW built-in is the committed
+JSON file, and the legacy `.4d` files are no longer needed. Tracked
 tests, docs and fixtures still use invented names only, and quote counts, never
 the names or the notice, so the rule above holds for them. Why the file is tracked, and what that does and does
 not settle: `docs/customisation.md`, "Why the built-in is in the repository".

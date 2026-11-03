@@ -23,8 +23,12 @@
 // The summary under the form is the plan's own (GlobalModifyPlan::summary),
 // refreshed as the form is edited and as the drawing changes, so what Apply
 // will do - and what it will leave alone and why - is read before it is
-// pressed. Apply is ONE undo step. Select Matches selects what the scope and
-// filter take, and shows it in the active plan view.
+// pressed. Apply is ONE undo step. Select Matches runs the SELECT line the
+// scope and filter say (SELECT DRAWING WHERE TYPE=leader) through the window's
+// executor and shows what it selected in the active plan view. Each type box
+// says how many of its kind the scope and the rest of the filter take
+// ("Leader (774)"), and with nothing selected the dialog opens on the whole
+// drawing, so a kind is found by ticking it.
 //
 // The rules of docs/desktop.md, "The rules a dialog or panel follows": no
 // moc; every control has an object name ("globalModify..."); a colour is
@@ -44,6 +48,8 @@
 #include "customisation_context.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/core/error.hpp"
+
+class QShowEvent;
 
 namespace katana::qt {
 
@@ -76,12 +82,18 @@ class GlobalModifyDialog : public QDialog {
 
     // Each shows its outcome in the summary and the log, and returns whether
     // it did what it says: preview whether the request is valid, apply
-    // whether the drawing changed, selectMatches whether anything matched.
+    // whether the drawing changed, selectMatches whether anything was
+    // selected. selectMatches needs the context's runner: with none it says
+    // the line to type and selects nothing.
     bool preview();
     bool apply();
     bool selectMatches();
 
     [[nodiscard]] QString summaryText() const;
+
+  protected:
+    // Opened with nothing selected, the scope is the whole drawing.
+    void showEvent(QShowEvent* event) override;
 
   private:
     struct Impl;

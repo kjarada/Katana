@@ -104,6 +104,14 @@ working directory (a mistyped shell `2>1` makes the first), it once answered
 The tool's description of `local` said it imported "in the drawing's own
 coordinates rather than reprojecting"; it moves the data, and says so.
 
+Selecting by kind is a line too, since 2026-11-03: `SELECT DRAWING WHERE
+TYPE=leader` (any scope and filter of the shared grammar) answers
+`scope=drawing where="TYPE=leader" matched=774 selected=774 types=leader:774`,
+and the edit verbs after it act on what it selected - the server's
+instructions say so, so an agent need not open `HELP` to find it
+(`docs/cad.md`, "Select by kind";
+`McpServer.AnAgentSelectsTheLeadersByKindAndRecoloursOnlyThem`).
+
 Leaders are made with `katana_run_commands` - `LEADER #12 20,20 preset=surface
 surface=ground` says how far point 12 is above the ground, `preset=level` its
 level, `preset=cutfill` the cut or fill, `preset=name` its name, `preset=station

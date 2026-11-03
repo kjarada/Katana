@@ -53,6 +53,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/document.hpp"
@@ -216,6 +217,18 @@ matchScope(const Document& document, const ScopeWords& words, const ScopeViewPro
 // objects (cad::road::matchRoadObjects) - from the resolved scope and how many
 // it took.
 [[nodiscard]] std::string scopeRecord(const ResolvedScope& resolved, std::size_t matched);
+
+// How many of `ids` are of each kind, in the geometry variant's order (the
+// kind byte's), kinds with none left out and an id the model lacks skipped.
+// What the window's type boxes show beside each kind - "Leader (774)" - and
+// SELECT's types= says, so the two cannot count differently.
+[[nodiscard]] std::vector<std::pair<katana::entity::EntityType, std::size_t>>
+countByType(const katana::entity::Model& model,
+            const std::vector<katana::entity::EntityId>& ids);
+// countByType as one record value, each kind as TYPE= spells it:
+// "leader:774,point:12". Empty when it counts nothing.
+[[nodiscard]] std::string typeTally(const katana::entity::Model& model,
+                                    const std::vector<katana::entity::EntityId>& ids);
 
 // A value in a reply record: as it is when it is one plain word, else in
 // double quotes with '"' and '\' escaped and a line break made a blank, so a

@@ -2489,10 +2489,11 @@ libraries carry a notice against copying, so it is in no clone: the folder
 is git-ignored, and the cache variable `KATANA_REFERENCE_CUSTOMISATION_DIR`
 names it (`docs/building.md`). The file made from it is another matter and is
 tracked ("Why the built-in is in the repository", above). Nothing committed
-needs the reference folder itself, and the test that converts it skips where
-the folder is absent or holds no file in the legacy formats - and FAILS where
-it holds some that are not the four, which a skip would hide
-(`AReferenceFolderIsSkippedOnlyWhenItHoldsNoLegacyFileAndRefusedWhenItHoldsTheWrongOnes`).
+needs the reference folder itself. The test that converted it and held the
+result to the census below, and the test of how it chose between skipping and
+failing, were removed on 2026-11-03 by the owner's decision: the NSW built-in
+is the committed JSON file, the legacy files are no longer needed, and the
+owner had stripped the copies' notices, which the conversion requires.
 
 It is converted - by the owner, on the machine that has it - with
 
@@ -2633,12 +2634,11 @@ others - twelve, with the words and the table given - describe the legacy
 files and the conversion rather than the result: the order given, blocks
 read, a file and replaced, strokes read, rules a file, items with no key,
 what carried a word, what was replaced, the inferred encoding, the notice
-lines, the colours. `TheReferenceCustomisationConvertsToTheFiguresOfItsCensus`
-holds the converter and its REPORT to all of them, with the 29 names the
-earlier clean-up gave the definitions that carried the publisher's word,
-every one of which must be defined. No figure in that test is the
-converter's own: converted in the other order, it fails on every figure the
-order moves.
+lines, the colours. A test held the converter and its REPORT to all of
+them, with the 29 names the earlier clean-up gave the definitions that
+carried the publisher's word, until it was removed on 2026-11-03 (above): the
+figures here are the record of that check, and the committed file is what it
+checked.
 
 ### What reading and writing cost
 
@@ -2705,7 +2705,7 @@ to decide against 20 ms at start-up; the benchmark is there to decide it on.
 
 **The words to strip are arguments, and matched as written.** *Rejected:
 finding them* (the commonest first word of the group paths), which is what
-the reference test does to avoid spelling them. A tool that decides by itself
+the reference test did to avoid spelling them. A tool that decides by itself
 what is a publisher's mark would one day take a real first word off every
 path of somebody's library. *Rejected: folding case*, since a definition's
 name is compared with regard to case everywhere else: `acme Kerb` and `ACME

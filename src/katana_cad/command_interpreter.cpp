@@ -1668,11 +1668,59 @@ CommandInterpreter::Reply CommandInterpreter::edit(const std::string& verb, cons
 CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
 {
     if (args.empty()) {
-        return usage("SELECT ALL | NONE | id... | LAYER name | TYPE name");
+        return usage("SELECT ALL | NONE | id... | LAYER name | TYPE name | "
+                     "SELECTION|DRAWING|VIEW [id] [EXTENTS]|AREA x0,y0,x1,y1|LAYERS a,b [ONLY] "
+                     "[WHERE key=value ...] | WHERE key=value ...");
     }
     const auto& model = document_.model();
     const std::string mode = uppered(args[0]);
     std::vector<EntityId> ids;
+
+    // The shared scope and filter (docs/cad.md, "Scope and filter"), so a type,
+    // a style or a property is selected across the drawing, a view or layers
+    // as Global Modify's Select Matches selects it: SELECT DRAWING WHERE
+    // TYPE=leader. ALL alone and LAYER name keep the meaning they had before,
+    // although ALL and LAYER are scope words too (DRAWING, LAYERS): LAYER name
+    // is that one layer, where LAYERS takes the layers beneath it, and a
+    // script's SELECT LAYER must not come to take more.
+    const bool ownForm =
+        (mode == "ALL" && args.size() == 1) || (mode == "LAYER" && args.size() == 2);
+    if (isScopeWord(args[0]) && !ownForm) {
+        std::size_t at = 0;
+        auto words = parseScopeWords(args, at);
+        if (!words) {
+            return words.error();
+        }
+        if (at < args.size()) {
+            return makeError(ErrorCode::ParseFailure,
+                             "SELECT takes nothing after its scope and WHERE conditions",
+                             args[at]);
+        }
+        auto matched = matchScope(document_, *words, scopeViews_);
+        if (!matched) {
+            return matched.error();
+        }
+        // Selected by the rule every other SELECT keeps: what is hidden, or on
+        // a hidden or locked layer, is matched and counted but not selected,
+        // so the next verb never acts on what cannot be seen or is locked.
+        for (const EntityId id : matched->matched) {
+            const Entity* entity = model.entities.find(id);
+            if (entity != nullptr && isSelectable(model, *entity, kNoLayerOverrides)) {
+                ids.push_back(id);
+            }
+        }
+        std::string reply = scopeRecord(*matched) + " selected=" + std::to_string(ids.size());
+        if (const std::size_t left = matched->matched.size() - ids.size(); left > 0) {
+            reply += " unselectable=" + std::to_string(left);
+        }
+        // What was matched, by kind: what the window's type boxes count.
+        if (const std::string tally = typeTally(model, matched->matched); !tally.empty()) {
+            reply += " types=" + tally;
+        }
+        document_.selection().set(std::move(ids));
+        document_.notifySelectionChanged();
+        return reply;
+    }
 
     const auto collect = [&](const SelectionFilter& filter) {
         model.entities.forEach([&](const Entity& entity) {

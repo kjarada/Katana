@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <set>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include <QButtonGroup>
@@ -44,6 +45,13 @@ constexpr std::size_t kTypeCount = std::variant_size_v<katana::entity::Geometry>
 std::string text(const QString& value)
 {
     return value.trimmed().toStdString();
+}
+
+// A type box's label: the kind as TYPE= and the variant name it.
+QString kindName(EntityType type)
+{
+    const std::string_view spelt = katana::entity::toString(type);
+    return QString::fromUtf8(spelt.data(), static_cast<qsizetype>(spelt.size()));
 }
 
 katana::core::Error noAreaOnScreen(const ScopeFilterView& view)
@@ -137,9 +145,7 @@ ScopeFilterWidget::ScopeFilterWidget(const QString& namePrefix, QWidget* parent)
     int row = 0;
     for (std::size_t kind = 0; kind < kTypeCount; ++kind) {
         const auto type = static_cast<EntityType>(kind);
-        const std::string_view spelt = katana::entity::toString(type);
-        const QString name =
-            QString::fromUtf8(spelt.data(), static_cast<qsizetype>(spelt.size()));
+        const QString name = kindName(type);
         auto* check = new QCheckBox(name, typeRow);
         check->setObjectName(prefix_ + QStringLiteral("Type") + name);
         QObject::connect(check, &QCheckBox::toggled, this, [this] { changed(); });
@@ -437,6 +443,24 @@ Result<ScopeWords> ScopeFilterWidget::words() const
     }
     }
     return words;
+}
+
+void ScopeFilterWidget::showTypeCounts(
+    const std::vector<std::pair<EntityType, std::size_t>>& counts)
+{
+    using Count = std::pair<EntityType, std::size_t>;
+    for (const auto& [type, check] : types_) {
+        const auto found = std::ranges::find(counts, type, &Count::first);
+        const std::size_t count = found != counts.end() ? found->second : 0;
+        check->setText(QStringLiteral("%1 (%2)").arg(kindName(type)).arg(count));
+    }
+}
+
+void ScopeFilterWidget::hideTypeCounts()
+{
+    for (const auto& [type, check] : types_) {
+        check->setText(kindName(type));
+    }
 }
 
 Result<QString> ScopeFilterWidget::verbWords() const

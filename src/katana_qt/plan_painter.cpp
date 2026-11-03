@@ -491,6 +491,20 @@ class PlanPainter {
     {
         return markPixels() / std::max(view_.scale, 1e-12);
     }
+    // A built-in symbol shape whose style gives it no size is a paper mark
+    // on a plot: the plain mark's kPointMarkerPaperMillimetres either side.
+    // So a fixed paper style scale sizes it in the plot's millimetres, as it
+    // sizes a library paper symbol; it stayed in screen pixels until
+    // 2026-11-03, the one paper mark the scale left alone. Auto and paper
+    // keep plainMarkHalfWidth. The plain point cross of a point with no
+    // symbol is the screen's own marker and is not drawn through this.
+    [[nodiscard]] double symbolFallbackHalfWidth() const
+    {
+        if (!paper() && options_.paperStyleScale) {
+            return kPointMarkerPaperMillimetres * paperScale();
+        }
+        return plainMarkHalfWidth();
+    }
     // On paper, the finest imagery is embedded at as a share of the device's
     // resolution: rasterDpiCap over the plot's own, and never more than 1 -
     // imagery is not embedded finer than the page is printed.
@@ -1464,7 +1478,7 @@ const PlanPainter::Stamp& PlanPainter::stampOf(const std::string& symbol, double
         // magnitude of a map grid coordinate.
         const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
             cache_.definitions_, library_, source_.libraryGeneration, symbol, Point2(0.0, 0.0),
-            size, 0.0, paperScale(), plainMarkHalfWidth());
+            size, 0.0, paperScale(), symbolFallbackHalfWidth());
         Stamp stamp;
         stamp.extent = cad::drawnExtent(drawing);
         stamp.empty = stamp.extent.empty();
@@ -1496,7 +1510,7 @@ void PlanPainter::drawEntities()
         }
         const Box2 box = cad::drawnExtent(cad::pointSymbolDrawing(
             cache_.definitions_, library_, source_.libraryGeneration, style.symbol,
-            Point2(0.0, 0.0), style.symbolSize, 0.0, millimetre, plainMarkHalfWidth()));
+            Point2(0.0, 0.0), style.symbolSize, 0.0, millimetre, symbolFallbackHalfWidth()));
         if (box.empty()) {
             return;
         }
@@ -1739,7 +1753,7 @@ void PlanPainter::drawSymbol(const StylePaintTarget& target, const std::string& 
     // in the model carries one yet.
     const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
         cache_.definitions_, library_, source_.libraryGeneration, symbol, centre, size, 0.0,
-        paperScale(), plainMarkHalfWidth());
+        paperScale(), symbolFallbackHalfWidth());
     paintStyleDrawing(painter_, drawing, target);
 }
 
@@ -1815,7 +1829,7 @@ bool PlanPainter::stampSprite(const StylePaintTarget& target, const std::string&
             local.view = view;
             const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
                 cache_.definitions_, library_, source_.libraryGeneration, symbol,
-                Point2(0.0, 0.0), size, 0.0, paperScale(), plainMarkHalfWidth());
+                Point2(0.0, 0.0), size, 0.0, paperScale(), symbolFallbackHalfWidth());
             QPainter imagePainter(&image);
             imagePainter.setRenderHints(painter_.renderHints());
             paintStyleDrawing(imagePainter, drawing, local);

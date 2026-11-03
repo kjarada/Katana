@@ -367,6 +367,72 @@ TEST(PlanContextMenu, StyleAndColourRunStyleApplyAndColorAndACancelledColourRuns
     EXPECT_FALSE(f.entity(1).color.has_value());
 }
 
+// The window deletes its menu as it hides (deleteLater), and since Qt 6.7 the
+// colour dialog's own event loop can run that delete while Choose is still
+// asking. Choose then reached its runner through the destroyed menu: the
+// crash recolouring 774 selected leaders (2026-11-03, a call to
+// 0x200000003 from this item in the dump). Here the menu is destroyed inside
+// the chooser, as Qt destroys it, and the line must still run, through a
+// runner that is alive.
+TEST(PlanContextMenu, ChoosingAColourRunsColorEvenWhenTheMenuIsDestroyedWhileItAsks)
+{
+    MenuFixture f;
+    f.run("LEADER 0,0 5,5 text=A");
+    f.run("LEADER 0,10 5,15 text=B");
+    f.run("SELECT ALL");
+    const std::size_t steps = f.document.history().undoCount();
+
+    struct Calls {
+        std::vector<QString> lines;
+        int throughDestroyed = 0;
+    };
+    // A runner that knows when it is called through a copy already destroyed:
+    // what the menu's own copy is once the menu has gone.
+    struct Runner {
+        std::shared_ptr<Calls> calls;
+        CommandRunner inner;
+        bool alive = true;
+        Runner(std::shared_ptr<Calls> c, CommandRunner i) : calls(std::move(c)), inner(std::move(i))
+        {
+        }
+        Runner(const Runner&) = default;
+        Runner& operator=(const Runner&) = default;
+        ~Runner() { alive = false; }
+        VerbOutcome operator()(const QString& line) const
+        {
+            if (!alive) {
+                ++calls->throughDestroyed;
+                return VerbOutcome{false, {}, QStringLiteral("called through a destroyed runner")};
+            }
+            calls->lines.push_back(line);
+            return inner(line);
+        }
+    };
+    const auto calls = std::make_shared<Calls>();
+    PlanContextMenuContext context = f.context();
+    context.run = Runner(calls, f.runner());
+    PlanContextMenu* menu = nullptr;
+    // Reads the menu's address before the delete and nothing of its own after
+    // it, so the chooser is well behaved whichever copy of it is running.
+    context.chooseColour = [slot = &menu](const QColor&) {
+        delete std::exchange(*slot, nullptr);
+        return std::optional<QColor>(QColor(0, 0, 255));
+    };
+    menu = new PlanContextMenu(context, &f.window);
+    QAction* choose = item(*menu, "planContextColour.Choose");
+    ASSERT_NE(choose, nullptr);
+    choose->trigger();
+
+    EXPECT_EQ(menu, nullptr) << "the chooser destroyed the menu, as the colour dialog's loop does";
+    EXPECT_EQ(calls->throughDestroyed, 0) << "the item ran its line through the destroyed menu";
+    EXPECT_EQ(calls->lines, (std::vector<QString>{"COLOR #0000FF"}));
+    for (const EntityId id : {1, 2}) {
+        ASSERT_TRUE(f.entity(id).color.has_value());
+        EXPECT_EQ(f.entity(id).color->toHex(), "#0000FF");
+    }
+    EXPECT_EQ(f.document.history().undoCount(), steps + 1) << "one recolour, one undo step";
+}
+
 TEST(PlanContextMenu, EntityInformationIsForOneEntityAndRunsInfo)
 {
     MenuFixture f;

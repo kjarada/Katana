@@ -6,8 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/command_interpreter.hpp"
@@ -632,4 +634,100 @@ TEST_F(ScopeVerbsTest, ModifyTakesItsOwnWordsWhereverTheyStoodBeforeTheSharedPar
     ASSERT_FALSE(bad.ok());
     EXPECT_EQ(bad.error().context, "TYPE");
     EXPECT_EQ(document.history().undoCount(), steps);
+}
+
+// ---- SELECT reads them ----------------------------------------------------------------------
+
+// Selecting by kind across a scope, as Global Modify's Select Matches does (the
+// owner's "select elements by their type such as selecting leaders",
+// 2026-11-03). Every count is read off the drawing laid out above.
+TEST_F(ScopeVerbsTest, SelectTakesTheScopeAndFilterAndSaysWhatItTookByKind)
+{
+    CommandInterpreter interpreter(document);
+    const auto selected = [this] { return document.selection().ids(); };
+
+    auto reply = interpreter.run("SELECT DRAWING WHERE TYPE=point");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "scope=drawing where=\"TYPE=point\" matched=3 selected=3 types=point:3");
+    EXPECT_EQ(selected(), (std::vector<EntityId>{pA, pB, pC}));
+
+    // Every kind the drawing holds, in the kind byte's order: point 0, line 1,
+    // text 5.
+    reply = interpreter.run("SELECT DRAWING");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "scope=drawing matched=5 selected=5 types=point:3,line:1,text:1");
+    EXPECT_EQ(selected(), (std::vector<EntityId>{pA, pB, pC, ln, tx}));
+
+    // WHERE alone narrows the selection, as it does for every verb.
+    document.selection().set({pB, ln});
+    reply = interpreter.run("SELECT WHERE TYPE=point");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "scope=selection where=\"TYPE=point\" matched=1 selected=1 types=point:1");
+    EXPECT_EQ(selected(), (std::vector<EntityId>{pB}));
+
+    reply = interpreter.run("SELECT LAYERS survey ONLY WHERE PROP=code:TREE*");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "scope=layers layers=survey sublayers=no where=\"PROP=code:TREE*\" "
+                      "matched=1 selected=1 types=point:1");
+    EXPECT_EQ(selected(), (std::vector<EntityId>{pA}));
+
+    // A scope that takes nothing is an answer, and leaves nothing selected.
+    reply = interpreter.run("SELECT AREA 100,100,200,200");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "scope=area area=100,100,200,200 matched=0 selected=0");
+    EXPECT_TRUE(selected().empty());
+}
+
+TEST_F(ScopeVerbsTest, SelectCountsWhatItCannotSelectAndKeepsTheFormsItHad)
+{
+    CommandInterpreter interpreter(document);
+
+    // The line and the text are on a locked layer: matched and counted, not
+    // selected, as no other SELECT would select them.
+    Layer roads = *document.model().layers.find("roads");
+    roads.locked = true;
+    ASSERT_TRUE(document.execute(cmd::updateLayer(roads)).ok());
+    auto reply = interpreter.run("SELECT DRAWING WHERE TYPE=line,text");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "scope=drawing where=\"TYPE=line,text\" matched=2 selected=0 "
+                      "unselectable=2 types=line:1,text:1");
+    EXPECT_TRUE(document.selection().ids().empty());
+    roads.locked = false;
+    ASSERT_TRUE(document.execute(cmd::updateLayer(roads)).ok());
+
+    // ALL alone and LAYER name are SELECT's own, with their reply: LAYER name
+    // is that layer alone, where the scope word LAYERS takes survey/trees too.
+    EXPECT_EQ(interpreter.run("SELECT ALL").valueOr(""), "5 selected");
+    EXPECT_EQ(interpreter.run("SELECT LAYER survey").valueOr(""), "2 selected");
+    EXPECT_EQ(interpreter.run("SELECT LAYERS survey").valueOr(""),
+              "scope=layers layers=survey sublayers=yes matched=3 selected=3 types=point:3");
+    EXPECT_EQ(interpreter.run("SELECT TYPE point").valueOr(""), "3 selected");
+
+    // Refused, naming what does not read, with the selection left as it was.
+    const std::vector<EntityId> before = document.selection().ids();
+    auto bad = interpreter.run("SELECT DRAWING leader");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_EQ(bad.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(bad.error().context, "leader");
+    bad = interpreter.run("SELECT DRAWING WHERE TYPE=blob");
+    ASSERT_FALSE(bad.ok());
+    // Headless there is no view: VIEW is refused naming AREA.
+    bad = interpreter.run("SELECT VIEW WHERE TYPE=point");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_TRUE(contains(bad.error().describe(), "AREA")) << bad.error().describe();
+    EXPECT_EQ(document.selection().ids(), before);
+}
+
+TEST_F(ScopeVerbsTest, TheTypeTallyCountsEachKindInTheKindBytesOrderAndSkipsWhatIsGone)
+{
+    const auto& model = document.model();
+    // Out of order, with an id no entity has.
+    const std::vector<EntityId> ids{tx, pC, ln, pA, 9999};
+    EXPECT_EQ(countByType(model, ids),
+              (std::vector<std::pair<EntityType, std::size_t>>{
+                  {EntityType::Point, 2}, {EntityType::Line, 1}, {EntityType::Text, 1}}));
+    EXPECT_EQ(typeTally(model, ids), "point:2,line:1,text:1");
+    EXPECT_TRUE(countByType(model, {}).empty());
+    EXPECT_EQ(typeTally(model, {}), "");
+    EXPECT_EQ(typeTally(model, {9999}), "");
 }

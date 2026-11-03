@@ -17,6 +17,8 @@
 #include <QLineEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTimer>
@@ -24,6 +26,7 @@
 
 #include "customisation/document_watcher.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/scope_verbs.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/display.hpp"
@@ -201,6 +204,27 @@ struct GlobalModifyDialog::Impl {
         if (!reloading) {
             previewSoon->start();
         }
+    }
+
+    // Beside each type box, how many of that kind the scope and the REST of
+    // the filter take: what ticking that box would take. Counted by
+    // cad::countByType, as SELECT's types= is; no numbers while the scope or
+    // the filter does not read.
+    void countTypes()
+    {
+        auto scope = scopeFilter->scope();
+        auto filter = scopeFilter->filter();
+        if (!scope || !filter) {
+            scopeFilter->hideTypeCounts();
+            return;
+        }
+        filter->types.clear();
+        auto matched = katana::cad::matchEntities(document(), *scope, *filter);
+        if (!matched) {
+            scopeFilter->hideTypeCounts();
+            return;
+        }
+        scopeFilter->showTypeCounts(katana::cad::countByType(document().model(), *matched));
     }
 
     // The tick in front of a field, enabling its editors.
@@ -855,6 +879,7 @@ bool GlobalModifyDialog::preview()
     if (!d.live()) {
         return false;
     }
+    d.countTypes();
     auto request = readRequest(*this);
     if (!request) {
         d.say(QString::fromStdString(request.error().describe()), true);
@@ -925,28 +950,57 @@ bool GlobalModifyDialog::selectMatches()
     if (!d.live()) {
         return false;
     }
-    auto scope = this->scope();
-    auto filter = this->filter();
-    if (!scope || !filter) {
-        d.say(QString::fromStdString((!scope ? scope.error() : filter.error()).describe()), true);
+    // The line a person would type - SELECT DRAWING WHERE TYPE=leader - run
+    // by the window's one executor, so it is in the log and the history as a
+    // typed line is, and selects by SELECT's rule: what is hidden or locked is
+    // counted and left out.
+    auto words = d.scopeFilter->verbWords();
+    if (!words) {
+        d.say(QString::fromStdString(words.error().describe()), true);
         return false;
     }
-    auto matched = katana::cad::matchEntities(d.document(), *scope, *filter);
-    if (!matched) {
-        d.say(QString::fromStdString(matched.error().describe()), true);
+    const QString line = QStringLiteral("SELECT ") + *words;
+    if (!d.context.run) {
+        d.say(QStringLiteral("Nothing runs the line here: type ") + line, true);
         return false;
     }
-    const std::size_t count = matched->size();
-    if (d.context.selectAndShow) {
-        d.context.selectAndShow(*matched);
-    } else {
-        d.document().selection().set(std::move(*matched));
-        d.document().notifySelectionChanged();
+    const VerbOutcome outcome = d.context.run(line);
+    if (!outcome.ok) {
+        d.say(outcome.error, true);
+        return false;
     }
-    const QString said = matchCount(count, " entity selected.", " entities selected.");
+    const std::vector<katana::entity::EntityId> ids = d.document().selection().ids();
+    // Framed in the active plan view, when the window has one.
+    if (!ids.empty() && d.context.selectAndShow) {
+        d.context.selectAndShow(ids);
+    }
+    QString said = matchCount(ids.size(), " entity selected.", " entities selected.");
+    // The reply is SELECT's record; what it could not select is its key.
+    static const QRegularExpression kBlanks(QStringLiteral("\\s+"));
+    for (const QString& field : outcome.reply.split(kBlanks, Qt::SkipEmptyParts)) {
+        if (field.startsWith(QStringLiteral("unselectable="))) {
+            said += QStringLiteral(" %1 hidden or on a locked layer left out.")
+                        .arg(field.mid(field.indexOf(QLatin1Char('=')) + 1));
+        }
+    }
     d.say(said, false);
-    d.log(QStringLiteral("Global Modify: ") + said, false);
-    return count > 0;
+    return !ids.empty();
+}
+
+void GlobalModifyDialog::showEvent(QShowEvent* event)
+{
+    QDialog::showEvent(event);
+    Impl& d = *impl_;
+    // AutoCAD's Quick Select rule: opened with nothing selected, "Selected
+    // entities" takes nothing, and a type ticked to select by (the owner's
+    // "select elements by their type such as selecting leaders", 2026-11-03)
+    // found none. So it opens on the whole drawing then. Only as it opens: a
+    // scope chosen while it is open is never changed under the person.
+    if (d.live() && d.document().selection().empty() &&
+        d.scopeFilter->choice() == ScopeChoice::Selection) {
+        d.scopeFilter->setChoice(ScopeChoice::Drawing);
+    }
+    d.schedulePreview();
 }
 
 } // namespace katana::qt

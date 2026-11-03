@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include <QComboBox>
 #include <QImage>
 #include <QLabel>
@@ -34,7 +36,11 @@ struct Mark {
     katana::qt::PlanPaintCache cache;
     katana::qt::PlanPaintStats stats;
 
-    explicit Mark(StyleUnits units = StyleUnits::Paper, bool linestyle = false)
+    // `builtIn` names one of the built-in shapes for the style's symbol in
+    // place of the library's "test mark"; `symbolSize` is Style::symbolSize,
+    // a width in model units, 0 for none.
+    explicit Mark(StyleUnits units = StyleUnits::Paper, bool linestyle = false,
+                  const std::string& builtIn = {}, double symbolSize = 0.0)
     {
         katana::entity::LineStyle definition;
         definition.name = "test mark";
@@ -59,7 +65,8 @@ struct Mark {
         if (linestyle) {
             style.linetype = definition.name;
         } else {
-            style.symbol = definition.name;
+            style.symbol = builtIn.empty() ? definition.name : builtIn;
+            style.symbolSize = symbolSize;
         }
         EXPECT_TRUE(model.styles.add(style).ok());
         katana::entity::Entity entity;
@@ -171,6 +178,54 @@ TEST(ViewScale, GroundSizedMarksAndPlotPaperMarksIgnoreTheScreenReferenceScale)
         EXPECT_EQ(paper.paint(), plotted);
         paper.options.paperStyleScale = 2000.0;
         EXPECT_EQ(paper.paint(), plotted);
+    }
+}
+
+// A built-in shape with no size of its own plots as a paper mark, 1 mm either
+// side (kPointMarkerPaperMillimetres), so a fixed scale sizes it as the plot
+// does; it used to keep its 4 screen pixels, the one paper mark the scale left
+// alone. Sizes worked by hand: the square spans +/- its half-width.
+TEST(ViewScale, ABuiltInSymbolWithNoSizeIsSizedByTheFixedScaleAsThePlotSizesIt)
+{
+    Mark mark(StyleUnits::Paper, false, "square");
+    // Auto: the plain mark's 4 px either side, 8 px across, at either zoom.
+    expectSize(mark.paint(), 8.0, 8.0);
+    // 1:500: 1 mm is 0.5 m, so 1 m across, 20 px at 20 px/m.
+    mark.options.paperStyleScale = 500.0;
+    expectSize(mark.paint(), 20.0, 20.0);
+    // 1:1000: 2 m across, 40 px; zooming to 40 px/m makes it 80 px.
+    mark.options.paperStyleScale = 1000.0;
+    expectSize(mark.paint(), 40.0, 40.0);
+    mark.frame.transform.scale = 40.0;
+    expectSize(mark.paint(), 80.0, 80.0);
+    mark.options.paperStyleScale.reset();
+    expectSize(mark.paint(), 8.0, 8.0);
+
+    // On paper the screen's scale changes nothing.
+    Mark plotted(StyleUnits::Paper, false, "square");
+    katana::cad::PlotSettings plot;
+    plotted.options.medium = katana::qt::PlanMedium::Paper;
+    plotted.options.plot = &plot;
+    const QImage before = plotted.paint();
+    plotted.options.paperStyleScale = 500.0;
+    EXPECT_EQ(plotted.paint(), before);
+}
+
+// What the archive and the survey codes give: a style with a symbol size,
+// which is a width on the ground (docs/cad.md, "Point symbols"), for a
+// library definition in ground units and for a built-in shape alike. The
+// plot draws them at that width at any scale, so the screen's paper scale
+// leaves them as they are: 2 m across is 40 px at 20 px/m.
+TEST(ViewScale, ASymbolWithAGroundSizeKeepsItWhateverTheFixedScale)
+{
+    for (const std::string& builtIn : {std::string(), std::string("square")}) {
+        Mark mark(StyleUnits::World, false, builtIn, 2.0);
+        const QImage automatic = mark.paint();
+        expectSize(automatic, 40.0, 40.0);
+        for (const double denominator : {500.0, 2000.0}) {
+            mark.options.paperStyleScale = denominator;
+            EXPECT_EQ(mark.paint(), automatic) << "1:" << denominator << " " << builtIn;
+        }
     }
 }
 

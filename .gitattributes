@@ -11,3 +11,8 @@ resources/customisation/*.json -text
 # A checkout that rewrote its line ends (core.autocrlf on Windows) would no
 # longer hold the unmodified text, so it is not converted.
 LICENSE -text
+
+# A shell script is run by bash, on Windows too (tools/build_visible.sh in Git
+# Bash), and bash reads a carriage return as part of each line: a checkout that
+# gave it CRLF line ends (core.autocrlf on Windows) breaks every line.
+*.sh text eol=lf
