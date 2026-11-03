@@ -324,6 +324,38 @@ TEST(GlobalModifyDialog, ASymbolAndAStyleSettingGoThroughTheirOwnTabs)
     EXPECT_EQ(fixture.document.model().styles.find(style)->symbolSize, 2.0);
 }
 
+// Their Styles' "Scale symbol size by" (the owner's "change the symbols size",
+// 2026-11-03): the style p1 wears, a square 0.3 wide, doubled to 0.6 -
+// exactly, since doubling a binary fraction only moves its exponent.
+TEST(GlobalModifyDialog, ScaleSymbolSizeByMultipliesTheSymbolSizeOfTheStylesTheyWear)
+{
+    DialogFixture fixture;
+    katana::entity::Style pit;
+    pit.name = "Pit";
+    pit.symbol = "square";
+    pit.symbolSize = 0.3;
+    ASSERT_TRUE(fixture.document.execute(cmd::createStyle(pit)).ok());
+    ASSERT_TRUE(fixture.document.execute(cmd::setEntityStyle({fixture.p1}, "Pit")).ok());
+    fixture.document.selection().set({fixture.p1});
+    GlobalModifyDialog dialog(fixture.context);
+    auto* scale = find<QDoubleSpinBox>(dialog, "globalModifyStyleSymbolScale");
+    EXPECT_FALSE(scale->isEnabled()) << "unticked, as every field starts";
+    check(dialog, "globalModifySetStyleSymbolScale");
+    scale->setValue(2.0);
+    const std::size_t undoBefore = fixture.document.history().undoCount();
+    ASSERT_TRUE(dialog.apply()) << dialog.summaryText().toStdString();
+    EXPECT_EQ(fixture.document.model().styles.find("Pit")->symbolSize, 0.6);
+    EXPECT_EQ(fixture.document.history().undoCount(), undoBefore + 1);
+    EXPECT_EQ(dialog.summaryText(),
+              "Done: 1 entity matched; changing 1 style. One Undo puts it all back.");
+
+    // Symbol size ticked too: a size set and scaled at once is refused.
+    check(dialog, "globalModifySetStyleSymbolSize");
+    EXPECT_FALSE(dialog.apply());
+    EXPECT_TRUE(dialog.summaryText().contains("not both")) << dialog.summaryText().toStdString();
+    EXPECT_EQ(fixture.document.model().styles.find("Pit")->symbolSize, 0.6);
+}
+
 TEST(GlobalModifyDialog, TheDialogOutlivesItsDocumentAndThenDoesNothing)
 {
     auto fixture = std::make_unique<DialogFixture>();

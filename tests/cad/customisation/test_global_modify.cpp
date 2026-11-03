@@ -6,7 +6,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <limits>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "katana/cad/command_interpreter.hpp"
@@ -466,6 +469,89 @@ TEST_F(GlobalModifyTest, ASymbolGoesOnThePointsThroughAStyleAndOtherEntitiesAreC
     EXPECT_EQ(entity(pB).style, "");
 }
 
+// The owner's "change the symbols size" (2026-11-03): one factor on every
+// symbol size the scope's styles hold. pA wears Tree (symbol "tree" at its
+// own size, 0); pB is given Pit (a square 0.3 wide) and tx Pole (a circle 1.0
+// wide). Doubling makes them 0.6 and 2.0 - exactly, since doubling a binary
+// fraction only moves its exponent - and leaves Tree, which has no number.
+TEST_F(GlobalModifyTest, TheSymbolScaleMultipliesEachStylesSizeAndLeavesAnOwnSizeAlone)
+{
+    for (const auto& [name, symbol, size] :
+         {std::tuple{"Pit", "square", 0.3}, std::tuple{"Pole", "circle", 1.0}}) {
+        Style style;
+        style.name = name;
+        style.symbol = symbol;
+        style.symbolSize = size;
+        ASSERT_TRUE(document.execute(cmd::createStyle(style)).ok());
+    }
+    ASSERT_TRUE(document.execute(cmd::setEntityStyle({pB}, "Pit")).ok());
+    ASSERT_TRUE(document.execute(cmd::setEntityStyle({tx}, "Pole")).ok());
+    select({pA, pB, tx});
+    const std::size_t undoBefore = document.history().undoCount();
+
+    GlobalModify change;
+    change.styles.symbolScale = 2.0;
+    const GlobalModifyPlan plan = apply(scopeOf(ScopeKind::Selection), {}, change);
+    EXPECT_EQ(plan.stylesChanged, (std::vector<std::string>{"Pit", "Pole"}));
+    EXPECT_EQ(plan.symbolsAtOwnSize, 1u);
+    EXPECT_TRUE(plan.changed.empty()) << "a style's size, not an entity, changes";
+    EXPECT_EQ(document.model().styles.find("Pit")->symbolSize, 0.6);
+    EXPECT_EQ(document.model().styles.find("Pole")->symbolSize, 2.0);
+    EXPECT_EQ(document.model().styles.find("Tree")->symbolSize, 0.0);
+    EXPECT_EQ(plan.summary(), "3 entities matched; changing 2 styles; 1 style with a symbol at "
+                              "its own size left as it is: give it a size to scale.");
+    EXPECT_EQ(document.history().undoCount(), undoBefore + 1);
+
+    // Halving the doubled sizes gives the first ones back; one Undo too.
+    change.styles.symbolScale = 0.5;
+    (void)apply(scopeOf(ScopeKind::Selection), {}, change);
+    EXPECT_EQ(document.model().styles.find("Pit")->symbolSize, 0.3);
+    ASSERT_TRUE(document.undo().ok());
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_EQ(document.model().styles.find("Pit")->symbolSize, 0.3);
+    EXPECT_EQ(document.model().styles.find("Pole")->symbolSize, 1.0);
+
+    // Kerb has no symbol: it is neither changed nor counted.
+    select({ln});
+    const GlobalModifyPlan kerb = apply(scopeOf(ScopeKind::Selection), {}, change);
+    EXPECT_TRUE(kerb.stylesChanged.empty());
+    EXPECT_EQ(kerb.symbolsAtOwnSize, 0u);
+    EXPECT_EQ(kerb.command, nullptr);
+}
+
+TEST_F(GlobalModifyTest, ASymbolScaleThatIsNoFactorOrIsGivenWithASizeIsRefused)
+{
+    select({pA});
+    const auto refused = [&](const GlobalModify& change) {
+        auto plan = planGlobalModify(document, scopeOf(ScopeKind::Selection), {}, change);
+        return plan.ok() ? std::string() : plan.error().describe();
+    };
+    for (const double bad : {0.0, -2.0, std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity()}) {
+        GlobalModify change;
+        change.styles.symbolScale = bad;
+        EXPECT_NE(refused(change).find("symbol scale must be above 0"), std::string::npos)
+            << bad;
+    }
+    GlobalModify both;
+    both.styles.symbolSize = 1.0;
+    both.styles.symbolScale = 2.0;
+    EXPECT_NE(refused(both).find("not both"), std::string::npos) << refused(both);
+
+    // A size near the largest double, doubled, is no number at all.
+    Style huge;
+    huge.name = "Huge";
+    huge.symbol = "square";
+    huge.symbolSize = std::numeric_limits<double>::max() / 1.5;
+    ASSERT_TRUE(document.execute(cmd::createStyle(huge)).ok());
+    ASSERT_TRUE(document.execute(cmd::setEntityStyle({pA}, "Huge")).ok());
+    GlobalModify twice;
+    twice.styles.symbolScale = 2.0;
+    const std::string overflow = refused(twice);
+    EXPECT_NE(overflow.find("too large"), std::string::npos) << overflow;
+    EXPECT_NE(overflow.find("Huge"), std::string::npos) << overflow;
+}
+
 // ---- what is refused, and what is no step at all ----------------------------------------------
 
 TEST_F(GlobalModifyTest, ARequestTheDrawingWouldRefuseIsRefusedNamingTheField)
@@ -598,4 +684,29 @@ TEST_F(GlobalModifyTest, ModifyRefusesWhatItCannotRead)
     EXPECT_FALSE(interpreter.run("MODIFY DRAWING WHERE TYPE=blob SET COLOUR=#FF0000").ok());
     EXPECT_FALSE(interpreter.run("MODIFY SET COLOUR=#FF0000").ok());
     EXPECT_FALSE(interpreter.run("MODIFY LAYERS nowhere SET COLOUR=#FF0000").ok());
+}
+
+// STYLE.SYMBOLSCALE= on the command line: Tree given a size of 0.5, then
+// tripled through the points that wear it - 1.5, exactly in binary - and the
+// line qn, which wears Tree outside the filter, redrawn with them.
+TEST_F(GlobalModifyTest, ModifyScalesTheSymbolSizesOfTheStylesItsScopeWears)
+{
+    CommandInterpreter interpreter(document);
+    ASSERT_TRUE(interpreter.run("STYLE SET Tree symbolsize 0.5").ok());
+    const std::size_t undoBefore = document.history().undoCount();
+    auto reply = interpreter.run("MODIFY DRAWING WHERE TYPE=point SET STYLE.SYMBOLSCALE=3");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "3 entities matched; changing 1 style; the changed styles also redraw 1 "
+                      "entity outside the scope. One UNDO restores it.");
+    EXPECT_EQ(document.model().styles.find("Tree")->symbolSize, 1.5);
+    EXPECT_EQ(document.history().undoCount(), undoBefore + 1);
+    ASSERT_TRUE(interpreter.run("UNDO").ok());
+    EXPECT_EQ(document.model().styles.find("Tree")->symbolSize, 0.5);
+
+    for (const char* bad : {"MODIFY DRAWING SET STYLE.SYMBOLSCALE=abc",
+                            "MODIFY DRAWING SET STYLE.SYMBOLSCALE=0",
+                            "MODIFY DRAWING SET STYLE.SYMBOLSCALE=2 STYLE.SYMBOLSIZE=1"}) {
+        EXPECT_FALSE(interpreter.run(bad).ok()) << bad;
+    }
+    EXPECT_EQ(document.model().styles.find("Tree")->symbolSize, 0.5);
 }

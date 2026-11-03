@@ -229,6 +229,17 @@ Status checkRequest(const Document& document, const GlobalModify& change)
             return status;
         }
     }
+    if (styles.symbolScale) {
+        if (styles.symbolSize) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "set the symbols' size or scale it, not both in one change");
+        }
+        // Above 0: a scale of 0 would make every size "own size", which is
+        // another request (a symbol size of 0).
+        if (auto status = checkPositive("symbol scale", *styles.symbolScale); !status) {
+            return status;
+        }
+    }
     return {};
 }
 
@@ -281,6 +292,10 @@ Style changedStyle(Style style, const StyleModify& change)
     }
     if (change.symbolSize) {
         style.symbolSize = *change.symbolSize;
+    }
+    // A size of 0 is the symbol's own size, which has no number to multiply.
+    if (change.symbolScale && style.symbolSize > 0.0) {
+        style.symbolSize *= *change.symbolScale;
     }
     return style;
 }
@@ -537,7 +552,17 @@ Result<GlobalModifyPlan> planGlobalModify(const Document& document, const Modify
     }
     for (const std::string& name : targetStyles) {
         const Style* style = model.styles.find(name);
-        if (auto command = cmd::updateStyleIfChanged(model, changedStyle(*style, change.styles))) {
+        if (change.styles.symbolScale && style->symbol != katana::entity::kNoSymbol &&
+            style->symbolSize == 0.0) {
+            ++plan.symbolsAtOwnSize;
+        }
+        const Style changed = changedStyle(*style, change.styles);
+        // A finite size times a finite scale can still overflow.
+        if (!std::isfinite(changed.symbolSize)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the scaled symbol size is too large to hold", name);
+        }
+        if (auto command = cmd::updateStyleIfChanged(model, changed)) {
             first.push_back(std::move(command));
             plan.stylesChanged.push_back(name);
         }
@@ -726,6 +751,12 @@ std::string GlobalModifyPlan::summary() const
     if (notText > 0) {
         text +=
             "; " + counted(notText, "entity is", "entities are") + " not text and has no height";
+    }
+    if (symbolsAtOwnSize > 0) {
+        text += "; " + counted(symbolsAtOwnSize, "style", "styles") +
+                " with a symbol at its own size left as " +
+                (symbolsAtOwnSize == 1 ? "it is: give it a size to scale"
+                                       : "they are: give them a size to scale");
     }
     if (styleReachesOthers > 0) {
         text += "; the changed styles also redraw " +

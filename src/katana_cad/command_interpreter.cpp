@@ -576,7 +576,8 @@ Scope     MODIFY, CODE and the UTILITY verbs: SELECTION | DRAWING | VIEW [id] [E
           UNPROP=key HEIGHT=h SYMBOL=name[@size]   layers: LAYER.COLOUR= LAYER.LTYPE=
           LAYER.WEIGHT= LAYER.HATCH= LAYER.DIMSTYLE= LAYER.VISIBLE= LAYER.LOCKED=
           styles worn: STYLE.COLOUR= STYLE.LTYPE= STYLE.WEIGHT= STYLE.HATCH= STYLE.SYMBOL=
-          STYLE.SYMBOLSIZE=   PREVIEW reports what would change and changes nothing
+          STYLE.SYMBOLSIZE= STYLE.SYMBOLSCALE=factor (2 doubles each symbol size)
+          PREVIEW reports what would change and changes nothing
 Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
           PROP RENAME old new   (selection; the type is guessed unless stated)
           PROP TREE [scope] [WHERE k=v ...] [UNDER path] [FROM n] [LIMIT n]   the
@@ -3004,6 +3005,14 @@ Status parseSetWord(const std::string& word, GlobalModify& change)
             return size.error();
         }
         styles.symbolSize = *size;
+    } else if (key == "STYLE.SYMBOLSCALE") {
+        // A factor, checked above 0 with the rest of the request
+        // (planGlobalModify): 2 doubles every symbol size, 0.5 halves it.
+        auto scale = number();
+        if (!scale) {
+            return scale.error();
+        }
+        styles.symbolScale = *scale;
     } else {
         return makeError(ErrorCode::ParseFailure, "not a SET key; HELP lists them", word);
     }

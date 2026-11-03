@@ -102,8 +102,11 @@ plot at 1:500 and at 1:2000 draws it the same number of metres wide, so a
 screen preview of either must too. The linestyles visibly follow the scale
 because they are paper definitions with no size of their own (237 of the NSW
 library's 321, all 98 of Katana Standard's). To make an archive's symbols
-paper-sized, set their styles' symbol size to "own size" (Global Modify,
-Their Styles, Symbol size; or `MODIFY ... SET STYLE.SYMBOLSIZE=0`): a paper
+larger or smaller on the ground - and in every plot - scale their styles'
+sizes by one factor (Global Modify, Their Styles, Scale symbol size by; or
+`MODIFY DRAWING SET STYLE.SYMBOLSCALE=2`). To make them paper-sized instead,
+set their styles' symbol size to "own size" (Global Modify, Their Styles,
+Symbol size; or `MODIFY ... SET STYLE.SYMBOLSIZE=0`): a paper
 definition then draws at its own millimetres, and a name no library defines
 at the built-in shape's 1 mm either side, both following the scale. Scaling
 ground symbols by the denominator was rejected: the screen would show a size

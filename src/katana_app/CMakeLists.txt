@@ -89,6 +89,19 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
             "scope=drawing where=\"TYPE=leader\" matched=2 selected=2 types=leader:2[\r\n]+2 recoloured"
         FAIL_REGULAR_EXPRESSION "error")
+    # MODIFY ... SET STYLE.SYMBOLSCALE= (docs/cad.md, "Global Modify"): the
+    # square 0.3 wide that a point's style draws, doubled to 0.6.
+    add_test(NAME cli.modify_scales_the_symbol_size_of_the_styles_its_scope_wears
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            $<TARGET_FILE:katana_cli>
+            -c "STYLE NEW Pit symbol square" -c "STYLE SET Pit symbolsize 0.3" -c "POINT 0,0"
+            -c "SELECT ALL" -c "STYLE APPLY Pit" -c "MODIFY DRAWING SET STYLE.SYMBOLSCALE=2"
+            -c "STYLE LIST")
+    set_tests_properties(cli.modify_scales_the_symbol_size_of_the_styles_its_scope_wears
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "1 entity matched; changing 1 style\\. One UNDO restores it\\.[\r\n]+  Pit  [^\r\n]*symbol=square@0\\.6([\r\n]|$)"
+        FAIL_REGULAR_EXPRESSION "error")
 
     # End-to-end: draw, save, reopen in a second process, and query.
     set(_project "${CMAKE_CURRENT_BINARY_DIR}/cli-smoke.katana")

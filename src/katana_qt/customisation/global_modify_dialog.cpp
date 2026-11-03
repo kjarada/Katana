@@ -161,6 +161,8 @@ struct GlobalModifyDialog::Impl {
     QComboBox* styleSymbol = nullptr;
     QCheckBox* setStyleSymbolSize = nullptr;
     QDoubleSpinBox* styleSymbolSize = nullptr;
+    QCheckBox* setStyleSymbolScale = nullptr;
+    QDoubleSpinBox* styleSymbolScale = nullptr;
 
     QTabWidget* tabs = nullptr;
     QLabel* summary = nullptr;
@@ -598,6 +600,19 @@ QWidget* GlobalModifyDialog::Impl::buildStylesTab(QWidget* parent)
                               QStringLiteral("globalModifySetStyleSymbolSize"), {styleSymbolSize});
     add(setStyleSymbolSize, styleSymbolSize);
 
+    // A factor on each style's own number (StyleModify::symbolScale): 2
+    // doubles every symbol, 0.5 halves them. 1000 is only the box's reach;
+    // MODIFY ... SET STYLE.SYMBOLSCALE= takes any factor above 0.
+    styleSymbolScale = spin(page, QStringLiteral("globalModifyStyleSymbolScale"), 2.0, 3, 1000.0);
+    styleSymbolScale->setMinimum(0.001);
+    styleSymbolScale->setToolTip(QStringLiteral(
+        "Multiplies each style's symbol size: 2 doubles them, 0.5 halves them. A symbol at its "
+        "own size has no size to multiply and is left as it is"));
+    setStyleSymbolScale = tick(page, QStringLiteral("Scale symbol size by"),
+                               QStringLiteral("globalModifySetStyleSymbolScale"),
+                               {styleSymbolScale});
+    add(setStyleSymbolScale, styleSymbolScale);
+
     grid->setRowStretch(row, 1);
     grid->setColumnStretch(1, 1);
     return page;
@@ -836,6 +851,9 @@ Result<GlobalModify> GlobalModifyDialog::modification() const
     }
     if (d.setStyleSymbolSize->isChecked()) {
         styles.symbolSize = d.styleSymbolSize->value();
+    }
+    if (d.setStyleSymbolScale->isChecked()) {
+        styles.symbolScale = d.styleSymbolScale->value();
     }
     return change;
 }

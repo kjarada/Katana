@@ -1146,6 +1146,22 @@ alone and why. `summary()` is what the dialog shows as its preview and
   redraws everything wearing them, in the scope or not; the plan counts those
   (`styleReachesOthers`) and the summary says so, so no front end can hide
   it.
+- **Symbol sizes scale by a factor** (`StyleModify::symbolScale`,
+  `MODIFY ... SET STYLE.SYMBOLSCALE=2`, Global Modify's "Scale symbol size
+  by"; the owner's "change the symbols size", 2026-11-03): each style the
+  scope reaches has its symbol size multiplied, so the archive's 0.3 m
+  symbols become 0.6 m in one undo step. A style drawing its symbol at its
+  own size (0) has no number to multiply: it is left as it is and counted
+  (`symbolsAtOwnSize`, "1 style with a symbol at its own size left as it is").
+  The factor must be above 0 - 0 would turn every size into "own size",
+  which is the other request, `STYLE.SYMBOLSIZE=0` - and a size and a scale
+  in one change are refused, having no one meaning. A product too large for
+  a double is refused naming the style. **Rejected:** giving an own-size
+  symbol a size from its definition's width before scaling. That width is
+  ground metres for a ground definition, but millimetres of paper for a paper
+  one and pixels for a built-in shape, so the step would size those on the
+  ground and stop them following the paper scale; set a size first, on
+  purpose, where that is wanted.
 - **Layer settings** go to the layers the matched entities sit on - or, for a
   Layers scope, to the scope's layers themselves, entities or not.
 - **One rule for linetype names.** The command line's check that a name is a

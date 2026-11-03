@@ -19,7 +19,8 @@
 //           visibility, properties, text height, the symbol a point draws),
 //           the layers they sit on (colour, linetype, weight, hatch,
 //           dimension style, shown, locked) and the styles they wear
-//           (colour, linetype, weight, hatch, symbol, symbol size).
+//           (colour, linetype, weight, hatch, symbol, symbol size, and a scale on
+//           the symbol size).
 //
 // planGlobalModify turns the three into ONE command, so one Undo puts every
 // entity, layer and style back (Rule 2): nothing here edits the model. What
@@ -198,10 +199,18 @@ struct StyleModify {
     std::optional<std::string> hatchPattern{};
     std::optional<std::string> symbol{};
     std::optional<double> symbolSize{};
+    // Multiplies each style's symbol size: 2 doubles every symbol the scope's
+    // styles draw, 0.5 halves them (the owner's "change the symbols size",
+    // 2026-11-03). Above 0. A style drawing its symbol at its own size (0) has
+    // no number to multiply and is left as it is, counted in the plan
+    // (GlobalModifyPlan::symbolsAtOwnSize). Not with symbolSize: a size set
+    // and scaled in one request has no one meaning.
+    std::optional<double> symbolScale{};
 
     [[nodiscard]] bool empty() const
     {
-        return !colour && !linetype && !lineWeight && !hatchPattern && !symbol && !symbolSize;
+        return !colour && !linetype && !lineWeight && !hatchPattern && !symbol && !symbolSize &&
+               !symbolScale;
     }
 };
 
@@ -229,6 +238,9 @@ struct GlobalModifyPlan {
     std::size_t notPoints = 0;
     // Left alone by the text height: matched, but not text.
     std::size_t notText = 0;
+    // Left alone by the symbol scale: styles the scope reaches that draw a
+    // symbol at its own size (StyleModify::symbolScale).
+    std::size_t symbolsAtOwnSize = 0;
     // The layers and styles whose definitions change, ascending.
     std::vector<std::string> layersChanged{};
     std::vector<std::string> stylesChanged{};

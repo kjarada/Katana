@@ -4325,7 +4325,12 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
 - **Modify**: three tabs - Entities, Their Layers, Their Styles. A field
   changes only when its box is ticked, and its editor is disabled until then,
   so an unticked field can never be written by accident (the rule "`<varies>`
-  protects" states for the attribute manager).
+  protects" states for the attribute manager). Their Styles' **Scale symbol
+  size by** (`globalModifySetStyleSymbolScale`, `globalModifyStyleSymbolScale`,
+  2 to start, 0.001 to 1000) multiplies the symbol size of every style the
+  scope reaches - `MODIFY ... SET STYLE.SYMBOLSCALE=` (`docs/cad.md`, "Global
+  Modify"); ticked with Symbol size, the two are refused together in the
+  summary.
 - **The summary** under the form is the plan's own, refreshed as the form is
   edited (coalesced to one preview per 150 ms) and as the drawing or the
   selection changes. Apply is one undo step and logs the summary. Text that

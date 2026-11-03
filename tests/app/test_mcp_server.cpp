@@ -3177,3 +3177,33 @@ TEST_F(McpServer, AnAgentSelectsTheLeadersByKindAndRecoloursOnlyThem)
         << lines[4];
     EXPECT_EQ(call("katana_status")["structuredContent"]["selected"], 2);
 }
+
+// An agent scales the symbols of the styles it selects by one factor (the
+// owner's "change the symbols size", 2026-11-03): the square 0.3 wide that a
+// point's style draws, doubled to 0.6, read back from the style list.
+TEST_F(McpServer, AnAgentScalesTheSymbolSizesOfTheStylesItsScopeWears)
+{
+    initialize();
+    const Json result = call(
+        "katana_run_commands",
+        Json{{"commands", {"STYLE NEW Pit symbol square", "STYLE SET Pit symbolsize 0.3",
+                           "POINT 0,0", "SELECT ALL", "STYLE APPLY Pit",
+                           "MODIFY DRAWING SET STYLE.SYMBOLSCALE=2", "STYLE LIST"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 7U);
+    EXPECT_NE(lines[5]["output"].get<std::string>().find(
+                  "1 entity matched; changing 1 style. One UNDO restores it."),
+              std::string::npos)
+        << lines[5];
+    EXPECT_NE(lines[6]["output"].get<std::string>().find("symbol=square@0.6"), std::string::npos)
+        << lines[6];
+    const Json refused = call("katana_run_commands",
+                              Json{{"commands", {"MODIFY DRAWING SET STYLE.SYMBOLSCALE=0"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>());
+    const Json& refusal = refused["structuredContent"]["commands"][0];
+    EXPECT_FALSE(refusal["ok"].get<bool>());
+    EXPECT_NE(refusal["messages"].get<std::string>().find("symbol scale must be above 0"),
+              std::string::npos)
+        << refusal;
+}
