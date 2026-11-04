@@ -75,6 +75,15 @@ LEGEND JSON`). One rule now, applied where text arrives:
   guess is said on stderr (`note: the script ... read as Windows-1252`). Its
   path is made with `core::pathFromUtf8`. `katana_run_script` reads the same
   way.
+- **A path is made from text through `core::pathFromUtf8`**, never by handing
+  a `std::string` to a function that takes a `std::filesystem::path`. That
+  conversion is implicit and means what the standard library says: UTF-8 in
+  libstdc++, the ANSI code page in libc++ on Windows (the Windows ARM64
+  release job). `OPEN` and `SAVE` did it until 2026-11-04. GCC never showed
+  it, and the clang check (docs/building.md) saved `SAVE "…/José-Łukasz-测/site"`
+  into a folder named `JosÃ©-Åukasz-æµ‹`. Since the conversion is implicit,
+  no grep finds it and no compiler warns of it. `tools/find_narrow_paths.py`
+  asks clang's AST for every one instead.
 - **A console is read wide.** Standard input that is a console is read with
   `ReadConsoleW` (the "é" typed at an OEM-850 prompt was the byte 0x82, which
   is no text in either code page), and the console's output code page is set
@@ -784,3 +793,26 @@ A modal box in a headless run is a hang until the test's timeout. So
   another machine, so it was not guessed.
 - `katana_customisation_convert`'s own wide reader (`src/katana_archive12d/legacy/
   convert_main.cpp`) is a second copy of what `update::utf8Arguments` does.
+- **A non-ASCII path is still wrong in libc++ on Windows outside `OPEN` and
+  `SAVE`.** On 2026-11-04 `tools/find_narrow_paths.py` found, in 32 files of
+  `src/`, 9 more paths made from narrow text and 167 `path.string()` calls.
+  - Most of them hand a file name to GDAL, PDAL or a message. Examples:
+    `src/katana_io/gdal_adapter.cpp`, `src/katana_io/point_cloud_engine.cpp`,
+    `src/katana_interop/import.cpp` and `src/katana_interop/terrain_io.cpp`.
+  - The Windows ARM64 build therefore cannot import, for example, a raster
+    under `C:/Users/José`. The GCC builds can: `pathToUtf8` and
+    `pathFromUtf8` give exactly what libstdc++ gives there, and on Linux and
+    macOS too, so replacing every one changes nothing on those builds.
+  - Each direction needs the other for a file to be found, so the replacement
+    is one change, with a test per reader that opens a file under a folder
+    named as the `cli.non_ascii_*` tests' is.
+  - Two of the nine are urgent on GCC too, both in
+    `src/katana_interop/archive12d.cpp`:
+    - one takes a zip member's name, which may be code page 437;
+    - the other takes a file name the archive references, written on Windows,
+      which may be Windows-1252.
+    libstdc++ throws at a byte that is not UTF-8, and `pathFromUtf8` never
+    does.
+  - Two in `src/katana_qt/gis_online.cpp` read an environment variable with
+    `std::getenv`, which `include/katana/core/path_text.hpp` says to read
+    through `environmentVariable`.

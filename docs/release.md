@@ -1443,7 +1443,16 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   build (`docs/building.md`, "A build someone can watch") found next: a
   constant no test used, which clang's `-Wunused-const-variable` refuses.
   Lesson kept from the first rounds: build with CLANG64 before a run, since
-  GCC alone passes what two of the five jobs refuse.
+  GCC alone passes what two of the five jobs refuse. The whole CLANG64 suite,
+  run before the next round, then found two more:
+  - Its first run listed nothing. The test listing had never put the toolchain
+    on PATH, and the window's PATH lacked clang64/bin (`docs/building.md`).
+  - Once it listed, 5 of 10,111 tests failed. `SAVE` and `OPEN` turned the
+    typed path into a `std::filesystem::path` implicitly, and libc++ on
+    Windows reads that in the ANSI code page, so the `cli.non_ascii_*` tests
+    saved into a folder whose name was mojibake. The Windows ARM64 job would
+    have failed the same way: these tests postdate the last run that reached
+    its test phase (`docs/headless.md`, "Text and names").
 * **What holds the workflow holds its shape, and that its scripts parse; no
   more.** `tools/check_release_workflow.py` ("The workflow's shape, held")
   refuses a second trigger, a write outside the Publish job, an action

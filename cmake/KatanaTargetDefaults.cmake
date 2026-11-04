@@ -102,6 +102,15 @@ function(katana_discover_tests target)
     set(_katana_target ${target})
     set(_katana_prefix "${ARG_PREFIX}")
     set(_katana_environment "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
+    # Whether the listing puts the runtime on PATH (KatanaGoogleTests.cmake.in):
+    # Windows finds DLLs there, and the template joins PATH with ';'. Left
+    # unset, the listing ran on ctest's PATH alone and a toolchain not on it
+    # stopped ctest before any case (docs/building.md, "Build and test speed").
+    if(WIN32)
+        set(_katana_windows TRUE)
+    else()
+        set(_katana_windows FALSE)
+    endif()
     foreach(_modification IN LISTS ARG_ENVIRONMENT)
         string(APPEND _katana_environment ";${_modification}")
     endforeach()

@@ -107,7 +107,15 @@ main() {
     cd "$root" || return 1
     # The toolchain asked for in front of UCRT64, which holds cmake and ninja:
     # CLANG64 has its compilers but neither (a clang run found cmake missing).
-    export PATH="${KATANA_TOOLCHAIN_BIN:+$KATANA_TOOLCHAIN_BIN:}/c/msys64/ucrt64/bin:$PATH"
+    # MSYS hands a path-like variable to cmd.exe in Windows form, so it arrives
+    # here as C:/msys64/clang64/bin, whose drive colon split PATH into "C" and
+    # a folder that does not exist: the clang suite's first listing then could
+    # not find libc++.dll. cygpath -u takes either form.
+    local toolchain=""
+    if [ -n "${KATANA_TOOLCHAIN_BIN:-}" ]; then
+        toolchain="$(cygpath -u "$KATANA_TOOLCHAIN_BIN")"
+    fi
+    export PATH="${toolchain:+$toolchain:}/c/msys64/ucrt64/bin:$PATH"
     echo $$ > "$running"
     # shellcheck disable=SC2064 # the path is fixed now, on purpose
     trap "rm -f '$running'" EXIT
@@ -115,6 +123,7 @@ main() {
     local started code
     started=$SECONDS
     echo "== Katana $phase in $root/$directory, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"
+    echo "== toolchain first on PATH: ${toolchain:-none, UCRT64}" | tee -a "$log"
     steps "$directory" "$phase" "$@" 2>&1 | tee -a "$log"
     code=${PIPESTATUS[0]}
     echo "== finished: exit=$code after $((SECONDS - started)) s" | tee -a "$log"

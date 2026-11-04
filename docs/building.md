@@ -129,9 +129,20 @@ Google Benchmark's registration macro under `-Wpedantic -Werror` (`'__COUNTER__'
 is a C2y extension`, 241 times on 2026-11-04), which no job builds. Not
 done: a benchmark build with clang 22 needs that warning turned off for the
 benchmark targets alone. `KATANA_TOOLCHAIN_BIN` goes on PATH in front
-of UCRT64, which keeps cmake and ninja (CLANG64 has neither).
+of UCRT64, which keeps cmake and ninja (CLANG64 has neither); the log's second
+line names it. It is passed through `cygpath -u` first: MSYS hands a
+path-like variable to `cmd.exe` in Windows form, and the `C:` of
+`C:/msys64/clang64/bin` split PATH at its colon, so the first clang suite run
+had no clang64/bin on PATH at all.
 `KATANA_BUILD_KEEP_GOING=1` is ninja's `-k 0`, so one run lists every error.
 The log and the status file are then in that directory.
+
+The clang tree also has the compile database that
+`tools/find_narrow_paths.py build/clang64` reads. The script lists every
+`std::filesystem::path` made from narrow text or turned back into it, which
+libc++ on Windows reads in the ANSI code page and libstdc++ as UTF-8
+(`docs/headless.md`, "Text and names"). It compiles nothing: clang dumps the
+AST with `-fsyntax-only`. All of `src/` takes about six minutes.
 
 Why a window rather than the agent's own shell: that shell moves a command
 still running after ten minutes to the background, and the IDE does not show
@@ -976,7 +987,12 @@ again before running anything.
   cases at test time, with CMake's own lister, and keeps the list until the
   executable is rebuilt. The toolchain is put on PATH for the listing only;
   each case keeps its `ENVIRONMENT_MODIFICATION`, which `ctest --show-only`
-  reports. The function's comment says why neither of `gtest_discover_tests`'
+  reports. (Until 2026-11-04 the listing did not get it: the flag that turns
+  it on for Windows was never set, so every listing ran on ctest's own PATH.
+  The GCC suites always had UCRT64 there and never showed it. A CLANG64 run
+  without clang64/bin on PATH did: `katana_app_tests.exe` could not find
+  libc++ (0xc0000135) and ctest stopped before any case ran. The same run with
+  the flag set listed and ran with UCRT64 alone on PATH.) The function's comment says why neither of `gtest_discover_tests`'
   modes was kept. A listing that fails fails `ctest` (exit 8, `ctest -N`
   included), as it did before: checked by putting a program that exits 1 in
   place of `katana_math_tests.exe`. The three places that registered cases (the module suites,

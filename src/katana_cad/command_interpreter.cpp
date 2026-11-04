@@ -7,6 +7,7 @@
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/cad/linework_verbs.hpp"
+#include "katana/core/path_text.hpp"
 #include "katana/core/text.hpp"
 
 #include "katana/cad/parcel.hpp"
@@ -3148,7 +3149,11 @@ CommandInterpreter::Reply CommandInterpreter::file(const std::string& verb, cons
         // C++ - so the count was read before the open and every OPEN reported
         // "(0 entities)". It is not undefined behaviour, just unspecified, and
         // it reads as correct code.
-        auto status = document_.open(args[0]);
+        // Through pathFromUtf8, never the implicit std::string -> path: that
+        // reads the bytes as libstdc++ does (UTF-8) or as libc++ on Windows
+        // does (the ANSI code page), and the second opened "JosÃ©" for
+        // "José" (core/path_text.hpp).
+        auto status = document_.open(katana::core::pathFromUtf8(args[0]));
         const std::size_t count = document_.model().entities.size();
         return finish(std::move(status),
                       "opened " + args[0] + " (" + std::to_string(count) + " entities)");
@@ -3158,7 +3163,7 @@ CommandInterpreter::Reply CommandInterpreter::file(const std::string& verb, cons
         return usage("SAVE [project-directory]");
     }
     if (args.size() == 1) {
-        return finish(document_.saveAs(args[0]), "saved to " + args[0]);
+        return finish(document_.saveAs(katana::core::pathFromUtf8(args[0])), "saved to " + args[0]);
     }
     return finish(document_.save(), "saved");
 }
