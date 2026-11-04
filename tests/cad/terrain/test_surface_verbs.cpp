@@ -418,7 +418,14 @@ namespace {
 void openWithStoredStyles(katana::cad::Document& document, const std::string& stored,
                           const std::string& name)
 {
-    static const katana::cad::surface_testing::ScratchDirectory scratch("stored-styles");
+    // Named for the test, as the scratch directory's rule asks: ctest runs the
+    // two tests that use this at once, and one directory of a fixed name was
+    // removed by the second while the first saved into it - on Linux, which
+    // unlinks a folder whose files are open (Linux ARM64, run 41581201803);
+    // Windows refuses, which hid it.
+    static const katana::cad::surface_testing::ScratchDirectory scratch(
+        std::string("stored-styles-") +
+        ::testing::UnitTest::GetInstance()->current_test_info()->name());
     const std::filesystem::path project = scratch.path / (name + ".katana");
     {
         katana::cad::Document made;

@@ -1426,6 +1426,24 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   written. And the rehearsal, the owner's acceptance step, is still to do:
   a second release installed as an update of the first. v0.2.0 is the only
   release, so no installed copy has been updated.
+
+  Run 41581201803 (2026-11-03, build only - no tag - on `6991dbf2`) was the
+  first since. macOS arm64 and Windows ARM64 failed to compile
+  `road_object_manager.cpp`: a lambda capturing `this` it does not use,
+  which clang's `-Wunused-lambda-capture` refuses under `-Werror` and GCC
+  does not report. Linux ARM64 built and failed three of 9,907 tests: a
+  scratch directory two surface-style tests shared under ctest's parallel
+  run (Linux unlinks a folder whose files are open, Windows refuses, which
+  hid it); a start-screen test that typed a Windows path, whose back slashes
+  are no separators on Linux; and the toolbar-fit check, the first row at
+  1,371 of a 1366-px laptop's width on Linux's fonts once Paper Style Scale
+  had joined the View toolbar (it is now the plan views' and the View
+  menu's only). The two x86-64 jobs were cancelled by hand before they
+  finished. Fixed together on 2026-11-04, with what a clean local CLANG64
+  build (`docs/building.md`, "A build someone can watch") found next: a
+  constant no test used, which clang's `-Wunused-const-variable` refuses.
+  Lesson kept from the first rounds: build with CLANG64 before a run, since
+  GCC alone passes what two of the five jobs refuse.
 * **What holds the workflow holds its shape, and that its scripts parse; no
   more.** `tools/check_release_workflow.py` ("The workflow's shape, held")
   refuses a second trigger, a write outside the Publish job, an action

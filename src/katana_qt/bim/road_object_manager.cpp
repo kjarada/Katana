@@ -345,7 +345,7 @@ RoadObjectManagerDialog::RoadObjectManagerDialog(RoadObjectManagerContext contex
             impl_->status->setText(outcome->reply.section('\n', 0, 0));
         }
     });
-    connect(d.deleteMatching, &QPushButton::clicked, this, [this, run, scopeWords] {
+    connect(d.deleteMatching, &QPushButton::clicked, this, [run, scopeWords] {
         if (const auto words = scopeWords()) {
             run("ROADOBJECT DELETE " + *words);
         }

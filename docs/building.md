@@ -99,6 +99,40 @@ bash tools/build_visible.sh build katana_cli   # configure, then only those targ
 bash tools/build_visible.sh test -R ViewScale  # the suite only, ctest's arguments after it
 ```
 
+The same window builds another directory of the `release` preset. The clang
+check that mirrors the Windows ARM64 and macOS jobs - their compiler warns of
+what GCC does not, `-Wunused-lambda-capture` among them, and `-Werror` makes
+each a failed CI round of hours - is:
+
+```sh
+# the first time, or to set the directory's compilers again; the benchmarks
+# off, as the release jobs have them:
+KATANA_BUILD_DIR=build/clang64 KATANA_TOOLCHAIN_BIN=/c/msys64/clang64/bin \
+KATANA_CONFIGURE_ARGS="--fresh -DCMAKE_CXX_COMPILER=C:/msys64/clang64/bin/clang++.exe -DCMAKE_C_COMPILER=C:/msys64/clang64/bin/clang.exe -DCMAKE_PREFIX_PATH=C:/msys64/clang64 -DKATANA_BUILD_BENCHMARKS=OFF" \
+KATANA_BUILD_KEEP_GOING=1 bash tools/build_visible.sh build
+# after that:
+KATANA_BUILD_DIR=build/clang64 KATANA_TOOLCHAIN_BIN=/c/msys64/clang64/bin \
+KATANA_BUILD_KEEP_GOING=1 bash tools/build_visible.sh build
+```
+
+A `KATANA_BUILD_DIR` that has a cache is configured again with `cmake -S .
+-B <dir>`, not the preset: the preset sets its own compiler and prefix over
+the cache's, and on 2026-11-04 that turned the clang directory into a GCC one
+reading clang's libraries, whose errors meant nothing - and did it again for
+an option that only meant to turn the benchmarks off. So
+`KATANA_CONFIGURE_ARGS` is added to the cache's settings, and takes the
+preset (the options after it, overriding it) only with `--fresh`, which drops
+the cache, or in a directory that has none.
+
+The benchmarks are off there as in the release jobs: clang 22 refuses
+Google Benchmark's registration macro under `-Wpedantic -Werror` (`'__COUNTER__'
+is a C2y extension`, 241 times on 2026-11-04), which no job builds. Not
+done: a benchmark build with clang 22 needs that warning turned off for the
+benchmark targets alone. `KATANA_TOOLCHAIN_BIN` goes on PATH in front
+of UCRT64, which keeps cmake and ninja (CLANG64 has neither).
+`KATANA_BUILD_KEEP_GOING=1` is ninja's `-k 0`, so one run lists every error.
+The log and the status file are then in that directory.
+
 Why a window rather than the agent's own shell: that shell moves a command
 still running after ten minutes to the background, and the IDE does not show
 the owner a command's output, so the long runs - a full build, the whole

@@ -56,9 +56,13 @@ Other entry points in the same header:
 
 ### Paper style scale: see the marks without moving the camera
 
-**View > Paper Style Scale...**, also on the View toolbar and the plan
-view's own Paper Style Scale icon button, sizes paper-based library
-linestyles and symbols.
+**View > Paper Style Scale...**, also the plan view's own Paper Style Scale
+icon button, sizes paper-based library linestyles and symbols. It was on the
+main View toolbar as well until 2026-11-04: there it took the first toolbar
+row to 1,371 px on Linux's fonts, past a 1366 x 768 laptop's width, so the
+Format toolbar hid an action and the toolbar-fit check failed (Linux ARM64,
+run 41581201803). The scale is each view's own, which its title bar says
+better than one button for the active view.
 The non-modal dialog chooses an open plan view, **Auto** or **Fixed 1:N**,
 and a denominator. It only builds and runs a command; it edits neither the
 view nor the drawing itself.
@@ -167,12 +171,12 @@ silently creates or chooses a view. Set a scale in a desktop plan view and
 save first. MCP uses the same lines through `katana_run_commands`
 (`docs/mcp.md`), with the same errors and undo.
 
-Stable controls: `viewPaperScale` (the menu and View-toolbar action),
+Stable controls: `viewPaperScale` (the menu action),
 `ViewScaleButton` (each plan view's title-bar tool), `viewScaleDialog`,
 `viewScaleView`, `viewScaleMode`, `viewScaleDenominator`, `viewScaleLine`,
-`viewScaleApply`, `viewScaleStatus`, `viewScaleClose`. The title-bar duplicate
-yields before the optional zoom tools when space is short; the main toolbar
-and menu still reach it. It uses the standard title-bar icon-button dimensions,
+`viewScaleApply`, `viewScaleStatus`, `viewScaleClose`. The title-bar button
+yields before the optional zoom tools when space is short; the menu still
+reaches it. It uses the standard title-bar icon-button dimensions,
 not a wider text button, so showing it never raises the dock's minimum width.
 The action is disabled for an active non-plan view.
 

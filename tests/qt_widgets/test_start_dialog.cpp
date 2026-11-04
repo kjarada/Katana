@@ -13,6 +13,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -180,8 +181,13 @@ TEST(StartDialog, AFileIsLoadedMergedOrInPlaceAndNoFileIsRefused)
     EXPECT_TRUE(child<QLabel>(dialog, "startStatus")->text().startsWith("Not started: no file is named"));
     EXPECT_TRUE(recorder.lines.empty());
 
-    // As a file manager hands a path over, quotes and back slashes and all.
-    file->setText(QStringLiteral("\"C:\\site data\\codes.customisation.json\""));
+    // As a file manager hands a path over, quotes and native separators and
+    // all: back slashes on Windows. Elsewhere a back slash is a character a
+    // file name may hold, not a separator, and stays one (Linux ARM64, run
+    // 41581201803), so the path is made native as the platform's own is.
+    file->setText(QLatin1Char('"') +
+                  QDir::toNativeSeparators(QStringLiteral("C:/site data/codes.customisation.json")) +
+                  QLatin1Char('"'));
     EXPECT_EQ(dialog.lines().value(),
               QStringList{"CUSTOMISE \"C:/site data/codes.customisation.json\""});
     child<QCheckBox>(dialog, "startCustomisationReplace")->setChecked(true);

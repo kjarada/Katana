@@ -116,7 +116,9 @@ void tick(QWidget& dialog, const char* listName, const char* layer)
 }
 
 constexpr int kBox = static_cast<int>(katana::entity::CalloutShape::Box);
-constexpr int kText = 0;
+// The note kinds' data in leaderForNoteKind: 0 is plain text, 1 a template.
+// Only the template is chosen here, and clang refuses a constant no test uses
+// (-Wunused-const-variable, which the Windows ARM64 and macOS jobs make an error).
 constexpr int kTemplate = 1;
 
 std::string id(EntityId value)

@@ -1045,7 +1045,10 @@ void MainWindow::buildActions()
 
     QToolBar* viewBar = makeToolBar("View", Qt::TopToolBarArea);
     viewBar->addAction(extentsAction);
-    viewBar->addAction(paperScaleAction);
+    // Paper Style Scale is not repeated here: it is each plan view's own
+    // (its title bar's ViewScaleButton) and in the View menu, and on this bar
+    // it took the first row past a 1366-px laptop's width on Linux's fonts,
+    // hiding a Format action (1371 of 1366 px, Linux ARM64, run 41581201803).
     viewBar->addSeparator();
     viewBar->addActions({gridAction_, snapAction_});
 
