@@ -72,10 +72,11 @@ passed; `packaging_installs_only_present_first_party_files` failed, because a
 filtered tree has no program to install. More to run is under
 [Try it](#try-it).
 
-**Status.** Pre-release, version 0.2.0. Release v0.2.0 was published on
-2026-10-14 (its packages are unsigned, so Windows and macOS warn about the
-download; [Install](#install) says what to do), and building from source is
-the other way in. Nothing here has been validated for professional or legal
+**Status.** Pre-release, version 0.3.0. Releases are published on the
+project's [releases page](https://github.com/kjarada/Katana/releases), the
+first, v0.2.0, on 2026-10-14. Their packages are unsigned, so Windows and
+macOS warn about the download; [Install](#install) says what to do. Building
+from source is the other way in. Nothing here has been validated for professional or legal
 survey work: check results against an independent calculation before you rely
 on them.
 
