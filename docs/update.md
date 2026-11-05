@@ -87,6 +87,16 @@ tests, their fake feed (`tools/update_fake_feed.py`) and the generator of
 their signed fixtures (`tools/update_make_fixtures.py`) are `docs/testing.md`,
 "The update system's tests".
 
+The manifest fixture comparison rebuilds the committed tree's bytes through
+the release-tool tests' ordinary temporary-tree helper before running the
+producer. Git records those fixture files as mode `100644`; WSL can see
+them as `777` on a Windows-mounted checkout, which otherwise marks DLLs
+and data executable. Recreating the input in the native temporary directory
+keeps the fixture's intended mode without changing the producer's executable
+bit policy or the committed manifest expectation. The WSL suite exposed
+this on 2026-11-05; the direct-source version failed and the temporary-tree
+version passed.
+
 ## What is an install
 
 The unit of everything below is the **install root R**, the folder that

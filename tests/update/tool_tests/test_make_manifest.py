@@ -976,8 +976,11 @@ class TheCodePageHint(ToolTest):
 
 class FixtureTrees(Produced):
     def test_the_producer_reproduces_the_committed_fixture_manifests_by_meaning(self) -> None:
+        source = FIXTURES / "install" / "v2"
+        tree = self.build({path.relative_to(source).as_posix(): path.read_bytes()
+                           for path in source.rglob("*") if path.is_file()})
         out = self.tmp / "out"
-        done = run_tool("update_make_manifest.py", "--tree", FIXTURES / "install" / "v2", "--out", out,
+        done = run_tool("update_make_manifest.py", "--tree", tree, "--out", out,
                         "--version", "0.10.0", "--target", "win64", "--sequence", "1792312800",
                         "--seed", "etc/katana/*.ini")
         self.assert_tool_ok(done)

@@ -97,7 +97,15 @@ it is closed.
 bash tools/build_visible.sh                    # configure, build, the whole suite
 bash tools/build_visible.sh build katana_cli   # configure, then only those targets
 bash tools/build_visible.sh test -R ViewScale  # the suite only, ctest's arguments after it
+bash tools/build_visible.sh cargo              # the Rust port's workspace alone
+bash tools/build_visible.sh wsl                # all of it in WSL, the linux-release preset
 ```
+
+The Rust port (`docs/rust.md`) is part of every whole run: clippy and the
+workspace's build after the C++ build, `cargo test` after ctest. `wsl` runs
+the phase in the WSL distribution Ubuntu-24.04 with the toolchain prefix of
+`tools/setup_linux_toolchain.py`, building on WSL's own disk; its window, log
+and status file are in `build/wsl/` (`docs/rust.md`, "The toolchains").
 
 The same window builds another directory of the `release` preset. The clang
 check that mirrors the Windows ARM64 and macOS jobs - their compiler warns of

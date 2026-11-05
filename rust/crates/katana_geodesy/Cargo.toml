@@ -1,0 +1,15 @@
+[package]
+name = "katana_geodesy"
+description = "The geodesy layer: coordinate reference systems and transformations through PROJ, grid and ground factors, geodesics."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_math.workspace = true
+
+[lints]
+workspace = true

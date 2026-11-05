@@ -1,0 +1,17 @@
+[package]
+name = "katana_surveyio"
+description = "The surveyio layer: instrument field files read into survey values."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+katana_survey.workspace = true
+
+[lints]
+workspace = true

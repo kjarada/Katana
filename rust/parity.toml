@@ -1,0 +1,11 @@
+# Which C++ test directories are ported, and the C++ cases that have no Rust
+# twin and why (tools/check_rust_parity.py, the `rust_parity` test;
+# docs/rust.md, "Tests are the specification").
+#
+# A directory goes into `ported` in the commit that ports its last case; from
+# then on every case there - a new one too, from a fix made in C++ - needs its
+# twin, or the test fails.
+ported = ["core", "math", "geometry"]
+
+[exempt]
+# "Suite.CaseName" = "why it has no Rust twin"

@@ -1,0 +1,23 @@
+[package]
+name = "katana_cad"
+description = "The cad layer: the engine both front ends drive: the document, the command interpreter and every verb family."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_commands.workspace = true
+katana_core.workspace = true
+katana_entity.workspace = true
+katana_geodesy.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+katana_render.workspace = true
+katana_storage.workspace = true
+katana_survey.workspace = true
+katana_terrain.workspace = true
+
+[lints]
+workspace = true

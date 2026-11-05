@@ -187,7 +187,11 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 14 --output-
     script's `tee` is the copy.
   - Before starting, say in one line what is being built. Afterwards, state
     the exit code and the test counts.
-  - The window stays open after the run until the owner closes it.
+  - The window stays open after the run so the owner can read it. Once you
+    have read its status file and log, close it - the owner's instruction
+    (2026-11-05): "make sure to close any finished cmd". `bash
+    tools/build_visible.sh close` closes this checkout's finished windows and
+    never one whose run is still going.
   - Allowed in Claude's shell still: a syntax-only compile of a file (not a
     build, see above) and reading the log.
   - On Linux (a cloud session) there is no owner's desktop: run the three
@@ -473,3 +477,27 @@ core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> 
   `include/katana/entity/layer_path.hpp`).
 - Use British spelling in prose. In identifiers, use American spelling where
   the surrounding code does (`color`, `normalize`).
+
+## 13. The Rust port
+
+On 2026-11-05 the owner decided to migrate the whole of Katana to Rust, the
+window included (egui and wgpu). `docs/rust.md` is the record and the rules:
+the decisions, the order of the work, the workspace in `rust/`, the toolchain
+and how every port is done. While the port runs:
+
+- **Build in WSL only - the owner's instruction (2026-11-05): "i dont want to
+  run anything on windows at this stage just build for wsl then once we have a
+  fully working version we test on windows".** Every run is
+  `bash tools/build_visible.sh wsl [phase]` (distribution Ubuntu-24.04, the
+  toolchain prefix in `/opt/katana-toolchain`). No build, cargo or ctest run
+  on Windows until the port is a fully working version.
+
+- **C++ takes fixes only.** A fix to a layer already ported lands in its Rust
+  twin in the same commit; `rust_parity` refuses a ported directory's new test
+  without one. A new feature waits for its layer and is written in Rust only.
+- **The port is made on branch `rust-port`** (`../Katana-wt/rust-port`;
+  agents in `../Katana-wt/rust-<crate>`) and reaches `main` only at a
+  cut-over, with the owner.
+- **Port behaviour as it is.** The C++ is the oracle and its tests' expected
+  values are copied, never recomputed. A defect found goes under "Not done" in
+  `docs/rust.md`.

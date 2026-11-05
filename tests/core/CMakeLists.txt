@@ -17,3 +17,9 @@ katana_add_test_suite(core
 if(KATANA_SIMD_KERNEL_SET STREQUAL "neon")
     target_compile_definitions(katana_core_tests PRIVATE KATANA_TEST_SIMD_KERNEL_SET_NEON=1)
 endif()
+
+add_executable(katana_number_format_oracle number_format_oracle.cpp)
+target_link_libraries(katana_number_format_oracle PRIVATE katana_core)
+katana_target_defaults(katana_number_format_oracle)
+set_target_properties(katana_number_format_oracle PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")

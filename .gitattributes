@@ -16,3 +16,9 @@ LICENSE -text
 # Bash), and bash reads a carriage return as part of each line: a checkout that
 # gave it CRLF line ends (core.autocrlf on Windows) breaks every line.
 *.sh text eol=lf
+
+# The Rust port (docs/rust.md) is edited on Windows and built in WSL from this
+# one checkout, and is written from both sides. LF in every checkout, as the
+# shell scripts are, keeps the bytes the same on both sides. (Not for string
+# literals' sake: rustc reads a CRLF in a source file as LF.)
+*.rs text eol=lf

@@ -521,6 +521,50 @@ if(Python3_Interpreter_FOUND)
     # `katana_standard_pictures_script` is the test of how `katana_standard_current` holds the catalogue's pictures
     # (test_pictures.py), on one-pixel pictures it writes itself in a scratch folder.
     add_test(NAME katana_standard_pictures_script COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_pictures.py")
+
+    # The Rust port (docs/rust.md). `rust_layering`: each crate of rust/crates is a layer's, and depends only on
+    # what tools/check_layering.cmake allows that layer, and re-exports no third-party crate. `rust_parity`: every
+    # C++ test case of a directory rust/parity.toml calls ported has its Rust twin, so a fix made in C++ to a
+    # ported layer cannot land without one. Each is shown, on a fixture that breaks its rule, to see the breach:
+    # a check that cannot see a violation passes as quietly as one that finds none. `rust_parity_skips_literals`
+    # is the one fixture that must PASS - its braces are all in strings, characters and comments, and it fails
+    # with any one of those not stepped over.
+    set(_rust_fixtures "${CMAKE_CURRENT_SOURCE_DIR}/rust_check_fixtures")
+    add_test(NAME rust_layering
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py" "${PROJECT_SOURCE_DIR}")
+    add_test(NAME rust_parity
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_parity.py" "${PROJECT_SOURCE_DIR}")
+    foreach(_case IN ITEMS core_depends_on_math reexports_third_party not_a_layer)
+        add_test(NAME rust_layering_catches_${_case}
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py" --partial
+                    --crates "${_rust_fixtures}/layering/${_case}/crates" "${PROJECT_SOURCE_DIR}")
+    endforeach()
+    set_tests_properties(rust_layering_catches_core_depends_on_math PROPERTIES
+        PASS_REGULAR_EXPRESSION "katana_core/Cargo.toml: layer 'core' must not depend on 'math'")
+    set_tests_properties(rust_layering_catches_reexports_third_party PROPERTIES
+        PASS_REGULAR_EXPRESSION "lib[.]rs: re-exports the third-party crate 'rusqlite'")
+    set_tests_properties(rust_layering_catches_not_a_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "katana_plotting: is not a layer of tools/check_layering[.]cmake")
+    add_test(NAME rust_layering_catches_missing_layer
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py"
+                --crates "${_rust_fixtures}/layering/missing_layer/crates" "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(rust_layering_catches_missing_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "layer 'math' has no crate in rust/crates")
+    add_test(NAME rust_parity_catches_missing_twin
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_parity.py"
+                "${_rust_fixtures}/parity/missing_twin")
+    set_tests_properties(rust_parity_catches_missing_twin PROPERTIES
+        PASS_REGULAR_EXPRESSION "CoreText[.]KeepsANul has no Rust twin [(]core_text::keeps_a_nul[)]")
+    add_test(NAME rust_parity_catches_stale_exemption
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_parity.py"
+                "${_rust_fixtures}/parity/stale_exemption")
+    set_tests_properties(rust_parity_catches_stale_exemption PROPERTIES
+        PASS_REGULAR_EXPRESSION "the exemption names no C[+][+] test: Nope[.]Nothing")
+    add_test(NAME rust_parity_skips_literals
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_parity.py"
+                "${_rust_fixtures}/parity/braces_in_literals")
+    set_tests_properties(rust_parity_skips_literals PROPERTIES
+        PASS_REGULAR_EXPRESSION "2 of 2 C[+][+] test cases have a Rust twin")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only

@@ -11,6 +11,30 @@
 #   tools/build_visible.sh [all]               configure, build everything, run the whole suite
 #   tools/build_visible.sh build [target...]   configure and build (only those targets, if named)
 #   tools/build_visible.sh test [ctest args]   the suite only, e.g. test -R PlanContextMenu
+#   tools/build_visible.sh cargo               the Rust workspace alone: clippy, build, test
+#   tools/build_visible.sh wsl [phase] [...]   any of those in WSL instead (below)
+#   tools/build_visible.sh close               close this checkout's windows whose run has ended
+#
+# A window stays open at its end so that the owner can read it; once its status
+# file has been read, Claude closes it with `close` (the owner's instruction of
+# 2026-11-05, "make sure to close any finished cmd"). A window whose run is
+# still going is never closed: its bash has the run below it, and a finished
+# one, waiting at its last prompt, has nothing.
+#
+# The Rust port (docs/rust.md) is part of every run: after the C++ build, clippy
+# and the build of rust/ with warnings as errors; after ctest, cargo test, with
+# its counts summed beside ctest's. A narrow run - `build` with targets, `test`
+# with ctest's arguments - leaves the Rust out, as it leaves out the rest of the
+# C++. On Windows the cargo is MSYS2 UCRT64's, first on PATH as cmake is.
+#
+# `wsl` runs the phase in the WSL distribution Ubuntu-24.04 (KATANA_WSL_DISTRO
+# for another) with the conda-forge prefix of tools/setup_linux_toolchain.py
+# (/opt/katana-toolchain, or KATANA_TOOLCHAIN): the linux-release preset and
+# cargo, both building on WSL's own disk, in ~/katana-build/<worktree>/, because
+# a build on /mnt/d is slow. The window, the log and the status file are on the
+# Windows side as for any run, in build/wsl/, so they are waited on and read the
+# same way. Git is never run inside WSL: a worktree made by Windows git names its
+# repository by a D:/ path that Linux cannot open, and the build needs no git.
 #
 # Run from Claude's shell it opens the window and returns at once, printing
 # where the log and the status file are. The status file appears when the run
@@ -48,10 +72,33 @@
 # again.
 
 main() {
-    local root script build log status running arguments phase
+    local root script build log status running arguments phase host=windows
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     script="$root/tools/build_visible.sh"
+
+    # ---- inside WSL, started by a window below: run the steps, nothing else ---------------
+    if [ "${1:-}" = "--inside-wsl" ]; then
+        shift
+        inside_wsl "$root" "$@"
+        return
+    fi
+    if [ "${1:-}" = close ]; then
+        close_finished "$script"
+        return
+    fi
+    # `wsl` on Claude's command line; KATANA_BUILD_HOST in the window it opens,
+    # which is given the phase alone.
+    if [ "${1:-}" = wsl ]; then
+        host=wsl
+        shift
+    elif [ "${KATANA_BUILD_HOST:-}" = wsl ]; then
+        host=wsl
+    fi
+
     local directory="${KATANA_BUILD_DIR:-build/release}"
+    if [ "$host" = wsl ]; then
+        directory=build/wsl # the window's log and status; the build itself is on WSL's disk
+    fi
     build="$root/$directory"
     log="$build/visible_build.log"
     status="$build/visible_build.status"
@@ -63,9 +110,9 @@ main() {
 
     phase="${1:-all}"
     case "$phase" in
-        all | build | test) ;;
+        all | build | test | cargo) ;;
         *)
-            echo "usage: tools/build_visible.sh [all | build [target...] | test [ctest arguments...]]" >&2
+            echo "usage: tools/build_visible.sh [wsl] [all | build [target...] | test [ctest arguments...] | cargo]" >&2
             return 2
             ;;
     esac
@@ -87,11 +134,14 @@ main() {
         fi
         local title
         title="Katana $phase - $(basename "$root")"
+        if [ "$host" = wsl ]; then
+            title="Katana WSL $phase - $(basename "$root")"
+        fi
         # start gives the window a console of its own on the owner's desktop; the
         # environment, KATANA_BUILD_WINDOW with it, goes with it. Only the phase
         # and two paths with no cmd.exe metacharacters are on its command line.
-        KATANA_BUILD_WINDOW=1 cmd.exe //c start "$title" "$(cygpath -w "$BASH")" --login \
-            "$(cygpath -w "$script")" "$phase" || return
+        KATANA_BUILD_WINDOW=1 KATANA_BUILD_HOST="$host" cmd.exe //c start "$title" \
+            "$(cygpath -w "$BASH")" --login "$(cygpath -w "$script")" "$phase" || return
         echo "window=\"$title\" log=$log status=$status"
         return 0
     fi
@@ -122,10 +172,22 @@ main() {
 
     local started code
     started=$SECONDS
-    echo "== Katana $phase in $root/$directory, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"
-    echo "== toolchain first on PATH: ${toolchain:-none, UCRT64}" | tee -a "$log"
-    steps "$directory" "$phase" "$@" 2>&1 | tee -a "$log"
-    code=${PIPESTATUS[0]}
+    if [ "$host" = wsl ]; then
+        local distro="${KATANA_WSL_DISTRO:-Ubuntu-24.04}"
+        echo "== Katana $phase in WSL ($distro), sources $root, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"
+        # The caps and switches reach the Linux side through WSLENV; the phase's
+        # arguments on wsl.exe's command line, with MSYS's path conversion off so
+        # that a Linux path or a ctest pattern arrives as it was written.
+        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_BUILD_KEEP_GOING/u:KATANA_TOOLCHAIN/u${WSLENV:+:$WSLENV}"
+        MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wsl.exe -d "$distro" --cd "$(cygpath -w "$root")" \
+            -- bash tools/build_visible.sh --inside-wsl "$phase" "$@" 2>&1 | tee -a "$log"
+        code=${PIPESTATUS[0]}
+    else
+        echo "== Katana $phase in $root/$directory, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"
+        echo "== toolchain first on PATH: ${toolchain:-none, UCRT64}" | tee -a "$log"
+        steps "$directory" "$phase" "$@" 2>&1 | tee -a "$log"
+        code=${PIPESTATUS[0]}
+    fi
     echo "== finished: exit=$code after $((SECONDS - started)) s" | tee -a "$log"
     echo "exit=$code" > "$status"
     rm -f "$running"
@@ -134,7 +196,9 @@ main() {
 }
 
 # The build directory, the phase, then its arguments: build targets, or
-# ctest's arguments.
+# ctest's arguments. KATANA_LINUX_BUILD (set by inside_wsl) makes it the Linux
+# build: the linux-release preset into that directory, and the suite under an
+# X server, where the gpu. suite runs Vulkan as in the release job.
 steps() {
     local directory="$1" phase="$2"
     shift 2
@@ -145,25 +209,44 @@ steps() {
     if [ "${KATANA_BUILD_KEEP_GOING:-}" = 1 ]; then
         keepGoing=(-- -k 0)
     fi
+    local oracle="$directory/bin/tests/katana_number_format_oracle"
+    if [[ "$oracle" != /* ]]; then
+        oracle="$PWD/$oracle"
+    fi
+    if [ -n "${KATANA_LINUX_BUILD:-}" ]; then
+        export KATANA_NUMBER_FORMAT_ORACLE="$oracle"
+    else
+        export KATANA_NUMBER_FORMAT_ORACLE="$(cygpath -w "$oracle.exe")"
+    fi
+    if [ "$phase" = cargo ]; then
+        cargo_steps build && cargo_steps test
+        return
+    fi
     if [ "$phase" != test ]; then
-        # build/release is the preset's own. Another directory that has a cache
-        # is configured again WITHOUT the preset, KATANA_CONFIGURE_ARGS added:
-        # the preset sets its compiler and prefix over the cache's, and twice
-        # turned the clang directory into a GCC one reading clang's libraries
-        # (2026-11-04), the second time for an option that only meant to turn
-        # the benchmarks off. The preset is taken for a directory with no cache
-        # and for --fresh, which drops one; the options then override it.
-        # shellcheck disable=SC2206 # options, split on blanks on purpose
-        local extra=(${KATANA_CONFIGURE_ARGS:-})
-        local configure=(cmake --preset release)
-        if [ "$directory" != build/release ]; then
-            if [ -f "$directory/CMakeCache.txt" ] && [[ " ${extra[*]} " != *" --fresh "* ]]; then
-                configure=(cmake -S . -B "$directory")
-            else
-                configure=(cmake --preset release -B "$directory")
+        local configure
+        if [ -n "${KATANA_LINUX_BUILD:-}" ]; then
+            configure=(cmake --preset linux-release -B "$directory")
+        else
+            # build/release is the preset's own. Another directory that has a
+            # cache is configured again WITHOUT the preset, KATANA_CONFIGURE_ARGS
+            # added: the preset sets its compiler and prefix over the cache's,
+            # and twice turned the clang directory into a GCC one reading
+            # clang's libraries (2026-11-04), the second time for an option that
+            # only meant to turn the benchmarks off. The preset is taken for a
+            # directory with no cache and for --fresh, which drops one; the
+            # options then override it.
+            # shellcheck disable=SC2206 # options, split on blanks on purpose
+            local extra=(${KATANA_CONFIGURE_ARGS:-})
+            configure=(cmake --preset release)
+            if [ "$directory" != build/release ]; then
+                if [ -f "$directory/CMakeCache.txt" ] && [[ " ${extra[*]} " != *" --fresh "* ]]; then
+                    configure=(cmake -S . -B "$directory")
+                else
+                    configure=(cmake --preset release -B "$directory")
+                fi
             fi
+            configure+=("${extra[@]}")
         fi
-        configure+=("${extra[@]}")
         echo "== configure: ${configure[*]}"
         "${configure[@]}" || return
         local targets=()
@@ -173,12 +256,133 @@ steps() {
         echo "== build: cmake --build $directory --parallel ${jobs[*]} ${targets[*]} ${keepGoing[*]}"
         cmake --build "$directory" --parallel "${jobs[@]}" "${targets[@]}" "${keepGoing[@]}" ||
             return
+        # The Rust is part of a whole build, not of one that names targets.
+        if [ ${#targets[@]} -eq 0 ]; then
+            cargo_steps build || return
+        fi
     fi
     if [ "$phase" != build ]; then
-        echo "== test: ctest --test-dir $directory --parallel 14 --output-on-failure $*"
-        QT_QPA_PLATFORM=offscreen ctest --test-dir "$directory" --parallel 14 \
-            --output-on-failure "$@"
+        local runner=()
+        if [ -n "${KATANA_LINUX_BUILD:-}" ]; then
+            runner=(xvfb-run -a)
+        fi
+        echo "== test: ${runner[*]} ctest --test-dir $directory --parallel 14 --output-on-failure $*"
+        local tested=0
+        QT_QPA_PLATFORM=offscreen "${runner[@]}" ctest --test-dir "$directory" --parallel 14 \
+            --output-on-failure "$@" || tested=$?
+        # The Rust suite too, unless ctest was given a selection: the run is then
+        # about those tests alone. It runs after a failed ctest as well, so that
+        # one run gives both answers.
+        if [ $# -eq 0 ]; then
+            if ! cargo_steps test && [ "$tested" -eq 0 ]; then
+                tested=1
+            fi
+        fi
+        return "$tested"
     fi
+}
+
+# The Rust workspace: `build` is clippy and the build with warnings as errors,
+# `test` is cargo test with the counts of every test binary summed. Every cargo
+# here is given the same flags - RUSTFLAGS as the caller set it, then -D
+# warnings - or each step would rebuild what the one before it built.
+cargo_steps() {
+    local step="$1" manifest=rust/Cargo.toml
+    local flags="${RUSTFLAGS:+$RUSTFLAGS }-D warnings"
+    if [ "$step" = build ]; then
+        export CLIPPY_CONF_DIR="$PWD/rust"
+        echo "== cargo: $(command -v cargo), $(cargo --version), $(rustc --version)"
+        echo "== cargo clippy --workspace --all-targets --release --keep-going -- -D warnings"
+        RUSTFLAGS="$flags" cargo clippy --manifest-path "$manifest" --workspace --all-targets \
+            --release --keep-going -- -D warnings || return
+        rust_float_guard "$flags" || return
+        echo "== cargo build --workspace --release"
+        RUSTFLAGS="$flags" cargo build --manifest-path "$manifest" --workspace --release
+        return
+    fi
+    echo "== cargo test --workspace --release"
+    local results code
+    results="$(mktemp)"
+    RUSTFLAGS="$flags" cargo test --manifest-path "$manifest" --workspace --release 2>&1 |
+        tee "$results"
+    code=${PIPESTATUS[0]}
+    awk '/^test result:/ { for (i = 1; i < NF; i++) { if ($(i + 1) ~ /^passed;/) p += $i
+                                                      if ($(i + 1) ~ /^failed;/) f += $i
+                                                      if ($(i + 1) ~ /^ignored;/) s += $i } }
+         END { printf "== cargo test: %d passed, %d failed, %d ignored\n", p, f, s }' "$results"
+    rm -f "$results"
+    return "$code"
+}
+
+rust_float_guard() {
+    local flags="$1" results code
+    results="$(mktemp)"
+    echo "== Rust float-to-text canary: the forbidden call must be diagnosed"
+    RUSTFLAGS="$flags" cargo clippy \
+        --manifest-path tests/rust_check_fixtures/float_to_string/Cargo.toml \
+        --target-dir "${CARGO_TARGET_DIR:-rust/target}/float-format-canary" \
+        --release -- -D warnings 2>&1 | tee "$results"
+    code=${PIPESTATUS[0]}
+    if [ "$code" -eq 0 ] || ! grep -q 'KATANA_REAL_FORMATTER_REQUIRED' "$results"; then
+        rm -f "$results"
+        echo "Rust float-to-text guard failed: the forbidden call was not diagnosed" >&2
+        return 1
+    fi
+    rm -f "$results"
+    echo "== Rust float-to-text guard: forbidden call rejected"
+}
+
+# In WSL, from a window's wsl.exe: the toolchain prefix's build tools first on
+# PATH (only those: its bin/ also holds a python3 that would shadow the
+# system's), cargo linking with the prefix's GCC and sysroot as CMake builds
+# with them, and both builds on WSL's own disk; then steps() as on Windows.
+inside_wsl() {
+    local root="$1" phase="$2"
+    shift 2
+    local prefix="${KATANA_TOOLCHAIN:-/opt/katana-toolchain}"
+    if [ ! -x "$prefix/bin-tools/cargo" ] || [ ! -x "$prefix/bin-tools/cmake" ]; then
+        echo "no toolchain at $prefix/bin-tools: install it with tools/setup_linux_toolchain.py" \
+            "and link its build tools there (docs/rust.md, \"WSL\")" >&2
+        return 1
+    fi
+    export KATANA_TOOLCHAIN="$prefix" KATANA_LINUX_BUILD=1
+    # A Linux PATH of its own. WSL appends the Windows one (/mnt/c/...), and
+    # CMake's find_package searches the prefixes of PATH: on 2026-11-05 it took
+    # MSYS2's Windows CURL package through /mnt/c/msys64/ucrt64 and the
+    # configure failed.
+    export PATH="$prefix/bin-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    local machine home
+    machine="$(uname -m)"
+    export "CARGO_TARGET_${machine^^}_UNKNOWN_LINUX_GNU_LINKER=$prefix/bin/$machine-conda-linux-gnu-gcc"
+    # A program finds the prefix's libraries without LD_LIBRARY_PATH.
+    export RUSTFLAGS="-C link-arg=-Wl,-rpath,$prefix/lib"
+    home="$HOME/katana-build/$(basename "$root")"
+    export CARGO_TARGET_DIR="$home/cargo"
+    mkdir -p "$home"
+    cd "$root" || return 1
+    echo "== WSL: $(. /etc/os-release && echo "$PRETTY_NAME"), toolchain $prefix, builds in $home"
+    steps "$home/linux-release" "$phase" "$@"
+}
+
+# Closes the windows of this script - this checkout's, by its full path - whose
+# run has ended. A window is the bash that `start` gave a console (its parent
+# is no window bash); at its last prompt it has no child but its console host,
+# while a running one has the run's subshell, cmake or wsl.exe below it.
+close_finished() {
+    local script
+    script="$(cygpath -w "$1")"
+    powershell.exe -NoProfile -Command "
+        \$script = '$script'
+        \$all = Get-CimInstance Win32_Process
+        \$windows = @(\$all | Where-Object { \$_.Name -eq 'bash.exe' -and \$_.CommandLine -and \$_.CommandLine.Contains(\$script) })
+        \$closed = 0
+        foreach (\$w in \$windows) {
+            if (\$windows.ProcessId -contains \$w.ParentProcessId) { continue }
+            \$busy = @(\$all | Where-Object { \$_.ParentProcessId -eq \$w.ProcessId -and \$_.Name -ne 'conhost.exe' })
+            if (\$busy.Count -eq 0) { Stop-Process -Id \$w.ProcessId -Force; \$closed++ }
+        }
+        \"closed \$closed finished window(s); \$(@(\$windows | Where-Object { \$windows.ProcessId -notcontains \$_.ParentProcessId }).Count - \$closed) still running\"
+    "
 }
 
 # One line, so bash has read the exit before main runs.

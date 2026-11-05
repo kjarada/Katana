@@ -1,0 +1,57 @@
+# The Rust port of Katana (docs/rust.md).
+#
+# One crate per layer of tools/check_layering.cmake. A crate's katana_*
+# dependencies are the layers that table allows it, so the layering rule holds
+# by construction: a crate cannot name what it does not depend on.
+# tools/check_rust_layering.py (the `rust_layering` test) keeps the crates and
+# the table in step while both exist.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+# Not the product's version: the C++ build carries that (CMakeLists.txt) until a
+# Rust program ships, and nothing here is published.
+version = "0.0.0"
+edition = "2024"
+# The older of the two compilers the port is built with: 1.98.1 from the
+# conda-forge snapshot (WSL, Linux, macOS), 1.99.0 from MSYS2 (Windows).
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace.dependencies]
+katana_app = { path = "crates/katana_app" }
+katana_archive12d = { path = "crates/katana_archive12d" }
+katana_cad = { path = "crates/katana_cad" }
+katana_commands = { path = "crates/katana_commands" }
+katana_core = { path = "crates/katana_core" }
+katana_dxf = { path = "crates/katana_dxf" }
+katana_entity = { path = "crates/katana_entity" }
+katana_geodesy = { path = "crates/katana_geodesy" }
+katana_geometry = { path = "crates/katana_geometry" }
+katana_gis = { path = "crates/katana_gis" }
+katana_gpu = { path = "crates/katana_gpu" }
+katana_ifc = { path = "crates/katana_ifc" }
+katana_interop = { path = "crates/katana_interop" }
+katana_math = { path = "crates/katana_math" }
+katana_pointcloud = { path = "crates/katana_pointcloud" }
+katana_render = { path = "crates/katana_render" }
+katana_storage = { path = "crates/katana_storage" }
+katana_survey = { path = "crates/katana_survey" }
+katana_surveyio = { path = "crates/katana_surveyio" }
+katana_terrain = { path = "crates/katana_terrain" }
+katana_update = { path = "crates/katana_update" }
+katana_updater = { path = "crates/katana_updater" }
+katana_window = { path = "crates/katana_window" }
+
+[workspace.lints.rust]
+# Deny, not forbid: the modules that must be unsafe - the FFI adapters, the OS
+# calls, the SIMD kernels - allow it where they are, and nowhere else does.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# A warning is a failure, as -Werror makes it in the C++ build: the build runs
+# clippy with -D warnings (tools/build_visible.sh).
+all = { level = "warn", priority = -1 }
+disallowed_methods = "deny"

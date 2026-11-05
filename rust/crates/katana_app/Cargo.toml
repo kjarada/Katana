@@ -1,0 +1,32 @@
+[package]
+name = "katana_app"
+description = "The app layer: the headless session that katana_cli and katana_mcp share."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_archive12d.workspace = true
+katana_cad.workspace = true
+katana_commands.workspace = true
+katana_core.workspace = true
+katana_dxf.workspace = true
+katana_entity.workspace = true
+katana_geodesy.workspace = true
+katana_geometry.workspace = true
+katana_gis.workspace = true
+katana_ifc.workspace = true
+katana_interop.workspace = true
+katana_math.workspace = true
+katana_pointcloud.workspace = true
+katana_render.workspace = true
+katana_storage.workspace = true
+katana_survey.workspace = true
+katana_surveyio.workspace = true
+katana_terrain.workspace = true
+katana_update.workspace = true
+
+[lints]
+workspace = true

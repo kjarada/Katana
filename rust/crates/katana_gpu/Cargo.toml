@@ -1,0 +1,18 @@
+[package]
+name = "katana_gpu"
+description = "The gpu layer: the GPU renderer, the software rasteriser's twin behind the same seam."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+katana_pointcloud.workspace = true
+katana_render.workspace = true
+
+[lints]
+workspace = true

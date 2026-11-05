@@ -67,11 +67,12 @@ NOT_YET_CHECKED = {
 EXPECTED = {'plan_view.md', 'plotting.md', 'gpu.md', 'dxf.md'}
 
 ROOTS = ('src', 'include', 'tests', 'tools', 'docs', 'cmake', 'benchmarks', 'resources',
-         'samples', 'third_party')
+         'samples', 'third_party', 'rust')
 ROOT_FILES = ('CMakeLists.txt', 'CMakePresets.json', '.gitignore', '.clang-format',
               '.clang-tidy')
-CODE_ROOTS = ('include', 'src', 'tests', 'benchmarks')
-CODE_SUFFIXES = ('.hpp', '.cpp', '.h', '.inl')
+# rust/ is the Rust port (docs/rust.md): a name a document cites may live there.
+CODE_ROOTS = ('include', 'src', 'tests', 'benchmarks', 'rust')
+CODE_SUFFIXES = ('.hpp', '.cpp', '.h', '.inl', '.rs')
 BUILD_FILE_SUFFIXES = ('CMakeLists.txt', '.cmake')
 
 # The removed root documents, as a citation would name them. Split so that
@@ -129,7 +130,9 @@ def code_index(root, suffixes=CODE_SUFFIXES):
     """word -> set of files, over the code roots' files ending in `suffixes`."""
     files_by_word = {}
     for top in CODE_ROOTS:
-        for directory, _, names in os.walk(os.path.join(root, top)):
+        for directory, folders, names in os.walk(os.path.join(root, top)):
+            # cargo's output, generated sources among it, is not the code.
+            folders[:] = [f for f in folders if not (top == 'rust' and f == 'target')]
             for name in names:
                 if not name.endswith(suffixes):
                     continue

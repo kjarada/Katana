@@ -1,0 +1,18 @@
+[package]
+name = "katana_archive12d"
+description = "The archive12d layer: the .12da archive format and the survey coding libraries."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_entity.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+katana_terrain.workspace = true
+
+[lints]
+workspace = true

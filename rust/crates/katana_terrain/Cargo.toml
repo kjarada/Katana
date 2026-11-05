@@ -1,0 +1,16 @@
+[package]
+name = "katana_terrain"
+description = "The terrain layer: TIN surfaces, constrained triangulation, contours, volumes, tiled terrain."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+
+[lints]
+workspace = true

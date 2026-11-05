@@ -1,0 +1,15 @@
+[package]
+name = "katana_updater"
+description = "The update layer: the helper program that swaps an install's files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_update.workspace = true
+
+[lints]
+workspace = true

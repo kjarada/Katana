@@ -1,0 +1,7 @@
+[package]
+name = "katana_core"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+katana_math = { path = "../katana_math" }

@@ -1,0 +1,20 @@
+[package]
+name = "katana_ifc"
+description = "The ifc layer: IFC 4.3 export and import."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_commands.workspace = true
+katana_core.workspace = true
+katana_entity.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+katana_survey.workspace = true
+katana_terrain.workspace = true
+
+[lints]
+workspace = true

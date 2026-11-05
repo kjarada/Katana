@@ -1,0 +1,4 @@
+ported = ["core"]
+
+[exempt]
+"Nope.Nothing" = "a case deleted long ago"

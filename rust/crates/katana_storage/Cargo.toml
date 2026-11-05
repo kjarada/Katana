@@ -1,0 +1,18 @@
+[package]
+name = "katana_storage"
+description = "The storage layer: the project database (SQLite, schema 13)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_entity.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+katana_survey.workspace = true
+
+[lints]
+workspace = true

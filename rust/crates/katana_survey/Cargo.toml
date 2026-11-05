@@ -1,0 +1,15 @@
+[package]
+name = "katana_survey"
+description = "The survey layer: the survey model, least squares and network adjustment, subsurface utilities."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_math.workspace = true
+
+[lints]
+workspace = true

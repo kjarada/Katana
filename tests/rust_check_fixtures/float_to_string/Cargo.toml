@@ -1,0 +1,10 @@
+[package]
+name = "katana_float_to_string_canary"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lints.clippy]
+disallowed_methods = "deny"

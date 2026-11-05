@@ -78,6 +78,11 @@ COMMON_SPECS = [
     "libboost-headers",
     "gtest",
     "benchmark",
+    # The Rust port's compiler (docs/rust.md): from the same snapshot as the
+    # libraries it links - GDAL, PROJ, PDAL, SQLite, libcurl - so that WSL,
+    # the Linux and macOS release jobs and a cloud session, whose egress
+    # reaches conda-forge but not static.rust-lang.org, build it alike.
+    "rust",
 ]
 
 def is_arm64() -> bool:

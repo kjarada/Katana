@@ -33,6 +33,8 @@ about the configuration that ships.
 | the layering rules | `tests/CMakeLists.txt` | `layering` | `tools/check_layering.cmake` |
 | what the programs link and install | `tests/CMakeLists.txt` | `the_programs_link_none_of_the_legacy_customisation_readers`, `packaging_installs_only_present_first_party_files` | the link closure walked at configure time; `tools/check_install_rules.cmake` ("What the programs hold", below) |
 | the documents' references | `tests/CMakeLists.txt` | `docs` | `tools/check_docs.py` ("The docs test", below) |
+| the Rust port's crates keep the layering rules; every C++ case of a ported layer has its Rust twin | `tests/CMakeLists.txt` | `rust_layering`, `rust_parity`, and `rust_layering_catches_<what>` and `rust_parity_catches_<what>` on fixtures that break each rule | `tools/check_rust_layering.py`, `tools/check_rust_parity.py`, `tests/rust_check_fixtures/` (`docs/rust.md`, "Tests are the specification") |
+| the Rust port's own tests | `cargo test`, the cargo stage of `tools/build_visible.sh` | `<module>::<test>` | `rust/crates/<crate>/tests/` (`docs/rust.md`) |
 | the update system end to end, on a feed of the tests' own | `tests/update/e2e.cmake` | `update_e2e_<what it shows>` | `tests/update/update_e2e.py` driving `tools/update_fake_feed.py`, `katana_update_e2e` and `katana_updater_test` ("The update system's tests", below) |
 | the release tools, and the build's promises about updating | `tests/update/CMakeLists.txt` | `update_tools_<tool>`, `update_keys_<what it shows>`, `katana_updater_imports_only_os_dlls`, `update_test_keys_are_in_no_shipped_program`, `packaging_nsis_<what it shows>` | Python `unittest` files in `tests/update/tool_tests/`; CMake scripts in `tests/update/` |
 

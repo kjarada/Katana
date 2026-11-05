@@ -1,0 +1,22 @@
+[package]
+name = "katana_interop"
+description = "The interop layer: what gis and pointcloud read, converted into the domain model."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_archive12d.workspace = true
+katana_commands.workspace = true
+katana_core.workspace = true
+katana_entity.workspace = true
+katana_geometry.workspace = true
+katana_gis.workspace = true
+katana_math.workspace = true
+katana_pointcloud.workspace = true
+katana_terrain.workspace = true
+
+[lints]
+workspace = true

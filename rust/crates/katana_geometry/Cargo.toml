@@ -1,0 +1,15 @@
+[package]
+name = "katana_geometry"
+description = "The geometry layer: 2D primitives and algorithms, spirals, chording, alignments."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_math.workspace = true
+
+[lints]
+workspace = true
