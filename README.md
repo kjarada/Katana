@@ -1,7 +1,7 @@
 # Katana
 
 **Survey, CAD, GIS and geospatial software for surveyors and civil engineers,
-written by AI agents and directed by a person.**
+written by AI agents and directed by Humans.**
 
 ![Katana's window: a site plan with its contours on the left and the 3D view of the surface they were cut from on the right, beside the layers, reference data and properties panels and the command line](docs/images/terrain.png)
 
