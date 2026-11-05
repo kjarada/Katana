@@ -389,6 +389,14 @@ TEST(JobRunner, ATriangulationRunAsAJobLeavesTheEventLoopRunning)
     // Debug build: 60k scattered points. What the test holds is the RATIO -
     // the GUI thread paused for well under half of the work's time - because
     // absolute times on a shared machine are not a property of the code.
+    //
+    // The work is repeated to a floor of 400 ms. One pass is 70-90 ms in
+    // Release, and one pause of the loaded machine's own, with the whole suite
+    // running beside it, was more than half of that: 52 ms on the macOS
+    // release runner (2026-10-14), 70 ms there again (2026-11-04), and the
+    // same on the owner's machine (docs/terrain.md). With 400 ms of work the
+    // bound is 200 ms, as for the 400 ms job above, and a triangulation run on
+    // the GUI thread would still pause the loop for all of it.
     katana::terrain::TinInput input;
     std::uint32_t state = 12345u;
     const auto next = [&state] {
@@ -404,14 +412,19 @@ TEST(JobRunner, ATriangulationRunAsAJobLeavesTheEventLoopRunning)
     JobReport report;
     const JobId id = runner.start(
         "Triangulating",
-        [input = std::move(input)](JobControl&) mutable
+        [input = std::move(input)](JobControl& control) mutable
             -> katana::core::Result<JobRunner::Apply> {
-            auto built = katana::terrain::buildTin(input);
-            if (!built) {
-                return built.error();
-            }
-            auto surface = std::make_shared<katana::terrain::TinSurface>(
-                std::move(built->surface));
+            using Clock = std::chrono::steady_clock;
+            const Clock::time_point began = Clock::now();
+            std::shared_ptr<katana::terrain::TinSurface> surface;
+            do {
+                auto built = katana::terrain::buildTin(input);
+                if (!built) {
+                    return built.error();
+                }
+                surface = std::make_shared<katana::terrain::TinSurface>(std::move(built->surface));
+            } while (Clock::now() - began < std::chrono::milliseconds(400) &&
+                     !control.stopRequested());
             return JobRunner::Apply([surface] {});
         },
         [&](const JobReport& r) { report = r; });

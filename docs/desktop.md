@@ -942,6 +942,22 @@ Vertex / ..."), and elsewhere on the button the tool's, where it showed the
 first tool's alone. The menu is the Draw menu's own submenu, one action per
 tool, so a tool is the same object in both.
 
+**Not done: the held press's test failed once on a loaded runner.**
+`ToolFamilyButtons.AClickOnTheIconRunsTheToolWhileTheMarkAHoldOrARightClickOpensTheFamily`
+holds a press past the popup delay, then lets go. In release run 41839118311
+(2026-11-04, Windows x86-64 job) the menu opened, after the delay, and the
+release still started a fourth tool where three were expected. It passed in
+the other four jobs and on the owner's machine (a whole suite there on
+2026-11-05 included). By Qt
+6.11's source this should not happen:
+- the button's private `popupTimerDone` opens the menu with a blocking `exec`;
+- `updateButtonDown`, on `aboutToHide`, clears the pressed state before the
+  test sends its release, so the release has nothing to click.
+The cause was therefore not found. In the window it cannot reach a person:
+the open menu takes the release, not the button. The test now names the
+tools that started when it fails, so the next failure says which tool ran
+and from where.
+
 **A family is framed for its own tool, and its mark lights for any.** A
 tool's button is framed in the accent while its tool runs
 (`QToolButton:checked`), the toolbar's one sign that a tool runs, and a

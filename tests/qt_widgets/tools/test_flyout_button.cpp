@@ -696,7 +696,15 @@ TEST(ToolFamilyButtons, AClickOnTheIconRunsTheToolWhileTheMarkAHoldOrARightClick
     QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton,
                         Qt::NoModifier);
     QCoreApplication::sendEvent(circle, &release);
-    EXPECT_EQ(built.started.size(), 3u) << "a held press that opened the menu also ran the tool";
+    // Which tools started, in order: it failed once on a loaded runner with a
+    // fourth start that Qt's own sequence rules out (docs/desktop.md, "Not
+    // done: the held press's test"), and the count alone did not say which.
+    std::string startedInOrder;
+    for (const std::string& tool : built.started) {
+        startedInOrder += (startedInOrder.empty() ? "" : ", ") + tool;
+    }
+    EXPECT_EQ(built.started.size(), 3u)
+        << "a held press that opened the menu also ran the tool; started: " << startedInOrder;
 }
 
 TEST(ToolFamilyButtons, WithNoToolRunningTheMarkIsLitInTheAccentOnlyWhileThePointerIsOnItsCorner)

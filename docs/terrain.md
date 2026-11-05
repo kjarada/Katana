@@ -1392,16 +1392,29 @@ From Point Cloud on `samples/gis/survey_scan.las` (29 512 ground points)
 triangulated in 1.28 s in the background, and the event loop paused at most
 24 ms, the Apply step included.
 
-**Not done: the ratio test is fragile in Release on a fast machine.**
+**The ratio test was fragile in Release on a fast machine.**
 `ATriangulationRunAsAJobLeavesTheEventLoopRunning` holds the longest pause
 under half the work's time, and the same 60 000 points take far less than
 the Debug figure above in a Release build: 89 ms on the macOS release runner
 (2026-10-14), where one 52 ms pause of the loop, with the whole suite running
 in parallel beside it, failed the 44 ms bound. It failed the same way on the
-owner's machine under a full parallel suite (2026-10-06) and passes alone. A
-pause that long is the loaded machine's, not the job's; the fix is work long
-enough that the ratio stands above it (more points, or the work repeated to a
-floor of time), which is not made yet.
+owner's machine under a full parallel suite (2026-10-06) and passes alone.
+It failed again on the macOS runner in release run 41839118311. On
+2026-11-04 the work took 70.5 ms and one pause took 69.9 ms, against a
+35.3 ms bound. In that job's re-run on 2026-11-05 they were 58.5 ms and
+52.4 ms, against 29.2 ms.
+
+A pause that long is the loaded machine's, not the job's. The triangulation
+is single-threaded (`src/katana_terrain/tin_builder.cpp` uses no pool), so it
+does not take the runner's cores from the GUI thread. And the pause does not
+grow with the work: 52 ms of 89 ms on 2026-10-14, then 70 ms and 52 ms of
+the shorter jobs above. That fits a 10 ms timer the system lets slip by
+50-70 ms, which on a job that short is most of it. Since 2026-11-05 the
+job repeats the triangulation until its work reaches 400 ms, so the bound is
+200 ms, the same bound as the 400 ms job test, about three times the longest
+such pause seen. More points were rejected: in Debug they would multiply a
+pass that is already past 400 ms. A triangulation run on the GUI thread
+still fails, since the pause is then the whole 400 ms.
 
 On real data (Release, headless, three runs), Surface From Drawing on the
 owner's *Test 4 without tin* archive (27 886 entities, giving 197 287 vertices
