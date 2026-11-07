@@ -872,7 +872,7 @@ pub fn observation_kind_name(observation: &Observation) -> String {
 }
 
 // The points an observation names, as views: never more than three.
-fn referenced_point_views(observation: &Observation) -> Vec<&str> {
+pub(crate) fn referenced_point_views(observation: &Observation) -> Vec<&str> {
     match observation {
         Observation::HorizontalAngle(o) => vec![o.at.as_str(), o.from.as_str(), o.to.as_str()],
         Observation::HorizontalDirection(o) => vec![o.at.as_str(), o.to.as_str()],

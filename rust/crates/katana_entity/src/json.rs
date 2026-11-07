@@ -14,6 +14,13 @@
 //! 2010), printed like printf's %g with at least one fractional digit ("1.0",
 //! "1e+20", "1e-05"). Grisu2 is not always the shortest round-trip text, so
 //! neither ryu nor katana_core's format_exact_real can stand in for it.
+//!
+//! `sax` is nlohmann's own reader of JSON text and its parse events, for the
+//! customisation format, which reads what a tree does not keep (sax.rs).
+
+mod sax;
+
+pub(crate) use sax::{Sax, SaxError, sax_parse};
 
 use serde_json::{Map, Number, Value};
 
@@ -331,7 +338,7 @@ fn write_value(out: &mut String, value: &Value) {
 /// nlohmann's dump_escaped with ensure_ascii off: the two-character escapes,
 /// \u00XX (lower-case hex) for the other control characters, and everything
 /// else - DEL and every non-ASCII character included - as it is.
-fn write_string(out: &mut String, text: &str) {
+pub(crate) fn write_string(out: &mut String, text: &str) {
     out.push('"');
     for character in text.chars() {
         match character {
@@ -352,7 +359,7 @@ fn write_string(out: &mut String, text: &str) {
 }
 
 /// nlohmann's dump_float: null for a non-finite value, else its to_chars.
-fn dump_float(value: f64) -> String {
+pub(crate) fn dump_float(value: f64) -> String {
     if !value.is_finite() {
         return String::from("null");
     }

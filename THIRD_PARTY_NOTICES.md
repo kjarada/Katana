@@ -281,7 +281,7 @@ its step 8, so for now these are compiled only into the port's libraries and
 tests; they move to section 1 with the first Rust program that ships. The
 versions are those of `rust/Cargo.lock`, and the licences are each crate's own
 `license` field as `cargo tree` reported it on 2026-11-07 (recorded). The
-first seven are the crates the port names; the rest come with them. `autocfg`
+rows up to windows-sys are the crates the port names; the rest come with them. `autocfg`
 and `paste` run only while building.
 
 | Crate | Version | Licence | Brought in by |
@@ -291,6 +291,8 @@ and `paste` run only while building.
 | spade | 2.15.1 | MIT OR Apache-2.0 | katana_terrain (the constrained Delaunay triangulation) |
 | robust | 1.2.0 | MIT OR Apache-2.0 | katana_terrain (exact orientation and in-circle predicates) |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | katana_update (raw inflate) |
+| ed25519-dalek, curve25519-dalek | 2.2.0, 4.1.3 | BSD-3-Clause | katana_update (Ed25519 verification and the RFC 8032 checks on the key) |
+| serde | 1.0.229 | MIT OR Apache-2.0 | katana_update (its JSON reader's visitor), serde_json |
 | windows-sys | 0.60.2 | MIT OR Apache-2.0, unverified (section 7) | katana_update, Windows only |
 | windows-targets, windows_x86_64_gnu | 0.53.5, 0.53.1 | MIT OR Apache-2.0, unverified (section 7) | windows-sys, Windows only |
 | serde_core, itoa, zmij, memchr | 1.0.229, 1.0.18, 1.0.23, 2.8.3 | MIT OR Apache-2.0; MIT OR Apache-2.0; MIT; Unlicense OR MIT | serde_json |
@@ -298,11 +300,13 @@ and `paste` run only while building.
 | simba, approx, num-traits, num-complex, num-integer, num-rational, typenum, matrixmultiply, rawpointer, wide, safe_arch, bytemuck | 0.9.1, 0.5.1, 0.2.19, 0.4.6, 0.1.47, 0.4.2, 1.20.1, 0.3.11, 0.2.1, 0.7.33, 0.7.4, 1.25.2 | Apache-2.0 (simba, approx); Zlib OR Apache-2.0 OR MIT (wide, safe_arch, bytemuck); MIT OR Apache-2.0 (the rest) | nalgebra |
 | smallvec | 1.16.5 | MIT OR Apache-2.0 | spade |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | miniz_oxide |
+| ed25519, signature, sha2, digest, block-buffer, crypto-common, generic-array, cpufeatures, cfg-if, subtle, zeroize | 2.2.3, 2.2.0, 0.10.9, 0.10.7, 0.10.4, 0.1.7, 0.14.7, 0.2.17, 1.0.5, 2.6.1, 1.9.1 | Apache-2.0 OR MIT (ed25519, signature, zeroize); MIT (generic-array); BSD-3-Clause (subtle); MIT OR Apache-2.0 (the rest) | ed25519-dalek, curve25519-dalek |
 | autocfg, paste | 1.5.1, 1.0.15 | Apache-2.0 OR MIT; MIT OR Apache-2.0 | build-time only, a build script's helper and a macro, both reached through nalgebra |
+| curve25519-dalek-derive, rustc_version, semver, version_check, proc-macro2, quote, syn, unicode-ident | 0.1.1, 0.4.1, 1.0.28, 0.9.5, 1.0.107, 1.0.47, 2.0.119, 1.0.27 | MIT OR Apache-2.0 (unicode-ident: (MIT OR Apache-2.0) AND Unicode-3.0) | build-time only: a derive macro and build scripts' helpers, reached through curve25519-dalek and generic-array |
 
 Every licence named is compatible with GPL-3.0-or-later: Apache-2.0 is
-compatible with GPL version 3, and MIT, Zlib, 0BSD and the Unlicense are
-permissive. Where a crate offers a choice, Katana takes it under MIT or
+compatible with GPL version 3, and MIT, BSD-3-Clause, Zlib, 0BSD, Unicode-3.0
+and the Unlicense are permissive. Where a crate offers a choice, Katana takes it under MIT or
 Apache-2.0.
 
 ## 6. The Linux, macOS and Windows ARM64 packages

@@ -58,7 +58,7 @@ the step's own run is the evidence, not this table.
 |---|---|
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
-| 2 | in progress: wave A done in WSL - geodesy and render whole, the entity model, the terrain TIN core on spade, the survey core and its subsurface tools, the update layer's leaves and machine seams (902 of the step's 2,094 cases, 869 run on Linux); waves B and C to come |
+| 2 | in progress: waves A and B done in WSL - geodesy, render, entity, commands, terrain and survey whole (`rust/parity.toml` holds them as ported), and the update layer's leaves, machine seams, install record, feed, manifest, signature and trust (1,530 of the step's 2,094 cases); wave C - the rest of update and the updater - to come |
 | 3-9 | not started |
 
 ### Step 1: the foundation crates
@@ -149,8 +149,8 @@ once, fixed and committed before the next begins.
 | Wave | What | Cases |
 |---|---|---|
 | A | geodesy; render; the entity model (all but the customisation libraries); terrain's TIN core (all but the volumes); survey's core and its subsurface tools (all but the reduction); update's version, ranges, inflate, paths, credential, file operations, fault injection, registry and process seams | 902 |
-| B | entity's customisation libraries; commands; terrain's overlay and volumes; survey's reduction; update's install, journal, state, feed, manifest, signature, trust, plan and check | - |
-| C | update's stage, apply, recover and contract, with the tests that need the apply harness; the updater | - |
+| B | entity's customisation libraries; commands; terrain's overlay and volumes; survey's reduction; update's install record, feed, manifest, signature and trust | 628 |
+| C | update's journal, state, plan, check, stage, apply, recover and contract, with the tests that need the apply harness; the updater | 562 |
 
 Wave A's seven agents wrote 73,540 lines no one had compiled: 44,357 of
 library and 29,099 of tests. The
@@ -188,6 +188,49 @@ readers of stored bytes - the geometry blob - still refuse such bytes. Two
 cases whose only subject is that refusal are exempt (`rust/parity.toml`), as
 are a moved-from transformer and a change of the floating-point rounding
 mode, which Rust cannot express.
+
+Wave B's five agents built on wave A's compiled code and compiled almost
+clean: eight Clippy findings in the libraries, two in the tests and one
+untyped float, then the first test run passed - 1,933 passed, none failed
+(631 new: 628 twins less one Windows-only case, plus four unit tests of the
+customisation parser). Its decisions:
+
+- **The undo stack does not hold the model.** `CommandStack::new(&mut model,
+  ..)`, then `execute`, `undo` and `redo` each take `&mut Model`. The C++
+  stack keeps a reference to a model that must outlive it, which a Rust
+  document holding both the model and its stack cannot express. A save point
+  is a step's serial number, not a command's address.
+- **Three JSON readers, by what each C++ reader depends on.** The entity
+  serialization reads through serde_json with nlohmann's answers; the
+  customisation reader is a line-for-line port of nlohmann 3.12's lexer and
+  event parser (`katana_entity`'s `json/sax.rs`), because the C++ reads
+  customisations as events - a member given twice, strokes read as they come,
+  error 406 with its line and column, 100,000 levels deep; the update layer
+  reads feeds, manifests and records through serde_json with nlohmann's
+  answers on duplicate keys, `-0`, a byte-order mark and number range
+  (`katana_update`'s `json.rs`), because it may depend on core alone. One
+  shared reader would need a crate below both with a JSON value type of its
+  own, since no third-party type may cross a crate's interface. The one
+  shared piece with no third-party type - nlohmann's number text, the port
+  of its Grisu2 - moves into `katana_core::text` when a second crate writes
+  a real number as nlohmann does; the update layer's records hold none (their
+  integers, strings and flags give serde_json's two-space text, with the keys
+  sorted as `nlohmann::json` holds them).
+- **The update layer's build configuration** - the pinned keys and the feed's
+  repository and address - is read by its `build.rs` from the same CMake
+  files, with the same refusals, so both programs of one checkout carry the
+  same keys.
+- **Signatures**: OpenSSL's Ed25519 and the C++'s RFC 8032 checks become
+  ed25519-dalek's `verify_strict` with each check made explicitly before it -
+  the canonical y by bytes (dalek's decompression would reduce it), the
+  point on the curve, the sign of x = 0, the neutral element, the prime-order
+  subgroup and S < L - each with the C++'s refusal.
+
+Wave B's integration evidence, 2026-11-07, `tools/build_visible.sh wsl` on
+the merged tree: exit 0; the Release C++ build, Clippy and the float-to-text
+guard clean; CTest 9,914 entries, 9,874 passed, 40 skipped, none failed, with
+`rust_parity` holding nine directories as ported; cargo test 1,933 passed,
+none failed, none ignored.
 
 Wave A's integration evidence, 2026-11-07, `tools/build_visible.sh wsl` on
 the merged tree: exit 0; the Release C++ build, Clippy with `-D warnings`
@@ -523,6 +566,24 @@ the crate's binding.
     entry that vanished after `ERROR_ALREADY_EXISTS` as made by another
     process; `absoluteNormal` may strip a trailing dot or space before
     `endsInDotOrSpace` sees it (suspected, to be checked on Windows).
+  - commands: a hatch pattern's update is still refused as MOD-09 found it -
+    `validate()` answers CommandRejected where the table's own check answers
+    InvalidArgument (linetypes were fixed to ask the table; hatch patterns
+    were not); `ChangeSetCommand::execute` dereferences a lookup unchecked
+    (validation keeps it unreachable).
+  - terrain: `gridVolume` casts its column and row counts to an integer
+    unguarded, undefined for an infinite count; `SegmentProfiler::along`
+    sorts with ties in no specified order.
+  - survey reduction: the report's `fixed()` copies a 64-byte buffer whole
+    for a value too long for it, and `dms()` casts unguarded (both
+    unreachable for survey values); `seedGnss`, `convertGnssVectors` and
+    `findTraverse` dereference an optional that can be empty (undefined in
+    C++; the Rust skips the observation or ends the search); a face pair with
+    no distance takes its target height from the left face's zenith only; a
+    later observation of a pointing overwrites the shot's face.
+  - customisation: nlohmann's lexer ends the input at a NUL, so `{...} junk`
+    is read; `Members::finish` counts the members found, so a name asked for
+    twice could hide an unknown member (nothing asks twice).
 - **Where the Rust necessarily differs from the C++** (step 2):
   - Text the model holds is validated UTF-8 (`String`), by the rule "bytes
     up to the decoder": the C++ cases that store non-UTF-8 text in a model
@@ -544,3 +605,13 @@ the crate's binding.
   - Windows-only code of the update layer (the Credential Manager, the long
     path forms, the Windows file operations and process launch) is written,
     not compiled, until step 8; so is every NEON kernel.
+  - The update layer's records nested deeper than 128 levels are refused
+    (serde_json's limit; nlohmann reads them); a record's I/O failure gives
+    Rust's error text; OpenSSL's initialisation and allocation failures have
+    no counterpart.
+- **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
+  reach the Rust yet.** Its `build.rs` reads the defaults from
+  `src/katana_update/CMakeLists.txt` and would take environment variables of
+  the same names, but nothing sets them; the cargo stage of
+  `tools/build_visible.sh` and the release jobs must pass them when a build
+  that is not the default is made.
