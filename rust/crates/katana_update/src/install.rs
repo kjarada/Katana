@@ -213,8 +213,9 @@ fn package_build(record: &Json, file: &Path) -> Result<Option<RecordedBuild>> {
 
 // The path without a trailing separator, normalised lexically (std::filesystem's
 // lexically_normal, and then the folder itself where the text ended in a separator): "." names are
-// dropped, a ".." takes the name before it with it, and one at the root goes.
-fn bare(path: &Path) -> PathBuf {
+// dropped, a ".." takes the name before it with it, and one at the root goes. The state module's
+// cleanup list compares its lines by the same rule (state.cpp's two copies of it are one here).
+pub(crate) fn bare(path: &Path) -> PathBuf {
     let mut parts: Vec<Component<'_>> = Vec::new();
     for component in path.components() {
         match component {

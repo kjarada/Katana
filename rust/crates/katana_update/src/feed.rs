@@ -310,7 +310,8 @@ where
     Some(Box::new(function))
 }
 
-fn stop_requested(stop: StopToken<'_>) -> bool {
+/// std::stop_token::stop_requested: the planner and check() ask it too.
+pub(crate) fn stop_requested(stop: StopToken<'_>) -> bool {
     stop.is_some_and(|flag| flag.load(Ordering::Relaxed))
 }
 

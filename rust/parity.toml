@@ -5,7 +5,7 @@
 # A directory goes into `ported` in the commit that ports its last case; from
 # then on every case there - a new one too, from a fix made in C++ - needs its
 # twin, or the test fails.
-ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands", "terrain", "survey"]
+ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands", "terrain", "survey", "storage", "dxf", "ifc"]
 
 [exempt]
 # "Suite.CaseName" = "why it has no Rust twin"

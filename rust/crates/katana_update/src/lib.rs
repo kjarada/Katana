@@ -8,6 +8,7 @@
 //! handed to the apply, the journal and the test at once: an implementation that keeps state
 //! (a fake's record, [`FaultFs`]'s counters) keeps it in a `Cell` or a `RefCell`.
 
+pub mod check;
 pub mod command_line;
 pub mod credential;
 pub mod credential_detail;
@@ -22,10 +23,12 @@ mod fsops_posix;
 mod fsops_win;
 pub mod inflate;
 pub mod install;
+pub mod journal;
 mod json;
 pub mod long_path;
 pub mod manifest;
 pub mod paths;
+pub mod plan;
 pub mod process;
 pub mod ranges;
 mod records;
@@ -36,9 +39,11 @@ pub mod signature;
 mod spawn_posix;
 #[cfg(windows)]
 mod spawn_win;
+pub mod state;
 pub mod trust;
 pub mod version;
 
+pub use check::{CheckResult, CheckStatus, apply_update_state, check};
 pub use credential::{
     CREDENTIAL_TARGET, CredentialStore, TOKEN_ENVIRONMENT_VARIABLE,
     make_environment_credential_store, make_system_credential_store, redact_token,
@@ -58,6 +63,10 @@ pub use install::{
     Install, InstallKind, install_record_directory, install_root_of_executable,
     install_root_of_running_program, read_install, update_work_directory,
 };
+pub use journal::{
+    Journal, JournalOp, JournalRecord, JournalState, ParsedJournal, crc32, encode_record,
+    needs_recovery, parse_journal, parse_journal_op,
+};
 pub use manifest::{
     FileClass, Manifest, ManifestFile, Payload, is_expired, parse_file_class, parse_manifest,
     parse_utc_time,
@@ -66,6 +75,7 @@ pub use paths::{
     INSTALL_ROOTS, MAX_FILES, MAX_INSTALL_BYTES, RECORD_PATHS, check_journal_directory,
     check_journal_path, check_manifest_path, check_manifest_paths, is_reserved_name, lower_ascii,
 };
+pub use plan::{FREE_SPACE_FACTOR, Plan, PlannedFile, plan};
 pub use process::{
     Launcher, ProcessOps, RunningProgram, SpawnRequest, SpawnResult, make_system_launcher,
     process_is_elevated, utf8_arguments,
@@ -78,6 +88,11 @@ pub use registry::{RUN_ONCE_NAME, RegistryOps};
 pub use signature::{
     PublicKey, SignatureBytes, SignatureLine, check_public_key, key_id_of, parse_public_key_hex,
     parse_signature_line, verify_ed25519,
+};
+pub use state::{
+    CHECK_INTERVAL, CHECK_JITTER_MAX, LastResult, UpdateState, append_cleanup, check_is_due,
+    clear_last_result, health_marker_path, process_cleanup_list, read_last_result, read_state,
+    run_path, stage_path, state_directory, write_last_result, write_state,
 };
 pub use trust::{Trust, TrustedKey, is_newer_than, production_trust, verify_manifest};
 pub use version::{Version, parse_version, program_version, program_version_text};

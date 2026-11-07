@@ -16,10 +16,6 @@ use std::path::Path;
 // failed their health check, one number each. Anything longer was not written by this program,
 // and the files are user-writable, so they are not read whole into memory.
 pub(crate) const MAX_RECORD_BYTES: u64 = 64 * 1024;
-#[allow(
-    dead_code,
-    reason = "state.json's cap, kept beside the other; the state module (the next wave) reads with it"
-)]
 pub(crate) const MAX_STATE_BYTES: u64 = 1024 * 1024;
 
 pub(crate) fn parse_failure(message: impl Into<String>, file: &Path) -> Error {

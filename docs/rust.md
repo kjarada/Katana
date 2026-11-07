@@ -58,8 +58,9 @@ the step's own run is the evidence, not this table.
 |---|---|
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
-| 2 | in progress: waves A and B done in WSL - geodesy, render, entity, commands, terrain and survey whole (`rust/parity.toml` holds them as ported), and the update layer's leaves, machine seams, install record, feed, manifest, signature and trust (1,530 of the step's 2,094 cases); wave C - the rest of update and the updater - to come |
-| 3-9 | not started |
+| 2 | in progress: waves A to C done in WSL - geodesy, render, entity, commands, terrain and survey whole (`rust/parity.toml` holds them as ported), and the update layer but for stage, apply, recover, contract and the updater (1,678 of the step's 2,094 cases); waves D and E to come |
+| 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); surveyio's core and delimited formats (105 of 538); the round-trip gate not started |
+| 4-9 | not started |
 
 ### Step 1: the foundation crates
 
@@ -150,7 +151,9 @@ once, fixed and committed before the next begins.
 |---|---|---|
 | A | geodesy; render; the entity model (all but the customisation libraries); terrain's TIN core (all but the volumes); survey's core and its subsurface tools (all but the reduction); update's version, ranges, inflate, paths, credential, file operations, fault injection, registry and process seams | 902 |
 | B | entity's customisation libraries; commands; terrain's overlay and volumes; survey's reduction; update's install record, feed, manifest, signature and trust | 628 |
-| C | update's journal, state, plan, check, stage, apply, recover and contract, with the tests that need the apply harness; the updater | 562 |
+| C | update's journal, state, plan and check; and step 3's storage, dxf, ifc, archive12d (without the legacy readers) and surveyio's core and delimited formats | 736 |
+| D | update's stage and apply, with the tests that need the apply harness; surveyio's instrument formats | - |
+| E | update's recover and contract, the helper's tests, the updater | - |
 
 Wave A's seven agents wrote 73,540 lines no one had compiled: 44,357 of
 library and 29,099 of tests. The
@@ -225,6 +228,29 @@ customisation parser). Its decisions:
   the canonical y by bytes (dalek's decompression would reduce it), the
   point on the curve, the sign of x = 0, the neutral element, the prime-order
   subgroup and S < L - each with the C++'s refusal.
+
+Wave C began step 3 beside step 2: its layers stand only on step 2's
+finished ones, so waiting for the update layer would only have idled the
+agents. Its first compile found 18 Clippy findings; the tests passed first
+time - 2,660 passed, none failed (727 new: 736 twins less ten Windows-only
+cases, plus one test of the record text). Its decisions:
+
+- The update layer's records are written by serde_json's two-space printer
+  with the keys sorted, which gives nlohmann's `dump(2)` text for integers,
+  strings, booleans, arrays and objects (the escapes were compared in both
+  sources; a test asserts the bytes).
+- surveyio's formats registered themselves at static initialisation in C++;
+  Rust has no life before main, so the program's registry is one explicit
+  list in `format.rs`, built once, to which each format adds one line.
+- The C++'s default name for an imported point cloud with none named the
+  vendor, against the naming rule; both programs now say "archive cloud" (a
+  fix, so the C++ takes it with its twin).
+
+Wave C's integration evidence, 2026-11-07, `tools/build_visible.sh wsl` on
+the merged tree, the C++ rebuilt for its one change: exit 0; Clippy and the
+float-to-text guard clean; CTest 9,914 entries, 9,874 passed, 40 skipped,
+none failed, with `rust_parity` holding twelve directories as ported; cargo
+test 2,660 passed, none failed, none ignored.
 
 Wave B's integration evidence, 2026-11-07, `tools/build_visible.sh wsl` on
 the merged tree: exit 0; the Release C++ build, Clippy and the float-to-text
@@ -446,7 +472,7 @@ version the C++ build links, from the same toolchain.
 | C++ | Rust | Crate |
 |---|---|---|
 | nlohmann_json | serde_json to parse (`preserve_order`, `float_roundtrip`); the text is written by a port of nlohmann's own `dump()` and its Grisu2 number text | entity, cad, app, update, interop |
-| SQLite | rusqlite on the system library, every pragma kept | storage |
+| SQLite | hand-written declarations of the 28 functions used, on the same libsqlite3, every pragma kept | storage |
 | Eigen (rank-revealing QR, Cholesky) | nalgebra for the dense storage and the Cholesky factor; the column-pivoted QR is the port's own, Eigen 3.4's algorithm step for step | survey |
 | PROJ | hand-written declarations of the 57 functions used, on the same libproj | geodesy |
 | CGAL (one 385-line file) | spade, if the terrain tests pass unchanged; otherwise that file stays as a C++ shim | terrain |
@@ -460,8 +486,14 @@ version the C++ build links, from the same toolchain.
 A crate is added to `THIRD_PARTY_NOTICES.md` in the commit that first uses it,
 and must be GPL-3.0-compatible.
 
-Three rows above differ from the plan of 2026-11-05, each for a reason found
+Four rows above differ from the plan of 2026-11-05, each for a reason found
 in porting:
+
+- **SQLite** is reached through the C++'s own wrapper (`sqlite_database.cpp`)
+  ported as it is over declarations of the functions it calls. Rejected:
+  rusqlite, which would put its own statement cache, transaction and error
+  semantics between the store and SQLite, where the port must keep every
+  pragma, statement and error path the C++ has.
 
 - **PROJ** is reached as GDAL is in the spike, through declarations of the
   functions the C++ calls and nothing else, with every `#[repr(C)]` layout
@@ -581,7 +613,7 @@ the crate's binding.
     C++; the Rust skips the observation or ends the search); a face pair with
     no distance takes its target height from the left face's zenith only; a
     later observation of a pointing overwrites the shot's face.
-  - customisation: nlohmann's lexer ends the input at a NUL, so `{...} junk`
+  - customisation: nlohmann's lexer ends the input at a NUL, so `{...}\0junk`
     is read; `Members::finish` counts the members found, so a name asked for
     twice could hide an unknown member (nothing asks twice).
 - **Where the Rust necessarily differs from the C++** (step 2):
@@ -609,6 +641,49 @@ the crate's binding.
     (serde_json's limit; nlohmann reads them); a record's I/O failure gives
     Rust's error text; OpenSSL's initialisation and allocation failures have
     no counterpart.
+- **Decisions waiting on the owner** (step 3):
+  - archive12d's legacy customisation readers and writers
+    (`src/katana_archive12d/legacy/`, the retired style library and survey
+    code file formats, and `katana_customisation_convert`): ported, or
+    exempt? Their 103 cases are neither twinned nor exempt, so
+    `tests/archive12d` is not yet held as ported.
+  - A project whose text is not UTF-8: the C++ loads the bytes; the Rust
+    refuses to load it, naming the table and column. Decoding such text as
+    Windows-1252, as cad already repairs surface names, would keep such
+    projects openable. To be settled before storage is cut over.
+  - The naming rule in the archive layer: the fallback layer name, which is
+    the vendor's name and which a C++ test asserts, and three C++ test names
+    holding that name (copied into their Rust twins by the parity rule).
+- **Step 3's round-trip gate must normalise line ends in stored SQL.** The
+  WSL build reads this Windows checkout, where `core.autocrlf` gives the
+  C++ sources CRLF, so the C++ built there stores CRLF in the CREATE
+  statements of `sqlite_master`; the Rust stores LF, as the committed source
+  does. (Whether the Windows-built program stores CRLF too is to be
+  checked.)
+- **Helpers written more than once in the port**: the C++'s `std::min`,
+  `std::max` and `std::clamp` semantics (in render, entity, dxf and ifc),
+  fdlibm's `remainder` (archive12d and ifc), and C library functions Rust
+  has no twin of - `asinh` (ifc), `erfc` (survey), `erf` and `lgamma`
+  (survey's tests). They belong in katana_math, once.
+- **Defects found in step 3's porting, ported as they are:**
+  - storage: a stray file in `backups/` whose number overflows `std::stol`
+    ends the program; a backup taken in the same millisecond after pruning
+    can reuse a freed name and be pruned at once.
+  - dxf: `Sink::blockPath` is never set; MTEXT's `\M` can cut a UTF-8
+    character, and the rest of that line is then refused; `writeLeader`
+    reads `v[size-2]` of a drawn leader that may have fewer than two
+    vertices; `std::abs(INT_MIN)` on a colour; text widths count bytes, not
+    characters.
+  - archive12d: an invisible vertex short-circuits the storing of its
+    segment's visibility; a leading empty point id is lost from the joined
+    list; the "points from point strings" notice is dropped past twenty
+    problems; `indices[i] - 1` and an unguarded cast are undefined for
+    extreme values.
+  - surveyio: `addPointMetadata` gives a point first named through metadata
+    source record 0; `siblingsInFolder` drops the tail of a file that grows
+    while it is read.
+  - update: plan.cpp's "is a file, not a folder" also names a special file;
+    a cleanup line acted on and listed twice is acted on twice.
 - **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
   reach the Rust yet.** Its `build.rs` reads the defaults from
   `src/katana_update/CMakeLists.txt` and would take environment variables of

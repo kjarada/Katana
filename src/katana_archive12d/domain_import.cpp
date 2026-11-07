@@ -1733,7 +1733,7 @@ class Importer {
     std::size_t import(const LasCloud& cloud)
     {
         ImportedCloud imported;
-        imported.name = cloud.header.name.empty() ? "12d cloud" : cloud.header.name;
+        imported.name = cloud.header.name.empty() ? "archive cloud" : cloud.header.name;
         imported.referenceFile = cloud.referenceFile;
         imported.points.reserve(cloud.points.size());
         for (const LasPoint& point : cloud.points) {
