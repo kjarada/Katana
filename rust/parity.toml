@@ -5,7 +5,17 @@
 # A directory goes into `ported` in the commit that ports its last case; from
 # then on every case there - a new one too, from a fix made in C++ - needs its
 # twin, or the test fails.
-ported = ["core", "math", "geometry"]
+ported = ["core", "math", "geometry", "geodesy", "render"]
 
 [exempt]
 # "Suite.CaseName" = "why it has no Rust twin"
+# A Rust value cannot be used after it is moved, so there is no moved-from
+# transformer to ask; the C++ case tests a state Rust cannot reach.
+"GeodesyTransformer.MovedFromTransformerReportsInvalidState" = "a moved-from value cannot be used in Rust"
+# The model holds validated UTF-8 (String) by the rule "bytes up to the
+# decoder" (docs/rust.md, step 2): a writer has no invalid text to refuse.
+"EntitySerialization.WritersReportFailureInsteadOfThrowing" = "a String cannot hold invalid UTF-8, so the writers have nothing to fail on"
+"TableValidation.AStyleWhoseLinetypeNameIsNotUtf8IsRefused" = "a String cannot hold invalid UTF-8, so no such style can be made"
+# Rust has no way to change the floating-point rounding mode (doing so is
+# undefined behaviour), and f64::round rounds half away from zero in every mode.
+"DimensionText.TheTieDirectionSurvivesAChangeOfRoundingMode" = "Rust cannot change the rounding mode; f64::round is half away from zero regardless"

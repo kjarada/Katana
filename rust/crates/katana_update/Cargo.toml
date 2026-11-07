@@ -9,6 +9,27 @@ publish.workspace = true
 
 [dependencies]
 katana_core.workspace = true
+# zlib's raw inflate in the C++ (src/katana_update/inflate.cpp; docs/rust.md, "Third-party
+# libraries").
+miniz_oxide = "0.8"
+
+# The machine seams on Windows: the file system, the launcher, the Credential Manager and the
+# command line (fsops_win.rs, spawn_win.rs, credential_win.rs, process.rs). The tests use the
+# same crate to read and write the Credential Manager behind the store's back.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }
 
 [lints]
 workspace = true

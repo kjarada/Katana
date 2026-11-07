@@ -276,6 +276,35 @@ it is possible: see `LICENSING.md`, "What the licence does not cover".
 | Qt's tools (`moc`, `rcc`, `windeployqt`, and `qsb` where the GPU shaders are baked) | 6.11.2 | recorded for `qt6-base` and `qt6-tools`: LGPL-3.0-only WITH Qt-GPL-exception-1.0, with GPL-3.0-only parts | build and packaging only; none is shipped |
 | CMake, Ninja, the compilers, Python, `osslsigncode` | n/a | their own licences | build, test and signing; not part of a package |
 
+**The Rust port's crates** (`docs/rust.md`). Nothing of the port ships before
+its step 8, so for now these are compiled only into the port's libraries and
+tests; they move to section 1 with the first Rust program that ships. The
+versions are those of `rust/Cargo.lock`, and the licences are each crate's own
+`license` field as `cargo tree` reported it on 2026-11-07 (recorded). The
+first seven are the crates the port names; the rest come with them. `autocfg`
+and `paste` run only while building.
+
+| Crate | Version | Licence | Brought in by |
+|---|---|---|---|
+| serde_json | 1.0.154 | MIT OR Apache-2.0 | katana_entity (parsing JSON) |
+| nalgebra | 0.34.2 | Apache-2.0 | katana_survey (dense storage, Cholesky) |
+| spade | 2.15.1 | MIT OR Apache-2.0 | katana_terrain (the constrained Delaunay triangulation) |
+| robust | 1.2.0 | MIT OR Apache-2.0 | katana_terrain (exact orientation and in-circle predicates) |
+| miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | katana_update (raw inflate) |
+| windows-sys | 0.60.2 | MIT OR Apache-2.0, unverified (section 7) | katana_update, Windows only |
+| windows-targets, windows_x86_64_gnu | 0.53.5, 0.53.1 | MIT OR Apache-2.0, unverified (section 7) | windows-sys, Windows only |
+| serde_core, itoa, zmij, memchr | 1.0.229, 1.0.18, 1.0.23, 2.8.3 | MIT OR Apache-2.0; MIT OR Apache-2.0; MIT; Unlicense OR MIT | serde_json |
+| indexmap, equivalent, hashbrown, foldhash, allocator-api2 | 2.14.2, 1.0.3, 0.16.1 and 0.17.1, 0.2.0, 0.2.21 | Apache-2.0 OR MIT; Apache-2.0 OR MIT; MIT OR Apache-2.0; Zlib; MIT OR Apache-2.0 | serde_json's `preserve_order`, spade |
+| simba, approx, num-traits, num-complex, num-integer, num-rational, typenum, matrixmultiply, rawpointer, wide, safe_arch, bytemuck | 0.9.1, 0.5.1, 0.2.19, 0.4.6, 0.1.47, 0.4.2, 1.20.1, 0.3.11, 0.2.1, 0.7.33, 0.7.4, 1.25.2 | Apache-2.0 (simba, approx); Zlib OR Apache-2.0 OR MIT (wide, safe_arch, bytemuck); MIT OR Apache-2.0 (the rest) | nalgebra |
+| smallvec | 1.16.5 | MIT OR Apache-2.0 | spade |
+| adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | miniz_oxide |
+| autocfg, paste | 1.5.1, 1.0.15 | Apache-2.0 OR MIT; MIT OR Apache-2.0 | build-time only, a build script's helper and a macro, both reached through nalgebra |
+
+Every licence named is compatible with GPL-3.0-or-later: Apache-2.0 is
+compatible with GPL version 3, and MIT, Zlib, 0BSD and the Unlicense are
+permissive. Where a crate offers a choice, Katana takes it under MIT or
+Apache-2.0.
+
 ## 6. The Linux, macOS and Windows ARM64 packages
 
 Not audited. The Linux and macOS packages are built against the conda-forge
@@ -296,6 +325,9 @@ package.
 * The versions and licences in section 3 are MSYS2's records, not read from each
   source. The headers of x264, x265, poppler, librttopo, libheif, GMP, MPFR and
   Qt were read, as the notes say.
+* The Windows-only Rust crates of section 5 (`windows-sys` and its target crates)
+  are not yet downloaded, because nothing of the port is built on Windows before
+  its step 8: their licences are not yet read from the crates.
 * `jbigkit`: read in the 2.1 sources of Debian and a mirror, not in the MSYS2
   archive (see the table).
 * The EPSG registry terms behind `proj.db`, and which licence covers the

@@ -10,6 +10,11 @@ publish.workspace = true
 [dependencies]
 katana_core.workspace = true
 katana_math.workspace = true
+# The Cholesky factor of a full observation covariance (least_squares.rs), as
+# Eigen's LLT is in the C++. The rank-revealing QR is this crate's own
+# (lsq_core.rs): nalgebra's ColPivQR pivots on the largest entry and has no
+# rank or threshold. Private to the crate: no nalgebra type is in its API.
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

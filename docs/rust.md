@@ -58,7 +58,8 @@ the step's own run is the evidence, not this table.
 |---|---|
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
-| 2-9 | not started |
+| 2 | in progress: wave A done in WSL - geodesy and render whole, the entity model, the terrain TIN core on spade, the survey core and its subsurface tools, the update layer's leaves and machine seams (902 of the step's 2,094 cases, 869 run on Linux); waves B and C to come |
+| 3-9 | not started |
 
 ### Step 1: the foundation crates
 
@@ -137,6 +138,64 @@ was 430 passed, zero failed and zero ignored, including child-process test
 summaries. All 231,536 number-format comparisons passed. No Windows run or
 program cut-over is claimed by this evidence.
 
+### Step 2: the domain kernels
+
+Step 2 is run in waves, split by what each module and each C++ test file
+includes: an agent may build only on what is already integrated, because
+under the owner's no-build rule it cannot compile its code, and code written
+against another agent's unbuilt API is a guess. Each wave is merged, built
+once, fixed and committed before the next begins.
+
+| Wave | What | Cases |
+|---|---|---|
+| A | geodesy; render; the entity model (all but the customisation libraries); terrain's TIN core (all but the volumes); survey's core and its subsurface tools (all but the reduction); update's version, ranges, inflate, paths, credential, file operations, fault injection, registry and process seams | 902 |
+| B | entity's customisation libraries; commands; terrain's overlay and volumes; survey's reduction; update's install, journal, state, feed, manifest, signature, trust, plan and check | - |
+| C | update's stage, apply, recover and contract, with the tests that need the apply harness; the updater | - |
+
+Wave A's seven agents wrote 73,540 lines no one had compiled: 44,357 of
+library and 29,099 of tests. The
+first build of the merged tree type-checked all six libraries; what failed
+was 18 Clippy findings, then 27 `.err().expect()` calls, two names a test
+module shadowed and an untyped float in the tests. The first test run
+passed: 1,302 passed, none failed (430 from step 1, and 872 new - the 902
+twins less the 33 Windows-only credential cases, plus three extra tests).
+Two of Clippy's suggestions were not taken because they would change
+behaviour: eager construction of a tile's 4,096-byte mask for every point,
+and an auto-deref that would borrow through `&mut` where the C++'s copy of
+the reference is meant.
+
+**CGAL to spade: decided for spade.** The plan's rule was spade if the
+terrain tests pass unchanged, else a C++ shim of the CGAL backend. They pass
+unchanged: all 185 TIN-core cases, among them the 89 TIN-edit cases. What
+made it possible: CGAL's constrained Delaunay triangulation flips with a
+symbolically perturbed in-circle test, so its result for a given set of
+vertices and constraints is unique and independent of insertion order - the
+spatial sort before insertion only makes it faster. The Rust
+(`katana_terrain`'s `cdt_backend.rs`) splits crossing constraints as
+`Constrained_triangulation_plus_2::insert_subconstraint` does, with CGAL's
+own construction of the crossing point and its four-ulp snap; triangulates
+with spade; and flips with CGAL's perturbed predicate, ported line for line,
+to CGAL's unique triangulation. Not reproduced: CGAL's check that a crossing
+it computed lies in a triangle beside the crossed edge, with its exact
+recomputation when it does not - it can only matter for crossings within
+rounding of an end. The overlay and volume cases of wave B test the kernel
+further.
+
+**Text in the model is validated UTF-8.** The entity layer holds `String`,
+by the rule "bytes up to the decoder": a C++ case that stores non-UTF-8 text
+in the model and refuses it later keeps its UTF-8 half as its twin, and the
+readers of stored bytes - the geometry blob - still refuse such bytes. Two
+cases whose only subject is that refusal are exempt (`rust/parity.toml`), as
+are a moved-from transformer and a change of the floating-point rounding
+mode, which Rust cannot express.
+
+Wave A's integration evidence, 2026-11-07, `tools/build_visible.sh wsl` on
+the merged tree: exit 0; the Release C++ build, Clippy with `-D warnings`
+and the float-to-text guard clean; CTest 9,914 entries, 9,874 passed, 40
+skipped as before, none failed, `rust_parity` holding geodesy and render as
+ported; cargo test 1,302 passed, none failed, none ignored. No Windows run is
+claimed: the update layer's Windows code is written and not compiled.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -159,7 +218,11 @@ interface - the table's second rule. Dev-dependencies are not checked, as
 
 Edition 2024; `rust-version` 1.98, the older of the two compilers. `unsafe`
 is denied in the workspace's lints and allowed only where a module must be
-unsafe - an FFI adapter, an OS call, a SIMD kernel - each saying why. Clippy
+unsafe - an FFI adapter, an OS call, a SIMD kernel, or the one module that
+hands the task pool's tasks disjoint parts of one buffer
+(`katana_render`'s `disjoint.rs`: tiles of a framebuffer have no safe slice
+form, and every step rests on the pool's contract that each index runs once
+and no range overlaps another) - each saying why. Clippy
 runs with `-D warnings`, as `-Werror` does for the C++.
 
 ## The toolchains
@@ -339,10 +402,10 @@ version the C++ build links, from the same toolchain.
 
 | C++ | Rust | Crate |
 |---|---|---|
-| nlohmann_json | serde_json, keys in order | entity, cad, app, update, interop |
+| nlohmann_json | serde_json to parse (`preserve_order`, `float_roundtrip`); the text is written by a port of nlohmann's own `dump()` and its Grisu2 number text | entity, cad, app, update, interop |
 | SQLite | rusqlite on the system library, every pragma kept | storage |
-| Eigen (rank-revealing QR, Cholesky) | nalgebra | survey |
-| PROJ | proj-sys on the same libproj | geodesy |
+| Eigen (rank-revealing QR, Cholesky) | nalgebra for the dense storage and the Cholesky factor; the column-pivoted QR is the port's own, Eigen 3.4's algorithm step for step | survey |
+| PROJ | hand-written declarations of the 57 functions used, on the same libproj | geodesy |
 | CGAL (one 385-line file) | spade, if the terrain tests pass unchanged; otherwise that file stays as a C++ shim | terrain |
 | GDAL, including its algorithm framework | gdal-sys, and the C algorithm API ("The GDAL algorithm spike") | gis |
 | PDAL (C++ only) | a C shim of the one adapter file | pointcloud |
@@ -352,7 +415,33 @@ version the C++ build links, from the same toolchain.
 | Qt | eframe, egui, egui_dock, wgpu, rfd, tiny-skia, krilla, cosmic-text | window |
 
 A crate is added to `THIRD_PARTY_NOTICES.md` in the commit that first uses it,
-and must be GPL-3.0-compatible. None is used yet.
+and must be GPL-3.0-compatible.
+
+Three rows above differ from the plan of 2026-11-05, each for a reason found
+in porting:
+
+- **PROJ** is reached as GDAL is in the spike, through declarations of the
+  functions the C++ calls and nothing else, with every `#[repr(C)]` layout
+  checked by size and offset against PROJ 9.8's headers. Rejected: the
+  proj-sys crate, a binding of the whole API made for a PROJ release of its
+  own, where 57 declarations checked against the headers of the PROJ the
+  build links pin exactly what is used.
+- **Eigen's QR**: nalgebra's `ColPivQR` pivots on the column holding the
+  largest entry, not the largest norm, and has no rank or threshold, so a
+  rank-deficient network would be found so elsewhere than Eigen finds it.
+  The port implements `ColPivHouseholderQR` as Eigen 3.4 does it (`lsq_core.rs`):
+  norms and the first-largest pivot, the LAWN 176 norm downdate, the rank
+  against the prescribed threshold, the solve. It is bit-identical to Eigen
+  on systems of up to three equations; beyond that Eigen's SSE2 kernels sum
+  in two lanes and the results differ in the last bit or two, inside every
+  test's tolerance.
+- **nlohmann's text**: serde_json writes numbers with ryu (`1e20`, `1`)
+  where nlohmann writes `1e+20` and `1.0`, and sorts keys only when it is
+  not built with `preserve_order`, which Cargo's feature unification turns
+  on for every crate once one needs insertion order. The entity layer's
+  private `json` module therefore keeps nlohmann's object order (sorted, as
+  `std::map` holds it) and writes its text with a line-for-line port of
+  nlohmann's `to_chars`; serde_json only parses.
 
 ## The GDAL algorithm spike
 
@@ -402,3 +491,56 @@ the crate's binding.
   the implementation's acceptance of negative radius magnitudes.
 - **The WSL distribution has no user of the owner's.** The builds run as root
   there; nothing depends on it.
+- **Defects found in porting step 2, ported as they are** (fix after the gate,
+  in both programs):
+  - geodesy: `proj_info()` and `proj_context_create()` run unguarded in
+    `projRuntimeInfo` and `ProjContext::create`'s fallback, though PROJ's
+    default context is filled lazily and copied without its lock (the Rust
+    serialises both behind one mutex, since its tests share a process);
+    `CoordinateReferenceSystem::operator==` is not transitive.
+  - render: the clipper's fixed 3+5-vertex buffers assume each plane adds at
+    most one vertex, which a near-degenerate polygon rounded to float may not
+    keep (an out-of-bounds write in C++, a panic in Rust; not shown to
+    happen); `DrawLine::depthBias`'s comment says NDC units where the
+    rasteriser applies pixel footprints of view distance.
+  - entity: `rewriteLayerPrefix` with an empty `from` drops the name's first
+    byte; `labelPiecesFor` and `labelAnchor` on an open polyline with no
+    vertices wrap `size() - 1` and divide by zero, and `resolveAnchor` calls
+    `front()` on an empty leader (undefined in C++; unreachable for a
+    validated entity); `formatDms`/`formatDm` and nlohmann's integer reads
+    convert an out-of-range double unchecked; `insidePoint` sorts crossings
+    that may hold a NaN.
+  - survey: `toString(SurveyTimestamp)` pads a "0" before negative seconds
+    under 10; `observationKindName` calls a global GNSS position with
+    neither part set "geodetic"; `millimetres` in the quality levels calls
+    `std::llround` on a NaN uncertainty (glibc gives the minimum integer, which
+    the Rust reproduces; the Windows runtime may not).
+  - update: `removeTree` resets the depth for the entry it deferred, so a
+    deep tree planted under the journal's name gets another 64 levels;
+    `writeAll` loops for ever on a `WriteFile` that succeeds having written
+    nothing; `spawn_win`'s `run` leaks the attribute list when
+    `UpdateProcThreadAttribute` fails; `makeDirectories` on Windows counts an
+    entry that vanished after `ERROR_ALREADY_EXISTS` as made by another
+    process; `absoluteNormal` may strip a trailing dot or space before
+    `endsInDotOrSpace` sees it (suspected, to be checked on Windows).
+- **Where the Rust necessarily differs from the C++** (step 2):
+  - Text the model holds is validated UTF-8 (`String`), by the rule "bytes
+    up to the decoder": the C++ cases that store non-UTF-8 text in a model
+    and refuse it later have their UTF-8 halves twinned, and the readers of
+    stored bytes (the geometry blob) still refuse such bytes.
+  - Non-UTF-8 bytes in a string PROJ returns become U+FFFD; the C++ keeps
+    the bytes.
+  - nlohmann's reader and serde_json's disagree at the edges: `-0` reads as
+    the real -0.0 (nlohmann: the integer 0), `1e400` is refused as it is
+    read (nlohmann reads infinity and the geometry check refuses it), and
+    nesting deeper than 128 is refused. A parse error's context after
+    nlohmann's prefix is serde_json's text.
+  - The raw inflate is miniz_oxide's: a stream that is not deflate is
+    refused with "inflate error: <reason>" where zlib gave "zlib error <n>:
+    <msg>", and zlib's two internal failures have no counterpart.
+  - `std::format` pads report columns by display width, Rust by characters:
+    the subsurface reports differ for an id holding wide or combining
+    characters.
+  - Windows-only code of the update layer (the Credential Manager, the long
+    path forms, the Windows file operations and process launch) is written,
+    not compiled, until step 8; so is every NEON kernel.

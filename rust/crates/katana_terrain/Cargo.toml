@@ -11,6 +11,11 @@ publish.workspace = true
 katana_core.workspace = true
 katana_geometry.workspace = true
 katana_math.workspace = true
+# The constrained Delaunay triangulation and the exact predicates, in place of
+# CGAL (docs/rust.md, "Third-party libraries"; src/cdt_backend.rs says how
+# CGAL's answer is reproduced).
+robust = "1.1"
+spade = "2"
 
 [lints]
 workspace = true
