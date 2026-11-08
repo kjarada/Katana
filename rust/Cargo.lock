@@ -563,8 +563,10 @@ dependencies = [
 name = "katana_updater"
 version = "0.0.0"
 dependencies = [
+ "ed25519-dalek",
  "katana_core",
  "katana_update",
+ "windows-sys",
 ]
 
 [[package]]

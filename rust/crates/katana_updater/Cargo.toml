@@ -7,9 +7,74 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# The library is the helper program itself (the C++'s src/katana_updater/main.cpp), so that the two
+# builds of it below are one source, as the C++ compiles main.cpp twice.
+[lib]
+path = "src/lib.rs"
+
+# The fourth program, the one that ships.
+[[bin]]
+name = "katana_updater"
+path = "src/main.rs"
+
+# Three programs the tests build and nothing ships (tools/check_install_rules.cmake refuses the
+# C++'s by name; the Rust's are to be held to the same when a Rust program is packaged). They are
+# binaries of THIS package, the engine's end-to-end client included, because cargo hands an
+# integration test the programs of its own package alone (CARGO_BIN_EXE_<name>), and the
+# end-to-end tests start all three:
+#
+#   katana_updater_test   the helper's own source with the test key in the place of the pinned
+#                         ones and the four test options (tests/update/CMakeLists.txt); a second
+#                         binary and not a cargo feature, because features are unified across a
+#                         build: a feature would turn the test key and the test options on in the
+#                         helper that ships too, or need a second build of the workspace
+#   katana_updater_stub   the stand-in for Katana that the helper starts
+#                         (tests/update/updater_stub.cpp)
+#   katana_update_e2e     the engine from a command line, over plain sockets to the loopback
+#                         (tests/update/e2e_main.cpp)
+[[bin]]
+name = "katana_updater_test"
+path = "src/bin/katana_updater_test.rs"
+
+[[bin]]
+name = "katana_updater_stub"
+path = "src/bin/katana_updater_stub.rs"
+
+[[bin]]
+name = "katana_update_e2e"
+path = "src/bin/katana_update_e2e.rs"
+
 [dependencies]
 katana_core.workspace = true
 katana_update.workspace = true
+
+# The helper turns the system's error boxes off for itself (SetErrorMode), and the stub reads the
+# helper's RunOnce value (RegGetValueW).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Registry",
+] }
+
+# The swap's test harness (rust/crates/katana_update/tests/apply_harness), which tests/helper.rs
+# shares, signs its manifests with ed25519-dalek's signer.
+[dev-dependencies]
+ed25519-dalek = "2"
+
+# What tests/helper.rs reads behind the code's back: the registry, the processes it started, the
+# file system's identity of a file, the spellings of a path, and the harness's free space.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [lints]
 workspace = true

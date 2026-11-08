@@ -58,7 +58,7 @@ the step's own run is the evidence, not this table.
 |---|---|
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
-| 2 | in progress: waves A to C done in WSL - geodesy, render, entity, commands, terrain and survey whole (`rust/parity.toml` holds them as ported), and the update layer but for the tests of its swap and recovery and the updater program (625 of its 940 cases); wave E to come |
+| 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate not started |
 | 4-9 | not started |
 
@@ -154,6 +154,23 @@ once, fixed and committed before the next begins.
 | C | update's journal, state, plan and check; and step 3's storage, dxf, ifc, archive12d (without the legacy readers) and surveyio's core and delimited formats | 736 |
 | D | update's stage, apply, recover and contract and the swap's test harness, with the tests that need nothing more; surveyio's ten instrument formats; one home in katana_math for the C++ library's semantics | 532 |
 | E | update's tests of the swap, recovery, journal and fault loops on the harness, the helper's tests, and the updater program | 315 |
+
+Wave E compiled with three Clippy findings and passed its first test run:
+3,437 passed, none failed (229 new: 212 of the 315 twins - the other 103
+are Windows-only, the helper's 53 among them - and 17 end-to-end and
+program checks). Its decisions:
+
+- **The helper's test build is a second program, not a cargo feature.**
+  Cargo merges a feature into every binary of a build, so a feature would put
+  the test key and the test options into the helper that ships.
+- **All four programs - the helper, its test build, the stand-in for Katana
+  and the end-to-end engine - are binaries of `katana_updater`**: cargo
+  hands an integration test the programs of its own package only, and the
+  end-to-end tests need the three together.
+- **The end-to-end tests run the same driver** (`tests/update/update_e2e.py`,
+  unchanged) with e2e.cmake's arguments, environment and timeouts, from a
+  Rust test that is generated with the list of cases it hands the driver's
+  registration check, so the two cannot drift.
 
 Wave A's seven agents wrote 73,540 lines no one had compiled: 44,357 of
 library and 29,099 of tests. The
@@ -264,6 +281,13 @@ cases, plus 23 tests of katana_math's new modules). Its decisions:
   does (`apply::catch_unexpected`).
 - **A test that subclasses a C++ file system** to break one operation becomes
   a forwarding file system that takes one closure per operation.
+
+Wave E's integration evidence, 2026-11-08, `tools/build_visible.sh wsl` on
+the merged tree: exit 0; Clippy and the float-to-text guard clean; CTest
+9,914 entries, 9,874 passed, 40 skipped, none failed, with `rust_parity`
+holding fourteen directories as ported; cargo test 3,437 passed, none
+failed, none ignored. The Rust end-to-end cases took as long as the C++
+ones (about 1.3 s each), so they ran rather than skipped.
 
 Wave D's integration evidence, 2026-11-08, `tools/build_visible.sh wsl` on
 the merged tree: exit 0; Clippy and the float-to-text guard clean; CTest
@@ -726,6 +750,21 @@ the crate's binding.
   so two ids whose bytes differ but decode alike are refused as duplicates;
   fields cut at a byte count may show U+FFFD where the C++ keeps a broken
   character.
+- **Before step 8, for the updater:** Rust's standard library imports
+  `bcryptprimitives.dll` on Windows (its random numbers), which the import
+  checks' allowed lists (`tests/update/check_updater_imports.cmake`) must
+  take, with that reason; the control case that expects a test program to
+  import a toolchain DLL may need another program; whether the test key's
+  text survives optimisation in the Rust test programs, which the
+  test-key check relies on, is unverified; `tools/check_install_rules.cmake`
+  must refuse the Rust test programs by name once a Rust program is
+  packaged; the Windows tests' console probes declare two kernel32
+  functions by hand where a windows-sys feature would do.
+- **The two programs reading each other's plan, journal and records** is
+  not tested directly yet: both pass the same tests on the same formats,
+  and the records are written to nlohmann's text, but no case has the C++
+  engine stage what the Rust helper swaps, or the reverse. The first is
+  part of step 8's real update on Windows.
 - **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
   reach the Rust yet.** Its `build.rs` reads the defaults from
   `src/katana_update/CMakeLists.txt` and would take environment variables of

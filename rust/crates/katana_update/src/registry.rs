@@ -80,6 +80,18 @@ pub fn make_system_registry_ops() -> Box<dyn RegistryOps> {
     }
 }
 
+/// The test seam of registry_win.rs: the same keys re-rooted under HKCU\<base>, or None for a base
+/// that is empty or starts or ends with a backslash (it would name no folder of keys of its own).
+/// For the helper built for the tests (`--registry-base`) and the tests of the registry, and for
+/// nothing else: the C++ declares it where those use it (src/katana_updater/main.cpp,
+/// tests/update/test_helper.cpp) and defines it in registry_win.cpp, beside the registry it
+/// re-roots.
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn make_registry_ops_under(base: &str) -> Option<Box<dyn RegistryOps>> {
+    crate::registry_win::make_registry_ops_under(base)
+}
+
 #[cfg(not(windows))]
 struct NoRegistry;
 
