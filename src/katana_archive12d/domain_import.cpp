@@ -1461,7 +1461,7 @@ class Importer {
             }
             if (worst > options_.alignmentTolerance) {
                 reconstruction.failure =
-                    "the alignment Katana solves from its PIs departs from 12d's by " +
+                    "the alignment Katana solves from its PIs departs from the archive's by " +
                     detail::formatReal(worst, 3);
                 solved.reset();
             }
@@ -1515,7 +1515,7 @@ class Importer {
 
         katana::entity::Alignment record;
         record.name = uniqueAlignmentName(alignment.header.name);
-        record.description = "Imported from 12d model \"" + alignment.header.model + "\"";
+        record.description = "Imported from archive model \"" + alignment.header.model + "\"";
         record.horizontal = reconstruction.horizontal;
 
         std::vector<std::string> notes;
@@ -1541,7 +1541,7 @@ class Importer {
                 }
                 if (worst > options_.alignmentTolerance) {
                     verticalFailure = "the grade line Katana solves from its VIPs departs from "
-                                      "12d's by " +
+                                      "the archive's by " +
                                       detail::formatReal(worst, 3);
                 }
             }
@@ -1858,7 +1858,7 @@ class Importer {
             warnings.push_back("transitions of type \"" + type +
                                "\" are drawn as clothoids and moved by up to " +
                                detail::formatReal(adjustment, 3) +
-                               " to meet the end points 12d recorded");
+                               " to meet the end points the archive recorded");
         }
         if (chordReport_.straightened != 0) {
             warnings.push_back(std::to_string(chordReport_.straightened) +

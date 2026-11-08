@@ -1,3 +1,11 @@
+// The constraint insertion, the crossing construction and the perturbed in-circle test in
+// this file are translations into Rust of CGAL 6.2's Constrained_triangulation_plus_2.h
+// (Copyright (c) 2012 INRIA Sophia-Antipolis), Constrained_Delaunay_triangulation_2.h and
+// Triangulation_2.h (Copyright (c) 1997-2010 INRIA Sophia-Antipolis), used under
+// GPL-3.0-or-later, and of Intersections_2/Segment_2_Segment_2.h (Copyright (c) 2000 Utrecht
+// University, ETH Zurich, INRIA Sophia-Antipolis and the other holders that file names),
+// used under LGPL-3.0-or-later; THIRD_PARTY_NOTICES.md ("Code translated into the Rust
+// port") lists them.
 //! Internal interface to the constrained Delaunay triangulation kernel. Everything
 //! that touches the triangulation library (spade) lives here; the rest of the
 //! crate sees Katana types only.

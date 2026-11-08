@@ -1626,7 +1626,7 @@ is not a warning.
 
 The other transition types the manual names and does not define (Westrail
 cubic, cubic spiral, Bloss, sinusoidal, cosinusoidal) are drawn as the
-clothoid with the same end radii and moved to meet the vertex 12d recorded,
+clothoid with the same end radii and moved to meet the vertex the archive recorded,
 and the size of that movement is reported - it *is* the error. A transition
 that would have to move more than a metre, or more than its own chord, is not
 an approximation of anything and is drawn straight and counted.
@@ -1921,7 +1921,7 @@ handling column is asserted by `tests/archive12d/test_coverage.cpp`.
 | Element | Manual | Handling | In Katana |
 |---|---|---|---|
 | `model` | 1.4.1 | import and export | a layer; a tree name such as Stage 1/Water arrives as that nested layer |
-| `colour` | 1.4.2 | import and export | the entity's colour where the name is one of 12d's standard colours; the name is always kept |
+| `colour` | 1.4.2 | import and export | the entity's colour where the name is one of the standard colours; the name is always kept |
 | `style` | 1.4.3 | import and export | a Katana Style of that name, with the name as its linetype, in the entity's own style field; a vertex symbol's linestyle is the string's style, with the symbol on it. Export writes the linestyle the style DRAWS (its linetype), not the style's name - see "Export writes what the style draws" below |
 | `breakline` | 1.4.4 | import and export | kept on the entity as 12d.breakline and written back |
 | `null` | 1.4.5 | import and export | a height equal to the null value, or the null keyword, is no height at all |

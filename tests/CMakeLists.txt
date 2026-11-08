@@ -565,6 +565,16 @@ if(Python3_Interpreter_FOUND)
                 "${_rust_fixtures}/parity/braces_in_literals")
     set_tests_properties(rust_parity_skips_literals PROPERTIES
         PASS_REGULAR_EXPRESSION "2 of 2 C[+][+] test cases have a Rust twin")
+    # Step 3's round-trip gate (rust/crates/katana_app/tests/round_trip.rs) compares the projects
+    # the two programs save through tools/project_dump.py, a dump made with Python's own sqlite3
+    # so that the judge is neither program. `project_dump_self_test` is the dump's own test, on
+    # projects it builds in a scratch folder: two saves of the same content dump the same whatever
+    # their stamps, line ends, backup names and insertion order, and each kind of real difference
+    # is seen.
+    add_test(NAME project_dump_self_test
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/project_dump.py" --self-test)
+    set_tests_properties(project_dump_self_test PROPERTIES
+        PASS_REGULAR_EXPRESSION "project_dump self-test: [0-9]+ checks passed")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only

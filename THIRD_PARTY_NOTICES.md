@@ -281,22 +281,21 @@ its step 8, so for now these are compiled only into the port's libraries and
 tests; they move to section 1 with the first Rust program that ships. The
 versions are those of `rust/Cargo.lock`, and the licences are each crate's own
 `license` field as `cargo tree` reported it on 2026-11-07 (recorded). The
-rows up to windows-sys are the crates the port names; the rest come with them. `autocfg`
+rows up to windows-sys are the crates the port names; the rest come with them. The
+port's JSON is its own (katana_core::json, translated from nlohmann/json, below), so
+no JSON crate is used. `autocfg`
 and `paste` run only while building.
 
 | Crate | Version | Licence | Brought in by |
 |---|---|---|---|
-| serde_json | 1.0.154 | MIT OR Apache-2.0 | katana_entity (parsing JSON) |
 | nalgebra | 0.34.2 | Apache-2.0 | katana_survey (dense storage, Cholesky) |
 | spade | 2.15.1 | MIT OR Apache-2.0 | katana_terrain (the constrained Delaunay triangulation) |
 | robust | 1.2.0 | MIT OR Apache-2.0 | katana_terrain (exact orientation and in-circle predicates) |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | katana_update (raw inflate) |
 | ed25519-dalek, curve25519-dalek | 2.2.0, 4.1.3 | BSD-3-Clause | katana_update (Ed25519 verification and the RFC 8032 checks on the key) |
-| serde | 1.0.229 | MIT OR Apache-2.0 | katana_update (its JSON reader's visitor), serde_json |
 | windows-sys | 0.60.2 | MIT OR Apache-2.0, unverified (section 7) | katana_update, Windows only |
 | windows-targets, windows_x86_64_gnu | 0.53.5, 0.53.1 | MIT OR Apache-2.0, unverified (section 7) | windows-sys, Windows only |
-| serde_core, itoa, zmij, memchr | 1.0.229, 1.0.18, 1.0.23, 2.8.3 | MIT OR Apache-2.0; MIT OR Apache-2.0; MIT; Unlicense OR MIT | serde_json |
-| indexmap, equivalent, hashbrown, foldhash, allocator-api2 | 2.14.2, 1.0.3, 0.16.1 and 0.17.1, 0.2.0, 0.2.21 | Apache-2.0 OR MIT; Apache-2.0 OR MIT; MIT OR Apache-2.0; Zlib; MIT OR Apache-2.0 | serde_json's `preserve_order`, spade |
+| equivalent, hashbrown, foldhash, allocator-api2 | 1.0.3, 0.16.1, 0.2.0, 0.2.21 | Apache-2.0 OR MIT; MIT OR Apache-2.0; Zlib; MIT OR Apache-2.0 | spade |
 | simba, approx, num-traits, num-complex, num-integer, num-rational, typenum, matrixmultiply, rawpointer, wide, safe_arch, bytemuck | 0.9.1, 0.5.1, 0.2.19, 0.4.6, 0.1.47, 0.4.2, 1.20.1, 0.3.11, 0.2.1, 0.7.33, 0.7.4, 1.25.2 | Apache-2.0 (simba, approx); Zlib OR Apache-2.0 OR MIT (wide, safe_arch, bytemuck); MIT OR Apache-2.0 (the rest) | nalgebra |
 | smallvec | 1.16.5 | MIT OR Apache-2.0 | spade |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | miniz_oxide |
@@ -305,9 +304,53 @@ and `paste` run only while building.
 | curve25519-dalek-derive, rustc_version, semver, version_check, proc-macro2, quote, syn, unicode-ident | 0.1.1, 0.4.1, 1.0.28, 0.9.5, 1.0.107, 1.0.47, 2.0.119, 1.0.27 | MIT OR Apache-2.0 (unicode-ident: (MIT OR Apache-2.0) AND Unicode-3.0) | build-time only: a derive macro and build scripts' helpers, reached through curve25519-dalek and generic-array |
 
 Every licence named is compatible with GPL-3.0-or-later: Apache-2.0 is
-compatible with GPL version 3, and MIT, BSD-3-Clause, Zlib, 0BSD, Unicode-3.0
-and the Unlicense are permissive. Where a crate offers a choice, Katana takes it under MIT or
+compatible with GPL version 3, and MIT, BSD-3-Clause, Zlib, 0BSD and Unicode-3.0
+are permissive. Where a crate offers a choice, Katana takes it under MIT or
 Apache-2.0.
+
+**Code translated into the Rust port.** The port reproduces the C++
+program's behaviour exactly, and in a few places that meant translating a
+third party's code into Rust rather than calling it: the translation is a
+copy of that code in another language, so it keeps that code's copyright and
+licence. Each file names its source at the top; this table lists them
+(verified: the copyright lines were read in the installed headers of
+MSYS2's packages on 2026-11-08, but fdlibm's, which are not installed and
+are quoted as fdlibm distributes them).
+
+| Translated code | Version | Licence | Rust file | What it asks of Katana |
+|---|---|---|---|---|
+| nlohmann/json: the lexer, parser, serializer, value rules and Grisu2 number text | 3.12.0 | MIT (Copyright (c) 2013-2025 Niels Lohmann; to_chars.hpp also Copyright (c) 2009 Florian Loitsch) | `rust/crates/katana_core/src/json.rs`, `json/sax.rs`, `json/serializer.rs`, `json/to_chars.rs` | Keep the copyright and permission notice (below). |
+| fdlibm `e_remainder.c` (`__ieee754_remainder`) | as distributed in fdlibm 5.3 and its descendants | Sun's notice: permission to use, copy, modify and distribute, provided the notice is preserved | `rust/crates/katana_math/src/cpp.rs` (`remainder`) | Preserve the notice, which the file does word for word. |
+| Eigen: ColPivHouseholderQR, Householder, HouseholderSequence | 3.4 | MPL-2.0 (Copyright (C) 2008-2010 Gael Guennebaud and Benoit Jacob) | `rust/crates/katana_survey/src/lsq_core.rs` | The translated file's source stays available under MPL-2.0, with its notice. Eigen's files carry no "Incompatible With Secondary Licenses" notice, so MPL-2.0 section 3.3 lets the larger work be distributed under the GPL. Recorded; whether a translation counts as a Modification of the covered files is unverified (section 7). |
+| CGAL: Constrained_triangulation_plus_2, Constrained_Delaunay_triangulation_2, Triangulation_2 (the perturbed in-circle test) | 6.2 | GPL-3.0-or-later (Copyright (c) 1997-2012 INRIA Sophia-Antipolis) | `rust/crates/katana_terrain/src/cdt_backend.rs` | The same licence as Katana's; keep the notices. |
+| CGAL: Intersections_2/Segment_2_Segment_2 (the crossing point's construction) | 6.2 | LGPL-3.0-or-later (Copyright (c) 2000 Utrecht University, ETH Zurich, INRIA Sophia-Antipolis and others) | `rust/crates/katana_terrain/src/cdt_backend.rs` | Compatible with GPL-3.0-or-later; keep the notice. |
+| libstdc++: `uniform_int_distribution`, `generate_canonical`, `std::clamp` | GCC 16.2 | GPL-3.0-or-later with the GCC Runtime Library Exception (Copyright (C) Free Software Foundation, Inc.) | the tests' random engines (`tests/support` of geometry, render, entity, dxf, surveyio, terrain and others) and `katana_math::cpp::clamp` | The same licence as Katana's. |
+
+nlohmann/json's copyright and permission notice, as its `LICENSE.MIT` gives it:
+
+```text
+MIT License 
+
+Copyright (c) 2013-2025 Niels Lohmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## 6. The Linux, macOS and Windows ARM64 packages
 
@@ -329,6 +372,9 @@ package.
 * The versions and licences in section 3 are MSYS2's records, not read from each
   source. The headers of x264, x265, poppler, librttopo, libheif, GMP, MPFR and
   Qt were read, as the notes say.
+* Whether the Rust translation of Eigen's QR (section 5, "Code translated into the
+  Rust port") is a Modification of Eigen's covered files under MPL-2.0, and so
+  must itself stay available under MPL-2.0; the notice is kept either way.
 * The Windows-only Rust crates of section 5 (`windows-sys` and its target crates)
   are not yet downloaded, because nothing of the port is built on Windows before
   its step 8: their licences are not yet read from the crates.

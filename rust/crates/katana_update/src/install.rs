@@ -58,13 +58,13 @@
 //! knows both layouts.
 
 use crate::fsops::path_text;
-use crate::json::Json;
 use crate::records::{
     MAX_RECORD_BYTES, parse_failure, parse_record, read_optional_text, string_member,
 };
 use crate::registry::RegistryOps;
 use crate::version::{Version, parse_version, program_version};
 use katana_core::error::make_error;
+use katana_core::json::Json;
 use katana_core::{Error, ErrorCode, Result};
 use std::cmp::Ordering;
 use std::path::{Component, Path, PathBuf};
@@ -176,7 +176,7 @@ fn version_member(record: &Json, file: &Path) -> Result<Version> {
 // The record's "sequence": a whole number, not negative, that fits 64 bits.
 fn sequence_member(record: &Json, file: &Path) -> Result<u64> {
     record
-        .get("sequence")
+        .find("sequence")
         .and_then(Json::as_unsigned)
         .ok_or_else(|| parse_failure("\"sequence\" is not a whole number", file))
 }
@@ -192,8 +192,8 @@ fn sequence_member(record: &Json, file: &Path) -> Result<u64> {
 // it carried them, which every test tree that only says its target still is. A sequence with no
 // version to belong to is no record of a build, and does not read.
 fn package_build(record: &Json, file: &Path) -> Result<Option<RecordedBuild>> {
-    let names_sequence = record.get("sequence").is_some();
-    if record.get("version").is_none() {
+    let names_sequence = record.find("sequence").is_some();
+    if record.find("version").is_none() {
         if names_sequence {
             return Err(parse_failure(
                 "the record has a \"sequence\" and no \"version\" it could belong to",

@@ -31,7 +31,7 @@
 //!   cad, must reach it (tools/check_layering.cmake). The JSON is private to
 //!   this module; everything public is text and katana_core::Result.
 //!
-//! The reader is nlohmann's parse events (the crate's json::sax), as the C++
+//! The reader is nlohmann's parse events (katana_core::json's), as the C++
 //! is, because the format reads three things a tree does not keep: a member
 //! given twice, a definition's strokes as they go by, and where a number too
 //! large to hold stands. Text in the model is validated UTF-8 (docs/rust.md,
@@ -48,7 +48,6 @@ use katana_geometry::Point2;
 use crate::colour_names::ColourTable;
 use crate::entity::Color;
 use crate::entity_geometry::Validate;
-use crate::json::{self, Sax, SaxError, sax_parse};
 use crate::layer_path::validate_layer_path;
 use crate::linework_codes::{LineworkCodes, linework_code_members};
 use crate::style_library::{LineStyle, Stroke, StrokeOp, StrokeText, StyleLibrary, StyleUnits};
@@ -56,6 +55,7 @@ use crate::survey_map::{
     SURVEY_SECTION_WORDS, SurveyAttribute, SurveyBreakline, SurveyMap, SurveyPipe, SurveyRule,
     SurveySection, SurveySymbol, SurveyTextStyle,
 };
+use katana_core::json::{self, JsonError, Sax, sax_parse};
 
 /// The value of a file's "format" member.
 pub const CUSTOMISATION_FORMAT: &str = "katana-customisation";
@@ -404,7 +404,7 @@ fn in_quotes(text: &str) -> String {
     const LONGEST_QUOTED: usize = 240;
     let mut quoted = String::new();
     if text.len() <= LONGEST_QUOTED {
-        json::write_string(&mut quoted, text);
+        json::write_string(&mut quoted, text, false);
         return quoted;
     }
     let mut end = LONGEST_QUOTED;
@@ -415,7 +415,7 @@ fn in_quotes(text: &str) -> String {
     if end < LONGEST_QUOTED {
         piece.push('\u{FFFD}');
     }
-    json::write_string(&mut quoted, &piece);
+    json::write_string(&mut quoted, &piece, false);
     quoted.insert_str(quoted.len() - 1, "...");
     quoted
 }
@@ -693,7 +693,7 @@ fn append_shown(text: &mut String, value: Json<'_>) {
                 if i > 0 {
                     text.push(',');
                 }
-                json::write_string(text, key);
+                json::write_string(text, key, false);
                 text.push(':');
                 append_shown(text, value.tree.at(item));
             }
@@ -708,7 +708,7 @@ fn append_shown(text: &mut String, value: Json<'_>) {
         Node::Integer(number) => text.push_str(&format!("{number}")),
         Node::Unsigned(number) => text.push_str(&format!("{number}")),
         Node::Float(number) => text.push_str(&json::dump_float(*number)),
-        Node::Text(string) => json::write_string(text, string),
+        Node::Text(string) => json::write_string(text, string, false),
     }
 }
 
@@ -738,7 +738,7 @@ fn shown(value: Json<'_>) -> String {
 /// The same for text that is not in the tree (an object's member name).
 fn shown_text(value: &str) -> String {
     let mut text = String::new();
-    json::write_string(&mut text, value);
+    json::write_string(&mut text, value, false);
     cut_short(text)
 }
 
@@ -924,7 +924,7 @@ impl Out {
                 "",
             ));
         }
-        json::write_string(&mut self.written, value);
+        json::write_string(&mut self.written, value, false);
         Ok(())
     }
 
@@ -2341,7 +2341,7 @@ impl Sax for TreeBuilder {
         self.end()
     }
 
-    fn parse_error(&mut self, position: usize, token: &str, error: &SaxError) -> bool {
+    fn parse_error(&mut self, position: usize, token: &str, error: &JsonError) -> bool {
         self.reason.clone_from(&error.what);
         // The one thing the reader refuses that IS JSON: a number past the
         // largest double ("number overflow", nlohmann's error 406). Its place
@@ -2415,7 +2415,7 @@ fn parse_json(bytes: &[u8], not_this: &str, kind: TextKind) -> Result<Parsed> {
         }
     }
     let mut builder = TreeBuilder::new(kind);
-    if !sax_parse(&decoded.text, &mut builder) {
+    if !sax_parse(decoded.text.as_bytes(), &mut builder) {
         if builder.too_many_rules {
             return Ok(builder.take());
         }

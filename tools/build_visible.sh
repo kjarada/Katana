@@ -218,6 +218,19 @@ steps() {
     else
         export KATANA_NUMBER_FORMAT_ORACLE="$(cygpath -w "$oracle.exe")"
     fi
+    # The C++ katana_cli of the same build, for step 3's round-trip gate
+    # (rust/crates/katana_app/tests/round_trip.rs): it runs the program beside
+    # the Rust katana_corpus on every file of the corpus, and fails, as the
+    # oracle's test does, when this is not set.
+    local cli="$directory/bin/katana_cli"
+    if [[ "$cli" != /* ]]; then
+        cli="$PWD/$cli"
+    fi
+    if [ -n "${KATANA_LINUX_BUILD:-}" ]; then
+        export KATANA_CPP_CLI="$cli"
+    else
+        export KATANA_CPP_CLI="$(cygpath -w "$cli.exe")"
+    fi
     if [ "$phase" = cargo ]; then
         cargo_steps build && cargo_steps test
         return

@@ -96,11 +96,11 @@
 //! fields and nothing after them.
 
 use crate::credential::redact_token;
-use crate::json::{self, Json};
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, Unread, parse_watched};
 use crate::ranges::{PARTIAL_DOWNLOADS_REFUSED, check_range_response, range_header_value};
 use crate::version::program_version_text;
 use katana_core::error::make_error;
+use katana_core::json::{Json, JsonErrorKind, ObjectMap};
 use katana_core::{Error, ErrorCode, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -454,21 +454,20 @@ pub fn parse_release_assets(json: impl AsRef<[u8]>) -> Result<Vec<ReleaseAsset>>
         return Err(bad_release("the release description holds a NUL byte", ""));
     }
 
-    let options = json::Options {
-        max_depth: Some(MAX_RELEASE_JSON_DEPTH),
-        refuse_duplicates: false,
-    };
-    let root = json::parse(json, options).map_err(|failure| match failure {
-        json::Failure::TooDeep => bad_release("the release description is nested too deeply", ""),
-        // Not the reader's own words: they end with the token it was in.
-        json::Failure::Syntax(byte) => bad_release(
-            "the release description is not well-formed JSON",
-            format!("the reader stopped at byte {byte}"),
-        ),
-        json::Failure::Duplicate(_) | json::Failure::OutOfRange => {
-            bad_release("the release description could not be read", "")
-        }
-    })?;
+    let root =
+        parse_watched(json, MAX_RELEASE_JSON_DEPTH, false).map_err(|unread| match unread {
+            Unread::TooDeep => bad_release("the release description is nested too deeply", ""),
+            // Not the reader's own words: they end with the token it was in.
+            Unread::Json(error) if error.kind == JsonErrorKind::ParseError => bad_release(
+                "the release description is not well-formed JSON",
+                format!("the reader stopped at byte {}", error.byte),
+            ),
+            // The out_of_range 406 of a number past the largest double (and a duplicate, which
+            // this watch does not refuse).
+            Unread::Json(_) | Unread::Duplicate(_) => {
+                bad_release("the release description could not be read", "")
+            }
+        })?;
 
     let Some(object) = root.as_object() else {
         return Err(bad_release(

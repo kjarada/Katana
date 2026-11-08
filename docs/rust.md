@@ -59,8 +59,9 @@ the step's own run is the evidence, not this table.
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
-| 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate not started |
-| 4-9 | not started |
+| 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
+| 4 | in progress: planned in five waves (F to J); the JSON home and the leaf libraries done (121 of 3,011 cases) |
+| 5-9 | not started |
 
 ### Step 1: the foundation crates
 
@@ -235,7 +236,8 @@ customisation parser). Its decisions:
   of its Grisu2 - moves into `katana_core::text` when a second crate writes
   a real number as nlohmann does; the update layer's records hold none (their
   integers, strings and flags give serde_json's two-space text, with the keys
-  sorted as `nlohmann::json` holds them).
+  sorted as `nlohmann::json` holds them). Superseded before cad began: one
+  home, `katana_core::json` (below, "Step 4").
 - **The update layer's build configuration** - the pinned keys and the feed's
   repository and address - is read by its `build.rs` from the same CMake
   files, with the same refusals, so both programs of one checkout carry the
@@ -255,7 +257,8 @@ cases, plus one test of the record text). Its decisions:
 - The update layer's records are written by serde_json's two-space printer
   with the keys sorted, which gives nlohmann's `dump(2)` text for integers,
   strings, booleans, arrays and objects (the escapes were compared in both
-  sources; a test asserts the bytes).
+  sources; a test asserts the bytes). Superseded by `katana_core::json`'s
+  own `dump(2)`; the same test asserts the same bytes.
 - surveyio's formats registered themselves at static initialisation in C++;
   Rust has no life before main, so the program's registry is one explicit
   list in `format.rs`, built once, to which each format adds one line.
@@ -313,6 +316,74 @@ and the float-to-text guard clean; CTest 9,914 entries, 9,874 passed, 40
 skipped as before, none failed, `rust_parity` holding geodesy and render as
 ported; cargo test 1,302 passed, none failed, none ignored. No Windows run is
 claimed: the update layer's Windows code is written and not compiled.
+
+### Step 3's round-trip gate
+
+The gate is a Rust test, `rust/crates/katana_app/tests/round_trip.rs`, that
+runs both programs on every file of the test data and the samples of the
+formats step 3 ported, and compares what they make:
+
+- **The C++ side** is `katana_cli`, its path passed by `tools/build_visible.sh`
+  as `KATANA_CPP_CLI`, as the number oracle's is; without it the test
+  fails, never skips. **The Rust side** is `katana_corpus`, a program of
+  `katana_app` (the Rust has no CLI until step 6, and `rust_layering` refuses
+  a crate that is no layer), which stands in for the part of cad's Document
+  that OPEN, SAVE, IMPORT, EXPORT and SURVEY READ touch, with the C++'s
+  options.
+- **Each file is read by both, written by both, and each program reads
+  what the other wrote**: a project opened, migrated, saved and saved as;
+  a DXF or .12da imported and saved; each writer's DXF, IFC and .12da
+  compared byte for byte (the IFC header's time set aside) and re-imported
+  by the other program; a survey file's SURVEY READ reply compared exactly.
+- **Projects are compared by `tools/project_dump.py`**, which reads them with
+  Python's sqlite3, independent of both programs: every table in key order,
+  blobs as hex, the stamps that differ between two saves of the same content
+  normalised (created and modified times, the application version, the
+  survey jobs' import and report times, the backups' names), and the stored
+  SQL's line ends normalised (a C++ built in WSL from this Windows checkout
+  stores CRLF).
+- **The corpus is a table**, one row per file and format, and a second test
+  fails when a data file has no row, so a new file is a decision. Left out,
+  each with its reason in the table: the zipped archive and the GIS files
+  (step 5), the legacy customisation formats (the owner's decision), the
+  scripts, design files and survey settings that need cad (step 4).
+- **Its first run found a real difference**: the archive import named an
+  alignment "Imported from" the vendor's model in C++ and the archive's in
+  Rust, which had followed the naming rule. Both programs now say "archive
+  model", as they now say "archive" in the import's two warnings and the
+  coverage table (a fix, so the C++ took it with its twin). Two files keep
+  one key aside, `reference_layers`: their point clouds are the C++
+  session's reference data, which is interop's (step 5).
+
+### Step 4: the cad layer
+
+cad (3,011 C++ cases) is planned in five waves by its include graph, so that
+no agent writes against another's unbuilt code: F, the Document and the
+leaf libraries; G, styles, scope, plotting, the scene and the road model; H,
+every verb family but volumes, the tool framework and the annotation core;
+I, the interpreter with the tool families; J, the 1,018 cases that drive the
+interpreter or span two agents' work. The 45 of cad's 148 test files that
+construct the interpreter can only be twinned in J. The crate's layout
+rules (one module tree in `lib.rs`, a module per header path, `document.rs`
+owned by one agent, one test target per agent) keep the agents of a wave
+off each other's files.
+
+Before cad: **one JSON home.** The plan had cad take a third copy of the
+JSON adapter; instead `katana_core::json` translates nlohmann 3.12, and
+entity and update moved onto it, so serde and serde_json left the workspace.
+Following nlohmann ended the readers' last differences from the C++: `-0`
+reads as the integer 0, `1e400` is nlohmann's out-of-range error, nesting
+deeper than 128 is read, a NUL outside a string ends the text, and a parse
+error names nlohmann's byte. No test had asserted the old answers. The
+first cad wave also ported the leaf libraries (dashing, style drawing,
+symbols, hatching, plot, view transform, viewport layout and the others)
+and gave the civil date and UTC timestamp a home in `katana_core`.
+
+Evidence, 2026-11-08, `tools/build_visible.sh wsl`: exit 0; the Release C++
+build, Clippy and the float-to-text guard clean; CTest 9,915 entries (the
+dump tool's self-test new), 9,875 passed, 40 skipped, none failed; cargo
+test 3,601 passed, none failed, none ignored, the round-trip gate among them
+over 73 files of the corpus.
 
 ## The workspace
 
@@ -520,7 +591,7 @@ version the C++ build links, from the same toolchain.
 
 | C++ | Rust | Crate |
 |---|---|---|
-| nlohmann_json | serde_json to parse (`preserve_order`, `float_roundtrip`); the text is written by a port of nlohmann's own `dump()` and its Grisu2 number text | entity, cad, app, update, interop |
+| nlohmann_json | `katana_core::json`: a translation of nlohmann 3.12 itself - its lexer and parser, serializer, Grisu2 number text and value rules - with no JSON crate | core, used by entity, cad, app, update, interop |
 | SQLite | hand-written declarations of the 28 functions used, on the same libsqlite3, every pragma kept | storage |
 | Eigen (rank-revealing QR, Cholesky) | nalgebra for the dense storage and the Cholesky factor; the column-pivoted QR is the port's own, Eigen 3.4's algorithm step for step | survey |
 | PROJ | hand-written declarations of the 57 functions used, on the same libproj | geodesy |
@@ -559,13 +630,20 @@ in porting:
   on systems of up to three equations; beyond that Eigen's SSE2 kernels sum
   in two lanes and the results differ in the last bit or two, inside every
   test's tolerance.
-- **nlohmann's text**: serde_json writes numbers with ryu (`1e20`, `1`)
-  where nlohmann writes `1e+20` and `1.0`, and sorts keys only when it is
-  not built with `preserve_order`, which Cargo's feature unification turns
-  on for every crate once one needs insertion order. The entity layer's
-  private `json` module therefore keeps nlohmann's object order (sorted, as
-  `std::map` holds it) and writes its text with a line-for-line port of
-  nlohmann's `to_chars`; serde_json only parses.
+- **nlohmann/json is translated, not replaced.** serde_json was tried
+  first: it writes numbers with ryu (`1e20`, `1`) where nlohmann writes
+  `1e+20` and `1.0`, keeps one object order for the whole build once
+  Cargo unifies `preserve_order`, and reads `-0`, `1e400`, deep nesting and
+  duplicate keys otherwise than nlohmann. Each crate grew an adapter of its
+  own to give nlohmann's answers, three in all by step 3, and a shared one
+  could not expose serde_json's types, as no third-party type may cross a
+  crate's interface. So
+  `katana_core::json` translates nlohmann itself, beside core's XML reader:
+  its value with both object orders (`Json` sorted as `nlohmann::json`,
+  `OrderedJson` as `ordered_json`), its lexer and event parser, its
+  serializer and Grisu2, its accessors and their error texts. The
+  translation keeps nlohmann's copyright and MIT notice
+  (THIRD_PARTY_NOTICES.md).
 
 ## The GDAL algorithm spike
 
@@ -672,11 +750,6 @@ the crate's binding.
     stored bytes (the geometry blob) still refuse such bytes.
   - Non-UTF-8 bytes in a string PROJ returns become U+FFFD; the C++ keeps
     the bytes.
-  - nlohmann's reader and serde_json's disagree at the edges: `-0` reads as
-    the real -0.0 (nlohmann: the integer 0), `1e400` is refused as it is
-    read (nlohmann reads infinity and the geometry check refuses it), and
-    nesting deeper than 128 is refused. A parse error's context after
-    nlohmann's prefix is serde_json's text.
   - The raw inflate is miniz_oxide's: a stream that is not deflate is
     refused with "inflate error: <reason>" where zlib gave "zlib error <n>:
     <msg>", and zlib's two internal failures have no counterpart.
@@ -686,9 +759,7 @@ the crate's binding.
   - Windows-only code of the update layer (the Credential Manager, the long
     path forms, the Windows file operations and process launch) is written,
     not compiled, until step 8; so is every NEON kernel.
-  - The update layer's records nested deeper than 128 levels are refused
-    (serde_json's limit; nlohmann reads them); a record's I/O failure gives
-    Rust's error text; OpenSSL's initialisation and allocation failures have
+  - A record's I/O failure in the update layer gives Rust's error text; OpenSSL's initialisation and allocation failures have
     no counterpart.
 - **Decisions waiting on the owner** (step 3):
   - archive12d's legacy customisation readers and writers
@@ -701,15 +772,21 @@ the crate's binding.
     Windows-1252, as cad already repairs surface names, would keep such
     projects openable. To be settled before storage is cut over.
   - The naming rule in the archive layer: the fallback layer name, which is
-    the vendor's name and which a C++ test asserts, and three C++ test names
-    holding that name (copied into their Rust twins by the parity rule).
+    the vendor's name and which a C++ test asserts; three C++ test names
+    holding that name (copied into their Rust twins by the parity rule); and
+    the source an archive import gives a surface, the vendor's name before
+    "archive <file>" (written by the C++ app and interop layers, and copied
+    by the round-trip gate's program so the projects compare equal).
 - **Step 3's round-trip gate must normalise line ends in stored SQL.** The
   WSL build reads this Windows checkout, where `core.autocrlf` gives the
   C++ sources CRLF, so the C++ built there stores CRLF in the CREATE
   statements of `sqlite_master`; the Rust stores LF, as the committed source
   does. (Whether the Windows-built program stores CRLF too is to be
   checked.)
-- **What is still written more than once in the port**: a Gregorian
+- **What is still written more than once in the port**: the civil date
+  and UTC timestamp, which now have a home in `katana_core::civil_date` but
+  whose private copies remain (core's log, storage, ifc, surveyio's RINEX,
+  update's manifest, the updater); a Gregorian
   calendar check (surveyio's SDR reader, update's manifest, survey's
   delivery schema), `std::to_chars` into a fixed 64-byte buffer (the GSI and
   RINEX readers, as the C++ has it twice), the hexadecimal float text
@@ -765,6 +842,17 @@ the crate's binding.
   and the records are written to nlohmann's text, but no case has the C++
   engine stage what the Rust helper swaps, or the reverse. The first is
   part of step 8's real update on Windows.
+- **The round-trip gate does not yet compare** SURVEY IMPORT (a survey job
+  in a project needs cad, step 4), the zipped archive, GIS data and
+  reference layers (step 5), or a Rust DXF of annotation cad draws (step 4).
+- **A GPU hardware test aborted once in WSL** instead of skipping:
+  `gpu.Devices/GpuRender.AShadedTriangleCoversTheSoftwarePathsPixelsInItsColours/Hardware`
+  could not connect to `xvfb-run`'s display under the suite's parallel
+  load; run alone it skips, as every run before. A test that loses its
+  display should skip as it does without a device.
+- **nlohmann widens its indent string once**, so an indent over 1,024
+  characters reads past it in C++ (undefined); `katana_core::json` widens it
+  until it fits, the same text wherever the C++ is defined.
 - **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
   reach the Rust yet.** Its `build.rs` reads the defaults from
   `src/katana_update/CMakeLists.txt` and would take environment variables of

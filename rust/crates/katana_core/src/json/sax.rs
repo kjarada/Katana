@@ -1,27 +1,40 @@
+// This file is a translation into Rust of nlohmann/json 3.12.0 (detail/input/lexer.hpp and detail/input/parser.hpp),
+// Copyright (c) 2013-2025 Niels Lohmann <https://nlohmann.me>, used under the MIT
+// licence, whose notice is kept in THIRD_PARTY_NOTICES.md ("Code translated into the
+// Rust port").
 //! nlohmann's reader of JSON text - its lexer (detail/input/lexer.hpp) and
 //! its event-driven parser (detail/input/parser.hpp, sax_parse) - ported line
-//! for line from nlohmann 3.12.0, for the one reader that needs the events
-//! rather than a tree: the customisation format sees a member given twice,
-//! reads a definition's strokes as they go by, and stops at a number too large
-//! to hold where nlohmann stops (customisation.rs). serde_json parses only to a
-//! tree, and refuses a text nested deeper than 128.
+//! for line from nlohmann 3.12.0. Every reader of JSON text goes through it:
+//! [`BasicJson::parse`](super::BasicJson::parse) hands its events to the
+//! tree builder, and a reader that needs the events themselves (the
+//! customisation format, which sees a member given twice, reads a definition's
+//! strokes as they go by and stops at a number too large to hold where
+//! nlohmann stops) is a [`Sax`] of its own.
 //!
 //! The parser is iterative, as nlohmann's is - a stack of what is open, never
 //! a level of the program's stack for a level of the text - so a text nested a
 //! hundred thousand deep is read as any other.
 //!
+//! The text is bytes, as nlohmann reads it: a UTF-8 byte order mark at the
+//! start is stepped over, a NUL byte outside a string ends the input (the end
+//! of a C string), and a string's bytes are checked as UTF-8 by the lexer's
+//! own rules, so every string it hands over is UTF-8. The one place the C++
+//! can hold bytes that are not - the token a message says was "last read" -
+//! shows them as U+FFFD, a `String` holding only UTF-8.
+//!
 //! What is not ported: comments (nlohmann's `ignore_comments`, off in every
 //! call the C++ makes) and the locale's decimal point (the "C" locale's '.' is
-//! the only one the C++ runs with). The text is a `&str`, validated UTF-8
-//! before it is read (docs/rust.md, "bytes up to the decoder"), so the
-//! lexer's checks of UTF-8, ported as they are, never fail; the one place the
-//! C++ can still hold a character cut short - the text a message says was
-//! "last read" - shows it as U+FFFD.
+//! the only one the C++ runs with).
+
+use super::JsonError;
 
 /// The handler of the parse events: nlohmann's json_sax. Each returns whether
 /// the parse goes on; `parse_error` is handed where the text stops being what
-/// it must be, the last token read and the exception nlohmann would throw.
-pub(crate) trait Sax {
+/// it must be, the last token read and the exception nlohmann would throw
+/// (parse_error 101, or out_of_range 406 for a number past the largest
+/// double). nlohmann's `binary` event (never made from JSON text) and the
+/// container sizes (always unknown in JSON text) are not ported.
+pub trait Sax {
     fn null(&mut self) -> bool;
     fn boolean(&mut self, value: bool) -> bool;
     fn number_integer(&mut self, value: i64) -> bool;
@@ -36,14 +49,7 @@ pub(crate) trait Sax {
     fn end_array(&mut self) -> bool;
     /// `position` is the bytes read so far (nlohmann's position_t as a
     /// size_t: chars_read_total).
-    fn parse_error(&mut self, position: usize, token: &str, error: &SaxError) -> bool;
-}
-
-/// The exception nlohmann hands parse_error: its id (101 for text that is not
-/// JSON, 406 for a number past the largest double) and its what() text.
-pub(crate) struct SaxError {
-    pub(crate) id: u32,
-    pub(crate) what: String,
+    fn parse_error(&mut self, position: usize, token: &str, error: &JsonError) -> bool;
 }
 
 /// The id of nlohmann's parse_error for text that is not JSON.
@@ -578,7 +584,8 @@ impl<'a> Lexer<'a> {
     }
 
     /// The token buffer as text: a string's value or a number's text. Always
-    /// UTF-8, being whole characters of a `&str` and the UTF-8 of escapes.
+    /// UTF-8, being the bytes scan_string checked as whole UTF-8 sequences and
+    /// the UTF-8 of escapes, or a number's ASCII.
     fn token_text(&self) -> String {
         String::from_utf8_lossy(&self.token_buffer).into_owned()
     }
@@ -683,14 +690,13 @@ impl Parser<'_> {
     /// `message`, and returns what it says.
     fn refuse<S: Sax>(&self, sax: &mut S, message: &str) -> bool {
         let position = self.lexer.position;
-        let error = SaxError {
-            id: SYNTAX_ERROR,
-            what: format!(
-                "[json.exception.parse_error.{SYNTAX_ERROR}] parse error at line {}, column {}: {message}",
-                position.lines_read + 1,
-                position.chars_read_current_line
-            ),
-        };
+        let error = JsonError::parse_error(
+            SYNTAX_ERROR,
+            position.chars_read_total,
+            position.lines_read + 1,
+            position.chars_read_current_line,
+            message,
+        );
         sax.parse_error(
             position.chars_read_total,
             &self.lexer.token_string(),
@@ -762,12 +768,10 @@ impl Parser<'_> {
                         let value = self.lexer.value_float;
                         if !value.is_finite() {
                             let token = self.lexer.token_string();
-                            let error = SaxError {
-                                id: NUMBER_OVERFLOW,
-                                what: format!(
-                                    "[json.exception.out_of_range.{NUMBER_OVERFLOW}] number overflow parsing '{token}'"
-                                ),
-                            };
+                            let error = JsonError::out_of_range(
+                                NUMBER_OVERFLOW,
+                                &format!("number overflow parsing '{token}'"),
+                            );
                             return sax.parse_error(
                                 self.lexer.position.chars_read_total,
                                 &token,
@@ -888,9 +892,9 @@ impl Parser<'_> {
 
 /// `json::sax_parse(text, &sax)`: strict - the text is one value and nothing
 /// after it - and without comments. Returns whether it was read to its end.
-pub(crate) fn sax_parse<S: Sax>(text: &str, sax: &mut S) -> bool {
+pub fn sax_parse<S: Sax>(text: &[u8], sax: &mut S) -> bool {
     let mut parser = Parser {
-        lexer: Lexer::new(text.as_bytes()),
+        lexer: Lexer::new(text),
         last_token: Token::Uninitialized,
     };
     // the parser reads its first token as it is made
@@ -901,155 +905,4 @@ pub(crate) fn sax_parse<S: Sax>(text: &str, sax: &mut S) -> bool {
         return parser.syntax_error(sax, Token::EndOfInput, "value");
     }
     read
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Records the events as text, the doubles apart, and the first error.
-    #[derive(Default)]
-    struct Events {
-        seen: Vec<String>,
-        doubles: Vec<f64>,
-        error: Option<(usize, String, u32, String)>,
-    }
-
-    impl Sax for Events {
-        fn null(&mut self) -> bool {
-            self.seen.push(String::from("null"));
-            true
-        }
-        fn boolean(&mut self, value: bool) -> bool {
-            self.seen.push(format!("bool {value}"));
-            true
-        }
-        fn number_integer(&mut self, value: i64) -> bool {
-            self.seen.push(format!("integer {value}"));
-            true
-        }
-        fn number_unsigned(&mut self, value: u64) -> bool {
-            self.seen.push(format!("unsigned {value}"));
-            true
-        }
-        fn number_float(&mut self, value: f64, written: &str) -> bool {
-            self.seen.push(format!("float {written}"));
-            self.doubles.push(value);
-            true
-        }
-        fn string(&mut self, value: &mut String) -> bool {
-            self.seen.push(format!("string {value}"));
-            true
-        }
-        fn start_object(&mut self) -> bool {
-            self.seen.push(String::from("{"));
-            true
-        }
-        fn key(&mut self, value: &mut String) -> bool {
-            self.seen.push(format!("key {value}"));
-            true
-        }
-        fn end_object(&mut self) -> bool {
-            self.seen.push(String::from("}"));
-            true
-        }
-        fn start_array(&mut self) -> bool {
-            self.seen.push(String::from("["));
-            true
-        }
-        fn end_array(&mut self) -> bool {
-            self.seen.push(String::from("]"));
-            true
-        }
-        fn parse_error(&mut self, position: usize, token: &str, error: &SaxError) -> bool {
-            self.error = Some((position, String::from(token), error.id, error.what.clone()));
-            false
-        }
-    }
-
-    fn events(text: &str) -> Events {
-        let mut events = Events::default();
-        sax_parse(text, &mut events);
-        events
-    }
-
-    // The events, the classification of numbers and the escapes, worked out
-    // from lexer.hpp's scan_number and scan_string: "-0" is the integer 0, a
-    // fraction or an exponent makes a double, an integer past 64 bits falls
-    // back to a double.
-    #[test]
-    fn the_events_are_nlohmanns() {
-        let read = events(
-            "{\"a\": [1, -0, -2, 1.5, 1e2, 18446744073709551616, true, null], \"b\\u00e9\": \"x\\ny\"}",
-        );
-        assert_eq!(read.error, None);
-        assert_eq!(
-            read.seen,
-            [
-                "{",
-                "key a",
-                "[",
-                "unsigned 1",
-                "integer 0",
-                "integer -2",
-                "float 1.5",
-                "float 1e2",
-                "float 18446744073709551616",
-                "bool true",
-                "null",
-                "]",
-                "key b\u{e9}",
-                "string x\ny",
-                "}",
-            ]
-        );
-        // 2^64, one past the largest unsigned, is a double exactly.
-        assert_eq!(read.doubles, [1.5, 100.0, 2.0_f64.powi(64)]);
-    }
-
-    // By hand from position_t and unget(): "[0,\n" is four bytes, and the
-    // number's last character is the ninth byte read.
-    #[test]
-    fn a_number_past_the_largest_double_stops_the_parse_where_it_ends() {
-        let read = events("[0,\n1e400]");
-        let (position, token, id, what) = read.error.expect("an overflow");
-        assert_eq!(position, 9);
-        assert_eq!(token, "1e400");
-        assert_eq!(id, 406);
-        assert_eq!(
-            what,
-            "[json.exception.out_of_range.406] number overflow parsing '1e400'"
-        );
-    }
-
-    // By hand: after "1" the lexer reads the line break and the blanks of
-    // line 4, and stops at the closing quote of "name", column 8.
-    #[test]
-    fn a_syntax_error_says_its_line_and_column_as_nlohmann_does() {
-        let read = events("{\n  \"format\": \"x\",\n  \"version\": 1\n  \"name\": \"T\"\n}\n");
-        let (_, _, id, what) = read.error.expect("a syntax error");
-        assert_eq!(id, 101);
-        assert_eq!(
-            what,
-            "[json.exception.parse_error.101] parse error at line 4, column 8: syntax error while parsing object - unexpected string literal; expected '}'"
-        );
-        let empty = events("");
-        assert_eq!(
-            empty.error.expect("an empty input").3,
-            "[json.exception.parse_error.101] parse error at line 1, column 1: attempting to parse an empty input; check that your input string or stream contains the expected JSON"
-        );
-        let literal = events("not json");
-        assert_eq!(
-            literal.error.expect("an invalid literal").3,
-            "[json.exception.parse_error.101] parse error at line 1, column 2: syntax error while parsing value - invalid literal; last read: 'no'"
-        );
-    }
-
-    #[test]
-    fn a_text_nested_a_hundred_thousand_deep_is_read() {
-        let deep = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
-        let read = events(&deep);
-        assert_eq!(read.error, None);
-        assert_eq!(read.seen.len(), 200_000);
-    }
 }

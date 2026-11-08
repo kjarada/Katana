@@ -67,6 +67,17 @@ pub fn clamp(value: f64, low: f64, high: f64) -> f64 {
     min(max(value, low), high)
 }
 
+// remainder is a translation into Rust of fdlibm's e_remainder.c (__ieee754_remainder),
+// whose notice is preserved, as it asks:
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
 /// `std::remainder(x, y)`, the IEEE 754 remainder (5.3.1): `x - n y`, `n` the
 /// integer nearest `x / y` and the even one when `x / y` is halfway between
 /// two. The result is exact, at most `|y| / 2` in magnitude, a zero result has

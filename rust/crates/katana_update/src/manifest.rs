@@ -38,12 +38,14 @@
 //! not know are ignored, but still checked for those two.
 
 use crate::feed::MAX_MANIFEST_BYTES;
-use crate::json::{self, Json};
 use crate::paths::{MAX_FILES, MAX_INSTALL_BYTES, check_manifest_path, check_manifest_paths};
 use crate::version::{Version, parse_version};
 use katana_core::error::make_error;
+use katana_core::json::{
+    DomBuilder, Json, JsonError, JsonErrorKind, ObjectMap, Sax, SortedMap, sax_parse,
+};
 use katana_core::{Error, ErrorCode, Result, Status};
-use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 /// How a file is treated at the swap. The helper commits data, then lib, then program (so a
 /// program that cannot load is the last thing replaced); a seed is written only when the file is
@@ -209,28 +211,165 @@ fn excerpt(text: &str) -> String {
 
 // ---- the JSON, with the two refusals the reader does not make by itself -----------------------
 
-fn parse_json(text: &[u8]) -> Result<Json> {
-    let options = json::Options {
-        max_depth: Some(MAX_DEPTH),
-        refuse_duplicates: true,
+/// Why a watched parse gave no value.
+pub(crate) enum Unread {
+    /// Nesting deeper than the limit: the outermost object or list is level 1.
+    TooDeep,
+    /// A member written twice in one object, by the name the reader ends up with (an escape read).
+    Duplicate(String),
+    /// The exception nlohmann threw: a parse_error (and the byte it stopped at), or the
+    /// out_of_range 406 of a number past the largest double.
+    Json(JsonError),
+}
+
+/// The C++'s parser callback `watch` (manifest.cpp's; feed.cpp's makes the depth check alone):
+/// one level more at each object_start and array_start, refused when it passes `max_depth`, one
+/// less at each end; and with `refuse_duplicates`, the names seen so far in each open object,
+/// refused at the key event of one seen before. A callback that refuses throws, which ends the
+/// parse; one that does not keeps everything, so every event goes on to the tree builder, as
+/// nlohmann's callback parser builds the tree.
+struct Watch {
+    tree: DomBuilder<SortedMap>,
+    max_depth: usize,
+    refuse_duplicates: bool,
+    depth: usize,
+    keys_seen: Vec<HashSet<String>>,
+    refusal: Option<Unread>,
+}
+
+impl Watch {
+    fn enter(&mut self) -> bool {
+        self.depth += 1;
+        if self.depth > self.max_depth {
+            self.refusal = Some(Unread::TooDeep);
+            return false;
+        }
+        true
+    }
+}
+
+impl Sax for Watch {
+    fn null(&mut self) -> bool {
+        self.tree.null()
+    }
+
+    fn boolean(&mut self, value: bool) -> bool {
+        self.tree.boolean(value)
+    }
+
+    fn number_integer(&mut self, value: i64) -> bool {
+        self.tree.number_integer(value)
+    }
+
+    fn number_unsigned(&mut self, value: u64) -> bool {
+        self.tree.number_unsigned(value)
+    }
+
+    fn number_float(&mut self, value: f64, written: &str) -> bool {
+        self.tree.number_float(value, written)
+    }
+
+    fn string(&mut self, value: &mut String) -> bool {
+        self.tree.string(value)
+    }
+
+    fn start_object(&mut self) -> bool {
+        if !self.enter() {
+            return false;
+        }
+        if self.refuse_duplicates {
+            self.keys_seen.push(HashSet::new());
+        }
+        self.tree.start_object()
+    }
+
+    fn key(&mut self, value: &mut String) -> bool {
+        if self.refuse_duplicates
+            && let Some(seen) = self.keys_seen.last_mut()
+            && !seen.insert(value.clone())
+        {
+            self.refusal = Some(Unread::Duplicate(value.clone()));
+            return false;
+        }
+        self.tree.key(value)
+    }
+
+    fn end_object(&mut self) -> bool {
+        if self.refuse_duplicates {
+            self.keys_seen.pop();
+        }
+        self.depth -= 1;
+        self.tree.end_object()
+    }
+
+    fn start_array(&mut self) -> bool {
+        if !self.enter() {
+            return false;
+        }
+        self.tree.start_array()
+    }
+
+    fn end_array(&mut self) -> bool {
+        self.depth -= 1;
+        self.tree.end_array()
+    }
+
+    fn parse_error(&mut self, position: usize, token: &str, error: &JsonError) -> bool {
+        self.tree.parse_error(position, token, error)
+    }
+}
+
+/// `Json::parse(text, watch)`: the text read as nlohmann reads it (katana_core::json), with the
+/// watch's refusals.
+pub(crate) fn parse_watched(
+    text: &[u8],
+    max_depth: usize,
+    refuse_duplicates: bool,
+) -> std::result::Result<Json, Unread> {
+    let mut watch = Watch {
+        tree: DomBuilder::new(),
+        max_depth,
+        refuse_duplicates,
+        depth: 0,
+        keys_seen: Vec::new(),
+        refusal: None,
     };
-    json::parse(text, options).map_err(|failure| match failure {
-        json::Failure::TooDeep => malformed(
+    let read = sax_parse(text, &mut watch);
+    if let Some(refusal) = watch.refusal {
+        return Err(refusal);
+    }
+    if read {
+        return Ok(watch.tree.into_value());
+    }
+    Err(Unread::Json(watch.tree.into_error().expect(
+        "a parse the watch did not stop ends at the parse error the tree builder keeps",
+    )))
+}
+
+fn parse_json(text: &[u8]) -> Result<Json> {
+    parse_watched(text, MAX_DEPTH, true).map_err(|unread| match unread {
+        Unread::TooDeep => malformed(
             format!("the JSON is nested more than {MAX_DEPTH} levels deep"),
             "",
         ),
-        json::Failure::Duplicate(key) => {
+        Unread::Duplicate(key) => {
             malformed("a member is written twice in one object", &excerpt(&key))
         }
         // Not the reader's own words: they quote the token it was in, which may be megabytes of
         // a manifest holding raw bytes, control characters and invalid UTF-8 among them. The
         // place is enough.
-        json::Failure::Syntax(byte) => malformed(
-            format!("not well-formed JSON: the reader stopped at byte {byte}"),
+        Unread::Json(error) if error.kind == JsonErrorKind::ParseError => malformed(
+            format!(
+                "not well-formed JSON: the reader stopped at byte {}",
+                error.byte
+            ),
             "",
         ),
         // nlohmann's out_of_range 406, which the C++ reports by its id.
-        json::Failure::OutOfRange => malformed("the JSON could not be read (reader error 406)", ""),
+        Unread::Json(error) => malformed(
+            format!("the JSON could not be read (reader error {})", error.id),
+            "",
+        ),
     })
 }
 
@@ -241,12 +380,12 @@ fn parse_json(text: &[u8]) -> Result<Json> {
 // word for "this is not the shape of a manifest"; rules about VALUES are InvalidArgument and are
 // the caller's.
 struct Members<'a> {
-    object: &'a BTreeMap<String, Json>,
+    object: &'a SortedMap,
     place: String,
 }
 
 impl<'a> Members<'a> {
-    fn new(object: &'a BTreeMap<String, Json>, place: impl Into<String>) -> Self {
+    fn new(object: &'a SortedMap, place: impl Into<String>) -> Self {
         Self {
             object,
             place: place.into(),

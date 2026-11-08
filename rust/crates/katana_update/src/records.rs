@@ -5,8 +5,8 @@
 //! file, the flush, the rename) is the state module's, with it.
 
 use crate::fsops::path_text;
-use crate::json::{self, Json};
 use katana_core::error::make_error;
+use katana_core::json::Json;
 use katana_core::{Error, ErrorCode, Result};
 use std::fs::File;
 use std::io::{ErrorKind, Read};
@@ -107,22 +107,19 @@ pub(crate) fn read_optional_text(file: &Path, max_bytes: u64) -> Result<Option<V
 }
 
 /// A JSON object with an integer `schema` member: ParseFailure when the text is not that,
-/// Unsupported when the schema is not `supported`. Read as nlohmann reads it with no callback
-/// (json.rs): a member written twice keeps its last value.
+/// Unsupported when the schema is not `supported`. Read as nlohmann reads it with no callback and
+/// no exceptions (katana_core::json): a text that does not read is no object, a member written
+/// twice keeps its last value, and there is no limit of depth.
 pub(crate) fn parse_record(text: &[u8], file: &Path, supported: i64) -> Result<Json> {
-    let options = json::Options {
-        max_depth: None,
-        refuse_duplicates: false,
-    };
-    let Ok(record) = json::parse(text, options) else {
+    let Ok(record) = Json::parse(text) else {
         return Err(parse_failure("the record is not a JSON object", file));
     };
-    if record.as_object().is_none() {
+    if !record.is_object() {
         return Err(parse_failure("the record is not a JSON object", file));
     }
-    let known = match record.get("schema") {
-        Some(Json::Unsigned(schema)) => *schema == supported as u64,
-        Some(Json::Integer(schema)) => *schema == supported,
+    let known = match record.find("schema") {
+        Some(Json::NumberUnsigned(schema)) => *schema == supported as u64,
+        Some(Json::NumberInteger(schema)) => *schema == supported,
         _ => {
             return Err(parse_failure("the record has no integer \"schema\"", file));
         }
@@ -146,7 +143,7 @@ pub(crate) fn string_member(
     file: &Path,
     fallback: &str,
 ) -> Result<String> {
-    let Some(member) = record.get(name) else {
+    let Some(member) = record.find(name) else {
         if required {
             return Err(parse_failure(format!("the record has no \"{name}\""), file));
         }

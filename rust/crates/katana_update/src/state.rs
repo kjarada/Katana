@@ -34,21 +34,17 @@
 //! state.json and last.json are written as nlohmann::json's `dump(2)` writes them in the C++ (the
 //! window and the helper share them, so either program reads what the other wrote): the members
 //! sorted by key, as nlohmann's std::map holds them, two spaces of indent, `": "` between a name
-//! and its value, and a line feed at the end. The records hold integers, strings, a flag and a
-//! list of integers, no real number, so serde_json's pretty printer gives that text once the
-//! members are put in sorted order: it escapes exactly what nlohmann escapes with ensure_ascii
-//! off (the quotation mark, the backslash, \b \t \n \f \r, and every other byte below 0x20 as
-//! \u00xx in lower-case hex; never '/', DEL or a byte beyond ASCII), writes an empty list as `[]`,
-//! and integers in plain decimal.
+//! and its value, and a line feed at the end. katana_core::json is nlohmann's own value and
+//! serializer, so the text is the C++'s.
 
 use crate::fsops::{EntryKind, FsOps, path_text};
 use crate::install::{bare, update_work_directory};
-use crate::json::Json;
 use crate::records::{
     MAX_RECORD_BYTES, MAX_STATE_BYTES, parse_failure, parse_record, read_optional_text,
     string_member,
 };
 use katana_core::error::make_error;
+use katana_core::json::Json;
 use katana_core::path_text::{environment_variable, path_from_utf8, path_to_utf8};
 use katana_core::{Error, ErrorCode, Result, Status};
 use std::fs::File;
@@ -253,28 +249,13 @@ fn require_state_directory(state_dir: &Path) -> Status {
     Ok(())
 }
 
-// A record's text as nlohmann::json's dump(2) writes it, and a line feed (the module's comment).
-// nlohmann keeps an object's members in a std::map, sorted by key whatever order they were set
-// in, so they are sorted here before serde_json writes them in the order it is given (its map
-// keeps the order of insertion once any crate of the workspace asks for preserve_order). The
-// C++'s error handler `replace` writes U+FFFD for a byte that is not UTF-8; a Rust string holds
-// none.
-fn dump(mut members: Vec<(&'static str, serde_json::Value)>) -> Result<Vec<u8>> {
-    members.sort_unstable_by_key(|member| member.0);
-    let mut object = serde_json::Map::new();
-    for (name, value) in members {
-        object.insert(String::from(name), value);
-    }
-    let mut text =
-        serde_json::to_vec_pretty(&serde_json::Value::Object(object)).map_err(|error| {
-            make_error(
-                ErrorCode::FileExportFailure,
-                "the record cannot be written",
-                format!("{error}"),
-            )
-        })?;
-    text.push(b'\n');
-    Ok(text)
+// A record's text as the C++'s dump(json) writes it: json.dump(2, ' ', false, replace) and a line
+// feed (the module's comment). `replace` makes a byte that is not UTF-8 (a version typed by hand)
+// U+FFFD instead of making dump() throw; a Rust string holds none.
+fn dump(json: &Json) -> String {
+    let mut text = json.dump_with(2, ' ', false);
+    text.push('\n');
+    text
 }
 
 // ---- the state folder --------------------------------------------------------------------------
@@ -359,11 +340,11 @@ pub fn read_state(state_dir: &Path) -> Result<UpdateState> {
     };
     let record = parse_record(&text, &file, 1)?;
 
-    if let Some(member) = record.get("last_check") {
+    if let Some(member) = record.find("last_check") {
         // A whole number, signed or not, that fits 64 bits with a sign.
         let seconds = match member {
-            Json::Integer(seconds) => Some(*seconds),
-            Json::Unsigned(seconds) => i64::try_from(*seconds).ok(),
+            Json::NumberInteger(seconds) => Some(*seconds),
+            Json::NumberUnsigned(seconds) => i64::try_from(*seconds).ok(),
             _ => None,
         };
         let Some(seconds) = seconds else {
@@ -374,14 +355,14 @@ pub fn read_state(state_dir: &Path) -> Result<UpdateState> {
         };
         state.last_check_epoch = seconds;
     }
-    if let Some(member) = record.get("auto") {
+    if let Some(member) = record.find("auto") {
         let Some(automatic) = member.as_bool() else {
             return Err(parse_failure("\"auto\" is not true or false", &file));
         };
         state.automatic = automatic;
     }
     state.skipped_version = string_member(&record, "skipped", false, &file, "")?;
-    if let Some(member) = record.get("blocked") {
+    if let Some(member) = record.find("blocked") {
         let Some(entries) = member.as_array() else {
             return Err(parse_failure("\"blocked\" is not a list", &file));
         };
@@ -401,29 +382,18 @@ pub fn read_state(state_dir: &Path) -> Result<UpdateState> {
 /// Written through a temporary file and a rename.
 pub fn write_state(state_dir: &Path, state: &UpdateState) -> Status {
     require_state_directory(state_dir)?;
-    let text = dump(vec![
-        ("schema", serde_json::Value::from(1)),
-        (
-            "last_check",
-            serde_json::Value::from(state.last_check_epoch),
-        ),
-        ("auto", serde_json::Value::Bool(state.automatic)),
-        (
-            "skipped",
-            serde_json::Value::String(state.skipped_version.clone()),
-        ),
-        (
-            "blocked",
-            serde_json::Value::Array(
-                state
-                    .blocked_sequences
-                    .iter()
-                    .map(|&sequence| serde_json::Value::from(sequence))
-                    .collect(),
-            ),
-        ),
-    ])?;
-    write_record(state_dir, "state.json", &text)
+    let mut json = Json::object();
+    json["schema"] = Json::from(1);
+    json["last_check"] = Json::from(state.last_check_epoch);
+    json["auto"] = Json::from(state.automatic);
+    json["skipped"] = Json::from(&state.skipped_version);
+    json["blocked"] = Json::array_of(
+        state
+            .blocked_sequences
+            .iter()
+            .map(|&sequence| Json::from(sequence)),
+    );
+    write_record(state_dir, "state.json", dump(&json).as_bytes())
 }
 
 // ---- last.json ---------------------------------------------------------------------------------
@@ -454,15 +424,14 @@ pub fn read_last_result(state_dir: &Path) -> Result<Option<LastResult>> {
 
 pub fn write_last_result(state_dir: &Path, result: &LastResult) -> Status {
     require_state_directory(state_dir)?;
-    let text = dump(vec![
-        ("schema", serde_json::Value::from(1)),
-        ("status", serde_json::Value::String(result.status.clone())),
-        ("reason", serde_json::Value::String(result.reason.clone())),
-        ("holder", serde_json::Value::String(result.holder.clone())),
-        ("version", serde_json::Value::String(result.version.clone())),
-        ("tx", serde_json::Value::String(result.transaction.clone())),
-    ])?;
-    write_record(state_dir, "last.json", &text)
+    let mut json = Json::object();
+    json["schema"] = Json::from(1);
+    json["status"] = Json::from(&result.status);
+    json["reason"] = Json::from(&result.reason);
+    json["holder"] = Json::from(&result.holder);
+    json["version"] = Json::from(&result.version);
+    json["tx"] = Json::from(&result.transaction);
+    write_record(state_dir, "last.json", dump(&json).as_bytes())
 }
 
 pub fn clear_last_result(state_dir: &Path) -> Status {

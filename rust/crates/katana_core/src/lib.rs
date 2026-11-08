@@ -1,9 +1,13 @@
 //! The `core` layer: errors and results, text and its encodings, logging, the task pool, SHA-256, the strict XML reader.
 //!
-//! The port of src/katana_core and include/katana/core.
+//! The port of src/katana_core and include/katana/core, and of the one third-party library the
+//! layers above share and no Rust crate may stand in for across their interfaces: nlohmann's JSON
+//! (`json`).
 
+pub mod civil_date;
 pub mod cpu_features;
 pub mod error;
+pub mod json;
 pub mod library_data;
 pub mod log;
 pub mod path_text;

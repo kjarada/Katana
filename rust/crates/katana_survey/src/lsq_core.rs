@@ -1,3 +1,9 @@
+// The column-pivoted Householder QR in this file is a translation into Rust of Eigen 3.4's
+// Eigen/src/QR/ColPivHouseholderQR.h (Copyright (C) 2008-2009 Gael Guennebaud, (C) 2009
+// Benoit Jacob) and Eigen/src/Householder/Householder.h and HouseholderSequence.h
+// (Copyright (C) 2009 Gael Guennebaud, (C) 2010 Benoit Jacob), used under the Mozilla Public
+// License 2.0 <https://mozilla.org/MPL/2.0/>; THIRD_PARTY_NOTICES.md ("Code translated
+// into the Rust port") says what that licence asks.
 //! Private numerical core shared by the linear solver and the network
 //! adjustments: the twin of the C++ private header lsq_core.hpp and of the
 //! Eigen code behind it in least_squares.cpp.

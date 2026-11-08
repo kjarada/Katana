@@ -11,11 +11,6 @@ publish.workspace = true
 katana_core.workspace = true
 katana_geometry.workspace = true
 katana_math.workspace = true
-# nlohmann::json's twin (docs/rust.md, "Third-party libraries"). preserve_order
-# because other layers need nlohmann's ordered_json; float_roundtrip because
-# nlohmann reads a number through strtod, correctly rounded, and serde_json's
-# default reading may be an ulp off - which a saved drawing must not be.
-serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 
 [lints]
 workspace = true

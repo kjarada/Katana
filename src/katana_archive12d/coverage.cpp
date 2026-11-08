@@ -9,7 +9,7 @@ const std::vector<ElementCoverage>& elementCoverage()
         {"model", "1.4.1", Handling::Full,
          "a layer; a tree name such as Stage 1/Water arrives as that nested layer"},
         {"colour", "1.4.2", Handling::Full,
-         "the entity's colour where the name is one of 12d's standard colours; the name is "
+         "the entity's colour where the name is one of the standard colours; the name is "
          "always kept"},
         {"style", "1.4.3", Handling::Full, "kept on the entity as 12d.style and written back"},
         {"breakline", "1.4.4", Handling::Full,

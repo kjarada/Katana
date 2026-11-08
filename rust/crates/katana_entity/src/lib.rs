@@ -7,7 +7,6 @@
     reason = "Preserve the C++ oracle's negated floating-point comparisons, including NaN rejection and branch order."
 )]
 
-mod json;
 mod validation;
 mod value_parts;
 

@@ -25,7 +25,6 @@ mod fsops_win;
 pub mod inflate;
 pub mod install;
 pub mod journal;
-mod json;
 pub mod long_path;
 pub mod manifest;
 pub mod paths;

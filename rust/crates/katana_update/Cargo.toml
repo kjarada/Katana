@@ -12,12 +12,6 @@ katana_core.workspace = true
 # zlib's raw inflate in the C++ (src/katana_update/inflate.cpp; docs/rust.md, "Third-party
 # libraries").
 miniz_oxide = "0.8"
-# nlohmann::json's twin, to parse only (docs/rust.md, "Third-party libraries"): serde_json reads
-# the text and the private json module builds nlohmann's value from it with serde's Visitor
-# traits (src/json.rs), so that a member written twice, a deep nesting, `-0` and a byte-order mark
-# mean what they mean to the C++. float_roundtrip as the entity layer has it.
-serde = "1"
-serde_json = { version = "1", features = ["float_roundtrip"] }
 # OpenSSL's Ed25519 verification in the C++ (src/katana_update/signature.cpp): verify_strict, and
 # the RFC 8032 checks the C++ makes on OpenSSL's big numbers (point decoding, the prime-order
 # subgroup, S < L) on curve25519-dalek's points.
