@@ -1894,6 +1894,17 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
 
 ## Not done
 
+- **Two processes reading one file can leave its sidecar behind.** The
+  guard puts a sidecar back as each process found it, so when two runs read
+  one file at once, the second can note the first's new sidecar as already
+  there and restore it after the first has removed it. Seen once
+  (2026-11-09): plane.asc's sidecar, holding its statistics, was left in
+  `tests/geo/data/` by a WSL suite run at
+  `--parallel 14`, where `ZonalVerb` cases run `RASTER ZONAL FILE` on that
+  shared file, each as its own process (suspected; not reproduced). The
+  tests could read a copy each, as `GdalRun`'s sidecar cases do; a person
+  running two Katanas over one file meets the same race, which only a lock
+  shared between processes would close.
 - **The toolbox's Pipeline tab has no Confirm or Overwrite box.** A pipeline
   with an `update` step, or with `--overwrite` in its text, is refused
   there with the verb's message naming CONFIRM or OVERWRITE; it runs typed

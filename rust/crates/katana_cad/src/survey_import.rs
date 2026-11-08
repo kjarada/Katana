@@ -18,7 +18,7 @@ use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 use katana_entity::entity::set_heights;
 use katana_entity::layer_path::{LAYER_SEPARATOR, join_layer_path, validate_layer_path};
-use katana_entity::{Entity, Geometry, Layer, PointGeometry, PropertyValue};
+use katana_entity::{Entity, Geometry, Layer, Model, PointGeometry, PropertyValue};
 use katana_geometry::Point2;
 use katana_survey::data_model::{
     CoordinateSource, SurveyPoint, SurveyProject, to_string, validate_project,
@@ -161,6 +161,19 @@ pub fn import_survey_project(
     options: &SurveyImportOptions,
     report: Option<&mut SurveyImportReport>,
 ) -> Result<Option<CommandPtr>> {
+    import_survey_project_to(document.model(), project, options, report)
+}
+
+/// import_survey_project over the model it reads: what a step of the
+/// document's own calls while the document's state is lent to it (a survey
+/// job command plans its import in its validate, survey_job.rs), where there
+/// is a model and no Document.
+pub(crate) fn import_survey_project_to(
+    model: &Model,
+    project: &SurveyProject,
+    options: &SurveyImportOptions,
+    report: Option<&mut SurveyImportReport>,
+) -> Result<Option<CommandPtr>> {
     // Asked of the survey layer rather than re-checked here, so that a parser
     // and this bridge cannot disagree about what a valid project is. It also
     // guarantees what follows: ids are non-empty and unique and every
@@ -193,7 +206,6 @@ pub fn import_survey_project(
         return Ok(None);
     }
 
-    let model = document.model();
     // Ordered: the layers are created in name order.
     let mut layers_needed: BTreeSet<String> = BTreeSet::new();
     // Counted per key rather than warned per point: a metadata key that

@@ -60,7 +60,7 @@ the step's own run is the evidence, not this table.
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
-| 4 | in progress: planned in five waves (F to J); waves F and G done - the JSON home, the leaf libraries, the Document core, styles and scope, the plotting core, the scene and surface display, the road model and the customisation edits (953 of 3,011 cases) |
+| 4 | in progress: planned in five waves (F to J); waves F, G and H done - the JSON home, the leaf libraries, the Document core, styles and scope, the plotting core, the scene and surface display, the road model, the customisation edits, and every verb family but volumes with the tool framework and the annotation core (1,495 of 3,011 cases); the interpreter and the tool families (wave I) and the interpreter-driven cases (wave J) remain |
 | 5-9 | not started |
 
 ### Step 1: the foundation crates
@@ -438,11 +438,62 @@ that caught a mistaken fix, and passed on their first run. Decisions:
   twin asserts the non-finite number's refusal, by step 2's rule for text
   that is not UTF-8, as wave F's four surface-style cases do.
 
-Evidence, 2026-11-08, `tools/build_visible.sh wsl`: exit 0; the Release C++
-build, Clippy and the float-to-text guard clean; CTest 9,915 entries (the
-dump tool's self-test new), 9,875 passed, 40 skipped, none failed; cargo
-test 3,601 passed, none failed, none ignored, the round-trip gate among them
-over 73 files of the corpus.
+**Wave H** ported the verb families and the tool framework that stand on
+waves F and G: survey jobs (survey points, the survey finish, the linework
+verbs, the job commands); the code table, the customisation host with its
+built-ins, the customisation, survey code and road verbs, the alignment
+report and parcels; the annotation core (leaders, label layout, automatic
+labels, annotation for export, leader presets), the tool framework, grips,
+vertex editing and the surface verbs; the plotting layer above the core (key
+plan, arrangement, legend, preflight) and the sheet verbs; the terrain and
+road-object verbs with the drawing's shapes and the BIM view; and the view
+verbs, the property outline, the utilities and the style manager's rows. Its
+542 cases compiled after fifteen Clippy findings, none of whose fixes changes
+behaviour, and passed on their first run. The verbs whose cases drive the
+interpreter are ported whole, so that wave J writes tests only. Decisions:
+
+- **A tool keeps no reference; its host lends it a context for each call.**
+  The C++ tools hold `const Document*` across steps while the host executes
+  each step's command between inputs, which Rust's borrows cannot express. A
+  Rust tool is `'static`, owned as `Box<dyn InteractiveTool>`, made once from
+  a `ToolStart` (attributes, selection, handles) whose parts it copies; every
+  call, `prompt` and `expects` included, takes a `ToolContext` - a `Copy`
+  bundle of the document, the pick tolerance, the view's pick and apertures
+  and its layer overrides - that the host builds for the call and drops before
+  executing the step's command. Typed input with drafting takes the host's
+  own copy of the drafting settings, written back after. `as_any_mut`
+  replaces the C++'s `dynamic_cast`. Rejected: one struct of the C++'s fields
+  rebuilt for each call (it copies the selection on every mouse move and says
+  nothing of which fields a later call may trust); a shared, interior-mutable
+  Document (shareable for one front end's sake, every execute behind a
+  run-time borrow); and a router holding the Document mutably while it lends
+  the tool an immutable one.
+- **The tool families are one list that starts empty.** The catalogue is
+  built from a constant list of family adders, and each of wave I's tool
+  agents adds its own line, in the C++'s order.
+- **A verb's front-end hooks take the document at each call.** The sheet
+  verbs' context closures take `&Document` first, since the verb holds the
+  document mutably and a closure cannot keep it as the C++'s lambdas do. The
+  view verbs' host takes `&self` and keeps its view set in a `RefCell`,
+  because the scope's view provider reads that same set while ZOOM VIEW runs.
+- **A survey job's command plans each step inside the document's state link
+  and runs it after.** The link does not nest, so nothing is planned while it
+  is held twice. The reduction's context is a job-owned copy, because
+  survey's `ReductionContext` holds functions that are not `Send` and a
+  command must be; the colour lookup the finish hands to linework is a
+  snapshot of the colour table at the call, where the C++ asks the document
+  each time.
+- **The built-in customisations are embedded by a build script**, which reads
+  the default and the alternates from `src/katana_cad/CMakeLists.txt` as the
+  update layer's reads its own; the cases that set the customisation's
+  environment variables are a test binary of their own behind one lock,
+  since `set_var` is unsafe in edition 2024 and races parallel tests.
+
+Evidence, 2026-11-09, `tools/build_visible.sh wsl` after wave H: exit 0; the
+Release C++ build, Clippy and the float-to-text guard clean; CTest 9,915
+entries, 9,875 passed, 40 skipped, none failed; cargo test 4,975 passed, none
+failed, none ignored (wave G's run gave 4,433; wave F's 3,724), the
+round-trip gate among them over 73 files of the corpus.
 
 ## The workspace
 
@@ -854,7 +905,9 @@ the crate's binding.
   added more: printf's `%.Nf` with the sign of a rounded zero (the plotting
   core, the survey tools, import placement and survey's utility report each
   have a copy), the system error text (copied from storage), and the
-  `from_chars` prefix readers. Each wants one home when a second user
+  `from_chars` prefix readers; and wave H's colour-table snapshot (the
+  survey finish's, the survey code verbs' and a test's), which belongs to
+  the colour lookup's module. Each wants one home when a second user
   appears or at the step's end.
 - **Defects found in step 3's porting, ported as they are:**
   - storage: a stray file in `backups/` whose number overflows `std::stol`
@@ -890,7 +943,7 @@ the crate's binding.
   so two ids whose bytes differ but decode alike are refused as duplicates;
   fields cut at a byte count may show U+FFFD where the C++ keeps a broken
   character.
-- **Defects found in porting cad (step 4, waves F and G), ported as they
+- **Defects found in porting cad (step 4, waves F to H), ported as they
   are:**
   - the leaf libraries: `layLinestyle`'s repeat counter, a double, loops for
     ever past 2^53 repeats; grading converts `floor(length / interval)` to a
@@ -930,6 +983,35 @@ the crate's binding.
     sign of -inf and -nan; the coordinate conversion's `isGeographic()`
     argument is never read; the inverse report dereferences an inconsistent
     hand-built result (the Rust prints its "no height difference" line).
+  - survey jobs: none found beyond the job list's unchecked index in
+    `RemoveSurveyJobCommand::execute` (the Rust returns NotFound and undoes,
+    on a path that cannot be reached); a re-adjustment takes the last job of
+    an id, as the C++'s loop does.
+  - the customisation family and road verbs: ROADTEMPLATE RENAME and
+    CORRIDOR RENAME build their reply from a reference into the cached set
+    after the step replaced it (dangling in C++; the Rust's shared pointer
+    gives the old name); the coding report's `coded - matched - fallbackOnly`
+    is unsigned and can wrap; CORRIDOR REGION and SUPERELEVATION sort with an
+    unstable sort (the Rust's is stable, so entries at one station keep their
+    order); `legalDescription` reads the first course of an empty report.
+  - the annotation core: the label layout's grid casts a float to an integer
+    cell unguarded (the Rust saturates); `surfaceRecord` dereferences a
+    surface's triangulation unchecked; both branches of `lineCandidates`'
+    `aligned ? ... : ...` pick one justification; `SelectionStep::all`
+    ignores the view (noted in the C++).
+  - the sheet verbs: their `number()` strips one `+` and reads the rest, so
+    "+-1" is -1, where `core::parseFiniteDouble` refuses it - two number
+    readers that disagree; `drawnOutline`'s arc step count is undefined for a
+    NaN or huge sweep; a NaN line weight or symbol size breaks the legend's
+    map order (never observed: only "most entities, then first met" is
+    asked); preflight's image check joins the viewport's text as a narrow
+    path on Windows, where the verbs use UTF-8.
+  - the utilities: a schedule, schema or design file that opens and then fails
+    to read (a folder, on Linux) is read as empty text - a silent failure;
+    `sampleAlignment` casts its piece count unguarded; views a host may have
+    closed, a vertex's point geometry, the first of no points and a
+    regrade's named points are dereferenced unchecked (the Rust refuses or
+    skips).
 - **Where cad's Rust differs** (step 4):
   - A document's command run through another document's stack fails with
     InvalidState; the C++ changes the document that made it. A road-objects
@@ -942,6 +1024,14 @@ the crate's binding.
     false where `std::filesystem::exists` throws.
   - Of the SIMD kernels, NEON keeps only libstdc++'s `hypot` formula, and,
     like every NEON kernel, is written, not yet compiled (above).
+  - The survey point report pads by characters; an option text's property
+    name that percent-decodes to bytes that are not UTF-8 reads with U+FFFD;
+    UTILITY reads a file's bytes as UTF-8, else Windows-1252, where the C++
+    passes them on; a sheet set file that is not UTF-8 gives the JSON
+    reader's own parse error rather than a lossy read.
+  - The surface edit target and its observers are per thread; observers are
+    shared closures, where the C++ copies each `std::function` (they differ
+    only for a lambda that changes its own captures).
 - **Before step 8, for the updater:** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must
@@ -974,3 +1064,11 @@ the crate's binding.
   the same names, but nothing sets them; the cargo stage of
   `tools/build_visible.sh` and the release jobs must pass them when a build
   that is not the default is made.
+- **A non-default built-in customisation does not reach the Rust yet.**
+  cad's `build.rs` reads the default and the alternates from
+  `src/katana_cad/CMakeLists.txt`; the alternates could come from a
+  `KATANA_ALTERNATE_CUSTOMISATIONS` that the cargo stage and the release jobs
+  pass, but the default cannot come in under its CMake name, which is also
+  the run-time setting that chooses a built-in. It wants a build-time
+  variable of another name, decided when a build that is not the default is
+  made.
