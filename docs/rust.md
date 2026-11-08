@@ -60,7 +60,7 @@ the step's own run is the evidence, not this table.
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
-| 4 | in progress: planned in five waves (F to J); the JSON home and the leaf libraries done (121 of 3,011 cases) |
+| 4 | in progress: planned in five waves (F to J); wave F done - the JSON home, the leaf libraries and the Document core (244 of 3,011 cases) |
 | 5-9 | not started |
 
 ### Step 1: the foundation crates
@@ -378,6 +378,33 @@ error names nlohmann's byte. No test had asserted the old answers. The
 first cad wave also ported the leaf libraries (dashing, style drawing,
 symbols, hatching, plot, view transform, viewport layout and the others)
 and gave the civil date and UTC timestamp a home in `katana_core`.
+
+**The Document's shape**, which every later cad agent builds on
+(`katana_cad`'s `document.rs` records it at its top):
+
+- The Document owns its model and its undo stack and hands the model to the
+  stack on each call, as wave B's stack requires.
+- What a command may change that is not the model - the project's metadata
+  and survey jobs, the surfaces and their styles, the session's
+  customisation, and the parsed caches of sheets, road templates, corridors,
+  road objects and the BIM model - is one state struct. Between steps it
+  lives in the Document, so its accessors return plain references as the
+  C++'s do; for one execute, undo or redo it is lent to a shared slot that
+  the document's own commands capture, so a command run through another
+  document's stack finds the slot empty and fails (the C++'s would change
+  the document that made it). Rejected: the plan's permanent shared state
+  with snapshots returned from the accessors - the C++'s readers hold
+  references, and a survey job holds its field file whole, which every
+  change would copy; and changes queued for after the step, since a survey
+  job command reads the job list while it runs.
+- The C++'s single stack listener becomes the work the Document does after
+  the stack returns (the index, tables, surfaces, road model, selection,
+  current layer and style, revision), then its listeners are told.
+- Every member of document.hpp is declared once: members the C++ implements
+  in other files (sheets, road templates and corridors, road objects, the
+  BIM cache, the coordinate system, survey jobs, the view's paper scale) are
+  `impl Document` blocks in their own modules, over crate-private fields and
+  primitives the Document provides, so no later agent edits document.rs.
 
 Evidence, 2026-11-08, `tools/build_visible.sh wsl`: exit 0; the Release C++
 build, Clippy and the float-to-text guard clean; CTest 9,915 entries (the
