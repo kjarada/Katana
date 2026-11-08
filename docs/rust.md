@@ -60,7 +60,7 @@ the step's own run is the evidence, not this table.
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
-| 4 | in progress: planned in five waves (F to J); wave F done - the JSON home, the leaf libraries and the Document core (244 of 3,011 cases) |
+| 4 | in progress: planned in five waves (F to J); waves F and G done - the JSON home, the leaf libraries, the Document core, styles and scope, the plotting core, the scene and surface display, the road model and the customisation edits (953 of 3,011 cases) |
 | 5-9 | not started |
 
 ### Step 1: the foundation crates
@@ -405,6 +405,38 @@ and gave the civil date and UTC timestamp a home in `katana_core`.
   BIM cache, the coordinate system, survey jobs, the view's paper scale) are
   `impl Document` blocks in their own modules, over crate-private fields and
   primitives the Document provides, so no later agent edits document.rs.
+
+**Wave G** ported the five families that stand on the Document alone:
+styles, survey coding and the scope (global modify, the scope words, the
+view set and its links); the plotting core (frame, sheet set, layout, page
+setup, generators, sheet storage, plan grid, tables, section annotation);
+the scene with its SIMD kernels and the surface display (colouring, plan,
+section cut); the road model (templates, sections, corridors, road objects,
+the BIM model); and the customisation edits, survey tools and drawing
+pieces. Its 709 cases compiled after five Clippy findings and one test
+that caught a mistaken fix, and passed on their first run. Decisions:
+
+- **The view provider of the scope words is a borrow**,
+  `Option<&dyn Fn(Option<u32>) -> Result<ScopeView>>`, `None` being headless,
+  where `VIEW` is refused in favour of `AREA`. Rejected: an
+  `Arc<dyn Fn + Send + Sync>` as the C++'s `std::function` would map, because
+  the interpreter calls it only during one verb, and a borrow lets the
+  window lend a closure over its own view set without making that set
+  shareable or thread-safe.
+- **The view set keeps its views boxed**, against Clippy's `vec_box`:
+  `take()` hands a closing widget the very object the set held, as the
+  C++'s `unique_ptr` does, and a C++ case asserts that identity; held by
+  value, the view moved and the case failed.
+- **A command a step plans for its own document refuses another's link**:
+  linework's styling step, which the C++ guards by comparing model
+  addresses, checks that its document's state is lent to it, and otherwise
+  fails with "linework was planned for another document" - the same refusal
+  from outside. The state link does not nest, so a step that styles lines
+  must not be run from inside another step's use of it.
+- **The sheet set's storage case holds its non-finite half**:
+  `SheetStorage.TextThatIsNotUtf8OrANumberThatIsNotFiniteCannotBeStored`'s
+  twin asserts the non-finite number's refusal, by step 2's rule for text
+  that is not UTF-8, as wave F's four surface-style cases do.
 
 Evidence, 2026-11-08, `tools/build_visible.sh wsl`: exit 0; the Release C++
 build, Clippy and the float-to-text guard clean; CTest 9,915 entries (the
@@ -818,8 +850,12 @@ the crate's binding.
   delivery schema), `std::to_chars` into a fixed 64-byte buffer (the GSI and
   RINEX readers, as the C++ has it twice), the hexadecimal float text
   (archive12d alone so far), and surveyio's test helpers (three support
-  modules with their own `double_eq`, `near` and Mersenne Twister). Each
-  wants one home when a second user appears or at the step's end.
+  modules with their own `double_eq`, `near` and Mersenne Twister). cad
+  added more: printf's `%.Nf` with the sign of a rounded zero (the plotting
+  core, the survey tools, import placement and survey's utility report each
+  have a copy), the system error text (copied from storage), and the
+  `from_chars` prefix readers. Each wants one home when a second user
+  appears or at the step's end.
 - **Defects found in step 3's porting, ported as they are:**
   - storage: a stray file in `backups/` whose number overflows `std::stol`
     ends the program; a backup taken in the same millisecond after pruning
@@ -854,6 +890,58 @@ the crate's binding.
   so two ids whose bytes differ but decode alike are refused as duplicates;
   fields cut at a byte count may show U+FFFD where the C++ keeps a broken
   character.
+- **Defects found in porting cad (step 4, waves F and G), ported as they
+  are:**
+  - the leaf libraries: `layLinestyle`'s repeat counter, a double, loops for
+    ever past 2^53 repeats; grading converts `floor(length / interval)` to a
+    size unguarded (a tiny interval is undefined in C++; the Rust saturates,
+    then runs out of memory); `dimensionStyleChanges` reports any refusal of
+    a command word as "holds a double quote"; a comment in the hatch angle's
+    text says a near-zero angle prints 0, where only an exact -0 does; a flat
+    definition's text reach counts bytes, not characters.
+  - the Document: an aligned dimension's label width counts bytes;
+    `open()` and `newDocument()` never refresh the road model's last-seen
+    keys, so the next change can report a road-model change that did not
+    happen; a surface's decode error text is lossy.
+  - styles and scope: `appendArc`'s chord count casts a double to an integer
+    unguarded (undefined in C++ for a huge or non-finite count; the Rust
+    saturates); the view set's id counter wraps, so ids repeat after 2^32
+    views.
+  - plotting: `denominatorText`'s `llround`, the grid's tile count and the
+    strip's sample count are undefined in C++ for extreme input (the Rust
+    saturates); `gridSheets` has no cap on its tiles, so a huge area at a
+    fine scale allocates without limit; the generators dereference
+    `pointAtStation` unchecked; the grid-label and label-priority sorts meet
+    a NaN in no specified order (the Rust's comparison can panic there).
+  - the scene and surface display: a colouring built by hand with stops out
+    of order indexes past its end (the Rust panics); NaN stops are sorted
+    with `<`; `fadeEdges` with a short edge base reads past it; the legend's
+    value text gives "?" past its 64-character buffer and "-" before a
+    negative value rounded to zero; `Heights::at` is never called.
+  - the road model: a template's parameters are matched ignoring case but
+    stored with the file's spelling and then looked up exactly, so a
+    "Height" key in a file is silently ignored; an error text builds a point
+    from its parts in the wrong order; a placement's alignment, profile and
+    surface and a culvert's ground levels are dereferenced unchecked
+    (unreachable for a validated model).
+  - customisation edits and survey tools: the area tool skips a closed curve
+    polyline of fewer than three vertices as "an open polyline has no area";
+    the line-ends tool refuses a curve polyline; `unsignedZero` strips the
+    sign of -inf and -nan; the coordinate conversion's `isGeographic()`
+    argument is never read; the inverse report dereferences an inconsistent
+    hand-built result (the Rust prints its "no height difference" line).
+- **Where cad's Rust differs** (step 4):
+  - A document's command run through another document's stack fails with
+    InvalidState; the C++ changes the document that made it. A road-objects
+    step outside its document undoes its layers and fails, a path the C++
+    does not have.
+  - Report tables pad by characters (the survey tools, as the subsurface
+    reports, above); a project folder whose name is not UTF-8 shows U+FFFD
+    in STATUS; on Windows, a file's identity is its canonical path and a sheet
+    file's stem is UTF-8, not the ANSI code page; `Path::exists` answers
+    false where `std::filesystem::exists` throws.
+  - Of the SIMD kernels, NEON keeps only libstdc++'s `hypot` formula, and,
+    like every NEON kernel, is written, not yet compiled (above).
 - **Before step 8, for the updater:** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must

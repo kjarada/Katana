@@ -177,10 +177,12 @@ main() {
         echo "== Katana $phase in WSL ($distro), sources $root, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"
         # The caps and switches reach the Linux side through WSLENV; the phase's
         # arguments on wsl.exe's command line, with MSYS's path conversion off so
-        # that a Linux path or a ctest pattern arrives as it was written.
+        # that a Linux path or a ctest pattern arrives as it was written. --exec,
+        # not --, because -- hands the line to a shell, which takes a pattern's
+        # ( | $ as its own syntax.
         export WSLENV="KATANA_BUILD_JOBS/u:KATANA_BUILD_KEEP_GOING/u:KATANA_TOOLCHAIN/u${WSLENV:+:$WSLENV}"
         MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wsl.exe -d "$distro" --cd "$(cygpath -w "$root")" \
-            -- bash tools/build_visible.sh --inside-wsl "$phase" "$@" 2>&1 | tee -a "$log"
+            --exec bash tools/build_visible.sh --inside-wsl "$phase" "$@" 2>&1 | tee -a "$log"
         code=${PIPESTATUS[0]}
     else
         echo "== Katana $phase in $root/$directory, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"

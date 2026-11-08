@@ -375,10 +375,6 @@ impl CacheSlot {
     /// again only when the key's text differs from what the cache was parsed
     /// from - compared by content, not by a revision, because set_metadata
     /// replaces the whole metadata, keys included, and must be seen.
-    #[allow(
-        dead_code,
-        reason = "Read by the sheet set's and the road model's members (waves G2 and G4)."
-    )]
     pub(crate) fn parsed_key<T: Default + Send + Sync + 'static>(
         &self,
         metadata: &ProjectMetadata,
@@ -410,10 +406,6 @@ impl CacheSlot {
 
     /// Puts `value` in the slot as the parsed key's state: what an undo step
     /// does, so undo and redo swap a pointer instead of parsing again.
-    #[allow(
-        dead_code,
-        reason = "Called by the sheet set's and the road model's steps (waves G2 and G4)."
-    )]
     pub(crate) fn store<T: Send + Sync + 'static>(&self, value: Arc<ParsedKey<T>>) {
         self.with(|cache: &mut Option<Arc<ParsedKey<T>>>| *cache = Some(value));
     }
@@ -471,17 +463,9 @@ pub(crate) struct DocumentState {
     /// The parsed sheet set and the JSON it was parsed from (sheet_store,
     /// wave G2), shared by an undo step so undo and redo swap a pointer
     /// instead of parsing the set again.
-    #[allow(
-        dead_code,
-        reason = "The sheet set's members are wave G2's (sheet_store)."
-    )]
     pub(crate) sheet_cache: CacheSlot,
     /// The parsed road objects and their JSON (road_object_store, wave G4),
     /// shared by the undo steps as the sheet cache is.
-    #[allow(
-        dead_code,
-        reason = "The road objects' members are wave G4's (road_object_store)."
-    )]
     pub(crate) road_object_cache: CacheSlot,
     /// The field files imported as jobs, in id order (survey_job, wave H1).
     pub(crate) survey_jobs: Vec<SurveyJob>,
@@ -500,22 +484,13 @@ pub(crate) struct DocumentState {
     // ---- the road model (road_document, wave G4) ----
     /// The parsed road templates and corridors and the JSON each was parsed
     /// from, shared by an undo step as the sheet set's are.
-    #[allow(
-        dead_code,
-        reason = "The road templates' members are wave G4's (road_document)."
-    )]
     pub(crate) road_template_cache: CacheSlot,
-    #[allow(
-        dead_code,
-        reason = "The corridors' members are wave G4's (road_document)."
-    )]
     pub(crate) corridor_cache: CacheSlot,
     /// The road model's metadata keys as the last command's notification saw
     /// them: what road_model_changed compares, to report ROAD_MODEL.
     pub(crate) road_model_seen: Vec<Option<String>>,
     /// The road model's 3D objects, made once per change of what they are
     /// made from (bim_object's bim_model, wave G4).
-    #[allow(dead_code, reason = "The BIM cache is wave G4's (bim_object).")]
     pub(crate) bim_cache: CacheSlot,
 }
 
@@ -1917,10 +1892,6 @@ impl Document {
     /// which of the state's slots it is, `write` the value's JSON. CommandRejected
     /// when the key was written by a newer Katana (`what` names it: "sheets",
     /// "road templates"); an empty value is stored as no key at all.
-    #[allow(
-        dead_code,
-        reason = "Called by the sheet set's and the road model's setters (waves G2 and G4)."
-    )]
     #[allow(
         clippy::too_many_arguments,
         reason = "The C++ changeCommand's arguments, with the step name and what the key holds."
