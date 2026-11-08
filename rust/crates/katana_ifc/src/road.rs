@@ -71,7 +71,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use katana_core::text::equals_ignoring_case;
 use katana_geometry::mesh::{TriangleMesh, validate};
 use katana_math::numerics::{nearly_zero, tolerance};
-use katana_math::{Vec2, Vec3};
+use katana_math::{Vec2, Vec3, cpp};
 
 use crate::builder::{Builder, Container, PropertyList};
 use crate::classification::IfcClass;
@@ -79,7 +79,7 @@ use crate::export::{RoadElement, RoadModelInput, RoadQuantity};
 use crate::product_layout::{find_product_layout, lists_word, predefined_types_of};
 use crate::step::{character_count, step_real};
 use crate::step_file::{Args, Id, list_of};
-use crate::support::{lower, max_of, trimmed, upper};
+use crate::support::{lower, trimmed, upper};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum QuantityKind {
@@ -484,7 +484,7 @@ fn level_at(mesh: &Tessellation, at: Vec2) -> Option<f64> {
         }
         let z = u * a.z + v * b.z + w * c.z;
         best = Some(match best {
-            Some(best) => max_of(best, z),
+            Some(best) => cpp::max(best, z),
             None => z,
         });
     }

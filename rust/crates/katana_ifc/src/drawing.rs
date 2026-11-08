@@ -55,6 +55,7 @@ use katana_geometry::{
     Arc2, Circle2, CurvePolyline2, CurveSegment, Ellipse2, Point2, Spline2, Vec2,
 };
 use katana_math::Vec3;
+use katana_math::cpp;
 use katana_math::numerics::{RAD_TO_DEG, normalize_angle};
 use katana_survey::subsurface::{
     self as sub, QualityLevel, UtilityAttributes, UtilityType, parse_quality_level,
@@ -69,7 +70,7 @@ use crate::classification::{
 use crate::parts::{quality_level_reference, service_long_name};
 use crate::step::step_real;
 use crate::step_file::{Args, Id, list_of};
-use crate::support::{lower, max_of, min_of, printf_fixed};
+use crate::support::{lower, printf_fixed};
 
 /// Two consecutive points closer than the model context's precision are one
 /// point to every reader (GEM111), and are written once.
@@ -1756,9 +1757,9 @@ impl<'b, 'a, 'm> DrawingWriter<'b, 'a, 'm> {
             }
         }
         if let Some((at_a, at_b)) = inverts {
-            invert_at[index] = Some(invert_at[index].map_or(at_a, |known| min_of(known, at_a)));
+            invert_at[index] = Some(invert_at[index].map_or(at_a, |known| cpp::min(known, at_a)));
             invert_at[index + 1] =
-                Some(invert_at[index + 1].map_or(at_b, |known| min_of(known, at_b)));
+                Some(invert_at[index + 1].map_or(at_b, |known| cpp::min(known, at_b)));
         }
 
         let mut representations = Vec::new();
@@ -1832,7 +1833,7 @@ impl<'b, 'a, 'm> DrawingWriter<'b, 'a, 'm> {
         self.b.defines(&format!("{pipe_key}/common"), set, &[pipe]);
         if let Some((at_a, at_b)) = inverts {
             let mut occurrence = PropertyList::new();
-            occurrence.length("InvertElevation", Some(max_of(at_a, at_b)));
+            occurrence.length("InvertElevation", Some(cpp::max(at_a, at_b)));
             let run = (b - a).length();
             if run > 0.0 {
                 occurrence.positive_ratio("Gradient", Some((at_a - at_b).abs() / run));

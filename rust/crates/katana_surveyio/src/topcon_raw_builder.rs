@@ -12,10 +12,6 @@
 //! and a code on a shot strings that shot's point into a feature.
 
 #![allow(
-    dead_code,
-    reason = "The instrument readers that use the builder (topcon_rw5, topcon_gts, opcode_field_file, sokkia_sdr) are ported in the next wave; remove this when the first of them lands."
-)]
-#![allow(
     clippy::neg_cmp_op_on_partial_ord,
     reason = "Preserve the C++ oracle's negated floating-point comparisons, including NaN rejection."
 )]
@@ -389,6 +385,10 @@ impl RawProjectBuilder {
     }
 
     /// The same, assigned into an existing record.
+    #[allow(
+        dead_code,
+        reason = "The C++ builder's stampSource, kept with its twin; station_observation builds its record with source(), and no reader calls this one."
+    )]
     pub(crate) fn stamp_source(&self, target: &mut SourceRecord, record: usize) {
         target.clone_from(&self.source_template);
         target.record_number = record;

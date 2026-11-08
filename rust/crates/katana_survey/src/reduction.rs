@@ -54,6 +54,7 @@ use std::fmt;
 use katana_core::error::make_error;
 use katana_core::text::{parse_integer, trimmed};
 use katana_core::{Error, ErrorCode, Result, Status};
+use katana_math::cpp;
 use katana_math::numerics::{
     HALF_PI, PI, TWO_PI, normalize_angle, normalize_angle_signed, tolerance,
 };
@@ -200,11 +201,6 @@ pub(crate) fn format_seconds(radians: f64, decimals: usize) -> String {
 
 pub(crate) fn format_millimetres(metres: f64, decimals: usize) -> String {
     format_number(metres * 1000.0, decimals) + " mm"
-}
-
-// std::max of two doubles: (a < b) ? b : a, which f64::max is not for a NaN.
-fn max_of(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
 }
 
 const NO_ROW: usize = usize::MAX;
@@ -2256,7 +2252,7 @@ fn seed_gnss(
             converted.northing = position.northing;
             converted.easting = position.easting;
             converted.height = Some(position.elevation);
-            converted.sigma_horizontal = max_of(position.sigma_northing, position.sigma_easting);
+            converted.sigma_horizontal = cpp::max(position.sigma_northing, position.sigma_easting);
             converted.sigma_vertical = position.sigma_elevation;
             converted.source = Some(&position.source);
         }
@@ -2296,7 +2292,7 @@ fn seed_gnss(
                     up = local.up;
                 }
                 if north > 0.0 && east > 0.0 && up > 0.0 {
-                    converted.sigma_horizontal = max_of(north, east).sqrt();
+                    converted.sigma_horizontal = cpp::max(north, east).sqrt();
                     converted.sigma_vertical = up.sqrt();
                 }
             }

@@ -17,14 +17,13 @@ use katana_core::task_pool::TaskPool;
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
 use katana_geometry::Triangle2;
+use katana_math::cpp;
 use katana_math::numerics::{lerp, tolerance};
 
 use crate::cdt_backend::{self, CdtConstraint, CdtInput, NO_INDEX};
 use crate::tin_edit::{TinEditResult, held_vertices};
 use crate::tin_patch::{VertexStars, finish_surface, report_of, unchanged};
-use crate::tin_surface::{
-    Point3, TinSurface, TinTriangle, compute_by_index, plan_of, std_max, std_min3,
-};
+use crate::tin_surface::{Point3, TinSurface, TinTriangle, compute_by_index, plan_of};
 
 /// Candidates per parallel chunk of the first measurement: each is a small
 /// triangulation (tens of microseconds), so 64 is a few milliseconds of work,
@@ -190,7 +189,7 @@ fn removal_of(
         let Some(weights) = plan.barycentric(at) else {
             continue;
         };
-        let least = std_min3(weights[0], weights[1], weights[2]);
+        let least = cpp::min3(weights[0], weights[1], weights[2]);
         if least > best_weight {
             best_weight = least;
             level = weights[0] * vertices[tri[0] as usize].z
@@ -226,7 +225,7 @@ fn removal_of(
                 }
                 let before = lerp(centre.z, vertices[r as usize].z, u);
                 let after = lerp(vertices[a as usize].z, vertices[b as usize].z, s);
-                removal.change = std_max(removal.change, (before - after).abs());
+                removal.change = cpp::max(removal.change, (before - after).abs());
             }
         }
     }
@@ -322,7 +321,7 @@ pub fn thin_surface(
         };
         let prior = star
             .iter()
-            .fold(0.0, |most, &t| std_max(most, bound[t as usize]));
+            .fold(0.0, |most, &t| cpp::max(most, bound[t as usize]));
         if prior + removal.change > limit {
             continue;
         }
@@ -363,7 +362,7 @@ pub fn thin_surface(
         if is_alive != 0 {
             kept.push(triangles[t]);
             kept_masks.push(masks[t]);
-            largest = std_max(largest, bound[t]);
+            largest = cpp::max(largest, bound[t]);
         }
     }
     let thinned = finish_surface(vertices.clone(), kept, kept_masks)?;

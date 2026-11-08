@@ -1,4 +1,4 @@
-use crate::numerics::{ordered_max, ordered_min};
+use crate::cpp;
 use crate::{Vec3, tolerance};
 use std::cmp::Ordering;
 
@@ -127,14 +127,14 @@ impl AABB {
 
     pub fn expand_point(&mut self, point: Vec3) {
         self.min = Vec3::new(
-            ordered_min(self.min.x, point.x),
-            ordered_min(self.min.y, point.y),
-            ordered_min(self.min.z, point.z),
+            cpp::min(self.min.x, point.x),
+            cpp::min(self.min.y, point.y),
+            cpp::min(self.min.z, point.z),
         );
         self.max = Vec3::new(
-            ordered_max(self.max.x, point.x),
-            ordered_max(self.max.y, point.y),
-            ordered_max(self.max.z, point.z),
+            cpp::max(self.max.x, point.x),
+            cpp::max(self.max.y, point.y),
+            cpp::max(self.max.z, point.z),
         );
     }
 
@@ -240,8 +240,8 @@ pub fn intersect_box(ray: Ray, bounds: AABB) -> Option<RayBoxHit> {
         if first > second {
             std::mem::swap(&mut first, &mut second);
         }
-        t_enter = ordered_max(t_enter, first);
-        t_exit = ordered_min(t_exit, second);
+        t_enter = cpp::max(t_enter, first);
+        t_exit = cpp::min(t_exit, second);
         if t_enter > t_exit {
             return None;
         }

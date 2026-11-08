@@ -12,9 +12,8 @@
 //! per add().
 
 use katana_geometry::Point2;
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
-
-use crate::tin_surface::{std_clamp, std_max};
 
 const EMPTY_SLOT: u32 = 0xFFFF_FFFF;
 
@@ -29,7 +28,7 @@ const CELL_WIDTH_IN_TOLERANCES: f64 = 1024.0;
 const MAX_CELL_COORDINATE: f64 = 4.0e18;
 
 fn cell_coordinate(scaled: f64) -> i64 {
-    std_clamp(scaled.floor(), -MAX_CELL_COORDINATE, MAX_CELL_COORDINATE) as i64
+    cpp::clamp(scaled.floor(), -MAX_CELL_COORDINATE, MAX_CELL_COORDINATE) as i64
 }
 
 fn table_size_for(capacity: usize) -> usize {
@@ -65,11 +64,11 @@ impl PointMerger {
     /// `capacity` is an upper bound on the number of add() calls. `tolerance` is
     /// in model units; 0 merges exactly equal positions only.
     pub fn new(capacity: usize, tolerance: f64) -> Self {
-        let kept_tolerance = std_max(tolerance, 0.0);
+        let kept_tolerance = cpp::max(tolerance, 0.0);
         let mask = table_size_for(capacity) - 1;
         Self {
             tolerance: kept_tolerance,
-            cell_size: CELL_WIDTH_IN_TOLERANCES * std_max(kept_tolerance, tolerance::GEOMETRIC),
+            cell_size: CELL_WIDTH_IN_TOLERANCES * cpp::max(kept_tolerance, tolerance::GEOMETRIC),
             mask,
             slots: vec![EMPTY_SLOT; mask + 1],
             positions: Vec::with_capacity(capacity),

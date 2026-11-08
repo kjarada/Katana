@@ -73,8 +73,8 @@ use crate::codes::{
     COLOUR_BY_BLOCK, COLOUR_BY_LAYER, RADIANS_PER_DEGREE, indexed_colour, plain_mtext, plain_text,
     true_colour,
 };
-use crate::scalar::{std_max, std_min};
 use crate::tokenizer::{Pair, Tokenizer, to_integer, to_real, trimmed_value};
+use katana_math::cpp;
 
 // ---- the public interface -------------------------------------------------------
 
@@ -271,12 +271,12 @@ impl Affine {
         let first = self.a * self.a + self.c * self.c;
         let second = self.b * self.b + self.d * self.d;
         let dot = self.a * self.b + self.c * self.d;
-        let scale = std_max(first, second);
+        let scale = cpp::max(first, second);
         scale > 0.0 && (first - second).abs() <= 1e-9 * scale && dot.abs() <= 1e-9 * scale
     }
 
     fn largest_scale(&self) -> f64 {
-        std_max(
+        cpp::max(
             self.a * self.a + self.c * self.c,
             self.b * self.b + self.d * self.d,
         )
@@ -898,7 +898,7 @@ fn place_geometry(geometry: &Geometry, t: &Affine, tolerance: f64) -> Option<Geo
                 }
                 return Some(Geometry::CurvePolyline(out));
             }
-            let mut out = polyline.to_polyline(tolerance / std_max(t.largest_scale(), 1e-12));
+            let mut out = polyline.to_polyline(tolerance / cpp::max(t.largest_scale(), 1e-12));
             for vertex in &mut out.vertices {
                 *vertex = t.apply(*vertex);
             }
@@ -915,7 +915,7 @@ fn place_geometry(geometry: &Geometry, t: &Affine, tolerance: f64) -> Option<Geo
                 }
                 return Some(Geometry::Ellipse(out));
             }
-            let mut points = ellipse.tessellate(tolerance / std_max(t.largest_scale(), 1e-12));
+            let mut points = ellipse.tessellate(tolerance / cpp::max(t.largest_scale(), 1e-12));
             if ellipse.is_full() && points.len() > 1 {
                 points.pop();
             }
@@ -1783,7 +1783,7 @@ impl<'a> Reader<'a> {
             let exact = Ellipse2 {
                 center: Point2::new(cx, cy),
                 major_axis,
-                ratio: std_min(ratio, 1.0),
+                ratio: cpp::min(ratio, 1.0),
                 // In [0, 2 pi), as the file's own parameters are: a mirror's
                 // -(start + sweep) is the same place a turn on.
                 start_parameter: normalize_angle(if normal.z > 0.0 {

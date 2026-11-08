@@ -30,10 +30,11 @@
 use katana_core::task_pool::TaskPool;
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result, Status};
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
 use crate::tin_builder::{TinBuildOptions, TinInput, build_tin};
-use crate::tin_surface::{Box2, NO_VERTEX, Point2, Point3, TinSurface, compute_by_index, std_max};
+use crate::tin_surface::{Box2, NO_VERTEX, Point2, Point3, TinSurface, compute_by_index};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TiledTerrainOptions {
@@ -158,8 +159,8 @@ impl TiledTerrain {
             terrain.bounds.expand(Point2::new(p.x, p.y));
         }
 
-        let columns = std_max(1.0, (terrain.bounds.width() / options.tile_size).ceil());
-        let rows = std_max(1.0, (terrain.bounds.height() / options.tile_size).ceil());
+        let columns = cpp::max(1.0, (terrain.bounds.width() / options.tile_size).ceil());
+        let rows = cpp::max(1.0, (terrain.bounds.height() / options.tile_size).ceil());
         if columns * rows > Self::MAX_TILE_COUNT as f64 {
             return Err(Error::new(
                 ErrorCode::InvalidArgument,

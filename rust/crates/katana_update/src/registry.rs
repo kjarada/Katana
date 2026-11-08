@@ -14,10 +14,10 @@
 //!   the version that is installed.
 //!
 //! The real implementations are the helper's (src/katana_updater/registry_win.cpp and
-//! registry_none.cpp in the C++), which the update library compiles; they and
-//! make_system_registry_ops are ported with the helper. Elsewhere than Windows the system
-//! registry is one that has nothing: installer_location is None and the writes succeed doing
-//! nothing.
+//! registry_none.cpp in the C++), which the update library compiles: here registry_win.rs, and the
+//! empty registry at the end of this module, behind make_system_registry_ops. Elsewhere than
+//! Windows the system registry is one that has nothing: installer_location is None and the writes
+//! succeed doing nothing.
 //!
 //! WHAT THE WINDOWS IMPLEMENTATION HOLDS ITSELF TO:
 //! - HKCU only, so no call needs or asks for administrator rights.
@@ -63,4 +63,41 @@ pub trait RegistryOps {
     /// Rewrites DisplayVersion and DisplayName under the Uninstall key, when that key exists (it
     /// exists only for an installer-kind install); success doing nothing when it does not.
     fn set_installed_version(&self, display_version: &str, display_name: &str) -> Status;
+}
+
+/// The system registry: registry_win.rs on Windows; elsewhere a registry that has nothing: there
+/// is no installer to have recorded a folder, no RunOnce and no Uninstall key, so nothing is read
+/// and a write succeeds by doing nothing - which is the correct, finished behaviour there, not a
+/// stub (the C++'s src/katana_updater/registry_none.cpp).
+pub fn make_system_registry_ops() -> Box<dyn RegistryOps> {
+    #[cfg(windows)]
+    {
+        crate::registry_win::make_system_registry_ops()
+    }
+    #[cfg(not(windows))]
+    {
+        Box::new(NoRegistry)
+    }
+}
+
+#[cfg(not(windows))]
+struct NoRegistry;
+
+#[cfg(not(windows))]
+impl RegistryOps for NoRegistry {
+    fn installer_location(&self) -> Result<Option<PathBuf>> {
+        Ok(None)
+    }
+
+    fn set_run_once(&self, _name: &str, _command: &str) -> Status {
+        Ok(())
+    }
+
+    fn clear_run_once(&self, _name: &str) -> Status {
+        Ok(())
+    }
+
+    fn set_installed_version(&self, _display_version: &str, _display_name: &str) -> Status {
+        Ok(())
+    }
 }

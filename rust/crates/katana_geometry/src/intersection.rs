@@ -1,5 +1,5 @@
-use crate::scalar::{max, min};
 use crate::{Arc2, Circle2, Containment, Line2, Point2, Segment2, Vec2};
+use katana_math::cpp::{max, min};
 use katana_math::numerics::tolerance;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

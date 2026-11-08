@@ -1,5 +1,5 @@
-use crate::scalar::{max, min};
 use crate::{Point2, Point3};
+use katana_math::cpp::{max, min};
 use std::arch::aarch64::*;
 
 #[target_feature(enable = "neon")]

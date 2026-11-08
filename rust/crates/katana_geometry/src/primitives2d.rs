@@ -1,4 +1,4 @@
-use crate::scalar::{max, min};
+use katana_math::cpp::{max, min};
 use katana_math::numerics::{HALF_PI, PI, TWO_PI, normalize_angle, tolerance};
 pub use katana_math::vec2::Vec2;
 pub type Point2 = Vec2;

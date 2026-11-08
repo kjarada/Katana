@@ -22,7 +22,7 @@
 use katana_geometry::{Point2, Vec2};
 
 use crate::entity::{TextGeometry, TextJustify};
-use crate::scalar;
+use katana_math::cpp;
 
 /// The distance between two baselines at line spacing 1, as a multiple of the
 /// text height: the 5/3 that AutoCAD's MTEXT uses at "1.0x" spacing (the MTEXT
@@ -142,7 +142,7 @@ pub fn estimated_text_corners(text: &TextGeometry) -> [Point2; 4] {
     let lines = text_lines(&text.text);
     let mut widest = 0.0;
     for line in &lines {
-        widest = scalar::max(widest, estimated_width(line));
+        widest = cpp::max(widest, estimated_width(line));
     }
     let block = text_block_extent(
         widest * text.height,

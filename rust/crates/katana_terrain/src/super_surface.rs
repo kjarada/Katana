@@ -14,11 +14,10 @@
 //! if that turns out to be wrong, and the test that pins it says as much.
 
 use katana_core::Result;
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
-use crate::tin_surface::{
-    Box2, Point2, Point3, TinSurface, TinTriangle, std_clamp, std_max, std_max3, std_min3,
-};
+use crate::tin_surface::{Box2, Point2, Point3, TinSurface, TinTriangle};
 
 /// Roughly two triangles per cell: the query walks whole cells, so fewer cells
 /// means longer lists to scan and more means a build that costs more than the
@@ -135,13 +134,13 @@ impl<'a> TriangleGrid<'a> {
         grid.origin = bounds.min;
         let width = bounds.width();
         let height = bounds.height();
-        let target_cells = std_max(1.0, surface.triangle_count() as f64 / TRIANGLES_PER_CELL);
+        let target_cells = cpp::max(1.0, surface.triangle_count() as f64 / TRIANGLES_PER_CELL);
         if width > 0.0 && height > 0.0 {
             let cell = (width * height / target_cells).sqrt();
             // An extremely elongated extent must not explode one dimension.
             let limit = 2.0 * target_cells;
-            grid.columns = std_clamp((width / cell).ceil(), 1.0, limit) as u32;
-            grid.rows = std_clamp((height / cell).ceil(), 1.0, limit) as u32;
+            grid.columns = cpp::clamp((width / cell).ceil(), 1.0, limit) as u32;
+            grid.rows = cpp::clamp((height / cell).ceil(), 1.0, limit) as u32;
         }
         grid.cell_width = if width > 0.0 {
             width / f64::from(grid.columns)
@@ -211,10 +210,10 @@ impl<'a> TriangleGrid<'a> {
         let b = self.surface.vertices()[tri[1] as usize];
         let c = self.surface.vertices()[tri[2] as usize];
         Extent {
-            min_x: std_min3(a.x, b.x, c.x),
-            min_y: std_min3(a.y, b.y, c.y),
-            max_x: std_max3(a.x, b.x, c.x),
-            max_y: std_max3(a.y, b.y, c.y),
+            min_x: cpp::min3(a.x, b.x, c.x),
+            min_y: cpp::min3(a.y, b.y, c.y),
+            max_x: cpp::max3(a.x, b.x, c.x),
+            max_y: cpp::max3(a.y, b.y, c.y),
         }
     }
 
@@ -247,10 +246,10 @@ impl<'a> TriangleGrid<'a> {
 /// over its middle.
 fn overlaps(higher: &TinSurface, grid: &TriangleGrid, a: Point3, b: Point3, c: Point3) -> bool {
     let bounds = higher.bounds();
-    let min_x = std_min3(a.x, b.x, c.x);
-    let max_x = std_max3(a.x, b.x, c.x);
-    let min_y = std_min3(a.y, b.y, c.y);
-    let max_y = std_max3(a.y, b.y, c.y);
+    let min_x = cpp::min3(a.x, b.x, c.x);
+    let max_x = cpp::max3(a.x, b.x, c.x);
+    let min_y = cpp::min3(a.y, b.y, c.y);
+    let max_y = cpp::max3(a.y, b.y, c.y);
     if !grid.usable
         || bounds.empty()
         || max_x < bounds.min.x
@@ -274,8 +273,8 @@ fn overlaps(higher: &TinSurface, grid: &TriangleGrid, a: Point3, b: Point3, c: P
     // their absolute error is a few dozen ulps of the coordinates, which
     // GEOMETRIC plus sixty-four ulps of them covers with room to spare (the
     // rounding margin tin_patch and the cull used before it derive).
-    let scale = std_max(
-        std_max(std_max(min_x.abs(), max_x.abs()), min_y.abs()),
+    let scale = cpp::max(
+        cpp::max(cpp::max(min_x.abs(), max_x.abs()), min_y.abs()),
         max_y.abs(),
     );
     let margin = tolerance::GEOMETRIC + 64.0 * f64::EPSILON * scale;
@@ -287,10 +286,10 @@ fn overlaps(higher: &TinSurface, grid: &TriangleGrid, a: Point3, b: Point3, c: P
         let q = vertices[tri[1] as usize];
         let r = vertices[tri[2] as usize];
         // Boxes that only touch share no area: the cheap rejection first.
-        if std_min3(p.x, q.x, r.x) >= max_x - margin
-            || std_max3(p.x, q.x, r.x) <= min_x + margin
-            || std_min3(p.y, q.y, r.y) >= max_y - margin
-            || std_max3(p.y, q.y, r.y) <= min_y + margin
+        if cpp::min3(p.x, q.x, r.x) >= max_x - margin
+            || cpp::max3(p.x, q.x, r.x) <= min_x + margin
+            || cpp::min3(p.y, q.y, r.y) >= max_y - margin
+            || cpp::max3(p.y, q.y, r.y) <= min_y + margin
         {
             return false;
         }

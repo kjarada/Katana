@@ -47,6 +47,7 @@ use std::f64::consts::{PI, SQRT_2};
 
 use katana_geometry::chording::sagitta_chord_count;
 use katana_geometry::{Point2, Spiral2, Vec2};
+use katana_math::cpp;
 
 use crate::archive::{Segment, SegmentKind, Vertex};
 use crate::text_utilities::lower;
@@ -116,19 +117,7 @@ pub(crate) struct CubicParabolaEnd {
 // std::max(worst, value), as the C++ keeps the largest: the first unless the
 // second is larger.
 fn raise_to(worst: &mut f64, value: f64) {
-    if *worst < value {
-        *worst = value;
-    }
-}
-
-// std::min and std::max, which return the first argument unless the second is
-// strictly smaller (larger) - not f64::min and f64::max, which differ on NaN.
-fn min_of(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-fn max_of(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
+    *worst = cpp::max(*worst, value);
 }
 
 // A computed transition that ends further than this from the vertex the file
@@ -139,7 +128,7 @@ fn max_of(a: f64, b: f64) -> f64 {
 // itself: a curve that misses by more than the distance between its own ends
 // is nowhere near, whatever its length claims.
 fn closure_limit(length: f64, chord: f64) -> f64 {
-    min_of(max_of(1.0, 0.05 * length), chord)
+    cpp::min(cpp::max(1.0, 0.05 * length), chord)
 }
 
 // A transition between two vertices is at least as long as the chord between
@@ -411,8 +400,8 @@ fn chord_curve_segment(
         length,
     };
 
-    let low = min_of(from, to);
-    let high = max_of(from, to);
+    let low = cpp::min(from, to);
+    let high = cpp::max(from, to);
     let span = Spiral2 {
         start: base.point_at(low),
         start_direction: base.direction_at(low),
@@ -426,7 +415,7 @@ fn chord_curve_segment(
     // more: tight enough that a wrong reading (out by the offset, or by the
     // whole curve) cannot pass, loose enough for coordinates written to 3
     // places.
-    let limit = max_of(0.01, 10.0 * tolerance);
+    let limit = cpp::max(0.01, 10.0 * tolerance);
     for hand in [1.0, -1.0] {
         let mut points = Vec::new();
         for i in 0..=chords {
@@ -477,12 +466,12 @@ pub(crate) fn solve_arc(
         // A radius written to 3 places can fall a hair short of half the chord
         // of the semicircle it describes. More than that and it is not an arc
         // between these two points at all.
-        if half - radius > max_of(tolerance, 1e-6 * half) {
+        if half - radius > cpp::max(tolerance, 1e-6 * half) {
             return None;
         }
         radius = half;
     }
-    let height = max_of(0.0, radius * radius - half * half).sqrt();
+    let height = cpp::max(0.0, radius * radius - half * half).sqrt();
     let direction = (b - a) / chord;
     let right_normal = Vec2::new(direction.y, -direction.x);
     let clockwise = segment.radius > 0.0;

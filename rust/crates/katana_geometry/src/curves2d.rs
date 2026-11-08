@@ -1,7 +1,7 @@
 pub use crate::curve_offset::offset;
 use crate::primitives2d::{Arc2, Box2, Point2, Polyline2, Segment2, Vec2};
-use crate::scalar::max;
 use katana_core::error::{Error, ErrorCode, Result, Status};
+use katana_math::cpp::max;
 use katana_math::numerics::{HALF_PI, PI, TWO_PI, normalize_angle, tolerance};
 
 pub const CURVE_CHORD_TOLERANCE: f64 = 1.0e-3;

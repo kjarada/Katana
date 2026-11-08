@@ -8,7 +8,6 @@
 )]
 
 mod json;
-mod scalar;
 mod validation;
 mod value_parts;
 

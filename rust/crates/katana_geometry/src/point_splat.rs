@@ -1,6 +1,6 @@
-use crate::scalar::max;
 use crate::{Box2, Point2};
 use katana_core::task_pool::TaskPool;
+use katana_math::cpp::max;
 use std::sync::OnceLock;
 
 pub const SPLAT_TILE_POINTS: usize = 1024;

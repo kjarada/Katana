@@ -21,6 +21,7 @@ use std::sync::Mutex;
 use katana_core::task_pool::TaskPool;
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_geometry::{Segment2, Triangle2, Triangle3};
+use katana_math::cpp;
 use katana_math::numerics::{normalize_angle, tolerance};
 
 use crate::summation::CompensatedSum;
@@ -142,37 +143,6 @@ const TRIANGLES_PER_CELL: f64 = 2.0;
 /// that a 4096-position section leaves every thread a share.
 const ELEVATION_GRAIN: usize = 256;
 
-/// std::min of two doubles: the first unless the second is smaller.
-pub(crate) fn std_min(first: f64, second: f64) -> f64 {
-    if second < first { second } else { first }
-}
-
-/// std::max of two doubles: the first unless it is smaller than the second.
-pub(crate) fn std_max(first: f64, second: f64) -> f64 {
-    if first < second { second } else { first }
-}
-
-/// std::min({a, b, c}).
-pub(crate) fn std_min3(a: f64, b: f64, c: f64) -> f64 {
-    std_min(std_min(a, b), c)
-}
-
-/// std::max({a, b, c}).
-pub(crate) fn std_max3(a: f64, b: f64, c: f64) -> f64 {
-    std_max(std_max(a, b), c)
-}
-
-/// std::clamp: `low` when value < low, `high` when high < value, else value.
-pub(crate) fn std_clamp(value: f64, low: f64, high: f64) -> f64 {
-    if value < low {
-        low
-    } else if high < value {
-        high
-    } else {
-        value
-    }
-}
-
 /// Monotonic in `value`, which is what makes the grid exact: a position inside a
 /// triangle's bounding box always maps into the cell range of that box.
 pub(crate) fn cell_coordinate(value: f64, origin: f64, cell_size: f64, count: u32) -> u32 {
@@ -211,10 +181,10 @@ fn cell_is_separated(a: Point2, b: Point2, c: Point2, cell_min: Point2, cell_max
 
 /// Calls visit(cell_index) for every grid cell the triangle may reach into.
 fn visit_cells(grid: &LocatorGrid, a: Point2, b: Point2, c: Point2, mut visit: impl FnMut(usize)) {
-    let min_x = std_min3(a.x, b.x, c.x) - LOCATOR_MARGIN;
-    let max_x = std_max3(a.x, b.x, c.x) + LOCATOR_MARGIN;
-    let min_y = std_min3(a.y, b.y, c.y) - LOCATOR_MARGIN;
-    let max_y = std_max3(a.y, b.y, c.y) + LOCATOR_MARGIN;
+    let min_x = cpp::min3(a.x, b.x, c.x) - LOCATOR_MARGIN;
+    let max_x = cpp::max3(a.x, b.x, c.x) + LOCATOR_MARGIN;
+    let min_y = cpp::min3(a.y, b.y, c.y) - LOCATOR_MARGIN;
+    let max_y = cpp::max3(a.y, b.y, c.y) + LOCATOR_MARGIN;
     let column0 = cell_coordinate(min_x, grid.origin.x, grid.cell_width, grid.columns);
     let column1 = cell_coordinate(max_x, grid.origin.x, grid.cell_width, grid.columns);
     let row0 = cell_coordinate(min_y, grid.origin.y, grid.cell_height, grid.rows);
@@ -244,7 +214,7 @@ fn visit_cells(grid: &LocatorGrid, a: Point2, b: Point2, c: Point2, mut visit: i
 /// Triangle2::is_degenerate(), from the doubled signed area and without roots.
 /// Barycentric weights of such a triangle are dominated by rounding.
 fn is_sliver(a: Point2, b: Point2, c: Point2, twice_area: f64) -> bool {
-    let longest_squared = std_max3(
+    let longest_squared = cpp::max3(
         (b - a).length_squared(),
         (c - b).length_squared(),
         (a - c).length_squared(),
@@ -503,8 +473,8 @@ impl TinSurface {
             for &v in &self.triangles[t] {
                 let p = self.vertices[v as usize];
                 self.bounds.expand(Point2::new(p.x, p.y));
-                min_z = std_min(min_z, p.z);
-                max_z = std_max(max_z, p.z);
+                min_z = cpp::min(min_z, p.z);
+                max_z = cpp::max(max_z, p.z);
             }
             plan_sum.add(self.triangle_plan_area(t));
             surface_sum.add(self.triangle_surface_area(t));
@@ -517,7 +487,7 @@ impl TinSurface {
         // Grid of roughly square cells holding TRIANGLES_PER_CELL triangles on average.
         let width = self.bounds.width();
         let height = self.bounds.height();
-        let target_cells = std_max(1.0, self.triangles.len() as f64 / TRIANGLES_PER_CELL);
+        let target_cells = cpp::max(1.0, self.triangles.len() as f64 / TRIANGLES_PER_CELL);
         let mut grid = LocatorGrid {
             origin: self.bounds.min,
             columns: 1,
@@ -528,8 +498,8 @@ impl TinSurface {
             let cell = (width * height / target_cells).sqrt();
             // An extremely elongated extent must not explode one dimension.
             let limit = 2.0 * target_cells;
-            grid.columns = std_clamp((width / cell).ceil(), 1.0, limit) as u32;
-            grid.rows = std_clamp((height / cell).ceil(), 1.0, limit) as u32;
+            grid.columns = cpp::clamp((width / cell).ceil(), 1.0, limit) as u32;
+            grid.rows = cpp::clamp((height / cell).ceil(), 1.0, limit) as u32;
         }
         grid.cell_width = if width > 0.0 {
             width / f64::from(grid.columns)
@@ -658,7 +628,7 @@ impl TinSurface {
     pub fn triangle_plan_area(&self, triangle: usize) -> f64 {
         // Slivers that are counter-clockwise by exact arithmetic can evaluate to a
         // rounding-sized negative area; they have no area.
-        std_max(0.0, self.plan_triangle(triangle).signed_area())
+        cpp::max(0.0, self.plan_triangle(triangle).signed_area())
     }
 
     pub fn triangle_surface_area(&self, triangle: usize) -> f64 {

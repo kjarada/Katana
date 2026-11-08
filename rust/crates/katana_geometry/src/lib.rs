@@ -21,7 +21,6 @@ pub mod polyline_vertices;
 pub mod primitives2d;
 pub mod primitives3d;
 pub mod profile;
-mod scalar;
 mod simd;
 pub mod spatial_index;
 pub mod spiral2;

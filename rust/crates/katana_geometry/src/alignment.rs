@@ -1,8 +1,8 @@
 use crate::chording::chord_arc;
-use crate::scalar::max;
 use crate::{Arc2, Point2, Polyline2, Segment2, Spiral2, Vec2};
 use katana_core::error::{Error, ErrorCode, Result};
 use katana_core::text::format_exact_real;
+use katana_math::cpp::max;
 use katana_math::numerics::{PI, RAD_TO_DEG, normalize_angle_signed, tolerance};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

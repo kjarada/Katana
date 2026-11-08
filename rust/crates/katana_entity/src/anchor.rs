@@ -9,11 +9,11 @@ use katana_geometry::{CurveSegment, Point2, Polyline2};
 use katana_math::numerics::{TWO_PI, normalize_angle};
 
 use crate::entity::{AnchorPoint, AnchorRef, Entity, Geometry, to_string};
-use crate::scalar;
+use katana_math::cpp;
 
 fn clamped_parameter(reference: &AnchorRef) -> f64 {
     if reference.parameter.is_finite() {
-        scalar::clamp(reference.parameter, 0.0, 1.0)
+        cpp::clamp(reference.parameter, 0.0, 1.0)
     } else {
         0.0
     }
@@ -264,12 +264,10 @@ pub fn nearest_anchor(entity: &Entity, near: Point2) -> Option<AnchorRef> {
             }
             reference.index = nearest.segment as u32;
             reference.parameter = match curve.segment(nearest.segment) {
-                CurveSegment::Segment(segment) => {
-                    scalar::clamp(segment.parameter_of(near), 0.0, 1.0)
-                }
+                CurveSegment::Segment(segment) => cpp::clamp(segment.parameter_of(near), 0.0, 1.0),
                 CurveSegment::Arc(arc) => {
                     let radial = nearest.point - arc.center;
-                    scalar::clamp(arc.parameter_of_angle(radial.y.atan2(radial.x)), 0.0, 1.0)
+                    cpp::clamp(arc.parameter_of_angle(radial.y.atan2(radial.x)), 0.0, 1.0)
                 }
             };
             Some(reference)
@@ -281,7 +279,7 @@ pub fn nearest_anchor(entity: &Entity, near: Point2) -> Option<AnchorRef> {
                 let turn = along - along.floor();
                 if turn < 1.0 { turn } else { 0.0 }
             } else {
-                scalar::clamp(along, 0.0, 1.0)
+                cpp::clamp(along, 0.0, 1.0)
             };
             Some(reference)
         }

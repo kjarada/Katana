@@ -1,3 +1,5 @@
+use crate::cpp;
+
 pub const PI: f64 = std::f64::consts::PI;
 pub const TWO_PI: f64 = 2.0 * PI;
 pub const HALF_PI: f64 = 0.5 * PI;
@@ -20,7 +22,7 @@ pub fn nearly_equal(first: f64, second: f64, epsilon: f64) -> bool {
         return false;
     }
     let difference = (first - second).abs();
-    let scale = ordered_max(ordered_max(1.0, first.abs()), second.abs());
+    let scale = cpp::max(cpp::max(1.0, first.abs()), second.abs());
     difference <= epsilon * scale
 }
 
@@ -33,7 +35,7 @@ pub fn lengths_equal(first: f64, second: f64, epsilon: f64) -> bool {
 }
 
 pub fn clamp(value: f64, min_value: f64, max_value: f64) -> f64 {
-    ordered_min(ordered_max(value, min_value), max_value)
+    cpp::min(cpp::max(value, min_value), max_value)
 }
 
 pub fn lerp(first: f64, second: f64, parameter: f64) -> f64 {
@@ -63,12 +65,4 @@ pub fn angles_equal(first: f64, second: f64, epsilon: f64) -> bool {
 
 pub fn is_finite(value: f64) -> bool {
     value.is_finite()
-}
-
-pub(crate) fn ordered_min(first: f64, second: f64) -> f64 {
-    if second < first { second } else { first }
-}
-
-pub(crate) fn ordered_max(first: f64, second: f64) -> f64 {
-    if first < second { second } else { first }
 }

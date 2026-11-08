@@ -44,15 +44,16 @@ use katana_geometry::alignment::{
     solve_alignment,
 };
 use katana_geometry::profile::{ProfileElementKind, SolvedProfile, solve_profile};
+use katana_math::cpp;
+use katana_math::libm::asinh;
 use katana_math::numerics::{HALF_PI, TWO_PI, tolerance};
 use katana_math::{Vec2, Vec3};
 
 use crate::builder::{Builder, PropertyList};
 use crate::classification::IfcClass;
-use crate::libm::asinh;
 use crate::step::step_real;
 use crate::step_file::{Args, Id};
-use crate::support::{printf_fixed, remainder};
+use crate::support::printf_fixed;
 
 /// Two directions or two curvatures closer than this are the same for the
 /// transition code. The solver closes an element to about 1e-12 rad; this is
@@ -128,7 +129,7 @@ fn piece_of(element: &AlignmentElement) -> Piece {
 
 /// The difference of two directions, folded into (-pi, pi].
 fn angle_between(a: f64, b: f64) -> f64 {
-    remainder(a - b, TWO_PI).abs()
+    cpp::remainder(a - b, TWO_PI).abs()
 }
 
 /// What one piece's end has in common with the next's start.

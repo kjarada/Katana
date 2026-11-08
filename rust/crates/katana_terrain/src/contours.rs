@@ -28,9 +28,10 @@ use katana_core::task_pool::TaskPool;
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
 use katana_geometry::Polyline2;
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
-use crate::tin_surface::{NO_TRIANGLE, Point2, TinSurface, compute_by_index, std_max3, std_min3};
+use crate::tin_surface::{NO_TRIANGLE, Point2, TinSurface, compute_by_index};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Contour {
@@ -325,8 +326,8 @@ pub fn contours(
             let z0 = surface.vertices()[tri[0] as usize].z;
             let z1 = surface.vertices()[tri[1] as usize].z;
             let z2 = surface.vertices()[tri[2] as usize].z;
-            let low = std_min3(z0, z1, z2);
-            let high = std_max3(z0, z1, z2);
+            let low = cpp::min3(z0, z1, z2);
+            let high = cpp::max3(z0, z1, z2);
             if low < high {
                 LevelRange {
                     first: first_level_above(low),

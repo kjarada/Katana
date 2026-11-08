@@ -1,9 +1,9 @@
 use crate::chording::chord_arc;
 use crate::curves2d::{bulge_from_sweep, bulge_through};
-use crate::scalar::{max, min};
 use crate::{CurvePolyline2, CurveSegment, CurveVertex, Point2, Segment2, Vec2};
 use katana_core::error::{Error, ErrorCode, Result, Status};
 use katana_core::text::format_exact_real;
+use katana_math::cpp::{max, min};
 use katana_math::numerics::{PI, tolerance};
 
 pub type PolylineResult = Result<CurvePolyline2>;

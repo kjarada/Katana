@@ -1,32 +1,16 @@
 //! Twin of tests/survey/test_statistics.cpp.
 
-#![allow(
-    unsafe_code,
-    reason = "The independent reference of the C++ test is the C library's erf and lgamma, declared here."
-)]
-
 mod survey_support;
 
-// The C++ test's reference functions, std::erf and std::lgamma, are the C
-// library's; Rust's standard library has neither. Declared from libm, which
-// the standard library links on every target it supports here.
-//
-// SAFETY: both take a double by value and return one, with no pointer and no
-// precondition, so declaring them safe to call is sound. lgamma also writes
-// the C library's global `signgam`; only one test of this binary calls it, so
-// no two threads write it at once.
-#[cfg_attr(unix, link(name = "m"))]
-unsafe extern "C" {
-    safe fn erf(x: f64) -> f64;
-    safe fn lgamma(x: f64) -> f64;
-}
-
 mod survey_statistics {
-    use super::{erf, lgamma};
     use crate::survey_support::{double_eq, error_code, near};
     use katana_core::ErrorCode;
     use katana_math::numerics::PI;
     use katana_survey::statistics::{chi_square_cdf, chi_square_quantile};
+
+    // The C++ test's reference functions, std::erf and std::lgamma, are the C
+    // library's; Rust's standard library has neither.
+    use katana_math::libm::{erf, lgamma};
 
     // Independent reference for the chi-square cdf, built from closed forms
     // rather than from the incomplete gamma expansions of the implementation:

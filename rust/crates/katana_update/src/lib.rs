@@ -8,6 +8,7 @@
 //! handed to the apply, the journal and the test at once: an implementation that keeps state
 //! (a fake's record, [`FaultFs`]'s counters) keeps it in a `Cell` or a `RefCell`.
 
+pub mod apply;
 pub mod check;
 pub mod command_line;
 pub mod credential;
@@ -30,19 +31,34 @@ pub mod manifest;
 pub mod paths;
 pub mod plan;
 pub mod process;
+#[cfg(not(windows))]
+mod process_scan_posix;
+#[cfg(windows)]
+mod process_scan_win;
 pub mod ranges;
 mod records;
+pub mod recover;
+#[doc(hidden)]
+pub mod recover_internal;
 pub mod registry;
+#[cfg(windows)]
+mod registry_win;
 pub mod remove_tree;
 pub mod signature;
 #[cfg(not(windows))]
 mod spawn_posix;
 #[cfg(windows)]
 mod spawn_win;
+pub mod stage;
 pub mod state;
 pub mod trust;
 pub mod version;
 
+pub use apply::{
+    APPLIER_PROTOCOL, ApplyOutcome, ApplyRequest, ApplyResult, ApplyServices, ApplyTimings,
+    HEALTH_SWITCH, apply, helper_arguments, installed_program, is_valid_transaction_id,
+    launch_apply, launch_apply_with, new_transaction_id, parse_helper_arguments, rollback,
+};
 pub use check::{CheckResult, CheckStatus, apply_update_state, check};
 pub use credential::{
     CREDENTIAL_TARGET, CredentialStore, TOKEN_ENVIRONMENT_VARIABLE,
@@ -80,14 +96,23 @@ pub use process::{
     Launcher, ProcessOps, RunningProgram, SpawnRequest, SpawnResult, make_system_launcher,
     process_is_elevated, utf8_arguments,
 };
+pub use process::{make_system_process_ops, running_programs};
 pub use ranges::{
     MergedRange, PARTIAL_DOWNLOADS_REFUSED, RANGE_MAX_LENGTH, RANGE_MERGE_GAP, RangeMember,
     check_range_response, merge_ranges, range_header_value,
 };
+pub use recover::{
+    Confirmed, RECOVER_WAIT, Settled, confirm_started, recover, recover_in_process, settle_unproved,
+};
+pub use registry::make_system_registry_ops;
 pub use registry::{RUN_ONCE_NAME, RegistryOps};
 pub use signature::{
     PublicKey, SignatureBytes, SignatureLine, check_public_key, key_id_of, parse_public_key_hex,
     parse_signature_line, verify_ed25519,
+};
+pub use stage::{
+    PreparedApply, STAGED_MANIFEST_NAME, STAGED_SIGNATURE_NAME, preflight, preflight_with, stage,
+    stage_lock_path, stage_with, staged_manifest_path, staged_signature_path,
 };
 pub use state::{
     CHECK_INTERVAL, CHECK_JITTER_MAX, LastResult, UpdateState, append_cleanup, check_is_due,

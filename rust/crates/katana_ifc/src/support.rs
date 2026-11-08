@@ -1,81 +1,13 @@
 //! What the C++ of this layer takes from its language and library, where
-//! Rust's std answers otherwise: the IEEE remainder, `std::clamp`'s order of
-//! tests, `printf`'s "%.3f", ASCII-only case and trimming, the text of a path
-//! and of an I/O error. Each is a few lines; none is a design of its own.
+//! Rust's std answers otherwise: `printf`'s "%.3f", ASCII-only case and
+//! trimming, the text of a path and of an I/O error. Each is a few lines; none
+//! is a design of its own. std::min, std::max, std::clamp and std::remainder
+//! are katana_math::cpp's, the C library's asinh katana_math::libm's.
 
 use std::path::Path;
 
 use katana_core::path_text::path_to_utf8;
 use katana_core::text::is_ascii_space;
-
-/// `std::remainder(x, p)`: x - n p, n the integer nearest x / p (an even one
-/// on a tie), which is exact. fdlibm's `__ieee754_remainder`, step for step,
-/// on top of the exact `fmod` Rust's `%` is.
-pub(crate) fn remainder(x: f64, p: f64) -> f64 {
-    // The high word of |p|, as fdlibm tests it.
-    let high_p = (p.to_bits() >> 32) as u32 & 0x7fff_ffff;
-    if p == 0.0 || !x.is_finite() || p.is_nan() {
-        #[allow(
-            clippy::eq_op,
-            reason = "fdlibm's own way to make the NaN of an invalid operation, kept for its bits."
-        )]
-        return (x * p) / (x * p);
-    }
-    let negative = x.is_sign_negative();
-    let p = p.abs();
-    let mut r = x;
-    // Below 2^1023 p + p is finite: now |r| < 2p.
-    if high_p <= 0x7fdf_ffff {
-        r %= p + p;
-    }
-    if x.abs() == p {
-        return 0.0 * x;
-    }
-    r = r.abs();
-    if high_p < 0x0020_0000 {
-        // p below 2^-1021: halving it could lose its last bit.
-        if r + r > p {
-            r -= p;
-            if r + r >= p {
-                r -= p;
-            }
-        }
-    } else {
-        let half = 0.5 * p;
-        if r > half {
-            r -= p;
-            if r >= half {
-                r -= p;
-            }
-        }
-    }
-    // fdlibm flips the sign bit for a negative x, whatever r's own sign is.
-    if negative { -r } else { r }
-}
-
-/// `std::clamp(value, low, high)`: `value < low ? low : high < value ? high :
-/// value`, which never panics (Rust's `f64::clamp` panics on a NaN bound or
-/// on low > high, where the C++ is merely unspecified).
-pub(crate) fn clamp(value: f64, low: f64, high: f64) -> f64 {
-    if value < low {
-        low
-    } else if high < value {
-        high
-    } else {
-        value
-    }
-}
-
-/// `std::min(a, b)`: `b < a ? b : a`, which keeps `a` on a NaN where
-/// `f64::min` would not.
-pub(crate) fn min_of(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `a < b ? b : a`.
-pub(crate) fn max_of(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
 
 /// `snprintf(buffer, size, "%.<decimals>f", value)`: the exact decimal
 /// expansion rounded to `decimals` places, its sign kept ("-0.000" stays, as

@@ -1,10 +1,17 @@
 //! The `math` layer: vectors, matrices, quaternions, the tolerance policy, unit ratios.
+//!
+//! Also the port's one home for what the C++ takes from its standard library
+//! and Rust answers otherwise: `cpp` (std::min, std::max, std::clamp,
+//! std::remainder on doubles) and `libm` (the C library's asinh, erf, erfc
+//! and lgamma).
 
 #[macro_use]
 mod vector_ops;
 #[macro_use]
 mod matrix_ops;
 
+pub mod cpp;
+pub mod libm;
 pub mod mat2;
 pub mod mat3;
 pub mod mat4;

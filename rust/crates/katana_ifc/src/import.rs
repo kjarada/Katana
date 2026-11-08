@@ -81,7 +81,7 @@ use katana_geometry::spiral2::Spiral2;
 use katana_geometry::{Arc2, Box2, Circle2, Polyline2, Segment2, Spline2};
 use katana_math::mat4::{transform_point, transform_vector};
 use katana_math::numerics::{TWO_PI, tolerance};
-use katana_math::{Mat4, Vec2, Vec3};
+use katana_math::{Mat4, Vec2, Vec3, cpp};
 use katana_terrain::TinSurface;
 use katana_terrain::tin_surface::TinTriangle;
 
@@ -91,7 +91,7 @@ use crate::import_alignment::{
 };
 use crate::product_classes::{ProductClass, ProductKind, product_class};
 use crate::step_reader::{StepInstance, StepKind, StepModel, StepValue, parse_step};
-use crate::support::{max_of, path_text};
+use crate::support::path_text;
 
 /// How far a reconstructed alignment may stand from the geometry the file
 /// states before the reconstruction is refused: the tolerance the .12da
@@ -912,7 +912,7 @@ impl<'m, 'o> Reader<'m, 'o> {
     fn rgb(&self, colour: Option<&StepInstance>) -> Option<Color> {
         let colour = colour.filter(|colour| colour.entity_type == "IFCCOLOURRGB")?;
         let channel = |index: usize| {
-            let value = crate::support::clamp(number(colour, index).unwrap_or(0.0), 0.0, 1.0);
+            let value = cpp::clamp(number(colour, index).unwrap_or(0.0), 0.0, 1.0);
             (value * 255.0).round() as u8
         };
         Some(Color::new(channel(1), channel(2), channel(3), 255))
@@ -1314,7 +1314,7 @@ impl<'m, 'o> Reader<'m, 'o> {
         let tolerance = self.options.curve_tolerance;
         let mut count: usize = 8;
         if r > tolerance {
-            let step = 2.0 * max_of(-1.0, 1.0 - tolerance / r).acos();
+            let step = 2.0 * cpp::max(-1.0, 1.0 - tolerance / r).acos();
             // The C++ casts the ceiling unchecked; Rust saturates.
             count = 2_usize.max((sweep.abs() / step).ceil() as usize);
         }
@@ -1421,7 +1421,7 @@ impl<'m, 'o> Reader<'m, 'o> {
                     let tolerance = self.options.curve_tolerance;
                     let mut count: usize = 8;
                     if r > tolerance {
-                        let step = 2.0 * max_of(-1.0, 1.0 - tolerance / r).acos();
+                        let step = 2.0 * cpp::max(-1.0, 1.0 - tolerance / r).acos();
                         count = 2_usize.max((arc.sweep.abs() / step).ceil() as usize);
                     }
                     count = count.min(20_000);

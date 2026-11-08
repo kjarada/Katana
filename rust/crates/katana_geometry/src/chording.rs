@@ -1,5 +1,5 @@
-use crate::scalar::max;
 use crate::{Arc2, Circle2, Point2};
+use katana_math::cpp::max;
 use katana_math::numerics::{TWO_PI, tolerance};
 
 pub fn sagitta_chord_count(radius: f64, sweep_radians: f64, epsilon: f64) -> usize {

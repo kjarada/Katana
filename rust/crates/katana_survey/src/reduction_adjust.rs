@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
 use katana_core::{Error, ErrorCode, Result, Status};
+use katana_math::cpp;
 use katana_math::numerics::{
     DEG_TO_RAD, HALF_PI, PI, RAD_TO_DEG, normalize_angle, normalize_angle_signed, tolerance,
 };
@@ -73,16 +74,6 @@ use crate::traverse::{TraverseAdjustment, TraverseOptions, compute_traverse};
 // the reduction refuses rather than appear to hang. Side shots do not count
 // (see above).
 const MAX_NETWORK_UNKNOWNS: usize = 3000;
-
-// std::min and std::max of two doubles: (b < a) ? b : a and (a < b) ? b : a,
-// which f64::min and f64::max are not for a NaN.
-fn min_of(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-fn max_of(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
 
 fn is_known(position: &Position) -> bool {
     matches!(
@@ -2110,7 +2101,7 @@ fn resection_data<'a>(engine: &Engine<'a>, setup_index: usize) -> ResectionData<
 // target centring, which no pointing to them can resolve, and never less than
 // the project's coordinate tolerance.
 fn one_position_of(apriori: &ObservationPrecision) -> f64 {
-    max_of(
+    cpp::max(
         tolerance::COORDINATE,
         2.0_f64.sqrt() * apriori.target_centring,
     )
@@ -2359,7 +2350,7 @@ fn circle_through(a: Plane, b: Plane, c: Plane) -> Option<(Plane, f64)> {
     let u = b - a;
     let v = c - a;
     let twice = 2.0 * (u.real() * v.imag() - u.imag() * v.real());
-    if !(twice.abs() > tolerance::RELATIVE * max_of(u.norm(), v.norm())) {
+    if !(twice.abs() > tolerance::RELATIVE * cpp::max(u.norm(), v.norm())) {
         return None;
     }
     let centre = Plane::new(
@@ -2549,7 +2540,7 @@ fn nearest_shape(targets: &[ResectionTarget<'_>], station: Plane) -> Shape {
             let b = plane_of(&targets[j].position);
             let apart = (a - b).abs();
             // How far they are: as measured, else from the station.
-            let reach = max_of(
+            let reach = cpp::max(
                 targets[i].distance.unwrap_or((a - station).abs()),
                 targets[j].distance.unwrap_or((b - station).abs()),
             );
@@ -2576,7 +2567,7 @@ fn nearest_shape(targets: &[ResectionTarget<'_>], station: Plane) -> Shape {
             let sine = (targets[j].direction.unwrap_or(0.0) - targets[i].direction.unwrap_or(0.0))
                 .sin()
                 .abs();
-            widest = max_of(widest, sine);
+            widest = cpp::max(widest, sine);
         }
     }
     consider(
@@ -2584,7 +2575,7 @@ fn nearest_shape(targets: &[ResectionTarget<'_>], station: Plane) -> Shape {
         format!(
             "its sight lines to {} are within {} of one line",
             names_of(targets),
-            angle_words(min_of(widest, 1.0).asin())
+            angle_words(cpp::min(widest, 1.0).asin())
         ),
     );
     for i in 0..count {
@@ -2690,12 +2681,12 @@ fn station_strength(
         let length = (sight.target - station).abs();
         if sight.direction {
             strength.linear_within =
-                min_of(strength.linear_within, length * (2.0 * sight.sigma).sqrt());
-            strength.worst_line = max_of(strength.worst_line, length * sight.sigma);
+                cpp::min(strength.linear_within, length * (2.0 * sight.sigma).sqrt());
+            strength.worst_line = cpp::max(strength.worst_line, length * sight.sigma);
         } else {
             strength.linear_within =
-                min_of(strength.linear_within, (2.0 * length * sight.sigma).sqrt());
-            strength.worst_line = max_of(strength.worst_line, sight.sigma);
+                cpp::min(strength.linear_within, (2.0 * length * sight.sigma).sqrt());
+            strength.worst_line = cpp::max(strength.worst_line, sight.sigma);
         }
     }
     Some(strength)
@@ -3030,7 +3021,7 @@ impl<'a> Resection<'_, 'a> {
             let mut least = f64::INFINITY;
             let mut reached = false;
             for solution in &found {
-                least = min_of(least, solution.squares);
+                least = cpp::min(least, solution.squares);
                 reached =
                     reached || (point - solution.position).abs() <= solution.strength.linear_within;
             }

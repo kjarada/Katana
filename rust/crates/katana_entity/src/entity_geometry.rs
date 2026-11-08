@@ -14,8 +14,8 @@ use crate::entity::{
     LeaderGeometry, PointGeometry, TextGeometry, to_string,
 };
 use crate::leader_values::check_leader_template;
-use crate::scalar;
 use crate::text_block::estimated_text_corners;
+use katana_math::cpp;
 
 /// What can be validated: the C++ `validate` overload set (a geometry here,
 /// the table records in tables.rs and annotation.rs). Fails with the reason.
@@ -456,7 +456,7 @@ fn dimension_lines(dimension: &DimensionGeometry) -> Vec<Segment2> {
             let radius = if dimension.offset > tolerance::GEOMETRIC {
                 dimension.offset
             } else {
-                scalar::min(
+                cpp::min(
                     dimension.start.distance_to(dimension.vertex),
                     dimension.end.distance_to(dimension.vertex),
                 )
@@ -482,7 +482,7 @@ fn dimension_lines(dimension: &DimensionGeometry) -> Vec<Segment2> {
             };
             vec![Segment2::new(
                 from,
-                dimension.start + out * scalar::max(dimension.offset, 0.0),
+                dimension.start + out * cpp::max(dimension.offset, 0.0),
             )]
         }
         DimensionKind::OrdinateX | DimensionKind::OrdinateY => {
@@ -561,14 +561,14 @@ pub fn distance_to(geometry: &Geometry, point: Point2) -> f64 {
         Geometry::Dimension(dimension) => {
             let mut nearest = f64::INFINITY;
             for line in dimension_lines(dimension) {
-                nearest = scalar::min(nearest, line.distance_to(point));
+                nearest = cpp::min(nearest, line.distance_to(point));
             }
             nearest
         }
         Geometry::Label(label) => {
             let mut nearest = label.anchor.distance_to(point);
             if let Some(position) = label.position {
-                nearest = scalar::min(nearest, position.distance_to(point));
+                nearest = cpp::min(nearest, position.distance_to(point));
             }
             nearest
         }

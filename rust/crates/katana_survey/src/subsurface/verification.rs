@@ -12,6 +12,8 @@
 //! (utility_network, top_level) - a detection recorded to the centre and an
 //! exposure recorded to the crown differ by half a diameter that is not error.
 
+use katana_math::cpp;
+
 use super::quality_level::{QualityLevel, classify, to_string};
 use super::utility_network::{
     GradingSettings, UtilityLine, UtilityVertex, has_vertical_measurement, top_level,
@@ -47,12 +49,6 @@ pub struct VerificationReport {
     /// Largest |vertical deviation|.
     pub maximum_vertical: Option<f64>,
     pub rms_vertical: Option<f64>,
-}
-
-/// `std::max(a, b)`: `b` only when `a < b`, so a NaN in `b` is passed over as
-/// the C++ passes it over.
-fn larger(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
 }
 
 /// The vertex `id` on `own` first, then on any other line.
@@ -134,14 +130,14 @@ pub fn verify_detections(lines: &[UtilityLine], settings: &GradingSettings) -> V
 
             report.horizontal_passed += usize::from(result.horizontal_within);
             report.maximum_horizontal =
-                larger(report.maximum_horizontal, result.horizontal_deviation);
+                cpp::max(report.maximum_horizontal, result.horizontal_deviation);
             sum_horizontal += result.horizontal_deviation * result.horizontal_deviation;
             if let Some(deviation) = result.vertical_deviation {
                 let magnitude = deviation.abs();
                 report.vertical_checked += 1;
                 report.vertical_passed += usize::from(result.vertical_within.unwrap_or(false));
                 report.maximum_vertical =
-                    Some(larger(report.maximum_vertical.unwrap_or(0.0), magnitude));
+                    Some(cpp::max(report.maximum_vertical.unwrap_or(0.0), magnitude));
                 sum_vertical += magnitude * magnitude;
             }
             report.results.push(result);

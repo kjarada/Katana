@@ -20,6 +20,7 @@ use katana_geometry::{
     AlignmentPi, Arc2, Circle2, HorizontalAlignment, Point2, Point3, Polyline2, ProfilePvi,
     Segment2, SolvedAlignment, Triangle2, Vec2, VerticalAlignment,
 };
+use katana_math::cpp;
 use katana_terrain::{TinSurface, TinTriangle, combine_surfaces};
 
 use crate::archive::{
@@ -89,32 +90,9 @@ fn radians(degrees: f64) -> f64 {
     degrees * PI / 180.0
 }
 
-// IEEE 754 remainder, as std::remainder computes it: x less the multiple of y
-// nearest to it, ties to the even multiple, exactly - no Rust function has it.
-// For a y that is finite, normal and far from the overflow edge (360 here) it
-// is fdlibm's reduction: x modulo 2y, which is exact, then at most two exact
-// subtractions of y (Sterbenz), and the sign of x put back.
-fn ieee_remainder(x: f64, y: f64) -> f64 {
-    let mut magnitude = (x % (y + y)).abs();
-    let half = 0.5 * y;
-    if magnitude > half {
-        magnitude -= y;
-        if magnitude >= half {
-            magnitude -= y;
-        }
-    }
-    if x.is_sign_negative() {
-        -magnitude
-    } else {
-        magnitude
-    }
-}
-
 // std::max(worst, value).
 fn raise_to(worst: &mut f64, value: f64) {
-    if *worst < value {
-        *worst = value;
-    }
+    *worst = cpp::max(*worst, value);
 }
 
 // A list item with a blank in it, as `"..."` with `"` and `\` escaped - the
@@ -1415,7 +1393,7 @@ impl<'a> Importer<'a> {
             return 0;
         }
         geometry.landing_angle = Some(
-            radians(ieee_remainder(angle, 360.0))
+            radians(cpp::remainder(angle, 360.0))
                 + if justify == "right_justify" { PI } else { 0.0 },
         );
         let mut entity = self.make_entity(&leader.header, "drafting_element/leader");

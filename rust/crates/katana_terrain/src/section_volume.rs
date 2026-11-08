@@ -57,10 +57,11 @@ use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
 use katana_geometry::alignment::SolvedAlignment;
 use katana_geometry::{SpatialEntry, SpatialId, SpatialIndex, Triangle2};
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
 use crate::summation::CompensatedSum;
-use crate::tin_surface::{Box2, Point2, TinSurface, compute_by_index, std_clamp, std_max, std_min};
+use crate::tin_surface::{Box2, Point2, TinSurface, compute_by_index};
 
 // ---- along a segment -----------------------------------------------------------------------
 
@@ -114,7 +115,7 @@ fn cross_edge(surface: &TinSurface, first: u32, second: u32, a: Point2, d: Point
     let denominator = d.x * ey - d.y * ex;
     let t = ((u.x - a.x) * ey - (u.y - a.y) * ex) / denominator;
     let s = ((u.x - a.x) * d.y - (u.y - a.y) * d.x) / denominator;
-    let along = std_clamp(s, 0.0, 1.0);
+    let along = cpp::clamp(s, 0.0, 1.0);
     EdgeCrossing {
         t,
         z: u.z * (1.0 - along) + v.z * along,
@@ -745,7 +746,7 @@ fn first_crossing(
                 slot.found = true;
                 slot.second = j;
             }
-            slot.nearest = std_min(slot.nearest, std_max(on_first, on_second));
+            slot.nearest = cpp::min(slot.nearest, cpp::max(on_first, on_second));
         }
         slot
     });
@@ -764,7 +765,7 @@ fn first_crossing(
                 nearest: slot.nearest,
             },
             Some(found) => SectionCrossing {
-                nearest: std_min(found.nearest, slot.nearest),
+                nearest: cpp::min(found.nearest, slot.nearest),
                 ..found
             },
         });
@@ -855,14 +856,14 @@ fn overlaps_deeper_than(first: &Tri, second: &Tri, depth: f64) -> bool {
                 let mut high = -low;
                 for corner in triangle {
                     let at = (corner.x - from.x) * nx + (corner.y - from.y) * ny;
-                    low = std_min(low, at);
-                    high = std_max(high, at);
+                    low = cpp::min(low, at);
+                    high = cpp::max(high, at);
                 }
                 (low, high)
             };
             let (low_a, high_a) = shadow(first);
             let (low_b, high_b) = shadow(second);
-            if !(std_min(high_a, high_b) - std_max(low_a, low_b) > depth) {
+            if !(cpp::min(high_a, high_b) - cpp::max(low_a, low_b) > depth) {
                 return false;
             }
         }
@@ -1061,8 +1062,8 @@ pub fn volumes_along_alignment(
             "the range has no length: from must be before to",
         ));
     }
-    let first = std_max(from, start);
-    let last = std_min(to, end);
+    let first = cpp::max(from, start);
+    let last = cpp::min(to, end);
     if (last - first) / options.interval > MAX_VOLUME_SECTIONS as f64 {
         return Err(Error::new(
             ErrorCode::InvalidArgument,
@@ -1085,12 +1086,12 @@ pub fn volumes_along_alignment(
     }
     let common = Box2::new(
         Point2::new(
-            std_max(existing.bounds().min.x, design.bounds().min.x),
-            std_max(existing.bounds().min.y, design.bounds().min.y),
+            cpp::max(existing.bounds().min.x, design.bounds().min.x),
+            cpp::max(existing.bounds().min.y, design.bounds().min.y),
         ),
         Point2::new(
-            std_min(existing.bounds().max.x, design.bounds().max.x),
-            std_min(existing.bounds().max.y, design.bounds().max.y),
+            cpp::min(existing.bounds().max.x, design.bounds().max.x),
+            cpp::min(existing.bounds().max.y, design.bounds().max.y),
         ),
     );
     let reach = common.width().hypot(common.height());

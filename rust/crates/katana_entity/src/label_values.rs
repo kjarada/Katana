@@ -18,9 +18,9 @@ use crate::annotation::{LabelKind, LabelStyle};
 use crate::entity::{Entity, Geometry, LabelGeometry, heights_of};
 use crate::label_text::{LabelQuantity, LabelValue, LabelValues};
 use crate::model::Model;
-use crate::scalar;
 use crate::tables::Alignment;
 use crate::value_parts::{add_arc_values, add_common_values, add_segment_values};
+use katana_math::cpp;
 
 /// The C++ `LabelPiece::Shape`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -172,7 +172,7 @@ fn chainage_pieces(alignment: &Alignment, style: &LabelStyle) -> Vec<LabelPiece>
     let end = solved.end_station();
     let interval = style.interval;
     let step = if style.tick_interval > tolerance::GEOMETRIC {
-        scalar::min(style.tick_interval, interval)
+        cpp::min(style.tick_interval, interval)
     } else {
         interval
     };
@@ -189,7 +189,7 @@ fn chainage_pieces(alignment: &Alignment, style: &LabelStyle) -> Vec<LabelPiece>
         if station > end + tolerance::GEOMETRIC || pieces.len() >= MAXIMUM_MARKS {
             break;
         }
-        let at = scalar::clamp(station, start, end);
+        let at = cpp::clamp(station, start, end);
         let point = solved.point_at_station(at);
         let direction = solved.direction_at_station(at);
         if let (Some(point), Some(direction)) = (point, direction) {

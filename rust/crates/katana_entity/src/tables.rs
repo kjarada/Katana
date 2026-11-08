@@ -23,8 +23,8 @@ use crate::layer_path::{
     rewrite_layer_prefix, validate_layer_path,
 };
 use crate::named_table::{Named, NamedMap, NamedTable, NamedTablePolicy};
-use crate::scalar;
 use crate::validation::validate_name;
+use katana_math::cpp;
 
 pub const DEFAULT_LAYER_NAME: &str = "0";
 pub const CONTINUOUS_LINETYPE: &str = "continuous";
@@ -802,7 +802,7 @@ impl Linetype {
             if element.is_dot() {
                 continue;
             }
-            shortest = scalar::min(shortest, element.length.abs());
+            shortest = cpp::min(shortest, element.length.abs());
         }
         if shortest.is_finite() { shortest } else { 0.0 }
     }

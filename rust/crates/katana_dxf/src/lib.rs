@@ -14,7 +14,6 @@
 pub mod codes;
 pub mod import_command;
 pub mod reader;
-mod scalar;
 mod tokenizer;
 pub mod writer;
 

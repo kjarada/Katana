@@ -27,11 +27,6 @@
 //! views, and a reader that puts them into the survey model validates them as
 //! UTF-8 there.
 
-#![allow(
-    dead_code,
-    reason = "Its reader (trimble_jobxml) is ported in the next wave; remove this when it lands."
-)]
-
 use katana_core::xml::XML_MAX_DEPTH;
 use katana_core::{Error, ErrorCode, Status};
 
@@ -185,6 +180,11 @@ impl<'a> XmlPullReader<'a> {
         self.text
     }
 
+    #[allow(
+        dead_code,
+        reason = "Part of the C++ reader's interface; trimble_jobxml, its one user, reads text \
+                  alike from either form."
+    )]
     pub(crate) fn text_is_cdata(&self) -> bool {
         self.cdata
     }

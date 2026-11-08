@@ -6,8 +6,8 @@
 //!   who holds the files and gives up. Windows: Toolhelp snapshot plus QueryFullProcessImageNameW;
 //!   Linux: /proc/<pid>/exe. The real implementations are the helper's process scans
 //!   (src/katana_updater/process_scan_win.cpp and process_scan_posix.cpp in the C++), compiled
-//!   into the update library (the program asks the same question to say `blocked`); they,
-//!   make_system_process_ops and running_programs are ported with the helper.
+//!   into the update library (the program asks the same question to say `blocked`): here
+//!   process_scan_win.rs and process_scan_posix.rs, behind make_system_process_ops.
 //! - Launcher: starts a program: waits for it (the preflight self-test, the recovery run) or
 //!   starts it detached (the helper copy that outlives the window, the relaunch of Katana). Real
 //!   implementations: spawn_win.rs and spawn_posix.rs. On Windows the child is started with
@@ -151,6 +151,26 @@ pub fn utf8_from_wide(wide: &[u16]) -> String {
         i += 1;
     }
     out
+}
+
+/// The system process seam: process_scan_win.rs on Windows (the Toolhelp scan); elsewhere
+/// process_scan_posix.rs, which answers who it is and who is alive and refuses to guess who runs
+/// from an install (its holders_under is Unsupported, `reason=platform`, until the POSIX apply is
+/// written). The C++ compiles both into the update library from src/katana_updater.
+pub fn make_system_process_ops() -> Box<dyn ProcessOps> {
+    #[cfg(windows)]
+    {
+        crate::process_scan_win::make_system_process_ops()
+    }
+    #[cfg(not(windows))]
+    {
+        crate::process_scan_posix::make_system_process_ops()
+    }
+}
+
+/// The engine's running_programs(root): make_system_process_ops().holders_under(root).
+pub fn running_programs(root: &Path) -> Result<Vec<RunningProgram>> {
+    make_system_process_ops().holders_under(root)
 }
 
 /// The system launcher: spawn_win.rs on Windows; spawn_posix.rs elsewhere, which refuses until

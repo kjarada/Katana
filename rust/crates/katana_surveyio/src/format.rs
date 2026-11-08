@@ -530,7 +530,19 @@ impl FormatRegistry {
 //     the ranking never depends on who registered first.
 
 /// Every format this program registers, one line each.
-const REGISTRATIONS: &[fn() -> FormatRegistration] = &[crate::delimited_points::registration];
+const REGISTRATIONS: &[fn() -> FormatRegistration] = &[
+    crate::delimited_points::registration,
+    crate::opcode_field_file::registration,
+    crate::trimble_jobxml::registration,
+    crate::trimble_dc::registration,
+    crate::leica_gsi::registration,
+    crate::leica_dbx::registration,
+    crate::rinex::registration,
+    crate::sokkia_sdr::registration,
+    crate::topcon_gts::gts6_registration,
+    crate::topcon_gts::gts7_registration,
+    crate::topcon_rw5::registration,
+];
 
 /// One format as a parser hands it to the registry: the descriptor, the probe
 /// and the reader, if the format has one.

@@ -22,14 +22,14 @@
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
 use katana_geometry::{Segment2, Triangle2};
+use katana_math::cpp;
 use katana_math::numerics::{lerp, tolerance};
 
 use crate::cdt_backend::{self, CdtConstraint, CdtInput, CdtOutput, NO_INDEX, orientation};
 use crate::point_merge::PointMerger;
 use crate::tin_edit::{MOST_MAGNITUDE, TinEditReport, TinEditResult};
 use crate::tin_surface::{
-    Box2, NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, TinTriangle, plan_of, std_clamp,
-    std_max, std_max3, std_min, std_min3,
+    Box2, NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, TinTriangle, plan_of,
 };
 
 /// Rounds of growth before the whole surface becomes the region. A round adds
@@ -195,7 +195,7 @@ impl Default for ConstraintInfo {
 }
 
 fn level_along(info: &ConstraintInfo, position: Point2) -> f64 {
-    let t = std_clamp(
+    let t = cpp::clamp(
         Segment2::new(info.from, info.to).parameter_of(position),
         0.0,
         1.0,
@@ -266,12 +266,12 @@ impl SegmentGrid {
         grid.origin = bounds.min;
         let width = bounds.width();
         let height = bounds.height();
-        let target_cells = std_max(1.0, count as f64 / 2.0);
+        let target_cells = cpp::max(1.0, count as f64 / 2.0);
         if width > 0.0 && height > 0.0 {
             let cell = (width * height / target_cells).sqrt();
             let limit = 2.0 * target_cells; // an elongated extent must not explode one side
-            grid.columns = std_clamp((width / cell).ceil(), 1.0, limit) as u32;
-            grid.rows = std_clamp((height / cell).ceil(), 1.0, limit) as u32;
+            grid.columns = cpp::clamp((width / cell).ceil(), 1.0, limit) as u32;
+            grid.rows = cpp::clamp((height / cell).ceil(), 1.0, limit) as u32;
         }
         grid.cell_width = if width > 0.0 {
             width / f64::from(grid.columns)
@@ -290,25 +290,25 @@ impl SegmentGrid {
             let b = positions[constraints[c].to as usize];
             [
                 cell_index(
-                    std_min(a.x, b.x) - reach,
+                    cpp::min(a.x, b.x) - reach,
                     grid.origin.x,
                     grid.cell_width,
                     grid.columns,
                 ),
                 cell_index(
-                    std_max(a.x, b.x) + reach,
+                    cpp::max(a.x, b.x) + reach,
                     grid.origin.x,
                     grid.cell_width,
                     grid.columns,
                 ),
                 cell_index(
-                    std_min(a.y, b.y) - reach,
+                    cpp::min(a.y, b.y) - reach,
                     grid.origin.y,
                     grid.cell_height,
                     grid.rows,
                 ),
                 cell_index(
-                    std_max(a.y, b.y) + reach,
+                    cpp::max(a.y, b.y) + reach,
                     grid.origin.y,
                     grid.cell_height,
                     grid.rows,
@@ -521,7 +521,7 @@ impl<'a> TriangleGrid<'a> {
         grid.origin = bounds.min;
         let width = bounds.width();
         let height = bounds.height();
-        let target_cells = std_max(
+        let target_cells = cpp::max(
             1.0,
             surface.triangle_count() as f64 / GRID_TRIANGLES_PER_CELL,
         );
@@ -529,8 +529,8 @@ impl<'a> TriangleGrid<'a> {
             let cell = (width * height / target_cells).sqrt();
             // An extremely elongated extent must not explode one dimension.
             let limit = 2.0 * target_cells;
-            grid.columns = std_clamp((width / cell).ceil(), 1.0, limit) as u32;
-            grid.rows = std_clamp((height / cell).ceil(), 1.0, limit) as u32;
+            grid.columns = cpp::clamp((width / cell).ceil(), 1.0, limit) as u32;
+            grid.rows = cpp::clamp((height / cell).ceil(), 1.0, limit) as u32;
         }
         grid.cell_width = if width > 0.0 {
             width / f64::from(grid.columns)
@@ -546,10 +546,10 @@ impl<'a> TriangleGrid<'a> {
         let cell_count = grid.columns as usize * grid.rows as usize;
         let range = |t: usize| {
             let tri = surface.plan_triangle(t);
-            let min_x = std_min3(tri.a.x, tri.b.x, tri.c.x);
-            let max_x = std_max3(tri.a.x, tri.b.x, tri.c.x);
-            let min_y = std_min3(tri.a.y, tri.b.y, tri.c.y);
-            let max_y = std_max3(tri.a.y, tri.b.y, tri.c.y);
+            let min_x = cpp::min3(tri.a.x, tri.b.x, tri.c.x);
+            let max_x = cpp::max3(tri.a.x, tri.b.x, tri.c.x);
+            let min_y = cpp::min3(tri.a.y, tri.b.y, tri.c.y);
+            let max_y = cpp::max3(tri.a.y, tri.b.y, tri.c.y);
             [
                 cell_index(min_x, grid.origin.x, grid.cell_width, grid.columns),
                 cell_index(max_x, grid.origin.x, grid.cell_width, grid.columns),
@@ -619,12 +619,12 @@ impl<'a> TriangleGrid<'a> {
             bounds.max.y.abs(),
         ]
         .into_iter()
-        .fold(0.0, std_max);
+        .fold(0.0, cpp::max);
         let margin = rounding_margin(scale);
-        let min_x = std_min(a.x, b.x) - margin;
-        let max_x = std_max(a.x, b.x) + margin;
-        let min_y = std_min(a.y, b.y) - margin;
-        let max_y = std_max(a.y, b.y) + margin;
+        let min_x = cpp::min(a.x, b.x) - margin;
+        let max_x = cpp::max(a.x, b.x) + margin;
+        let min_y = cpp::min(a.y, b.y) - margin;
+        let max_y = cpp::max(a.y, b.y) + margin;
         if max_x < bounds.min.x
             || min_x > bounds.max.x
             || max_y < bounds.min.y
@@ -1458,7 +1458,7 @@ fn try_patch(surface: &TinSurface, request: &PatchRequest, region: &[u8]) -> Res
                     segment.end.y.abs(),
                 ]
                 .into_iter()
-                .fold(0.0, std_max);
+                .fold(0.0, cpp::max);
                 if segment.distance_to(at) > rounding_margin(scale) {
                     return Err(Error::new(
                         ErrorCode::InvalidGeometry,

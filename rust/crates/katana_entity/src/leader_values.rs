@@ -44,8 +44,8 @@ use crate::label_text::{
     template_fields,
 };
 use crate::model::Model;
-use crate::scalar;
 use crate::value_parts::{add_arc_values, add_common_values, add_segment_values};
+use katana_math::cpp;
 
 /// Where a point is along an alignment, as a context reads it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -167,7 +167,7 @@ fn height_between(a: Option<f64>, b: Option<f64>, t: f64) -> Option<f64> {
 
 fn clamped_parameter(place: &AnchorRef) -> f64 {
     if place.parameter.is_finite() {
-        scalar::clamp(place.parameter, 0.0, 1.0)
+        cpp::clamp(place.parameter, 0.0, 1.0)
     } else {
         0.0
     }

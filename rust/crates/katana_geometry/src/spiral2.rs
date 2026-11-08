@@ -1,6 +1,6 @@
 use crate::chording::sagitta_chord_count;
-use crate::scalar::max;
 use crate::{Arc2, Point2, Vec2};
+use katana_math::cpp::max;
 
 const NODES: [f64; 5] = [
     0.1488743389816312,

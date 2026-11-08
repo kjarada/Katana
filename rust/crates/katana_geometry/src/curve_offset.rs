@@ -1,9 +1,9 @@
 use crate::curves2d::{arc_from_bulge, bulge_from_sweep};
 use crate::editing::Offset;
-use crate::scalar::max;
 use crate::{CurvePolyline2, CurveVertex, Point2, Vec2};
 use katana_core::error::{Error, ErrorCode, Result};
 use katana_core::text::format_exact_real;
+use katana_math::cpp::max;
 use katana_math::numerics::{PI, TWO_PI, normalize_angle, tolerance};
 
 #[derive(Clone, Copy, Default)]

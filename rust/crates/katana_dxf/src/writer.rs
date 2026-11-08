@@ -79,7 +79,7 @@ use crate::reader::{
     APPLICATION_NAME, EXTENDED_COLOUR, EXTENDED_HEIGHTS, EXTENDED_PATH, META_LINETYPE,
     META_LINEWEIGHT,
 };
-use crate::scalar::{std_max, std_min};
+use katana_math::cpp;
 
 // ---- the public interface -------------------------------------------------------
 
@@ -572,13 +572,13 @@ impl<'m> Writer<'m> {
         let view_height = if self.extents.empty() {
             100.0
         } else {
-            std_max(1.0, self.extents.height() * 1.1)
+            cpp::max(1.0, self.extents.height() * 1.1)
         };
         self.real(40, view_height);
         let aspect = if self.extents.empty() {
             1.5
         } else {
-            (self.extents.width() / std_max(self.extents.height(), 1e-9)).clamp(0.1, 10.0)
+            (self.extents.width() / cpp::max(self.extents.height(), 1e-9)).clamp(0.1, 10.0)
         };
         self.real(41, aspect);
         self.real(42, 50.0);
@@ -1260,7 +1260,7 @@ impl<'m> Writer<'m> {
         self.real(11, ellipse.major_axis.x);
         self.real(21, ellipse.major_axis.y);
         self.real(31, 0.0);
-        self.real(40, std_min(ellipse.ratio, 1.0));
+        self.real(40, cpp::min(ellipse.ratio, 1.0));
         // Each in [0, 2 pi), as a DXF reader expects them; an end below the start
         // is an arc through the parameter 0, which is how the format says it.
         let start = normalize_angle(ellipse.start_parameter);

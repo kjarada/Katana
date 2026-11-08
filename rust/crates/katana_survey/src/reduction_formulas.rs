@@ -3,6 +3,10 @@
 //! Private to the crate: the public face of these is the report
 //! (reduction_report.rs), which records what each one did to each value.
 
+// The C library's erfc, the one std::erfc calls: the normal quantile below
+// bisects on it, so its digits decide the quantile's last bit. Rust has no
+// stable erfc of its own.
+use katana_math::libm::erfc;
 use katana_math::numerics::PI;
 
 use crate::data_model::{GeocentricCoordinate, GeodeticCoordinate, GnssCovariance3};
@@ -44,27 +48,6 @@ pub(crate) const ASSUMED_HUMIDITY_PERCENT: f64 = 60.0;
 
 const KELVIN_OFFSET: f64 = 273.15;
 const STANDARD_PRESSURE: f64 = 1013.25; // hPa
-
-// The C library's erfc, the one std::erfc calls: the normal quantile below
-// bisects on it, so its digits decide the quantile's last bit. Rust has no
-// stable erfc of its own.
-mod c_math {
-    #![allow(
-        unsafe_code,
-        reason = "erfc from the C library std links, as std::erfc is in the C++."
-    )]
-
-    unsafe extern "C" {
-        fn erfc(x: f64) -> f64;
-    }
-
-    pub(super) fn complementary_error_function(x: f64) -> f64 {
-        // SAFETY: erfc is a pure function of one double, defined for every
-        // input including NaN and the infinities (C99 7.12.8.2); it touches
-        // no memory of the caller's.
-        unsafe { erfc(x) }
-    }
-}
 
 // N_gr of standard air for the carrier, IUGG 1999.
 fn standard_group_refractivity() -> f64 {
@@ -338,12 +321,7 @@ pub(crate) fn normal_quantile(probability: f64) -> f64 {
     }
     let tail = 1.0 - probability;
     // Upper tail Q(z) = erfc(z / sqrt 2) / 2 decreases, so search on -Q.
-    solve_increasing(
-        |z| -0.5 * c_math::complementary_error_function(z / 2.0_f64.sqrt()),
-        -tail,
-        0.0,
-        40.0,
-    )
+    solve_increasing(|z| -0.5 * erfc(z / 2.0_f64.sqrt()), -tail, 0.0, 40.0)
 }
 
 /// t with P(T <= t) = probability for Student's t with `degrees_of_freedom` >= 1;

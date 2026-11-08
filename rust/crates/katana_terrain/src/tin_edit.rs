@@ -32,6 +32,7 @@ use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_geometry::polygon::{Orientation, orientation as polygon_orientation};
 use katana_geometry::{Containment, PolygonClassifier, Segment2};
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
 use crate::cdt_backend::orientation;
@@ -44,8 +45,7 @@ use crate::tin_patch::{
     within_magnitude,
 };
 use crate::tin_surface::{
-    Box2, NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, TinTriangle, plan_of, std_max,
-    std_max3, std_min,
+    Box2, NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, TinTriangle, plan_of,
 };
 
 pub use crate::tin_thin::thin_surface;
@@ -235,8 +235,8 @@ fn segments_meet(a: Point2, b: Point2, c: Point2, d: Point2) -> bool {
     }
     // A point on the line of the other segment meets it when it lies within it.
     let within = |p: Point2, s: Point2, e: Point2| {
-        (std_min(s.x, e.x)..=std_max(s.x, e.x)).contains(&p.x)
-            && (std_min(s.y, e.y)..=std_max(s.y, e.y)).contains(&p.y)
+        (cpp::min(s.x, e.x)..=cpp::max(s.x, e.x)).contains(&p.x)
+            && (cpp::min(s.y, e.y)..=cpp::max(s.y, e.y)).contains(&p.y)
     };
     (o1 == 0 && within(c, a, b))
         || (o2 == 0 && within(d, a, b))
@@ -499,7 +499,7 @@ pub fn triangles_longer_than(surface: &TinSurface, length: f64) -> Vec<u32> {
     (0..surface.triangle_count() as u32)
         .filter(|&t| {
             let plan = surface.plan_triangle(t as usize);
-            let longest = std_max3(
+            let longest = cpp::max3(
                 plan.a.distance_to(plan.b),
                 plan.b.distance_to(plan.c),
                 plan.c.distance_to(plan.a),
@@ -521,7 +521,7 @@ pub fn triangles_thinner_than(surface: &TinSurface, radians: f64) -> Vec<u32> {
                 let w = corners[(k + 2) % 3] - corners[k];
                 // atan2(|u x w|, u . w) is the angle between them, well conditioned
                 // near 0 and pi where acos of a cosine is not; 0 for a zero-length side.
-                smallest = std_min(smallest, u.cross(w).abs().atan2(u.dot(w)));
+                smallest = cpp::min(smallest, u.cross(w).abs().atan2(u.dot(w)));
             }
             smallest < radians
         })
@@ -1418,7 +1418,7 @@ fn add_report(total: &mut TinEditReport, step: &TinEditReport, first: bool) {
     total.points_moved += step.points_moved;
     total.points_held += step.points_held;
     total.crossings += step.crossings;
-    total.largest_change = std_max(total.largest_change, step.largest_change);
+    total.largest_change = cpp::max(total.largest_change, step.largest_change);
 }
 
 /// Whether two segments come within GEOMETRIC of each other: they meet, or an
@@ -1721,7 +1721,7 @@ pub fn change_heights(
     if change.operation == HeightOperation::Scale {
         base = change.base.unwrap_or_else(|| {
             affected.iter().fold(f64::INFINITY, |lowest, &v| {
-                std_min(lowest, surface.vertices()[v as usize].z)
+                cpp::min(lowest, surface.vertices()[v as usize].z)
             })
         });
     }
@@ -1749,7 +1749,7 @@ pub fn change_heights(
         }
         if next != z {
             report.points_moved += 1;
-            report.largest_change = std_max(report.largest_change, (next - z).abs());
+            report.largest_change = cpp::max(report.largest_change, (next - z).abs());
         }
         vertices[v as usize].z = next;
     }
@@ -1873,7 +1873,7 @@ pub fn smooth_surface(
     for (vertex, &level) in vertices.iter_mut().zip(z.iter()) {
         if level != vertex.z {
             report.points_moved += 1;
-            report.largest_change = std_max(report.largest_change, (level - vertex.z).abs());
+            report.largest_change = cpp::max(report.largest_change, (level - vertex.z).abs());
             vertex.z = level;
         }
     }

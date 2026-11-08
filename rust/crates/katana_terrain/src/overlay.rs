@@ -39,15 +39,14 @@ use katana_core::error::make_error;
 use katana_core::task_pool::TaskPool;
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_geometry::{Containment, Polyline2, SpatialEntry, SpatialId, SpatialIndex, Triangle2};
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
 use crate::summation::CompensatedSum;
 use crate::tin_builder::{
     Breakline, CrossingBreaklinePolicy, DuplicatePointPolicy, TinBuildOptions, TinInput, build_tin,
 };
-use crate::tin_surface::{
-    Box2, NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, TinTriangle, std_max, std_min,
-};
+use crate::tin_surface::{Box2, NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, TinTriangle};
 
 // ---- the region ------------------------------------------------------------------------
 
@@ -587,12 +586,12 @@ fn cut_overlay<E, const LABELS: bool>(
     }
     let mut common = Box2::new(
         Point2::new(
-            std_max(base.bounds().min.x, top.bounds().min.x),
-            std_max(base.bounds().min.y, top.bounds().min.y),
+            cpp::max(base.bounds().min.x, top.bounds().min.x),
+            cpp::max(base.bounds().min.y, top.bounds().min.y),
         ),
         Point2::new(
-            std_min(base.bounds().max.x, top.bounds().max.x),
-            std_min(base.bounds().max.y, top.bounds().max.y),
+            cpp::min(base.bounds().max.x, top.bounds().max.x),
+            cpp::min(base.bounds().max.y, top.bounds().max.y),
         ),
     );
     if let Some(region) = region {
@@ -601,12 +600,12 @@ fn cut_overlay<E, const LABELS: bool>(
         }
         common = Box2::new(
             Point2::new(
-                std_max(common.min.x, region.bounds().min.x),
-                std_max(common.min.y, region.bounds().min.y),
+                cpp::max(common.min.x, region.bounds().min.x),
+                cpp::max(common.min.y, region.bounds().min.y),
             ),
             Point2::new(
-                std_min(common.max.x, region.bounds().max.x),
-                std_min(common.max.y, region.bounds().max.y),
+                cpp::min(common.max.x, region.bounds().max.x),
+                cpp::min(common.max.y, region.bounds().max.y),
             ),
         );
     }
@@ -1179,8 +1178,8 @@ pub fn envelope_surface(
     for (&z_base, &z_top) in mesh.z_base.iter().zip(&mesh.z_top) {
         difference.push(z_top - z_base);
         heights.push(match which {
-            Envelope::Upper => std_max(z_base, z_top),
-            Envelope::Lower => std_min(z_base, z_top),
+            Envelope::Upper => cpp::max(z_base, z_top),
+            Envelope::Lower => cpp::min(z_base, z_top),
         });
     }
     let mut state = Meetings {

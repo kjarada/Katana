@@ -6,10 +6,8 @@
 use katana_geometry::alignment::{AlignmentPi, HorizontalAlignment, SolvedAlignment};
 use katana_geometry::profile::{ProfilePvi, SolvedProfile, VerticalAlignment};
 use katana_geometry::spiral2::Spiral2;
-use katana_math::Vec2;
 use katana_math::numerics::{PI, TWO_PI};
-
-use crate::support::{clamp, max_of, remainder};
+use katana_math::{Vec2, cpp};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct HorizontalSegment {
@@ -43,7 +41,7 @@ const NO_LENGTH: f64 = 1e-9;
 const SAME_DIRECTION: f64 = 1e-9;
 
 fn same_curvature(a: f64, b: f64) -> bool {
-    (a - b).abs() <= 1e-6 * max_of(a.abs(), b.abs()) + 1e-12
+    (a - b).abs() <= 1e-6 * cpp::max(a.abs(), b.abs()) + 1e-12
 }
 
 fn unit(direction: f64) -> Vec2 {
@@ -150,7 +148,7 @@ pub(crate) fn reconstruct_horizontal(
         if curve.is_empty() {
             // Two tangents meeting: a kink where they turn, nothing where they
             // run on.
-            if remainder(after.direction - before.direction, TWO_PI).abs() > SAME_DIRECTION {
+            if cpp::remainder(after.direction - before.direction, TWO_PI).abs() > SAME_DIRECTION {
                 pi.point = end;
                 definition.pis.push(pi);
             }
@@ -231,17 +229,17 @@ pub(crate) fn check_horizontal(solved: &SolvedAlignment, segments: &[HorizontalS
     let mut worst: f64 = 0.0;
     let mut distance = 0.0;
     for segment in segments {
-        let station = clamp(
+        let station = cpp::clamp(
             solved.start_station() + distance,
             solved.start_station(),
             solved.end_station(),
         );
         if let Some(at) = solved.point_at_station(station) {
-            worst = max_of(worst, (at - segment.start).length());
+            worst = cpp::max(worst, (at - segment.start).length());
         }
         distance += segment.length;
     }
-    max_of(worst, (solved.length() - distance).abs())
+    cpp::max(worst, (solved.length() - distance).abs())
 }
 
 /// The PVI definition whose solution is these segments (CONSTANTGRADIENT and
@@ -324,10 +322,13 @@ pub(crate) fn check_vertical(
         for along in [0.0, segment.length / 2.0, segment.length] {
             let station = start_station + segment.start_distance + along;
             let expected = height_at(segments, segment.start_distance + along);
-            let actual =
-                solved.elevation_at(clamp(station, solved.start_station(), solved.end_station()));
+            let actual = solved.elevation_at(cpp::clamp(
+                station,
+                solved.start_station(),
+                solved.end_station(),
+            ));
             if let (Some(expected), Some(actual)) = (expected, actual) {
-                worst = max_of(worst, (expected - actual).abs());
+                worst = cpp::max(worst, (expected - actual).abs());
             }
         }
     }
@@ -352,7 +353,7 @@ pub(crate) fn sample_horizontal(all: &[HorizontalSegment], tolerance: f64) -> Ve
     for segment in &segments {
         let k0 = segment.start_curvature;
         let k1 = segment.end_curvature;
-        let k_max = max_of(k0.abs(), k1.abs());
+        let k_max = cpp::max(k0.abs(), k1.abs());
         // Chords from the sagitta rule at the tightest curvature (as
         // geometry's chording does): a chord of length c stands off a circle
         // of curvature k by about k c^2 / 8.
@@ -434,7 +435,7 @@ pub(crate) fn height_at(segments: &[VerticalSegment], distance: f64) -> Option<f
         {
             continue;
         }
-        let x = clamp(distance - s.start_distance, 0.0, s.length);
+        let x = cpp::clamp(distance - s.start_distance, 0.0, s.length);
         if s.segment_type == "CIRCULARARC" {
             // Slope angle a from atan g1 to atan g2: sin a changes by x / R'
             // over a horizontal x, with R' = L / (sin a2 - sin a1).
@@ -442,7 +443,7 @@ pub(crate) fn height_at(segments: &[VerticalSegment], distance: f64) -> Option<f
             let a2 = s.end_grade.atan();
             if (a2.sin() - a1.sin()).abs() > 1e-12 {
                 let r = s.length / (a2.sin() - a1.sin());
-                let sa = clamp(a1.sin() + x / r, -1.0, 1.0);
+                let sa = cpp::clamp(a1.sin() + x / r, -1.0, 1.0);
                 return Some(s.start_height + r * (a1.cos() - (1.0 - sa * sa).sqrt()));
             }
         }

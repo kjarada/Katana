@@ -1,7 +1,7 @@
 use crate::intersection::intersect;
-use crate::scalar::{max, min};
 use crate::{Box2, IntersectionKind, Point2, Polyline2, Segment2, Triangle2};
 use katana_core::error::{Error, ErrorCode, Result};
+use katana_math::cpp::{max, min};
 use katana_math::numerics::tolerance;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

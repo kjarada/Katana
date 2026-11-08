@@ -58,8 +58,8 @@ the step's own run is the evidence, not this table.
 |---|---|
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
-| 2 | in progress: waves A to C done in WSL - geodesy, render, entity, commands, terrain and survey whole (`rust/parity.toml` holds them as ported), and the update layer but for stage, apply, recover, contract and the updater (1,678 of the step's 2,094 cases); waves D and E to come |
-| 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); surveyio's core and delimited formats (105 of 538); the round-trip gate not started |
+| 2 | in progress: waves A to C done in WSL - geodesy, render, entity, commands, terrain and survey whole (`rust/parity.toml` holds them as ported), and the update layer but for the tests of its swap and recovery and the updater program (625 of its 940 cases); wave E to come |
+| 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate not started |
 | 4-9 | not started |
 
 ### Step 1: the foundation crates
@@ -152,8 +152,8 @@ once, fixed and committed before the next begins.
 | A | geodesy; render; the entity model (all but the customisation libraries); terrain's TIN core (all but the volumes); survey's core and its subsurface tools (all but the reduction); update's version, ranges, inflate, paths, credential, file operations, fault injection, registry and process seams | 902 |
 | B | entity's customisation libraries; commands; terrain's overlay and volumes; survey's reduction; update's install record, feed, manifest, signature and trust | 628 |
 | C | update's journal, state, plan and check; and step 3's storage, dxf, ifc, archive12d (without the legacy readers) and surveyio's core and delimited formats | 736 |
-| D | update's stage and apply, with the tests that need the apply harness; surveyio's instrument formats | - |
-| E | update's recover and contract, the helper's tests, the updater | - |
+| D | update's stage, apply, recover and contract and the swap's test harness, with the tests that need nothing more; surveyio's ten instrument formats; one home in katana_math for the C++ library's semantics | 532 |
+| E | update's tests of the swap, recovery, journal and fault loops on the harness, the helper's tests, and the updater program | 315 |
 
 Wave A's seven agents wrote 73,540 lines no one had compiled: 44,357 of
 library and 29,099 of tests. The
@@ -245,6 +245,31 @@ cases, plus one test of the record text). Its decisions:
 - The C++'s default name for an imported point cloud with none named the
   vendor, against the naming rule; both programs now say "archive cloud" (a
   fix, so the C++ takes it with its twin).
+
+Wave D compiled with four Clippy findings and passed its first test run -
+3,208 passed, none failed (548 new: 532 twins less seven Windows-only
+cases, plus 23 tests of katana_math's new modules). Its decisions:
+
+- **The C++ standard library's semantics have one home**: `katana_math::cpp`
+  (`min`, `max`, `min3`, `max3`, `clamp`, `remainder`) and
+  `katana_math::libm` (the C library's `asinh`, `erf`, `erfc`, `lgamma`,
+  whose digits Rust's own functions do not reproduce), replacing private
+  copies in ten crates. `clamp` is libstdc++'s body, `min(max(v, lo), hi)`,
+  not the standard's Returns clause: they differ only when the bounds cross,
+  and the C++ the port is held to is GCC's build. `lgamma` holds a lock
+  around the C call, since it writes the global `signgam`. Kept apart:
+  render's generic `min`/`max`/`clamp`, used on integers too.
+- **Where the C++ catches `std::exception`** in the swap, the Rust catches a
+  panic and lets the fault injector's simulated crash through, as the C++
+  does (`apply::catch_unexpected`).
+- **A test that subclasses a C++ file system** to break one operation becomes
+  a forwarding file system that takes one closure per operation.
+
+Wave D's integration evidence, 2026-11-08, `tools/build_visible.sh wsl` on
+the merged tree: exit 0; Clippy and the float-to-text guard clean; CTest
+9,914 entries, 9,874 passed, 40 skipped, none failed, with `rust_parity`
+holding thirteen directories as ported; cargo test 3,208 passed, none
+failed, none ignored.
 
 Wave C's integration evidence, 2026-11-07, `tools/build_visible.sh wsl` on
 the merged tree, the C++ rebuilt for its one change: exit 0; Clippy and the
@@ -660,11 +685,13 @@ the crate's binding.
   statements of `sqlite_master`; the Rust stores LF, as the committed source
   does. (Whether the Windows-built program stores CRLF too is to be
   checked.)
-- **Helpers written more than once in the port**: the C++'s `std::min`,
-  `std::max` and `std::clamp` semantics (in render, entity, dxf and ifc),
-  fdlibm's `remainder` (archive12d and ifc), and C library functions Rust
-  has no twin of - `asinh` (ifc), `erfc` (survey), `erf` and `lgamma`
-  (survey's tests). They belong in katana_math, once.
+- **What is still written more than once in the port**: a Gregorian
+  calendar check (surveyio's SDR reader, update's manifest, survey's
+  delivery schema), `std::to_chars` into a fixed 64-byte buffer (the GSI and
+  RINEX readers, as the C++ has it twice), the hexadecimal float text
+  (archive12d alone so far), and surveyio's test helpers (three support
+  modules with their own `double_eq`, `near` and Mersenne Twister). Each
+  wants one home when a second user appears or at the step's end.
 - **Defects found in step 3's porting, ported as they are:**
   - storage: a stray file in `backups/` whose number overflows `std::stol`
     ends the program; a backup taken in the same millisecond after pruning
@@ -683,7 +710,22 @@ the crate's binding.
     source record 0; `siblingsInFolder` drops the tail of a file that grows
     while it is read.
   - update: plan.cpp's "is a file, not a folder" also names a special file;
-    a cleanup line acted on and listed twice is acted on twice.
+    a cleanup line acted on and listed twice is acted on twice;
+    `sweepOlderStages` converts folder names without the guard `nameAsText`
+    gives elsewhere, so on Windows a name that is not Unicode throws out of
+    `stage()` uncaught.
+  - surveyio's instrument readers: the RW5 and GTS-7 unit-change warning
+    compares with the first units record, not the previous one; the RW5
+    face-mismatch warning says "face left-face"; the SDR lost-RED warning
+    quotes ids raw where the lost-MC one cleans them; compact RINEX writes an
+    epoch's clock offset half-done when it is too large for its field; the
+    JobXML number parse accepts "+-5", and its timestamps negative hours.
+- **Where the instrument readers' Rust differs**: a JobXML document that is
+  not UTF-8 is refused (the C++ puts its bytes into the model); GSI text
+  that is not UTF-8 is decoded as Windows-1252 where it reaches the model,
+  so two ids whose bytes differ but decode alike are refused as duplicates;
+  fields cut at a byte count may show U+FFFD where the C++ keeps a broken
+  character.
 - **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
   reach the Rust yet.** Its `build.rs` reads the defaults from
   `src/katana_update/CMakeLists.txt` and would take environment variables of

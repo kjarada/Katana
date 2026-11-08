@@ -23,6 +23,7 @@ use katana_core::task_pool::TaskPool;
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
 use katana_geometry::Polyline2;
+use katana_math::cpp;
 use katana_math::numerics::tolerance;
 
 use crate::overlay::{
@@ -31,7 +32,7 @@ use crate::overlay::{
 use crate::section_volume::SegmentProfiler;
 use crate::summation::CompensatedSum;
 use crate::tin_builder::{DuplicatePointPolicy, TinBuildOptions, TinInput, build_tin};
-use crate::tin_surface::{Box2, Point2, Point3, TinSurface, compute_by_index, std_max, std_min};
+use crate::tin_surface::{Box2, Point2, Point3, TinSurface, compute_by_index};
 
 /// Volume between a surface and the horizontal plane z = datum. Cubic metres
 /// and square metres for metre coordinates.
@@ -664,7 +665,7 @@ pub fn stockpile_volume(
             let mut lowest: Option<f64> = None;
             let mut lower = |z: f64| {
                 lowest = Some(match lowest {
-                    Some(low) => std_min(low, z),
+                    Some(low) => cpp::min(low, z),
                     None => z,
                 });
             };
@@ -676,7 +677,7 @@ pub fn stockpile_volume(
                     let from = edge.vertices[v];
                     let to = edge.vertices[(v + 1) % count];
                     for piece in profiler.along(from, to) {
-                        lower(std_min(piece.z0, piece.z1));
+                        lower(cpp::min(piece.z0, piece.z1));
                     }
                     if let Some(at) = surface.elevation_at(from) {
                         lower(at);
@@ -782,12 +783,12 @@ pub fn grid_volume(
     }
     let mut common = Box2::new(
         Point2::new(
-            std_max(existing.bounds().min.x, design.bounds().min.x),
-            std_max(existing.bounds().min.y, design.bounds().min.y),
+            cpp::max(existing.bounds().min.x, design.bounds().min.x),
+            cpp::max(existing.bounds().min.y, design.bounds().min.y),
         ),
         Point2::new(
-            std_min(existing.bounds().max.x, design.bounds().max.x),
-            std_min(existing.bounds().max.y, design.bounds().max.y),
+            cpp::min(existing.bounds().max.x, design.bounds().max.x),
+            cpp::min(existing.bounds().max.y, design.bounds().max.y),
         ),
     );
     if let Some(region) = region {
@@ -796,12 +797,12 @@ pub fn grid_volume(
         }
         common = Box2::new(
             Point2::new(
-                std_max(common.min.x, region.bounds().min.x),
-                std_max(common.min.y, region.bounds().min.y),
+                cpp::max(common.min.x, region.bounds().min.x),
+                cpp::max(common.min.y, region.bounds().min.y),
             ),
             Point2::new(
-                std_min(common.max.x, region.bounds().max.x),
-                std_min(common.max.y, region.bounds().max.y),
+                cpp::min(common.max.x, region.bounds().max.x),
+                cpp::min(common.max.y, region.bounds().max.y),
             ),
         );
     }
@@ -826,8 +827,8 @@ pub fn grid_volume(
             ),
         ));
     }
-    let columns = std_max(columns_real, 0.0) as usize;
-    let rows = std_max(rows_real, 0.0) as usize;
+    let columns = cpp::max(columns_real, 0.0) as usize;
+    let rows = cpp::max(rows_real, 0.0) as usize;
     let cell_area = cell * cell;
 
     // Rows in blocks of a fixed size, each summed in order into its own slot,

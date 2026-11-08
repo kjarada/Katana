@@ -37,11 +37,12 @@ use katana_core::text::format_general;
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_geometry::polygon::{Orientation, orientation};
 use katana_geometry::{Containment, Polyline2, Segment2, Triangle2};
+use katana_math::cpp;
 use katana_math::numerics::{lerp, tolerance};
 
 use crate::cdt_backend::{self, CdtConstraint, CdtInput, CdtOutput, NO_INDEX};
 use crate::point_merge::PointMerger;
-use crate::tin_surface::{NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface, std_max, std_min};
+use crate::tin_surface::{NO_TRIANGLE, NO_VERTEX, Point2, Point3, TinSurface};
 
 /// A 3D polyline whose segments the triangulation must honour.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -317,8 +318,8 @@ fn resolve_crossing_elevations(
             let z = lerp(z_from, z_to, segment.parameter_of(position));
             let accumulator = &mut created[vertex as usize - input_count];
             accumulator.sum += z;
-            accumulator.lowest = std_min(accumulator.lowest, z);
-            accumulator.highest = std_max(accumulator.highest, z);
+            accumulator.lowest = cpp::min(accumulator.lowest, z);
+            accumulator.highest = cpp::max(accumulator.highest, z);
             accumulator.count += 1;
         }
     }

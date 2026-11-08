@@ -27,8 +27,8 @@
 
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
-use katana_math::Vec2;
 use katana_math::numerics::tolerance;
+use katana_math::{Vec2, cpp};
 
 /// The same ground mark in both systems. x = easting, y = northing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -60,11 +60,6 @@ impl Default for SimilarityTransform2D {
 // M v with M = [a -b; b a].
 fn rotate_scale(a: f64, b: f64, v: Vec2) -> Vec2 {
     Vec2::new(a * v.x - b * v.y, b * v.x + a * v.y)
-}
-
-// std::max: the first unless it is less than the second.
-fn std_max(first: f64, second: f64) -> f64 {
-    if first < second { second } else { first }
 }
 
 impl SimilarityTransform2D {
@@ -266,8 +261,8 @@ pub fn fit_similarity_2d(pairs: &[ControlPointPair]) -> Result<SimilarityFit2D> 
         sum_squares += s.length_squared();
         sum_dot += s.dot(t);
         sum_cross += s.cross(t);
-        source_spread = std_max(source_spread, s.length());
-        target_spread = std_max(target_spread, t.length());
+        source_spread = cpp::max(source_spread, s.length());
+        target_spread = cpp::max(target_spread, t.length());
     }
     if source_spread <= tolerance::COORDINATE || target_spread <= tolerance::COORDINATE {
         return Err(Error::new(
@@ -307,7 +302,7 @@ pub fn fit_similarity_2d(pairs: &[ControlPointPair]) -> Result<SimilarityFit2D> 
     for pair in pairs {
         let residual = pair.target - fit.transform.apply(pair.source);
         sum_residual_squares += residual.length_squared();
-        fit.max_residual = std_max(fit.max_residual, residual.length());
+        fit.max_residual = cpp::max(fit.max_residual, residual.length());
         fit.residuals.push(residual);
     }
     fit.rms = (sum_residual_squares / n).sqrt();

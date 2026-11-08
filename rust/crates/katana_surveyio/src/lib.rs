@@ -8,8 +8,22 @@ mod delimited_proposal;
 mod delimited_records;
 pub mod detect;
 pub mod format;
+pub mod leica;
+mod leica_dbx;
+mod leica_gsi;
+mod opcode_field_file;
 pub mod reader;
+pub mod rinex;
+mod rinex_compact;
+#[doc(hidden)]
+pub mod rinex_internal;
+mod rinex_navigation;
+mod sokkia_sdr;
+mod topcon_gts;
 mod topcon_raw_builder;
+mod topcon_rw5;
+mod trimble_dc;
+mod trimble_jobxml;
 mod xml_pull;
 
 pub use delimited_points::{
@@ -32,7 +46,9 @@ pub use format::{
     ReadResult, ReadWarning, SiblingFile, SiblingLookup, describe, describe_format,
     format_registry, ruled_out, to_string,
 };
+pub use leica::{LEICA_DBX_FORMAT_ID, LEICA_GSI_FORMAT_ID};
 pub use reader::{
     MAX_SIBLING_FILES, MAX_SURVEY_FILE_BYTES, read_survey, report_input_for, siblings_in_folder,
     siblings_in_memory, to_import_result,
 };
+pub use rinex::{RINEX_APPROXIMATE_POSITION_SIGMA, RINEX_OBSERVATION_FORMAT_ID};
