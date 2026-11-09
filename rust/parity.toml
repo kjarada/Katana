@@ -24,6 +24,11 @@ ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands",
 "AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt" = "a tool's typed text is a &str, so text that is not UTF-8 cannot reach the prompt to be refused"
 "LeaderScope.AByteThatIsNotUtf8InAnyNameIsWrittenAsTheReplacementCharacterNotThrown" = "a leader report's names are Strings, which cannot hold a byte that is not UTF-8"
 "DocumentStatus.ANameThatIsNotUtf8IsReplacedRatherThanThrown" = "the status's layer name is a String, which cannot hold a byte that is not UTF-8"
+# step 5 (tests/geo, held as ported after step 6): the surface store's text
+# is String, so these refusals cannot be reached; the case of a name that is
+# not UTF-8 is twinned through the store's own byte check.
+"SurfaceStore.ASourceOrAStyleThatIsNotUtf8IsRefused" = "a surface's source and style are Strings, which cannot hold a byte that is not UTF-8"
+"SurfaceStore.ARenameToANameThatIsNotUtf8IsRefusedAndKeepsTheOldName" = "rename takes a &str, so a name that is not UTF-8 cannot reach it to be refused"
 # Rust has no way to change the floating-point rounding mode (doing so is
 # undefined behaviour), and f64::round rounds half away from zero in every mode.
 "DimensionText.TheTieDirectionSurvivesAChangeOfRoundingMode" = "Rust cannot change the rounding mode; f64::round is half away from zero regardless"

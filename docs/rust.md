@@ -41,8 +41,8 @@ answers as the C++ does.
 | 2 | geodesy, survey, terrain, render, entity, commands, update, updater | 2,094 | the cases twinned; the updater's end-to-end tests on Linux |
 | 3 | storage, archive12d, dxf, ifc, surveyio | 1,124 | every file of the test data and samples read and written by both, each reading the other's |
 | 4 | cad | 3,011 | the cases twinned; every verb and alias accepted |
-| 5 | gis, pointcloud, interop | 744 | the cases twinned, the online tests too |
-| 6 | app | 241 | the 375 cli tests pass against the Rust katana_cli; the replies and saved projects of both programs compared |
+| 5 | gis, pointcloud, interop | 370 (io 43, interop 174, geo 153) | the cases twinned, the online tests too |
+| 6 | app, with the geo verbs of `src/katana_app/geo` | 616 (app 242, geo 374) | the 375 cli tests pass against the Rust katana_cli; the replies and saved projects of both programs compared |
 | 7 | window, gpu | 1,609 | the 285 headless window tests pass against the Rust window |
 | 8 | Windows | - | the whole of the above on Windows, natively; the updater applies, rolls back and recovers a real update there |
 | 9 | - | - | a release on the Rust programs, one release cycle, then the C++ is removed |
@@ -61,7 +61,8 @@ the step's own run is the evidence, not this table.
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
-| 5-9 | not started |
+| 5 | in progress: planned in three waves (K, L, M); wave K done - the GDAL core (the adapter, formats, reprojection, zip, raster sampling) and the point-cloud engine, the online catalogue and the colour ramps (93 of step 5's 370 cases); 374 of the geo suite's cases drive the app layer and move to step 6 |
+| 6-9 | not started |
 
 ### Step 1: the foundation crates
 
@@ -554,6 +555,44 @@ none failed, none ignored (wave I's run gave 5,472, H's 4,975, G's 4,433,
 F's 3,724), the round-trip gate among them over 73 files of the corpus.
 The parity tool: 6,538 of the C++ suite's 9,236 cases twinned or exempt.
 
+### Step 5: gis, pointcloud and interop
+
+A planning pass split step 5 by dependency into three waves: K, the GDAL
+core and the point clouds; L, the geoprocessing bridge and web access; M,
+interop's core and online fetch. It also split the geo suite by case:
+374 of its 527 cases drive the app layer - `src/katana_app/geo`, its
+executor, verbs, records and MCP tools - and are twinned with that layer in
+step 6, so step 5 twins tests/io (43), tests/interop (174) and the 153 geo
+cases of the bridge, the bindings and what they stand on. Rejected: leaving
+all of tests/geo to step 6, which would leave the bridge with no twin for a
+step, and porting the app's geo verbs in step 5, which are the app's layer.
+
+**Wave K** ported the GDAL core - the adapter with its registry and error
+handling, formats, reprojection, zip containers and raster sampling - over
+167 declarations of GDAL's C API, and the point-cloud engine over its PDAL
+shim, the online catalogue and the colour ramps, with 27 twins of the
+terrain and cad code the geo suite reaches. Its 93 cases passed on their
+first run. Decisions:
+
+- **A GDAL dataset owns its handle**: it moves between threads but is not
+  shared, closing it is its drop, and nothing ever destroys GDAL's driver
+  manager (a case pins it). An error collector is a guard that pops GDAL's
+  handler when dropped, its handler catching every panic.
+- **Text from GDAL and PDAL is decoded lossily** at the boundary, as
+  PROJ's is; names handed to GDAL go as their own bytes.
+- **PDAL is called without a lock**: it guards its own registries, each
+  call owns its stages, and the C++ runs it from job threads unlocked. The
+  shim's C ABI returns a code and, on a throw, the exception's message.
+- **PROJ's search path has one home**, pointcloud's, which gis may see;
+  GDAL's registry calls it where the C++ does, so one once-flag points both
+  at PROJ's data.
+
+Evidence, 2026-11-10, `tools/build_visible.sh wsl` after wave K: exit 0;
+the Release C++ build, Clippy and the float-to-text guard clean, and the
+C checks of every GDAL declaration compiled; CTest 9,915 entries, 9,875
+passed, 40 skipped, none failed; cargo test 6,581 passed, none failed, none
+ignored (6,488 before).
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -765,9 +804,9 @@ version the C++ build links, from the same toolchain.
 | Eigen (rank-revealing QR, Cholesky) | nalgebra for the dense storage and the Cholesky factor; the column-pivoted QR is the port's own, Eigen 3.4's algorithm step for step | survey |
 | PROJ | hand-written declarations of the 57 functions used, on the same libproj | geodesy |
 | CGAL (one 385-line file) | spade, if the terrain tests pass unchanged; otherwise that file stays as a C++ shim | terrain |
-| GDAL, including its algorithm framework | gdal-sys, and the C algorithm API ("The GDAL algorithm spike") | gis |
-| PDAL (C++ only) | a C shim of the one adapter file | pointcloud |
-| libcurl, the handle GDAL configures | the curl crate on the same libcurl | gis |
+| GDAL, including its algorithm framework | hand-written declarations of the C functions used, each checked by the C compiler against GDAL's headers; a seven-call C++ shim where the C algorithm API has gaps | gis, pointcloud |
+| PDAL (C++ only) | a thin C++ shim of its primitives behind a C ABI, the adapter's logic in Rust | pointcloud |
+| libcurl, the handle GDAL configures | hand-written declarations on the libcurl GDAL loads | gis |
 | OpenSSL (Ed25519 verification with the RFC 8032 checks) | ed25519-dalek and curve25519-dalek | update |
 | zlib (raw inflate) | miniz_oxide | update |
 | Qt | eframe, egui, egui_dock, wgpu, rfd, tiny-skia, krilla, cosmic-text | window |
@@ -775,8 +814,29 @@ version the C++ build links, from the same toolchain.
 A crate is added to `THIRD_PARTY_NOTICES.md` in the commit that first uses it,
 and must be GPL-3.0-compatible.
 
-Four rows above differ from the plan of 2026-11-05, each for a reason found
+Seven rows above differ from the plan of 2026-11-05, each for a reason found
 in porting:
+
+- **GDAL, PDAL and libcurl** (step 5) are reached as PROJ and SQLite are:
+  declarations of exactly what the C++ calls, on the libraries the build
+  links. GDAL's are checked by a C file compiled with the crate
+  (`rust/crates/katana_gis/native/ffi_check.c`): a `_Generic` test of each
+  declared function's type, written in the header's own typedefs, and a
+  static assert of every size, offset and constant copied, so that a
+  declaration GDAL's headers contradict fails the build. PDAL has no C
+  API, so a thin C++ shim
+  (`rust/crates/katana_pointcloud/native/pdal_shim.cpp`) puts its
+  primitives behind one, catching every exception, and every decision of
+  the C++ engine is Rust. The `cc` crate compiles both from the crates'
+  build scripts, with the toolchain's own compilers, so the C++ ABI is that
+  of the PDAL and GDAL linked. Rejected: gdal-sys, a binding of all of GDAL
+  made for a release of its own, whose bindgen route needs libclang, which
+  the toolchain lacks; the gdal crate, which puts its own dataset and error
+  semantics between the port and GDAL, as rusqlite would have; the curl
+  crate, which builds a libcurl of its own when it finds none on
+  pkg-config's path, so a handle of one copy would be handed to a GDAL
+  linked against the other; and a CMake-built shim, which would make
+  cargo depend on a C++ build directory.
 
 - **SQLite** is reached through the C++'s own wrapper (`sqlite_database.cpp`)
   ported as it is over declarations of the functions it calls. Rejected:
@@ -825,8 +885,8 @@ the geo suite's `tests/geo/data/plane.asc` through that API - the registry,
 an algorithm from its path, the arguments parsed, the run, the output read
 back - and checks the size it reports against the grid's own header (40
 columns, 30 rows). It runs in every cargo stage, on both toolchains, which have
-the same GDAL, 3.13.2. Phase 5 replaces its hand-written declarations with
-the crate's binding.
+the same GDAL, 3.13.2. Step 5 keeps hand-written declarations ("Third-party
+libraries"); the spike retires when the bridge's twins hold its route.
 
 ## Measurements
 
@@ -941,8 +1001,9 @@ the crate's binding.
     Windows-1252, as cad already repairs surface names, would keep such
     projects openable. To be settled before storage is cut over.
   - The naming rule in the archive layer: the fallback layer name, which is
-    the vendor's name and which a C++ test asserts; three C++ test names
-    holding that name (copied into their Rust twins by the parity rule); and
+    the vendor's name and which a C++ test asserts; four C++ test names
+    holding that name (copied into their Rust twins by the parity rule; the
+    fourth, a zip-container case found in step 5, spells it out); and
     the source an archive import gives a surface, the vendor's name before
     "archive <file>" (written by the C++ app and interop layers, and copied
     by the round-trip gate's program so the projects compare equal).
@@ -1114,6 +1175,26 @@ the crate's binding.
     is no drawing to dimension") or previews nothing, where the C++
     dereferences a null document (the edit, inquiry, match properties,
     terrain edit, dimension and leader tools); no view reaches it.
+- **Defects found in porting step 5, ported as they are:**
+  - the GDAL core: `writeTables` asks a geometry `Is3D()` after
+    `SetGeometryDirectly` has deleted it, when the layer has no geometry
+    field (the Rust asks before handing it over); `readImage`'s
+    `longest + maxPixels - 1` overflows for a budget near `INT_MAX`;
+    `warpToGeoTiff` sets progress on options it never checked.
+  - the point clouds and the catalogue: `parseCatalogue` lets nlohmann's
+    type_error out for a member of the wrong JSON type, where its header
+    promises ParseFailure, and the window's read of a user's catalogue
+    catches nothing (the Rust panics with the same text); the engine asks
+    PDAL for a driver outside its guard in `isCopc`, `convertToCopc` and
+    `write`; `decimationForBudget` wraps within the budget of 2^64;
+    `readColourMap` sorts with no strict weak order when a value is NaN; on
+    Windows the engine hands PDAL a path in the ANSI code page (suspected).
+- **Where step 5's Rust differs**: text from GDAL and PDAL is decoded
+  lossily; a point with a NaN coordinate is empty where the C++
+  constructor may make it not; a temporary name's suffix comes from the
+  hasher's random state, not `std::random_device`; an I/O error's text has
+  no "(os error N)"; a ring or curve GDAL refuses is deleted, where the
+  C++ leaks it.
 - **Before step 8, for the updater:** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must

@@ -18,5 +18,11 @@ katana_math.workspace = true
 katana_pointcloud.workspace = true
 katana_terrain.workspace = true
 
+# The geo cases that build a Document, as the C++ geo suite links cad. cad
+# does not depend on interop, so there is no cycle, and tools/check_rust_layering.py
+# does not read dev-dependencies (the step-5 plan, section 8, choice 9).
+[dev-dependencies]
+katana_cad.workspace = true
+
 [lints]
 workspace = true

@@ -11,5 +11,10 @@ publish.workspace = true
 katana_core.workspace = true
 katana_pointcloud.workspace = true
 
+[build-dependencies]
+# Compiles native/ (build.rs): the C check of the GDAL declarations, and the
+# shims later waves add beside it.
+cc = "1"
+
 [lints]
 workspace = true

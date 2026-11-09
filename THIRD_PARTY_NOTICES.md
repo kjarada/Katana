@@ -302,6 +302,7 @@ and `paste` run only while building.
 | ed25519, signature, sha2, digest, block-buffer, crypto-common, generic-array, cpufeatures, cfg-if, subtle, zeroize | 2.2.3, 2.2.0, 0.10.9, 0.10.7, 0.10.4, 0.1.7, 0.14.7, 0.2.17, 1.0.5, 2.6.1, 1.9.1 | Apache-2.0 OR MIT (ed25519, signature, zeroize); MIT (generic-array); BSD-3-Clause (subtle); MIT OR Apache-2.0 (the rest) | ed25519-dalek, curve25519-dalek |
 | autocfg, paste | 1.5.1, 1.0.15 | Apache-2.0 OR MIT; MIT OR Apache-2.0 | build-time only, a build script's helper and a macro, both reached through nalgebra |
 | curve25519-dalek-derive, rustc_version, semver, version_check, proc-macro2, quote, syn, unicode-ident | 0.1.1, 0.4.1, 1.0.28, 0.9.5, 1.0.107, 1.0.47, 2.0.119, 1.0.27 | MIT OR Apache-2.0 (unicode-ident: (MIT OR Apache-2.0) AND Unicode-3.0) | build-time only: a derive macro and build scripts' helpers, reached through curve25519-dalek and generic-array |
+| cc, find-msvc-tools, shlex | 1.11.1, 0.1.15, 2.0.1 | MIT OR Apache-2.0 (`cargo tree`, 2026-11-10) | build-time only: compiles katana_gis's C checks of its GDAL declarations and katana_pointcloud's PDAL shim from their build scripts |
 
 Every licence named is compatible with GPL-3.0-or-later: Apache-2.0 is
 compatible with GPL version 3, and MIT, BSD-3-Clause, Zlib, 0BSD and Unicode-3.0

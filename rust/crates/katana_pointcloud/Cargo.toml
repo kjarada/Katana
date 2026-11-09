@@ -10,5 +10,11 @@ publish.workspace = true
 [dependencies]
 katana_core.workspace = true
 
+# Compiles native/pdal_shim.cpp, PDAL's primitives behind a C ABI, and the
+# static checks of native/ffi_check.c (build.rs; docs/rust.md, "Third-party
+# libraries").
+[build-dependencies]
+cc = "1"
+
 [lints]
 workspace = true
