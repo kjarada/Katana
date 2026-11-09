@@ -55,7 +55,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use katana_core::error::make_error;
-use katana_core::path_text::{path_from_utf8, path_to_utf8, read_file_bytes};
+use katana_core::path_text::{path_exists, path_from_utf8, path_to_utf8, read_file_bytes};
 use katana_core::text::equals_ignoring_case;
 use katana_core::text_encoding::utf8_or_windows1252;
 use katana_core::{Error, ErrorCode, Result, Status};
@@ -204,7 +204,7 @@ fn digest_of_file(file: &Path) -> Option<String> {
 fn is_there(file: &Path) -> bool {
     // When it cannot be told, it is taken to be there: the read that follows
     // then says why, and nothing is written over what might be a file.
-    file.try_exists().unwrap_or(true)
+    path_exists(file).unwrap_or(true)
 }
 
 // A name beside `file` for the file that is written first and renamed into its

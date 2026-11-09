@@ -56,6 +56,18 @@ pub fn environment_variable(name: Option<&str>) -> Vec<u8> {
     }
 }
 
+/// `std::filesystem::exists(path, error)` as libstdc++ answers it: a path
+/// that leads nowhere, missing (ENOENT) or running through a file (ENOTDIR),
+/// is not there, with no error; any other failure to tell is the error.
+/// `Path::try_exists` errs for ENOTDIR, where the C++ answers false, so a
+/// caller that takes "cannot tell" as "there" would call such a path there.
+pub fn path_exists(path: &Path) -> std::io::Result<bool> {
+    match path.try_exists() {
+        Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => Ok(false),
+        answer => answer,
+    }
+}
+
 pub fn read_file_bytes(path: &Path) -> Result<Vec<u8>> {
     let error = |code, message| {
         Error::new(code, message).with_context(utf8_or_windows1252(path_to_utf8(path)))

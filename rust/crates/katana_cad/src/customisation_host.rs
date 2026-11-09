@@ -50,7 +50,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use katana_core::error::make_error;
-use katana_core::path_text::{environment_variable, path_from_utf8, path_to_utf8, read_file_bytes};
+use katana_core::path_text::{
+    environment_variable, path_exists, path_from_utf8, path_to_utf8, read_file_bytes,
+};
 use katana_core::text::{equals_ignoring_case, lowered};
 use katana_core::text_encoding::utf8_or_windows1252;
 use katana_core::{Error, ErrorCode, Result, Status};
@@ -656,7 +658,7 @@ fn choose_and_install(document: &mut Document, host: &CustomisationHost) -> Cust
     if !host.kept_file.as_os_str().is_empty() {
         // When it cannot be told, it is taken to be there, as the C++'s
         // `exists(path, unknown) || unknown`.
-        let there = host.kept_file.try_exists().unwrap_or(true);
+        let there = path_exists(&host.kept_file).unwrap_or(true);
         if there {
             let fallback = if has_built_in {
                 "the built-in customisation is used"

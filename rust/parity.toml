@@ -5,7 +5,7 @@
 # A directory goes into `ported` in the commit that ports its last case; from
 # then on every case there - a new one too, from a fix made in C++ - needs its
 # twin, or the test fails.
-ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands", "terrain", "survey", "storage", "dxf", "ifc", "surveyio", "update"]
+ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands", "terrain", "survey", "storage", "dxf", "ifc", "surveyio", "update", "cad"]
 
 [exempt]
 # "Suite.CaseName" = "why it has no Rust twin"
@@ -17,6 +17,13 @@ ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands",
 "EntitySerialization.WritersReportFailureInsteadOfThrowing" = "a String cannot hold invalid UTF-8, so the writers have nothing to fail on"
 "TableValidation.AStyleWhoseLinetypeNameIsNotUtf8IsRefused" = "a String cannot hold invalid UTF-8, so no such style can be made"
 "CustomisationWriter.TextThatIsNotUtf8IsRefusedNamingWhereItIs" = "a String cannot hold invalid UTF-8, so the writer has no such text to refuse"
+# cad (step 4): each case's only subject is a byte that is not UTF-8 in text
+# a String holds - a tool's typed text, a leader report's name, the current
+# layer's name - which Rust cannot hold, so there is nothing to refuse or
+# replace. Cases with a UTF-8 half twin that half instead.
+"AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt" = "a tool's typed text is a &str, so text that is not UTF-8 cannot reach the prompt to be refused"
+"LeaderScope.AByteThatIsNotUtf8InAnyNameIsWrittenAsTheReplacementCharacterNotThrown" = "a leader report's names are Strings, which cannot hold a byte that is not UTF-8"
+"DocumentStatus.ANameThatIsNotUtf8IsReplacedRatherThanThrown" = "the status's layer name is a String, which cannot hold a byte that is not UTF-8"
 # Rust has no way to change the floating-point rounding mode (doing so is
 # undefined behaviour), and f64::round rounds half away from zero in every mode.
 "DimensionText.TheTieDirectionSurvivesAChangeOfRoundingMode" = "Rust cannot change the rounding mode; f64::round is half away from zero regardless"

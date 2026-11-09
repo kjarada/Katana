@@ -315,10 +315,12 @@ cargo_steps() {
         RUSTFLAGS="$flags" cargo build --manifest-path "$manifest" --workspace --release
         return
     fi
-    echo "== cargo test --workspace --release"
+    # --no-fail-fast: a failing test binary must not hide the binaries after
+    # it, or the counts summed below would read as the whole suite's.
+    echo "== cargo test --workspace --release --no-fail-fast"
     local results code
     results="$(mktemp)"
-    RUSTFLAGS="$flags" cargo test --manifest-path "$manifest" --workspace --release 2>&1 |
+    RUSTFLAGS="$flags" cargo test --manifest-path "$manifest" --workspace --release --no-fail-fast 2>&1 |
         tee "$results"
     code=${PIPESTATUS[0]}
     awk '/^test result:/ { for (i = 1; i < NF; i++) { if ($(i + 1) ~ /^passed;/) p += $i

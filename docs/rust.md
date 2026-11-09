@@ -60,7 +60,7 @@ the step's own run is the evidence, not this table.
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
-| 4 | in progress: planned in five waves (F to J); waves F to I done - the JSON home, the leaf libraries, the Document core, styles and scope, the plotting core, the scene and surface display, the road model, the customisation edits, every verb family, the tool framework and the annotation core, the command interpreter and the thirteen tool families (1,992 of 3,011 cases); wave J, the 1,018 cases that drive the interpreter or span two agents' work, remains |
+| 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5-9 | not started |
 
 ### Step 1: the foundation crates
@@ -525,11 +525,34 @@ Decisions:
   only subject is that refusal, has no twin, and is an exemption to make when
   cad is held as ported.
 
-Evidence, 2026-11-10, `tools/build_visible.sh wsl` after wave I: exit 0; the
+**Wave J** twinned the 1,018 cases that drive the interpreter or span two
+agents' work - six agents writing tests only, against code no case had run
+before. 1,016 passed after one fix to the program: CUSTOMISE KEEP, and the
+customisation host's start, asked whether the kept file was there with
+`Path::try_exists`, which errs for a path that runs through a file where
+libstdc++'s `exists` answers false, so a kept file whose folder could not be
+made was taken to be there and refused as unreadable (InvalidState) where
+the C++ refuses the write (FileExportFailure). `katana_core::path_text::path_exists`
+now answers as libstdc++ does, the one home for that rule in cad. The other
+two cases are exempt (`rust/parity.toml`), as are
+`AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt` from
+wave I: each one's only subject is a byte that is not UTF-8 in text a
+`String` holds - a tool's typed text, a leader report's names, the status's
+layer name. Where such a case has a UTF-8 half, the half is twinned.
+
+The gate's second half, every verb and alias accepted: the interpreter's
+alias table was compared with the C++'s entry by entry (46 entries,
+identical and in the same order), and its dispatch arms follow the C++'s
+order; the interpreter's cases (`test_cad` and the families' verb files)
+pass.
+
+Evidence, 2026-11-10, `tools/build_visible.sh wsl` after wave J: exit 0; the
 Release C++ build, Clippy and the float-to-text guard clean; CTest 9,915
-entries, 9,875 passed, 40 skipped, none failed; cargo test 5,472 passed, none
-failed, none ignored (wave H's run gave 4,975, wave G's 4,433, wave F's
-3,724), the round-trip gate among them over 73 files of the corpus.
+entries, 9,875 passed, 40 skipped, none failed - `rust_parity` among them
+with `tests/cad` held as ported, 3,011 of 3,011; cargo test 6,488 passed,
+none failed, none ignored (wave I's run gave 5,472, H's 4,975, G's 4,433,
+F's 3,724), the round-trip gate among them over 73 files of the corpus.
+The parity tool: 6,538 of the C++ suite's 9,236 cases twinned or exempt.
 
 ## The workspace
 
@@ -947,8 +970,10 @@ the crate's binding.
   answer, a factory from a closure and a text trim (the drawing tools', the
   edit support's and the annotation tools' copies, beside the tool
   framework's private trim), and the edit support re-derives the fixed
-  number form from `format_exact_real`'s digits. Each wants one home when a second user
-  appears or at the step's end.
+  number form from `format_exact_real`'s digits; and the update layer reads
+  a path through a file as not there inline, three times, where
+  `katana_core::path_text::path_exists` now holds the rule. Each wants one
+  home when a second user appears or at the step's end.
 - **Defects found in step 3's porting, ported as they are:**
   - storage: a stray file in `backups/` whose number overflows `std::stol`
     ends the program; a backup taken in the same millisecond after pruning
@@ -1104,9 +1129,10 @@ the crate's binding.
   and the records are written to nlohmann's text, but no case has the C++
   engine stage what the Rust helper swaps, or the reverse. The first is
   part of step 8's real update on Windows.
-- **The round-trip gate does not yet compare** SURVEY IMPORT (a survey job
-  in a project needs cad, step 4), the zipped archive, GIS data and
-  reference layers (step 5), or a Rust DXF of annotation cad draws (step 4).
+- **The round-trip gate does not yet compare** SURVEY IMPORT (cad, which
+  holds a survey job in a project, is ported; the gate's Rust program does
+  not yet drive it), the zipped archive, GIS data and reference layers
+  (step 5), or a Rust DXF of annotation cad draws.
 - **A GPU hardware test aborted once in WSL** instead of skipping:
   `gpu.Devices/GpuRender.AShadedTriangleCoversTheSoftwarePathsPixelsInItsColours/Hardware`
   could not connect to `xvfb-run`'s display under the suite's parallel
