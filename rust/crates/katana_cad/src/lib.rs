@@ -12,6 +12,7 @@
 
 pub mod alignment_report;
 pub mod annotation {
+    mod annotation_verbs;
     pub mod associative;
     pub mod auto_label;
     pub mod command_words;
@@ -33,6 +34,7 @@ pub mod bim {
 pub mod code_edit;
 pub mod code_table;
 pub mod colour_lookup;
+pub mod command_interpreter;
 pub mod corridor;
 pub mod csv_table;
 pub mod customisation_host;
@@ -52,6 +54,7 @@ pub mod drawing {
     pub mod construction;
     pub mod drafting;
     pub mod draw_shapes;
+    mod drawing_verbs;
     pub mod grips;
     pub mod vertex_editing;
     pub mod vertex_table;
@@ -186,13 +189,48 @@ pub mod terrain {
     pub mod surface_plan;
     pub mod surface_style;
     pub mod surface_verbs;
+    pub mod volume_verbs;
 }
 pub mod tool_feedback;
 pub mod tools {
+    pub mod annotate;
+    mod annotate_balloon;
+    #[doc(hidden)]
+    pub mod annotate_common;
+    mod annotate_dimension;
+    mod annotate_dimension_chain;
+    mod annotate_dimension_kinds;
+    mod annotate_label;
+    mod annotate_leader;
+    mod annotate_leader_presets;
+    mod annotate_text;
+    #[doc(hidden)]
+    pub mod draw_curves;
+    mod draw_divide;
+    #[doc(hidden)]
+    pub mod draw_lines;
+    #[doc(hidden)]
+    pub mod draw_professional;
     #[doc(hidden)]
     pub mod everyday_support;
     #[doc(hidden)]
     pub mod families;
+    mod inquiry;
+    mod modify_edit;
+    mod modify_edit_break;
+    mod modify_edit_corner;
+    mod modify_edit_join;
+    mod modify_edit_offset;
+    #[doc(hidden)]
+    pub mod modify_edit_support;
+    mod modify_edit_trim;
+    mod modify_length;
+    mod modify_properties;
+    #[doc(hidden)]
+    pub mod modify_transform;
+    pub mod modify_vertex;
+    mod select_tools;
+    mod terrain_edit;
 }
 pub mod utilities {
     pub mod utility_data;
@@ -217,6 +255,7 @@ pub use code_table::{
     CodeExplanation, CodeFieldSource, CodeFieldSourceOverruled, CodeNearMiss, CodeTableRow,
     ColourLookup, DefinitionLookup, LintIssue, LintKind, LintSeverity, NearMissKind,
 };
+pub use command_interpreter::{CommandInterpreter, ImportArgument};
 pub use corridor::{
     Assembly, CorridorQuantities, CorridorSection, CorridorSurface, SectionVertex, SplitArea,
 };

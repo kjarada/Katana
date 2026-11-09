@@ -60,7 +60,7 @@ the step's own run is the evidence, not this table.
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
-| 4 | in progress: planned in five waves (F to J); waves F, G and H done - the JSON home, the leaf libraries, the Document core, styles and scope, the plotting core, the scene and surface display, the road model, the customisation edits, and every verb family but volumes with the tool framework and the annotation core (1,495 of 3,011 cases); the interpreter and the tool families (wave I) and the interpreter-driven cases (wave J) remain |
+| 4 | in progress: planned in five waves (F to J); waves F to I done - the JSON home, the leaf libraries, the Document core, styles and scope, the plotting core, the scene and surface display, the road model, the customisation edits, every verb family, the tool framework and the annotation core, the command interpreter and the thirteen tool families (1,992 of 3,011 cases); wave J, the 1,018 cases that drive the interpreter or span two agents' work, remains |
 | 5-9 | not started |
 
 ### Step 1: the foundation crates
@@ -489,11 +489,47 @@ interpreter are ported whole, so that wave J writes tests only. Decisions:
   environment variables are a test binary of their own behind one lock,
   since `set_var` is unsafe in edition 2024 and races parallel tests.
 
-Evidence, 2026-11-09, `tools/build_visible.sh wsl` after wave H: exit 0; the
+**Wave I** ported the command interpreter with the annotation, drawing and
+volume verbs, and the thirteen tool families: lines, curves and the
+professional drawing tools, the transforms, the edits (trim, extend, offset,
+fillet, chamfer, break, join, explode), divide and measure, inquiry,
+lengthen, match properties, selection, the vertex tools, every annotation
+tool and the terrain edits. Its 497 twinned cases compiled after five Clippy
+findings and passed on their first run; wave H's tool-framework cases,
+written against an empty family list, pass against the full catalogue.
+Decisions:
+
+- **The interpreter does not hold the Document**: it is
+  `run(&mut self, &mut Document, line)`. Holding the Document as the C++
+  does would lock it away for the interpreter's life, so that the window
+  could not paint it nor a test read it between lines; an
+  `Rc<RefCell<Document>>` makes every reader a run-time borrow that can
+  panic. The interpreter keeps its own history and last point and the front
+  end's hooks - the sheet verbs' context, the scope's view provider, the view
+  host and the customisation host - all owned, so it is single-threaded, as
+  the C++ window is, and a front end that replaces a hook sets it again,
+  where the C++ asked its providers at each line.
+- **A tool's remembered settings are per thread**: the edit, lengthen, match
+  properties, select similar and terrain edit choices, the vertex defaults,
+  and the drawing heights, double-line width and cloud arc length, which the
+  C++ keeps per catalogue or per process. The test harness runs each case on
+  a thread of its own, so each starts at the initial values, as each gtest
+  case did in its own process; two catalogues on one thread share them.
+- **A tool base class with virtual steps becomes a tool generic over a trait
+  of steps** (the transforms' selection tool), lent the chosen entities at
+  each call, as every tool is lent its context.
+- **A tool's text prompt takes text**, so the C++'s refusals of input that is
+  not UTF-8 (Text, a dimension's text, a leader's note, a balloon's number, a
+  label's text) cannot be reached.
+  `AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt`, whose
+  only subject is that refusal, has no twin, and is an exemption to make when
+  cad is held as ported.
+
+Evidence, 2026-11-10, `tools/build_visible.sh wsl` after wave I: exit 0; the
 Release C++ build, Clippy and the float-to-text guard clean; CTest 9,915
-entries, 9,875 passed, 40 skipped, none failed; cargo test 4,975 passed, none
-failed, none ignored (wave G's run gave 4,433; wave F's 3,724), the
-round-trip gate among them over 73 files of the corpus.
+entries, 9,875 passed, 40 skipped, none failed; cargo test 5,472 passed, none
+failed, none ignored (wave H's run gave 4,975, wave G's 4,433, wave F's
+3,724), the round-trip gate among them over 73 files of the corpus.
 
 ## The workspace
 
@@ -907,7 +943,11 @@ the crate's binding.
   have a copy), the system error text (copied from storage), and the
   `from_chars` prefix readers; and wave H's colour-table snapshot (the
   survey finish's, the survey code verbs' and a test's), which belongs to
-  the colour lookup's module. Each wants one home when a second user
+  the colour lookup's module; wave I's tool agents each wrote a tool's call to the trait's own default
+  answer, a factory from a closure and a text trim (the drawing tools', the
+  edit support's and the annotation tools' copies, beside the tool
+  framework's private trim), and the edit support re-derives the fixed
+  number form from `format_exact_real`'s digits. Each wants one home when a second user
   appears or at the step's end.
 - **Defects found in step 3's porting, ported as they are:**
   - storage: a stray file in `backups/` whose number overflows `std::stol`
@@ -943,7 +983,7 @@ the crate's binding.
   so two ids whose bytes differ but decode alike are refused as duplicates;
   fields cut at a byte count may show U+FFFD where the C++ keeps a broken
   character.
-- **Defects found in porting cad (step 4, waves F to H), ported as they
+- **Defects found in porting cad (step 4, waves F to I), ported as they
   are:**
   - the leaf libraries: `layLinestyle`'s repeat counter, a double, loops for
     ever past 2^53 repeats; grading converts `floor(length / interval)` to a
@@ -1012,6 +1052,19 @@ the crate's binding.
     closed, a vertex's point geometry, the first of no points and a
     regrade's named points are dereferenced unchecked (the Rust refuses or
     skips).
+  - the interpreter: ALIGN PI and ALIGN PVI build their reply's count as an
+    argument beside the step that moves the changed alignment away, in an
+    order C++ leaves open, so the count can be read after the move ("0
+    PVIs", or one PI too many) - the class of the OPEN count the C++ already
+    fixed; the Rust counts before the step. Its number reader, like the
+    sheet verbs', reads "+-1" as -1; `check_index` wraps for an empty
+    polyline.
+  - the tools: the transforms' All option and Stretch's window take entities
+    on layers the view hides, where the context now carries the view;
+    Revision Cloud and Circle Tangent-Tangent-Tangent clear what was picked
+    before a refusal, against the rule that a refusal leaves a tool as it
+    was; the 3D polyline accepts Close at two vertices and then refuses it,
+    though its prompt offers Close only from three.
 - **Where cad's Rust differs** (step 4):
   - A document's command run through another document's stack fails with
     InvalidState; the C++ changes the document that made it. A road-objects
@@ -1032,6 +1085,10 @@ the crate's binding.
   - The surface edit target and its observers are per thread; observers are
     shared closures, where the C++ copies each `std::function` (they differ
     only for a lambda that changes its own captures).
+  - A tool given no document refuses ("There is no drawing to edit.", "there
+    is no drawing to dimension") or previews nothing, where the C++
+    dereferences a null document (the edit, inquiry, match properties,
+    terrain edit, dimension and leader tools); no view reaches it.
 - **Before step 8, for the updater:** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must

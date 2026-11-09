@@ -50,9 +50,25 @@ pub type Report<'a> = dyn FnMut(Status) + 'a;
 /// A family's adder: `fn(catalog: &mut ToolCatalog, report: &mut Report<'_>)`.
 pub type Family = for<'a, 'b, 'c> fn(&'a mut ToolCatalog, &'b mut Report<'c>);
 
-/// Every family, in the C++'s order; empty until wave I's families are
-/// ported (module doc).
-pub const FAMILIES: &[Family] = &[];
+/// Every family, in the C++'s order (module doc).
+pub const FAMILIES: &[Family] = &[
+    crate::tools::draw_lines::add_draw_line_tools,
+    crate::tools::draw_curves::add_draw_curve_tools,
+    crate::tools::modify_transform::add_modify_transform_tools,
+    crate::tools::modify_edit::add_modify_edit_tools,
+    crate::tools::annotate::add_annotate_tools,
+    crate::tools::inquiry::add_inquiry_tools,
+    crate::tools::draw_divide::add_draw_divide_tools,
+    crate::tools::modify_length::add_modify_length_tools,
+    crate::tools::modify_properties::add_property_tools,
+    crate::tools::select_tools::add_select_tools,
+    crate::tools::modify_vertex::add_modify_vertex_tools,
+    crate::tools::draw_professional::add_draw_professional_tools,
+    crate::tools::terrain_edit::add_terrain_edit_tools,
+];
+
+/// The Sketch tool's pen moving through a point, for the tests (module doc).
+pub use crate::tools::draw_professional::sketch_move_for_tests;
 
 /// Esc for a tool whose Enter only ever commits work it has collected - a
 /// LINE or PLINE chain, the cuts of a Trim or Extend, Offset's copies, a run
