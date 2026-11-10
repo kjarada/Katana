@@ -18,6 +18,12 @@ publish.workspace = true
 name = "katana_corpus"
 path = "src/bin/katana_corpus/main.rs"
 
+# The Katana engine without a window (src/katana_app/main.cpp): named as the C++ program is, so
+# that the cli gate swaps one path for the other (docs/rust.md, step 6).
+[[bin]]
+name = "katana_cli"
+path = "src/bin/katana_cli/main.rs"
+
 [dependencies]
 katana_archive12d.workspace = true
 katana_cad.workspace = true
@@ -38,6 +44,11 @@ katana_survey.workspace = true
 katana_surveyio.workspace = true
 katana_terrain.workspace = true
 katana_update.workspace = true
+
+# katana_cli's console on Windows: the output code page set to UTF-8 for the run, and a console's
+# lines read wide (src/bin/katana_cli/main.rs). The version katana_update already locks.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [lints]
 workspace = true

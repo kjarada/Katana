@@ -12,6 +12,10 @@
 #   tools/build_visible.sh build [target...]   configure and build (only those targets, if named)
 #   tools/build_visible.sh test [ctest args]   the suite only, e.g. test -R PlanContextMenu
 #   tools/build_visible.sh cargo               the Rust workspace alone: clippy, build, test
+#   tools/build_visible.sh wsl gate [-- ctest args]   step 6's cli gate: the cli tests of the last
+#                                              WSL build run against the Rust katana_cli and
+#                                              katana_mcp, both runs' replies compared
+#                                              (tools/rust_cli_gate.py, whose header says how)
 #   tools/build_visible.sh wsl [phase] [...]   any of those in WSL instead (below)
 #   tools/build_visible.sh close               close this checkout's windows whose run has ended
 #
@@ -110,7 +114,7 @@ main() {
 
     phase="${1:-all}"
     case "$phase" in
-        all | build | test | cargo) ;;
+        all | build | test | cargo | gate) ;;
         *)
             echo "usage: tools/build_visible.sh [wsl] [all | build [target...] | test [ctest arguments...] | cargo]" >&2
             return 2
@@ -235,6 +239,20 @@ steps() {
     fi
     if [ "$phase" = cargo ]; then
         cargo_steps build && cargo_steps test
+        return
+    fi
+    # Step 6's cli gate, in WSL only: the C++ build tree's cli tests, rewritten
+    # to run the Rust programs cargo built, beside a rerun of the C++ ones, and
+    # the two runs' replies compared. It reads the build tree of the last full
+    # run and runs after it, never beside it: the cli tests write into that tree.
+    if [ "$phase" = gate ]; then
+        if [ -z "${KATANA_LINUX_BUILD:-}" ]; then
+            echo "the gate runs in WSL: tools/build_visible.sh wsl gate" >&2
+            return 2
+        fi
+        echo "== gate: xvfb-run -a python3 tools/rust_cli_gate.py --build $directory --programs $CARGO_TARGET_DIR/release --rerun-cpp $*"
+        QT_QPA_PLATFORM=offscreen xvfb-run -a python3 tools/rust_cli_gate.py --build "$directory" \
+            --programs "$CARGO_TARGET_DIR/release" --rerun-cpp "$@"
         return
     fi
     if [ "$phase" != test ]; then

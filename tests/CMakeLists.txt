@@ -575,6 +575,25 @@ if(Python3_Interpreter_FOUND)
         COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/project_dump.py" --self-test)
     set_tests_properties(project_dump_self_test PROPERTIES
         PASS_REGULAR_EXPRESSION "project_dump self-test: [0-9]+ checks passed")
+    # Step 6's cli gate (tools/rust_cli_gate.py; docs/rust.md, "Step 6") runs the cli tests of
+    # this build against the Rust katana_cli and katana_mcp. Its own check, on CTest files of its
+    # fixtures: each refusal it must make, and one set it must accept, since a check that refused
+    # everything would pass the other three. --check writes and runs nothing.
+    foreach(_case IN ITEMS unreplaced other_program count_differs accepted)
+        add_test(NAME rust_cli_gate_${_case}
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/rust_cli_gate.py" --check
+                    --build "${_rust_fixtures}/rust_cli_gate/${_case}" --cpp-bin /katana-build/bin
+                    --programs /katana-build/cargo/release)
+    endforeach()
+    set_tests_properties(rust_cli_gate_unreplaced PROPERTIES PASS_REGULAR_EXPRESSION
+        "refused: cli[.]a_program_found_on_the_path runs katana_cli where the gate replaces nothing")
+    set_tests_properties(rust_cli_gate_other_program PROPERTIES PASS_REGULAR_EXPRESSION
+        "refused: cli[.]the_window_is_run names /katana-build/bin/katana, a program of the C[+][+] build the gate does not replace")
+    set_tests_properties(rust_cli_gate_count_differs PROPERTIES PASS_REGULAR_EXPRESSION
+        "refused: the count of cli tests written [(]1[)] differs from the count read [(]2[)]: cli[.]twice is defined more than once")
+    set_tests_properties(rust_cli_gate_accepted PROPERTIES
+        PASS_REGULAR_EXPRESSION "rust_cli_gate: 4 cli tests read, 4 written [(]3 run a program, 1 runs none[)]; 1 fixture provider carried from the C[+][+] suite as it is: qt_a_project_is_saved_by_the_window_headless"
+        FAIL_REGULAR_EXPRESSION "refused")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only

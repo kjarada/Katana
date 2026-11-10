@@ -349,6 +349,7 @@ dependencies = [
  "katana_surveyio",
  "katana_terrain",
  "katana_update",
+ "windows-sys",
 ]
 
 [[package]]

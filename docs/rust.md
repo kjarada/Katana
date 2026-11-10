@@ -62,7 +62,7 @@ the step's own run is the evidence, not this table.
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | in progress: planned in three waves (K, L, M); waves K and L done - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery (236 of step 5's 370 cases); 374 of the geo suite's cases drive the app layer and move to step 6 |
-| 6 | in progress, begun beside step 5's last wave at the owner's word (2026-11-10): planned in a foundation and two waves; the foundation done - the console a session is lent for each call and the import records the verbs share; wave 1 (the session and katana_cli, the survey, IFC and DXF verbs, the geo executor's frame) under way |
+| 6 | in progress, begun beside step 5's last wave at the owner's word (2026-11-10): planned in a foundation and two waves; the foundation and wave 1 done - the session and katana_cli, the update verbs, the survey, IFC and DXF verbs, the geo executor's frame (177 cases, 27 of them Windows-only, written and not compiled until step 8); the cli gate runs: 248 of the 354 cli tests that run a program pass against the Rust katana_cli |
 | 7-9 | not started |
 
 ### Step 1: the foundation crates
@@ -631,6 +631,61 @@ entries, 9,874 passed, 40 skipped, and the docs check failed on the retired
 spike test, which this section no longer cites (rerun on the final docs: it
 passed); cargo test 6,723 passed, none failed, none ignored (6,581 before,
 less the retired spike).
+
+### Step 6: the app layer
+
+Step 6 ports the headless session that katana_cli and katana_mcp share,
+with the geo verbs of `src/katana_app/geo` - 374 geo cases whose verbs are
+the app's (step 5) - for 616 cases in all. It began beside step 5's last
+wave, so its wave 1 stands only on built code: where the C++ calls interop's
+reference data, which that wave was writing, the geo frame calls one module
+of marked seams that wave 2 fills. Its foundation, built first because three
+agents needed it, is the console and the import records. Decisions:
+
+- **A session is lent a console for each call.** The C++ writes a line's
+  reply and refusals to `std::cout` and `std::cerr`, and katana_mcp swaps
+  the buffers around each line; Rust has no buffer to swap and runs a
+  binary's tests on parallel threads, so `Session::run` writes through a
+  `Console` its caller lends it - the process's streams in katana_cli, a
+  capture in katana_mcp and the tests. Rejected: a session owning a boxed
+  console, `run` returning its text (a download's progress would print
+  late), a process-wide capture (it races parallel tests).
+- **The session owns its drawing and its interpreter** and takes a line as
+  bytes. A panic out of a verb is reported as `error: Internal: ...` and the
+  line fails, as the C++ catches every exception, so katana_cli's unsaved
+  drawing survives. Off Windows a line that is not UTF-8 is refused at the
+  session's door, since the interpreter reads text; on Windows it is read
+  as Windows-1252, as the C++ does.
+- **The geo executor's context is a bundle of borrows built for each
+  phase** - the drawing, the interpreter, the scratch folder, the front
+  end's hooks - and its work and apply are `Send`, so the window can run
+  the work on a job thread (step 7). Rejected: a long-lived context in the
+  session, which would be self-referential, and a shared drawing behind a
+  run-time lock.
+- **The update rig's feed is a trait, not a closure**, because the context
+  it gives borrows the rig's feed, store and launcher; the running
+  program's credential stores are made once per thread, where the C++'s are
+  process-wide statics, because they are not `Sync`.
+- **The cli gate reruns the C++ build's own cli tests against the Rust
+  programs** (`tools/rust_cli_gate.py`, the `wsl gate` phase): it reads the
+  build tree's CTest files, puts the Rust katana_cli and katana_mcp in place
+  of the C++ ones, reruns the C++ ones beside them, and compares the two
+  runs' replies, normalising only the programs' paths, a run's seconds and
+  the per-process scratch folder, and comparing the two streams apart
+  (the C++'s output is buffered on ctest's pipe and its errors are not).
+  Rejected: a CMake variable at some 330 call sites, a Rust copy of the
+  cli tests, CTest's test launcher, and pass and fail alone, which two
+  programs can share with different words.
+
+Evidence, 2026-11-11, `tools/build_visible.sh wsl` after wave 1: exit 0; the
+Release C++ build, Clippy and the float-to-text guard clean; CTest 9,919
+entries (the gate's four checks new), 9,879 passed, 40 skipped, none
+failed; cargo test 6,884 passed, none failed, none ignored. The first
+`wsl gate`: 376 cli tests read and rewritten, 270 passed (248 of the 354
+that run a program, and the 22 fixture steps); 257 replies the same as
+the C++'s. The failures are wave 2's verbs and katana_mcp, but for the
+HELP texts, whose geo families wave 2 adds, and one survey reply whose
+two numbers differ in the last digit ("Not done").
 
 ## The workspace
 
@@ -1238,6 +1293,30 @@ pin classifies every algorithm GDAL lists.
     readers of query pages, items, STAC and CKAN answers let nlohmann's
     type_error out for a member of the wrong type, so a CKAN answer with a
     null licence ends the C++ program (the Rust panics with the same text).
+- **Defects found in porting step 6, ported as they are:** `session.cpp`'s
+  `isQuit` and `upperVerb` are two copies of one loop; the update
+  progress's step multiplication can wrap; `describeIfc` fails silently on
+  a parse it cannot reach; the survey verbs' refusal of a line break in a
+  SET item names no item, unlike every other; `importIfc`'s note keeps
+  "-0.000" where core's fixed form drops the sign - a third fixed-number
+  form; the scoped DXF export drops the status of a removal; the geo
+  verbs keep two `positiveOption`s that word their refusals differently and
+  four joins of records, two of which keep empty records; `describeJson`
+  catches only nlohmann's parse error; `runNow` on a prepared line with
+  neither a reply nor work throws.
+- **The cli gate's one numeric difference so far**: SURVEY IMPORT of the
+  free-station field file gives `sigma_e` and `dilution` that differ from
+  the C++'s in the last digit - the least-squares solve beyond three
+  equations, where Eigen's SSE2 kernels sum in two lanes ("Third-party
+  libraries"). The case passes its tolerance; the gate, which compares
+  replies, does not, so before step 6's gate the Rust's QR sums as Eigen's
+  kernels do, or the difference is listed with its reason.
+- **Where step 6's Rust differs**: off Windows a line that is not UTF-8 is
+  refused, where the C++ hands its bytes on and can still reach a file
+  named in Latin-1; the update verbs' credential stores are per thread;
+  the no-GDAL arms of the C++ (DXF-only IMPORT and EXPORT, the no-network
+  update fetch) are not ported, the Rust app always having GDAL; the geo
+  scratch folder is `std::env::temp_dir()`'s.
 - **Where step 5's Rust differs**: text from GDAL and PDAL is decoded
   lossily; a point with a NaN coordinate is empty where the C++
   constructor may make it not; a temporary name's suffix comes from the
