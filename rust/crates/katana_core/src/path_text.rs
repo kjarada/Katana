@@ -39,6 +39,22 @@ pub fn path_to_utf8(path: &Path) -> Vec<u8> {
     }
 }
 
+/// `path.generic_u8string()`: the path's own bytes, with '/' for the
+/// separator on Windows, as a record or a reply shows a path on every
+/// platform. One home for the generic form; earlier layers' private copies
+/// are listed in docs/rust.md "Not done".
+pub fn generic_path_utf8(path: &Path) -> Vec<u8> {
+    let bytes = path_to_utf8(path);
+    if cfg!(windows) {
+        bytes
+            .into_iter()
+            .map(|byte| if byte == b'\\' { b'/' } else { byte })
+            .collect()
+    } else {
+        bytes
+    }
+}
+
 pub fn environment_variable(name: Option<&str>) -> Vec<u8> {
     let Some(name) = name
         .and_then(|name| name.split('\0').next())

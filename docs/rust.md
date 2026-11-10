@@ -62,7 +62,8 @@ the step's own run is the evidence, not this table.
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | in progress: planned in three waves (K, L, M); waves K and L done - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery (236 of step 5's 370 cases); 374 of the geo suite's cases drive the app layer and move to step 6 |
-| 6-9 | not started |
+| 6 | in progress, begun beside step 5's last wave at the owner's word (2026-11-10): planned in a foundation and two waves; the foundation done - the console a session is lent for each call and the import records the verbs share; wave 1 (the session and katana_cli, the survey, IFC and DXF verbs, the geo executor's frame) under way |
+| 7-9 | not started |
 
 ### Step 1: the foundation crates
 
@@ -1071,7 +1072,10 @@ pin classifies every algorithm GDAL lists.
   framework's private trim), and the edit support re-derives the fixed
   number form from `format_exact_real`'s digits; and the update layer reads
   a path through a file as not there inline, three times, where
-  `katana_core::path_text::path_exists` now holds the rule. Each wants one
+  `katana_core::path_text::path_exists` now holds the rule; and the generic form of
+  a path (`generic_u8string`), private in cad's customisation verbs,
+  geodesy and gis, now has one home in
+  `katana_core::path_text::generic_path_utf8`, which step 6 uses. Each wants one
   home when a second user appears or at the step's end.
 - **Defects found in step 3's porting, ported as they are:**
   - storage: a stray file in `backups/` whose number overflows `std::stol`
