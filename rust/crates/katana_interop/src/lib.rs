@@ -12,12 +12,27 @@
 
 pub mod geo {
     pub mod colour_ramps;
+    pub mod contour_entities;
+    pub mod drawing_dataset;
 
     pub use colour_ramps::{ColourRamp, LegendEntry, RampStop};
+    pub use contour_entities::{ContourBoundary, ContourEntityOptions, ContourPlan};
+    pub use drawing_dataset::{
+        DrawingDataset, DrawingDatasetOptions, DrawingDatasetStats, FeaturePiece,
+        FeaturePieceCounts, FeaturePieceOptions, ResultMode, ResultOptions, ResultPlan,
+    };
 }
+mod curve_chords;
 pub mod online_catalogue;
+pub mod online_discovery;
+pub mod online_requests;
 
 pub use online_catalogue::{
     LonLatBox, OnlineCatalogue, OnlineLayer, OnlineLayerKind, OnlineProvider, OnlineService,
     OnlineServiceType,
+};
+pub use online_discovery::{CogProbe, TextFetcher};
+pub use online_requests::{
+    CkanResource, ImageRequest, ItemsPage, QueryPage, StacChoice, StacItem, TileIndex, TileMatrix,
+    TileMatrixSet,
 };

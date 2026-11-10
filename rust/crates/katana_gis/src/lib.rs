@@ -6,8 +6,11 @@
 //! GDAL type reaches the public interface.
 
 mod ffi {
+    pub(crate) mod algorithm;
     pub(crate) mod cpl;
+    pub(crate) mod curl;
     pub(crate) mod gdal;
+    pub(crate) mod http;
     pub(crate) mod minixml;
     pub(crate) mod ogr;
     pub(crate) mod osr;
@@ -22,6 +25,7 @@ pub mod formats;
 pub mod gdal_adapter;
 pub mod raster_sampling;
 pub mod reproject;
+pub mod web_access;
 pub mod zip_container;
 
 pub mod processing {
@@ -32,6 +36,15 @@ pub mod processing {
         FieldValue, OutputTo, Policy, RasterGrid, RunOutputs, RunRequest, Scalar, TailEffects,
         Versions,
     };
+
+    mod bridge;
+    mod policy;
+    mod run_detail;
+    pub use bridge::{
+        Words, arguments_given, catalogue, dataset_kinds_text, describe, path_text, resolve, run,
+        staged_dataset_count, suggest, to_string, validate, versions,
+    };
+    pub use policy::{check_tokens, reads_heights, step_policy, tail_effects};
 }
 
 pub use formats::{Content, DataKind, Format, FormatOption, FormatOptions, OptionList, SaveChoice};
@@ -42,4 +55,7 @@ pub use gdal_adapter::{
 };
 pub use raster_sampling::{RasterSampler, Resampling};
 pub use reproject::{CrsBox, RasterProbe, WarpOptions, WarpResult, WarpSource};
+pub use web_access::{
+    HttpExchange, HttpFailure, HttpRequest, HttpResponse, TransferProgress, XmlElement,
+};
 pub use zip_container::{ZipContent, ZipMember};

@@ -61,7 +61,7 @@ the step's own run is the evidence, not this table.
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
-| 5 | in progress: planned in three waves (K, L, M); wave K done - the GDAL core (the adapter, formats, reprojection, zip, raster sampling) and the point-cloud engine, the online catalogue and the colour ramps (93 of step 5's 370 cases); 374 of the geo suite's cases drive the app layer and move to step 6 |
+| 5 | in progress: planned in three waves (K, L, M); waves K and L done - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery (236 of step 5's 370 cases); 374 of the geo suite's cases drive the app layer and move to step 6 |
 | 6-9 | not started |
 
 ### Step 1: the foundation crates
@@ -593,6 +593,44 @@ C checks of every GDAL declaration compiled; CTest 9,915 entries, 9,875
 passed, 40 skipped, none failed; cargo test 6,581 passed, none failed, none
 ignored (6,488 before).
 
+**Wave L** ported the geoprocessing bridge - GDAL's algorithm framework
+through its C API, the policy that classes each algorithm, staging, the run
+and its outputs - with the drawing bindings (a drawing as a dataset,
+results back as entities, contours), and web access through GDAL's HTTP and
+the libcurl GDAL loads, with the online request builders and service
+discovery. Its 143 cases passed on their first build and run; the GDAL
+spike test is retired. Decisions:
+
+- **The algorithm framework through C, with a shim of thirteen calls.**
+  Disassembly of libgdal 3.13.2 showed that the C API's sub-algorithm and
+  argument lookups ask for suggestions where the C++ bridge does not, so
+  an unknown name would raise a failure the C++ never meets; the shim makes
+  those lookups as the C++ does, and gives the calls the C API lacks
+  (aliases, hidden algorithms, suggestions, completion, validation,
+  bounds, datasets by name). Each catches every exception and reports it
+  as a GDAL error.
+- **GDAL's HTTP option setter is C++ only** (its symbol is mangled), so a
+  one-call shim gives it a C name. Rejected: declaring the mangled name,
+  which no compiler would check, and through which a C++ exception could
+  unwind into Rust.
+- **A run's stop and progress** are an `Option<&AtomicBool>` and a progress
+  closure that is `Sync`, because GDAL calls progress from its own threads;
+  a panic in it stops GDAL's run and is raised again when the run returns.
+- **libcurl's variadic calls** are declared as variadics and reached only
+  through typed wrappers, each option constant carrying the C type libcurl
+  reads.
+- **A text fetcher is a borrow** used during the call, and parsed XML is
+  plain owned data in the terms of GDAL's parser, which the C++ uses rather
+  than core's XML reader.
+
+Evidence, 2026-11-10, `tools/build_visible.sh wsl` after wave L: exit 0;
+the Release C++ build, Clippy and the float-to-text guard clean, the C
+checks of the algorithm and HTTP declarations compiled; CTest 9,915
+entries, 9,874 passed, 40 skipped, and the docs check failed on the retired
+spike test, which this section no longer cites (rerun on the final docs: it
+passed); cargo test 6,723 passed, none failed, none ignored (6,581 before,
+less the retired spike).
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -804,9 +842,9 @@ version the C++ build links, from the same toolchain.
 | Eigen (rank-revealing QR, Cholesky) | nalgebra for the dense storage and the Cholesky factor; the column-pivoted QR is the port's own, Eigen 3.4's algorithm step for step | survey |
 | PROJ | hand-written declarations of the 57 functions used, on the same libproj | geodesy |
 | CGAL (one 385-line file) | spade, if the terrain tests pass unchanged; otherwise that file stays as a C++ shim | terrain |
-| GDAL, including its algorithm framework | hand-written declarations of the C functions used, each checked by the C compiler against GDAL's headers; a seven-call C++ shim where the C algorithm API has gaps | gis, pointcloud |
+| GDAL, including its algorithm framework | hand-written declarations of the C functions used, each checked by the C compiler against GDAL's headers; a C++ shim of thirteen calls where the C algorithm API has gaps or differs | gis, pointcloud |
 | PDAL (C++ only) | a thin C++ shim of its primitives behind a C ABI, the adapter's logic in Rust | pointcloud |
-| libcurl, the handle GDAL configures | hand-written declarations on the libcurl GDAL loads | gis |
+| libcurl, the handle GDAL configures | hand-written declarations on the libcurl GDAL loads; a one-call shim for GDAL's C++-only option setter | gis |
 | OpenSSL (Ed25519 verification with the RFC 8032 checks) | ed25519-dalek and curve25519-dalek | update |
 | zlib (raw inflate) | miniz_oxide | update |
 | Qt | eframe, egui, egui_dock, wgpu, rfd, tiny-skia, krilla, cosmic-text | window |
@@ -877,16 +915,16 @@ in porting:
 ## The GDAL algorithm spike
 
 The C++ runs GDAL's algorithm framework through its C++ API
-(`src/katana_io/geo/processing.cpp`, 102 allow-listed algorithms), which no
-Rust binding wraps; it was the one part of the port with no known route.
-GDAL 3.13 exposes the same framework in C (`gdalalgorithm_c.h`). The test
-`rust/crates/katana_gis/tests/gdal_algorithm.rs` runs `gdal raster info` on
-the geo suite's `tests/geo/data/plane.asc` through that API - the registry,
-an algorithm from its path, the arguments parsed, the run, the output read
-back - and checks the size it reports against the grid's own header (40
-columns, 30 rows). It runs in every cargo stage, on both toolchains, which have
-the same GDAL, 3.13.2. Step 5 keeps hand-written declarations ("Third-party
-libraries"); the spike retires when the bridge's twins hold its route.
+(`src/katana_io/geo/processing.cpp`), which no Rust binding wraps; it was
+the one part of the port with no known route. GDAL 3.13 exposes the same
+framework in C (`gdalalgorithm_c.h`). A test of the gis crate ran `gdal
+raster info` on the geo suite's `tests/geo/data/plane.asc` through that
+API - the registry, an algorithm from its path, the arguments parsed, the
+run, the output read back - and checked the size it reported against the
+grid's own header (40 columns, 30 rows), in every cargo stage from step 0.
+Step 5 took that route ("Third-party libraries"), and the spike retired in
+wave L, when the bridge's twins came to hold it; the policy table they
+pin classifies every algorithm GDAL lists.
 
 ## Measurements
 
@@ -1189,12 +1227,23 @@ libraries"); the spike retires when the bridge's twins hold its route.
     `write`; `decimationForBudget` wraps within the budget of 2^64;
     `readColourMap` sorts with no strict weak order when a value is NaN; on
     Windows the engine hands PDAL a path in the ANSI code page (suspected).
+  - the bridge and web access: `arcgisExtent` indexes a missing `ymin`,
+    `xmax` or `ymax` (undefined; the Rust reads the extent as unreadable);
+    the exchange's body callback subtracts sizes that could wrap; the HTTP
+    option setter leaves GDAL's error handler pushed when it throws; the
+    readers of query pages, items, STAC and CKAN answers let nlohmann's
+    type_error out for a member of the wrong type, so a CKAN answer with a
+    null licence ends the C++ program (the Rust panics with the same text).
 - **Where step 5's Rust differs**: text from GDAL and PDAL is decoded
   lossily; a point with a NaN coordinate is empty where the C++
   constructor may make it not; a temporary name's suffix comes from the
   hasher's random state, not `std::random_device`; an I/O error's text has
   no "(os error N)"; a ring or curve GDAL refuses is deleted, where the
-  C++ leaks it.
+  C++ leaks it. A text argument holding a NUL is cut there by GDAL's C
+  API, where the C++ passes the whole string; a spill file goes in
+  `std::env::temp_dir()`; a byte cut through a character in a licence,
+  title or date reads as U+FFFD; a float-to-integer cast past range
+  saturates where the C++ is undefined.
 - **Before step 8, for the updater:** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must
