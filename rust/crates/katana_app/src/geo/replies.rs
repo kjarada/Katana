@@ -26,7 +26,7 @@ pub(crate) fn joined<S: AsRef<str>>(items: &[S], separator: &str) -> String {
     text
 }
 
-fn yes_no(flag: bool) -> &'static str {
+pub(crate) fn yes_no(flag: bool) -> &'static str {
     if flag { "yes" } else { "no" }
 }
 

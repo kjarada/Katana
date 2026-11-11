@@ -10,14 +10,52 @@
 //! ```
 //!
 //! One named surface's record is cad's surface_record
-//! (cad/terrain/surface_verbs.rs). A reference layer's record, for a raster
-//! and for a point cloud, joins this module with interop's reference data
-//! (step 6, wave 2).
+//! (cad/terrain/surface_verbs.rs).
 
 use katana_core::json::Json;
 use katana_core::text::{parse_finite_double, parse_integer};
+use katana_interop::reference_data::{to_string, to_word};
+use katana_interop::{PointCloudLayer, RasterOverlay};
 
-use super::replies::{Record, joined, parse_records};
+use super::replies::{Record, joined, parse_records, value, yes_no};
+use crate::import_records::{bounds_text, path_text, record_number};
+
+/// One reference raster as REFS and IMPORT give it (the C++'s
+/// `referenceRecord(const RasterOverlay&)`).
+pub fn reference_record_of_raster(raster: &RasterOverlay) -> String {
+    format!(
+        "reference id={} kind=raster name={} width={} height={} bounds={} georeferenced={} \
+         visible={} opacity={} role={} display={} file={}",
+        raster.id,
+        value(&raster.name),
+        raster.width,
+        raster.height,
+        bounds_text(&raster.world_bounds()),
+        yes_no(raster.has_geotransform),
+        yes_no(raster.visible),
+        record_number(raster.opacity),
+        to_string(raster.role),
+        to_word(raster.display_style),
+        value(&path_text(&raster.source)),
+    )
+}
+
+/// One reference point cloud as REFS and IMPORT give it (the C++'s
+/// `referenceRecord(const PointCloudLayer&)`).
+pub fn reference_record_of_point_cloud(cloud: &PointCloudLayer) -> String {
+    format!(
+        "reference id={} kind=pointcloud name={} points={} source_points={} bounds={} \
+         visible={} color={} file={}",
+        cloud.id,
+        value(&cloud.name),
+        cloud.points.len(),
+        cloud.source_point_count,
+        bounds_text(&cloud.world_bounds()),
+        yes_no(cloud.visible),
+        to_word(cloud.color_mode),
+        value(&path_text(&cloud.source)),
+    )
+}
 
 /// Two or more finite numbers joined by commas; None for anything else, one
 /// number included (that is a number, not a list).

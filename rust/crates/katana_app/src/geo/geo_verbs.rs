@@ -59,6 +59,7 @@ use katana_core::error::make_error;
 use katana_core::text::is_ascii_space;
 use katana_core::{ErrorCode, Result, Status};
 use katana_geometry::Box2;
+use katana_interop::ReferenceData;
 use katana_terrain::SurfaceStore;
 
 use super::bindings::{Tokens, tokenize};
@@ -122,11 +123,15 @@ impl fmt::Debug for FrontEnd {
 
 /// What a geoprocessing line runs against, lent for one phase: the front
 /// end's drawing (with its surfaces), its interpreter (whose scope context
-/// answers VIEW in the window and refuses it headless), where derived rasters
-/// go when the drawing has no project, and the front end's hooks.
+/// answers VIEW in the window and refuses it headless), its reference rasters
+/// and point clouds, where derived rasters go when the drawing has no
+/// project, and the front end's hooks.
 pub struct Context<'a> {
     pub document: &'a mut Document,
     pub interpreter: &'a CommandInterpreter,
+    /// The front end's reference layers: a run's derived rasters are added
+    /// here as it applies, and a RASTER source is found here.
+    pub reference: &'a mut ReferenceData,
     /// Where derived rasters go when the drawing has no project directory.
     pub scratch: &'a Path,
     pub front_end: &'a FrontEnd,
@@ -143,12 +148,14 @@ impl<'a> Context<'a> {
     pub fn new(
         document: &'a mut Document,
         interpreter: &'a CommandInterpreter,
+        reference: &'a mut ReferenceData,
         scratch: &'a Path,
         front_end: &'a FrontEnd,
     ) -> Self {
         Self {
             document,
             interpreter,
+            reference,
             scratch,
             front_end,
             surfaces: SurfaceStore::default(),

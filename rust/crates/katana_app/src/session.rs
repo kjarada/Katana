@@ -49,6 +49,7 @@ use katana_core::error::make_error;
 use katana_core::path_text::{environment_variable, path_from_utf8, read_file_bytes};
 use katana_core::text::{split_lines, trimmed};
 use katana_core::text_encoding::decode_text;
+use katana_interop::ReferenceData;
 use katana_update::{ApplyRequest, install_root_of_running_program, recover};
 
 use crate::console::Console;
@@ -261,6 +262,9 @@ fn not_utf8_refusal() -> katana_core::Error {
 pub struct Session {
     document: Document,
     interpreter: CommandInterpreter,
+    // The reference rasters and point clouds: lent to the geo executor with
+    // the drawing for each line.
+    reference: ReferenceData,
     updates: UpdatePart,
     // The geo executor's scratch folder (this process's, taken once) and its
     // front-end hooks, of which a session has none: the C++'s geo Context
@@ -297,6 +301,7 @@ impl Session {
         let mut session = Session {
             document: Document::new(None),
             interpreter: CommandInterpreter::new(),
+            reference: ReferenceData::default(),
             updates: UpdatePart {
                 // A session of no program has nothing for UPDATE to act on.
                 program: program.is_some(),
@@ -463,6 +468,7 @@ impl Session {
             let mut context = geo::Context::new(
                 &mut self.document,
                 &self.interpreter,
+                &mut self.reference,
                 &self.geo_scratch,
                 &self.geo_front_end,
             );

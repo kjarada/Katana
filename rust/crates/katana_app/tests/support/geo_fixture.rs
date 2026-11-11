@@ -8,9 +8,8 @@
 //! The C++ fixture holds a `geo::Context` of references for its life; the
 //! Rust Context is a bundle of borrows made for each phase
 //! (katana_app::geo::geo_verbs), so `GeoFixture::context` makes one when a
-//! line runs and the drawing is the test's to read between lines. The
-//! fixture has no reference data until step 6's wave-2 prelude adds it, with
-//! the Context's member.
+//! line runs and the drawing and the reference data are the test's to read
+//! between lines.
 //!
 //! One owner (G1); a test target includes it with
 //! `#[path = "../support/geo_fixture.rs"] pub mod geo_fixture;`.
@@ -31,6 +30,7 @@ use katana_core::Result;
 use katana_entity::entity::{INVALID_ENTITY_ID, property_to_string};
 use katana_entity::{Entity, EntityId, Geometry, Layer, PropertyMap};
 use katana_geometry::{Point2, Polyline2, Segment2};
+use katana_interop::ReferenceData;
 use katana_terrain::SurfaceStore;
 
 // ---- the data, where the C++ reads it -----------------------------------------------------------
@@ -110,6 +110,7 @@ pub struct GeoFixture {
     pub scratch: TempDir,
     pub document: Document,
     pub interpreter: CommandInterpreter,
+    pub reference: ReferenceData,
     /// No hooks, as in a session: nothing framed, nothing asked.
     pub front_end: FrontEnd,
 }
@@ -122,6 +123,7 @@ impl GeoFixture {
             scratch: TempDir::new(prefix, name),
             document: Document::new(None),
             interpreter: CommandInterpreter::new(),
+            reference: ReferenceData::default(),
             front_end: FrontEnd::default(),
         }
     }
@@ -131,6 +133,7 @@ impl GeoFixture {
         Context::new(
             &mut self.document,
             &self.interpreter,
+            &mut self.reference,
             self.scratch.path(),
             &self.front_end,
         )
