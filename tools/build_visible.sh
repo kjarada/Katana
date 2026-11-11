@@ -339,27 +339,30 @@ cli_gate() {
 # The Rust workspace: `build` is clippy and the build with warnings as errors,
 # `test` is cargo test with the counts of every test binary summed. Every cargo
 # here is given the same flags - RUSTFLAGS as the caller set it, then -D
-# warnings - or each step would rebuild what the one before it built.
+# warnings - or each step would rebuild what the one before it built. Every
+# cargo is --locked: the committed rust/Cargo.lock is what is built, so a
+# build never takes a newer crate on its own (docs/rust.md, "Third-party
+# libraries": a crate is at least two weeks old, and listed in the notices).
 cargo_steps() {
     local step="$1" manifest=rust/Cargo.toml
     local flags="${RUSTFLAGS:+$RUSTFLAGS }-D warnings"
     if [ "$step" = build ]; then
         export CLIPPY_CONF_DIR="$PWD/rust"
         echo "== cargo: $(command -v cargo), $(cargo --version), $(rustc --version)"
-        echo "== cargo clippy --workspace --all-targets --release --keep-going -- -D warnings"
-        RUSTFLAGS="$flags" cargo clippy --manifest-path "$manifest" --workspace --all-targets \
+        echo "== cargo clippy --locked --workspace --all-targets --release --keep-going -- -D warnings"
+        RUSTFLAGS="$flags" cargo clippy --manifest-path "$manifest" --locked --workspace --all-targets \
             --release --keep-going -- -D warnings || return
         rust_float_guard "$flags" || return
-        echo "== cargo build --workspace --release"
-        RUSTFLAGS="$flags" cargo build --manifest-path "$manifest" --workspace --release
+        echo "== cargo build --locked --workspace --release"
+        RUSTFLAGS="$flags" cargo build --manifest-path "$manifest" --locked --workspace --release
         return
     fi
     # --no-fail-fast: a failing test binary must not hide the binaries after
     # it, or the counts summed below would read as the whole suite's.
-    echo "== cargo test --workspace --release --no-fail-fast"
+    echo "== cargo test --locked --workspace --release --no-fail-fast"
     local results code
     results="$(mktemp)"
-    RUSTFLAGS="$flags" cargo test --manifest-path "$manifest" --workspace --release --no-fail-fast 2>&1 |
+    RUSTFLAGS="$flags" cargo test --manifest-path "$manifest" --locked --workspace --release --no-fail-fast 2>&1 |
         tee "$results"
     code=${PIPESTATUS[0]}
     awk '/^test result:/ { for (i = 1; i < NF; i++) { if ($(i + 1) ~ /^passed;/) p += $i

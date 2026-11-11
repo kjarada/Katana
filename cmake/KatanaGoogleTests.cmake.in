@@ -31,7 +31,7 @@ else()
             TEST_EXECUTOR @_katana_executor@
             TEST_WORKING_DIR [==[@CMAKE_CURRENT_BINARY_DIR@]==]
             TEST_PREFIX [==[@_katana_prefix@]==]
-            TEST_PROPERTIES [==[ENVIRONMENT_MODIFICATION]==] [==[@_katana_environment@]==]
+            TEST_PROPERTIES [==[ENVIRONMENT_MODIFICATION]==] [==[@_katana_environment@]==] @_katana_lock@
             TEST_LIST [==[@_katana_target@_TESTS]==]
             CTEST_FILE "${_katana_tests}"
             TEST_DISCOVERY_TIMEOUT [==[60]==]

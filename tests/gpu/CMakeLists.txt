@@ -49,9 +49,20 @@ if(NOT WIN32 AND NOT APPLE)
         message(STATUS "xvfb-run not found: the Vulkan GPU tests will skip their device cases")
     endif()
 endif()
+# Each case starts its own `xvfb-run -a`, which picks a free display by its
+# lock file: two started at once under ctest's --parallel can take the same
+# number, and a case then reaches the other's server with its own cookie and
+# aborts ("Authorization required ... could not connect to display", three
+# times on 2026-11-11). One lock keeps them apart; each case takes a fraction
+# of a second.
+set(_katana_gpu_lock "")
+if(NOT _katana_gpu_platform STREQUAL "offscreen")
+    set(_katana_gpu_lock "xvfb_run")
+endif()
 katana_discover_tests(katana_gpu_tests
     PREFIX "gpu."
     ENVIRONMENT "QT_QPA_PLATFORM=set:offscreen" "KATANA_GPU_TEST_PLATFORM=set:${_katana_gpu_platform}"
+    RESOURCE_LOCK "${_katana_gpu_lock}"
 )
 if(NOT _katana_gpu_platform STREQUAL "offscreen")
     # What the widget tells its host under the offscreen platform, where every
@@ -64,5 +75,7 @@ if(NOT _katana_gpu_platform STREQUAL "offscreen")
         PROPERTIES ENVIRONMENT_MODIFICATION
             "QT_QPA_PLATFORM=set:offscreen;KATANA_GPU_TEST_PLATFORM=set:offscreen"
             # A skip exits 0; without this a plain add_test calls it passed.
-            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]")
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+            # It runs through the same `xvfb-run -a` launcher.
+            RESOURCE_LOCK xvfb_run)
 endif()

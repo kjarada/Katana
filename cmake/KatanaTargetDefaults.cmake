@@ -97,10 +97,18 @@ endfunction()
 # has redeployed the GDAL/PDAL runtime loads freshly copied DLLs, which are
 # scanned on first load, and listing the 1073-case widget suite took 10.7 s
 # then. Listing normally takes a tenth of a second, so a minute costs nothing.
+#
+# RESOURCE_LOCK <name> gives every case that lock, so no two run at once: a
+# suite whose TEST_LAUNCHER cannot run beside itself (tests/gpu's `xvfb-run
+# -a`) says so here.
 function(katana_discover_tests target)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "PREFIX" "ENVIRONMENT")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "PREFIX;RESOURCE_LOCK" "ENVIRONMENT")
     set(_katana_target ${target})
     set(_katana_prefix "${ARG_PREFIX}")
+    set(_katana_lock "")
+    if(ARG_RESOURCE_LOCK)
+        set(_katana_lock "[==[RESOURCE_LOCK]==] [==[${ARG_RESOURCE_LOCK}]==]")
+    endif()
     set(_katana_environment "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
     # Whether the listing puts the runtime on PATH (KatanaGoogleTests.cmake.in):
     # Windows finds DLLs there, and the template joins PATH with ';'. Left

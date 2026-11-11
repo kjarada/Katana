@@ -43,7 +43,7 @@ answers as the C++ does.
 | 4 | cad | 3,011 | the cases twinned; every verb and alias accepted |
 | 5 | gis, pointcloud, interop | 370 (io 43, interop 174, geo 153) | the cases twinned, the online tests too |
 | 6 | app, with the geo verbs of `src/katana_app/geo` | 616 (app 242, geo 374) | the 375 cli tests pass against the Rust katana_cli; the replies and saved projects of both programs compared |
-| 7 | window, gpu | 1,609 | the 285 headless window tests pass against the Rust window |
+| 7 | window, gpu | 1,609 | every headless window test the build registers passes against the Rust window (267 in WSL on 2026-11-11) |
 | 8 | Windows | - | the whole of the above on Windows, natively; the updater applies, rolls back and recovers a real update there |
 | 9 | - | - | a release on the Rust programs, one release cycle, then the C++ is removed |
 
@@ -63,7 +63,8 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7-9 | not started |
+| 7 | in progress: planned in a foundation and four waves of agents; the window's third-party crates declared, fetched and pinned at releases two weeks old (the prelude) |
+| 8-9 | not started |
 
 ### Step 1: the foundation crates
 
@@ -778,6 +779,32 @@ test 7,456 passed, none failed, none ignored, the round-trip gate's
 failed, every reply the same as the C++'s. `rust/parity.toml` holds app and
 geo as ported.
 
+### Step 7: the window
+
+Step 7 ports the desktop window, `src/katana_qt` (121,563 lines of C++ and
+516 of GLSL), and its GPU layer to `katana_window` and `katana_gpu`, in egui
+and wgpu: 1,609 cases (tests/qt_widgets 1,548, tests/gpu 61). A planning
+pass split it into a foundation and four waves, because one chain cannot be
+cut by interfaces: the plan painter, the plan view, the workspace that holds
+the views and the main window that holds the workspace. Its gate is every
+headless window test the build registers, 267 in WSL: the 285 of this
+file's first table could not be reproduced (the commit that wrote it had
+268). Decisions so far:
+
+- **egui 0.36.2, not 0.37**: egui_dock, the docks the window needs, has no
+  release for 0.37 yet. The move later is one commit for the whole window.
+- **Every crate is at least two weeks old when it is locked.** Cargo picks
+  each transitive crate's newest compatible release, which can be a day
+  old; the prelude dated every new lock entry from crates.io and pinned the
+  24 younger than 2026-10-28 back to their newest older release, all at
+  once (the wasm-bindgen family pins itself to exact versions, so one at a
+  time cannot move it). Every cargo of `tools/build_visible.sh` is
+  `--locked`, so no build takes a newer crate on its own. Rejected:
+  `cargo vendor` into git, some 420 crates' sources in the repository.
+- **No test opens a window.** WSLg sets `DISPLAY` in every WSL process, so
+  a real window would open on the owner's screen: egui runs headless, fed
+  by the drive harness, and only the `katana` program names eframe.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -994,7 +1021,7 @@ version the C++ build links, from the same toolchain.
 | libcurl, the handle GDAL configures | hand-written declarations on the libcurl GDAL loads; a one-call shim for GDAL's C++-only option setter | gis |
 | OpenSSL (Ed25519 verification with the RFC 8032 checks) | ed25519-dalek and curve25519-dalek | update |
 | zlib (raw inflate) | miniz_oxide | update |
-| Qt | eframe, egui, egui_dock, wgpu, rfd, tiny-skia, krilla, cosmic-text | window |
+| Qt | egui, eframe and egui_extras 0.36.2, egui_dock 0.21.1, wgpu 30.0.1, tiny-skia 0.12.0, cosmic-text 0.19.0, krilla 0.8.2, png 0.18.1, image 0.25.10, arboard 3.7.0, rfd 0.17.2, pollster 1.0.1 | window, gpu |
 
 A crate is added to `THIRD_PARTY_NOTICES.md` in the commit that first uses it,
 and must be GPL-3.0-compatible.
@@ -1198,6 +1225,20 @@ pin classifies every algorithm GDAL lists.
     the source an archive import gives a surface, the vendor's name before
     "archive <file>" (written by the C++ app and interop layers, and by
     the Rust IMPORT as they write it, since it is saved with the project).
+- **Decisions waiting on the owner** (step 7), none needed before step 8:
+  - The window's fonts: egui's embedded UI fonts (Ubuntu-Light, Hack, Noto
+    Emoji) are data under the SIL Open Font Licence 1.1 and the Ubuntu Font
+    Licence 1.0. Does the rule that a crate be GPL-3.0-compatible apply to
+    embedded font data, and which font should the window carry? The work
+    goes on with egui's defaults, recorded in THIRD_PARTY_NOTICES.md.
+  - A person's Qt settings at the cut-over: the Rust window cannot read
+    `QSettings` (the registry on Windows), so the online data keys, recent
+    scripts, start-up and toolbar choices, the project folder and the
+    layout are lost unless migrated at step 8 or 9.
+  - Views floating onto another screen: egui_dock floats a view inside
+    the main window, where the C++'s can leave it.
+  - A `rust_notices` check that every crate of the lock is listed in
+    THIRD_PARTY_NOTICES.md with its version.
 - **Step 3's round-trip gate must normalise line ends in stored SQL.** The
   WSL build reads this Windows checkout, where `core.autocrlf` gives the
   C++ sources CRLF, so the C++ built there stores CRLF in the CREATE
@@ -1490,13 +1531,11 @@ pin classifies every algorithm GDAL lists.
   a survey file and a terrain grid shared by several suites): its table
   is checked against each suite's own data folder, as it was first
   written.
-- **A GPU hardware test aborts in WSL now and then** instead of skipping:
-  `gpu.Devices/GpuRender.AShadedTriangleCoversTheSoftwarePathsPixelsInItsColours/Hardware`
-  once, and on 2026-11-11
-  `gpu.Devices/GpuRender.ASceneAtMgaCoordinatesDrawsLikeTheSameSceneAtTheOrigin/Hardware`,
-  each because it could not connect to `xvfb-run`'s display under the
-  suite's parallel load; run alone each skips, as every run before. A test
-  that loses its display should skip as it does without a device.
+- **A GPU hardware test that loses its display aborts** instead of
+  skipping, as it skips without a device. The cause of the aborts seen in
+  WSL was the cases' `xvfb-run -a` launchers racing for one display, now
+  kept apart (docs/gpu.md); a display lost for another reason would still
+  abort the case.
 - **nlohmann widens its indent string once**, so an indent over 1,024
   characters reads past it in C++ (undefined); `katana_core::json` widens it
   until it fits, the same text wherever the C++ is defined.

@@ -29,6 +29,26 @@ katana_survey.workspace = true
 katana_surveyio.workspace = true
 katana_terrain.workspace = true
 katana_update.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+# The window (step 7; docs/rust.md, "Third-party libraries"). egui 0.36, not 0.37: egui_dock has
+# no release for 0.37 yet. eframe is the desktop runner only (src/bin/katana): its defaults would
+# turn on the WebAssembly screen reader and its own persistence, and the window keeps its own
+# settings.
+egui = "0.36.2"
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "x11", "wayland", "links"] }
+egui_dock = "0.21.1"
+egui_extras = { version = "0.36.2", default-features = false }
+# The raster canvas, the text drawn in a drawing, and PDF plots and sheets (one Canvas trait).
+tiny-skia = "0.12.0"
+cosmic-text = "0.19.0"
+krilla = "0.8.2"
+# Images a drawing or sheet holds, in the formats Qt's image plugins read, and PNG written.
+png = "0.18.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "ico"] }
+# The desktop's clipboard, text and image, and its file dialogs: never opened headless.
+arboard = "3.7.0"
+rfd = "0.17.2"
 
 [lints]
 workspace = true

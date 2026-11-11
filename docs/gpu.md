@@ -508,7 +508,13 @@ packing and fallback cases need no device and always run.
   ctest, on lavapipe when there is no GPU (Debian and Ubuntu:
   `mesa-vulkan-drivers`, `xvfb`). The one offscreen case is registered again as
   `gpu_offscreen.*`. Without `xvfb-run` the suite runs offscreen and its device
-  cases skip, saying why.
+  cases skip, saying why. Each case starts its own `xvfb-run -a`, so the
+  cases hold one ctest `RESOURCE_LOCK`, `xvfb_run`, and never run beside each
+  other: `-a` picks a free display by its lock file, two started at once
+  under `--parallel` can take the same number, and a case then reaches the
+  other's server with its own cookie and aborts ("Authorization required
+  ... could not connect to display"). Seen three times in WSL on
+  2026-11-11, first taken for the suite's load.
   Without a Vulkan driver at all (no `mesa-vulkan-drivers` and no GPU driver:
   the loader's "Failed to create Vulkan instance: -9") the `OnTheDesktop`
   cases skip too, saying so, through the suite's `whyNoVulkanDriver`, as the
