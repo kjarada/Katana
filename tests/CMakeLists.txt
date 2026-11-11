@@ -594,6 +594,25 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(rust_cli_gate_accepted PROPERTIES
         PASS_REGULAR_EXPRESSION "rust_cli_gate: 4 cli tests read, 4 written [(]3 run a program, 1 runs none[)]; 1 fixture provider carried from the C[+][+] suite as it is: qt_a_project_is_saved_by_the_window_headless"
         FAIL_REGULAR_EXPRESSION "refused")
+    # Step 7's window gate (tools/rust_window_gate.py; docs/rust.md, "Step 7") runs the headless
+    # window tests of this build against the Rust katana. Its own check, as the cli gate's: each
+    # refusal it must make, and one set it must accept. --check writes and runs nothing; --output
+    # is given so the check does not depend on where the checkout is.
+    foreach(_case IN ITEMS unreplaced other_program count_differs accepted)
+        add_test(NAME rust_window_gate_${_case}
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/rust_window_gate.py" --check
+                    --build "${_rust_fixtures}/rust_window_gate/${_case}" --cpp-bin /katana-build/bin
+                    --programs /katana-build/cargo/release --output /katana-build/rust_window_gate)
+    endforeach()
+    set_tests_properties(rust_window_gate_unreplaced PROPERTIES PASS_REGULAR_EXPRESSION
+        "refused: qt_a_window_found_on_the_path_headless runs katana where the gate replaces nothing [(]-DAPP=katana[)]: a test that runs the window must name it as /katana-build/bin/katana")
+    set_tests_properties(rust_window_gate_other_program PROPERTIES PASS_REGULAR_EXPRESSION
+        "refused: qt_the_window_and_the_cli_headless names /katana-build/bin/katana_cli, a program of the C[+][+] build the gate does not replace")
+    set_tests_properties(rust_window_gate_count_differs PROPERTIES PASS_REGULAR_EXPRESSION
+        "refused: the count of window tests written [(]1[)] differs from the count read [(]2[)]: qt_twice_headless is defined more than once")
+    set_tests_properties(rust_window_gate_accepted PROPERTIES
+        PASS_REGULAR_EXPRESSION "rust_window_gate: 3 window tests read, 3 written [(]1 through -DAPP=, 1 run directly, 1 otherwise[)]; carried from the C[+][+] suite as it is: 1 fixture provider [(]qt_line_folder_made[)] and 1 fixture user [(]batch_project_is_there_after_the_batch_run[)]"
+        FAIL_REGULAR_EXPRESSION "refused")
 endif()
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only

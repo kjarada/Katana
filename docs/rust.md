@@ -63,7 +63,7 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the window's third-party crates declared, fetched and pinned at releases two weeks old (the prelude) |
+| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan) |
 | 8-9 | not started |
 
 ### Step 1: the foundation crates
@@ -803,7 +803,66 @@ file's first table could not be reproduced (the commit that wrote it had
   `cargo vendor` into git, some 420 crates' sources in the repository.
 - **No test opens a window.** WSLg sets `DISPLAY` in every WSL process, so
   a real window would open on the owner's screen: egui runs headless, fed
-  by the drive harness, and only the `katana` program names eframe.
+  by the drive harness, and only the `katana` program names eframe (a
+  foundation case fails when another file does).
+
+**Wave 0** built what every later agent builds on, in three agents:
+
+- **Every control is driven by its C++ object name.** The foundation's
+  controls register each control under its name in a target (a dialog, a
+  dock, a panel, the window), and a test or the headless runner posts an
+  act - fill, press, scroll to - to that name in a mailbox. The first
+  control of that name drawn in a frame takes it, applies it before it
+  draws, and reports the change after; an act no control took is refused
+  in the C++'s sentence for a missing widget, or kept while its target is
+  still being sized, or refused because the target has closed. A name drawn
+  twice in one target is refused: a driver could not tell the two apart.
+  The main window is the target with no name, as its C++ object has none.
+- **A run of the harness never ends on the frame that took an act.** Such
+  a frame drew the controls before the taker with the state from before
+  the act, where Qt shows a click's result everywhere at once; one more
+  frame follows (found by FilterBar's exclusive chips at the first run).
+- **A dialog declares its footer** and is fitted to the screen every frame,
+  where the C++ read a Qt dialog's laid-out widgets to find the footer.
+  The eleven ScreenFit cases about reading and wrapping Qt's layouts are
+  exempt, as the plan foresaw.
+- **The painters draw through one `Canvas` trait**, made from a census of
+  the C++ painters' QPainter calls (in its module's header), so the screen,
+  PNG, TIFF and PDF are one painter's backends.
+- **The GPU layer's shaders are WGSL**, written from the C++'s GLSL by
+  hand and validated by naga. wgpu has no geometry stage, so lines and
+  points are instanced only; there are no serialized shaders and one
+  compiler, so four GPU cases are exempt. Each device case runs on a
+  Hardware device, then a Software one, skipping only when the device is
+  not there: in WSL the Hardware cases skip and every Software case runs on
+  lavapipe, with no X server needed. The default backend on Windows is
+  Direct3D 12, where the C++ used Direct3D 11.
+- **The window gate** (`tools/rust_window_gate.py`, the `wsl wgate`
+  phase) runs every headless window test against the Rust `katana` beside
+  a rerun of the C++ window. It compares both programs' streams after
+  listed normalisations, and their exit codes, since a test that passes on
+  any failure would not tell an exit 1 from an exit 2. It keeps both
+  screenshots side by side for a person to look at and never compares their
+  pixels. It shares one CTest reader (`tools/ctest_tree.py`) with the cli
+  gate, whose output did not change. It joins the whole run when the Rust
+  `katana` exists, at the last wave.
+- **The headless window has the C++'s geometry.** Tests pin pointer
+  coordinates and toolbar device pixels, so the Rust window's headless runs
+  must lay out as the C++'s do. The probe (`tools/window_geometry.py`) ran
+  the C++ window headless on nine variants and measured it from its own
+  screenshots: at scale 1 the window is 1360 x 860, the Layers dock
+  45,159 300 x 295, Reference Data 45,459 300 x 328, Properties 1015,159
+  300 x 628, the command line 350,637 660 x 150, and the views 350,159
+  660 x 473 under a 26-pixel title strip, two views splitting it 327 | 328.
+  At 125 % the window is 1700 x 1075 and the docks' sizes scale; their
+  places there are still to measure, as the probe could not locate them.
+
+Evidence, 2026-11-11, `tools/build_visible.sh wsl` after wave 0: exit 0; the
+Release C++ build, Clippy (`--locked`) and the float-to-text guard clean;
+CTest 9,923 entries (the window gate's four checks new), 9,883 passed, 40
+skipped, none failed; cargo test 7,565 passed, none failed, none ignored
+(6,884 before step 7); the cli gate 376 of 376 identical. The GPU cases,
+run once with their output shown, skipped only on the Hardware device.
 
 ## The workspace
 
@@ -1451,6 +1510,17 @@ pin classifies every algorithm GDAL lists.
   four joins of records, two of which keep empty records; `describeJson`
   catches only nlohmann's parse error; `runNow` on a prepared line with
   neither a reply nor work throws.
+- **Defect found in porting step 7's wave 0:** the C++ GPU tests' `makeGpu`
+  returns nothing for every failure, so a pipeline that does not build is
+  skipped as if the device were missing; the Rust skips only when the
+  device is not there, and fails on anything else.
+- **Where step 7's Rust differs so far:** a failed GPU pipeline or shader
+  says wgpu's or naga's words ("the WGSL module did not compile: ..."),
+  and wgpu's own steps add sentences of their own (the read-back buffer,
+  the frame timer); a GPU target takes 1 or 4 samples; a path's arc is
+  split into pieces of at most 90 degrees, where Qt splits it otherwise,
+  so a curve's control points can differ slightly; a number grouped for
+  the locale puts "," every three digits unless the locale is C or POSIX.
 - **Defects found in porting step 6's wave 2, ported as they are:**
   - katana_mcp: `Server::handle` says it never throws, but a non-string
     `jsonrpc` member (read outside its try) and a number past the largest

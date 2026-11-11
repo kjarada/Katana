@@ -16,6 +16,9 @@
 #                                              WSL build run against the Rust katana_cli and
 #                                              katana_mcp, both runs' replies compared
 #                                              (tools/rust_cli_gate.py, whose header says how)
+#   tools/build_visible.sh wsl wgate [-- ctest args]  step 7's window gate: the headless window
+#                                              tests of the last WSL build run against the
+#                                              Rust katana (tools/rust_window_gate.py)
 #   tools/build_visible.sh wsl [phase] [...]   any of those in WSL instead (below)
 #   tools/build_visible.sh close               close this checkout's windows whose run has ended
 #
@@ -114,7 +117,7 @@ main() {
 
     phase="${1:-all}"
     case "$phase" in
-        all | build | test | cargo | gate) ;;
+        all | build | test | cargo | gate | wgate) ;;
         *)
             echo "usage: tools/build_visible.sh [wsl] [all | build [target...] | test [ctest arguments...] | cargo]" >&2
             return 2
@@ -256,6 +259,14 @@ steps() {
         cli_gate "$directory" "$@"
         return
     fi
+    if [ "$phase" = wgate ]; then
+        if [ -z "${KATANA_LINUX_BUILD:-}" ]; then
+            echo "the window gate runs in WSL: tools/build_visible.sh wsl wgate" >&2
+            return 2
+        fi
+        window_gate "$directory" "$@"
+        return
+    fi
     if [ "$phase" != test ]; then
         local configure
         if [ -n "${KATANA_LINUX_BUILD:-}" ]; then
@@ -333,6 +344,20 @@ cli_gate() {
     shift
     echo "== gate: xvfb-run -a python3 tools/rust_cli_gate.py --build $directory --programs $CARGO_TARGET_DIR/release --rerun-cpp $*"
     QT_QPA_PLATFORM=offscreen xvfb-run -a python3 tools/rust_cli_gate.py --build "$directory" \
+        --programs "$CARGO_TARGET_DIR/release" --rerun-cpp "$@"
+}
+
+# Step 7's window gate (tools/rust_window_gate.py, whose header says how): the
+# headless window tests of the build tree in $1, run against the Rust katana
+# beside a rerun of the C++ window, both programs' streams and exit codes
+# compared, both screenshots kept side by side for a person. The rest of the
+# arguments go to ctest. Its own phase until step 7's last wave builds the Rust
+# katana; then it joins the whole run as the cli gate did.
+window_gate() {
+    local directory="$1"
+    shift
+    echo "== window gate: xvfb-run -a python3 tools/rust_window_gate.py --build $directory --programs $CARGO_TARGET_DIR/release --rerun-cpp $*"
+    QT_QPA_PLATFORM=offscreen xvfb-run -a python3 tools/rust_window_gate.py --build "$directory" \
         --programs "$CARGO_TARGET_DIR/release" --rerun-cpp "$@"
 }
 

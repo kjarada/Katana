@@ -32,3 +32,24 @@ ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands",
 # Rust has no way to change the floating-point rounding mode (doing so is
 # undefined behaviour), and f64::round rounds half away from zero in every mode.
 "DimensionText.TheTieDirectionSurvivesAChangeOfRoundingMode" = "Rust cannot change the rounding mode; f64::round is half away from zero regardless"
+# Step 7, the window (step7_plan.md section 3.3). ScreenFit read a Qt dialog's retained
+# layout to find its footer and wrapped the dialog, once, from an application-wide event
+# filter; an egui dialog declares its footer and is fitted every frame, so what these test
+# - the layout read, the filter, a dialog shown again, Qt's own dialogs - is not there.
+"ScreenFit.QtsOwnDialogsKeepTheirLayoutsToThemselves" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.FittingWithoutTheFilterDoesTheSameAsTheFilterDoes" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.ADialogShownAgainIsNotWrappedAgain" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.ADialogShownAgainKeepsOneFooter" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.OnlyTheLastRowOfButtonsIsTheFooterAndAnEarlierOneScrollsWithTheBody" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.AReadOnlyLineBesideTheButtonsIsPartOfTheirRow" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.ADialogWithNoRowOfButtonsHasNoFooterAndEverythingScrolls" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.AButtonRowThatIsNotLastAndIsFollowedByABigListIsNoFooter" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.ARowWithAFieldInItIsAFormsOwnAndNotTheFooter" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.ADialogLaidOutInAGridKeepsItsButtonsInTheScrollArea" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+"ScreenFit.ADialogThatFitsWithAButtonRowKeepsItsLayoutAndHasNoFooter" = "an egui dialog declares its footer and is fitted each frame; there is no Qt layout to read or wrap"
+# The GPU layer on wgpu (step 7): no geometry stage, no serialized shader blobs, and one
+# shader compiler (naga), where QRhi had a geometry-shader path, QShader blobs and two.
+"GpuRender.TheGeometryShaderAndInstancingDrawTheSameLinesPointsAndCloud" = "wgpu has no geometry stage; lines and points are instanced only"
+"GpuRender.SerializedShadersDrawWhatTheRuntimeShadersDraw" = "wgpu takes WGSL at run time; there are no serialized shaders to compare"
+"SerializedShaderLibrary.ReportsABlobThatDoesNotDeserialize" = "there is no serialized shader library: the WGSL is compiled by naga at run time"
+"GpuRender.BytecodeCompiledHereDrawsWhatQRhiCompilingTheSourceDraws" = "naga is the one shader compiler; there is no second to compare with"

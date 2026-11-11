@@ -22,3 +22,8 @@ LICENSE -text
 # shell scripts are, keeps the bytes the same on both sides. (Not for string
 # literals' sake: rustc reads a CRLF in a source file as LF.)
 *.rs text eol=lf
+
+# The GPU layer's shaders (rust/crates/katana_gpu/src/shaders) are WGSL the
+# program embeds with include_str!: LF in every checkout, or a Windows checkout
+# would embed other bytes than the same commit built in WSL.
+*.wgsl text eol=lf
