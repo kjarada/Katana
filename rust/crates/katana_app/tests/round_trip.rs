@@ -1,25 +1,31 @@
-//! Step 3's round-trip gate (docs/rust.md, "The order of the work"): every
-//! file of the test data and the samples in a format step 3 ported - the
-//! project (storage), DXF, IFC, the .12da archive and the survey field files
-//! (surveyio) - is read by the C++ katana_cli and by the Rust katana_corpus,
-//! written by both where a writer exists, and each program reads what the
-//! other wrote.
+//! The round-trip gate (docs/rust.md, "Step 3's round-trip gate"): every file
+//! of the test data and the samples is read by the C++ katana_cli and by the
+//! Rust katana_cli on the same lines, written by both where a writer exists,
+//! and each program reads what the other wrote. Step 3 wrote it for the
+//! formats it ported, with a stand-in for the Rust program; it now runs the
+//! Rust katana_cli itself (this package's), and takes what steps 4 to 6 ported
+//! as well: the GIS data, the zipped archive, the reference layers, SURVEY
+//! IMPORT, the scripts and the files only a verb naming them reads.
 //!
 //! The corpus is the table CORPUS, one row per file, so that a new data file
 //! is a decision rather than an accident: the first test fails for a file of
 //! the test data or the samples that has no row, and a row says why a file is
-//! left out. What each kind of row runs, in both programs:
+//! left out. What each kind of row runs, in both programs, as katana_cli's -c
+//! lines (a script as its argument):
 //!
 //! ```text
-//! project   OPEN <copy>, SAVE, SAVE <new>    the copy (migrated, saved in place, its backups)
-//!                                            and the new project compared
-//! import    IMPORT <file>, SAVE <new>        the new project compared
-//! survey    SURVEY READ <file>               the replies compared, word for word
-//! ifc       EXPORT <file.ifc> UTILITIES ...  the files compared, then each program
-//!                                            imports the other's
+//! project   OPEN <copy>, SAVE, SAVE <new>        the copy (migrated, saved in place, its
+//!                                                backups) and the new project compared
+//! import    IMPORT <file>, SAVE <new>            the new project compared
+//! survey    SURVEY READ <file>                   the replies compared
+//!           SURVEY IMPORT <file>, SAVE <new>     the new project compared
+//! script    <file>, SAVE <new>                   the new project compared
+//! lines     the row's lines, SAVE <new>          the new project compared
+//! ifc       EXPORT <file.ifc> UTILITIES ...      the files compared, then each program
+//!                                                imports the other's
 //! ```
 //!
-//! and after a project or an import row:
+//! and after every row whose runs saved a project:
 //!
 //! ```text
 //! the other's project   OPEN <the other's>, SAVE <new>    compared
@@ -27,6 +33,13 @@
 //!                                                         the files compared byte for byte
 //! the other's file      IMPORT <the other's out>, SAVE <new>   compared
 //! ```
+//!
+//! Every pair of runs is compared first by how each ended (both succeeding,
+//! or both failing on the same error line, is an answer; anything else is a
+//! finding) and then, where they ended alike, by what each wrote on standard
+//! output and on standard error, word for word, with each run's own folders
+//! and files (the project it saved, the file it wrote or read: two paths for
+//! one thing) written by one name on both sides.
 //!
 //! Both programs export from the same project - the C++'s - because an IFC's
 //! GlobalIds are made from the project's name and the time it was created
@@ -43,13 +56,28 @@
 //!
 //! The C++ katana_cli is the one tools/build_visible.sh built, named by
 //! KATANA_CPP_CLI as the number-format oracle is by its variable; without it
-//! the gate fails rather than skipping. It runs with
-//! KATANA_BUILTIN_CUSTOMISATION=none (the seam of cad/customisation_host.hpp),
-//! because the Rust has no customisation yet: a session with the built-in
-//! would record its name in every project it saves and resolve an archive's
-//! colours by its palette. A difference is reported as the file, the format,
-//! what was compared and the first difference.
+//! the gate fails rather than skipping. The Rust katana_cli is cargo's build
+//! of this package's program. Both run in ONE environment, which the gate
+//! makes for every run (Gate::katana): the gate's scratch folder as the
+//! working directory, a folder inside it as the temporary folder (TMPDIR, TMP
+//! and TEMP, so that whatever either program leaves there goes with the
+//! scratch), and neither KATANA_CUSTOMISATION nor KATANA_BUILTIN_CUSTOMISATION.
+//! So a caller's kept file or choice of built-in reaches neither program, and
+//! each starts as a person's katana_cli starts, with the built-in
+//! customisation it was built with. Step 3 ran the C++ with the built-in
+//! switched off (`none`) because its stand-in had no customisation; the Rust
+//! has cad's now, embedded from the same file by the same declaration
+//! (src/katana_cad/CMakeLists.txt, which katana_cad's build.rs reads), and
+//! `none` would leave out what a customisation does to the corpus: the
+//! customisations a SAVE records, an archive's colours resolved through the
+//! customisation's palette, and SURVEY IMPORT's coding and linework by its
+//! survey code rules. That the two start alike is checked before any row, by
+//! a run of a note alone, so that a build configured with another built-in
+//! (which reaches the C++ alone; docs/rust.md, "Not done") fails the gate in
+//! one sentence rather than in every row. A difference is reported as the
+//! file, the format, what was compared and the first difference.
 
+use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -71,10 +99,20 @@ enum Read {
     /// A file IMPORT reads into a new drawing, saved as a project; then
     /// written by each writer.
     Import,
-    /// A survey field file, read by SURVEY READ. The formats have no writer,
-    /// and SURVEY IMPORT - the reduction, the coding and the drawing of the
-    /// job - is the cad layer's, ported in step 4.
+    /// A survey field file: read by SURVEY READ, whose replies are compared;
+    /// then imported by SURVEY IMPORT (the reduction, and the coding and
+    /// linework of the customisation the session starts with) into a new
+    /// drawing, saved as a project and written by each writer.
     Survey,
+    /// A katana_cli script, run as the program's argument into a new
+    /// drawing, saved as a project; then written by each writer.
+    Script,
+    /// A file that only a line naming it reads (a customisation, a design, a
+    /// file of reduction settings) and the lines that read it, each {path} a
+    /// file of the corpus read by a row of its own, the row's own file among
+    /// them: run into a new drawing, saved as a project, then written by each
+    /// writer.
+    Lines(&'static [&'static str]),
     /// An IFC export whose input the line's files are - a schedule, its
     /// delivery schema, a project's rules - from a new drawing or from a
     /// project of the corpus (`project`, a row of its own). `arguments` is
@@ -88,17 +126,6 @@ enum Read {
     Out(&'static str),
 }
 
-/// What the gate expects of one writer, given a row's drawing.
-#[derive(Clone, Copy)]
-enum Write {
-    /// Both programs write it: the files are compared, and each program
-    /// reads the other's.
-    Compare,
-    /// The Rust refuses it with these words in its error - what the C++
-    /// writes needs a layer not ported yet - and both read the C++'s file.
-    RustRefuses(&'static str),
-}
-
 #[derive(Clone, Copy)]
 struct Row {
     /// From the checkout's root; for an Out row, a folder ending in '/' to
@@ -107,35 +134,46 @@ struct Row {
     /// For the report.
     format: &'static str,
     read: Read,
-    dxf: Write,
-    archive: Write,
-    ifc: Write,
-    /// Metadata keys the row's project comparisons leave out; the row says why.
-    ignore_metadata: &'static [&'static str],
-}
-
-const fn row(path: &'static str, format: &'static str, read: Read) -> Row {
-    Row {
-        path,
-        format,
-        read,
-        dxf: Write::Compare,
-        archive: Write::Compare,
-        ifc: Write::Compare,
-        ignore_metadata: &[],
-    }
 }
 
 const fn project(path: &'static str) -> Row {
-    row(path, "project", Read::Project)
+    Row {
+        path,
+        format: "project",
+        read: Read::Project,
+    }
 }
 
 const fn import(path: &'static str, format: &'static str) -> Row {
-    row(path, format, Read::Import)
+    Row {
+        path,
+        format,
+        read: Read::Import,
+    }
 }
 
 const fn survey(path: &'static str, format: &'static str) -> Row {
-    row(path, format, Read::Survey)
+    Row {
+        path,
+        format,
+        read: Read::Survey,
+    }
+}
+
+const fn script(path: &'static str) -> Row {
+    Row {
+        path,
+        format: "script",
+        read: Read::Script,
+    }
+}
+
+const fn read_by(path: &'static str, format: &'static str, lines: &'static [&'static str]) -> Row {
+    Row {
+        path,
+        format,
+        read: Read::Lines(lines),
+    }
 }
 
 const fn ifc_export(
@@ -143,37 +181,24 @@ const fn ifc_export(
     project: Option<&'static str>,
     arguments: &'static str,
 ) -> Row {
-    row(path, "ifc", Read::IfcExport { project, arguments })
+    Row {
+        path,
+        format: "ifc",
+        read: Read::IfcExport { project, arguments },
+    }
 }
 
 const fn out(path: &'static str, format: &'static str, why: &'static str) -> Row {
-    row(path, format, Read::Out(why))
-}
-
-impl Row {
-    const fn dxf_refused(self, words: &'static str) -> Row {
-        Row {
-            dxf: Write::RustRefuses(words),
-            ..self
-        }
-    }
-
-    const fn ignoring(self, keys: &'static [&'static str]) -> Row {
-        Row {
-            ignore_metadata: keys,
-            ..self
-        }
+    Row {
+        path,
+        format,
+        read: Read::Out(why),
     }
 }
-
-/// The words of katana_corpus's refusal of what needs the cad layer.
-const NEEDS_CAD: &str = "ported in step 4";
 
 const LEGACY: &str = "a file of the retired style library and survey code file formats, whose legacy readers are not ported until the owner decides (docs/rust.md, \"Decisions waiting on the owner\")";
-const SCRIPT: &str =
-    "a katana_cli script of drawing verbs, the cad layer's (step 4), run by step 6's program";
-const SETTINGS: &str = "reduction settings for SURVEY IMPORT, whose reduction, coding and drawing of the job are the cad layer's (step 4)";
 const GIT: &str = "git's settings for the folder, not data";
+const SERVICE: &str = "a web service's capabilities document, which describes a server's data and holds none: IMPORT would hand it to GDAL, whose service drivers (WMS, WMTS, WFS) take such a document as the way to the server it names and read from there, and the gate reaches no host (CLAUDE.md section 4); the online discovery reads these files, in tests/interop's own cases";
 
 const CORPUS: &[Row] = &[
     // ---- projects (storage) --------------------------------------------------------------
@@ -197,15 +222,14 @@ const CORPUS: &[Row] = &[
     import("tests/dxf/data/r2000_site.dxf", "dxf"),
     out("tests/dxf/data/.gitattributes", "git", GIT),
     // ---- the archive ---------------------------------------------------------------------
-    // Its point cloud ("LiDAR Patch") is a reference layer of the C++ session,
-    // as las_point_cloud.12da's is below: interop's reference data (step 5),
-    // which the Rust has not yet, so reference_layers is left out here too.
-    import("tests/archive12d/data/all_geometries.12da", "12da").ignoring(&["reference_layers"]),
-    out(
-        "tests/archive12d/data/all_geometries.12daz",
-        "12daz",
-        "a zip container, which the gis layer opens (step 5); the .12da it holds is the row above's file",
-    ),
+    // Its point cloud ("LiDAR Patch") is a reference layer of the session, as
+    // las_point_cloud.12da's is below: SAVE records it in the project's
+    // reference_layers and OPEN reads it again from the archive, so the key is
+    // compared with the rest of the project.
+    import("tests/archive12d/data/all_geometries.12da", "12da"),
+    // The same archive in its zip container, which IMPORT opens through the
+    // gis layer.
+    import("tests/archive12d/data/all_geometries.12daz", "12daz"),
     out(
         "tests/archive12d/data/customisation/test_linestyles.4d",
         "style library",
@@ -222,20 +246,25 @@ const CORPUS: &[Row] = &[
         LEGACY,
     ),
     // Its two drafting leaders are drawn into a DXF by the cad layer's export
-    // annotation (cad/annotation/export_annotation.cpp), so the Rust writes no
-    // DXF of it yet, and both read the C++'s.
-    import("tests/archive12d/data/drafting_leaders.12da", "12da").dxf_refused(NEEDS_CAD),
-    out(
+    // annotation (cad/annotation/export_annotation.cpp).
+    import("tests/archive12d/data/drafting_leaders.12da", "12da"),
+    // The customisation whose colour table names that archive's own colours:
+    // loaded, and the archive imported after it, as
+    // tests/archive12d/check_drafting_import.cmake runs them for
+    // cli.archive_custom_colours_and_native_leaders_are_imported, so that the
+    // colours are resolved through this palette rather than the built-in's.
+    read_by(
         "tests/archive12d/data/drafting_palette.customisation.json",
         "customisation",
-        "a Katana customisation: the entity layer's format (step 2), which only the cad layer's CUSTOMISE puts in a drawing (step 4)",
+        &[
+            "CUSTOMISE {tests/archive12d/data/drafting_palette.customisation.json}",
+            "IMPORT {tests/archive12d/data/drafting_leaders.12da} LOCAL",
+        ],
     ),
     import("tests/archive12d/data/drainage_strings.12da", "12da"),
-    // Its LAS cloud is a reference layer of the C++ session (interop's
-    // reference data, step 5), which a SAVE records in the project's
-    // reference_layers; the Rust has no reference data yet, so that one
-    // record is left out of this row's comparisons.
-    import("tests/archive12d/data/las_point_cloud.12da", "12da").ignoring(&["reference_layers"]),
+    // Its LAS cloud is a reference layer of the session, which a SAVE records
+    // in the project's reference_layers, compared with the rest.
+    import("tests/archive12d/data/las_point_cloud.12da", "12da"),
     import("tests/archive12d/data/multiple_tins.12da", "12da"),
     import("tests/archive12d/data/super_tin.12da", "12da"),
     import("tests/archive12d/data/symbols.12da", "12da"),
@@ -265,65 +294,153 @@ const CORPUS: &[Row] = &[
         Some("samples/site_plan/project.db"),
         "RULES {samples/ifc/classification_rules.csv}",
     ),
-    out("samples/ifc/scenario.txt", "script", SCRIPT),
-    out("samples/site_plan.kcs", "script", SCRIPT),
-    out(
+    // ---- scripts -------------------------------------------------------------------------
+    // The road centreline and the survey beside it that the IFC samples are
+    // exported from (docs/ifc.md): its project coordinate system, alignment,
+    // profile, kerb, fence, pit, point and text, then each writer.
+    script("samples/ifc/scenario.txt"),
+    // The sample site plan: layers, polylines, arcs, circles, text,
+    // dimensions, hatches and an alignment with its design profile, ending in
+    // LIST.
+    script("samples/site_plan.kcs"),
+    // The window's scripts (File > Run Script) are katana_cli's scripts too.
+    // Three commands, three entities; an indented note is a note.
+    script("tests/qt_widgets/data/scripts/good.kcs"),
+    // Its second command is refused (a circle of negative radius), which ends
+    // a katana_cli run: both programs must fail on that line alike.
+    script("tests/qt_widgets/data/scripts/bad.kcs"),
+    // Its VIEWS and ZOOM lines are a window's, which katana_cli has not: both
+    // programs must refuse the first of them alike.
+    script("tests/qt_widgets/data/scripts/open_and_zoom.kcs"),
+    // ---- the subsurface utilities --------------------------------------------------------
+    // The design UTILITY CLEARANCE checks the sample schedule's services
+    // against, as cli.utility_clearance_shows_the_crossing_within_tolerance
+    // runs it: a report, compared with the replies.
+    read_by(
         "samples/utilities/design.csv",
         "csv",
-        "the design of UTILITY CLEARANCE, a verb of the cad layer (step 4)",
+        &[
+            "UTILITY CLEARANCE {samples/utilities/schedule.csv} {samples/utilities/design.csv} WIDTH 0.375",
+        ],
     ),
-    out(
-        "samples/utilities/located_services.geojson",
-        "geojson",
-        "vector data, read through GDAL by the gis layer (step 5)",
-    ),
-    // ---- the gis layer's and the window's --------------------------------------------------
-    out(
-        "samples/gis/parcels.geojson",
-        "geojson",
-        "vector data, read through GDAL by the gis layer (step 5)",
-    ),
-    out(
-        "samples/gis/survey_scan.las",
-        "las",
-        "a point cloud, read through PDAL by the pointcloud layer (step 5)",
-    ),
-    out(
-        "samples/gis/terrain.asc",
-        "asc",
-        "a raster, read through GDAL by the gis layer (step 5)",
-    ),
+    // The sample investigation as a GIS delivers it (plan strings, points shot
+    // on the ground, the attributes under the GIS's names), which
+    // cli.utility_draw_takes_the_services_an_import_left_in_the_drawing
+    // imports: vector data, read through GDAL.
+    import("samples/utilities/located_services.geojson", "geojson"),
+    // ---- GIS data (the gis and pointcloud layers) ----------------------------------------
+    import("samples/gis/parcels.geojson", "geojson"),
+    // A point cloud, read through PDAL: a reference layer of the session, not
+    // the drawing's, which SAVE records in reference_layers and OPEN reads
+    // again from the file.
+    import("samples/gis/survey_scan.las", "las"),
+    // A raster, read through GDAL: a reference layer, as the cloud is.
+    import("samples/gis/terrain.asc", "asc"),
     out(
         "samples/gis/terrain.prj",
         "prj",
-        "the raster's coordinate system, read with it by the gis layer (step 5)",
+        "the raster's coordinate system, which GDAL reads with samples/gis/terrain.asc (its row is above) and never alone",
+    ),
+    // The geoprocessing suite's data: a lot with a hole, two lots, the plane
+    // (a raster with no coordinate system) and points on it.
+    import("tests/geo/data/lot_with_hole.geojson", "geojson"),
+    import("tests/geo/data/lots.geojson", "geojson"),
+    import("tests/geo/data/plane.asc", "asc"),
+    import("tests/geo/data/plane_points.geojson", "geojson"),
+    // ---- the replies of online services, as the online tests keep them -------------------
+    // JSON that no reader of GDAL takes (an error, an image service's and a
+    // catalogue's descriptions, a feature service's list of collections):
+    // both programs must refuse IMPORT of it alike.
+    import("tests/interop/data/online/arcgis_error.json", "json"),
+    import("tests/interop/data/online/arcgis_imageserver.json", "json"),
+    import("tests/interop/data/online/ckan_search.json", "json"),
+    import("tests/interop/data/online/oapif_collections.json", "json"),
+    // A feature layer's and a map service's descriptions, which GDAL's ESRI
+    // JSON reader claims by the geometry type they name and which hold no
+    // features: whatever it makes of them, both programs must make the same.
+    import("tests/interop/data/online/arcgis_layer.json", "json"),
+    import("tests/interop/data/online/arcgis_mapserver.json", "json"),
+    // Pages of features as the services return them: GeoJSON.
+    import(
+        "tests/interop/data/online/arcgis_query_page1.geojson",
+        "geojson",
+    ),
+    import(
+        "tests/interop/data/online/arcgis_query_page2.geojson",
+        "geojson",
+    ),
+    import(
+        "tests/interop/data/online/arcgis_query_page3.geojson",
+        "geojson",
+    ),
+    import(
+        "tests/interop/data/online/oapif_items_page1.json",
+        "geojson",
+    ),
+    // OpenStreetMap's XML as Overpass returns it, read by GDAL's OSM driver.
+    import("tests/interop/data/online/overpass_buildings.osm", "osm"),
+    // A STAC item and a page of a STAC search, read as the GeoJSON they are.
+    // GDAL's STAC readers, which would open the remote assets they name, take
+    // only a document that carries the projection extension's transform,
+    // which these do not.
+    import(
+        "tests/interop/data/online/stac_item_sentinel2.json",
+        "geojson",
+    ),
+    import("tests/interop/data/online/stac_search.json", "geojson"),
+    out(
+        "tests/interop/data/online/headless_catalogue.json.in",
+        "template",
+        "a template the build fills in (tests/interop/CMakeLists.txt) for the window's headless check of the online catalogue: not data",
     ),
     out(
-        "tests/geo/data/",
-        "gis",
-        "the geoprocessing suite's rasters and vectors, the gis layer's (step 5)",
+        "tests/interop/data/online/wcs_capabilities_100.xml",
+        "service",
+        SERVICE,
     ),
     out(
-        "tests/interop/data/online/",
-        "online",
-        "replies of online catalogues and services, the interop layer's (step 5)",
+        "tests/interop/data/online/wfs_capabilities_200.xml",
+        "service",
+        SERVICE,
     ),
     out(
-        "tests/qt_widgets/data/",
-        "script",
-        "the window's scripts (step 7)",
+        "tests/interop/data/online/wms_capabilities_111.xml",
+        "service",
+        SERVICE,
     ),
     out(
+        "tests/interop/data/online/wms_capabilities_130.xml",
+        "service",
+        SERVICE,
+    ),
+    out(
+        "tests/interop/data/online/wmts_capabilities.xml",
+        "service",
+        SERVICE,
+    ),
+    // ---- reduction settings for SURVEY IMPORT --------------------------------------------
+    // CP1 held where the drawing has it, read by SETTINGS after the point is
+    // placed, as cli.survey_import_takes_its_settings_from_a_file runs it
+    // (its last key is one a later Katana might write, skipped and said).
+    read_by(
         "tests/app/data/survey_settings/hold_cp1.txt",
         "settings",
-        SETTINGS,
+        &[
+            "FORWARD 500000,4999999,100 0 1 0 CP1",
+            "SURVEY IMPORT {tests/surveyio/data/sdr/traverse_without_coordinates.sdr} SETTINGS {tests/app/data/survey_settings/hold_cp1.txt}",
+        ],
     ),
-    out(
+    // Settings of a later version, refused whole: both programs must refuse
+    // them alike (cli.survey_import_refuses_settings_from_a_newer_katana).
+    read_by(
         "tests/app/data/survey_settings/newer_version.txt",
         "settings",
-        SETTINGS,
+        &[
+            "FORWARD 500000,4999999,100 0 1 0 CP1",
+            "SURVEY IMPORT {tests/surveyio/data/sdr/traverse_without_coordinates.sdr} SETTINGS {tests/app/data/survey_settings/newer_version.txt}",
+        ],
     ),
-    // ---- survey field files (surveyio): read only --------------------------------------------
+    // ---- survey field files (surveyio): read, then imported ------------------------------
     survey("samples/Survey_File/Example field file1.fld", "fld"),
     survey("samples/Survey_File/Example field file2.fld", "fld"),
     survey("samples/Survey_File/Example field file3.fld", "fld"),
@@ -410,7 +527,8 @@ const CORPUS: &[Row] = &[
         "sdr",
     ),
     // Coordinate files: SURVEY READ refuses one - it is read through its
-    // column layout - and both programs must refuse it alike.
+    // column layout - and both programs must refuse it alike, and import it
+    // alike.
     survey("tests/surveyio/data/survey_points_headerless.txt", "points"),
     survey(
         "tests/surveyio/data/survey_points_headerless_penz.txt",
@@ -463,15 +581,26 @@ fn relative(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
-/// git ignores samples/*/backups/ (.gitignore): running the program on a
-/// sample writes a backup there, and such a backup is no corpus file. The
-/// backups git tracks have rows of their own.
+/// What a run of a program leaves beside the corpus, which is no corpus
+/// file. git ignores samples/*/backups/ (.gitignore): running the program on
+/// a sample writes a backup there, and the backups git tracks have rows of
+/// their own. GDAL's persistent auxiliary metadata, `<file>.aux.xml` beside
+/// a raster a row reads, is written by a run that asks GDAL for statistics:
+/// a cache of the file, never data (.gitignore ignores the samples' own, and
+/// docs/geoprocessing.md, "Not done", records one left beside
+/// tests/geo/data/plane.asc). That a run leaves one is for `git status` after
+/// the suite to show, not for this table.
 fn is_written_by_a_run(relative: &str) -> bool {
     let parts: Vec<&str> = relative.split('/').collect();
-    parts.len() == 4 && parts[0] == "samples" && parts[2] == "backups"
+    if parts.len() == 4 && parts[0] == "samples" && parts[2] == "backups" {
+        return true;
+    }
+    relative
+        .strip_suffix(".aux.xml")
+        .is_some_and(|data| CORPUS.iter().any(|row| row.path == data))
 }
 
-/// The {path}s an IFC export row's line names.
+/// The {path}s a row's line names.
 fn named_files(arguments: &str) -> Vec<&str> {
     let mut found = Vec::new();
     let mut rest = arguments;
@@ -483,6 +612,13 @@ fn named_files(arguments: &str) -> Vec<&str> {
         rest = &rest[open + close + 1..];
     }
     found
+}
+
+/// Whether a file of the corpus is read by a row of its own.
+fn read_by_a_row(path: &str) -> bool {
+    CORPUS
+        .iter()
+        .any(|other| other.path == path && !matches!(other.read, Read::Out(_)))
 }
 
 fn checkout_root() -> PathBuf {
@@ -516,23 +652,38 @@ fn the_corpus_table_has_a_row_for_every_file_of_the_test_data_and_the_samples() 
         if !root.join(row.path).exists() {
             problems.push(format!("{} has a row and is not there", row.path));
         }
-        if let Read::Out(why) = row.read
-            && why.trim().is_empty()
-        {
-            problems.push(format!("{} is left out without saying why", row.path));
-        }
-        if let Read::IfcExport { project, arguments } = row.read {
-            for named in named_files(arguments).into_iter().chain(project) {
-                if !CORPUS
-                    .iter()
-                    .any(|other| other.path == named && !matches!(other.read, Read::Out(_)))
-                {
+        match row.read {
+            Read::Out(why) if why.trim().is_empty() => {
+                problems.push(format!("{} is left out without saying why", row.path));
+            }
+            Read::IfcExport { project, arguments } => {
+                for named in named_files(arguments).into_iter().chain(project) {
+                    if !read_by_a_row(named) {
+                        problems.push(format!(
+                            "{}'s export names {named}, which is no file of the corpus read by a row of its own",
+                            row.path
+                        ));
+                    }
+                }
+            }
+            Read::Lines(lines) => {
+                let named: Vec<&str> = lines.iter().copied().flat_map(named_files).collect();
+                if !named.contains(&row.path) {
                     problems.push(format!(
-                        "{}'s export names {named}, which is no file of the corpus read by a row of its own",
+                        "{}'s lines do not name it: a row of lines reads its own file",
                         row.path
                     ));
                 }
+                for each in named {
+                    if !read_by_a_row(each) {
+                        problems.push(format!(
+                            "{}'s lines name {each}, which is no file of the corpus read by a row of its own",
+                            row.path
+                        ));
+                    }
+                }
             }
+            _ => {}
         }
     }
     assert!(
@@ -553,15 +704,28 @@ struct Run {
 }
 
 impl Run {
-    /// The line saying why it failed.
+    /// The line saying why it failed: the LAST error line. katana_cli stops
+    /// at the first line that fails, so nothing is run after it; an error
+    /// line before it is the start's (a customisation that could not be
+    /// read), which the start check compares once for every row.
     fn error(&self) -> String {
         self.stderr
             .lines()
+            .rev()
             .find(|line| line.starts_with("error: "))
             .map_or_else(
                 || format!("(no error line; standard error: {:?})", self.stderr.trim()),
                 String::from,
             )
+    }
+
+    /// How it ended, for a report.
+    fn ending(&self) -> String {
+        if self.ok {
+            String::from("succeeds")
+        } else {
+            format!("fails: {}", self.error())
+        }
     }
 }
 
@@ -580,22 +744,6 @@ fn run(command: &mut Command) -> Run {
     }
 }
 
-/// A Rust run's steps.
-#[derive(Default)]
-struct Steps(Vec<OsString>);
-
-impl Steps {
-    fn word(mut self, word: &str) -> Self {
-        self.0.push(OsString::from(word));
-        self
-    }
-
-    fn path(mut self, path: &Path) -> Self {
-        self.0.push(path.as_os_str().to_owned());
-        self
-    }
-}
-
 /// A katana_cli line of a verb and a path, quoted.
 fn line(verb: &str, path: &Path) -> String {
     format!("{verb} \"{}\"", path.display())
@@ -606,33 +754,42 @@ struct Gate {
     cpp: PathBuf,
     rust: PathBuf,
     python: OsString,
-    /// The C++'s KATANA_VERSION: the CMake project's version.
-    version: String,
     ifcopenshell: bool,
+    /// The working directory of every run, and the parent of every row's
+    /// folder.
     scratch: PathBuf,
+    /// The temporary folder of every run, inside `scratch`.
+    temporary: PathBuf,
 }
 
 impl Gate {
-    fn cpp(&self, lines: &[String]) -> Run {
-        let mut command = Command::new(&self.cpp);
+    /// One run of a program, in the one environment both run in (the
+    /// module's head says why): `script` as its argument where there is one,
+    /// then each line as a -c, in order, as katana_cli runs them.
+    fn katana(&self, program: &Path, script: Option<&Path>, lines: &[String]) -> Run {
+        let mut command = Command::new(program);
+        if let Some(script) = script {
+            command.arg(script);
+        }
         for each in lines {
             command.arg("-c").arg(each);
         }
         command
-            .env("KATANA_BUILTIN_CUSTOMISATION", "none")
             .env_remove("KATANA_CUSTOMISATION")
+            .env_remove("KATANA_BUILTIN_CUSTOMISATION")
+            .env("TMPDIR", &self.temporary)
+            .env("TMP", &self.temporary)
+            .env("TEMP", &self.temporary)
             .current_dir(&self.scratch);
         run(&mut command)
     }
 
-    fn rust(&self, steps: Steps) -> Run {
-        let mut command = Command::new(&self.rust);
-        command
-            .arg("--application-version")
-            .arg(&self.version)
-            .args(steps.0)
-            .current_dir(&self.scratch);
-        run(&mut command)
+    fn cpp(&self, lines: &[String]) -> Run {
+        self.katana(&self.cpp, None, lines)
+    }
+
+    fn rust(&self, lines: &[String]) -> Run {
+        self.katana(&self.rust, None, lines)
     }
 
     fn tool(&self, name: &str) -> PathBuf {
@@ -644,13 +801,10 @@ impl Gate {
     }
 
     /// tools/project_dump.py's dump of a project.
-    fn dump(&self, project: &Path, ignore: &[&str]) -> Result<String, String> {
-        let mut command = Command::new(&self.python);
-        command.arg(self.tool("project_dump.py")).arg(project);
-        for key in ignore {
-            command.arg("--ignore-metadata").arg(key);
-        }
-        let ran = run(&mut command);
+    fn dump(&self, project: &Path) -> Result<String, String> {
+        let ran = run(Command::new(&self.python)
+            .arg(self.tool("project_dump.py"))
+            .arg(project));
         if ran.ok {
             Ok(ran.stdout)
         } else {
@@ -672,7 +826,7 @@ impl Gate {
         (ran.ok, ran.stdout.replace(named.as_str(), "<file>"))
     }
 
-    /// The {path}s of an IFC export row's line, each the corpus file, quoted.
+    /// A row's line with each {path} the corpus file, quoted.
     fn with_corpus_paths(&self, arguments: &str) -> String {
         let mut text = String::from(arguments);
         for named in named_files(arguments) {
@@ -683,22 +837,6 @@ impl Gate {
         }
         text
     }
-}
-
-/// The CMake project's version (the root CMakeLists.txt), which the C++ builds
-/// into katana_cli as KATANA_VERSION and an IFC names as the program that
-/// wrote it.
-fn katana_version(root: &Path) -> String {
-    let text = std::fs::read_to_string(root.join("CMakeLists.txt"))
-        .expect("the checkout's CMakeLists.txt");
-    let (_, after) = text
-        .split_once("project(Katana VERSION ")
-        .expect("CMakeLists.txt names Katana's version in its project()");
-    after
-        .split_whitespace()
-        .next()
-        .expect("a version after VERSION")
-        .to_owned()
 }
 
 /// A copy of a project's database as the project.db of `directory`.
@@ -712,6 +850,30 @@ fn place_project(database: &Path, directory: &Path) -> Result<(), String> {
                 database.display(),
                 directory.display()
             )
+        })
+}
+
+/// What tells the two programs apart before any row: a run of a note alone,
+/// which writes nothing but what a session says as it starts (the
+/// customisation it starts with, and anything it could not read). None when
+/// they start alike.
+fn start_difference(gate: &Gate) -> Option<String> {
+    let note = [String::from(
+        "# the round-trip gate's first run: a session's start, and nothing else",
+    )];
+    let (cpp, rust) = (gate.cpp(&note), gate.rust(&note));
+    if !cpp.ok || !rust.ok {
+        return Some(format!(
+            "a run of a note alone: the C++ {}, the Rust {}",
+            cpp.ending(),
+            rust.ending()
+        ));
+    }
+    first_difference(&cpp.stdout, &rust.stdout)
+        .map(|difference| format!("on standard output, {difference}"))
+        .or_else(|| {
+            first_difference(&cpp.stderr, &rust.stderr)
+                .map(|difference| format!("on standard error, {difference}"))
         })
 }
 
@@ -772,44 +934,86 @@ fn first_difference(cpp: &str, rust: &str) -> Option<String> {
     }
 }
 
-/// Whether both runs succeeded. Both failing alike - the same error line - is
-/// an answer, not a difference; anything else is a finding.
-fn both_succeeded(findings: &mut Findings<'_>, what: &str, cpp: &Run, rust: &Run) -> bool {
-    match (cpp.ok, rust.ok) {
-        (true, true) => true,
-        (false, false) => {
-            if cpp.error() != rust.error() {
-                findings.add(
-                    what,
-                    &format!(
-                        "both fail, differently: the C++ {:?}, the Rust {:?}",
-                        cpp.error(),
-                        rust.error()
-                    ),
-                );
-            }
-            false
+/// `text` with each of a run's own folders and files written by the one name
+/// both runs' are given. A step's lines name two paths for one thing (the
+/// project each program saves, the file each writes or reads), and a reply
+/// says a path as its line gave it (`saved to <path>`, `opened <path>`,
+/// `file=<path>`). The longest path first, so that none is cut out of a
+/// longer one; and each also with '/' for '\', the form a record gives a path
+/// on Windows.
+fn named(text: &str, names: &[(&Path, &str)]) -> String {
+    let mut paths: Vec<(String, &str)> = names
+        .iter()
+        .map(|&(path, name)| (format!("{}", path.display()), name))
+        .collect();
+    paths.sort_by_key(|(path, _)| Reverse(path.len()));
+    let mut out = String::from(text);
+    for (path, name) in &paths {
+        out = out.replace(path.as_str(), name);
+        if path.contains('\\') {
+            out = out.replace(path.replace('\\', "/").as_str(), name);
         }
+    }
+    out
+}
+
+/// Two runs of one step compared. How each ended: both succeeding, or both
+/// failing on the same error line, is an answer; anything else is a finding.
+/// Then, where they ended alike, what each wrote on standard output and on
+/// standard error, word for word. `names` gives each path the step's lines
+/// name: the C++'s, the Rust's, and the one name both are written as before
+/// anything is compared. True when both succeeded, for the comparisons after.
+fn same_step(
+    findings: &mut Findings<'_>,
+    what: &str,
+    cpp: &Run,
+    rust: &Run,
+    names: &[(&Path, &Path, &str)],
+) -> bool {
+    let cpp_names: Vec<(&Path, &str)> = names.iter().map(|&(path, _, name)| (path, name)).collect();
+    let rust_names: Vec<(&Path, &str)> =
+        names.iter().map(|&(_, path, name)| (path, name)).collect();
+    let cpp_error = named(&cpp.error(), &cpp_names);
+    let rust_error = named(&rust.error(), &rust_names);
+    match (cpp.ok, rust.ok) {
         (true, false) => {
             findings.add(
                 what,
-                &format!("the C++ succeeds and the Rust fails: {}", rust.error()),
+                &format!("the C++ succeeds and the Rust fails: {rust_error}"),
             );
-            false
+            return false;
         }
         (false, true) => {
             findings.add(
                 what,
-                &format!("the Rust succeeds and the C++ fails: {}", cpp.error()),
+                &format!("the Rust succeeds and the C++ fails: {cpp_error}"),
             );
-            false
+            return false;
+        }
+        (false, false) if cpp_error != rust_error => {
+            findings.add(
+                what,
+                &format!("both fail, differently: the C++ {cpp_error:?}, the Rust {rust_error:?}"),
+            );
+            return false;
+        }
+        _ => {}
+    }
+    for (stream, cpp_text, rust_text) in [
+        ("standard output", &cpp.stdout, &rust.stdout),
+        ("standard error", &cpp.stderr, &rust.stderr),
+    ] {
+        if let Some(difference) =
+            first_difference(&named(cpp_text, &cpp_names), &named(rust_text, &rust_names))
+        {
+            findings.add(&format!("{what}: what each wrote on {stream}"), &difference);
         }
     }
+    cpp.ok
 }
 
 fn same_project(gate: &Gate, findings: &mut Findings<'_>, what: &str, cpp: &Path, rust: &Path) {
-    let ignore = findings.row.ignore_metadata;
-    match (gate.dump(cpp, ignore), gate.dump(rust, ignore)) {
+    match (gate.dump(cpp), gate.dump(rust)) {
         (Ok(a), Ok(b)) => {
             if let Some(difference) = first_difference(&a, &b) {
                 findings.add(what, &difference);
@@ -910,14 +1114,18 @@ fn each_reads(
 ) {
     let (cpp_saved, rust_saved) = (folder.join("cpp/read"), folder.join("rust/read"));
     let cpp = gate.cpp(&[line("IMPORT", cpp_reads), line("SAVE", &cpp_saved)]);
-    let rust = gate.rust(
-        Steps::default()
-            .word("import")
-            .path(rust_reads)
-            .word("save-as")
-            .path(&rust_saved),
-    );
-    if both_succeeded(findings, &format!("IMPORT of {what}"), &cpp, &rust) {
+    let rust = gate.rust(&[line("IMPORT", rust_reads), line("SAVE", &rust_saved)]);
+    let names = [
+        (cpp_reads, rust_reads, "<file>"),
+        (cpp_saved.as_path(), rust_saved.as_path(), "<project>"),
+    ];
+    if same_step(
+        findings,
+        &format!("IMPORT of {what} and SAVE <new>"),
+        &cpp,
+        &rust,
+        &names,
+    ) {
         same_project(
             gate,
             findings,
@@ -929,13 +1137,12 @@ fn each_reads(
 }
 
 /// One writer, from the C++'s project, which both programs open; then each
-/// reads the other's file, or both the C++'s where the Rust wrote none.
+/// reads the other's file.
 fn check_writer(
     gate: &Gate,
     findings: &mut Findings<'_>,
     work: &Path,
     extension: &str,
-    expected: Write,
     project: &Path,
 ) {
     let folder = work.join(extension);
@@ -952,67 +1159,42 @@ fn check_writer(
         findings.add("the copies", &why);
         return;
     }
-    let what = format!("EXPORT .{extension}");
     let cpp = gate.cpp(&[line("OPEN", &cpp_source), line("EXPORT", &cpp_file)]);
-    let rust = gate.rust(
-        Steps::default()
-            .word("open")
-            .path(&rust_source)
-            .word("export")
-            .path(&rust_file),
+    let rust = gate.rust(&[line("OPEN", &rust_source), line("EXPORT", &rust_file)]);
+    let names = [
+        (cpp_source.as_path(), rust_source.as_path(), "<opened>"),
+        (cpp_file.as_path(), rust_file.as_path(), "<file>"),
+    ];
+    if !same_step(
+        findings,
+        &format!("OPEN and EXPORT .{extension}"),
+        &cpp,
+        &rust,
+        &names,
+    ) {
+        return;
+    }
+    same_file(
+        findings,
+        &format!("the .{extension} both write"),
+        &cpp_file,
+        &rust_file,
     );
-    let rust_wrote = match expected {
-        Write::Compare => {
-            if !both_succeeded(findings, &what, &cpp, &rust) {
-                return;
-            }
-            same_file(
-                findings,
-                &format!("the .{extension} both write"),
-                &cpp_file,
-                &rust_file,
-            );
-            if extension == "ifc" {
-                same_ifc_judgement(gate, findings, &cpp_file, &rust_file);
-            }
-            true
-        }
-        Write::RustRefuses(words) => {
-            if !cpp.ok {
-                findings.add(&what, &format!("the C++ fails: {}", cpp.error()));
-                return;
-            }
-            if rust.ok {
-                findings.add(
-                    &what,
-                    &format!(
-                        "the row expects the Rust to refuse ({words}), and it wrote the file: the row is out of date"
-                    ),
-                );
-            } else if !rust.error().contains(words) {
-                findings.add(
-                    &what,
-                    &format!(
-                        "the Rust fails otherwise than the row expects ({words}): {}",
-                        rust.error()
-                    ),
-                );
-                return;
-            }
-            rust.ok
-        }
-    };
-    let cpp_reads = if rust_wrote { &rust_file } else { &cpp_file };
-    let other = if rust_wrote {
-        format!("the other's .{extension}")
-    } else {
-        format!("the C++'s .{extension}")
-    };
-    each_reads(gate, findings, &other, &folder, cpp_reads, &cpp_file);
+    if extension == "ifc" {
+        same_ifc_judgement(gate, findings, &cpp_file, &rust_file);
+    }
+    each_reads(
+        gate,
+        findings,
+        &format!("the other's .{extension}"),
+        &folder,
+        &rust_file,
+        &cpp_file,
+    );
 }
 
-/// After a project or an import row: each program opens the other's project
-/// and saves it as a new one, then each writer.
+/// After a row whose runs saved a project: each program opens the other's
+/// project and saves it as a new one, then each writer.
 fn check_writers(
     gate: &Gate,
     findings: &mut Findings<'_>,
@@ -1021,41 +1203,38 @@ fn check_writers(
     rust_project: &Path,
 ) {
     let (cpp_reads, rust_reads) = (work.join("cpp/reads-rust"), work.join("rust/reads-cpp"));
-    match place_project(&rust_project.join("project.db"), &cpp_reads.join("opened"))
-        .and_then(|()| place_project(&cpp_project.join("project.db"), &rust_reads.join("opened")))
+    let (cpp_opened, rust_opened) = (cpp_reads.join("opened"), rust_reads.join("opened"));
+    let (cpp_saved, rust_saved) = (cpp_reads.join("saved"), rust_reads.join("saved"));
+    match place_project(&rust_project.join("project.db"), &cpp_opened)
+        .and_then(|()| place_project(&cpp_project.join("project.db"), &rust_opened))
     {
         Err(why) => findings.add("the copies", &why),
         Ok(()) => {
-            let cpp = gate.cpp(&[
-                line("OPEN", &cpp_reads.join("opened")),
-                line("SAVE", &cpp_reads.join("saved")),
-            ]);
-            let rust = gate.rust(
-                Steps::default()
-                    .word("open")
-                    .path(&rust_reads.join("opened"))
-                    .word("save-as")
-                    .path(&rust_reads.join("saved")),
-            );
-            if both_succeeded(
+            let cpp = gate.cpp(&[line("OPEN", &cpp_opened), line("SAVE", &cpp_saved)]);
+            let rust = gate.rust(&[line("OPEN", &rust_opened), line("SAVE", &rust_saved)]);
+            let names = [
+                (cpp_opened.as_path(), rust_opened.as_path(), "<opened>"),
+                (cpp_saved.as_path(), rust_saved.as_path(), "<project>"),
+            ];
+            if same_step(
                 findings,
                 "OPEN of the other's project and SAVE <new>",
                 &cpp,
                 &rust,
+                &names,
             ) {
                 same_project(
                     gate,
                     findings,
                     "the project each program saves of the other's",
-                    &cpp_reads.join("saved"),
-                    &rust_reads.join("saved"),
+                    &cpp_saved,
+                    &rust_saved,
                 );
             }
         }
     }
-    let row = findings.row;
-    for (extension, expected) in [("dxf", row.dxf), ("12da", row.archive), ("ifc", row.ifc)] {
-        check_writer(gate, findings, work, extension, expected, cpp_project);
+    for extension in ["dxf", "12da", "ifc"] {
+        check_writer(gate, findings, work, extension, cpp_project);
     }
 }
 
@@ -1074,15 +1253,16 @@ fn check_project(gate: &Gate, findings: &mut Findings<'_>, work: &Path) {
         String::from("SAVE"),
         line("SAVE", &cpp_saved),
     ]);
-    let rust = gate.rust(
-        Steps::default()
-            .word("open")
-            .path(&rust_opened)
-            .word("save")
-            .word("save-as")
-            .path(&rust_saved),
-    );
-    if !both_succeeded(findings, "OPEN, SAVE and SAVE <new>", &cpp, &rust) {
+    let rust = gate.rust(&[
+        line("OPEN", &rust_opened),
+        String::from("SAVE"),
+        line("SAVE", &rust_saved),
+    ]);
+    let names = [
+        (cpp_opened.as_path(), rust_opened.as_path(), "<opened>"),
+        (cpp_saved.as_path(), rust_saved.as_path(), "<project>"),
+    ];
+    if !same_step(findings, "OPEN, SAVE and SAVE <new>", &cpp, &rust, &names) {
         return;
     }
     same_project(
@@ -1102,43 +1282,94 @@ fn check_project(gate: &Gate, findings: &mut Findings<'_>, work: &Path) {
     check_writers(gate, findings, work, &cpp_saved, &rust_saved);
 }
 
-fn check_import(gate: &Gate, findings: &mut Findings<'_>, work: &Path) {
-    let file = gate.corpus(findings.row.path);
-    let (cpp_saved, rust_saved) = (work.join("cpp/saved"), work.join("rust/saved"));
+/// A row's run into a new drawing (`lines` after `script`, where there is
+/// one), saved as a project: the two runs compared, then the projects, then
+/// each writer.
+fn check_saved_run(
+    gate: &Gate,
+    findings: &mut Findings<'_>,
+    work: &Path,
+    what: &str,
+    script: Option<&Path>,
+    lines: &[String],
+) {
     if let Err(error) = std::fs::create_dir_all(work) {
         findings.add("the work folder", &format!("{error}"));
         return;
     }
-    let cpp = gate.cpp(&[line("IMPORT", &file), line("SAVE", &cpp_saved)]);
-    let rust = gate.rust(
-        Steps::default()
-            .word("import")
-            .path(&file)
-            .word("save-as")
-            .path(&rust_saved),
-    );
-    if !both_succeeded(findings, "IMPORT and SAVE <new>", &cpp, &rust) {
+    let (cpp_saved, rust_saved) = (work.join("cpp/saved"), work.join("rust/saved"));
+    let saving = |saved: &Path| -> Vec<String> {
+        let mut all = lines.to_vec();
+        all.push(line("SAVE", saved));
+        all
+    };
+    let cpp = gate.katana(&gate.cpp, script, &saving(&cpp_saved));
+    let rust = gate.katana(&gate.rust, script, &saving(&rust_saved));
+    let names = [(cpp_saved.as_path(), rust_saved.as_path(), "<project>")];
+    if !same_step(
+        findings,
+        &format!("{what} and SAVE <new>"),
+        &cpp,
+        &rust,
+        &names,
+    ) {
         return;
     }
     same_project(
         gate,
         findings,
-        "the file read and saved as a project",
+        &format!("the drawing {what} made, saved as a project"),
         &cpp_saved,
         &rust_saved,
     );
     check_writers(gate, findings, work, &cpp_saved, &rust_saved);
 }
 
-fn check_survey(gate: &Gate, findings: &mut Findings<'_>) {
+fn check_import(gate: &Gate, findings: &mut Findings<'_>, work: &Path) {
     let file = gate.corpus(findings.row.path);
-    let cpp = gate.cpp(&[line("SURVEY READ", &file)]);
-    let rust = gate.rust(Steps::default().word("survey").path(&file));
-    if both_succeeded(findings, "SURVEY READ", &cpp, &rust)
-        && let Some(difference) = first_difference(&cpp.stdout, &rust.stdout)
-    {
-        findings.add("SURVEY READ's reply", &difference);
-    }
+    check_saved_run(
+        gate,
+        findings,
+        work,
+        "IMPORT",
+        None,
+        &[line("IMPORT", &file)],
+    );
+}
+
+fn check_survey(gate: &Gate, findings: &mut Findings<'_>, work: &Path) {
+    let file = gate.corpus(findings.row.path);
+    let read = [line("SURVEY READ", &file)];
+    let (cpp, rust) = (gate.cpp(&read), gate.rust(&read));
+    same_step(findings, "SURVEY READ", &cpp, &rust, &[]);
+    check_saved_run(
+        gate,
+        findings,
+        work,
+        "SURVEY IMPORT",
+        None,
+        &[line("SURVEY IMPORT", &file)],
+    );
+}
+
+fn check_script(gate: &Gate, findings: &mut Findings<'_>, work: &Path) {
+    let file = gate.corpus(findings.row.path);
+    check_saved_run(
+        gate,
+        findings,
+        work,
+        "the script",
+        Some(file.as_path()),
+        &[],
+    );
+}
+
+fn check_lines(gate: &Gate, findings: &mut Findings<'_>, work: &Path, lines: &[&str]) {
+    let lines: Vec<String> = lines
+        .iter()
+        .map(|each| gate.with_corpus_paths(each))
+        .collect();
+    check_saved_run(gate, findings, work, "the row's lines", None, &lines);
 }
 
 fn check_ifc_export(
@@ -1150,11 +1381,11 @@ fn check_ifc_export(
 ) {
     let folder = work.join("ifc");
     let (cpp_file, rust_file) = (folder.join("cpp/out.ifc"), folder.join("rust/out.ifc"));
+    let (cpp_source, rust_source) = (folder.join("cpp/source"), folder.join("rust/source"));
     let mut cpp_lines = Vec::new();
-    let mut rust_steps = Steps::default();
+    let mut rust_lines = Vec::new();
     if let Some(project) = project {
         let database = gate.corpus(project);
-        let (cpp_source, rust_source) = (folder.join("cpp/source"), folder.join("rust/source"));
         if let Err(why) = place_project(&database, &cpp_source)
             .and_then(|()| place_project(&database, &rust_source))
         {
@@ -1162,7 +1393,7 @@ fn check_ifc_export(
             return;
         }
         cpp_lines.push(line("OPEN", &cpp_source));
-        rust_steps = rust_steps.word("open").path(&rust_source);
+        rust_lines.push(line("OPEN", &rust_source));
     }
     for side in ["cpp", "rust"] {
         if let Err(error) = std::fs::create_dir_all(folder.join(side)) {
@@ -1172,12 +1403,13 @@ fn check_ifc_export(
     }
     let arguments = gate.with_corpus_paths(arguments);
     cpp_lines.push(format!("{} {arguments}", line("EXPORT", &cpp_file)));
-    let rust_steps = rust_steps
-        .word("export-ifc")
-        .word(&format!(" \"{}\" {arguments}", rust_file.display()));
-    let cpp = gate.cpp(&cpp_lines);
-    let rust = gate.rust(rust_steps);
-    if !both_succeeded(findings, "EXPORT .ifc", &cpp, &rust) {
+    rust_lines.push(format!("{} {arguments}", line("EXPORT", &rust_file)));
+    let (cpp, rust) = (gate.cpp(&cpp_lines), gate.rust(&rust_lines));
+    let names = [
+        (cpp_source.as_path(), rust_source.as_path(), "<opened>"),
+        (cpp_file.as_path(), rust_file.as_path(), "<file>"),
+    ];
+    if !same_step(findings, "EXPORT .ifc", &cpp, &rust, &names) {
         return;
     }
     same_file(findings, "the .ifc both write", &cpp_file, &rust_file);
@@ -1203,7 +1435,9 @@ fn check_row(gate: &Gate, index: usize, row: &Row) -> Vec<String> {
         Read::Out(_) => {}
         Read::Project => check_project(gate, &mut findings, &work),
         Read::Import => check_import(gate, &mut findings, &work),
-        Read::Survey => check_survey(gate, &mut findings),
+        Read::Survey => check_survey(gate, &mut findings, &work),
+        Read::Script => check_script(gate, &mut findings, &work),
+        Read::Lines(lines) => check_lines(gate, &mut findings, &work, lines),
         Read::IfcExport { project, arguments } => {
             check_ifc_export(gate, &mut findings, &work, project, arguments);
         }
@@ -1229,16 +1463,24 @@ fn every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust() 
     let scratch =
         Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("round_trip-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::create_dir_all(&scratch).expect("the gate's scratch folder");
+    let temporary = scratch.join("tmp");
+    std::fs::create_dir_all(&temporary)
+        .expect("the gate's scratch folder and the temporary folder in it");
     let gate = Gate {
-        version: katana_version(&root),
         root,
         cpp: PathBuf::from(cpp),
-        rust: PathBuf::from(env!("CARGO_BIN_EXE_katana_corpus")),
+        rust: PathBuf::from(env!("CARGO_BIN_EXE_katana_cli")),
         python,
         ifcopenshell,
         scratch: scratch.clone(),
+        temporary,
     };
+
+    if let Some(difference) = start_difference(&gate) {
+        panic!(
+            "the C++ and the Rust katana_cli do not start alike, so no row can be compared (do both have the same built-in customisation?): {difference}"
+        );
+    }
 
     // The rows are independent, each in its own folder, so they run side by
     // side; the findings are reported in the table's order.

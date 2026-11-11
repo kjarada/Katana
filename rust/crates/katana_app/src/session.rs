@@ -29,9 +29,10 @@
 //! the C++ catches every std::exception, so katana_cli's unsaved drawing
 //! survives it.
 //!
-//! SURVEY, IFC and the geo executor are joined below in the C++'s order.
-//! The reference layers, which are interop's reference data (step 6's
-//! wave 2), are still marked `SEAM(step 6)`: GEO SAVE and GEO OPEN.
+//! SURVEY, IFC and the geo executor are joined below in the C++'s order, and
+//! so are the reference layers (interop's reference data): recorded before a
+//! SAVE that has somewhere to go, let go with the drawing on NEW and OPEN,
+//! and read again by an OPEN whose project records them.
 
 mod update_part;
 
@@ -233,14 +234,16 @@ fn start_with_the_hosts_customisation(
     }
 }
 
-// The text of a panic's payload, as the C++ says an exception's what().
-fn panic_text(payload: &(dyn Any + Send)) -> String {
+/// The text of a panic's payload, as the C++ says an exception's what();
+/// `otherwise` for a payload that holds no text (the session's and the MCP
+/// tools' own sentences).
+pub(crate) fn panic_text(payload: &(dyn Any + Send), otherwise: &str) -> String {
     if let Some(text) = payload.downcast_ref::<&str>() {
         String::from(*text)
     } else if let Some(text) = payload.downcast_ref::<String>() {
         text.clone()
     } else {
-        String::from("a verb stopped without a message")
+        String::from(otherwise)
     }
 }
 
@@ -348,7 +351,10 @@ impl Session {
         match catch_unwind(AssertUnwindSafe(|| self.run_bytes(line, console))) {
             Ok(ran) => ran,
             Err(payload) => {
-                console.err(&format!("error: Internal: {}\n", panic_text(&*payload)));
+                console.err(&format!(
+                    "error: Internal: {}\n",
+                    panic_text(&*payload, "a verb stopped without a message")
+                ));
                 false
             }
         }
@@ -491,11 +497,25 @@ impl Session {
         // definitions, which are session data - is written by the save itself
         // (Document::save), so nothing is done for that here.
         let verb = upper_verb(line);
-        // SEAM(step 6): GEO SAVE - the reference layers the drawing is worked
-        // on top of are recorded before a SAVE that has somewhere to go
-        // (session.cpp 448 to 459): `verb == "SAVE" &&
-        // typed_save_has_destination(line, self.document.has_project())`,
-        // then geo::record_references.
+        // The reference layers the drawing is worked on top of are recorded
+        // here: their sources and display, read again when it opens
+        // (docs/interop.md, "Reference layers"). Only for a SAVE that has
+        // somewhere to go, as in the window: writing them marks the drawing
+        // modified whether or not the save then happens.
+        if verb == "SAVE"
+            && katana_cad::customisation_record::typed_save_has_destination(
+                line,
+                self.document.has_project(),
+            )
+        {
+            geo::references::record_references(&mut geo::Context::new(
+                &mut self.document,
+                &self.interpreter,
+                &mut self.reference,
+                &self.geo_scratch,
+                &self.geo_front_end,
+            ));
+        }
         let reply = self.interpreter.run(&mut self.document, line);
         let reply = match reply {
             Ok(reply) => reply,
@@ -547,12 +567,37 @@ impl Session {
                 console.err(&warning);
             }
         }
-        // SEAM(step 6): GEO OPEN - only a line that REPLACES the drawing (NEW,
-        // OPEN of a project; replaces_document tells it from OPEN #12 and OPEN
-        // SELECTION) clears the reference layers, and an OPEN whose project
-        // records some runs REFS RESTORE through geo::run_now: its reply on
-        // `out`, or `warning: the reference layers were not read again:
-        // <describe>` on `err` (session.cpp 504 to 526).
+        // Only a line that REPLACES the drawing - NEW, OPEN of a project -
+        // goes here. CommandInterpreter::replaces_document tells it from OPEN
+        // #12 and OPEN SELECTION, the polyline edits that share the verb:
+        // those keep the drawing and so its reference layers, as in the
+        // window, which asks the same.
+        if CommandInterpreter::replaces_document(line) {
+            // The reference layers go with their drawing, as the window's do
+            // (audit QT-17); an OPEN then reads again the layers the project
+            // records. A layer whose file is gone is warned of by the restore,
+            // and the drawing is open all the same. (The surfaces are the
+            // drawing's: NEW cleared them, OPEN read the project's.)
+            self.reference.clear();
+            if CommandInterpreter::verb_of(line) == "OPEN" {
+                let mut context = geo::Context::new(
+                    &mut self.document,
+                    &self.interpreter,
+                    &mut self.reference,
+                    &self.geo_scratch,
+                    &self.geo_front_end,
+                );
+                if geo::references::records_references(&context) {
+                    match geo::run_now(&mut context, "REFS RESTORE", None, None) {
+                        Ok(restored) => console.out(&format!("{restored}\n")),
+                        Err(error) => console.err(&format!(
+                            "warning: the reference layers were not read again: {}\n",
+                            error.describe()
+                        )),
+                    }
+                }
+            }
+        }
         true
     }
 

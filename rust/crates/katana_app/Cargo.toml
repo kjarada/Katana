@@ -7,22 +7,17 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# Step 3's round-trip gate (tests/round_trip.rs; docs/rust.md, "The order of the work") runs the
-# Rust readers and writers of its formats from a command line beside the C++ katana_cli. There is
-# no Rust katana_cli until step 6, so this program stands in for its IMPORT, EXPORT, OPEN, SAVE
-# and SURVEY READ. It is a binary of THIS package because katana_app may use every layer it
-# needs, which no crate of step 3 may (and a crate that is no layer is refused by
-# tools/check_rust_layering.py), and because cargo hands an integration test the programs of its
-# own package alone (CARGO_BIN_EXE_<name>). Never installed; step 6's katana_cli replaces it.
-[[bin]]
-name = "katana_corpus"
-path = "src/bin/katana_corpus/main.rs"
-
 # The Katana engine without a window (src/katana_app/main.cpp): named as the C++ program is, so
 # that the cli gate swaps one path for the other (docs/rust.md, step 6).
 [[bin]]
 name = "katana_cli"
 path = "src/bin/katana_cli/main.rs"
+
+# The Katana engine as a Model Context Protocol server (src/katana_app/mcp_main.cpp), named as
+# the C++ program is, so that the cli gate swaps one path for the other (docs/rust.md, step 6).
+[[bin]]
+name = "katana_mcp"
+path = "src/bin/katana_mcp/main.rs"
 
 [dependencies]
 katana_archive12d.workspace = true

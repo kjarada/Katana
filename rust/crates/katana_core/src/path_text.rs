@@ -39,20 +39,38 @@ pub fn path_to_utf8(path: &Path) -> Vec<u8> {
     }
 }
 
-/// `path.generic_u8string()`: the path's own bytes, with '/' for the
-/// separator on Windows, as a record or a reply shows a path on every
-/// platform. One home for the generic form; earlier layers' private copies
-/// are listed in docs/rust.md "Not done".
+/// `path.generic_u8string()` as libstdc++ makes it, the form a record or a
+/// reply shows a path in on every platform: '/' for the separator on Windows,
+/// and a run of separators written as one. libstdc++'s
+/// `path::generic_string` does not copy the text: it rebuilds it from the
+/// path's elements - the root directory as one '/' however many lead, then
+/// each name with one '/' after it - so `/vsizip//root/a.zip` reads back as
+/// `/vsizip/root/a.zip` (the cli test of a zipped shapefile types the first
+/// and the C++ replies with the second). "." and ".." are elements and stay.
+/// On Windows a leading pair of separators begins a root name (`//server`),
+/// which keeps both; that arm is unverified until step 8 builds there. One
+/// home for the generic form; earlier layers' private copies are listed in
+/// docs/rust.md "Not done".
 pub fn generic_path_utf8(path: &Path) -> Vec<u8> {
-    let bytes = path_to_utf8(path);
+    let mut bytes = path_to_utf8(path);
     if cfg!(windows) {
-        bytes
-            .into_iter()
-            .map(|byte| if byte == b'\\' { b'/' } else { byte })
-            .collect()
-    } else {
-        bytes
+        for byte in &mut bytes {
+            if *byte == b'\\' {
+                *byte = b'/';
+            }
+        }
     }
+    let root_name = cfg!(windows) && bytes.starts_with(b"//") && bytes.get(2) != Some(&b'/');
+    let kept = if root_name { 2 } else { 0 };
+    let mut generic = Vec::with_capacity(bytes.len());
+    generic.extend_from_slice(&bytes[..kept]);
+    for &byte in &bytes[kept..] {
+        if byte == b'/' && generic.len() > kept && generic.last() == Some(&b'/') {
+            continue;
+        }
+        generic.push(byte);
+    }
+    generic
 }
 
 pub fn environment_variable(name: Option<&str>) -> Vec<u8> {

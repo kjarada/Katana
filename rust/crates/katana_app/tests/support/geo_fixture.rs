@@ -27,6 +27,7 @@ use katana_app::geo::{Context, FrontEnd, Prepared, prepare, run_now};
 use katana_cad::{CommandInterpreter, Document};
 use katana_commands::{create_entities, create_layer};
 use katana_core::Result;
+use katana_core::path_text::generic_path_utf8;
 use katana_entity::entity::{INVALID_ENTITY_ID, property_to_string};
 use katana_entity::{Entity, EntityId, Geometry, Layer, PropertyMap};
 use katana_geometry::{Point2, Polyline2, Segment2};
@@ -51,9 +52,10 @@ pub fn gis_samples() -> String {
     generic(&checkout("samples/gis"))
 }
 
-/// A path's generic_string: the text, '/' its separator.
+/// A path's generic_string, as the programs show one: core's one home of the
+/// generic form.
 pub fn generic(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    String::from_utf8_lossy(&generic_path_utf8(path)).into_owned()
 }
 
 static SHARED_DATA: Mutex<()> = Mutex::new(());

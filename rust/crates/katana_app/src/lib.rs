@@ -15,7 +15,21 @@ pub mod session; // S1 (its update part: session/update_part.rs)
 pub mod survey_verbs; // F1
 pub mod update_transport; // S1
 pub mod update_verbs; // S1
-// pub mod mcp { pub mod tools; pub mod server; mod customisation; }   // C (wave 2)
+/// The MCP server and its tools (src/katana_app/mcp_*): katana_mcp's engine.
+/// The server's and the tools' names are re-exported here, as the C++'s
+/// namespace `katana::app::mcp` holds them.
+pub mod mcp {
+    // C
+    mod customisation;
+    pub mod server;
+    pub mod tools;
+
+    // C
+    pub use server::{LATEST_PROTOCOL_VERSION, Server};
+    pub use tools::{
+        LineOutcome, RunOptions, Tool, ToolCall, ToolRefusal, ToolReply, check_update_reply,
+    };
+}
 
 /// The geoprocessing executor and its verbs (src/katana_app/geo): the
 /// executor's frame and shared support (G1), and step 6's wave-2 families,
@@ -35,16 +49,36 @@ pub mod geo {
     pub mod gis_records;
     pub mod replies;
     pub mod schema;
-    mod seams; // A puts the real calls back and deletes it (step 6, wave 2)
     pub mod staged_files;
     pub mod terrain_verbs;
     pub mod vector_support;
     pub mod verb_table;
     // A:  surface_verbs, references, refs_verb, info_verb, contour_verbs
+    mod contour_verbs;
+    mod info_verb;
+    pub mod references;
+    mod refs_verb;
+    mod surface_verbs;
     // B:  import_verb, export_verb, drape_verbs, zonal_verbs
-    // V:  buffer_verbs, check_verbs, hull_clip_verbs, overlay_verbs, sql_verbs
+    mod drape_verbs;
+    mod export_verb;
+    mod import_verb;
+    mod zonal_verbs;
+    // V:  the GIS vector verbs.
+    mod buffer_verbs;
+    mod check_verbs;
+    mod hull_clip_verbs;
+    mod overlay_verbs;
+    mod sql_verbs;
     // R:  shade_verbs, slope_verbs, viewshed_verbs, grid_verbs, dem_verbs
-    // C:  mcp_geo_tools, sql_mcp
+    mod dem_verbs;
+    mod grid_verbs;
+    mod shade_verbs;
+    mod slope_verbs;
+    mod viewshed_verbs;
+    // C:  the MCP server's geo tools.
+    pub mod mcp_geo_tools;
+    mod sql_mcp;
 
     // G1
     pub use geo_verbs::{

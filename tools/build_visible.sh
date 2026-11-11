@@ -229,7 +229,7 @@ steps() {
     fi
     # The C++ katana_cli of the same build, for step 3's round-trip gate
     # (rust/crates/katana_app/tests/round_trip.rs): it runs the program beside
-    # the Rust katana_corpus on every file of the corpus, and fails, as the
+    # the Rust katana_cli on every file of the corpus, and fails, as the
     # oracle's test does, when this is not set.
     local cli="$directory/bin/katana_cli"
     if [[ "$cli" != /* ]]; then
@@ -253,9 +253,7 @@ steps() {
             echo "the gate runs in WSL: tools/build_visible.sh wsl gate" >&2
             return 2
         fi
-        echo "== gate: xvfb-run -a python3 tools/rust_cli_gate.py --build $directory --programs $CARGO_TARGET_DIR/release --rerun-cpp $*"
-        QT_QPA_PLATFORM=offscreen xvfb-run -a python3 tools/rust_cli_gate.py --build "$directory" \
-            --programs "$CARGO_TARGET_DIR/release" --rerun-cpp "$@"
+        cli_gate "$directory" "$@"
         return
     fi
     if [ "$phase" != test ]; then
@@ -313,9 +311,29 @@ steps() {
             if ! cargo_steps test && [ "$tested" -eq 0 ]; then
                 tested=1
             fi
+            # Step 6's cli gate is part of the whole run in WSL, after both
+            # suites, whose cli tests it reruns: a reply of the Rust programs
+            # that differs from the C++'s fails the run as a failed test does.
+            # On Windows it waits for step 8.
+            if [ -n "${KATANA_LINUX_BUILD:-}" ] && ! cli_gate "$directory" &&
+                [ "$tested" -eq 0 ]; then
+                tested=1
+            fi
         fi
         return "$tested"
     fi
+}
+
+# Step 6's cli gate (tools/rust_cli_gate.py, whose header says how): the cli
+# tests of the build tree in $1, rewritten to run the Rust programs cargo
+# built, beside a rerun of the C++ ones, and the two runs' replies compared.
+# The rest of the arguments go to ctest.
+cli_gate() {
+    local directory="$1"
+    shift
+    echo "== gate: xvfb-run -a python3 tools/rust_cli_gate.py --build $directory --programs $CARGO_TARGET_DIR/release --rerun-cpp $*"
+    QT_QPA_PLATFORM=offscreen xvfb-run -a python3 tools/rust_cli_gate.py --build "$directory" \
+        --programs "$CARGO_TARGET_DIR/release" --rerun-cpp "$@"
 }
 
 # The Rust workspace: `build` is clippy and the build with warnings as errors,

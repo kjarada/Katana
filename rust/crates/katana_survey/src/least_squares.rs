@@ -26,8 +26,8 @@ use nalgebra::DMatrix;
 use nalgebra::linalg::Cholesky;
 
 use crate::lsq_core::{
-    RankDeficiency, Whitened, WhitenedSolution, scaled_matrix, solve_lower_matrix_in_place,
-    solve_lower_vector_in_place, solve_whitened, to_matrix,
+    RankDeficiency, Whitened, WhitenedSolution, eigen_sum, scaled_matrix,
+    solve_lower_matrix_in_place, solve_lower_vector_in_place, solve_whitened, to_matrix,
 };
 use crate::matrix::Matrix;
 
@@ -194,8 +194,9 @@ fn residuals_of(design: &Matrix, parameters: &[f64], observations: &[f64]) -> Ve
         .collect()
 }
 
+// whitenedResiduals.squaredNorm(), added as Eigen adds it (lsq_core::eigen_sum).
 fn squared_norm(values: &[f64]) -> f64 {
-    values.iter().fold(0.0, |sum, value| sum + value * value)
+    eigen_sum(values.len(), |index| values[index] * values[index])
 }
 
 // Statistics shared by both weightings. `whitened_residuals` has unit

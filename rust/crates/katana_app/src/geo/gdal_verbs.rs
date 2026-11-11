@@ -26,6 +26,7 @@ use katana_gis::processing::{
     DatasetValue, OutputTo, Policy, RunRequest,
 };
 use katana_interop::geo::{DrawingDatasetOptions, ResultOptions};
+use katana_interop::terrain_io::suggested_cell_size;
 
 use super::bindings::{
     ApplyRequest, DeferredDataset, Source, SourceKind, Target, TargetKind, Tokens, apply_outputs,
@@ -38,7 +39,6 @@ use super::replies::{
     value, version_record, warning_record,
 };
 use super::schema::{algorithm_json, describe_json};
-use super::seams;
 use super::staged_files::StagedFiles;
 use crate::import_records::{path_from_text, path_text};
 
@@ -626,7 +626,9 @@ fn run_line(
                 .surface
                 .as_ref()
                 .expect("a drawing's surface has a triangulation");
-            from.source.cell = Some(seams::suggested_cell_size(tin.bounds())?);
+            // 1000 cells along the longer side is the C++'s default
+            // (terrain_io.hpp, suggestedCellSize).
+            from.source.cell = Some(suggested_cell_size(tin.bounds(), 1000));
         }
         let dataset = bind_raster(context, &from.source)?;
         records.push(input_record(&from.arg, &from.source));

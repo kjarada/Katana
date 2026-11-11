@@ -69,11 +69,12 @@ struct VerbWords {
 // `rules` names, wherever they stand, and the rest as ONE scope clause. An
 // option whose key is a WHERE key (cad::isWhereKey: layer=) is the option
 // before WHERE and a condition after it.
-// InvalidArgument naming the word for an option or flag given twice, an
-// option with no value, a TO where none is taken or given twice; the scope
-// parser's refusal for its own words; and InvalidArgument with the usage for
-// a word that is none of these. A word after LAYERS is always the layer list,
-// so a layer may be called "preview".
+// InvalidArgument naming the word for an option or flag given twice, or a TO
+// where none is taken or given twice; the scope parser's refusal for its own
+// words; and InvalidArgument with the usage for a word that is none of these.
+// An option with no value (keep=) is read as empty, for its verb to judge. A
+// word after LAYERS is always the layer list, so a layer may be called
+// "preview".
 [[nodiscard]] katana::core::Result<VerbWords> readVerbWords(const Tokens& tokens, std::size_t begin,
                                                             std::size_t end, const WordRules& rules);
 

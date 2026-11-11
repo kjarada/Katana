@@ -185,4 +185,25 @@ mod path_text {
         assert_eq!(directory.code, ErrorCode::NotFound);
         assert_eq!(directory.context.as_bytes(), path_to_utf8(&scratch.root));
     }
+
+    // No C++ case: the C++ gets this from libstdc++, whose path::generic_string
+    // rebuilds the text from the path's elements (bits/fs_path.h). The expected
+    // values follow that rule, and the first is the C++ katana_cli's own reply
+    // to cli.import_of_a_zipped_shapefile_by_vsizip, which types the doubled
+    // slash and answers with one.
+    #[test]
+    fn the_generic_form_writes_a_run_of_separators_as_one_as_libstdcxx_rebuilds_it() {
+        let generic = |text: &str| generic_path_utf8(Path::new(text));
+        assert_eq!(
+            generic("/vsizip//root/out/lots.shp.zip/katana.shp"),
+            b"/vsizip/root/out/lots.shp.zip/katana.shp"
+        );
+        assert_eq!(generic("a//b///c"), b"a/b/c");
+        assert_eq!(generic("///top"), b"/top");
+        assert_eq!(generic("///"), b"/");
+        assert_eq!(generic("a/b//"), b"a/b/");
+        assert_eq!(generic("./a/../b"), b"./a/../b");
+        assert_eq!(generic("plain.txt"), b"plain.txt");
+        assert_eq!(generic(""), b"");
+    }
 }

@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use katana_cad::scope_verbs::ScopeWords;
 use katana_cad::terrain::surface_verbs::surface_record;
 use katana_core::error::make_error;
-use katana_core::text::{format_exact_real, parse_finite_double};
+use katana_core::text::{equals_ignoring_case, format_exact_real, parse_finite_double};
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_geometry::{Box2, Point2, Polyline2};
 use katana_gis::processing::{
@@ -48,6 +48,9 @@ use katana_gis::processing::{
 use katana_gis::{GdalDataset, RasterInfo};
 use katana_interop::geo::contour_entities::boundaries_of;
 use katana_interop::geo::{ContourBoundary, DrawingDatasetOptions};
+use katana_interop::terrain_io::{
+    RasterElevationOptions, read_raster_elevations, suggested_cell_size,
+};
 use katana_math::cpp;
 use katana_terrain::{
     DuplicatePointPolicy, NamedSurface, TinBuildOptions, TinInput, TinSurface, build_tin,
@@ -59,7 +62,6 @@ use super::bindings::{
 };
 use super::geo_verbs::{Context, Prepared, Progress, system_message};
 use super::replies::warning_record;
-use super::seams;
 use crate::import_records::{path_from_text, path_text};
 
 /// The most points a surface is triangulated from when nothing else is said:
@@ -117,7 +119,12 @@ pub fn surface_from_raster_file(
     // The band's TRUE values, read again from the file through GDAL - never
     // the 8-bit display copy a reference raster holds (audit QT-23) - on a
     // stride that keeps the whole extent under the cap (audit QT-24).
-    let elevations = seams::raster_elevations(path, max_points, area)?;
+    let options = RasterElevationOptions {
+        max_points,
+        area,
+        ..RasterElevationOptions::default()
+    };
+    let elevations = read_raster_elevations(path, &options)?;
     let mut records = vec![format!(
         "sampled stride={} pixels={} nodata={} points={}",
         elevations.stride,
@@ -591,7 +598,9 @@ pub fn bind_terrain_source(
         cell_given = source.cell.is_some();
         if source.cell.is_none() {
             // Chosen now, so the reply says the cell the surface was read at.
-            source.cell = Some(seams::suggested_cell_size(tin.bounds())?);
+            // 1000 cells along the longer side is the C++'s default
+            // (terrain_io.hpp, suggestedCellSize).
+            source.cell = Some(suggested_cell_size(tin.bounds(), 1000));
         }
         surface = Some(tin);
     }
@@ -693,7 +702,17 @@ pub fn source_name(context: &Context<'_>, source: &Source) -> String {
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        SourceKind::Raster => seams::source_raster_name(context, &source.raster),
+        // The first reference raster of that id or name; the word as given
+        // when none has it.
+        SourceKind::Raster => context
+            .reference
+            .rasters()
+            .iter()
+            .find(|raster| {
+                format!("{}", raster.id) == source.raster
+                    || equals_ignoring_case(raster.name.as_bytes(), source.raster.as_bytes())
+            })
+            .map_or_else(|| source.raster.clone(), |raster| raster.name.clone()),
         SourceKind::Drawing => String::from("raster"),
     }
 }

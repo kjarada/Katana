@@ -1905,7 +1905,14 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
   shared file, each as its own process (suspected; not reproduced). The
   tests could read a copy each, as `GdalRun`'s sidecar cases do; a person
   running two Katanas over one file meets the same race, which only a lock
-  shared between processes would close.
+  shared between processes would close. A reader beside such a run also
+  sees the run's sidecar while it lasts: on 2026-11-11 the Rust port's cli
+  gate, which compares replies exactly, found `cli.info_raster`'s plain INFO
+  of the sample terrain giving the band's statistics in one program's run
+  and none in the other's. That test now reads a copy of its own; the other
+  cli tests on the shared sample print no statistics INFO did not compute.
+  The same day's next whole run left an empty `terrain.asc.aux.xml` beside
+  that sample (gitignored, so only `git status --ignored` shows one).
 - **The toolbox's Pipeline tab has no Confirm or Overwrite box.** A pipeline
   with an `update` step, or with `--overwrite` in its text, is refused
   there with the verb's message naming CONFIRM or OVERWRITE; it runs typed

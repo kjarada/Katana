@@ -62,7 +62,7 @@ the step's own run is the evidence, not this table.
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
-| 6 | in progress, begun beside step 5's last wave at the owner's word (2026-11-10): planned in a foundation and two waves; the foundation and wave 1 done - the session and katana_cli, the update verbs, the survey, IFC and DXF verbs, the geo executor's frame (177 cases, 27 of them Windows-only, written and not compiled until step 8); the cli gate runs: 248 of the 354 cli tests that run a program pass against the Rust katana_cli |
+| 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
 | 7-9 | not started |
 
 ### Step 1: the foundation crates
@@ -327,11 +327,19 @@ formats step 3 ported, and compares what they make:
 
 - **The C++ side** is `katana_cli`, its path passed by `tools/build_visible.sh`
   as `KATANA_CPP_CLI`, as the number oracle's is; without it the test
-  fails, never skips. **The Rust side** is `katana_corpus`, a program of
-  `katana_app` (the Rust has no CLI until step 6, and `rust_layering` refuses
-  a crate that is no layer), which stands in for the part of cad's Document
-  that OPEN, SAVE, IMPORT, EXPORT and SURVEY READ touch, with the C++'s
-  options.
+  fails, never skips. **The Rust side** is the Rust `katana_cli` (since
+  step 6; until then `katana_corpus`, a stand-in program of `katana_app`
+  for the part of cad's Document that OPEN, SAVE, IMPORT, EXPORT and
+  SURVEY READ touch). Both get the same lines.
+- **Both programs start alike**: the working directory and `TMPDIR` are
+  the gate's scratch, and neither customisation variable is set, so each
+  starts with the built-in customisation it was built with. Starting with
+  none would hide what a SAVE records of the customisation, an archive's
+  colours and SURVEY IMPORT's coding; a run of a note alone, before any
+  row, stops the test with one sentence if the two start differently.
+- **Each run pair is compared on how it ended and on what it said**: the
+  last error line, then both streams word for word, each program's own
+  paths written as `<project>`, `<opened>` and `<file>`.
 - **Each file is read by both, written by both, and each program reads
   what the other wrote**: a project opened, migrated, saved and saved as;
   a DXF or .12da imported and saved; each writer's DXF, IFC and .12da
@@ -345,17 +353,20 @@ formats step 3 ported, and compares what they make:
   SQL's line ends normalised (a C++ built in WSL from this Windows checkout
   stores CRLF).
 - **The corpus is a table**, one row per file and format, and a second test
-  fails when a data file has no row, so a new file is a decision. Left out,
-  each with its reason in the table: the zipped archive and the GIS files
-  (step 5), the legacy customisation formats (the owner's decision), the
-  scripts, design files and survey settings that need cad (step 4).
+  fails when a data file has no row, so a new file is a decision. Since
+  step 6 it compares 104 of its 116 rows: projects, imports (the zipped
+  archive, the GIS samples and the online-data fixtures among them), every
+  survey file read and imported, scripts, lines of verbs and IFC exports.
+  Left out, each with its reason in the table: the services' capabilities
+  documents (GDAL's drivers would reach the hosts they name), a build
+  template, and the legacy customisation formats (the owner's decision).
 - **Its first run found a real difference**: the archive import named an
   alignment "Imported from" the vendor's model in C++ and the archive's in
   Rust, which had followed the naming rule. Both programs now say "archive
   model", as they now say "archive" in the import's two warnings and the
-  coverage table (a fix, so the C++ took it with its twin). Two files keep
-  one key aside, `reference_layers`: their point clouds are the C++
-  session's reference data, which is interop's (step 5).
+  coverage table (a fix, so the C++ took it with its twin). Until step 6
+  two files kept one key aside, `reference_layers`, which the Rust session
+  now records as the C++'s does.
 
 ### Step 4: the cad layer
 
@@ -721,6 +732,52 @@ the C++'s. The failures are wave 2's verbs and katana_mcp, but for the
 HELP texts, whose geo families wave 2 adds, and one survey reply whose
 two numbers differ in the last digit ("Not done").
 
+**Wave 2** ported the MCP server and katana_mcp, and the geo verbs' every
+family - the vector verbs; the reference layers, SURFACE, REFS, INFO and
+CONTOUR; IMPORT, EXPORT, DRAPE, RASTER SAMPLE and ZONAL; the raster
+analysis verbs - in six agents, three of them after wave M, and moved the
+round-trip gate onto the real katana_cli. A prelude, built first, gave the
+geo context and the session interop's reference data. The agents' code
+compiled at the first build but for one temporary borrowed past its
+statement; Clippy had six findings. Decisions:
+
+- **The MCP server is attached to nothing.** `Server::handle` marks the
+  session it is lent as katana_mcp's at the head of every message, so
+  there is no attach call to forget. A tool is a row of a plain function
+  over the session and its arguments; a JSON error out of a tool is its
+  refusal, `error: <what>`, as the C++ says it, and a panic is the tool's
+  error inside a call and JSON-RPC's -32603 inside a method.
+- **The case that nothing leaks onto the real streams runs itself as a
+  child** of its own test program, with a variable set on the child
+  alone, and reads the child's streams between two markers: a test
+  thread cannot own the process's streams.
+- **The geo frame's seams are gone.** Wave 1's eight stand-ins for
+  interop's reference data are the C++'s code again at each site, and no
+  signature changed; the session records the reference layers on SAVE,
+  lets them go on NEW and OPEN, and restores them on an OPEN of a
+  project that records them.
+- **The round-trip gate drives the real katana_cli** ("Step 3's
+  round-trip gate"), and `katana_corpus`, which stood in for it, is
+  deleted.
+- **Two differences the gates found were fixed at their home, not at the
+  gate.** Core's generic path form copied a path's bytes, where
+  libstdc++'s rebuilds the path from its elements and so writes a run of
+  separators as one (`/vsizip//root/...` typed, `/vsizip/root/...`
+  replied). The survey solver added its sums in order, where the C++
+  build's Eigen 3.4.0 adds them in SSE2's two-lane patterns: it now adds
+  them in Eigen's order, read from the installed headers ("Third-party
+  libraries"), and both resections in the gates give the C++'s digits.
+- **The cli gate is part of the whole WSL run**, after both suites, and a
+  reply that differs fails the run as a failed test does.
+
+Evidence, 2026-11-11, `tools/build_visible.sh wsl` after wave 2: exit 0; the
+Release C++ build, Clippy and the float-to-text guard clean; CTest
+9,919 entries, 9,879 passed, 40 skipped, none failed; cargo
+test 7,456 passed, none failed, none ignored, the round-trip gate's
+104 compared files among them; the cli gate: 376 cli tests, none
+failed, every reply the same as the C++'s. `rust/parity.toml` holds app and
+geo as ported.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -983,10 +1040,16 @@ in porting:
   rank-deficient network would be found so elsewhere than Eigen finds it.
   The port implements `ColPivHouseholderQR` as Eigen 3.4 does it (`lsq_core.rs`):
   norms and the first-largest pivot, the LAWN 176 norm downdate, the rank
-  against the prescribed threshold, the solve. It is bit-identical to Eigen
-  on systems of up to three equations; beyond that Eigen's SSE2 kernels sum
-  in two lanes and the results differ in the last bit or two, inside every
-  test's tolerance.
+  against the prescribed threshold, the solve. Its sums are added in the
+  order the C++ build's Eigen 3.4.0 adds them (SSE2, no fused
+  multiply-add): a vector's reduction in two packet accumulators, the
+  Householder products in the row-major matrix-vector kernel's two lanes
+  or as a dot product for one column, the leverage reduced a pair of rows
+  at a time. The order depends on the lengths alone, never on where the
+  data lies, so the results are the C++'s bit for bit; until step 6 they
+  were sequential and differed in the last bit or two beyond three
+  equations. Eigen's blocked Q (48 reflectors or more) and its
+  triangular solves' register panels are still applied one at a time.
 - **nlohmann/json is translated, not replaced.** serde_json was tried
   first: it writes numbers with ryu (`1e20`, `1`) where nlohmann writes
   `1e+20` and `1.0`, keeps one object order for the whole build once
@@ -1133,8 +1196,8 @@ pin classifies every algorithm GDAL lists.
     holding that name (copied into their Rust twins by the parity rule; the
     fourth, a zip-container case found in step 5, spells it out); and
     the source an archive import gives a surface, the vendor's name before
-    "archive <file>" (written by the C++ app and interop layers, and copied
-    by the round-trip gate's program so the projects compare equal).
+    "archive <file>" (written by the C++ app and interop layers, and by
+    the Rust IMPORT as they write it, since it is saved with the project).
 - **Step 3's round-trip gate must normalise line ends in stored SQL.** The
   WSL build reads this Windows checkout, where `core.autocrlf` gives the
   C++ sources CRLF, so the C++ built there stores CRLF in the CREATE
@@ -1347,19 +1410,52 @@ pin classifies every algorithm GDAL lists.
   four joins of records, two of which keep empty records; `describeJson`
   catches only nlohmann's parse error; `runNow` on a prepared line with
   neither a reply nor work throws.
-- **The cli gate's one numeric difference so far**: SURVEY IMPORT of the
-  free-station field file gives `sigma_e` and `dilution` that differ from
-  the C++'s in the last digit - the least-squares solve beyond three
-  equations, where Eigen's SSE2 kernels sum in two lanes ("Third-party
-  libraries"). The case passes its tolerance; the gate, which compares
-  replies, does not, so before step 6's gate the Rust's QR sums as Eigen's
-  kernels do, or the difference is listed with its reason.
+- **Defects found in porting step 6's wave 2, ported as they are:**
+  - katana_mcp: `Server::handle` says it never throws, but a non-string
+    `jsonrpc` member (read outside its try) and a number past the largest
+    double (an out-of-range error its catch misses) end the C++ program;
+    the Rust panics out of `handle` and exits 101 where the C++ aborts.
+  - The vector verbs: COVERAGE CHECK counts features across every table
+    GDAL returns, so a second table would read past the end (GDAL returns
+    one); OVERLAY drops the warnings of a FILE overlay's read; COVERAGE
+    CLEAN works out how many features were unchanged and never says it.
+  - The reference layers: three raster finders that answer an id or a
+    name differently (bindings', SURFACE's, and the source name's single
+    pass, where a raster named "2" before raster 2 is found first);
+    `referenceNameTaken` written again in dem_support.
+  - The raster verbs: five unchecked dereferences that cannot be reached
+    (the Rust checks the invariant); grid's numeric field takes the last of
+    its name; viewshed rewrites `arg=output` to `arg=areas` in a record's
+    text.
+  - EXPORT ending in a bare CLOUD gives the general sentence rather than a
+    missing value; RASTER SAMPLE asks for a stop only between scope
+    entities.
+  - Dead code: `surfaceUsage`, `contourUsage`, `shadeUsage`, `slopeUsage`
+    and `aspectUsage`, whose texts the verb table holds again.
+- **Second ways in the geo verbs, kept as the C++ has them:** each file's
+  own `secondsSince`, `number`, `utf8Of` and `pathOf`; three copies of
+  the layer refusal; slope's ring area beside vector_support's; dem's
+  `answered` beside two others; the cell area written inline twice beside
+  `cellArea`; grid's target refusals beside dem's; three spellings of a
+  file name and four of a cancelled error in the Rust. They want one home
+  each, in both programs.
 - **Where step 6's Rust differs**: off Windows a line that is not UTF-8 is
   refused, where the C++ hands its bytes on and can still reach a file
   named in Latin-1; the update verbs' credential stores are per thread;
   the no-GDAL arms of the C++ (DXF-only IMPORT and EXPORT, the no-network
   update fetch) are not ported, the Rust app always having GDAL; the geo
-  scratch folder is `std::env::temp_dir()`'s.
+  scratch folder is `std::env::temp_dir()`'s. Where the C++ leaves the
+  order of two refusable arguments unspecified, the Rust reads them left
+  to right, so with both wrong it may name the other one; HULL's sort is
+  stable where `std::sort` is not, which changes nothing the hull reads;
+  MOSAIC's temporary name takes the system clock's nanoseconds, and a
+  rounding to an integer saturates past range where the C++ is undefined.
+- **One run of the round-trip gate, under the suite's load, found one
+  project's two backups the other way round** in the Rust (the schema-13
+  one first, the schema-9 one 0.75 s after the save). Six runs of both
+  programs alone, and the gate's later runs, gave the C++'s order; the
+  storage writes its backups on one thread through SQLite's own backup.
+  Not explained; to be watched.
 - **Where step 5's Rust differs**: text from GDAL and PDAL is decoded
   lossily; a point with a NaN coordinate is empty where the C++
   constructor may make it not; a temporary name's suffix comes from the
@@ -1390,15 +1486,17 @@ pin classifies every algorithm GDAL lists.
   and the records are written to nlohmann's text, but no case has the C++
   engine stage what the Rust helper swaps, or the reverse. The first is
   part of step 8's real update on Windows.
-- **The round-trip gate does not yet compare** SURVEY IMPORT (cad, which
-  holds a survey job in a project, is ported; the gate's Rust program does
-  not yet drive it), the zipped archive, GIS data and reference layers
-  (step 5), or a Rust DXF of annotation cad draws.
-- **A GPU hardware test aborted once in WSL** instead of skipping:
+- **The round-trip gate does not scan `tests/data`** (the customisations,
+  a survey file and a terrain grid shared by several suites): its table
+  is checked against each suite's own data folder, as it was first
+  written.
+- **A GPU hardware test aborts in WSL now and then** instead of skipping:
   `gpu.Devices/GpuRender.AShadedTriangleCoversTheSoftwarePathsPixelsInItsColours/Hardware`
-  could not connect to `xvfb-run`'s display under the suite's parallel
-  load; run alone it skips, as every run before. A test that loses its
-  display should skip as it does without a device.
+  once, and on 2026-11-11
+  `gpu.Devices/GpuRender.ASceneAtMgaCoordinatesDrawsLikeTheSameSceneAtTheOrigin/Hardware`,
+  each because it could not connect to `xvfb-run`'s display under the
+  suite's parallel load; run alone each skips, as every run before. A test
+  that loses its display should skip as it does without a device.
 - **nlohmann widens its indent string once**, so an indent over 1,024
   characters reads past it in C++ (undefined); `katana_core::json` widens it
   until it fits, the same text wherever the C++ is defined.

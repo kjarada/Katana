@@ -1429,9 +1429,16 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
         TIMEOUT 90)
     set(_copc "${CMAKE_CURRENT_BINARY_DIR}/cli-scan.copc.laz")
+    # INFO reports a band's statistics when a sidecar beside the file holds
+    # them, and every GDAL run on the shared sample writes one for as long as
+    # it runs (docs/geoprocessing.md, "Sidecars"), so this reply depended on
+    # which other test ran beside it. It reads a copy of its own, made when the
+    # build is configured, which nothing else reads.
+    set(_info_raster "${CMAKE_CURRENT_BINARY_DIR}/cli-info-raster")
+    file(COPY "${_gis}/terrain.asc" "${_gis}/terrain.prj" DESTINATION "${_info_raster}")
     add_test(NAME cli.info_raster
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli> -c "INFO ${_gis}/terrain.asc")
+                $<TARGET_FILE:katana_cli> -c "INFO ${_info_raster}/terrain.asc")
     add_test(NAME cli.info_point_cloud
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "INFO ${_gis}/survey_scan.las")

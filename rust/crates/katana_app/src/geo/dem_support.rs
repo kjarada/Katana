@@ -23,14 +23,16 @@ use std::collections::btree_map::Entry;
 use std::path::{Path, PathBuf};
 
 use katana_core::error::make_error;
-use katana_core::text::parse_finite_double;
+use katana_core::text::{equals_ignoring_case, parse_finite_double};
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_gis::GdalDataset;
 use katana_gis::processing::DatasetValue;
+use katana_interop::RasterOverlay;
+use katana_interop::geo::raster_products::derived_overlay;
 
 use super::bindings::Tokens;
 use super::geo_verbs::{Context, system_message};
-use super::seams;
+use super::replies::{value, yes_no};
 use crate::import_records::{path_from_text, path_text};
 
 /// A UTF-8 path as the file system's: import_records' path_from_text, the
@@ -266,13 +268,38 @@ pub fn keep_in_place(
     persisted: bool,
     arg: &str,
 ) -> Result<String> {
+    let taken = |rasters: &[RasterOverlay], candidate: &str| {
+        rasters
+            .iter()
+            .any(|raster| equals_ignoring_case(raster.name.as_bytes(), candidate.as_bytes()))
+    };
     let mut unique = String::from(name);
     let mut copy = 2;
-    while seams::reference_name_taken(context, &unique) {
+    while taken(context.reference.rasters(), &unique) {
         unique = format!("{name}-{copy}");
         copy += 1;
     }
-    Ok(seams::keep_derived_raster(context, file, &unique, derivation, persisted, arg)?.record)
+    let overlay = derived_overlay(file, unique.clone(), String::from(derivation))?;
+    let width = overlay.width;
+    let height = overlay.height;
+    let bounds = overlay.world_bounds();
+    let id = context.reference.add(overlay);
+    if let Some(changed) = &context.front_end.changed {
+        changed();
+    }
+    if let Some(frame) = &context.front_end.frame
+        && !bounds.empty()
+    {
+        frame(&bounds);
+    }
+    Ok(format!(
+        "output arg={} kind=raster target=reference id={id} name={} raster={width}x{height} \
+         file={} persisted={}",
+        value(arg),
+        value(&unique),
+        value(&utf8_of_path(file)),
+        yes_no(persisted)
+    ))
 }
 
 // raster_info_of, the facts of a raster dataset, is terrain_verbs.rs's.

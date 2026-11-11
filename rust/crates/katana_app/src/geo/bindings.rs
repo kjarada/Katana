@@ -21,9 +21,7 @@
 //! Reserved blocks, one per package that adds to this file, so the lanes that
 //! build on it edit only their own: T0 (TO SURFACE: a raster result kept as a
 //! named surface) and V5 (TO SELECTION and TO REPORT: a query's rows selected
-//! or reported). Where the C++ reads interop's reference data or its raster
-//! products, the call goes through `seams` (seams.rs), until step 6's wave 2
-//! puts the real calls back.
+//! or reported).
 
 use std::ops::Index;
 use std::path::{Path, PathBuf};
@@ -36,7 +34,9 @@ use katana_cad::scope_verbs::{
     scope_record as cad_scope_record,
 };
 use katana_core::error::make_error;
-use katana_core::text::{format_exact_real, is_ascii_space, parse_finite_double};
+use katana_core::text::{
+    equals_ignoring_case, format_exact_real, is_ascii_space, parse_finite_double,
+};
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_entity::entity_geometry::bounding_box;
 use katana_entity::{Entity, EntityId};
@@ -44,12 +44,14 @@ use katana_geometry::Box2;
 use katana_gis::gdal_adapter::{describe_crs, same_crs};
 use katana_gis::processing::{DatasetPath, DatasetValue, RasterGrid, RunOutputs};
 use katana_gis::{GdalDataset, RasterExportOptions};
+use katana_interop::RasterOverlay;
 use katana_interop::geo::drawing_dataset::{drawing_dataset, result_command};
+use katana_interop::geo::raster_products::{derived_overlay, derived_raster_path, surface_grid};
 use katana_interop::geo::{DrawingDataset, DrawingDatasetOptions, ResultOptions};
+use katana_interop::terrain_io::suggested_cell_size;
 
 use super::geo_verbs::{Context, system_message};
-use super::replies::{text_record, value, warning_record};
-use super::seams;
+use super::replies::{text_record, value, warning_record, yes_no};
 use super::terrain_verbs::{SURFACE_POINT_CAP, keep_surface, surface_from_raster_file};
 use super::vector_support::{joined, report_records, select_features}; // V5: TO SELECTION and TO REPORT
 use crate::import_records::{path_from_text, path_text};
@@ -183,6 +185,29 @@ fn word_at(tokens: &Tokens, at: usize) -> String {
     } else {
         String::new()
     }
+}
+
+/// The reference raster a RASTER source names: by its id (digits) first, else
+/// by its name in any case.
+fn find_raster<'r>(rasters: &'r [RasterOverlay], word: &str) -> Option<&'r RasterOverlay> {
+    let digits = !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_digit());
+    if digits
+        && let Some(raster) = rasters
+            .iter()
+            .find(|raster| format!("{}", raster.id) == word)
+    {
+        return Some(raster);
+    }
+    rasters
+        .iter()
+        .find(|raster| equals_ignoring_case(raster.name.as_bytes(), word.as_bytes()))
+}
+
+/// Whether a reference raster has `name`, in any case.
+fn reference_name_taken(rasters: &[RasterOverlay], name: &str) -> bool {
+    rasters
+        .iter()
+        .any(|raster| equals_ignoring_case(raster.name.as_bytes(), name.as_bytes()))
 }
 
 /// The words of a clause keyword, for the errors that name what was expected.
@@ -396,8 +421,22 @@ pub type DeferredDataset = Arc<dyn Fn() -> Result<DatasetValue> + Send + Sync>;
 pub fn bind_raster(context: &Context<'_>, source: &Source) -> Result<DeferredDataset> {
     match source.kind {
         SourceKind::Raster => {
+            let Some(raster) = find_raster(context.reference.rasters(), &source.raster) else {
+                return Err(make_error(
+                    ErrorCode::NotFound,
+                    "no reference raster has that id or name; REFS lists them",
+                    source.raster.clone(),
+                ));
+            };
+            if raster.source.as_os_str().is_empty() {
+                return Err(make_error(
+                    ErrorCode::Unsupported,
+                    "the reference raster has no file to read at full precision",
+                    source.raster.clone(),
+                ));
+            }
             let path = DatasetPath {
-                path: seams::reference_raster_file(context, &source.raster)?,
+                path: path_text(&raster.source),
                 ..DatasetPath::default()
             };
             let deferred: DeferredDataset =
@@ -420,13 +459,17 @@ pub fn bind_raster(context: &Context<'_>, source: &Source) -> Result<DeferredDat
             );
             // The C++ suggests a cell whether or not CELL gave one; it reads
             // nothing else, so asking only when there is none is the same.
+            // 1000 cells along the longer side is the C++'s default
+            // (terrain_io.hpp, suggestedCellSize).
             let cell = match source.cell {
                 Some(cell) => cell,
-                None => seams::suggested_cell_size(surface.bounds())?,
+                None => suggested_cell_size(surface.bounds(), 1000),
             };
             let crs = project_crs(context);
             let deferred: DeferredDataset = Arc::new(move || -> Result<DatasetValue> {
-                let mut grid = seams::surface_grid(&surface, cell)?;
+                // At most 25 000 000 cells: the C++'s default
+                // (raster_products.hpp, surfaceGrid).
+                let mut grid = surface_grid(&surface, cell, 25_000_000)?;
                 grid.info.projection_wkt = crs.clone();
                 Ok(DatasetValue::Raster(grid))
             });
@@ -521,7 +564,8 @@ pub fn crs_differs(data: &str, project: &str, what: &str, consequence: &str) -> 
 /// Where a derived raster goes: the project's cache, or the scratch folder
 /// (persisted=no) when the drawing has no project.
 pub fn derived_folder(context: &Context<'_>) -> PathBuf {
-    seams::derived_raster_path(context, "x")
+    let project = context.document.project_directory();
+    derived_raster_path(project.as_deref(), context.scratch, "x")
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_default()
@@ -598,25 +642,42 @@ fn keep_derived(context: &mut Context<'_>, request: &ApplyRequest, file: &Path) 
     let mut destination;
     let mut copy = 2;
     loop {
-        destination = seams::derived_raster_path(context, &name);
-        if !seams::reference_name_taken(context, &name) && !destination.exists() {
+        destination = derived_raster_path(project.as_deref(), context.scratch, &name);
+        if !reference_name_taken(context.reference.rasters(), &name) && !destination.exists() {
             break;
         }
         name = format!("{base}-{copy}");
         copy += 1;
     }
     move_file(file, &destination)?;
-    let kept = seams::keep_derived_raster(
-        context,
+    let overlay = derived_overlay(
         &destination,
-        &name,
-        &request.result.command_name,
-        project.is_some(),
-        &request.arg,
+        name.clone(),
+        request.result.command_name.clone(),
     )?;
-    let mut reply = kept.record;
+    let width = overlay.width;
+    let height = overlay.height;
+    let crs = overlay.projection_wkt.clone();
+    let bounds = overlay.world_bounds();
+    let id = context.reference.add(overlay);
+    if let Some(changed) = &context.front_end.changed {
+        changed();
+    }
+    if let Some(frame) = &context.front_end.frame
+        && !bounds.empty()
+    {
+        frame(&bounds);
+    }
+    let mut reply = format!(
+        "output arg={} kind=raster target=reference id={id} name={} raster={width}x{height} \
+         file={} persisted={}",
+        value(&request.arg),
+        value(&name),
+        value(&path_text(&destination)),
+        yes_no(project.is_some())
+    );
     if let Some(differs) = crs_differs(
-        &kept.crs,
+        &crs,
         &project_crs(context),
         "the raster",
         "it is drawn at its own coordinates, where the drawing's are not; RASTER REPROJECT moves \

@@ -19,16 +19,19 @@
 //! rank() against the prescribed threshold. The solve, the triangular solves
 //! and Q are applied as Eigen applies them, panel by panel where it has panels.
 //!
-//! What differs from the C++, by design of the port: every sum here is
-//! sequential, where Eigen's SSE2 kernels (the C++ build's baseline) add a
-//! vector of three or more terms in two interleaved lanes, so results agree
-//! with the C++ to the last bit or two, not bit for bit. Every sum of one or two
-//! terms, and so every result of a problem with at most three equations, is the
-//! same. The rank decision compares pivots against kRankTolerance = 1e-9 of the
-//! largest, so a deficiency the tests construct (a pivot of ~1e-16) is found in
-//! the same unknowns. Eigen applies Q in blocks once it has 48 reflectors and
-//! solves triangular systems against a matrix in register panels; both are
-//! applied one reflector and one column at a time here.
+//! Every sum Eigen vectorises is added here in the order the C++ build's
+//! Eigen 3.4.0 adds it, so results agree with the C++ bit for bit: the build's
+//! baseline is SSE2 (packets of two doubles) with no fused multiply-add
+//! (-ffp-contract=off), and the order is fixed by the kernel, not by where the
+//! data lies (see `eigen_sum`, `eigen_gemv_dot`, `packetwise_sum`). A
+//! sequential sum, which this file used until step 6, differs from Eigen's in
+//! the last bit or two once a vector holds four or more terms; the cli gate's
+//! free-station resection showed it. The rank decision compares pivots against
+//! kRankTolerance = 1e-9 of the largest, so a deficiency the tests construct (a
+//! pivot of ~1e-16) is found in the same unknowns. Eigen applies Q in blocks
+//! once it has 48 reflectors and solves triangular systems against a matrix in
+//! register panels; both are applied one reflector and one column at a time
+//! here, so a network of 48 or more unknowns may still differ in the last bit.
 
 use nalgebra::DMatrix;
 
@@ -62,13 +65,101 @@ pub(crate) enum Whitened {
 // matrix-vector product per panel.
 const TRIANGULAR_PANEL_WIDTH: usize = 16;
 
-fn squared_norm(matrix: &DMatrix<f64>, column: usize, first_row: usize) -> f64 {
-    let mut sum = 0.0;
-    for row in first_row..matrix.nrows() {
-        let value = matrix[(row, column)];
-        sum += value * value;
+// The C++ build's packet: SSE2 holds two doubles.
+const PACKET: usize = 2;
+
+/// The sum of `size` terms as Eigen 3.4.0 adds a vector expression
+/// (Redux.h, `redux_impl<..., LinearVectorizedTraversal, NoUnrolling>`):
+/// `squaredNorm()`, `norm()`, `dot()`, `sum()`. The expressions summed in the
+/// survey code - a column's squares, a product of two columns - have no
+/// direct access, so `first_default_aligned` gives 0 and the packets start at
+/// term 0 wherever the data lies. Two packet accumulators take the terms four
+/// at a time, are added together, take one packet left over, and have their
+/// two lanes added; an odd last term comes after. One or no term is that term
+/// or 0.
+pub(crate) fn eigen_sum(size: usize, term: impl Fn(usize) -> f64) -> f64 {
+    let aligned_size = size / PACKET * PACKET;
+    if aligned_size == 0 {
+        return if size == 0 { 0.0 } else { term(0) };
+    }
+    let aligned_size2 = size / (2 * PACKET) * (2 * PACKET);
+    let mut first = [term(0), term(1)];
+    if aligned_size > PACKET {
+        let mut second = [term(2), term(3)];
+        let mut index = 2 * PACKET;
+        while index < aligned_size2 {
+            first = [first[0] + term(index), first[1] + term(index + 1)];
+            second = [second[0] + term(index + 2), second[1] + term(index + 3)];
+            index += 2 * PACKET;
+        }
+        first = [first[0] + second[0], first[1] + second[1]];
+        if aligned_size > aligned_size2 {
+            first = [
+                first[0] + term(aligned_size2),
+                first[1] + term(aligned_size2 + 1),
+            ];
+        }
+    }
+    let mut sum = first[0] + first[1];
+    for index in aligned_size..size {
+        sum += term(index);
     }
     sum
+}
+
+/// One output of Eigen 3.4.0's row-major matrix-vector kernel
+/// (GeneralMatrixVector.h), which `essential.adjoint() * bottom` reaches for a
+/// block of two or more columns: one accumulator of two lanes, zero to start,
+/// over the pairs of terms, its lanes added, then an odd last term.
+fn eigen_gemv_dot(size: usize, term: impl Fn(usize) -> f64) -> f64 {
+    let mut lanes = [0.0, 0.0];
+    let mut index = 0;
+    while index + PACKET <= size {
+        lanes = [term(index) + lanes[0], term(index + 1) + lanes[1]];
+        index += PACKET;
+    }
+    let mut sum = lanes[0] + lanes[1];
+    for last in index..size {
+        sum += term(last);
+    }
+    sum
+}
+
+/// One lane of Eigen 3.4.0's packet-wise partial reduction
+/// (PartialReduxEvaluator.h, `packetwise_redux_impl<..., NoUnrolling>`), as
+/// `rowwise().squaredNorm()` reduces a pair of rows: the first term, then
+/// four at a time as ((a + b) + (c + d)), then one at a time.
+fn packetwise_sum(size: usize, term: impl Fn(usize) -> f64) -> f64 {
+    if size == 0 {
+        return 0.0;
+    }
+    let size4 = (size - 1) & !3;
+    let mut sum = term(0);
+    let mut index = 1;
+    while index < size4 {
+        sum += (term(index) + term(index + 1)) + (term(index + 2) + term(index + 3));
+        index += 4;
+    }
+    for rest in index..size {
+        sum += term(rest);
+    }
+    sum
+}
+
+/// Eigen's scalar reduction of an expression it cannot load in packets (a row
+/// of a column-major matrix): the first term, then each in order.
+fn ordered_sum(size: usize, term: impl Fn(usize) -> f64) -> f64 {
+    if size == 0 {
+        return 0.0;
+    }
+    (1..size).fold(term(0), |sum, index| sum + term(index))
+}
+
+fn squared_norm(matrix: &DMatrix<f64>, column: usize, first_row: usize) -> f64 {
+    eigen_sum(matrix.nrows() - first_row, |offset| {
+        let value = matrix[(first_row + offset, column)];
+        value * value
+    })
 }
 
 // The essential part of reflector k: column k below the diagonal.
@@ -91,12 +182,18 @@ fn apply_householder_on_the_left(
             target[(first_row, column)] *= factor;
         }
     } else if tau != 0.0 {
+        // `essential.adjoint() * bottom` is a dot product when the block has
+        // one column (ProductEvaluators.h falls back to the inner product for
+        // a 1 x 1 result) and the row-major matrix-vector kernel otherwise.
+        let one_column = columns.len() == 1;
         for column in columns {
             // tmp = essential^T bottom + row0
-            let mut tmp = 0.0;
-            for (offset, e) in essential.iter().enumerate() {
-                tmp += target[(first_row + 1 + offset, column)] * e;
-            }
+            let term = |offset: usize| target[(first_row + 1 + offset, column)] * essential[offset];
+            let mut tmp = if one_column {
+                eigen_sum(essential.len(), term)
+            } else {
+                eigen_gemv_dot(essential.len(), term)
+            };
             tmp += target[(first_row, column)];
             target[(first_row, column)] -= tau * tmp;
             // bottom -= (tau essential) tmp, the scaled vector formed first as
@@ -449,15 +546,22 @@ pub(crate) fn solve_whitened(design: &DMatrix<f64>, observations: &[f64]) -> Whi
         }
     }
 
+    // thinQ.rowwise().squaredNorm() assigned to a vector: the rows in pairs,
+    // each pair one packet reduced across the columns, and an odd last row by
+    // the scalar path.
     let thin_q = qr.thin_q(parameter_count);
+    let paired_rows = rows / PACKET * PACKET;
     let leverage = (0..rows)
         .map(|row| {
-            let mut sum = 0.0;
-            for column in 0..parameter_count {
+            let term = |column: usize| {
                 let value = thin_q[(row, column)];
-                sum += value * value;
+                value * value
+            };
+            if row < paired_rows {
+                packetwise_sum(parameter_count, term)
+            } else {
+                ordered_sum(parameter_count, term)
             }
-            sum
         })
         .collect();
 
