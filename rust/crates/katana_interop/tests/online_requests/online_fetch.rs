@@ -3,9 +3,9 @@
 //! and - only with KATANA_ONLINE_TESTS=1 - every built-in endpoint and one
 //! exchange on the wire.
 //!
-//! The file's OnlineFetch cases and its Copernicus live case are wave M's
-//! (online_fetch); its live case that sets GDAL_HTTP_USERPWD is in the target
-//! tests/online_environment.
+//! The file's OnlineFetch cases and its Copernicus live case are in the
+//! target tests/interop_core; its live case that sets GDAL_HTTP_USERPWD is in
+//! the target tests/online_environment.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -22,10 +22,11 @@ use katana_interop::online_discovery::{
     parse_wcs_capabilities, parse_wfs_capabilities, parse_wms_capabilities,
     parse_wmts_capabilities,
 };
+use katana_interop::online_fetch::extract_key;
 use katana_interop::online_requests::{TileIndex, degree_tile_urls, expand_tile_template};
 
 use crate::online_support::{
-    DEFAULT_USER_AGENT, LIVE_SKIP, fixture, live_tests_enabled, must, near, refused,
+    LIVE_SKIP, default_user_agent, fixture, live_tests_enabled, must, near, refused,
 };
 
 // ---- discovery from fixtures --------------------------------------------------------------
@@ -103,14 +104,15 @@ mod online_discovery {
             custom_provider_id("https://maps.example.org/arcgis/rest/services/A/MapServer?f=json")
         );
         // A key in a discovered address is taken out into the settings, and the
-        // address keeps {key}. That is online_fetch's extractKey, which wave M
-        // ports; the C++ case's three assertions of it are made live there:
-        //
-        //   let (endpoint, secret) =
-        //       extract_key("https://tiles.example.org/{z}/{x}/{y}.png?api=SECRET&style=topo");
-        //   assert_eq!(endpoint, "https://tiles.example.org/{z}/{x}/{y}.png?api={key}&style=topo");
-        //   assert_eq!(secret, "SECRET");
-        //   assert!(extract_key("https://a.org/x?layer=1").1.is_empty());
+        // address keeps {key}.
+        let (endpoint, secret) =
+            extract_key("https://tiles.example.org/{z}/{x}/{y}.png?api=SECRET&style=topo");
+        assert_eq!(
+            endpoint,
+            "https://tiles.example.org/{z}/{x}/{y}.png?api={key}&style=topo"
+        );
+        assert_eq!(secret, "SECRET");
+        assert!(extract_key("https://a.org/x?layer=1").1.is_empty());
         assert_eq!(
             redact_url("https://a.org/x?api=S&subscription-key=T&auth=U"),
             "https://a.org/x?api=***&subscription-key=***&auth=***"
@@ -404,7 +406,7 @@ mod online_live {
                 };
                 let request = HttpRequest {
                     url,
-                    user_agent: String::from(DEFAULT_USER_AGENT),
+                    user_agent: default_user_agent(),
                     max_bytes: 64 << 20,
                     retries: 1,
                     ..HttpRequest::default()
@@ -444,7 +446,7 @@ mod online_live {
         // followed, this would be a 200 and a page of several hundred kilobytes.
         let request = HttpRequest {
             url: String::from("http://github.com/"),
-            user_agent: String::from(DEFAULT_USER_AGENT),
+            user_agent: default_user_agent(),
             max_bytes: 1 << 20,
             retries: 1,
             ..HttpRequest::default()

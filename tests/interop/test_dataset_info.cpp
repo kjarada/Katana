@@ -382,10 +382,10 @@ TEST(DatasetInfo, WhatCannotBeDescribedIsRefusedWithTheReason)
     writeText(unknown, "hello");
     EXPECT_EQ(describeSource(unknown).error().code, ErrorCode::Unsupported);
 
-    // A 12d archive's header says nothing its contents do not; it is
+    // An archive's header says nothing its contents do not; it is
     // described by importing it.
     const auto archive = dir.file("job.12da");
-    writeText(archive, "// 12d archive\n");
+    writeText(archive, "// archive\n");
     EXPECT_EQ(describeSource(archive).error().code, ErrorCode::Unsupported);
 
     const auto brokenRaster = dir.file("broken.tif");

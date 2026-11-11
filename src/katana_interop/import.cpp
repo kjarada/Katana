@@ -254,7 +254,7 @@ const char* toString(SourceKind kind)
     case SourceKind::PointCloud:
         return "point cloud";
     case SourceKind::Archive12d:
-        return "12d archive";
+        return "archive";
     case SourceKind::Unknown:
         break;
     }

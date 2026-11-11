@@ -61,7 +61,7 @@ the step's own run is the evidence, not this table.
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
-| 5 | in progress: planned in three waves (K, L, M); waves K and L done - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery (236 of step 5's 370 cases); 374 of the geo suite's cases drive the app layer and move to step 6 |
+| 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | in progress, begun beside step 5's last wave at the owner's word (2026-11-10): planned in a foundation and two waves; the foundation and wave 1 done - the session and katana_cli, the update verbs, the survey, IFC and DXF verbs, the geo executor's frame (177 cases, 27 of them Windows-only, written and not compiled until step 8); the cli gate runs: 248 of the 354 cli tests that run a program pass against the Rust katana_cli |
 | 7-9 | not started |
 
@@ -631,6 +631,40 @@ entries, 9,874 passed, 40 skipped, and the docs check failed on the retired
 spike test, which this section no longer cites (rerun on the final docs: it
 passed); cargo test 6,723 passed, none failed, none ignored (6,581 before,
 less the retired spike).
+
+**Wave M** ported interop's core - reference data, the import of vector,
+raster and point-cloud files with the placement advice, export, the
+archive's import and export, dataset descriptions, terrain I/O, the
+derived raster products and table reprojection - and online fetch with
+its verbs: 132 cases, which passed once a derive the compiler refused was
+dropped (a struct holding a `Vec2` cannot be `Eq`). Decisions:
+
+- **Reference data is a plain value**, cloned and compared, changed by no
+  command, as the C++'s is: the session owns it beside its drawing and
+  lends it to the geo executor with the drawing for each line (step 6).
+- **The online transport is a shared, thread-safe closure in an owned
+  environment** built for each import, so a fetch moves to a job thread
+  with everything it needs; its progress is a borrowed `Sync` closure,
+  because GDAL's warp reports from its own threads, and its stop an
+  `Option<&AtomicBool>`, as in wave L.
+- **Four shown texts that named a vendor say "archive" in both programs**,
+  as the naming rule asks: the archive kind's name, the refusal to describe
+  an archive, a reference layer's refusal of an archive without a point
+  cloud, and the archive's refusal of a file not named `.12da` or
+  `.12daz`. None is stored, read back, or asserted by a test or a cli
+  script but the one C++ fixture changed with it, so each C++ line
+  changed in the same commit as its twin.
+- **The cases that reach real hosts** run only with
+  `KATANA_ONLINE_TESTS=1`, as every such case in Katana does, which
+  `tools/build_visible.sh` now passes into WSL. They have not been run on
+  the port: one run, on 2026-11-10, ended during its configure, before any
+  test. They run at the owner's word, and step 5's gate waits on them.
+
+Evidence, 2026-11-11, `tools/build_visible.sh wsl` after wave M, merged onto
+step 6's wave 1: exit 0; the Release C++ build, Clippy and the
+float-to-text guard clean; CTest 9,919 entries, 9,879 passed,
+40 skipped, none failed; cargo test 7,016 passed, none failed,
+none ignored; `rust/parity.toml` holds io and interop as ported.
 
 ### Step 6: the app layer
 
@@ -1293,6 +1327,15 @@ pin classifies every algorithm GDAL lists.
     readers of query pages, items, STAC and CKAN answers let nlohmann's
     type_error out for a member of the wrong type, so a CKAN answer with a
     null licence ends the C++ program (the Rust panics with the same text).
+- **Defects found in porting step 5's wave M, ported as they are:**
+  `parseReferenceRecord` lets nlohmann's type error out for a member of
+  the wrong type (the Rust panics with the same text, which the session
+  reports as an internal error); `fetchVectors` replaces `{layer}` by
+  searching from the start each time, so a layer name that holds
+  `{layer}` loops for ever.
+- **One way, not yet:** `lexically_normal` and `lexically_relative` have
+  private copies in interop's reference data, in cad and in update; they
+  want one home in core's path text.
 - **Defects found in porting step 6, ported as they are:** `session.cpp`'s
   `isQuit` and `upperVerb` are two copies of one loop; the update
   progress's step multiplication can wrap; `describeIfc` fails silently on
@@ -1326,7 +1369,12 @@ pin classifies every algorithm GDAL lists.
   API, where the C++ passes the whole string; a spill file goes in
   `std::env::temp_dir()`; a byte cut through a character in a licence,
   title or date reads as U+FFFD; a float-to-integer cast past range
-  saturates where the C++ is undefined.
+  saturates where the C++ is undefined. Online fetch's text is decoded
+  lossily where the C++ keeps the bytes; a size in millimetres is written
+  with three decimals, where the C++'s `to_chars` falls back to the exact
+  form for a number past 64 characters; the cache's pruning walks its
+  folder by a simpler route, which its porter judged to remove the same
+  files.
 - **Before step 8, for the updater:** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must

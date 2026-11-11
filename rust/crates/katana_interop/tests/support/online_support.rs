@@ -1,7 +1,7 @@
 //! What the online test targets share (step 5, agent L2, its owner): where the
 //! fixtures are, the live switch and the asserts the C++ suites make. Included
 //! with `#[path = "../support/online_support.rs"] mod online_support;` by
-//! tests/online_requests and tests/online_environment.
+//! tests/online_requests, tests/online_environment and tests/interop_core.
 
 #![allow(
     dead_code,
@@ -18,10 +18,10 @@ pub const ONLINE_TEST_DATA: &str = concat!(
 );
 
 /// `OnlineEnvironment{}.userAgent`, online_fetch's `onlineUserAgent("dev")`:
-/// what the live cases name themselves with. online_fetch is wave M's; until
-/// it is ported its text stands here, and then its call should.
-pub const DEFAULT_USER_AGENT: &str =
-    "Katana/dev (survey and civil-engineering CAD; +https://github.com/kjarada/Katana)";
+/// what the live cases name themselves with.
+pub fn default_user_agent() -> String {
+    katana_interop::online_fetch::online_user_agent("dev")
+}
 
 /// A fixture of tests/interop/data/online, as text.
 pub fn fixture(name: &str) -> String {

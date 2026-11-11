@@ -425,7 +425,7 @@ Result<SourceDescription> describeSource(const std::filesystem::path& path,
         return describePointCloud(path, std::move(description));
     case SourceKind::Archive12d:
         return makeError(ErrorCode::Unsupported,
-                         "a 12d archive is described by importing it: its header says nothing "
+                         "an archive is described by importing it: its header says nothing "
                          "its contents do not",
                          gdalName(path));
     case SourceKind::Vector:

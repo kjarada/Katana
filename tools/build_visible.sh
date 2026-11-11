@@ -184,7 +184,10 @@ main() {
         # that a Linux path or a ctest pattern arrives as it was written. --exec,
         # not --, because -- hands the line to a shell, which takes a pattern's
         # ( | $ as its own syntax.
-        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_BUILD_KEEP_GOING/u:KATANA_TOOLCHAIN/u${WSLENV:+:$WSLENV}"
+        # KATANA_ONLINE_TESTS=1 lets the cases that reach real hosts run
+        # (CLAUDE.md section 4), in both programs: step 5's gate has an
+        # online half (docs/rust.md, "The order of the work").
+        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_BUILD_KEEP_GOING/u:KATANA_TOOLCHAIN/u:KATANA_ONLINE_TESTS/u${WSLENV:+:$WSLENV}"
         MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wsl.exe -d "$distro" --cd "$(cygpath -w "$root")" \
             --exec bash tools/build_visible.sh --inside-wsl "$phase" "$@" 2>&1 | tee -a "$log"
         code=${PIPESTATUS[0]}

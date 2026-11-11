@@ -271,7 +271,7 @@ exportArchive12d(const katana::entity::Model& model,
     const auto known = archive12dExtensions();
     if (std::find(known.begin(), known.end(), extension) == known.end()) {
         return makeError(ErrorCode::InvalidArgument,
-                         "a 12d archive must be named .12da or .12daz", path.string());
+                         "an archive must be named .12da or .12daz", path.string());
     }
 
     katana::archive12d::ExportOptions mapping;

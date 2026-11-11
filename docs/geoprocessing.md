@@ -1897,8 +1897,9 @@ opening, the Reference Data panel as a builder of REFS lines, and MCP
 - **Two processes reading one file can leave its sidecar behind.** The
   guard puts a sidecar back as each process found it, so when two runs read
   one file at once, the second can note the first's new sidecar as already
-  there and restore it after the first has removed it. Seen once
-  (2026-11-09): plane.asc's sidecar, holding its statistics, was left in
+  there and restore it after the first has removed it. Seen twice
+  (2026-11-09 and 2026-11-10, both during the C++ suite's part of a run):
+  plane.asc's sidecar, holding its statistics, was left in
   `tests/geo/data/` by a WSL suite run at
   `--parallel 14`, where `ZonalVerb` cases run `RASTER ZONAL FILE` on that
   shared file, each as its own process (suspected; not reproduced). The

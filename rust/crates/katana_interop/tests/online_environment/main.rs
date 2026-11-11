@@ -77,7 +77,7 @@ mod online_fetch {
         use katana_gis::web_access::{HttpRequest, http_exchange};
 
         use crate::online_support::{
-            DEFAULT_USER_AGENT, LIVE_SKIP, holds, live_tests_enabled, must,
+            LIVE_SKIP, default_user_agent, holds, live_tests_enabled, must,
         };
         use crate::{ScopedEnvironmentVariable, environment};
 
@@ -106,7 +106,7 @@ mod online_fetch {
             );
             let request = HttpRequest {
                 url: String::from("https://api.github.com/zen"),
-                user_agent: String::from(DEFAULT_USER_AGENT),
+                user_agent: default_user_agent(),
                 max_bytes: 1 << 16,
                 retries: 1,
                 ..HttpRequest::default()

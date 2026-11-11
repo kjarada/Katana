@@ -606,7 +606,7 @@ Result<ReferenceLayer> readReference(const ReferenceSource& recorded,
             archive->clouds, [&source](const PointCloudLayer& each) { return each.name == source.name; });
         if (found == archive->clouds.end()) {
             return makeError(ErrorCode::NotFound,
-                             "the 12d archive holds no point cloud \"" + source.name + "\" now",
+                             "the archive holds no point cloud \"" + source.name + "\" now",
                              name);
         }
         cloud = std::move(*found);
