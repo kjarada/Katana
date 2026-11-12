@@ -274,17 +274,18 @@ pub mod plotting {
     // P
     pub mod plot_style;
     pub mod section_painter;
-    // SH1: pub mod grid_properties;
-    //      pub mod legend_painter;
-    //      pub mod legend_properties;
-    //      pub mod plot_drawing_dialog;
-    //      pub mod plot_output;
-    //      pub mod sheet_list_widget;
-    //      pub mod sheet_readout;
-    //      pub mod sheet_rulers;
-    //      pub mod sheet_tables;
-    //      pub mod sheet_thumbnails;
-    //      pub mod view_image_export;
+    // SH1
+    pub mod grid_properties;
+    pub mod legend_painter;
+    pub mod legend_properties;
+    pub mod plot_drawing_dialog;
+    pub mod plot_output;
+    pub mod sheet_list_widget;
+    pub mod sheet_readout;
+    pub mod sheet_rulers;
+    pub mod sheet_tables;
+    pub mod sheet_thumbnails;
+    pub mod view_image_export;
     // SH2: pub mod plot_dialog;
     //      pub mod sheet_arrange;
     //      pub mod sheet_canvas_editing;
@@ -388,7 +389,8 @@ pub mod zoom_to_dialog;
 // V3:  pub mod gpu_scene_view;
 //      pub mod render_view_widget;
 //      pub mod section_view_widget;
-// SH1: pub mod sheet_painter;
+// SH1
+pub mod sheet_painter;
 // CU1: pub mod layer_manager;
 //      pub mod style_manager;
 // GA:  pub mod dataset_info_dialog;
@@ -422,3 +424,7 @@ pub use jobs::JobRunner;
 
 // I
 pub use icons::{Icon, IconMode, Rasteriser};
+// SH1
+pub use sheet_painter::{
+    SheetPaintCache, SheetPaintOptions, SheetPaintStats, SheetSource, paint_sheet,
+};
