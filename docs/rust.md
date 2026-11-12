@@ -63,7 +63,7 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan) |
+| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases) |
 | 8-9 | not started |
 
 ### Step 1: the foundation crates
@@ -864,6 +864,80 @@ skipped, none failed; cargo test 7,565 passed, none failed, none ignored
 (6,884 before step 7); the cli gate 376 of 376 identical. The GPU cases,
 run once with their output shown, skipped only on the Hardware device.
 
+**Wave 1** ported, in nine agents, what stands on the foundation alone:
+the drive programs and the docks' chrome, the raster and PDF canvases and
+the text both draw, the host's jobs and command log, the plan painters, the
+icons and tool bars, and the annotation, roads, utilities and survey
+dialogs. Decisions:
+
+- **The raster canvas covers an antialiased shape by the exact area of each
+  pixel inside it** (`canvas::coverage`), as Qt's raster engine does, and
+  tiny-skia only blends. tiny-skia's own antialiasing samples a pixel on a
+  4 x 4 grid, so every edge lands on a quarter of a pixel: a pen 1.3 px
+  wide inked as 1.25, and the twin comparing a mesh footprint's outline at
+  two resolutions read 3.33 where Qt's exact coverage reads
+  2 x 1.3 / 0.65 = 4.0. Rejected: rasterising at four times and averaging
+  (edges to a sixteenth of a pixel, still not the area), and widening the
+  twin's band, which is the C++ test's. A stroke is outlined by tiny-skia's
+  stroker and the outline covered exactly; one a pixel wide or thinner
+  stays tiny-skia's hairline. The coverage is worked out 64 rows at a time,
+  so a fill across a plotted A1 sheet holds 5 MB of it, not 560.
+- **Each medium has one canvas.** The icons' rasteriser, the painters'
+  raster backend and the plot's PDF page writer are the raster and PDF
+  canvases (`icons::CanvasRasteriser`, `style_painter::CanvasRasterBackend`,
+  `plan_painter::CanvasPdfWriter`), and the survey report's PDF is written
+  through the PDF canvas, where it had an interim writer of its own.
+- **A PDF's text is real text**: glyph runs from the same shaping as the
+  raster, embedded as subset fonts that map back to Unicode, so a plot's
+  text can be searched and copied. Rejected: krilla's own text drawing (one
+  font, no fallback, its own advances) and glyph outlines (not text).
+- **A font is found by the families asked for, in order**, then a fixed
+  pitch face for a fixed pitch font, then the window's embedded sans, so a
+  missing font falls back to the same face on every machine.
+- **A job runs on a thread of its own**, its result handed back down a
+  channel at the start of a frame, and frames keep coming every 10 ms while
+  one runs. Dropping the job runner stops and joins every job.
+- **The geo verbs' effects on the window are queued** and applied after each
+  phase of a frame: egui cannot ask a question in the middle of applying a
+  result. Headless, the far-apart question is answered Keep, as the C++
+  answers it; in the window the line is cancelled, the question shown, and
+  the line run again on the answer.
+- **A logged line is masked in one place**, `command_log` (the online data
+  keys, the update tokens), which the online data and update dialogs call.
+- **An icon is painted once** for each name, device size, mode and state,
+  kept as a texture and drawn on whole device pixels. An icon is named by
+  the C++ enumerator (`Import`), a catalogue tool by its id (`draw.circle`).
+- **A dialog follows the document at its next look**: what a Qt listener
+  did at once is done at the next frame or method call, and a document
+  watcher delivers at the end of each frame's drawing.
+- **A page or tab that is not in front is drawn but not shown**, so a
+  driver can fill a control on it, as it can on a hidden Qt page; a control
+  the C++ hid is drawn invisible, and pressing it is refused as hidden.
+- **A test reads a PDF written readable**: `PdfDocument::uncompressed`
+  writes page contents as they are and dictionaries spaced, so an image
+  reads `/Subtype /Image` as in QPdfWriter's files (krilla writes
+  `/Subtype/Image` unless asked).
+- **A C++ test's probe was half a pixel out, fixed in both languages.** In
+  `EntersPlaceIsAnOutlinedRingNotTheNewVertexsFilledDisc`, `inkNear` names a
+  pixel by its top-left corner, so the probe at 2.5 px out on each axis
+  took a pixel 45.3 % covered by the ring's pen: the area of the pixel
+  [3,4] x [3,4] outside radius 5 is 1 - (integral from 3 to 4 of
+  sqrt(25 - x^2) dx - 3) = 0.45257, over the 0.4456 at which `inkOf` counts
+  ink. Qt passed only because its curve offsets put the edge 0.073 px
+  further out. The probe at 2 px out is the one the comment means.
+
+Wave 1 twinned 440 cases, and the plan painter's agent left its 20
+preview cases (the name picker and the style preview) to wave 2's styles
+agent, as the plan allowed. The first run of its tests failed 8 cases;
+each was fixed in the code, none by changing an expected value, and the
+one C++ test changed is the ring probe above, by its probe point.
+
+Evidence, 2026-11-12, `tools/build_visible.sh wsl` after wave 1: exit 0; the
+Release C++ build, Clippy (`--locked`) and the float-to-text guard clean;
+CTest 9,923 entries, 9,883 passed, 40 skipped, none failed; cargo test
+8,094 passed, none failed, none ignored (7,565 after wave 0); the cli gate
+376 of 376 identical.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -1521,6 +1595,59 @@ pin classifies every algorithm GDAL lists.
   split into pieces of at most 90 degrees, where Qt splits it otherwise,
   so a curve's control points can differ slightly; a number grouped for
   the locale puts "," every three digits unless the locale is C or POSIX.
+- **Defects found in porting step 7's wave 1, ported as they are:**
+  - The plan painter's raster drawing wraps a raster's pixels without
+    checking their length, so a short buffer is read past its end; the Rust
+    skips such a raster.
+  - The text and label style managers send back a value their spin box has
+    rounded to two decimals, so Apply rewrites a stored 2.3456 as 2.35. The
+    leader manager does not.
+  - The disk icon passes `true` as its accent where the outline's
+    closedness may have been meant, so Save's label is in the accent.
+  - The attribute manager, the survey tool dialogs, the survey import
+    wizard's Import and the survey jobs' Apply and Remove change the
+    document directly, not through a verb line, so those edits are not
+    reachable as commands.
+- **Changed from the C++ in step 7's wave 1:** the survey import wizard's
+  Browse and Save, its Export, Survey Jobs and the point report opened a
+  file dialog even headless, where nothing can answer it; the Rust refuses
+  with a sentence instead.
+- **Second ways left by step 7's wave 1:** the operating system's error
+  sentence has a third copy in the script runner beside the app layer's; the
+  survey dialogs keep the C++'s readers and reduction helpers beside the
+  app layer's SURVEY verbs; the drive harness's headless runner and the
+  foundation's harness both run frames until the window is idle; and the
+  roads dialogs keep the C++'s two refusals of a missing command line.
+- **The foundation's gaps found by wave 1**, to settle before wave 2: the
+  host lends its interpreter only to read, where running a line needs it
+  to write; a workbench's dialog that runs a line reaches back into the
+  workbench drawing it; a menu item draws no icon cell, and a submenu has
+  no icon or status tip; an action has no tooltip of its own; a text field
+  has no placeholder; a path cannot be transformed; a colour has no lighter
+  or darker; a rectangle has no intersection test; font metrics have no
+  cap height; an image keeps no dots per metre; the clipboard carries only
+  text and images; a radio button has no mnemonic; and an act taken in a
+  pass egui throws away is spent where the icons' controls carry it over.
+  Two roads twins were shortened until wave 1 joined: the road object icons
+  are checked by name, not by their ink, and the command reference's road
+  object verbs by their help, not by its sections.
+- **Where step 7's wave 1 differs from the C++:** a curve's stroke is
+  offset by tiny-skia's stroker, which follows a circle more closely than
+  Qt's, so an edge pixel can differ by a shade; the viewport clipboard
+  travels as text, a copy being any text that reads as a sheet set; a
+  section title is not bold and a tooltip is plain text, since the window's
+  face has no bold; a TIFF drops a translucent raster's alpha (a plotted
+  sheet is opaque); a disabled control is faded, not recoloured; a combo
+  box's per-item tooltips are folded into its own, and a grid's cell
+  colours are not drawn; the survey report's PDF has no title or creator,
+  which the PDF canvas does not write yet; a number in a roads message is
+  written as `%g` to six digits and a darker colour is worked per channel,
+  either of which can differ by one; the survey dialog's Enter does not run
+  its first verb; a step of the drive that does not settle, or a name drawn
+  twice, fails the run with exit 1, where the C++ had no such failure;
+  choosing the project's coordinate system no longer blocks; the leader
+  manager's size boxes show 0 where the C++ said "the text style's" or
+  "none"; and a dock is dragged by its tab, not its title bar.
 - **Defects found in porting step 6's wave 2, ported as they are:**
   - katana_mcp: `Server::handle` says it never throws, but a non-string
     `jsonrpc` member (read outside its try) and a number past the largest

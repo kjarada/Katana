@@ -34,10 +34,18 @@ pub mod canvas {
     };
     pub use png_file::{decode_png, encode_png, read_png, write_png};
 
-    // C: the raster canvas (tiny-skia, cosmic-text), the PDF canvas (krilla), image reading.
-    // pub mod raster;
-    // pub mod pdf;
-    // pub mod image_files;
+    // C: the raster canvas (tiny-skia, cosmic-text), the PDF canvas (krilla), image reading, and
+    // the text both canvases draw (fonts resolved, lines shaped and laid out, the metrics).
+    pub(crate) mod coverage;
+    pub mod image_files;
+    pub mod pdf;
+    pub mod raster;
+    pub mod text;
+
+    pub use image_files::{decode_image, read_image};
+    pub use pdf::{PdfCanvas, PdfDocument};
+    pub use raster::RasterCanvas;
+    pub use text::{SCREEN_DPI, TextMetrics, font_pixels, resolved_family, text_path};
 }
 
 /// What a dialog, a panel or a workbench sees of the window: the one executor (command_runner),
@@ -92,11 +100,11 @@ pub mod drive {
 
     // D: main.cpp's port over DrivenWindow, the step engine, the headless and desktop runners and
     // the soft renderer.
-    // pub mod run;
-    // pub mod steps;
-    // pub mod headless;
-    // pub mod soft_renderer;
-    // pub mod desktop;
+    pub mod desktop;
+    pub mod headless;
+    pub mod run;
+    pub mod soft_renderer;
+    pub mod steps;
 }
 
 /// The window's frame for what it shows: the dialog frame (screen_fit) and the workbenches.
@@ -126,7 +134,13 @@ pub mod theme {
 
     // C: theme.cpp, applied to egui's style; the text sizes read back from their names; the
     // command line's fixed pitch.
-    // pub mod style;
+    pub mod style;
+
+    pub use style::{
+        apply, menu_icon_cell, menu_section, menu_separator, monospace_font, monospace_font_id,
+        overflow_arrow, overlay_font, paint_overflow_arrow, set_text_size, text_size, ui_font,
+        ui_font_id, visuals,
+    };
 }
 
 // F0: the small top-level units every dialog uses.
@@ -141,25 +155,37 @@ pub mod annotation {
     // F0
     pub mod form_widgets;
 
-    // P:  pub mod annotation_painter;
-    // AN: pub mod annotation_managers;
-    //     pub mod label_edit_dialog;
-    //     pub mod label_layout_report;
-    //     pub mod leader_manager;
-    //     pub mod text_edit_dialog;
+    // P
+    pub mod annotation_painter;
+    // AN
+    pub mod annotation_managers;
+    pub(crate) mod dialog_support;
+    pub mod label_edit_dialog;
+    pub mod label_layout_report;
+    pub mod leader_manager;
+    pub mod text_edit_dialog;
+
+    pub use annotation_managers::{LabelStyleManagerDialog, TextStyleManagerDialog};
+    pub use label_edit_dialog::{LabelEditDialog, LabelEditForm};
+    pub use label_layout_report::{LabelLayoutReportDialog, LabelLayoutSummary};
+    pub use leader_manager::{LeaderManagerContext, LeaderManagerDialog};
+    pub use text_edit_dialog::TextEditDialog;
     // V3: pub mod annotation_workbench;
     //     pub mod dimension_style_manager;
 }
 
 pub mod bim {
-    // I:  pub mod road_object_icons;
-    // BM: pub mod corridor_dialog;
-    //     pub mod corridor_quantities_dialog;
-    //     pub mod road_dialog_support;
-    //     pub mod road_object_dialog;
-    //     pub mod road_object_manager;
-    //     pub mod road_object_workbench;
-    //     pub mod road_template_manager;
+    // I
+    pub mod road_object_icons;
+
+    // BM
+    pub mod corridor_dialog;
+    pub mod corridor_quantities_dialog;
+    pub mod road_dialog_support;
+    pub mod road_object_dialog;
+    pub mod road_object_manager;
+    pub mod road_object_workbench;
+    pub mod road_template_manager;
     // V3: pub mod road_workbench;
 }
 
@@ -177,11 +203,14 @@ pub mod customisation {
         FilterField, ScopeChoice, ScopeFilterView, ScopeFilterWidget, scope_filter_views,
     };
 
-    // H:   pub mod code_manager_support;
+    // H
+    pub mod code_manager_support;
     // P:   pub mod customisation_context;
-    //      pub mod definition_thumbnails;
+    // P
+    pub mod definition_thumbnails;
+    pub mod style_painter;
+    // P (the previews, left for CU1): pub mod customisation_context;
     //      pub mod name_picker;
-    //      pub mod style_painter;
     //      pub mod style_preview;
     // CU1: pub mod drawing_summary_dialog;
     //      pub mod global_modify_dialog;
@@ -198,17 +227,21 @@ pub mod customisation {
 }
 
 pub mod drawing {
-    // P:  pub mod feedback_painter;
+    // P
+    pub mod feedback_painter;
     // VP: pub mod drawing_ui;
     //     pub mod grip_controller;
     //     pub mod vertex_panel;
 }
 
 pub mod geo {
-    // H:  pub mod geo_dialog_support;
-    //     pub mod geo_workbench;
-    //     pub mod point_pick;
-    //     pub mod terrain_dialog_support;
+    // H
+    pub mod geo_dialog_support;
+    pub mod geo_workbench;
+    pub mod point_pick;
+    pub mod terrain_dialog_support;
+
+    pub use geo_workbench::{GeoEffect, GeoEffects, GeoWorkbench, started_job, started_record};
     // GA: pub mod buffer_dialog;
     //     pub mod clip_dialog;
     //     pub mod coverage_dialog;
@@ -235,10 +268,12 @@ pub mod geo {
 }
 
 pub mod plotting {
-    // C:   pub mod tiff_writer;
-    //      pub mod viewport_clipboard;
-    // P:   pub mod plot_style;
-    //      pub mod section_painter;
+    // C:
+    pub mod tiff_writer;
+    pub mod viewport_clipboard;
+    // P
+    pub mod plot_style;
+    pub mod section_painter;
     // SH1: pub mod grid_properties;
     //      pub mod legend_painter;
     //      pub mod legend_properties;
@@ -259,23 +294,28 @@ pub mod plotting {
 }
 
 pub mod survey {
-    // SV: pub mod reduction_options_widget;
-    //     pub mod reduction_report_view;
-    //     pub mod survey_dialogs;
-    //     pub mod survey_import_wizard;
-    //     pub mod survey_job_support;
-    //     pub mod survey_jobs_dialog;
-    //     pub mod survey_parcel_dialog;
-    //     pub mod survey_points_ui;
-    //     pub mod survey_task;
-    //     pub mod survey_templates;
-    //     pub mod survey_workbench;
-    // UT: pub mod utility_dialog;
-    //     pub mod utility_workbench;
+    // UT
+    pub mod utility_dialog;
+    pub mod utility_workbench;
+    // SV
+    pub mod reduction_options_widget;
+    pub mod reduction_report_view;
+    pub mod survey_dialogs;
+    pub mod survey_import_wizard;
+    pub mod survey_job_support;
+    pub mod survey_jobs_dialog;
+    pub mod survey_parcel_dialog;
+    pub mod survey_points_ui;
+    pub mod survey_task;
+    pub mod survey_templates;
+    pub mod survey_workbench;
+
+    pub use survey_workbench::{SurveyServices, SurveyWorkbench};
 }
 
 pub mod terrain {
-    // P:  pub mod surface_plan_painter;
+    // P
+    pub mod surface_plan_painter;
     // TR: pub mod surface_edit_dialogs;
     //     pub mod surface_edit_ui;
     //     pub mod surface_style_manager;
@@ -285,43 +325,64 @@ pub mod terrain {
 }
 
 pub mod tools {
-    // I:  pub mod flyout_button;
-    //     pub mod icons_annotate;
-    //     pub mod icons_draw_curves;
-    //     pub mod icons_draw_lines;
-    //     pub mod icons_drawing;
-    //     pub mod icons_everyday;
-    //     pub mod icons_inquiry;
-    //     pub mod icons_modify_edit;
-    //     pub mod icons_modify_transform;
-    //     pub mod icons_terrain;
-    //     pub mod tool_icons;
-    //     pub mod tool_menus;
+    // I
+    pub mod flyout_button;
+    pub mod icons_annotate;
+    pub mod icons_draw_curves;
+    pub mod icons_draw_lines;
+    pub mod icons_drawing;
+    pub mod icons_everyday;
+    pub mod icons_inquiry;
+    pub mod icons_modify_edit;
+    pub mod icons_modify_transform;
+    pub mod icons_terrain;
+    pub mod tool_icons;
+    pub mod tool_menus;
+
+    pub use flyout_button::{
+        ButtonIcon, ButtonPaint, ButtonState, DrawnParts, Flyout, MeasuredButton, MenuSign,
+        SignHolder, Strip, StripItem, ToolButtonLook, drawn_parts, flyout_button_at,
+        menu_sign_clashes, overflow_paint, paint_overflow_arrow, paint_tool_button,
+        split_button_at, split_paint, strip_sign_holder, tool_bar_strip, tool_button_at,
+    };
+    pub use tool_icons::{ToolInk, has_tool_icon, paint_tool_icon};
+    pub use tool_menus::{
+        BarMenu, ToolActions, ToolFamily, ToolMenuTargets, fill_tool_menus, tool_id_for_command,
+        with_mnemonic,
+    };
+
     // VP: pub mod tool_host;
 }
 
 // ---- the top-level units of the C++, by agent ---------------------------------------------------
 
-// D:   pub mod dock_chrome;
-// H:   pub mod attribute_manager;
-//      pub mod command_log;
-//      pub mod command_reference_dialog;
-//      pub mod import_placement;
-//      pub mod jobs;
-//      pub mod keyboard_shortcuts_dialog;
-//      pub mod property_panel;
-//      pub mod script_runner;
-//      pub mod select_by_id_dialog;
+// D
+pub mod dock_chrome;
+// H
+pub mod attribute_manager;
+pub mod command_log;
+pub mod command_reference_dialog;
+pub mod import_placement;
+pub mod jobs;
+pub mod keyboard_shortcuts_dialog;
+pub mod property_panel;
+pub mod script_runner;
+pub mod select_by_id_dialog;
 // P:   pub mod kept_name_combo;
-//      pub mod plan_painter;
-// I:   pub mod icons;
-//      pub mod make_icons;
-//      pub mod tool_icon_sheet;
-// BM:  pub mod alignment_manager;
-// UT:  pub mod ifc_dialogs;
-//      pub mod project_crs_dialog;
-//      pub mod view_scale_dialog;
-//      pub mod zoom_to_dialog;
+// P
+pub mod plan_painter;
+// P (the previews, left for CU1): pub mod kept_name_combo;
+// I
+pub mod icons;
+pub mod make_icons;
+pub mod tool_icon_sheet;
+// BM
+pub mod alignment_manager;
+// UT
+pub mod ifc_dialogs;
+pub mod project_crs_dialog;
+pub mod view_scale_dialog;
+pub mod zoom_to_dialog;
 // VP:  pub mod plan_context_menu;
 //      pub mod viewport_widget;
 // V3:  pub mod gpu_scene_view;
@@ -350,6 +411,14 @@ pub mod tools {
 
 // F0
 pub use canvas::{Canvas, Color, Image};
+// P
 pub use drive::{Action, DrivenWindow, Harness};
 pub use host::{Host, RecordingHost, VerbOutcome, ViewAccess};
+pub use plan_painter::{PlanFrame, PlanPaintCache, PlanPaintOptions, PlanSource, paint_plan};
 pub use shell::{DialogFrame, Workbench};
+// H
+pub use command_log::CommandLog;
+pub use jobs::JobRunner;
+
+// I
+pub use icons::{Icon, IconMode, Rasteriser};

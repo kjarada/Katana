@@ -43,7 +43,7 @@
 //! reload, which refills the lists keeping what is ticked and chosen. It never touches the
 //! Document; reload is given the model to read the layers from.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use egui::Ui;
@@ -151,6 +151,9 @@ pub struct ScopeFilterWidget {
     drawn_only: bool,
     /// A setter changed a control since the last frame: reported then, as its signal would be.
     pending: bool,
+    /// The filter's controls greyed by the tool, each with why: drawn disabled, the reason their
+    /// hover text, their values kept.
+    greyed: BTreeMap<String, String>,
 }
 
 /// QString::trimmed, then the text: what a field says.
@@ -202,7 +205,44 @@ impl ScopeFilterWidget {
             filter_text: String::new(),
             drawn_only: false,
             pending: false,
+            greyed: BTreeMap::new(),
         }
+    }
+
+    /// Greys the filter's control `object_name` with `reason` as its hover text: a tool whose
+    /// data has nothing the control reads (a road object has no entity type, style or text) says
+    /// so where the verb would refuse it by name. The control keeps its value and is drawn
+    /// disabled, so a driver's fill or press of it is refused as disabled.
+    pub fn grey(&mut self, object_name: &str, reason: &str) {
+        self.greyed
+            .insert(String::from(object_name), String::from(reason));
+    }
+
+    /// Why the control `object_name` is greyed, if it is.
+    pub fn greyed(&self, object_name: &str) -> Option<&str> {
+        self.greyed.get(object_name).map(String::as_str)
+    }
+
+    /// The object names of the filter's controls, in the order they are drawn: what a tool greys
+    /// from.
+    pub fn control_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .types
+            .iter()
+            .map(|type_box| format!("{}Type{}", self.prefix, kind_name(type_box.kind)))
+            .collect();
+        for part in [
+            "FilterLayer",
+            "FilterStyle",
+            "FilterColour",
+            "FilterProperty",
+            "FilterValue",
+            "FilterText",
+            "DrawnOnly",
+        ] {
+            names.push(self.named(part));
+        }
+        names
     }
 
     /// The widget's own object name: the prefix and "Scope".
@@ -651,14 +691,23 @@ impl ScopeFilterWidget {
                 ui.label("Only those that match (optional)");
                 ui.label("Types (none: all)");
                 let prefix = self.prefix.clone();
+                let greyed = &self.greyed;
                 let types = &mut self.types;
                 for row in types.chunks_mut(4) {
                     ui.horizontal(|ui| {
                         for type_box in row {
                             let name = format!("{prefix}Type{}", kind_name(type_box.kind));
-                            if check(ui, &name, &type_box.label, &mut type_box.ticked).changed() {
-                                changed = true;
-                            }
+                            let grey = greyed.get(&name);
+                            ui.add_enabled_ui(grey.is_none(), |ui| {
+                                let mut response =
+                                    check(ui, &name, &type_box.label, &mut type_box.ticked);
+                                if let Some(reason) = grey {
+                                    response = response.on_disabled_hover_text(reason.as_str());
+                                }
+                                if response.changed() {
+                                    changed = true;
+                                }
+                            });
                         }
                     });
                 }
@@ -685,6 +734,7 @@ impl ScopeFilterWidget {
                 ];
                 for (label, part, placeholder, tip) in fields {
                     let name = self.named(part);
+                    let grey = self.greyed.get(&name).cloned();
                     let field = match part {
                         "FilterLayer" => &mut self.filter_layer,
                         "FilterStyle" => &mut self.filter_style,
@@ -692,21 +742,25 @@ impl ScopeFilterWidget {
                     };
                     ui.horizontal(|ui| {
                         ui.label(label);
-                        let mut response = line_with(
-                            ui,
-                            &name,
-                            field,
-                            LineOptions {
-                                placeholder,
-                                ..LineOptions::default()
-                            },
-                        );
-                        if !tip.is_empty() {
-                            response = response.on_hover_text(tip.as_str());
-                        }
-                        if response.changed() {
-                            changed = true;
-                        }
+                        ui.add_enabled_ui(grey.is_none(), |ui| {
+                            let mut response = line_with(
+                                ui,
+                                &name,
+                                field,
+                                LineOptions {
+                                    placeholder,
+                                    ..LineOptions::default()
+                                },
+                            );
+                            if let Some(reason) = &grey {
+                                response = response.on_disabled_hover_text(reason.as_str());
+                            } else if !tip.is_empty() {
+                                response = response.on_hover_text(tip.as_str());
+                            }
+                            if response.changed() {
+                                changed = true;
+                            }
+                        });
                     });
                 }
                 ui.horizontal(|ui| {
@@ -744,19 +798,24 @@ impl ScopeFilterWidget {
                 ui.horizontal(|ui| {
                     ui.label("Text");
                     let name = self.named("FilterText");
-                    if line_with(
-                        ui,
-                        &name,
-                        &mut self.filter_text,
-                        LineOptions {
-                            placeholder: "a text's words, e.g. CH *",
-                            ..LineOptions::default()
-                        },
-                    )
-                    .changed()
-                    {
-                        changed = true;
-                    }
+                    let grey = self.greyed.get(&name).cloned();
+                    ui.add_enabled_ui(grey.is_none(), |ui| {
+                        let mut response = line_with(
+                            ui,
+                            &name,
+                            &mut self.filter_text,
+                            LineOptions {
+                                placeholder: "a text's words, e.g. CH *",
+                                ..LineOptions::default()
+                            },
+                        );
+                        if let Some(reason) = &grey {
+                            response = response.on_disabled_hover_text(reason.as_str());
+                        }
+                        if response.changed() {
+                            changed = true;
+                        }
+                    });
                 });
                 let name = self.named("DrawnOnly");
                 if check(

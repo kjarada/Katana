@@ -190,7 +190,14 @@ TEST(FeedbackPainter, EntersPlaceIsAnOutlinedRingNotTheNewVertexsFilledDisc)
     const QPointF centre = toScreen(Point2(5, 0));
     EXPECT_GT(inkNear(ring.image, centre, 7.5, overlay::preview()),
               inkNear(baseline.image, centre, 7.5, overlay::preview()));
-    const QPointF inside = centre + QPointF(2.5, 2.5);
+    // inkNear names a pixel by its top-left corner, so the pixels whose
+    // centres lie within 1 px of that point are those within 1 px of
+    // centre + (2, 2): from 2.24 px out to 5.0 px, inside the pen's inner
+    // edge at 5 px. Probed at centre + (2.5, 2.5), the pixel [3,4] x [3,4]
+    // from the centre lies 45.3 % outside radius 5 (the area
+    // 1 - (integral from 3 to 4 of sqrt(25 - x^2) dx - 3)), an inked edge
+    // pixel that an exact rasteriser draws and Qt's curve offsets missed.
+    const QPointF inside = centre + QPointF(2.0, 2.0);
     EXPECT_GT(inkNear(disc.image, inside, 1, overlay::preview()), 0);
     EXPECT_EQ(inkNear(ring.image, inside, 1, overlay::preview()), 0);
     EXPECT_EQ(ring.counts.enter, 1u);

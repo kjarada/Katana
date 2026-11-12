@@ -2308,6 +2308,7 @@ dependencies = [
  "katana_terrain",
  "katana_update",
  "krilla",
+ "miniz_oxide 0.8.9",
  "png",
  "pollster 1.0.1",
  "rfd",
