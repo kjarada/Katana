@@ -229,9 +229,10 @@ pub mod customisation {
 pub mod drawing {
     // P
     pub mod feedback_painter;
-    // VP: pub mod drawing_ui;
-    //     pub mod grip_controller;
-    //     pub mod vertex_panel;
+    // VP
+    pub mod drawing_ui;
+    pub mod grip_controller;
+    pub mod vertex_panel;
 }
 
 pub mod geo {
@@ -351,7 +352,8 @@ pub mod tools {
         with_mnemonic,
     };
 
-    // VP: pub mod tool_host;
+    // VP
+    pub mod tool_host;
 }
 
 // ---- the top-level units of the C++, by agent ---------------------------------------------------
@@ -383,8 +385,9 @@ pub mod ifc_dialogs;
 pub mod project_crs_dialog;
 pub mod view_scale_dialog;
 pub mod zoom_to_dialog;
-// VP:  pub mod plan_context_menu;
-//      pub mod viewport_widget;
+// VP
+pub mod plan_context_menu;
+pub mod viewport_widget;
 // V3:  pub mod gpu_scene_view;
 //      pub mod render_view_widget;
 //      pub mod section_view_widget;
@@ -422,3 +425,6 @@ pub use jobs::JobRunner;
 
 // I
 pub use icons::{Icon, IconMode, Rasteriser};
+// VP
+pub use plan_context_menu::{PlanContextMenu, PlanContextMenuContext, PlanMenuChoice};
+pub use viewport_widget::{PlanView, PlanViewEvent, PlanViewHooks, PlanViewHost};
