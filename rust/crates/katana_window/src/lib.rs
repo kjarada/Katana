@@ -252,18 +252,20 @@ pub mod geo {
     //     pub mod hull_dialog;
     //     pub mod overlay_dialog;
     //     pub mod sql_dialog;
-    // GB: pub mod argument_form;
-    //     pub mod binding_picker;
-    //     pub mod contours_dialog;
-    //     pub mod dem_tools_dialog;
-    //     pub mod drape_dialog;
-    //     pub mod gdal_toolbox_dialog;
-    //     pub mod grid_dem_dialog;
-    //     pub mod pipeline_builder;
-    //     pub mod slope_analysis_dialog;
-    //     pub mod terrain_shading_dialog;
-    //     pub mod viewshed_dialog;
-    //     pub mod zonal_stats_dialog;
+    // GB
+    pub mod argument_form;
+    pub mod binding_picker;
+    pub mod contours_dialog;
+    pub mod dem_tools_dialog;
+    pub mod drape_dialog;
+    pub mod gdal_toolbox_dialog;
+    pub mod grid_dem_dialog;
+    pub mod pipeline_builder;
+    pub mod slope_analysis_dialog;
+    pub(crate) mod terrain_dialog_parts;
+    pub mod terrain_shading_dialog;
+    pub mod viewshed_dialog;
+    pub mod zonal_stats_dialog;
     // K:  pub mod menu_table;
 }
 
@@ -397,7 +399,8 @@ pub mod zoom_to_dialog;
 //      pub mod gis_import_dialogs;
 //      pub mod gis_online;
 //      pub mod gis_online_dialog;
-// GB:  pub mod surface_raster_dialog;
+// GB
+pub mod surface_raster_dialog;
 // UP:  pub mod update_dialog;
 //      pub mod update_workbench;
 // WS:  pub mod start_dialog;
