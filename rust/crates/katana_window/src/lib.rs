@@ -221,8 +221,9 @@ pub mod customisation {
     //      pub mod definition_editor;
     //      pub mod symbol_library;
     //      pub mod symbol_library_model;
-    // UP:  pub mod linework_labels;
-    //      pub mod settings_dialog;
+    // UP
+    pub mod linework_labels;
+    pub mod settings_dialog;
     // WS:  pub mod customisation_workbench;
 }
 
@@ -398,8 +399,9 @@ pub mod zoom_to_dialog;
 //      pub mod gis_online;
 //      pub mod gis_online_dialog;
 // GB:  pub mod surface_raster_dialog;
-// UP:  pub mod update_dialog;
-//      pub mod update_workbench;
+// UP
+pub mod update_dialog;
+pub mod update_workbench;
 // WS:  pub mod start_dialog;
 //      pub mod view_layers_popup;
 //      pub mod view_workspace;
@@ -422,3 +424,8 @@ pub use jobs::JobRunner;
 
 // I
 pub use icons::{Icon, IconMode, Rasteriser};
+
+// UP
+pub use customisation::settings_dialog::{SettingsDialog, SettingsUpdates};
+pub use update_dialog::{UpdateDialog, UpdateView};
+pub use update_workbench::{UpdateLines, UpdateWorkbench};
