@@ -343,12 +343,23 @@ Before handing back:
 6. **Say plainly what is not yet reachable** in the window, the CLI or MCP
    (section 1).
 
-## 8. Parallel agents and worktrees
+## 8. Agents and worktrees
 
-Use parallel agents when a task splits into parts whose file sets do not
-overlap, each part can be judged on its own, and together they are more than
-a few minutes of work. Read-only sweeps (audits, reviews) are the clearest
-win.
+**Run at most two agents at a time - the owner's standing instruction
+(2026-11-14): "change it to 2".** It was one at a time from 2026-11-12, after
+six agents running at once spent the account's limit in minutes and all six of
+a wave stopped mid-file. So:
+
+- At most TWO agents are running at any moment, a read-only sweep included.
+  Start another only after one of the two has reported (or been stopped).
+- Work that splits into parts whose file sets do not overlap is still split,
+  each part with its own worktree and brief: the parts are run two at a time,
+  not all side by side.
+- An agent that stopped part way is resumed from where it stopped, not
+  started again.
+
+What follows says how each agent's part is set up, whichever order they run
+in.
 
 - **Put worktrees beside the checkout, in `Katana-wt/<name>`**, created from
   the main checkout with `git worktree add -b <branch> ../Katana-wt/<name> main`.
