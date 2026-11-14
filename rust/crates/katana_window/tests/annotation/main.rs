@@ -30,6 +30,8 @@ pub mod window_support;
 pub mod support;
 
 mod annotation_ui;
+mod annotation_workbench;
+mod dimension_style_manager;
 mod label_edit_dialog;
 mod leader_manager;
 mod leader_manager_lines;
