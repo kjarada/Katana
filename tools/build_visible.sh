@@ -11,7 +11,8 @@
 #   tools/build_visible.sh [all]               configure, build everything, run the whole suite
 #   tools/build_visible.sh build [target...]   configure and build (only those targets, if named)
 #   tools/build_visible.sh test [ctest args]   the suite only, e.g. test -R PlanContextMenu
-#   tools/build_visible.sh cargo               the Rust workspace alone: clippy, build, test
+#   tools/build_visible.sh cargo [args...]     the Rust workspace alone: clippy, build, test; with
+#                                              cargo test arguments, only those tests
 #   tools/build_visible.sh wsl gate [-- ctest args]   step 6's cli gate: the cli tests of the last
 #                                              WSL build run against the Rust katana_cli and
 #                                              katana_mcp, both runs' replies compared
@@ -190,7 +191,7 @@ main() {
         # KATANA_ONLINE_TESTS=1 lets the cases that reach real hosts run
         # (CLAUDE.md section 4), in both programs: step 5's gate has an
         # online half (docs/rust.md, "The order of the work").
-        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_BUILD_KEEP_GOING/u:KATANA_TOOLCHAIN/u:KATANA_ONLINE_TESTS/u${WSLENV:+:$WSLENV}"
+        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_BUILD_KEEP_GOING/u:KATANA_TOOLCHAIN/u:KATANA_SHEET_PNG/p:KATANA_ONLINE_TESTS/u${WSLENV:+:$WSLENV}"
         MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wsl.exe -d "$distro" --cd "$(cygpath -w "$root")" \
             --exec bash tools/build_visible.sh --inside-wsl "$phase" "$@" 2>&1 | tee -a "$log"
         code=${PIPESTATUS[0]}
@@ -244,6 +245,14 @@ steps() {
         export KATANA_CPP_CLI="$(cygpath -w "$cli.exe")"
     fi
     if [ "$phase" = cargo ]; then
+        # With arguments, only those tests: `cargo -p katana_window --test codes NAME`
+        # (cargo test's own arguments, after --locked --release), shown in full.
+        if [ $# -gt 0 ]; then
+            echo "== cargo test --locked --release $*"
+            RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-D warnings" cargo test \
+                --manifest-path rust/Cargo.toml --locked --release "$@" -- --nocapture
+            return
+        fi
         cargo_steps build && cargo_steps test
         return
     fi
@@ -450,8 +459,11 @@ inside_wsl() {
 
 # Closes the windows of this script - this checkout's, by its full path - whose
 # run has ended. A window is the bash that `start` gave a console (its parent
-# is no window bash); at its last prompt it has no child but its console host,
-# while a running one has the run's subshell, cmake or wsl.exe below it.
+# is no window bash), with the script's own bash below it; at its last prompt
+# nothing runs under either but those two and the console host, while a
+# running one has cmake, cargo or wsl.exe somewhere below it. Counting only the
+# window's direct children took that second bash for a run, and no finished
+# window was ever closed (2026-11-16).
 close_finished() {
     local script
     script="$(cygpath -w "$1")"
@@ -462,7 +474,12 @@ close_finished() {
         \$closed = 0
         foreach (\$w in \$windows) {
             if (\$windows.ProcessId -contains \$w.ParentProcessId) { continue }
-            \$busy = @(\$all | Where-Object { \$_.ParentProcessId -eq \$w.ProcessId -and \$_.Name -ne 'conhost.exe' })
+            \$below = @(\$w.ProcessId); \$busy = @()
+            while (\$below.Count -gt 0) {
+                \$kids = @(\$all | Where-Object { \$below -contains \$_.ParentProcessId })
+                \$busy += @(\$kids | Where-Object { \$_.Name -ne 'conhost.exe' -and \$_.Name -ne 'bash.exe' })
+                \$below = @(\$kids | ForEach-Object { \$_.ProcessId })
+            }
             if (\$busy.Count -eq 0) { Stop-Process -Id \$w.ProcessId -Force; \$closed++ }
         }
         \"closed \$closed finished window(s); \$(@(\$windows | Where-Object { \$windows.ProcessId -notcontains \$_.ParentProcessId }).Count - \$closed) still running\"

@@ -209,12 +209,21 @@ pub mod customisation {
     // P
     pub mod definition_thumbnails;
     pub mod style_painter;
-    // P (the previews, left for CU1): pub mod customisation_context;
-    //      pub mod name_picker;
-    //      pub mod style_preview;
-    // CU1: pub mod drawing_summary_dialog;
-    //      pub mod global_modify_dialog;
-    //      pub mod hatch_patterns_tab;
+    // P (the previews, left for CU1)
+    pub mod customisation_context;
+    pub mod name_picker;
+    pub mod style_preview;
+    // CU1
+    pub mod drawing_summary_dialog;
+    pub mod global_modify_dialog;
+    pub mod hatch_patterns_tab;
+
+    pub use customisation_context::{CustomisationContext, DefinitionEdit, SharedThumbnails};
+    pub use drawing_summary_dialog::{DrawingSummaryContext, DrawingSummaryDialog};
+    pub use global_modify_dialog::{GlobalModifyDialog, GlobalModifyView};
+    pub use hatch_patterns_tab::HatchPatternsTab;
+    pub use name_picker::{NamePicker, PickerItem, UNDEFINED_NAME_COLOUR};
+    pub use style_preview::{DefinitionAs, PreviewGround, StylePreview};
     // CU2: pub mod code_manager;
     //      pub mod code_manager_form;
     //      pub mod code_manager_tabs;
@@ -224,15 +233,37 @@ pub mod customisation {
     // UP
     pub mod linework_labels;
     pub mod settings_dialog;
+    // P (the previews, left for CU1): pub mod customisation_context;
+    //      pub mod name_picker;
+    //      pub mod style_preview;
+    // CU1: pub mod drawing_summary_dialog;
+    //      pub mod global_modify_dialog;
+    //      pub mod hatch_patterns_tab;
+    // CU2 (codes_seams: its seams to CU1's customisation_context, name_picker and style_preview
+    // and UP's linework_labels, for the integrator to join)
+    pub mod code_manager;
+    pub(crate) mod code_manager_form;
+    pub(crate) mod code_manager_tabs;
+    pub mod codes_seams;
+    pub mod definition_editor;
+    pub mod symbol_library;
+    pub mod symbol_library_model;
+
+    pub use code_manager::SurveyCodeManagerDialog;
+    pub use definition_editor::DefinitionEditorDialog;
+    pub use symbol_library::SymbolLibraryDialog;
+    // UP:  pub mod linework_labels;
+    //      pub mod settings_dialog;
     // WS:  pub mod customisation_workbench;
 }
 
 pub mod drawing {
     // P
     pub mod feedback_painter;
-    // VP: pub mod drawing_ui;
-    //     pub mod grip_controller;
-    //     pub mod vertex_panel;
+    // VP
+    pub mod drawing_ui;
+    pub mod grip_controller;
+    pub mod vertex_panel;
 }
 
 pub mod geo {
@@ -243,16 +274,19 @@ pub mod geo {
     pub mod terrain_dialog_support;
 
     pub use geo_workbench::{GeoEffect, GeoEffects, GeoWorkbench, started_job, started_record};
-    // GA: pub mod buffer_dialog;
-    //     pub mod clip_dialog;
-    //     pub mod coverage_dialog;
-    //     pub mod dissolve_dialog;
-    //     pub mod formats_dialog;
-    //     pub mod geometry_check_dialog;
-    //     pub mod gis_tool_dialog;
-    //     pub mod hull_dialog;
-    //     pub mod overlay_dialog;
-    //     pub mod sql_dialog;
+    // GA
+    pub mod buffer_dialog;
+    pub mod clip_dialog;
+    pub mod coverage_dialog;
+    pub mod dissolve_dialog;
+    pub mod formats_dialog;
+    pub mod geometry_check_dialog;
+    pub mod gis_tool_dialog;
+    pub mod hull_dialog;
+    pub mod overlay_dialog;
+    pub mod sql_dialog;
+
+    pub use gis_tool_dialog::{GisDialogContext, GisTool, GisToolDialogs, GisToolFrame};
     // GB: pub mod argument_form;
     //     pub mod binding_picker;
     //     pub mod contours_dialog;
@@ -265,6 +299,30 @@ pub mod geo {
     //     pub mod terrain_shading_dialog;
     //     pub mod viewshed_dialog;
     //     pub mod zonal_stats_dialog;
+    // GA: pub mod buffer_dialog;
+    //     pub mod clip_dialog;
+    //     pub mod coverage_dialog;
+    //     pub mod dissolve_dialog;
+    //     pub mod formats_dialog;
+    //     pub mod geometry_check_dialog;
+    //     pub mod gis_tool_dialog;
+    //     pub mod hull_dialog;
+    //     pub mod overlay_dialog;
+    //     pub mod sql_dialog;
+    // GB
+    pub mod argument_form;
+    pub mod binding_picker;
+    pub mod contours_dialog;
+    pub mod dem_tools_dialog;
+    pub mod drape_dialog;
+    pub mod gdal_toolbox_dialog;
+    pub mod grid_dem_dialog;
+    pub mod pipeline_builder;
+    pub mod slope_analysis_dialog;
+    pub(crate) mod terrain_dialog_parts;
+    pub mod terrain_shading_dialog;
+    pub mod viewshed_dialog;
+    pub mod zonal_stats_dialog;
     // K:  pub mod menu_table;
 }
 
@@ -275,17 +333,18 @@ pub mod plotting {
     // P
     pub mod plot_style;
     pub mod section_painter;
-    // SH1: pub mod grid_properties;
-    //      pub mod legend_painter;
-    //      pub mod legend_properties;
-    //      pub mod plot_drawing_dialog;
-    //      pub mod plot_output;
-    //      pub mod sheet_list_widget;
-    //      pub mod sheet_readout;
-    //      pub mod sheet_rulers;
-    //      pub mod sheet_tables;
-    //      pub mod sheet_thumbnails;
-    //      pub mod view_image_export;
+    // SH1
+    pub mod grid_properties;
+    pub mod legend_painter;
+    pub mod legend_properties;
+    pub mod plot_drawing_dialog;
+    pub mod plot_output;
+    pub mod sheet_list_widget;
+    pub mod sheet_readout;
+    pub mod sheet_rulers;
+    pub mod sheet_tables;
+    pub mod sheet_thumbnails;
+    pub mod view_image_export;
     // SH2: pub mod plot_dialog;
     //      pub mod sheet_arrange;
     //      pub mod sheet_canvas_editing;
@@ -317,11 +376,12 @@ pub mod survey {
 pub mod terrain {
     // P
     pub mod surface_plan_painter;
-    // TR: pub mod surface_edit_dialogs;
-    //     pub mod surface_edit_ui;
-    //     pub mod surface_style_manager;
-    //     pub mod surfaces_panel;
-    //     pub mod volumes_dialog;
+    // TR
+    pub mod surface_edit_dialogs;
+    pub mod surface_edit_ui;
+    pub mod surfaces_panel;
+    pub mod surface_style_manager;
+    pub mod volumes_dialog;
     // K:  pub mod main_window_surface_display;
 }
 
@@ -352,7 +412,8 @@ pub mod tools {
         with_mnemonic,
     };
 
-    // VP: pub mod tool_host;
+    // VP
+    pub mod tool_host;
 }
 
 // ---- the top-level units of the C++, by agent ---------------------------------------------------
@@ -372,7 +433,8 @@ pub mod select_by_id_dialog;
 // P:   pub mod kept_name_combo;
 // P
 pub mod plan_painter;
-// P (the previews, left for CU1): pub mod kept_name_combo;
+// P (the previews, left for CU1)
+pub mod kept_name_combo;
 // I
 pub mod icons;
 pub mod make_icons;
@@ -384,24 +446,41 @@ pub mod ifc_dialogs;
 pub mod project_crs_dialog;
 pub mod view_scale_dialog;
 pub mod zoom_to_dialog;
-// VP:  pub mod plan_context_menu;
-//      pub mod viewport_widget;
+// VP
+pub mod plan_context_menu;
+pub mod viewport_widget;
 // V3:  pub mod gpu_scene_view;
 //      pub mod render_view_widget;
 //      pub mod section_view_widget;
-// SH1: pub mod sheet_painter;
+// SH1
+pub mod sheet_painter;
 // CU1: pub mod layer_manager;
 //      pub mod style_manager;
+// SH1: pub mod sheet_painter;
+// CU1
+pub mod layer_manager;
+pub mod style_manager;
 // GA:  pub mod dataset_info_dialog;
 //      pub mod gis_dialog_support;
 //      pub mod gis_export_dialog;
 //      pub mod gis_import_dialogs;
 //      pub mod gis_online;
 //      pub mod gis_online_dialog;
+// GA
+pub mod dataset_info_dialog;
+pub mod gis_dialog_support;
+pub mod gis_export_dialog;
+pub mod gis_import_dialogs;
+pub mod gis_online;
+pub mod gis_online_dialog;
 // GB:  pub mod surface_raster_dialog;
 // UP
 pub mod update_dialog;
 pub mod update_workbench;
+// GB
+pub mod surface_raster_dialog;
+// UP:  pub mod update_dialog;
+//      pub mod update_workbench;
 // WS:  pub mod start_dialog;
 //      pub mod view_layers_popup;
 //      pub mod view_workspace;
@@ -429,3 +508,13 @@ pub use icons::{Icon, IconMode, Rasteriser};
 pub use customisation::settings_dialog::{SettingsDialog, SettingsUpdates};
 pub use update_dialog::{UpdateDialog, UpdateView};
 pub use update_workbench::{UpdateLines, UpdateWorkbench};
+// VP
+pub use plan_context_menu::{PlanContextMenu, PlanContextMenuContext, PlanMenuChoice};
+pub use viewport_widget::{PlanView, PlanViewEvent, PlanViewHooks, PlanViewHost};
+// SH1
+pub use sheet_painter::{
+    SheetPaintCache, SheetPaintOptions, SheetPaintStats, SheetSource, paint_sheet,
+};
+// CU1
+pub use layer_manager::LayerManagerDialog;
+pub use style_manager::StyleManagerDialog;

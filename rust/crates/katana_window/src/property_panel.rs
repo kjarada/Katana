@@ -1390,8 +1390,17 @@ impl PropertyTreePanel {
             self.set_filter(&text, document, now);
         }
         if let Some(due) = self.filter_due {
+            // egui takes a frame's time off a delay so as not to overshoot it, and a pause with
+            // less than a frame left became "repaint now". In the window that is one frame early
+            // and harmless; the test harness, whose frames take no real time, spun frame after
+            // frame until the real clock caught up, and under load ran out of frames first
+            // (PropertyPanel.TheFilterListsEveryValueHoldingTheWordsHoweverDeep, wave 2's
+            // integration). Asked a frame later, the repaint is never early: the search runs on
+            // the first frame after the pause.
+            let frame = Duration::try_from_secs_f32(ui.input(|input| input.predicted_dt))
+                .unwrap_or_default();
             ui.ctx()
-                .request_repaint_after(due.saturating_duration_since(now));
+                .request_repaint_after(due.saturating_duration_since(now) + frame);
         }
 
         enum Act {
