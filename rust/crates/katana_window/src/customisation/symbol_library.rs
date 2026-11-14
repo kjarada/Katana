@@ -1511,7 +1511,13 @@ impl SymbolLibraryDialog {
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, TITLE));
         let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
-        for event in std::mem::take(&mut self.events) {
+        let events = std::mem::take(&mut self.events);
+        // What an event changes is drawn on the next frame: ask for it at once, as the code
+        // manager does.
+        if !events.is_empty() {
+            ctx.request_repaint();
+        }
+        for event in events {
             self.react(host, event);
         }
         if closed {

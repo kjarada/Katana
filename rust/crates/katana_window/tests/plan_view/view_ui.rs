@@ -56,7 +56,6 @@ mod view_ui {
         harness.run(&mut draw).expect("the button goes down");
         harness.pointer_button(at, PointerButton::Primary, false, Modifiers::NONE);
         harness.run(&mut draw).expect("the button comes up");
-        drop(draw);
 
         assert_eq!(view.size(), (400, 300));
         assert_eq!(document.selection().ids(), [line]);

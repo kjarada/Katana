@@ -1248,7 +1248,7 @@ impl VolumesDialog {
         tabs(ui, "volumesMethods", &PAGES, &mut self.page);
         let front = self.page;
         for (at, name) in PAGE_NAMES.iter().enumerate() {
-            let draw = |ui: &mut Ui| {
+            let mut draw = |ui: &mut Ui| {
                 let page = ui.vertical(|ui| match at {
                     0 => self.surfaces_page(ui),
                     1 => self.level_page(ui),

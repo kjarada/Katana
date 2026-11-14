@@ -294,7 +294,7 @@ impl Plan {
             self.key(
                 Self::key_of(character),
                 KeyModifiers::NONE,
-                &character.to_string(),
+                character.encode_utf8(&mut [0; 4]),
             );
         }
     }
@@ -305,7 +305,7 @@ impl Plan {
             let _ = self.key_press(
                 Self::key_of(character),
                 KeyModifiers::NONE,
-                &character.to_string(),
+                character.encode_utf8(&mut [0; 4]),
             );
         }
     }

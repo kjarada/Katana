@@ -1976,7 +1976,12 @@ mod definition_editor {
         );
         assert!(duplicate(&mut bench, "TEST Kerb"));
         assert_eq!(bench.value("definitionName"), "TEST Kerb 3");
-        bench.press("definitionRevert");
+        // The C++ presses Revert here as after each case. A copy just made is its own baseline, so
+        // Revert is disabled, and a disabled button's click() does nothing in Qt; the harness
+        // refuses the press instead, so it is made only as Qt would act on it.
+        if bench.enabled("definitionRevert") {
+            bench.press("definitionRevert");
+        }
 
         // And a library linestyle the drawing also holds: deleted, what names it is handed to the
         // drawing's linetype, not left plain.

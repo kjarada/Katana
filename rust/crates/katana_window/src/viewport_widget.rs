@@ -1825,21 +1825,20 @@ impl PlanView {
     /// none left, the tool's own undo.
     fn step_back(&mut self, document: &mut Document) {
         let selecting = self.tools.expects(document) == Some(ToolInput::Selection);
-        if selecting && let Some(step) = self.selection_steps_now().pop() {
-            if let Some(before) = step {
-                {
-                    let DocumentParts {
-                        model, selection, ..
-                    } = document.parts_mut();
-                    selection.set(before);
-                    // An entity deleted since (by a panel, not this tool) stays gone.
-                    let _ = selection.prune(&model.entities);
-                }
-                document.notify_selection_changed();
-                self.update_prompt(document);
-                return;
+        // The step is taken off either way. A selection is put back here; an input the tool took
+        // itself (None) the tool steps back, below.
+        if selecting && let Some(Some(before)) = self.selection_steps_now().pop() {
+            {
+                let DocumentParts {
+                    model, selection, ..
+                } = document.parts_mut();
+                selection.set(before);
+                // An entity deleted since (by a panel, not this tool) stays gone.
+                let _ = selection.prune(&model.entities);
             }
-            // An input the tool took itself: the tool steps it back, below.
+            document.notify_selection_changed();
+            self.update_prompt(document);
+            return;
         }
         // A tool with nothing to step back says so (on_rejected, then an Error).
         let _ = self.tools.undo(document);
@@ -3105,17 +3104,15 @@ impl PlanView {
                         self.key_release(key);
                     }
                 }
-                egui::Event::Text(text) => {
-                    if response.has_focus() && text != " " {
-                        let modifiers =
-                            KeyModifiers::from_egui(ui.input(|input| input.modifiers));
-                        let key = if text.eq_ignore_ascii_case("z") {
-                            ViewKey::Z
-                        } else {
-                            ViewKey::Other
-                        };
-                        let _ = self.key_press(cx, state, key, modifiers, &text);
-                    }
+                egui::Event::Text(text) if response.has_focus() && text != " " => {
+                    let modifiers =
+                        KeyModifiers::from_egui(ui.input(|input| input.modifiers));
+                    let key = if text.eq_ignore_ascii_case("z") {
+                        ViewKey::Z
+                    } else {
+                        ViewKey::Other
+                    };
+                    let _ = self.key_press(cx, state, key, modifiers, &text);
                 }
                 _ => {}
             }

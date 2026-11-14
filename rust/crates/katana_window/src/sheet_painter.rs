@@ -1716,9 +1716,9 @@ impl SheetPainter<'_, '_> {
                 self.canvas.set_brush(Brush::none());
                 let mut centroid = Point2::default();
                 for p in &points {
-                    centroid = centroid + *p;
+                    centroid += *p;
                 }
-                centroid = centroid * (1.0 / points.len() as f64);
+                centroid *= 1.0 / points.len() as f64;
                 let style = TextStyle {
                     cap_mm: 3.0,
                     bold: true,

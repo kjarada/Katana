@@ -1708,7 +1708,13 @@ impl SurveyCodeManagerDialog {
         let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         self.update_dirty();
-        for event in std::mem::take(&mut self.events) {
+        let events = std::mem::take(&mut self.events);
+        // What an event changes is drawn on the next frame: ask for it at once, as a Qt slot's
+        // change was shown at once (a scope ticked by a setter, a line rebuilt).
+        if !events.is_empty() {
+            ctx.request_repaint();
+        }
+        for event in events {
             self.react(host, event);
         }
         if closed {

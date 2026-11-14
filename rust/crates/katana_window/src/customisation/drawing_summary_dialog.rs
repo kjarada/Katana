@@ -60,6 +60,9 @@ const TITLE: &str = "Drawing Summary";
 /// The width the dialog is laid out at (the C++'s resize(640, 600), less its margins).
 const BODY_WIDTH: f32 = 616.0;
 
+/// Shows the missing definition a record names (the window's "show what is missing").
+pub type ShowMissing = Rc<dyn Fn(&str)>;
+
 /// What the dialog is given by the window, besides the host it is drawn with: the drawing and the
 /// executor are the host's.
 #[derive(Clone, Default)]
@@ -67,7 +70,7 @@ pub struct DrawingSummaryContext {
     /// False when nothing can run a line (the C++'s empty `run`): Copy as JSON then says so.
     pub has_runner: bool,
     /// Opens the style manager at its Missing chip, searching for the name.
-    pub show_missing: Option<Rc<dyn Fn(&str)>>,
+    pub show_missing: Option<ShowMissing>,
     /// The project's coordinate system as the status bar says it (projectCrsLabel); None, the
     /// project's own text, or that it has none.
     pub crs: Option<Rc<dyn Fn() -> String>>,

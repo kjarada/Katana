@@ -412,7 +412,7 @@ impl HatchPatternsTab {
         }
         let grid = self.grid_families()?;
         let words: Vec<&str> = grid.split(' ').collect();
-        for (index, pair) in words.chunks_exact(2).enumerate() {
+        for (index, pair) in words.as_chunks::<2>().0.iter().enumerate() {
             let (Some(angle), Some(spacing)) =
                 (parse_finite_double(pair[0]), parse_finite_double(pair[1]))
             else {
@@ -866,7 +866,6 @@ impl HatchPatternsTab {
                 Point2::new(-half, half),
             ],
             closed: true,
-            ..Polyline2::default()
         };
         let scale = f64::from(side) / (2.0 * half);
         let at = |point: Point2| {

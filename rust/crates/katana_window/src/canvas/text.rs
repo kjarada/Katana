@@ -6,8 +6,13 @@
 //! HOW A FAMILY RESOLVES (decided here, the plan's section 4.10). The families a Font asks for
 //! are tried in order against the machine's fonts (fontdb: fontconfig's folders on Linux, the
 //! font folder on Windows), matched as Qt matches a family name - without regard to case; the
-//! first the machine has is used, at the weight and slant asked for. When none is there, a font
-//! that wants fixed pitch (QFont::TypeWriter, the command line's) takes the machine's generic
+//! first the machine has is used, at the weight and slant asked for. A family the machine lacks
+//! that has a metric stand-in is taken as that stand-in: Arial and Helvetica as Liberation Sans,
+//! embedded in the program (`fonts/`), whose every glyph is as wide as Arial's, so text set for
+//! Arial wraps and measures alike on a machine without it - as Qt's fontconfig substitute does on
+//! Linux, but the same face on every machine (the owner's decision, 2026-11-15; docs/rust.md,
+//! "Step 7"). When none is there, a font that wants fixed pitch (QFont::TypeWriter, the command
+//! line's) takes the machine's generic
 //! monospace face, else the first fixed-pitch face it has; and anything still unresolved - a font
 //! that names no family, which is the UI's own face, included - takes the UI's sans, the face
 //! egui draws the window's text in (Ubuntu-Light, embedded in the program, so it is there on every
@@ -51,6 +56,27 @@ const ELLIPSIS: &str = "\u{2026}";
 
 /// The name egui gives its embedded sans in FontDefinitions::default(): the UI's own face.
 const UI_SANS: &str = "Ubuntu-Light";
+
+/// The family of the embedded faces below, as their name tables give it.
+const ARIAL_STAND_IN: &str = "Liberation Sans";
+
+/// Liberation Sans 2.1.5 in its four styles (SIL Open Font License; fonts/LICENSE-LiberationSans.txt):
+/// metrically compatible with Arial, loaded into every engine.
+const ARIAL_STAND_IN_FACES: [&[u8]; 4] = [
+    include_bytes!("../../fonts/LiberationSans-Regular.ttf"),
+    include_bytes!("../../fonts/LiberationSans-Bold.ttf"),
+    include_bytes!("../../fonts/LiberationSans-Italic.ttf"),
+    include_bytes!("../../fonts/LiberationSans-BoldItalic.ttf"),
+];
+
+/// The embedded family that stands in for `asked` when the machine lacks it, matched without regard
+/// to case; None for a family with no stand-in.
+fn stand_in_for(asked: &str) -> Option<&'static str> {
+    match asked.to_lowercase().as_str() {
+        "arial" | "helvetica" => Some(ARIAL_STAND_IN),
+        _ => None,
+    }
+}
 
 /// A font's size in pixels of a device at `dpi` dots an inch: points at 72 an inch (QFont's
 /// pointSizeF on a paint device of that resolution), or pixels as given.
@@ -164,6 +190,12 @@ fn weight_of(weight: FontWeight) -> Weight {
 impl Engine {
     fn new() -> Self {
         let mut system = FontSystem::new();
+        for face in ARIAL_STAND_IN_FACES {
+            let bytes: Arc<dyn AsRef<[u8]> + Sync + Send> = Arc::new(face);
+            system
+                .db_mut()
+                .load_font_source(fontdb::Source::Binary(bytes));
+        }
         let ui_sans = egui::FontDefinitions::default()
             .font_data
             .get(UI_SANS)
@@ -236,7 +268,10 @@ impl Engine {
         };
         let mut chosen = None;
         for family in &font.families {
-            if let Some(found) = self.family_named(family) {
+            let found = self
+                .family_named(family)
+                .or_else(|| stand_in_for(family).map(String::from));
+            if let Some(found) = found {
                 chosen = Some((found, asked));
                 break;
             }

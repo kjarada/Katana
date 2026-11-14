@@ -4,6 +4,11 @@
 //! the line the tab shows - CODE ..., LINEWORK ... - to the window's executor: one undo step,
 //! logged and undone as a typed line (code_manager). The port of customisation/code_manager_tabs.
 
+#![allow(
+    clippy::type_complexity,
+    reason = "A table of pages, each a label and the function drawing it, read more plainly inline."
+)]
+
 use std::sync::Arc;
 
 use egui::{RichText, Ui};

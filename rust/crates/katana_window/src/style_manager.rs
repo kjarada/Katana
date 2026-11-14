@@ -51,6 +51,11 @@
 //! lines, where the C++ label was rich text. As in the C++, this dialog runs its commands on the
 //! Document itself, not as lines through the executor.
 
+#![allow(
+    clippy::type_complexity,
+    reason = "A table of pages, each a label and the function drawing it, read more plainly inline."
+)]
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;

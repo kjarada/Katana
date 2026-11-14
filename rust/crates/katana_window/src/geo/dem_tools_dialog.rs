@@ -17,7 +17,9 @@
 //!   demMosaicTiles, demMosaicAdd, demMosaicRemove, demMosaicResolution, demMosaicSave
 //!   demClipNote, demClipByArea, demClipArea, demClipByBoundaries, demClipBoundaryScope...
 //!   demFillDistance, demFillSmoothing, demFillStrategy
-//!   demReprojectCrs, demReprojectLike, demReprojectFrom, demReprojectResampling, demReprojectCell
+//!   demReprojectCrs, demReprojectLike, demReprojectFrom, demReprojectResampling,
+//!   demReprojectTargetCell (the C++ names it demReprojectCell, as it does the tab's picker's surface
+//!   cell: two controls a driver could not tell apart; docs/rust.md, "Not done")
 //!   demFootprintLayer
 //!   demDifferenceSecondKind ..., demDifferenceLimit, demDifferenceWithinScope...,
 //!   demDifferenceResampling
@@ -679,7 +681,7 @@ impl DemToolsDialog {
                 row(ui, "Cell:", |ui| {
                     field(
                         ui,
-                        "demReprojectCell",
+                        "demReprojectTargetCell",
                         &mut self.reproject_cell,
                         "as GDAL chooses",
                     )

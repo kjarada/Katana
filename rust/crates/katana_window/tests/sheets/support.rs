@@ -58,7 +58,11 @@ pub fn paint_on(image: &mut Image, mut paint: impl FnMut(&mut dyn Canvas)) {
 /// With KATANA_SHEET_PNG set to a directory, a painted sheet is also written there as
 /// `<name>.png`, to be looked at.
 pub fn keep(image: &Image, name: &str) {
-    if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+    // Set but empty is unset: tools/build_visible.sh hands the variable to WSL, which sets it
+    // empty when the Windows side has none, and an empty folder wrote into the crate's own.
+    if let Ok(folder) = std::env::var("KATANA_SHEET_PNG")
+        && !folder.is_empty()
+    {
         let _ = write_png(image, &std::path::Path::new(&folder).join(format!("{name}.png")));
     }
 }

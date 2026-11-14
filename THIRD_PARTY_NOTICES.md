@@ -362,6 +362,14 @@ and the Ubuntu Font Licence 1.0: whether the GPL-3.0 rule applies to them,
 and which font the window carries, waits on the owner (docs/rust.md, "Not
 done"); nothing ships before step 8.
 
+**Fonts embedded in the Rust port's window.** Compiled into `katana_window` with
+`include_bytes!` (`rust/crates/katana_window/src/canvas/text.rs`), so shipped inside the
+window program from step 8.
+
+| Font | Version | Licence | Where | What it asks of Katana |
+|---|---|---|---|---|
+| Liberation Sans (Regular, Bold, Italic, BoldItalic) | 2.1.5 (Ubuntu's `fonts-liberation` 1:2.1.5-3) | SIL Open Font License 1.1 (Copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation; digitized data copyright (c) 2010 Google Corporation, with Reserved Fonts Arimo, Tinos and Cousine) | `rust/crates/katana_window/fonts/` | Keep the copyright notice and licence with the fonts (`fonts/LICENSE-LiberationSans.txt`); the fonts may not be sold by themselves, and a modified font may not bear the Reserved Font Names. Bundling them in a program under another licence is allowed (OFL 1.1, condition 1). |
+
 **Code translated into the Rust port.** The port reproduces the C++
 program's behaviour exactly, and in a few places that meant translating a
 third party's code into Rust rather than calling it: the translation is a

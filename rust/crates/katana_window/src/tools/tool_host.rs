@@ -125,7 +125,7 @@ pub struct ToolHost {
     /// The tool ended: finished without asking to restart, or cancelled.
     pub on_finished: Option<TextHook>,
     /// A transparent command typed while a tool runs (`is_transparent_command`): it is the VIEW's
-    /// - ZOOM, PAN - and goes here instead of to the tool, which stays at the same step, as
+    /// (ZOOM, PAN) and goes here instead of to the tool, which stays at the same step, as
     /// AutoCAD runs 'ZOOM inside LINE. Answers whether it was carried out. Unset, or answering
     /// false, the host says the command cannot run inside the tool, and the tool is not sent it
     /// either: "Z" is never a malformed point.

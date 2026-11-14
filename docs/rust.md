@@ -63,7 +63,7 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases) |
+| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases; 1,124 of the window's 1,609 twinned) |
 | 8-9 | not started |
 
 ### Step 1: the foundation crates
@@ -894,6 +894,19 @@ dialogs. Decisions:
 - **A font is found by the families asked for, in order**, then a fixed
   pitch face for a fixed pitch font, then the window's embedded sans, so a
   missing font falls back to the same face on every machine.
+- **Arial and Helvetica stand in as Liberation Sans where the machine lacks
+  them** (the owner's choice, 2026-11-15). Liberation Sans 2.1.5 (SIL OFL 1.1)
+  is embedded in four styles (`rust/crates/katana_window/fonts/`), and its
+  every glyph is as wide as Arial's. Found by wave 2's integration: the
+  C++ asks for Arial, and where Arial is missing Qt takes fontconfig's
+  substitute (DejaVu Sans in WSL), about as wide; the Rust took egui's thinner
+  UI face, so text set for Arial wrapped into fewer, tighter lines and
+  `NotesAndALegendDrawTheirText` found two lines of notes where it asks for
+  three. Where Arial is installed (Windows) it is still Arial. Rejected: the
+  machine's own substitute, as Qt does (text would differ from machine to
+  machine, which the rule above avoids), and keeping egui's face (text
+  measured narrower than the C++'s everywhere Arial is missing). The four
+  faces add 1.6 MB to the window program.
 - **A job runs on a thread of its own**, its result handed back down a
   channel at the start of a frame, and frames keep coming every 10 ms while
   one runs. Dropping the job runner stops and joins every job.
@@ -937,6 +950,62 @@ Release C++ build, Clippy (`--locked`) and the float-to-text guard clean;
 CTest 9,923 entries, 9,883 passed, 40 skipped, none failed; cargo test
 8,094 passed, none failed, none ignored (7,565 after wave 0); the cli gate
 376 of 376 identical.
+
+**Wave 2** ported, in eight agents run at most two at a time (the owner's
+rule from 2026-11-12, when six at once spent the account's limit and all
+stopped mid-file), what stands on wave 1: the plan view (`viewport_widget`,
+its context menu, grips, the Vertices panel and the tool host); the sheet
+painter, legends, grids, tables and plot output; the name picker, style
+preview, Global Modify, hatch patterns and the style and layer managers; the
+survey code manager, definition editor and symbol library; the GIS vector
+dialogs, import, export and online data; the terrain analysis dialogs, GDAL
+toolbox and pipeline builder; and the Surfaces panel, surface editing,
+surface styles and volumes dialogs. Decisions:
+
+- **The plan view owns no window state.** It is one struct drawn into the
+  rect it is given, with events in (`mouse_press`, `wheel`, `key_press` ...)
+  and `take_events()` out, and its hooks set as flags; the workspace (wave 3)
+  implements `ViewAccess` over its views. A double click is read from raw
+  presses (0.4 s, 5 px), as Qt delivers it at the second press, not egui's
+  at the release; a wheel line is one notch.
+- **A dialog asks for the next frame when it works out a change after
+  drawing.** The code manager, definition editor and symbol library react
+  to their events after the frame, so what an event changed (a scope ticked
+  by a setter, Revert enabled) is drawn a frame later; each now asks egui for
+  that frame, as wave 1's leader manager does. Found at integration, where
+  the harness settled before the frame that showed it.
+- **Arial and Helvetica stand in as Liberation Sans** where the machine lacks
+  them (above, under wave 1's font rule).
+- **A name the C++ gives two controls is split**, as the registry refuses a
+  name drawn twice: the vector import's file layer list is
+  `vectorImportFileLayers` (the C++ names it and the scope's list
+  `vectorImportLayers` alike), and the DEM tools' Reproject cell is
+  `demReprojectTargetCell` (the C++'s `demReprojectCell` is also the tab's
+  picker's surface cell). No test or script used either name. The code
+  manager's `filterText`, both the search field and the Text chip in the
+  C++, is one control taking a fill as the search and a press as the chip.
+- **A C++ test's press of a disabled button is made only when the button is
+  enabled**, where the C++ pressed it as tidy-up and Qt's `click()` did
+  nothing; the harness refuses such a press. Twins that asserted on the
+  press itself assert the button disabled instead.
+- **Printing writes the sheets as a PDF**, a page a sheet, and hands it to
+  the operating system's print queue (`hand_to_print_queue` in
+  `plotting/plot_output.rs`), which returns Unsupported for now ("Not done").
+
+Wave 2 was written by agents that did not build, in eight worktrees, and
+merged into `rust-port`. Its first compile found one error (a missing `mut`)
+and 22 Clippy findings, and its first run 11 failures from five causes, each
+fixed in the code and none by changing an expected value: the duplicate DEM
+name (7 cases), the late frame (2), the font (1), and a property panel test
+that egui's delay arithmetic made fail under load (1). egui takes a
+predicted frame off a delayed repaint, so a filter pause with less than a
+frame left asked for an immediate one, and the harness, whose frames take no
+real time, spun until the real clock caught up and ran out of frames; the
+panel now asks a frame later, so the repaint is never early.
+
+Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 2: in the
+commit that merged it; the window's twins 1,124 of 1,609 (`tests/qt_widgets`
+1,075 of 1,548, `tests/gpu` 49 of 61).
 
 ## The workspace
 
@@ -1750,3 +1819,43 @@ pin classifies every algorithm GDAL lists.
   the run-time setting that chooses a built-in. It wants a build-time
   variable of another name, decided when a build that is not the default is
   made.
+- **Defects found in porting step 7's wave 2, ported as they are:** the
+  vertex panel's Insert After computes `segmentCount() - 1` unsigned (a
+  polyline with no segments wraps; the Rust refuses the row); the plan
+  context menu's Choose Colour starts on the wrong colour for a translucent
+  colour (`#RRGGBBAA` written, `#AARRGGBB` read); a double click during a
+  point pick falls through to the view; `paintViewport`'s message slice
+  wraps when a problem has no ": " (unreachable today); `paintMarks` fills
+  a stored sheet outline with `paperFill` where the live key plan uses
+  `paperShade`; `plotSheetsToPdf` writes straight to the file, so a failed
+  plot leaves a partial PDF; the layer manager, style manager and Global
+  Modify's Apply run commands on the Document directly, not as verb lines
+  (against the three-surfaces rule; the tests pin their undo steps);
+  "Select users" writes the selection directly; a driver's fill of a name
+  picker can choose a section header; the vector import and the DEM tools
+  each give two controls one name (above); the vector export's Browse has
+  no headless guard; `OnlineDataWorkbench::areaOf` does not check for a
+  missing view; the export filter names the archive format by its vendor
+  (the naming rule); the code manager's Linework status and Use These Codes
+  are set only as a field is typed in; `ArgumentForm::setValue` takes "2.0"
+  as a whole number and sets 0; the pipeline builder's Add with "write"
+  selected leaves the step form hidden; the binding list's Remove reports a
+  change with no row current; the volumes dialog measures a surface against
+  itself when only one is left, and keeps the last results under a refused
+  line.
+- **Where step 7's wave 2 differs from the C++:** the style and layer
+  managers' tables are text rows (no preview pictures, swatches, amber
+  undefined names, bold current row or header sort), as are the census and
+  apply tables' marks and the Formats table's sort; a number box shows no
+  special text or prefix (`SpinRange` has neither), and the command lines
+  are not monospace (`LineOptions` has no font); a PDF's title and creator
+  are not written (the PDF canvas cannot yet); the plan view's measure of
+  wrapped text and the sheet's cap height are private seams over the
+  canvas; online data's "today" is UTC where Qt's was local.
+- **Printing is not handed to the operating system yet**:
+  `hand_to_print_queue` returns Unsupported after the PDF is written (step
+  8, with Windows).
+- **The code manager's seams to the shared name picker and style preview**
+  (`rust/crates/katana_window/src/customisation/codes_seams.rs`) stand in
+  for the modules written beside it: its previews draw nothing until they
+  are joined (wave 3).

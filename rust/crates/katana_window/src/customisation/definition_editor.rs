@@ -1438,6 +1438,11 @@ impl DefinitionEditorDialog {
         });
         let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
+        // An edit or a press is worked out after the frame drew the form, which shows what it
+        // meant (the issues, Save and Revert enabled): the next frame shows it, asked for at once.
+        if self.edited_now || self.pressed.is_some() {
+            ctx.request_repaint();
+        }
         if std::mem::take(&mut self.edited_now) {
             let document = self.live_document(host.document());
             self.edited(document);

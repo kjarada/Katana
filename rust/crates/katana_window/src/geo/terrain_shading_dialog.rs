@@ -27,6 +27,11 @@
 //!   shadingReply      what it said
 //! ```
 
+#![allow(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "Keep the C++'s negated comparisons, which refuse NaN."
+)]
+
 use std::path::Path;
 
 use egui::Ui;

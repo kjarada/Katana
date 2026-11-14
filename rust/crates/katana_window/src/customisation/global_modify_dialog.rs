@@ -36,6 +36,11 @@
 //! in place of the number. The tabs' pages and the Modify group had object names of their own;
 //! only the controls in them are named here.
 
+#![allow(
+    clippy::type_complexity,
+    reason = "A table of pages, each a label and the function drawing it, read more plainly inline."
+)]
+
 use std::rc::Rc;
 
 use egui::{Context, Ui};
