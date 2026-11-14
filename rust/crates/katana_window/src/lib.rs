@@ -242,16 +242,19 @@ pub mod geo {
     pub mod terrain_dialog_support;
 
     pub use geo_workbench::{GeoEffect, GeoEffects, GeoWorkbench, started_job, started_record};
-    // GA: pub mod buffer_dialog;
-    //     pub mod clip_dialog;
-    //     pub mod coverage_dialog;
-    //     pub mod dissolve_dialog;
-    //     pub mod formats_dialog;
-    //     pub mod geometry_check_dialog;
-    //     pub mod gis_tool_dialog;
-    //     pub mod hull_dialog;
-    //     pub mod overlay_dialog;
-    //     pub mod sql_dialog;
+    // GA
+    pub mod buffer_dialog;
+    pub mod clip_dialog;
+    pub mod coverage_dialog;
+    pub mod dissolve_dialog;
+    pub mod formats_dialog;
+    pub mod geometry_check_dialog;
+    pub mod gis_tool_dialog;
+    pub mod hull_dialog;
+    pub mod overlay_dialog;
+    pub mod sql_dialog;
+
+    pub use gis_tool_dialog::{GisDialogContext, GisTool, GisToolDialogs, GisToolFrame};
     // GB: pub mod argument_form;
     //     pub mod binding_picker;
     //     pub mod contours_dialog;
@@ -391,12 +394,13 @@ pub mod zoom_to_dialog;
 // SH1: pub mod sheet_painter;
 // CU1: pub mod layer_manager;
 //      pub mod style_manager;
-// GA:  pub mod dataset_info_dialog;
-//      pub mod gis_dialog_support;
-//      pub mod gis_export_dialog;
-//      pub mod gis_import_dialogs;
-//      pub mod gis_online;
-//      pub mod gis_online_dialog;
+// GA
+pub mod dataset_info_dialog;
+pub mod gis_dialog_support;
+pub mod gis_export_dialog;
+pub mod gis_import_dialogs;
+pub mod gis_online;
+pub mod gis_online_dialog;
 // GB:  pub mod surface_raster_dialog;
 // UP:  pub mod update_dialog;
 //      pub mod update_workbench;
