@@ -209,12 +209,21 @@ pub mod customisation {
     // P
     pub mod definition_thumbnails;
     pub mod style_painter;
-    // P (the previews, left for CU1): pub mod customisation_context;
-    //      pub mod name_picker;
-    //      pub mod style_preview;
-    // CU1: pub mod drawing_summary_dialog;
-    //      pub mod global_modify_dialog;
-    //      pub mod hatch_patterns_tab;
+    // P (the previews, left for CU1)
+    pub mod customisation_context;
+    pub mod name_picker;
+    pub mod style_preview;
+    // CU1
+    pub mod drawing_summary_dialog;
+    pub mod global_modify_dialog;
+    pub mod hatch_patterns_tab;
+
+    pub use customisation_context::{CustomisationContext, DefinitionEdit, SharedThumbnails};
+    pub use drawing_summary_dialog::{DrawingSummaryContext, DrawingSummaryDialog};
+    pub use global_modify_dialog::{GlobalModifyDialog, GlobalModifyView};
+    pub use hatch_patterns_tab::HatchPatternsTab;
+    pub use name_picker::{NamePicker, PickerItem, UNDEFINED_NAME_COLOUR};
+    pub use style_preview::{DefinitionAs, PreviewGround, StylePreview};
     // CU2: pub mod code_manager;
     //      pub mod code_manager_form;
     //      pub mod code_manager_tabs;
@@ -374,7 +383,8 @@ pub mod select_by_id_dialog;
 // P:   pub mod kept_name_combo;
 // P
 pub mod plan_painter;
-// P (the previews, left for CU1): pub mod kept_name_combo;
+// P (the previews, left for CU1)
+pub mod kept_name_combo;
 // I
 pub mod icons;
 pub mod make_icons;
@@ -396,6 +406,10 @@ pub mod viewport_widget;
 pub mod sheet_painter;
 // CU1: pub mod layer_manager;
 //      pub mod style_manager;
+// SH1: pub mod sheet_painter;
+// CU1
+pub mod layer_manager;
+pub mod style_manager;
 // GA:  pub mod dataset_info_dialog;
 //      pub mod gis_dialog_support;
 //      pub mod gis_export_dialog;
@@ -434,3 +448,6 @@ pub use viewport_widget::{PlanView, PlanViewEvent, PlanViewHooks, PlanViewHost};
 pub use sheet_painter::{
     SheetPaintCache, SheetPaintOptions, SheetPaintStats, SheetSource, paint_sheet,
 };
+// CU1
+pub use layer_manager::LayerManagerDialog;
+pub use style_manager::StyleManagerDialog;
