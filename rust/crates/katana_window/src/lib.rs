@@ -323,7 +323,7 @@ pub mod terrain {
     pub mod surface_edit_ui;
     pub mod surfaces_panel;
     pub mod surface_style_manager;
-    // TR: pub mod volumes_dialog;
+    pub mod volumes_dialog;
     // K:  pub mod main_window_surface_display;
 }
 
