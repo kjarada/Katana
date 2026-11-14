@@ -230,6 +230,25 @@ pub mod customisation {
     //      pub mod definition_editor;
     //      pub mod symbol_library;
     //      pub mod symbol_library_model;
+    // P (the previews, left for CU1): pub mod customisation_context;
+    //      pub mod name_picker;
+    //      pub mod style_preview;
+    // CU1: pub mod drawing_summary_dialog;
+    //      pub mod global_modify_dialog;
+    //      pub mod hatch_patterns_tab;
+    // CU2 (codes_seams: its seams to CU1's customisation_context, name_picker and style_preview
+    // and UP's linework_labels, for the integrator to join)
+    pub mod code_manager;
+    pub(crate) mod code_manager_form;
+    pub(crate) mod code_manager_tabs;
+    pub mod codes_seams;
+    pub mod definition_editor;
+    pub mod symbol_library;
+    pub mod symbol_library_model;
+
+    pub use code_manager::SurveyCodeManagerDialog;
+    pub use definition_editor::DefinitionEditorDialog;
+    pub use symbol_library::SymbolLibraryDialog;
     // UP:  pub mod linework_labels;
     //      pub mod settings_dialog;
     // WS:  pub mod customisation_workbench;
