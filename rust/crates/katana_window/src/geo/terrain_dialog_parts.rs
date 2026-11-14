@@ -191,13 +191,28 @@ pub(crate) fn check_list(
     items: &mut [(String, bool)],
     height: f32,
 ) -> bool {
+    let mut current = None;
+    check_list_with_current(ui, name, items, &mut current, height, false)
+}
+
+/// `check_list` whose rows can also be picked - `current` the row picked, shown as picked when
+/// `shows_current` - for a list whose buttons move a row. A fill picks the row of that text.
+pub(crate) fn check_list_with_current(
+    ui: &mut Ui,
+    name: &str,
+    items: &mut [(String, bool)],
+    current: &mut Option<usize>,
+    height: f32,
+    shows_current: bool,
+) -> bool {
     let taken = take(ui, name);
     if let Some(taken) = &taken {
         match &taken.posted.act {
             Act::Fill(text) => {
                 if ui.is_visible() && !ui.is_enabled() {
                     settle(ui, taken, Err(fill_disabled(&taken.posted)));
-                } else if items.iter().any(|(listed, _)| listed == text) {
+                } else if let Some(at) = items.iter().position(|(listed, _)| listed == text) {
+                    *current = Some(at);
                     settle(ui, taken, Ok(()));
                 } else {
                     settle(ui, taken, Err(lists_no(name, text)));
@@ -213,8 +228,20 @@ pub(crate) fn check_list(
         .max_height(height)
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            for (label, on) in items.iter_mut() {
-                if ui.checkbox(on, label.as_str()).changed() {
+            for (at, (label, on)) in items.iter_mut().enumerate() {
+                if shows_current {
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(on, "").changed() {
+                            changed = true;
+                        }
+                        if ui
+                            .selectable_label(*current == Some(at), label.as_str())
+                            .clicked()
+                        {
+                            *current = Some(at);
+                        }
+                    });
+                } else if ui.checkbox(on, label.as_str()).changed() {
                     changed = true;
                 }
             }
