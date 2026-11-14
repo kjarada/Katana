@@ -1,5 +1,6 @@
-//! TR's cases (step 7 wave 2): the twins of tests/qt_widgets/terrain's test_surfaces_panel and
-//! test_surface_edit_dialogs - one module a C++ file, the suites as modules inside.
+//! TR's cases (step 7 wave 2): the twins of tests/qt_widgets/terrain's test_surfaces_panel,
+//! test_surface_edit_dialogs and test_surface_style_manager - one module a C++ file, the suites as
+//! modules inside.
 //!
 //! The panel is drawn in the headless harness (drive::Harness) with a recording host whose runner
 //! is the interpreter on the host's drawing, as the C++ tests' runner was. What the C++ did to a
@@ -11,8 +12,7 @@
 //! * SurfacesPanelWidget.ItsDockIsReachedFromViewPanelsAndTheTerrainMenu and
 //!   SurfacesPanelWidget.ViewPanelsSurfacesBringsThePanelToTheFrontOfItsTabGroup install the
 //!   panel's dock in a main window with its menus and tab groups: the main window's (K).
-//! * test_surface_style_manager and test_volumes_dialog: their modules are not ported yet (see
-//!   the slice's report).
+//! * test_volumes_dialog: its module is not ported yet (see the slice's report).
 
 #![allow(
     clippy::float_cmp,
@@ -29,10 +29,12 @@ pub mod window_support;
 pub mod support;
 
 mod surface_edit_dialogs;
+mod surface_style_manager;
 mod surfaces_panel;
 
 use katana_window::host::RecordingHost;
 use katana_window::terrain::surface_edit_dialogs::{SurfaceCombineDialog, SurfaceLevelsDialog};
+use katana_window::terrain::surface_style_manager::SurfaceStyleManagerDialog;
 use katana_window::terrain::surfaces_panel::SurfacesPanel;
 
 macro_rules! drawn {
@@ -45,4 +47,9 @@ macro_rules! drawn {
     };
 }
 
-drawn!(SurfaceCombineDialog, SurfaceLevelsDialog, SurfacesPanel);
+drawn!(
+    SurfaceCombineDialog,
+    SurfaceLevelsDialog,
+    SurfaceStyleManagerDialog,
+    SurfacesPanel,
+);
