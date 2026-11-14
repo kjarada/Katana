@@ -374,10 +374,10 @@ pub mod terrain {
     // P
     pub mod surface_plan_painter;
     // TR
+    pub mod surface_edit_dialogs;
+    pub mod surface_edit_ui;
     pub mod surfaces_panel;
-    // TR: pub mod surface_edit_dialogs;
-    //     pub mod surface_edit_ui;
-    //     pub mod surface_style_manager;
+    // TR: pub mod surface_style_manager;
     //     pub mod volumes_dialog;
     // K:  pub mod main_window_surface_display;
 }

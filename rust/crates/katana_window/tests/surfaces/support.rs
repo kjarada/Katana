@@ -13,7 +13,7 @@ use katana_cad::view_set::{ViewId, ViewSet};
 use katana_geometry::{Box2, Point2, Point3};
 use katana_terrain::{NamedSurface, SurfaceStore, TinSurface};
 use katana_window::drive::{ControlRecord, Harness};
-use katana_window::host::{Answer, PickId, RecordingHost, ViewAccess};
+use katana_window::host::{Answer, PickId, RecordingHost, VerbOutcome, ViewAccess};
 
 /// What the harness draws with the recording host.
 pub trait Drawn {
@@ -102,6 +102,36 @@ impl<D: Drawn> Bench<D> {
 /// what came of it: the C++ tests' runner.
 pub fn interpreter_host() -> RecordingHost {
     RecordingHost::new().answering(Answer::Interpreter)
+}
+
+/// A host that keeps the lines and answers each as the C++ tests' Recorder does: ok, "ran <line>".
+pub fn ran_host() -> RecordingHost {
+    RecordingHost::new().answering(Answer::Custom(Box::new(|_parts, line| {
+        VerbOutcome::new(true, &format!("ran {line}"), "")
+    })))
+}
+
+/// The drawing given surfaces of these names beside what it has, as one step.
+pub fn add_surfaces(host: &mut RecordingHost, names: &[&str]) {
+    if names.is_empty() {
+        return;
+    }
+    let mut store: SurfaceStore = host.document().surfaces().clone();
+    for name in names {
+        let surface = TinSurface::create(
+            vec![
+                Point3::new(0.0, 0.0, 1.0),
+                Point3::new(10.0, 0.0, 2.0),
+                Point3::new(10.0, 10.0, 3.0),
+                Point3::new(0.0, 10.0, 2.0),
+            ],
+            vec![[0, 1, 2], [0, 2, 3]],
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("{}", error.describe()));
+        keep(&mut store, named(name, Arc::new(surface), "test"));
+    }
+    set_surfaces(host, store, "TEST");
 }
 
 /// A flat square of side 10 at height `z`: two triangles.
