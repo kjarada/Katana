@@ -345,15 +345,15 @@ Before handing back:
 
 ## 8. Agents and worktrees
 
-**Run at most two agents at a time - the owner's standing instruction
-(2026-11-14): "change it to 2".** It was one at a time from 2026-11-12, after
-six agents running at once spent the account's limit in minutes and all six of
-a wave stopped mid-file. So:
+**Run at most four agents at a time - the owner's standing instruction
+(2026-11-15): "spawn 4 agents max".** It was two from 2026-11-14 and one from
+2026-11-12, after six agents running at once spent the account's limit in
+minutes and all six of a wave stopped mid-file. So:
 
-- At most TWO agents are running at any moment, a read-only sweep included.
-  Start another only after one of the two has reported (or been stopped).
+- At most FOUR agents are running at any moment, a read-only sweep included.
+  Start another only after one of the four has reported (or been stopped).
 - Work that splits into parts whose file sets do not overlap is still split,
-  each part with its own worktree and brief: the parts are run two at a time,
+  each part with its own worktree and brief: the parts are run four at a time,
   not all side by side.
 - An agent that stopped part way is resumed from where it stopped, not
   started again.
