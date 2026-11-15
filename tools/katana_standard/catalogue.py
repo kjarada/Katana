@@ -560,7 +560,7 @@ def catalogue(data, root):
     w("**Yellow and cream print light.** On white paper yellow gas (%.2f : 1) and cream sewer (%.2f : 1) cannot "
       "reach 3:1 and still be yellow and cream. The colours are the standard's, so they are not darkened: they "
       "keep their 3:1 against the plan ground and print light, and the tests name them as the only two "
-      "excused. Communications is white, which the plot prints black (`cad::paperColour`: every channel at "
+      "excused. Communications is white, which the plot prints black (`plot::paper_colour`: every channel at "
       "230 or more), so it is held to the floor as printed (%.2f : 1). A plot that must show gas and sewer "
       "firmly plots monochrome, which prints every pen black, or recolours those layers." %
       (colours.paper_contrast(colours.COLOURS["katana gas"]), colours.paper_contrast(colours.COLOURS["katana sewer"]),
@@ -766,7 +766,7 @@ def catalogue(data, root):
     w("")
     w("- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` "
       "and `codes.py`, each importing nothing of the outside and each with its own `--check`; the check of "
-      "`colours.py` also reads `kNearWhiteChannel` from `include/katana/cad/plot.hpp`, so the white rule it "
+      "`colours.py` also reads `NEAR_WHITE_CHANNEL` from `rust/crates/katana_cad/src/plot.rs`, so the white rule it "
       "prints by is the plot's. `codes.py --check` also holds that every definition is named by a code and "
       "every colour of the palette is used. "
       "`make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, "
@@ -786,10 +786,11 @@ def catalogue(data, root):
       "shared, with its own tests in `test_originality.py`). `katana_standard_parity` and "
       "`katana_standard_originality` run them against the two tracked files, and `katana_standard_parity_script` "
       "and `katana_standard_originality_script` run the scripts' own tests on small invented libraries; "
-      "`KatanaStandard.EveryKeyOfTheNswBuiltInIsHereAndNoOtherKey` and "
-      "`KatanaStandard.FortyCodesAcrossAllClassesResolveToTheKindOfEntityTheNswBuiltInMakes` do the same in C++, "
+      "`katana_standard::every_key_of_the_nsw_built_in_is_here_and_no_other_key` and "
+      "`katana_standard::forty_codes_across_all_classes_resolve_to_the_kind_of_entity_the_nsw_built_in_makes` "
+      "do the same in Rust, "
       "from the two files alone.")
-    w("- **Tests.** `KatanaStandard.*` (`tests/cad/customisation/test_katana_standard.cpp`) reads the committed "
+    w("- **Tests.** `katana_standard::*` (`rust/crates/katana_cad/tests/tool_cases/katana_standard.rs`) reads the committed "
       "file with the strict reader and holds the counts, the grammar, every name resolved, every definition "
       "used and catalogued, the weights, the utility words, the geometry bounds of the contract and the "
       "byte-for-byte writer round trip. `" + CLI_IMPORT_TEST + "` imports the invented field file; `" +
@@ -825,7 +826,7 @@ def catalogue(data, root):
     w("")
     w("- **Yellow and cream print light.** AS 5488's gas and sewer colours are under 3:1 on white paper, and the "
       "plot has no rule that darkens a light colour: it turns only white and near-white pens black "
-      "(`cad::paperColour`). A rule that did, for any pen under 3:1, would change every plot, so it is the "
+      "(`plot::paper_colour`). A rule that did, for any pen under 3:1, would change every plot, so it is the "
       "owner's decision; until then they print light, as the palette section says.")
     w("- **The earlier file names of an old project** belonged to the NSW customisation and are answered by it "
       "alone (`docs/customisation.md`, \"Several built-ins\"): opened under Katana Standard such a project lists "

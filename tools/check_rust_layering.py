@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # tools/check_rust_layering.py [--crates DIR] [--partial] [checkout-root]
 #
-# The `rust_layering` test: the Rust port's crates keep the layering rule of
-# tools/check_layering.cmake (docs/rust.md, "The workspace").
+# The `rust_layering` test: the crates keep the layering rule of
+# tools/check_layering.cmake, the table that says which layer may depend on
+# which (docs/rust.md, "The workspace"). Since the C++ went (2026-11-15) this is
+# the only check of that rule; the table is data, and a crate cannot use a
+# crate it does not name in its manifest, so the manifests are what is read.
 #
 # Each crate of rust/crates is one layer's: katana_<layer>, with two names
-# that differ - katana_window is the qt layer's (the window is not Qt in the
-# port) and katana_updater, the helper program, is the update layer's, as
-# src/katana_updater is. It checks, against the table's KATANA_ALLOWED_<layer>
-# lines, which it reads rather than repeats:
+# that differ - katana_window is the qt layer's (the window is not Qt) and
+# katana_updater, the helper program, is the update layer's. It checks,
+# against the table's KATANA_ALLOWED_<layer> lines, which it reads rather
+# than repeats:
 #   * every layer of the table has a crate, and every crate is a layer's
 #     (--partial skips the first half, for a fixture of a few crates);
 #   * a crate's katana_* [dependencies] and [build-dependencies] are its own
 #     layer's crates or ones the table allows it. [dev-dependencies] are not
-#     checked, as tests/ is not in the C++ check: a test may reach what its
-#     layer may not;
+#     checked: a test may reach what its layer may not;
 #   * no crate re-exports a third-party crate it depends on (`pub use rusqlite
 #     ...`), which would put a third-party type in its public interface - the
 #     table's second rule (Rule 4).

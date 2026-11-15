@@ -2,11 +2,12 @@
 """Install the Linux or macOS toolchain Katana builds with, into one prefix.
 
 The Windows build takes every tool and library from MSYS2 UCRT64. Linux
-distributions lag behind that - Ubuntu 24.04 ships GCC 14, CGAL 5.6 and PROJ
-9.4, and Katana needs GCC 15 or later (#embed, C++26 library additions),
-CGAL 6 (Constraint_id::index) and PROJ 9.5 - so the Linux build takes the same
-set from conda-forge instead, into a prefix of its own that touches nothing
-else on the machine (docs/building.md, "Linux").
+distributions lag behind that - Ubuntu 24.04 ships PROJ 9.4 and a Rust older
+than the workspace's rust-version - so the Linux build takes the same set from
+conda-forge instead, into a prefix of its own that touches nothing else on the
+machine (docs/building.md, "Linux"): Rust, the GDAL, PDAL, PROJ, SQLite and
+libcurl the crates link, the C and C++ compilers their small native shims are
+compiled with, and CMake and Ninja for the test runner.
 
 The environment is solved with py-rattler, from PyPI, rather than conda or
 mamba: it needs no installer of its own, and it reaches the channel over plain
@@ -19,9 +20,9 @@ here. Idempotent: a prefix whose stamp matches SNAPSHOT and SPECS is left
 alone, so running this again costs a second.
 
 macOS takes the same libraries from conda-forge for osx-arm64, with clang and
-libc++ instead of GCC: every conda-forge C++ library for macOS - Qt, PDAL,
-GDAL - is built against libc++, and GCC's libstdc++ cannot link with them
-(docs/building.md, "macOS"). The script keeps its name because the cloud
+libc++ instead of GCC: every conda-forge C++ library for macOS - PDAL, GDAL -
+is built against libc++, and GCC's libstdc++ cannot link with them, so the
+PDAL shim must be compiled by that clang (docs/building.md, "macOS"). The script keeps its name because the cloud
 session's start-up hook and the documentation name it.
 
     python3 tools/setup_linux_toolchain.py            # into $KATANA_TOOLCHAIN or /opt/katana-toolchain
@@ -49,39 +50,29 @@ DEFAULT_PREFIX = "/opt/katana-toolchain"
 SNAPSHOT = datetime.datetime(2026, 9, 26, tzinfo=datetime.timezone.utc)
 
 # The same versions MSYS2 gives the Windows build where the two can match
-# (GCC 16.2); the libraries at the newest release the snapshot has. Eigen is
-# held at 3.4 because the build asks for Eigen3.
+# (GCC 16.2); the libraries at the newest release the snapshot has. libcurl
+# comes with GDAL, which links it.
+#
+# Removed with the C++ (2026-11-15), each needed by the C++ build alone: Qt
+# (qt6-main, and libgl-devel and libvulkan-headers below, for its OpenGL and
+# Vulkan headers), CGAL with GMP and MPFR, Eigen, Boost's headers,
+# nlohmann_json, GoogleTest and Google Benchmark, clang-format, and the
+# headers of OpenSSL and zlib that the C++ update library linked (the Rust
+# update engine verifies and inflates in Rust). The solve still holds the
+# shared libraries of the last two, through GDAL and libcurl. A prefix
+# installed before then still has them all; it builds the same, and this
+# script, run again, installs the smaller set (its stamp names the specs).
 COMMON_SPECS = [
     "cmake >=3.31",
     "ninja",
-    "clang-format",
-    "qt6-main >=6.9",
-    "cgal-cpp >=6",
-    "eigen >=3.4,<3.5",
     "proj >=9.5",
     "gdal",
     "pdal",
-    "nlohmann_json",
-    # The update engine's own two, which src/katana_update/CMakeLists.txt asks
-    # for by name: Ed25519 from libcrypto, raw inflate from zlib. The solve
-    # holds both without them - openssl through Qt, GDAL and libcurl, but zlib
-    # only because geotiff, libspatialite and prometheus-cpp name it rather
-    # than libzlib, which is the shared library alone: no zlib.h and no
-    # libz.so for a linker to ask for. Named so that a moved SNAPSHOT cannot
-    # drop the headers and leave the configure to a distribution's copy under
-    # /usr.
-    "openssl",
-    "zlib",
     "libsqlite",
-    "gmp",
-    "mpfr",
-    "libboost-headers",
-    "gtest",
-    "benchmark",
-    # The Rust port's compiler (docs/rust.md): from the same snapshot as the
-    # libraries it links - GDAL, PROJ, PDAL, SQLite, libcurl - so that WSL,
-    # the Linux and macOS release jobs and a cloud session, whose egress
-    # reaches conda-forge but not static.rust-lang.org, build it alike.
+    # The compiler (docs/rust.md): from the same snapshot as the libraries it
+    # links - GDAL, PROJ, PDAL, SQLite, libcurl - so that WSL, the Linux and
+    # macOS release jobs and a cloud session, whose egress reaches
+    # conda-forge but not static.rust-lang.org, build it alike.
     "rust",
 ]
 
@@ -102,10 +93,6 @@ LINUX_SPECS = [
     # solver takes the newest sysroot (2.39 here), and a release built on
     # Ubuntu 24.04 would refuse to start on anything older.
     f"sysroot_{_LINUX_TARGET} 2.28.*",
-    "libgl-devel",
-    # Qt declares QVulkanInstance only where vulkan/vulkan.h is; the loader
-    # itself comes with the machine's graphics driver.
-    "libvulkan-headers",
 ]
 
 # clang 23 is the newest conda-forge has for osx-arm64 at SNAPSHOT; the
@@ -122,7 +109,8 @@ def is_macos() -> bool:
 
 SPECS = COMMON_SPECS + (MACOS_SPECS if is_macos() else LINUX_SPECS)
 
-# The C++ compiler the toolchain files (cmake/toolchains/) expect in bin/.
+# The C++ compiler the native shims are compiled with (the crates' build.rs,
+# and the release jobs' CC and CXX), whose presence says the prefix is whole.
 if is_macos():
     COMPILER = "arm64-apple-darwin20.0.0-clang++"
 elif is_arm64():
