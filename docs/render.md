@@ -30,8 +30,10 @@ code comments say the same things next to the lines they govern.
 ## Why the 3D view "looked weird sometimes" (2026-09-24)
 
 Measured on the owner's archives (`Test 4 with Tin`, `plot_PW_example_data`,
-`test multiple tins`, `test trimishes complex`) through the real widget before
-this work, and each fixed below:
+`test multiple tins`, `test trimishes complex`) through the C++ window's real
+widget before this work, and each fixed below; the fixes are the Rust's too,
+and the timings here and under "Measurements" are the C++ build's (the Rust
+renderer, a port of it, has not been timed):
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -608,9 +610,10 @@ selected entity in the core's colour and width, without the casing: it kept
 a width of its own (the option `selectedLineWidth`, since removed), 2 px, which no view
 read and which looked like the view's setting
 (`cad_scene::the_one_list_build_draws_a_selected_line_at_the_selections_one_width`). Walking
-the ids rather than the drawing took `BM_SceneSelectionBuild` from 0.039 /
-0.028 ms to 0.006 / 0.005 ms (256 / 512 cells; medians of three, main
-against the view-sync worktree, both Release, 2026-09-30), casing and all.
+the ids rather than the drawing took the C++ build's `BM_SceneSelectionBuild`
+from 0.039 / 0.028 ms to 0.006 / 0.005 ms (256 / 512 cells; medians of three,
+main against the view-sync worktree, both Release, 2026-09-30), casing and
+all.
 The culled walk finds exactly what the walk of the drawing found: the
 one-list build still walks the drawing, drawing each selected entity it
 meets in the selection colour, and the overlay is exactly its
@@ -712,7 +715,8 @@ through the scene's centre looked like axes and meant nothing); faded into the
 background towards its rim. Each line is emitted **cell by cell**: a
 full-length line's quad touches every tile its bounding box does, and the old
 fixed grid's 162 long diagonals cost 70-95 ms a frame at 1600x1000-1920x1080,
-95% of a small scene's time; cut into cells the same grid measured about 3 ms.
+95% of a small scene's time; cut into cells the same grid measured about 3 ms
+(the C++ build's frames).
 With no depth written, a later grid line covers an earlier one where they
 cross, so the plain lines are emitted first, then every fifth, then the axes:
 no plain line breaks an axis
@@ -732,8 +736,9 @@ headless ratio of 1; the C++ suite ran it again at `QT_SCALE_FACTOR=1.25`).
 
 ## Measurements
 
-All on the i7-1270P laptop this project is built on, shared with other agents
-and on battery: **ratios and counts, not absolute times**.
+All the C++ build's, from before the port, on the i7-1270P laptop this
+project is built on, shared with other agents and on battery: **ratios and
+counts, not absolute times**. No Rust benchmark of the renderer exists yet.
 
 ### Benchmarks (the C++ build's `bench_render`, removed with the C++ tree)
 
@@ -806,7 +811,7 @@ every archive under 530 pixels.
 
 ### The real archives (headless widget, 1200x800)
 
-A scratch harness drove `RenderView` offscreen over each archive and
+A scratch harness drove the C++ window's `RenderView` offscreen over each archive and
 saved what it painted - iso, top, 12 notches in, 8 notches out, orthographic
 12 in, a low orbit - with the build before this work and after it, and timed
 the paint that follows a selection click (single samples on a busy machine:
@@ -839,21 +844,9 @@ read them as sizes, not ratios). What changed, looking at the pictures:
 * No anti-aliasing, no transparency, no text in 3D (text is a point marker),
   no point clouds in 3D, no selecting in 3D: the zoom finds what is drawn
   under the cursor (`katana_cad::scene_zoom::pick_drawn_point`), a click does not.
-* No verb reaches a 3D view's camera: its zoom cannot be typed on the
-  window's command line or run by a script. The headless driver reaches it
-  as a person does, with the wheel (`~RenderView2 X,Y N`, docs/headless.md),
-  and reads it back (`?RenderView2`); `katana_cli` and `katana_mcp` have no
-  views, so nothing there has a camera to zoom. The verb is not added here
-  because the view-sync branch moves `ZOOM` into the shared interpreter (its
-  own `view_verbs.rs` in cad), with `ZOOM IN`, `OUT` and a factor for plan views
-  that it refuses for a 3D one; a second `ZOOM` beside that one would be a
-  defect. Where the two meet, those words on a 3D view should call
-  `render_view_widget::zoom_at_pixel` at the view's middle (or `AT x,y`), and a
-  `-DDRIVE` test read the camera back from `VIEWS`, whose record for a 3D
-  view carries the keys `?RenderView2` prints. Also at that merge:
-  view-sync's `prepare_gpu_frame` widens the depth box by the selection's
-  ghosts, where this change's uses `katana_cad::scene::scene_depth_box`, which must then take
-  them too.
+* (Settled since: `ZOOM` reaches a 3D view's camera - IN, OUT and a factor
+  turn its wheel over its middle pixel, `katana_cad::view_verbs` - and the
+  depth box takes the selection's ghosts, `katana_cad::scene::scene_depth_box`.)
 * The 3D pick's aperture is an angle about the pixel's ray: three pixels in
   the middle of the view and more towards its edges, up to 1.5 times in the
   corner of a 4:3 view and 1.7 in a 16:9 one (`PickOptions::aperture`).
@@ -869,8 +862,6 @@ read them as sizes, not ratios). What changed, looking at the pictures:
   dense TIN at extents is still bound by triangle setup and binning.
 * Zoom-extents centres the scene's box, so in perspective the near half of a
   large flat site fills more of the view than the far half.
-* `draw_list.rs` still describes `DrawLine::depth_bias` as NDC depth; it is
-  pixel footprints of view distance (above).
 * The GPU renderer must match four rules of this path: the grid, edges and
   selection-casing passes write no depth; the edges come surface by surface in reverse (as
   `build_terrain` emits them); a point sprite is decided at its centre against

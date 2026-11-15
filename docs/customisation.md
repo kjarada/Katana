@@ -558,8 +558,8 @@ for everything except a definition's `strokes`, which it turns into
 `katana_entity::Stroke` values as they go by. A library is 35,000 strokes, and a tree
 holds each as a list of its own with its word as text of its own - most of
 what a tree of the whole file weighs, built to be read once and thrown away.
-On a generated customisation of the reference one's size this took the reader
-from 55 ms to 43 ("Not done" has the measurement and what is left). What a
+On a generated customisation of the reference one's size this took the C++
+reader from 55 ms to 43 ("Not done" has the measurement and what is left). What a
 refusal says of a stroke, and the order refusals come in, are as they would be
 from a tree: the strokes' first problem is kept with its place and reported
 when its definition is read.
@@ -1013,10 +1013,16 @@ survives being read and written.
   `"colour": "orange"` draws. It should be filled from
   `katana_entity::colour_names::standard_colour_names`; left because the window's behaviour belongs
   to the work that gives it Settings.
-- **The reader is slower than the readers it replaces.** The measurement
-  that can be repeated is the C++ build's `bench_customisation` benchmark, and its
-  figures are under "What reading and writing cost" at the end of this
-  document. What follows is the first measurement, kept for what it found:
+- **The reader's cost is measured on the C++ build only.** The Rust reader
+  (`katana_core::json`, a translation of the C++'s JSON library) has not
+  been timed, and there is no Rust benchmark of it. The C++ reader was
+  slower than the older readers it replaced, and half of its read was the C
+  library's `strtod`; the Rust converts a number with Rust's own `parse`,
+  correctly rounded like `strtod` but not the same code, so that half may
+  not be there - a Rust benchmark would say. The C++ build's
+  `bench_customisation` figures are under "What reading and writing cost" at
+  the end of this document. What follows is the first C++ measurement, kept
+  for what it found:
   made once, on 2026-10-06, with a throwaway program (Release, GCC 16, best
   of 15 runs) on a GENERATED customisation of the reference one's size - 792
   definitions, 35,684 strokes in the reference mix with coordinates of three
@@ -1047,8 +1053,8 @@ survives being read and written.
   the JSON library offers no way to replace it: only a scanner of this
   format's own would. *Not done*: that is a second JSON reader in the
   program, and it should be decided on a benchmark that can be repeated, on
-  the converted reference customisation. Both now exist, and say the same
-  ("What reading and writing cost").
+  the converted reference customisation. The C++ build's said the same
+  ("What reading and writing cost"); the Rust's is to be written first.
 
 ## The verbs
 
@@ -2200,9 +2206,10 @@ release job against the tracked default having been deleted or a path being wron
   gives this program's and CUSTOMISE BUILTIN lists the built-in customisations it
   has". Settings' sentence, beside its own Built-in library, says "Reset to Built-in
   gives this program's".
-- **the C++ build's `bench_customisation` benchmark** measures the file `KATANA_BUILTIN_CUSTOMISATION`
-  names, which is Katana Standard now: 319,020 bytes, about a fifth of the 1,540,630
-  of the NSW file it once measured.
+- **the C++ build's `bench_customisation` benchmark** measured the file
+  `KATANA_BUILTIN_CUSTOMISATION` named, which became Katana Standard: 319,020
+  bytes, about a fifth of the 1,540,630 of the NSW file it once measured. It
+  went with the C++ tree and has no Rust twin.
 - **A project that records the earlier file names** is told that they are not
   loaded, under the default, without the `CUSTOMISE BUILTIN NSW` words: the missing
   names are those file names and not "NSW", and only a name that is a built-in's is
@@ -2646,7 +2653,9 @@ checked.
 
 ### What reading and writing cost
 
-the C++ build's `bench_customisation` benchmark, Release, GCC 16.2, late on 2026-10-06
+Every figure in this section is the C++ build's, from its `bench_customisation`
+benchmark (gone with the C++ tree; the Rust reader is not measured, "Not
+done" above). Release, GCC 16.2, late on 2026-10-06
 with no other build seen running; the median of five repetitions, in
 milliseconds, the coefficient of variation of the five between 1 and 5 % in
 every row. The generated customisation is made in code to the reference
@@ -2703,7 +2712,8 @@ take from it: half of a read is `strtod`.
 *Not done, and nothing was changed to get these figures:* the only way to
 take that half is a number scanner of the format's own in place of the JSON
 library's, which is a second JSON reader in the program. It is the owner's
-to decide against 20 ms at start-up; the benchmark is there to decide it on.
+to decide against 20 ms at start-up - on a Rust benchmark, since the Rust
+reader's numbers do not go through `strtod`.
 
 ### Decisions about the converter, and what was rejected
 

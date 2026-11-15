@@ -791,7 +791,7 @@ It is not in the repository, and neither is the workbook: TfNSW's cover page
 says the document may be used only by those providing services to a NSW
 Government agency with its authority, and is not under an open licence. So
 the repository carries the means of reading it - the same arrangement as the
-12d reference files - and a checkout that has a copy, as
+reference customisation files - and a checkout that has a copy, as
 Utility-Schema-and-Specification-v1.2.xlsx in the git-ignored folder
 "docs/TfNSW Reference Files", registers
 `cli.utility_check_schema_from_the_workbook`, which extracts it, and

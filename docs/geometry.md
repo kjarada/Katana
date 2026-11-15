@@ -520,18 +520,19 @@ missing.
 ## Rejecting early without changing the answer (`polygon.rs`, `primitives2d.rs`)
 
 `is_simple` is O(n^2) and runs on validation, so its constant matters: a
-512-vertex boundary took 3.2 ms and takes 0.80 ms. The saving is a bounding-box
-reject before the segment-segment intersection, with a margin of `4 *
-kGeometric` - **derived, not chosen**: `intersect()` reports a hit when the
+512-vertex boundary took 3.2 ms and then 0.80 ms (the C++ build's figures,
+like every timing in this section; the Rust keeps the same code and is not
+measured). The saving is a bounding-box reject before the segment-segment
+intersection, with a margin of `4 * GEOMETRIC` - **derived, not chosen**: `intersect()` reports a hit when the
 segments come within `2 * GEOMETRIC` of each other, so two boxes further apart
 than twice that cannot contain a reported intersection. Removing the margin
 fails two polygon tests, which was checked by removing it.
 
-`clip_polygon` swaps its two vertex buffers rather than move-assigning them, so
-Sutherland-Hodgman's per-clip-edge lists are allocated once instead of once per
-edge. `Rectangle2::closest_point` walks a stack `std::array<Point2, 4>` instead
-of building a `std::vector` of corners on every call, and is 2.8x faster for
-it. This said it is called once per candidate entity on every pick and snap; it
+`clip_polygon` swaps its two vertex buffers (`std::mem::swap`) rather than
+making new ones, so Sutherland-Hodgman's per-clip-edge lists are allocated
+once instead of once per edge. `Rectangle2::closest_point` walks a fixed
+array of four corners instead of building a growable list of them on every
+call, and was 2.8x faster for it. This said it is called once per candidate entity on every pick and snap; it
 is not - `Rectangle2` is not an entity geometry, and in production it is only
 built by `from_corners()` and turned into a polyline - so the saving is real but
 lands nowhere hot.

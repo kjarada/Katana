@@ -396,8 +396,9 @@ for its description or one tile and names each that does not answer.
 
 ## Verified live, 2026-09-25
 
-Headless, through the verbs, `QT_QPA_PLATFORM=offscreen`, in the cloud
-environment described above:
+Headless, through the verbs of the C++ programs (offscreen), in the cloud
+environment described above; the Rust port's live tests have not been run
+yet (`docs/rust.md`, "Where it stands", step 5):
 
 - Copernicus GLO-30 over the Sydney CBD (151.20,-33.875 to 151.215,-33.865)
   into MGA 56 at 30 m: 47 x 38 cells, -4.4 to 111.8 m - a surface model, so
