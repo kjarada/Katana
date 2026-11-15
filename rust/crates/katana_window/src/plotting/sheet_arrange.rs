@@ -700,6 +700,22 @@ impl SheetEditor {
     /// The Match Scale To list (sheetMatchScaleMenu): every view drawn to a scale in the set but
     /// the selected one, by sheet, with the scale it is drawn at.
     pub fn match_scale_menu(&self, host: &dyn Host) -> Menu {
+        let key = (
+            host.document().model_revision(),
+            self.canvas.selection_serial,
+            self.current_sheet(),
+        );
+        if let Some((made_for, menu)) = &*self.match_scale_cache.borrow()
+            && *made_for == key
+        {
+            return menu.clone();
+        }
+        let menu = self.make_match_scale_menu(host);
+        *self.match_scale_cache.borrow_mut() = Some((key, menu.clone()));
+        menu
+    }
+
+    fn make_match_scale_menu(&self, host: &dyn Host) -> Menu {
         let mut menu = Menu::new("sheetMatchScaleMenu", "Match Scale To...");
         let document: &Document = host.document();
         let set = document.sheet_set();

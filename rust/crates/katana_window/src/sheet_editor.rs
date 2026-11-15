@@ -2716,6 +2716,10 @@ pub struct SheetEditor {
     pub(crate) focus_canvas: bool,
     /// The egui adaptor's double-click and held buttons.
     pub(crate) egui_state: CanvasInput,
+    /// The Match Scale To list as it was last made, and what it was made for (the model revision,
+    /// the selection and the sheet): the window's menus are made every frame, and the list asks
+    /// the scale every view is drawn at, which cuts an automatic section.
+    pub(crate) match_scale_cache: RefCell<Option<((u64, u64, usize), Menu)>>,
 }
 
 /// What the egui adaptor keeps between frames about the pointer over the canvas.
@@ -2770,6 +2774,7 @@ impl SheetEditor {
             paste_ready: false,
             focus_canvas: false,
             egui_state: CanvasInput::default(),
+            match_scale_cache: RefCell::new(None),
         };
         editor.count_text = String::from("0 sheets");
         editor
