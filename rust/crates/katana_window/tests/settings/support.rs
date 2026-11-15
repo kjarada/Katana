@@ -240,6 +240,7 @@ impl Default for Fixture {
     }
 }
 
+#[allow(clippy::type_complexity, reason = "The one boxed callback type the dialog takes.")]
 fn counter(count: &Rc<Cell<u32>>) -> Box<dyn FnMut(&mut dyn Host)> {
     let count = Rc::clone(count);
     Box::new(move |_host: &mut dyn Host| count.set(count.get() + 1))

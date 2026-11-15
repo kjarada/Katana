@@ -414,12 +414,11 @@ fn leaf_rects(tree: &Tree<ViewTab>, area: Rect, pixels_per_point: f32) -> Vec<(N
 }
 
 /// Where a docked view is in the dock area: its leaf's rectangle (the whole dock, its bar
-/// included), less the tab strip of a group, and whether it is the page shown.
+/// included) less the tab strip of a group, and whether it is the page shown.
 #[derive(Clone, Copy, Debug)]
 struct Placed {
     rect: Rect,
     shown: bool,
-    tabbed: bool,
 }
 
 // ---- Inner: the views, their docks and their bars ------------------------------------------------
@@ -474,7 +473,6 @@ impl Inner {
                         Placed {
                             rect: dock,
                             shown: at == leaf.active.0,
-                            tabbed,
                         },
                     );
                 }
@@ -516,6 +514,9 @@ impl Inner {
             }
             if let Some(section) = &mut view.section {
                 section.resize(state, width, height);
+            }
+            if let Some(render) = &mut view.render {
+                render.take_layout_size(width, height);
             }
         }
     }
@@ -897,7 +898,7 @@ impl Inner {
         &mut self,
         views: &RefCell<ViewSet>,
         id: ViewId,
-        mut cx: Option<&mut dyn PlanViewHost>,
+        mut cx: Option<&mut (dyn PlanViewHost + '_)>,
     ) {
         let events = match self.find_mut(id).and_then(|view| view.plan.as_mut()) {
             Some(plan) => plan.take_events(),
@@ -913,7 +914,7 @@ impl Inner {
         views: &RefCell<ViewSet>,
         id: ViewId,
         event: PlanViewEvent,
-        cx: Option<&mut dyn PlanViewHost>,
+        cx: Option<&mut (dyn PlanViewHost + '_)>,
     ) {
         match event {
             PlanViewEvent::Prompt(text) => self.push(WorkspaceEvent::Prompt(text)),
@@ -1023,7 +1024,7 @@ impl Inner {
         }
     }
 
-    fn drain_all(&mut self, views: &RefCell<ViewSet>, mut cx: Option<&mut dyn PlanViewHost>) {
+    fn drain_all(&mut self, views: &RefCell<ViewSet>, mut cx: Option<&mut (dyn PlanViewHost + '_)>) {
         if cx.is_some() {
             for (id, event) in std::mem::take(&mut self.held_events) {
                 self.plan_event(views, id, event, cx.as_deref_mut());
@@ -1101,7 +1102,7 @@ impl Inner {
         views: &RefCell<ViewSet>,
         kind: ViewKind,
         activate_it: bool,
-        cx: Option<&mut dyn PlanViewHost>,
+        cx: Option<&mut (dyn PlanViewHost + '_)>,
     ) -> ViewId {
         // A split made while the other views were hidden would be made against the wrong
         // neighbours.

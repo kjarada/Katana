@@ -569,10 +569,8 @@ impl GpuSceneView {
         // The frame is drawn in the pixels actually drawn - device pixels - so the image is not
         // upscaled on a HiDPI display. Through a copy: the host's camera stays in logical pixels,
         // where the render view and its rasteriser keep it.
-        let (wide, high) = match &self.target {
-            Some(target) => (target.width(), target.height()),
-            None => return None,
-        };
+        let target = self.target.as_ref()?;
+        let (wide, high) = (target.width(), target.height());
         let mut frame_camera = *host.camera();
         frame_camera.set_viewport_size(wide, high);
         self.in_frame = true;

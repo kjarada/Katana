@@ -24,7 +24,7 @@ use crate::fixture_customisation::{
     install_noticed_session, read_customisation_fixture,
 };
 use crate::support::{
-    Bench, Fixture, KEEP, KEPT_FILE, ONE_CODE, automation, carried_out, install_site, native, ok,
+    Fixture, KEEP, KEPT_FILE, ONE_CODE, automation, carried_out, install_site, native, ok,
     path_text, refused, site_built_in,
 };
 use crate::window_support::Scratch;
@@ -1174,7 +1174,7 @@ mod settings_dialog {
         assert!(bench.visible("settingsShowNotice"));
         assert!(!bench.checked("settingsShowNotice"));
         assert!(!bench.visible("settingsNotice"), "hidden until asked");
-        assert!(NOTICE_BOX.read_only);
+        const { assert!(NOTICE_BOX.read_only) };
 
         bench.press("settingsShowNotice");
         assert!(bench.visible("settingsNotice"));

@@ -58,7 +58,7 @@ mod settings_updates {
         assert_eq!(bench.control("settingsUpdateTokenSave").text, "Save");
         assert_eq!(bench.control("settingsUpdateTokenClear").text, "Clear");
         // A token is typed as dots.
-        assert!(TOKEN_FIELD.password);
+        const { assert!(TOKEN_FIELD.password) };
 
         // Turned to as the headless driver's settingsPages=Updates turns to it.
         bench.turn_to("Updates");

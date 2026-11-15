@@ -17,10 +17,6 @@
     reason = "Inner module names identify the C++ suites for the parity checker."
 )]
 
-#[allow(
-    dead_code,
-    reason = "The shared fixtures; these twins use only some of them."
-)]
 #[path = "../support/fixture_customisation.rs"]
 pub mod fixture_customisation;
 

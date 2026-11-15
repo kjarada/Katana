@@ -7,9 +7,6 @@
 //! are drawn each frame into the editor's form (an egui Grid of two columns) and the change, when
 //! there is one, is answered: the editor makes it, as one undoable step, and the rows are drawn
 //! from the edited viewport at the next frame.
-//!
-//! WHAT DIFFERS FROM THE C++. The spacing box shows 0 as "0.000 m", not "Auto" (the foundation's
-//! number box has no special text for its minimum); its tooltip still says what Auto comes to.
 
 use egui::Ui;
 use katana_cad::plotting::sheet_set::{GridStyle, Viewport};
@@ -87,7 +84,10 @@ impl GridRows {
                     ui,
                     "sheetGridInterval",
                     &mut self.interval,
-                    SpinRange::new(0.0, 1e6, 1.0, 3).with_suffix(" m"),
+                    // At its minimum, 0, the box reads "Auto".
+                    SpinRange::new(0.0, 1e6, 1.0, 3)
+                        .with_suffix(" m")
+                        .with_special_text("Auto"),
                 )
             })
             .inner

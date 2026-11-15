@@ -3,7 +3,7 @@
 //! as JSON, and the page setup changed without plotting. The port of plotting/sheet_set_menu.
 //!
 //! Every item runs the SHEETS line a person would type through the editor (SheetEditor::run_line)
-//! - in the window, its one executor - so the log shows what to type, the history keeps it, and
+//! (in the window, its one executor), so the log shows what to type, the history keeps it, and
 //! an edit is ONE undoable step:
 //!
 //! ```text

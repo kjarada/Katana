@@ -134,7 +134,7 @@ fn advice_words(reply: &str) -> String {
     let number = |key: &str| {
         values
             .get(key)
-            .and_then(|value| parse_finite_double(value))
+            .and_then(parse_finite_double)
             .unwrap_or(0.0)
     };
     let text = |key: &str| values.get(key).copied().unwrap_or_default();
@@ -786,7 +786,7 @@ impl SheetEditor {
         let id = main_plan_of(&set, self.current_sheet());
         let mut dialog = SuggestPaperDialog {
             frame: DialogFrame::new("sheetSuggestPaperDialog", "Choose Paper for a Scale"),
-            sheet: (self.current_sheet() + 1).to_string(),
+            sheet: format!("{}", self.current_sheet() + 1),
             note: format!(
                 "The smallest paper that holds {} at the scale, the other views kept in \
                  proportion.",

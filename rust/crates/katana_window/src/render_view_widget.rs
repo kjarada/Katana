@@ -949,7 +949,7 @@ impl RenderView {
 
     fn rebuild_if_needed(
         &mut self,
-        mut gpu: Option<&mut GpuSceneView>,
+        gpu: Option<&mut GpuSceneView>,
         scene: &RenderScene<'_>,
         state: &mut ViewState,
     ) {
@@ -1023,7 +1023,7 @@ impl RenderView {
             && self.layers.edges.empty()
             && self.layers.entities.empty();
         if self.framed_empty && !self.scene_empty {
-            self.zoom_extents_on(gpu.as_deref_mut(), scene, state);
+            self.zoom_extents_on(gpu, scene, state);
         }
     }
 
@@ -1241,6 +1241,19 @@ impl RenderView {
         }
         state.camera.set_viewport_size(wide, high);
         true
+    }
+
+    /// The size the workspace's layout gives a view that has framed nothing yet, before its first
+    /// frame draws it: a script's VIEWS OPEN 3d then ZOOM IN, with no frame between, frames the
+    /// scene at the size the view is seen at (the C++'s workspace does the layout Qt has queued
+    /// before it zooms). A framed view is resized by its frame, which refits it with the scene.
+    pub fn take_layout_size(&mut self, width: i32, height: i32) {
+        if self.framed {
+            return;
+        }
+        self.width = width.max(1);
+        self.height = height.max(1);
+        self.dirty = true;
     }
 
     /// QWidget::resizeEvent: the view is `width` by `height` of its own logical pixels now.
@@ -1801,12 +1814,10 @@ impl RenderView {
                         let _ = self.wheel(scene, state, local(at), notches * 120.0);
                     }
                 }
-                egui::Event::Key { key, pressed, .. } => {
-                    if pressed && response.has_focus() {
-                        let key = SceneKey::from_egui(key);
-                        if key != SceneKey::Other {
-                            let _ = self.key_press(scene, state, key);
-                        }
+                egui::Event::Key { key, pressed, .. } if pressed && response.has_focus() => {
+                    let key = SceneKey::from_egui(key);
+                    if key != SceneKey::Other {
+                        let _ = self.key_press(scene, state, key);
                     }
                 }
                 _ => {}

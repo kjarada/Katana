@@ -501,6 +501,9 @@ pub struct SpinRange {
     pub decimals: usize,
     /// QDoubleSpinBox::suffix (" m").
     pub suffix: &'static str,
+    /// QAbstractSpinBox::specialValueText: what the box reads at its minimum, in place of
+    /// the number and its suffix ("Auto"). Empty for none.
+    pub special: &'static str,
 }
 
 impl SpinRange {
@@ -511,11 +514,26 @@ impl SpinRange {
             step,
             decimals,
             suffix: "",
+            special: "",
         }
     }
 
     pub const fn with_suffix(self, suffix: &'static str) -> Self {
         Self { suffix, ..self }
+    }
+
+    pub const fn with_special_text(self, special: &'static str) -> Self {
+        Self { special, ..self }
+    }
+
+    /// QAbstractSpinBox::text(): the special text at the minimum, else the number as the
+    /// box rounds it, with no suffix (what the records have always carried).
+    pub fn shown(&self, value: f64) -> String {
+        if !self.special.is_empty() && value == self.minimum {
+            String::from(self.special)
+        } else {
+            crate::format::qt_fixed(value, self.decimals)
+        }
     }
 
     /// QDoubleSpinBox's rounding of a value to its decimals: the number as it would show it, read
@@ -555,19 +573,31 @@ pub fn spin(ui: &mut Ui, name: &str, value: &mut f64, range: SpinRange) -> Respo
             Act::ScrollTo => {}
         }
     }
-    let mut response = ui.add(
-        egui::DragValue::new(value)
-            .range(range.minimum..=range.maximum)
-            .speed(range.step)
-            .fixed_decimals(range.decimals)
-            .suffix(range.suffix),
-    );
+    let mut drag = egui::DragValue::new(value)
+        .range(range.minimum..=range.maximum)
+        .speed(range.step)
+        .fixed_decimals(range.decimals)
+        .suffix(range.suffix);
+    if !range.special.is_empty() {
+        let minimum = range.minimum;
+        let decimals = range.decimals;
+        let special = range.special;
+        let suffix = range.suffix;
+        drag = drag.suffix("").custom_formatter(move |number, _| {
+            if number == minimum {
+                String::from(special)
+            } else {
+                format!("{}{suffix}", crate::format::qt_fixed(number, decimals))
+            }
+        });
+    }
+    let mut response = ui.add(drag);
     if changed {
         response.mark_changed();
     }
     scroll_if_asked(ui, taken.as_ref(), &response);
     let mut record = base_record(ui, name, ControlKind::Spin);
-    record.value = crate::format::qt_fixed(*value, range.decimals);
+    record.value = range.shown(*value);
     super::registry::record(ui, &response, record);
     response
 }

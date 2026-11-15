@@ -8,6 +8,7 @@ mod view_scale {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::rc::Rc;
+    use std::sync::Arc;
 
     use katana_cad::view_set::{ViewSet, set_view_paper_scales};
     use katana_cad::viewport_layout::ViewKind;
@@ -19,6 +20,7 @@ mod view_scale {
     };
     use katana_geometry::{Point2, Segment2};
     use katana_window::canvas::{Canvas, Color, Image, RasterCanvas};
+    use katana_window::customisation::style_painter::CanvasRasterBackend;
     use katana_window::drive::Harness;
     use katana_window::host::{Answer, RecordingHost, VerbOutcome};
     use katana_window::plan_painter::{
@@ -145,6 +147,7 @@ mod view_scale {
                     PlanMedium::Screen
                 },
                 plot: self.on_paper.then_some(&plot),
+                raster: Some(Arc::new(CanvasRasterBackend)),
                 ..PlanPaintOptions::default()
             };
             let cache = &mut self.cache;
@@ -432,8 +435,8 @@ mod view_scale {
         w.frame();
         assert!(w.state(1).paper_style_scale.is_none());
         assert_eq!(
-            w.harness.report("viewScaleMode").as_deref(),
-            Ok("Auto (fixed screen size)")
+            w.harness.control("viewScaleMode").map(|mode| mode.value).as_deref(),
+            Some("Auto (fixed screen size)")
         );
         assert!(w.tip(1, "ViewScaleButton").contains("Auto"));
         assert!(w.document_mut().redo().is_ok());

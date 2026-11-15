@@ -1716,7 +1716,7 @@ impl SettingsDialog {
             }
             // Read, never typed into: what is drawn is a copy the frame throws away.
             let mut notice = self.notice.clone();
-            let draw_notice = |ui: &mut Ui| {
+            let mut draw_notice = |ui: &mut Ui| {
                 controls::text_with(ui, "settingsNotice", &mut notice, NOTICE_BOX);
             };
             if self.notice_shown {

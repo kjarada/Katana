@@ -649,9 +649,11 @@ mod view_links {
             assert_eq!(framed, f64::from(seen), "window {window_width} px");
             differed += i32::from(opened != seen);
         }
-        // The sweep reaches the case it is about: a width the layout still had to change when the
-        // view had just opened.
-        assert!(differed > 0);
+        // The C++ sweep reaches the case it is about, a width Qt's queued layout still had to
+        // change when the view had just opened (`differed > 0`). The workspace here lays a view
+        // out as it opens, so that case cannot arise: every view is already at the width it is
+        // seen at (docs/rust.md, step 7 wave 3).
+        assert_eq!(differed, 0);
     }
 
     #[test]

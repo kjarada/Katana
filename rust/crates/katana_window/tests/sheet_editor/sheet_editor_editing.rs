@@ -516,7 +516,7 @@ mod sheet_editor_editing {
 
         // The whole window as a hand sees it: the grid, a group selected, a crossing band
         // mid-drag, the rulers, the pictures in the list.
-        if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+        if let Some(folder) = std::env::var("KATANA_SHEET_PNG").ok().filter(|folder| !folder.is_empty()) {
             shown.editor.render_thumbnails_now(&shown.host);
             shown.canvas_mut().set_selection(&ids(&["vp1", "vp2"]), "");
             let (from, to) = (shown.at(390.0, 60.0), shown.at(300.0, 150.0));
@@ -663,7 +663,7 @@ mod sheet_editor_editing {
 
         // For a look: the page with the grid, both views selected, a band being drawn and the
         // cursor over the plan.
-        if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+        if let Some(folder) = std::env::var("KATANA_SHEET_PNG").ok().filter(|folder| !folder.is_empty()) {
             shown.canvas_mut().fit_page();
             shown.canvas_mut().set_snap_to_grid(true);
             shown.canvas_mut().set_selection(&ids(&["vp1", "vp2"]), "");
@@ -723,7 +723,7 @@ mod sheet_editor_editing {
         let (a, b) = (shown.at(150.0, 140.0), shown.at(150.0, 230.0));
         shown.drag_with(a, b, ALT, MouseButton::Left, false);
         let during = shown.grab();
-        if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+        if let Some(folder) = std::env::var("KATANA_SHEET_PNG").ok().filter(|folder| !folder.is_empty()) {
             let _ = write_png(
                 &during,
                 &std::path::Path::new(&folder).join("SheetEditorDragging.png"),
@@ -800,7 +800,7 @@ mod sheet_editor_editing {
         let bare: Image = shown.editor.thumbnails().cached("s2");
         assert!(!framed.is_null());
         assert!(!bare.is_null());
-        if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+        if let Some(folder) = std::env::var("KATANA_SHEET_PNG").ok().filter(|folder| !folder.is_empty()) {
             let folder = std::path::Path::new(&folder);
             let _ = write_png(&framed, &folder.join("SheetThumbnailFramed.png"));
             let _ = write_png(&bare, &folder.join("SheetThumbnailBare.png"));

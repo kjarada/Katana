@@ -100,7 +100,7 @@ pub fn view_layers_line(action: &str, view: ViewId, layers: &[String]) -> Result
 /// VIEWS HIDE or SHOW <view> REFERENCE <ids>: the reference layers (the Reference Data panel's ids)
 /// a view hides. `action` is HIDE or SHOW.
 pub fn view_references_line(action: &str, view: ViewId, references: &[u64]) -> String {
-    let ids: Vec<String> = references.iter().map(u64::to_string).collect();
+    let ids: Vec<String> = references.iter().map(|id| format!("{id}")).collect();
     format!("VIEWS {action} {view} REFERENCE {}", ids.join(" "))
 }
 

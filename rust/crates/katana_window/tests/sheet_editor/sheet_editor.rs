@@ -196,7 +196,7 @@ mod sheet_editor {
         shown.paint();
         assert_eq!(shown.canvas().renders(), renders + 1);
 
-        if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+        if let Some(folder) = std::env::var("KATANA_SHEET_PNG").ok().filter(|folder| !folder.is_empty()) {
             let image = shown.grab();
             let _ = write_png(
                 &image,

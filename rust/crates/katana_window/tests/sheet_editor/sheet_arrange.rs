@@ -349,7 +349,7 @@ mod sheet_arrange_editor {
                 let _ = paint_sheet(canvas, &set, 0, &source, &options, &mut cache);
             });
         }
-        if let Ok(folder) = std::env::var("KATANA_SHEET_PNG") {
+        if let Some(folder) = std::env::var("KATANA_SHEET_PNG").ok().filter(|folder| !folder.is_empty()) {
             let _ = write_png(
                 &image,
                 &std::path::Path::new(&folder).join("SheetArrangeTurned.png"),

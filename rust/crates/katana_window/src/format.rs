@@ -67,7 +67,7 @@ fn locale_groups_digits() -> bool {
 /// (12.40625 at four places is 12.4063); Rust's formatting rounds it to even (12.4062), as C's
 /// printf does. They differ only on an exact tie - a value whose exact binary expansion ends in a
 /// 5 at the place after the last kept - so the tie is found exactly and rounded Qt's way.
-pub(crate) fn qt_fixed(value: f64, decimals: usize) -> String {
+pub fn qt_fixed(value: f64, decimals: usize) -> String {
     if value.is_nan() {
         return String::from("nan");
     }

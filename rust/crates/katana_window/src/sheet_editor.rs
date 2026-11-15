@@ -128,7 +128,6 @@ use crate::plotting::sheet_readout::{SheetCursorReadout, readout_text};
 use crate::plotting::sheet_rulers::{
     RulerView, paint_paper_grid, paint_sheet_rulers,
 };
-use crate::plotting::sheet_set_menu::SheetSetMenu;
 use crate::plotting::sheet_tables::resolved_sheet_set;
 use crate::plotting::sheet_thumbnails::SheetThumbnails;
 use crate::sheet_painter::{
@@ -1265,7 +1264,7 @@ impl SheetCanvas {
         self.update_readout(document, at);
         match self.drag {
             Drag::Pan => {
-                self.origin = self.origin + (at - self.press_widget);
+                self.origin += at - self.press_widget;
                 self.press_widget = at;
                 return;
             }
@@ -2599,7 +2598,7 @@ impl TitleBlockDialog {
                     let code = if row < 26 {
                         String::from(char::from(b'A' + row as u8))
                     } else {
-                        row.to_string()
+                        format!("{row}")
                     };
                     let today = katana_cad::plotting::sheet_commands::frame_date(
                         katana_core::civil_date::today_utc(),
@@ -2686,9 +2685,11 @@ pub struct SheetEditor {
     /// nothing, and the choice is not offered.
     pub plan_view_area: Option<Box<dyn Fn() -> Option<Box2>>>,
     /// The system's file dialog, or what a test answers in its place.
+    #[allow(clippy::type_complexity, reason = "A boxed callback, named where it is set.")]
     pub choose_file: Option<Box<dyn FnMut(&FileAsk) -> String>>,
     /// The questions the editor puts, or what a test answers in their place; unset, a question
     /// opens a box and waits for it (in a headless session none is put).
+    #[allow(clippy::type_complexity, reason = "A boxed callback, named where it is set.")]
     pub answer_question: Option<Box<dyn FnMut(&QuestionAsk) -> bool>>,
     /// The status bar's message (statusBar()->showMessage).
     pub(crate) status: String,
@@ -2707,7 +2708,6 @@ pub struct SheetEditor {
     pub(crate) title_block: Option<TitleBlockDialog>,
     pub(crate) arrange: ArrangeDialogs,
     pub(crate) plot_dialog: Option<PlotDialog>,
-    pub(crate) sheet_set_menu: SheetSetMenu,
     /// The context menu open, where, and the viewport it is for.
     pub(crate) context_menu: Option<(egui::Pos2, String)>,
     pub(crate) rename: Option<(usize, String)>,
@@ -2719,6 +2719,7 @@ pub struct SheetEditor {
     /// The Match Scale To list as it was last made, and what it was made for (the model revision,
     /// the selection and the sheet): the window's menus are made every frame, and the list asks
     /// the scale every view is drawn at, which cuts an automatic section.
+    #[allow(clippy::type_complexity, reason = "A one-entry cache keyed as its comment says.")]
     pub(crate) match_scale_cache: RefCell<Option<((u64, u64, usize), Menu)>>,
 }
 
@@ -2768,7 +2769,6 @@ impl SheetEditor {
             title_block: None,
             arrange: ArrangeDialogs::default(),
             plot_dialog: None,
-            sheet_set_menu: SheetSetMenu::default(),
             context_menu: None,
             rename: None,
             paste_ready: false,
@@ -3116,7 +3116,7 @@ impl SheetEditor {
                         return Err(make_error(
                             ErrorCode::FileExportFailure,
                             "could not copy the image into the project",
-                            error.to_string(),
+                            format!("{error}"),
                         ));
                     }
                 }
@@ -3203,7 +3203,7 @@ impl SheetEditor {
         let sheets = if all_sheets {
             String::new()
         } else {
-            (self.current_sheet() + 1).to_string()
+            format!("{}", self.current_sheet() + 1)
         };
         let mut request = plot_request_for(&set.page_setup, path, &sheets);
         request.format = PlotFormat::Pdf;
@@ -4919,10 +4919,10 @@ impl SheetEditor {
     /// at each frame and when a test waits.
     pub fn poll(&mut self, host: &mut dyn Host) {
         self.observe(&*host);
-        if let Some((from, to)) = self.list.take_move_request() {
-            if let Err(error) = self.move_sheet_to(host, from, to) {
-                self.report(host, &error.describe(), true);
-            }
+        if let Some((from, to)) = self.list.take_move_request()
+            && let Err(error) = self.move_sheet_to(host, from, to)
+        {
+            self.report(host, &error.describe(), true);
         }
         self.run_queued(host);
         if self.checks.due() {
@@ -5057,10 +5057,10 @@ impl SheetEditor {
                 }
             }
         }
-        if let Some(name) = chosen {
-            if let Err(error) = self.trigger(host, &name) {
-                self.report(host, &error.describe(), true);
-            }
+        if let Some(name) = chosen
+            && let Err(error) = self.trigger(host, &name)
+        {
+            self.report(host, &error.describe(), true);
         }
         self.dialogs_ui(&ctx, host);
         self.poll(host);

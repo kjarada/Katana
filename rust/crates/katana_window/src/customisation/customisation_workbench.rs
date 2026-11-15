@@ -141,6 +141,7 @@ pub struct CustomisationWorkbench {
     settings: Option<SettingsDialog>,
     /// Asked instead of a question box in an interactive session - a test's answer. None: the
     /// question is a refusal said in the log, as egui has no modal box to wait in.
+    #[allow(clippy::type_complexity, reason = "A boxed callback, named where it is set.")]
     pub confirm: Option<Box<dyn FnMut(&str) -> bool>>,
     /// The editor asked for by a manager (CustomisationContext::edit_definition).
     edits: Rc<RefCell<Vec<(DefinitionEdit, String)>>>,

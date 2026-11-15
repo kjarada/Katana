@@ -63,7 +63,7 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases; 1,124 of the window's 1,609 twinned) |
+| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases; 1,563 of the window's 1,609 twinned) |
 | 8-9 | not started |
 
 ### Step 1: the foundation crates
@@ -1007,6 +1007,58 @@ Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 2: in the
 commit that merged it; the window's twins 1,124 of 1,609 (`tests/qt_widgets`
 1,075 of 1,548, `tests/gpu` 49 of 61).
 
+**Wave 3** ported, in four agents run at most two at a time, what stands on
+wave 2: the update and settings dialogs; the 3D and elevation views, the GPU
+scene view and the section view, with the annotation and road workbenches;
+the sheet editor, its plot dialog, arrange, checks, Sheet Set menu and
+generate; and the view workspace, the views' Layers popup, the start screen
+and the customisation workbench, which joined the code manager to the real
+name picker and style preview in place of wave 2's seams. Decisions:
+
+- **The workspace lays its docks out itself**, with egui_dock's `DockState`
+  and the split arithmetic of its tree, not `DockArea`'s tab strips, and
+  lays a view out as it opens. Qt queued that layout, so a script's
+  `VIEWS OPEN plan` then `ZOOM IN` framed the view at a width the layout
+  then changed, and the C++ workspace does the queued layout before it
+  zooms; here the case cannot arise, and the twin of
+  `ViewLinks.AZoomStraightAfterAViewOpensIsFramedAtTheWidthTheViewIsSeenAt`
+  asserts that no view's width changed after it opened, where the C++
+  asserts that its sweep reached one that did. A 3D view that has framed
+  nothing yet takes its size from that layout too (`take_layout_size`), so
+  its first zoom frames the scene at the size it is seen at; found at
+  integration, where it framed at its default 640 by 480.
+- **A ZOOM line run while the drawing is lent** goes to a probe interpreter
+  over a scratch copy of the views, which records the zoom requests; the
+  workspace applies them and replays the line. Zoom to Selection is queued
+  as the line `ZOOM SELECTION view=<id>`.
+- **The sheet editor edits as the C++ does**: its canvas and panels call
+  cad's undoable functions on the Document, and named lines run as lines; it
+  never waits on a modal question, and a plot runs inside the frame under
+  the progress dialog's Cancel. Its unnamed C++ controls are given `sheet*`
+  names; a wheel notch is 50 points.
+- **A number box has Qt's special value text**
+  (`SpinRange::with_special_text`): the plan grid's spacing reads "Auto" at
+  0, and its record carries what `QAbstractSpinBox::text()` would. A fill of
+  "Auto" is refused, as `--fill` reads a number.
+- **A hidden button is pressed through its dialog** (the update dialog's
+  `click`), as egui draws a hidden control disabled and the harness refuses
+  a press of one.
+
+Wave 3 was written by agents that did not build, in four worktrees, and
+merged into `rust-port`. Its first compile found 6 errors (an
+`Option<&mut dyn PlanViewHost>` that could not be lent twice in a loop, and
+a missing `mut`) and 29 Clippy findings, and its first run 5 failures, each
+fixed in the code or in the twin and none by changing an expected value:
+the grid's "Auto" (above); the 3D view framed at its default size (above);
+the sweep (above); a twin that asked `--report` for a combo box, which it
+does not report, where the C++ reads the box's current item; and a twin
+whose painter had no raster back end, so no symbol was blitted from a
+sprite, where the C++ painter always reaches Qt's. Six sheet editor twins
+wrote their pictures into the crate when `KATANA_SHEET_PNG` was set empty;
+they now write only to a folder named.
+
+Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 3: in the commit that merged it, the C++ suite 9,923 of 9,923 with this record in place (9,922 before it, the one failure the docs check finding wave 2's note on the code manager's seams after the seams had gone), cargo test 9,144 passed and 0 failed, the cli gate 379 of 379; the window's twins 1,563 of 1,609 (`tests/qt_widgets` 1,506 of 1,548, `tests/gpu` 57 of 61).
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -1855,7 +1907,33 @@ pin classifies every algorithm GDAL lists.
 - **Printing is not handed to the operating system yet**:
   `hand_to_print_queue` returns Unsupported after the PDF is written (step
   8, with Windows).
-- **The code manager's seams to the shared name picker and style preview**
-  (`rust/crates/katana_window/src/customisation/codes_seams.rs`) stand in
-  for the modules written beside it: its previews draw nothing until they
-  are joined (wave 3).
+- **Defects found in porting step 7's wave 3, ported as they are:** the
+  sheet canvas fits the sheet again on every resize, losing a zoom made by
+  hand; adding an image viewport opens a file dialog even headless; the
+  interactive plot's busy flag is not reset when the plot throws.
+- **Where step 7's wave 3 differs from the C++:** a GPU view's frame is read
+  back to the CPU every frame (the window has no `egui_wgpu` yet); the
+  dialog frame has no hide and show of its own; a control's record has no
+  tooltip, and a list has no row activation, so the sheet list's rename by
+  double click never fires; there are no printers to list; the
+  `QT_SCALE_FACTOR=1.25` reruns have no twin; `ErrorCode` has no Cancelled,
+  so a cancel is `InvalidState`; the customisation workbench names the style
+  manager `styleManager` where the C++ renamed it `styleManagerDialog`; the
+  plan painter's road model switch is process-wide, and the twins that set
+  it hold a mutex; the sheet editor's source provider is given only the
+  Document (reference data, meshes, surfaces and the logo must reach it
+  another way, in wave 4).
+- **The window's cases still without a twin** (46 of 1,609, by name): the
+  screen-fit cases (16) and the general texts (3), whose tooltips and
+  native file dialogs need the main window (wave 4); the definition editor
+  (6), the 3D surface legend (4), the GPU render cases (4), the symbol
+  library (3), the view image export (2), the Surfaces panel (2), and one
+  each of the Sheet Set menu, the road dialogs, the import placement, the GIS
+  menus, the flyout button and the customisation workbench.
+- **One workspace twin fails now and then**:
+  `view_chrome::a_maximised_view_fills_the_workspace_and_restore_gives_every_view_back_its_place`
+  failed in 2 of 6 runs at wave 3's integration ("view 2 is docked": the
+  3D view had no place in the dock) and passed on its own, with the other
+  workspace twins and in the whole run. The harness's clock is simulated,
+  the tests run headless with no GPU, and the dock code keeps no state
+  beyond the test; the cause is not found yet.

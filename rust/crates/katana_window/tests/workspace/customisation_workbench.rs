@@ -530,7 +530,7 @@ mod customisation_workbench {
         let id = bench
             .views
             .as_ref()
-            .and_then(|views| ViewAccess::active_plan_view(views))
+            .and_then(ViewAccess::active_plan_view)
             .expect("a plan view");
         must(
             bench.host.document_mut(),

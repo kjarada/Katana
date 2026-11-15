@@ -304,7 +304,7 @@ impl PlotDialog {
     pub fn request(&self) -> PlotRequest {
         let mut request = PlotRequest::default();
         match self.sheets {
-            PlotSheets::Current => request.sheets = (self.current + 1).to_string(),
+            PlotSheets::Current => request.sheets = format!("{}", self.current + 1),
             PlotSheets::List => request.sheets.clone_from(&self.list_text),
             PlotSheets::All => {}
         }
