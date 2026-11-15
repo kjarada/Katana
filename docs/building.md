@@ -17,12 +17,17 @@ programs cargo built.
 
 ## Where it is built
 
-**In WSL, until the port works on Windows** (the owner's ruling of
-2026-11-05, `docs/rust.md`, "The owner's decisions"): the distribution
-Ubuntu-24.04, with the conda-forge prefix of `tools/setup_linux_toolchain.py`
-in `/opt/katana-toolchain`. Its setup, as root, is `docs/rust.md`, "WSL, where
-the port is built". Nothing is built or run on Windows meanwhile; the native
-Windows build below is written for when the owner says so.
+**In WSL and natively on Windows.** The port was built in WSL alone from
+2026-11-05, by the owner's ruling that nothing run on Windows until the port
+was a working version (`docs/rust.md`, "The owner's decisions"). On
+2026-11-16 the owner asked for the Windows build, which lifts that ruling.
+The native build in MSYS2 UCRT64 ("Windows", below) is up: clippy and the
+whole release build pass there (rustc 1.99, 2026-11-16); its test results
+are not yet in, so this document does not yet say that the suite passes on
+Windows. The WSL build is the
+distribution Ubuntu-24.04 with the conda-forge prefix of
+`tools/setup_linux_toolchain.py` in `/opt/katana-toolchain`; its setup, as
+root, is `docs/rust.md`, "WSL, where the port is built".
 
 | Where | Rust | The native shims' compilers | GDAL, PDAL, PROJ, SQLite, libcurl | CMake, Ninja |
 |---|---|---|---|---|
@@ -56,12 +61,17 @@ bash tools/build_visible.sh wsl                 # all: clippy, build, cargo test
 bash tools/build_visible.sh wsl cargo           # the Rust workspace alone: clippy, build, cargo test
 bash tools/build_visible.sh wsl cargo -p katana_cad --test interpreter   # only those cargo tests
 bash tools/build_visible.sh wsl test -R Docs    # the runner's suite only, ctest's arguments after it
+bash tools/build_visible.sh                     # the same phases natively on Windows: all
+bash tools/build_visible.sh cargo               #   ... the Rust workspace alone
+bash tools/build_visible.sh test -R '^cli\.'    #   ... the runner's suite only
 bash tools/build_visible.sh close               # close this checkout's finished windows
 ```
 
-A WSL run's window, log and status file are on the Windows side, in
-`build/wsl/` (`visible_build.log`, `visible_build.status`); the build itself is
-on WSL's own disk, in `~/katana-build/<worktree>/`: cargo's target in
+Without `wsl` the phases are the same and run natively in MSYS2 UCRT64
+("Windows", below); with it they run in the WSL distribution. A WSL run's
+window, log and status file are on the Windows side, in `build/wsl/`
+(`visible_build.log`, `visible_build.status`); the build itself is on WSL's
+own disk, in `~/katana-build/<worktree>/`: cargo's target in
 `cargo/`, the runner in `tests/`. A build through `/mnt/d` is slow. Git is
 never run inside WSL: a worktree made by Windows git names its repository by a
 `D:/` path that Linux cannot open, and the build needs no git.
@@ -80,11 +90,14 @@ What `all` runs, in order, stopping after a build step that fails:
 4. `cargo test --locked --workspace --release --no-fail-fast`; the log sums the
    counts of every test binary into one line,
    `== cargo test: N passed, M failed, K ignored`.
-5. The runner: `cmake --preset linux-release -B ~/katana-build/<worktree>/tests
+5. The runner: in WSL `cmake --preset linux-release -B ~/katana-build/<worktree>/tests
    -DKATANA_PROGRAMS=<cargo>/release`, then `ctest --parallel 14
    --output-on-failure` under `xvfb-run -a`, where the window's tests draw
-   through Vulkan (Mesa's lavapipe in WSL). It runs after a failed cargo test
-   too, so one run gives both answers, and the run fails if either failed.
+   through Vulkan (Mesa's lavapipe in WSL); on Windows the `release` preset
+   into `build/release`, with `KATANA_PROGRAMS` the checkout's
+   `target/release`, and no display server. It runs after a failed cargo
+   test too, so one run gives both answers, and the run fails if either
+   failed.
 
 Every cargo is `--locked` (the committed `Cargo.lock` is what is built)
 and given the same `RUSTFLAGS`, or each step would rebuild what the one before
@@ -98,20 +111,15 @@ is going is refused.
 Without `wsl` the same phases run natively on Windows in MSYS2 UCRT64
 (`/c/msys64/ucrt64/bin` first on `PATH`, or `KATANA_TOOLCHAIN_BIN` before it),
 cargo building into `target` and the runner into `build/release` with the
-`release` preset; the log and status are in `build/windows/`. That mode is
-kept for step 8 and not run now.
+`release` preset; the log and status are in `build/windows/`
+(`visible_build.log`, `visible_build.status`), and the wait is the same loop
+on that folder.
 
-**Gone with the C++** (2026-11-15): the `build` phase with its CMake targets,
-the C++ configure and ninja, the clang build directory of `KATANA_BUILD_DIR`,
-`KATANA_CONFIGURE_ARGS` and `KATANA_BUILD_KEEP_GOING`, and the two gates `wsl
-gate` and `wsl wgate`, which ran the C++ suite's cli and window tests against
-the Rust programs and compared the two programs' replies (step 6's gate, 379
-of 379; step 7's, 266 of 267: `docs/rust.md`). Their oracle was the C++ build;
-what they held is now the runner's suite run against the Rust alone. Two cargo
-tests that ran the C++ went with them for the same reason: the round-trip
-gate, which had every file of the test data read and written by both
-programs, and the number-format oracle, which compared the reply's number
-texts with the C++'s on every exponent.
+The script has no phase that builds anything but cargo's: the C++ build's
+phases and the two gates that compared the C++ and Rust programs' replies
+went with the C++ on 2026-11-15, since their oracle was the C++ build
+(`docs/rust.md`, "The C++ is removed"). What the gates held is the runner's
+suite, now run against the Rust alone.
 
 Why a window rather than the agent's own shell: that shell moves a command
 still running after ten minutes to the background, and the IDE does not show
@@ -179,16 +187,12 @@ Only those tools go on `PATH`: the prefix's `bin/` also holds a python3 that
 would shadow the system's. On 2026-11-05 the snapshot gave rustc 1.98.1,
 GCC 16.2.0, GDAL 3.13.2, PROJ 9.8.1 and PDAL 2.10.1.
 
-**What the prefix no longer holds** (2026-11-15). The C++ build needed Qt,
-CGAL with GMP and MPFR, Eigen, Boost's headers, nlohmann_json, GoogleTest,
-Google Benchmark, clang-format, the GL and Vulkan headers Qt's build asked for,
-and the headers of OpenSSL and zlib that the C++ update library linked; the
-Rust needs none of them (its update engine verifies Ed25519 and inflates in
-Rust). They were taken out of the script's specs, so its next run installs the
-smaller set; a prefix made before then still has them and builds the same.
-The solve was not read again for the smaller set, so which versions it gives
-GDAL and the rest is to be seen in the first prefix made from it; the snapshot
-date is unchanged.
+**The specs are the Rust's alone** since 2026-11-15: what only the C++ build
+needed (Qt, CGAL, Boost, GoogleTest and the rest) was taken out, so a new
+prefix is smaller, and one made before then still has them and builds the
+same. The solve was not read again for the smaller set, so which versions it
+gives GDAL and the rest is to be seen in the first prefix made from it; the
+snapshot date is unchanged.
 
 **Run-time paths.** cargo links each program with `-Wl,-rpath,<prefix>/lib`
 (`RUSTFLAGS`, set by `tools/build_visible.sh` and the release jobs), so the
@@ -238,7 +242,7 @@ cargo build --locked --workspace --release
 `-D_LIBCPP_DISABLE_AVAILABILITY` because libc++'s availability markup refuses
 functions the SYSTEM libc++ of the deployment target lacks, and the programs
 load conda-forge's, which the package carries (conda-forge's documented
-remedy). This recipe is the release job's and has not been run (step 8).
+remedy). This recipe is the release job's and has not been run.
 
 **Claude Code cloud sessions** run `.claude/hooks/session-start.sh` when they
 start, which runs the setup script into `/opt/katana-toolchain`.
@@ -249,7 +253,31 @@ MSYS2 UCRT64 has every library and a Rust for it, `mingw-w64-ucrt-x86_64-rust`
 (target `x86_64-pc-windows-gnu`, against UCRT): a program it builds imports
 only `api-ms-win-crt-*` and system DLLs, never msvcrt. Why that and not
 rustup's or the MSVC Rust is `docs/rust.md`, "Windows, once the port works".
-With `/c/msys64/ucrt64/bin` first on `PATH`:
+
+**The packages.** MSYS2 installed in `C:\msys64` (the path the script and the
+`release` preset name), then, in its UCRT64 shell, the set the Windows
+release job installs (`.github/workflows/release.yml`, its `pacboy` line):
+
+```sh
+pacman -S --needed mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gcc \
+    mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python \
+    mingw-w64-ucrt-x86_64-gdal mingw-w64-ucrt-x86_64-pdal mingw-w64-ucrt-x86_64-proj \
+    mingw-w64-ucrt-x86_64-sqlite3 mingw-w64-ucrt-x86_64-curl
+pacman -S --needed mingw-w64-ucrt-x86_64-nsis      # only to make the installer
+```
+
+GCC is there for the three shims, which must be compiled by the compiler
+GDAL and PDAL were built with; the linker cargo uses is the same GCC. Python
+is for the checks only. The Rust on the owner's machine is pinned at
+1.99.0-1, because the newer build of that version needs an `llvm-libs` that
+the rest of the toolchain was not built against (`docs/rust.md`, "Windows,
+once the port works"): `--needed` leaves an installed package as it is, but
+upgrading `rust` alone would move it past that toolchain, so update MSYS2
+whole (`pacman -Syu`) or not at all.
+
+**The build.** `bash tools/build_visible.sh` from Git Bash (or any bash),
+with no `wsl`: it puts `/c/msys64/ucrt64/bin` first on `PATH` itself. By
+hand, with that folder first on `PATH`:
 
 ```sh
 cargo build --locked --workspace --release
@@ -257,10 +285,34 @@ cmake --preset release -DKATANA_PROGRAMS=$(cygpath -m "$PWD/target/release")
 ctest --preset release --parallel 14
 ```
 
+Clippy and the release build pass this way (2026-11-16, rustc 1.99); the
+results of cargo's tests and the runner's suite on Windows are not yet in.
+
+**Running what cargo built.** The programs in `target/release` load GDAL,
+PDAL, PROJ, SQLite, libcurl and the GCC runtime as DLLs of
+`C:\msys64\ucrt64\bin`, which is on no `PATH` a program started from
+Explorer has. The runner puts that folder first on every test's `PATH`
+(`KATANA_RUNTIME_BIN`). To run the programs, `bash tools/stage_windows.sh`
+from the checkout's root makes a self-contained copy in
+`build/windows/Katana`, laid out as an install is: `bin/` with the four
+programs and every DLL they import from UCRT64, followed import by import
+with `objdump`, `share/gdal` and `share/proj`, and
+`etc/ssl/certs/ca-bundle.crt`, without which every `https://` request fails.
+`bash tools/stage_windows.sh --beside` puts the same runtime beside cargo's
+own output instead (the DLLs into `target/release`, the data one folder up),
+so that `target/release/katana.exe` itself starts from Explorer. It copies
+only, and refreshes a stage made before; it is a developer's copy, not a
+package ("Bundling").
+
+The Windows-only code - the updater's swap and its registry, the Credential
+Manager, the wide-path file operations - is compiled only here, and tested
+only by the native suite run (`docs/rust.md`, "Not done").
+
 On ARM64, MSYS2's CLANGARM64 environment has the same libraries with clang
 and libc++ and a Rust built for them (`mingw-w64-clang-aarch64-rust`); the
 shims are then compiled with `CC=clang CXX=clang++`, as the release job does.
-Nothing of this has been run since the owner's ruling (step 8).
+That has not been run on a machine of the owner's; the release job is where
+it is first tried.
 
 ## What cargo builds
 
@@ -307,7 +359,8 @@ own `version` in `Cargo.toml` is `0.0.0` and is not the product's.
 ### The desktop application
 
 ```sh
-~/katana-build/<worktree>/cargo/release/katana [project-dir] [file-to-import ...] [switches]
+~/katana-build/<worktree>/cargo/release/katana [project-dir] [file-to-import ...] [switches]   # WSL
+build/windows/Katana/bin/katana.exe [project-dir] [file-to-import ...] [switches]               # Windows, after tools/stage_windows.sh
 ```
 
 Each argument that is a directory is opened as a project; any other is
@@ -369,9 +422,9 @@ is the RUN-time seam, which the suite and a person set for one run, and a
 `KATANA_BUILTIN_CUSTOMISATION=none cargo test` must not build a program with
 no built-in. To change the default, change the constant in the build script.
 
-The C++ build's cache logic that moved a stale default once
-(`KatanaBuiltInDefault.cmake` and its test) went with the C++: cargo keeps no
-cache of the choice, so there is nothing to move.
+Cargo keeps no cache of the choice, so a changed default takes effect at the
+next build with nothing stale to move (the C++ build needed a script for
+that).
 
 The reference customisation in the legacy formats, which the NSW file was
 converted from, is third-party material kept on the owner's machine and never
@@ -405,7 +458,9 @@ build:
   a folder with no `bin/` beside it. It verifies Ed25519 and inflates with
   pure-Rust crates (ed25519-dalek, miniz_oxide), so it needs neither OpenSSL
   nor zlib, which the C++ helper linked statically. Whether the Windows build
-  of it imports only the system's DLLs is the release job's to show (step 8).
+  of it imports only the system's DLLs is what the runner's
+  `katana_updater_imports_only_os_dlls` reads, on Windows where `objdump` is
+  found; the first native run is the first to read it of the Rust helper.
 - **What makes a copy a release.** `share/katana/install.json`, written only
   into a package's staged tree by CPack (`docs/release.md`, "Packaging"):
   cargo's target folder, `cmake --install` and the `bundle` target are
@@ -431,12 +486,12 @@ configure checks. On Windows, copy **the whole `dist/Katana` directory**, then
 start `Katana/bin/katana.exe`; its DLLs are beside it, and the geospatial data
 and certificates in the neighbouring `share` and `etc` directories.
 
-Cargo's target folder is not made self-contained, as the C++ build tree was
-(its `katana_runtime` target deployed the DLLs beside the programs after
-every link): a developer runs the programs where the toolchain is - in WSL
-through their run-time path, on Windows with MSYS2 on `PATH`, which the
-runner puts first on every test's (`KATANA_RUNTIME_BIN`) - and the bundle is
-the tree that runs on its own.
+Cargo's target folder is not made self-contained by the build, as the C++
+build tree was after every link: a developer runs the programs where the
+toolchain is - in WSL through their run-time path, on Windows with MSYS2 on
+`PATH`, which the runner puts first on every test's (`KATANA_RUNTIME_BIN`) -
+or, on Windows, stages a runnable copy by hand with `tools/stage_windows.sh`
+("Windows"). The bundle is the tree a release ships.
 
 `bin/` sits beside `share/` because that is where the data-hungry libraries
 look: PROJ finds `proj.db` at `<its library>/../share/proj` by itself, and
@@ -481,9 +536,11 @@ builds, the five thousand GoogleTest processes the Windows virus scanner
 slowed - described a build that no longer exists and were removed with it;
 `git log` keeps them. The Rust's are `docs/rust.md`, "Measurements". What
 carries over: Microsoft Defender inspects a program as it starts, and a newly
-built one much longer, so when the port is built on Windows the checkout, its
-worktrees, the toolchain (`C:\msys64`) and cargo's folders are what IT could
-exclude, or a Dev Drive used for the checkouts.
+built one much longer, so on Windows - where every cargo test binary and every
+`cli.*` process is a new program - the checkout, its worktrees, the toolchain
+(`C:\msys64`) and cargo's folders are what IT could exclude, or a Dev Drive
+used for the checkouts. How long the native build and suite take is to be
+measured on its first passing run.
 
 ## Continuous integration
 

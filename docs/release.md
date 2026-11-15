@@ -12,10 +12,12 @@ cargo builds: each job builds the workspace with cargo, runs cargo's tests and
 the test runner's suite, and packages the four programs through the packaging
 project (`packaging/CMakeLists.txt`, "Packaging" below). The packages, their
 layout, the installer, the update assets and the signing are what they were.
-**The workflow in that form has not been run** ("Not done"): nothing of the
-port runs on Windows before the owner says so (`docs/rust.md`, "The owner's
-decisions"), and a release is where the Windows build is first proven. Where
-this document records what a run showed, the run was of the C++ build.
+**The workflow in that form has not been run** ("Not done"). The port was
+built in WSL alone until 2026-11-16, when the owner asked for the Windows
+build; the native Windows build is up, clippy and the release build passing
+(`docs/building.md`, "Windows"), and a run of this workflow is still where ARM64 and macOS are
+first built. Where this document records what a run showed, the run was of
+the C++ build.
 
 ## Publishing a release
 
@@ -304,12 +306,12 @@ run:
   `KATANA_UPDATE_SEQUENCE:STRING=<the sequence the first job printed>`
   after CMake's own output, and goes on: the settings reached the programs
   and the packaging ("Packaging").
-* The first Rust run: every job builds and tests at all. Windows (x86-64 and
-  ARM64) and macOS are where the Rust programs first meet those systems -
-  the updater's swap and the Credential Manager on Windows, the shims
+* The first Rust run: every job builds and tests at all. Windows ARM64 and
+  macOS are where the Rust programs first meet those systems - the shims
   compiled by CLANGARM64's clang and by conda-forge's clang on macOS, the
-  Metal backend of the window - and the run is that first meeting
-  (`docs/rust.md`, step 8).
+  Metal backend of the window, the NEON kernels - and Windows x86-64 is the
+  first time they are built on a runner rather than the owner's machine,
+  where the native build is up (`docs/rust.md`, step 8).
 * Each job's smoke test prints, before any program runs, the three members
   it found in the package's install record: `"target":"<token>"`,
   `"version":"X.Y.Z"` and `"sequence":<that same sequence>` ("Update
@@ -667,15 +669,16 @@ Until 2026-09-27 the jobs ran only the part of the suite that meets hardware
 nowhere else, and the release's question was only whether each package was
 complete. The whole suite is the stronger gate at the cost of runner time: a
 release is rare (it is started by hand), and the five machines are the only
-place four of the platforms' suites run at all - for the Rust, before step 8,
-the only place anything but Linux x86-64 runs. Those runners remain the only
-place some code meets real hardware:
+place three of the platforms' suites run at all: the owner's machine runs
+Linux x86-64 (WSL) and, since 2026-11-16, Windows x86-64; nothing runs on
+64-bit ARM or macOS but here. Those runners remain the only place some code
+meets real hardware:
 
 | Job | What only it proves |
 |---|---|
 | macOS arm64 | the GPU layer through Metal against the software rasteriser, on a real GPU |
 | Linux ARM64, Windows ARM64, macOS arm64 | the programs and every test on 64-bit ARM, natively, the SIMD kernels' ARM paths among them |
-| Windows x86-64, Windows ARM64 | the Windows-only code: the updater's swap and its registry, the Credential Manager, wide paths (`docs/rust.md`, step 8) |
+| Windows ARM64 | the Windows-only code - the updater's swap and its registry, the Credential Manager, wide paths - on ARM64; on x86-64 the native build on the owner's machine runs it too (`docs/rust.md`, step 8) |
 
 ### The smoke test
 
@@ -1500,25 +1503,28 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   runner's suite in place of the C++ configure, build and ctest, the
   packaging project in place of the C++ build's `package` target - and
   checked only as far as `tools/check_release_workflow.py` and its tests go
-  (the shape, and that every bash and PowerShell step parses). Nothing of
-  the port has run on Windows or macOS (`docs/rust.md`, step 8), so the first
-  run is where these are first seen: MSYS2's Rust on both Windows runners
-  (CLANGARM64's above all, whose target is `aarch64-pc-windows-gnullvm`), the
-  shims compiled by conda-forge's clang against the runner's SDK, the
-  dependency scan of the Rust programs and whether `katana_updater.exe`
-  imports only the system's DLLs (the C++ helper was static and a test read
-  its import table; nothing reads the Rust one's yet), the run-time path
-  rewrite on Linux (`file(RPATH_CHANGE)`) and macOS (`install_name_tool`),
-  the build-script check of the release configure, and the headless window
-  of each package. A run with the tag left empty is the way to try it.
+  (the shape, and that every bash and PowerShell step parses). The native
+  Windows x86-64 build is up on the owner's machine, its tests' results not
+  yet in
+  (`docs/building.md`, "Windows"); nothing of the port has run on ARM64 or
+  macOS. The first run is where these are first seen: MSYS2's Rust on a
+  runner, CLANGARM64's above all (its target is
+  `aarch64-pc-windows-gnullvm`), the shims compiled by conda-forge's clang
+  against the runner's SDK, the dependency scan of the Rust programs, the
+  run-time path rewrite on Linux (`file(RPATH_CHANGE)`) and macOS
+  (`install_name_tool`), the build-script check of the release configure, and
+  the headless window of each package. Whether `katana_updater.exe` imports
+  only the system's DLLs is read by the runner's
+  `katana_updater_imports_only_os_dlls` on Windows, in the native run and in
+  the job's. A run with the tag left empty is the way to try it.
 * **The Windows programs carry no icon and no version resource.** The C++
   `katana.exe` had both (`resources/katana.ico`, a `.rc` file); the Rust
   programs are built without, so Settings > Apps, the Start menu entry and
   the Desktop shortcut - which take the program's own icon - show Windows'
   generic one, and the file's properties name no publisher. The installer's
-  own icon is unchanged (`CPACK_NSIS_MUI_ICON`). Not added here: it is a
+  own icon is unchanged (`CPACK_NSIS_MUI_ICON`). Not added yet: it is a
   build script for the window crate (a resource compiled with the
-  toolchain's `windres`), which no Windows build can try before step 8.
+  toolchain's `windres`), to be tried once the native Windows build passes.
 * **The packaging's own configure is checked by nobody.** The C++ build ran
   `tools/check_install_rules.cmake` and `tools/check_installer_licence.cmake`
   on its own configure, and built a real NSIS installer from its CPack

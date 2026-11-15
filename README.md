@@ -29,20 +29,27 @@ Published by **Jarada**.
 
 ## Quick start
 
-Katana is written in Rust (one Cargo workspace, `Cargo.toml`). It was C++
-until 2026-11-15, when the owner had the C++ removed once every layer had its
-Rust twin (`docs/rust.md`). Until the Rust programs are built and tested on
-Windows, they are built in WSL or on Linux:
+Katana is written in Rust: one Cargo workspace at the root of the checkout
+(`Cargo.toml`), one crate per layer under `crates/`. It was C++ until
+2026-11-15, when the owner had the C++ removed once every layer had its Rust
+twin (`docs/rust.md`). On Linux, or in WSL:
 
 ```sh
-python3 tools/setup_linux_toolchain.py      # once: Rust, GCC 16 for the three C++ shims, GDAL, PDAL, PROJ, SQLite, CMake
 git clone https://github.com/kjarada/Katana.git
-cd Katana/rust                              # the workspace
-cargo build --release                       # the four programs, into cargo's target folder
+cd Katana
+python3 tools/setup_linux_toolchain.py      # once: Rust, GCC 16 for the three C++ shims, GDAL, PDAL, PROJ, SQLite, CMake
+cargo build --release                       # the four programs, into target/release
 cargo test --release                        # every crate's tests
-cp -r ../samples/site_plan ~/my_site_plan   # open a copy: opening a project can update it in place
+cp -r samples/site_plan ~/my_site_plan      # open a copy: opening a project can update it in place
 target/release/katana ~/my_site_plan
 ```
+
+On Windows, in MSYS2's UCRT64 environment, the same `cargo` commands build
+`target/release/katana.exe` once the packages `docs/building.md` lists
+("Windows") are installed. The native Windows build is up: clippy and the release
+build pass there (2026-11-16, after the port was built in WSL alone until
+then); its test results are not yet in. `tools/stage_windows.sh` gathers the
+DLLs the programs need into a copy that runs on its own.
 
 The toolchain script installs into `/opt/katana-toolchain`, or into
 `$KATANA_TOOLCHAIN` if you set it, and needs write access to that folder;
@@ -52,8 +59,7 @@ maintainer's WSL build puts cargo's output on WSL's own disk
 later, a C++ compiler for the three shims that reach GDAL's and PDAL's C++
 interfaces (`crates/katana_gis/native/`,
 `crates/katana_pointcloud/native/`), and GDAL, PDAL, PROJ and SQLite; the
-window is egui and wgpu, which cargo fetches. The native Windows build (MSYS2
-UCRT64's Rust) is written down in `docs/building.md` and not run yet.
+window is egui and wgpu, which cargo fetches.
 
 The four programs cargo builds:
 
@@ -73,8 +79,8 @@ project that compiles nothing and runs the programs cargo built
 **Status.** Pre-release, version 0.3.0. Releases are published on the
 project's [releases page](https://github.com/kjarada/Katana/releases), the
 first, v0.2.0, on 2026-10-14; the releases so far are of the C++ program. No
-release of the Rust programs has been made yet: by the owner's ruling nothing
-ships until the Rust is built and tested on Windows (`docs/rust.md`). The
+release of the Rust programs has been made yet: nothing ships until the Rust
+is built and tested on Windows, which is under way (`docs/rust.md`). The
 packages are unsigned, so Windows and macOS warn about the download;
 [Install](#install) says what to do. Building from source is the other way
 in. Nothing here has been validated for professional or legal
@@ -205,7 +211,8 @@ that records how and why it works. `docs/index.md` lists every document.
   has, as tools. See [headless.md](docs/headless.md), [mcp.md](docs/mcp.md).
 
 `katana_cli -c "HELP"` prints the verbs: 386 lines in a default build, 385 with
-no built-in customisation, at the time of writing.
+no built-in customisation, when counted on the C++ program, whose verbs the
+Rust interpreter was held to accept one by one (`docs/rust.md`, step 4).
 
 **Where the three ways in differ.** Not every capability is on all three yet.
 `katana_cli` and `katana_mcp` refuse `PLOT`, `PLOTSHEETS`, `SNAPSHOT`,
@@ -223,7 +230,8 @@ Katana's code is written by AI agents, Anthropic's Claude models, working in
 this repository. A person, Jarada, directs the work, makes the decisions and
 owns the repository. Katana makes no claim to be the first application of its
 kind; that cannot be checked. What follows is what the repository shows, and
-the commands that measured each figure are at the end of the section.
+the commands that measured each figure are at the end of the section. The
+figures were taken on 2026-10-08, when Katana was C++, and are of that day.
 
 - **The agents.** 788 of the 791 non-merge commits carry a
   `Co-Authored-By: Claude` trailer. The three that do not are a commit of
@@ -237,7 +245,9 @@ the commands that measured each figure are at the end of the section.
   affected document is updated in the same change; a commit message gives the
   evidence and what is still open; and agents never push, merge a pull request
   or delete a remote branch unless the owner asks.
-- **Tests are the arbiter.** There are 7,366 registered tests. The cardinal
+- **Tests are the arbiter.** The C++ build registered 7,366 tests; every one
+  of its cases was given a Rust twin or a recorded exemption when it was
+  ported (`docs/rust.md`, "Tests are the specification"). The cardinal
   rule is that nobody, human or agent, changes an expected value to match what
   the program produced. A failing test is fixed in the code, or the expectation
   is corrected from a source outside the program (a standard, a published
@@ -253,9 +263,9 @@ the commands that measured each figure are at the end of the section.
   second, adversarial reader told to refute it. What survived is listed in
   [docs/audit/2026-09-23-defects.md](docs/audit/2026-09-23-defects.md). Later
   review rounds are in the history: 31 commit subjects mention a review.
-- **Documents as the record.** Thirty-one documents in `docs/` record
-  decisions, measurements, the alternatives that were rejected, and what is not
-  done.
+- **Documents as the record.** The documents in `docs/` (thirty-one on that
+  day) record decisions, measurements, the alternatives that were rejected,
+  and what is not done.
 
 The limits, plainly:
 
@@ -288,7 +298,9 @@ was C++ (the source-file figures are of that tree, which was removed on
 | 452 test and benchmark files, about 220,000 lines | the same over `tests/*` and `benchmarks/*` |
 | 31 documents in `docs/` | `ls docs/*.md \| wc -l` (the two audit files are in `docs/audit/`) |
 
-These move every day. Run the commands for today's numbers.
+These move every day. Run the commands for today's numbers; the test and
+source counts of the Rust tree are `cargo test --release -- --list` and
+`ctest -N` in the test runner's folder, and `git ls-files 'crates/*.rs'`.
 
 </details>
 
@@ -330,9 +342,9 @@ Inverse  E 0.000 N 0.000  ->  E 30.000 N 40.000
 A default build prints one more line first, naming its built-in customisation;
 the outputs here are as `KATANA_BUILTIN_CUSTOMISATION=none` gives them. The
 second one is a 3-4-5 triangle, so you can check it in your head. More to try:
-`katana_cli ../samples/site_plan.kcs -c STATUS`,
-`katana_cli -c "UTILITY REPORT ../samples/utilities/schedule.csv"` and
-`katana_cli -c "INFO ../samples/gis/terrain.asc"` (with a package, give the
+`katana_cli samples/site_plan.kcs -c STATUS`,
+`katana_cli -c "UTILITY REPORT samples/utilities/schedule.csv"` and
+`katana_cli -c "INFO samples/gis/terrain.asc"` (with a package, give the
 path under `share/katana/samples`, as "First steps" shows).
 
 **Start the MCP server.** An MCP client starts `katana_mcp` itself. With
@@ -356,7 +368,8 @@ It needs no display and no GPU: the headless window is drawn on the CPU.
 
 ```sh
 cargo test --release                                # every crate's tests, from the checkout's root
-bash tools/build_visible.sh wsl                     # the maintainer's way: clippy, build, cargo test, then the test runner's suite
+bash tools/build_visible.sh wsl                     # the maintainer's way, in WSL: clippy, build, cargo test, then the test runner's suite
+bash tools/build_visible.sh                         # the same natively on Windows, in MSYS2 UCRT64
 bash tools/build_visible.sh wsl test -R '^qt_'      # the runner's window checks only
 ```
 
@@ -537,9 +550,9 @@ address in the line above is one anybody can open.
 Pick a package, or [build from source](#build-from-source). This part is the
 reference for installing, verifying and running Katana on each platform.
 The packages published so far are of the C++ program; the Rust programs'
-packages are made the same way and installed the same way (`docs/release.md`),
-and what they need from a Linux system beyond the graphics driver is to be
-read from their first release.
+packages are made by the same packaging and installed the same way
+(`docs/release.md`), and what they need from a Linux system beyond the
+graphics driver is to be read from their first release.
 
 ### Download
 
@@ -648,6 +661,12 @@ C:\Katana\Katana-X.Y.Z-win64\bin\katana_cli.exe -c "RECT 0,0 30,20" -c "SAVE C:\
    The 3D view draws on the GPU through Vulkan when the machine has a Vulkan
    driver (Mesa's `mesa-vulkan-drivers` on Debian/Ubuntu, `mesa-vulkan-drivers`
    on Fedora). Without one it draws in software, and everything still works.
+
+   This list is what the C++ packages published so far need. The Rust window
+   draws through wgpu and opens its window through the system's X11 or
+   Wayland libraries; what its package needs of a minimal system, beyond the
+   Vulkan loader (`libvulkan1` on Debian and Ubuntu), is to be read from its
+   first package run on a clean machine (`docs/release.md`, "Not done").
 
 3. Optional, a menu entry. Save this as
    `~/.local/share/applications/katana.desktop`, with the path changed to
@@ -805,11 +824,13 @@ claude mcp add katana -- /path/to/Katana/bin/katana_mcp --project /path/to/a/pro
 Then ask for the work in plain words. `docs/mcp.md` has the Claude Desktop
 set-up and the tools it offers.
 
-**Performance.** Katana uses the processor's vector instructions (AVX2 on
-Intel and AMD, NEON on ARM) and can draw the 3D view on the GPU through wgpu:
-Direct3D 12 on Windows, Vulkan on Linux, Metal on macOS (the Rust window's 3D
-views draw in software for now, `docs/gpu.md`). It falls back to exact
-software paths where either is missing. `KATANA_SIMD=scalar` and
+**Performance.** Katana uses the processor's vector instructions where it has
+them (AVX2 on Intel and AMD; the NEON kernels for ARM are written and have not
+yet been built on an ARM machine, `docs/performance.md`) and can draw the 3D
+view on the GPU through wgpu: Direct3D 12 on Windows, Vulkan on Linux, Metal
+on macOS (the Rust window's 3D views draw in software for now,
+`docs/gpu.md`). It falls back to exact software paths where either is
+missing, with the same results. `KATANA_SIMD=scalar` and
 `KATANA_RENDERER=software` force the fallbacks, for comparison or
 trouble-shooting.
 
@@ -823,22 +844,23 @@ The toolchains and the test runner are in `docs/building.md`; in short:
 |---|---|---|
 | Linux and WSL (x64, ARM64) | `python3 tools/setup_linux_toolchain.py` installs Rust, GCC 16 and the libraries from conda-forge | `cargo build --release` at the checkout's root, then `cargo test --release` |
 | macOS (Apple silicon) | the same script installs Rust, clang and the libraries | the same |
-| Windows | MSYS2 UCRT64's `rust` (x64) or CLANGARM64's (ARM64) | the same; written down, not run until the owner says so |
+| Windows | MSYS2 UCRT64's `rust`, GCC and libraries (x64; the `pacman` line is in `docs/building.md`), or CLANGARM64's (ARM64) | the same, in the UCRT64 environment; the build passes, its test results are not yet in |
 
 The packages a release ships are made by the release workflow
 (`docs/release.md`). The process-level tests run with the CMake test runner:
-`bash tools/build_visible.sh wsl test`, or by hand `cmake -S . -B <dir>
--DKATANA_PROGRAMS=<cargo's release folder>` then `ctest --test-dir <dir>`
-(`docs/testing.md`).
+`bash tools/build_visible.sh wsl test` (or `test` alone on Windows), or by
+hand `cmake -S . -B <dir> -DKATANA_PROGRAMS=<cargo's release folder>` then
+`ctest --test-dir <dir>` (`docs/testing.md`).
 
 ## Make a release
 
 Releases are built by the **Release** workflow, which runs only when started
 by hand: **Actions > Release > Run workflow**. Given a tag `vX.Y.Z` matching
 `project(Katana VERSION ...)` in `CMakeLists.txt` (the one place the version
-is written), it builds the Rust programs for all five platforms, runs the whole test suite on each, starts each package and
-installer as a user would, signs them, and publishes the release. Without a
-tag it builds and tests them only.
+is written), it builds the Rust programs for all five platforms, runs the
+whole test suite on each, starts each package and installer as a user would,
+signs them, and publishes the release. Without a tag it builds and tests them
+only. The workflow in its Rust form is written and has not yet been run.
 `docs/release.md` has the details, including how to add the signing keys.
 
 ## Documentation

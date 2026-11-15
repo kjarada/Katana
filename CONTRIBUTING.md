@@ -12,14 +12,16 @@ You contribute under it and keep your copyright.
 ## Your first hour
 
 1. **Build once.** [README, Quick start](README.md#quick-start) has the
-   toolchain and the commands: Katana is one Cargo workspace (at the checkout's root), built
-   with `cargo build --release` in WSL or on Linux until the owner has it
-   built on Windows. To work on one crate, `cargo build -p <crate>` and
-   `cargo test -p <crate>` build and test only it and what it stands on.
+   toolchain and the commands: Katana is one Cargo workspace at the
+   checkout's root, built with `cargo build --release` on Linux or in WSL,
+   or natively on Windows in MSYS2 UCRT64 (`docs/building.md`, "Windows";
+   that build passes; its test results are not yet in). To work on one crate,
+   `cargo build -p <crate>` and `cargo test -p <crate>` build and test only
+   it and what it stands on.
 2. **Run something.** [README, Try it](README.md#try-it) runs a command line, a
    screenshot and the tests. `cargo test -p <crate> <name>` runs the crate's
-   tests whose names match; `bash tools/build_visible.sh wsl test -R <name>` the
-   test runner's.
+   tests whose names match; `bash tools/build_visible.sh wsl test -R <name>`
+   (without `wsl` on Windows) the test runner's.
 3. **Pick a task.** [README, Where to start](README.md#where-to-start) lists
    five that were real on 2026-10-08, from one line of code to a large gap. To
    find more, read the "Not done" list at the end of the document for the area
@@ -80,16 +82,18 @@ not.
 ## Build
 
 - [ ] The toolchain is in the README's [Quick start](README.md#quick-start)
-      (`python3 tools/setup_linux_toolchain.py`); the build and the test
-      runner are `docs/building.md`. In short, from the checkout's root:
+      (`python3 tools/setup_linux_toolchain.py` on Linux and in WSL; MSYS2
+      UCRT64's packages on Windows); the build and the test runner are
+      `docs/building.md`. In short, from the checkout's root:
 
   ```sh
-  cargo clippy --release --all-targets -- -D warnings
-  cargo build --release
+  cargo clippy --locked --workspace --all-targets --release -- -D warnings
+  cargo build --locked --workspace --release
   ```
 
   The maintainer runs both, and the tests, through `tools/build_visible.sh`
-  (`bash tools/build_visible.sh wsl`), in a window of its own.
+  (`bash tools/build_visible.sh wsl`, or without `wsl` natively on
+  Windows), in a window of its own.
 - [ ] Judge a build by its exit code, never by filtering its output. Clippy
       runs with `-D warnings`, so a warning is a failure.
 - [ ] Never run two builds in one target folder at once.
@@ -103,7 +107,7 @@ not.
 
   ```sh
   cargo test --release                         # from the checkout's root
-  bash tools/build_visible.sh wsl              # all of it, the maintainer's way
+  bash tools/build_visible.sh wsl              # all of it, the maintainer's way (no `wsl` on Windows)
   ```
 
   `docs/testing.md` explains each kind of test and how to register one: a
@@ -125,7 +129,10 @@ not.
 - [ ] Tests that reach the network run only with `KATANA_ONLINE_TESTS=1`.
 - [ ] Before you change anything for speed, measure in Release. Put the before
       and after numbers in the commit message and the docs, and commit the
-      benchmark beside the code so it can be repeated.
+      benchmark beside the code so it can be repeated. The Rust workspace has
+      no benchmarks yet (`docs/performance.md`, "Not done"): a speed change
+      is the place to add the first, with the method of `docs/testing.md`,
+      "Benchmarks".
 
 ## The contract
 
