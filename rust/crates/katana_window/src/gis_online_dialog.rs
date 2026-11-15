@@ -232,6 +232,14 @@ impl DateField {
     }
 }
 
+/// The details of the layer chosen, as they are drawn: a heading, each fact's name and value, and a
+/// catalogue's note (OnlineDataDialog::details_shown).
+struct DetailsShown {
+    title: String,
+    rows: Vec<(String, String)>,
+    note: Option<String>,
+}
+
 /// GIS > Online Data... (see the module comment).
 pub struct OnlineDataDialog {
     frame: DialogFrame,
@@ -526,16 +534,35 @@ impl OnlineDataDialog {
         }
     }
 
-    /// What onlineDetails says of the layer chosen: a line a fact.
+    /// What onlineDetails says of the layer chosen, as the C++ label's text reads: its title, then
+    /// each fact's name and value on lines of their own (QTextDocument::toPlainText of the
+    /// heading and the two-column table the C++ shows), then a catalogue's note.
     pub fn details(&self, context: &mut dyn OnlineDialogContext) -> String {
+        let shown = self.details_shown(context);
+        let mut lines = vec![shown.title];
+        for (name, value) in shown.rows {
+            lines.push(name);
+            lines.push(value);
+        }
+        lines.extend(shown.note);
+        lines.join("\n")
+    }
+
+    /// The details as they are drawn: the title, the facts as name and value, and a catalogue's
+    /// note. With no layer chosen, the title alone says to choose one.
+    fn details_shown(&self, context: &mut dyn OnlineDialogContext) -> DetailsShown {
         let Some(layer) = self.chosen_layer() else {
-            return String::from(
-                "Choose a layer to see what it is, where it comes from and on what terms.",
-            );
+            return DetailsShown {
+                title: String::from(
+                    "Choose a layer to see what it is, where it comes from and on what terms.",
+                ),
+                rows: Vec::new(),
+                note: None,
+            };
         };
         let key_stored = context.has_key(&layer.key_name);
-        let mut lines = vec![layer.title.clone()];
-        let mut row = |name: &str, value: String| lines.push(format!("{name}: {value}"));
+        let mut rows: Vec<(String, String)> = Vec::new();
+        let mut row = |name: &str, value: String| rows.push((String::from(name), value));
         row(
             "Provider",
             format!("{} ({})", layer.provider_title, layer.provider_id),
@@ -607,14 +634,18 @@ impl OnlineDataDialog {
                 format!("answered {}", layer.verified)
             },
         );
-        if layer.kind == OnlineLayerKind::Catalogue {
-            lines.push(format!(
+        let note = (layer.kind == OnlineLayerKind::Catalogue).then(|| {
+            format!(
                 "This is a search, not data: search it below and add a service it finds, or \
                  type ONLINE LAYERS {} <words> and ONLINE CUSTOM <address>.",
                 layer.provider_id
-            ));
+            )
+        });
+        DetailsShown {
+            title: layer.title.clone(),
+            rows,
+            note,
         }
-        lines.join("\n")
     }
 
     fn apply_filter(&mut self, text: &str) {
@@ -1116,12 +1147,32 @@ impl OnlineDataDialog {
     /// The details, a catalogue's search, the import's fields and the Advanced group.
     fn right(&mut self, ui: &mut Ui, context: &mut dyn OnlineDialogContext) {
         let details = self.details(&mut *context);
-        label_as(
-            ui,
-            "onlineDetails",
-            &details,
-            egui::Label::new(details.as_str()).wrap(),
-        );
+        // Drawn as the C++ draws its rich text: the title a heading, each fact's name in bold
+        // before its value; recorded as that text reads (details).
+        let shown = self.details_shown(&mut *context);
+        let style = ui.style().clone();
+        let mut job = egui::text::LayoutJob::default();
+        let mut add = |text: RichText| {
+            text.append_to(
+                &mut job,
+                &style,
+                egui::FontSelection::Default,
+                egui::Align::Min,
+            );
+        };
+        if shown.rows.is_empty() && shown.note.is_none() {
+            add(RichText::new(shown.title.as_str()));
+        } else {
+            add(RichText::new(format!("{}\n", shown.title)).heading());
+        }
+        for (name, value) in &shown.rows {
+            add(RichText::new(format!("{name}  ")).strong());
+            add(RichText::new(format!("{value}\n")));
+        }
+        if let Some(note) = &shown.note {
+            add(RichText::new(note.as_str()));
+        }
+        label_as(ui, "onlineDetails", &details, egui::Label::new(job).wrap());
 
         // A catalogue layer's search, in place of the import it cannot do.
         let is_catalogue = self
