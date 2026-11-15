@@ -565,7 +565,20 @@ impl MainWindow {
             "editSelectById" => {
                 ui.dialogs
                     .select_by_id
-                    .get_or_insert_with(SelectByIdDialog::new)
+                    .get_or_insert_with(|| {
+                        let mut dialog = SelectByIdDialog::new();
+                        // MainWindow::showSelection: framed in the view the person works in, by
+                        // that view's Zoom to Selection line through the one executor, so the log
+                        // says what moved the view. Without it the dialog's Zoom to the selection
+                        // box framed nothing.
+                        dialog.on_selected = Some(Box::new(|zoom: bool, host: &mut dyn Host| {
+                            let view = host.views().and_then(|views| views.active_plan_view());
+                            if let (true, Some(view)) = (zoom, view) {
+                                let _ = host.run(&format!("ZOOM SELECTION view={view}"));
+                            }
+                        }));
+                        dialog
+                    })
                     .open = true;
             }
             "editCopyViewImage" => {
