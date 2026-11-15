@@ -170,8 +170,12 @@ pub mod annotation {
     pub use label_layout_report::{LabelLayoutReportDialog, LabelLayoutSummary};
     pub use leader_manager::{LeaderManagerContext, LeaderManagerDialog};
     pub use text_edit_dialog::TextEditDialog;
-    // V3: pub mod annotation_workbench;
-    //     pub mod dimension_style_manager;
+    // V3
+    pub mod annotation_workbench;
+    pub mod dimension_style_manager;
+
+    pub use annotation_workbench::AnnotationWorkbench;
+    pub use dimension_style_manager::DimensionStyleManagerDialog;
 }
 
 pub mod bim {
@@ -186,7 +190,8 @@ pub mod bim {
     pub mod road_object_manager;
     pub mod road_object_workbench;
     pub mod road_template_manager;
-    // V3: pub mod road_workbench;
+    // V3
+    pub mod road_workbench;
 }
 
 pub mod customisation {
@@ -449,9 +454,10 @@ pub mod zoom_to_dialog;
 // VP
 pub mod plan_context_menu;
 pub mod viewport_widget;
-// V3:  pub mod gpu_scene_view;
-//      pub mod render_view_widget;
-//      pub mod section_view_widget;
+// V3
+pub mod gpu_scene_view;
+pub mod render_view_widget;
+pub mod section_view_widget;
 // SH1
 pub mod sheet_painter;
 // CU1: pub mod layer_manager;
@@ -518,3 +524,9 @@ pub use sheet_painter::{
 // CU1
 pub use layer_manager::LayerManagerDialog;
 pub use style_manager::StyleManagerDialog;
+// V3
+pub use gpu_scene_view::{GpuSceneEvent, GpuSceneHost, GpuSceneView, SceneKey};
+pub use render_view_widget::{GpuSession, RenderScene, RenderView, RenderViewEvent};
+pub use section_view_widget::{SectionView, SectionViewEvent};
+pub use annotation::{AnnotationWorkbench, DimensionStyleManagerDialog};
+pub use bim::road_workbench::{RoadWorkbench, RoadWorkbenchEvent};

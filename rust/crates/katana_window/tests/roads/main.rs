@@ -22,3 +22,4 @@ mod alignment_manager;
 mod driver;
 mod road_dialogs;
 mod road_object_dialogs;
+mod road_workbench;
