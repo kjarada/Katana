@@ -7,6 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# The window, katana, named as the C++ program is: the tests of the window gate run it in its
+# place (tools/rust_window_gate.py).
+[[bin]]
+name = "katana"
+path = "src/bin/katana/main.rs"
+
 # The developer tools that render the icons to files (src/katana_qt/make_icons.cpp and
 # tool_icon_sheet.cpp), named as the C++ programs are; not part of the product.
 [[bin]]
