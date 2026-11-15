@@ -158,11 +158,21 @@ pub fn button(ui: &mut Ui, name: &str, text: &str) -> Response {
 /// A dialog's primary action (Run, Import, Compute): `button` drawn in the accent with the text
 /// on the accent - one to a dialog, last in its row of buttons (shell::dialog::button_row).
 pub fn primary(ui: &mut Ui, name: &str, text: &str) -> Response {
-    button_as(ui, name, text, primary_button(text))
+    let look = primary_look(text, ui.is_enabled());
+    button_as(ui, name, text, look)
 }
 
 /// The look of a primary button, for `button_as` and a caller's own `ui.add`.
 pub fn primary_button(text: &str) -> egui::Button<'static> {
+    primary_look(text, true)
+}
+
+/// The look of a primary button showing `text`: in the accent while `enabled`, else as any button
+/// is disabled - an accent fill on a button that does nothing would invite the click.
+pub fn primary_look(text: &str, enabled: bool) -> egui::Button<'static> {
+    if !enabled {
+        return egui::Button::new(String::from(text));
+    }
     egui::Button::new(
         egui::RichText::new(text).color(crate::theme::palette::accent_text().to_egui()),
     )

@@ -3130,13 +3130,13 @@ if(KATANA_TEST_WINDOW)
     #    ::menu-button Origin_Border), 30..41, and Fusion's arrow, 8 x 4 px,
     #    is (12 - 8) / 2 = 2 px into it and (33 - 4) / 2 = 14.5 down
     #    (qt_fusion_draw_arrow): 32..39 across, antialiased over rows 14..18;
-    #  - the kind switcher is 34 x 22 with a 1 px border; its arrow's box is
-    #    a ::menu-indicator's default 13 x 13 (defaultSize), set right and
-    #    centred in the padding box 1..32 x 1..20: 20..32 across, 5..17 down.
-    #    Fusion's arrow is 2.5 px in and 4.5 down, 22.5..30.5 x 9.5..13.5,
-    #    antialiased over 22..30 x 9..13. Padded on the right by the box's
-    #    13 px, the contents are 3..19 x 3..18 and the 14 px icon is centred
-    #    at 4..17 both ways.
+    #  - the kind switcher is 32 x 20 (the slim title bar of 2026-11-16:
+    #    dock_chrome's BUTTON_SIZE 20 high, a 24-point bar), its 14 px icon at
+    #    3,3 like every title-bar button's, so 3..16 both ways; its arrow is
+    #    Katana's own, 8 x 4 px, in the 12 px strip at its right (20..28
+    #    across) and centred in its 20 px height (8..12 down). At 125 % each
+    #    of those is 1.25 times as far: the icon 4..21, the arrow 25..35 x
+    #    10..15 (dock_chrome, docs/desktop.md "The look").
     # The grab is the Draw toolbar, for a person to look at.
     #
     # Fusion's arrows - Undo's and Redo's, and the kind switcher's - are worked
@@ -3156,8 +3156,8 @@ if(KATANA_TEST_WINDOW)
     else()
         set(_undo_sign "sign x 32[.][.]39 y 14[.][.]18")
         set(_undo_sign_large "sign x 40[.][.]47 y 18[.][.]22")
-        set(_kind_sign "sign x 22[.][.]30 y 9[.][.]13")
-        set(_kind_sign_125 "sign x 28[.][.]38 y 11[.][.]16")
+        set(_kind_sign "sign x 20[.][.]28 y 8[.][.]12")
+        set(_kind_sign_125 "sign x 25[.][.]35 y 10[.][.]15")
     endif()
     add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
         COMMAND ${CMAKE_COMMAND}
@@ -3165,7 +3165,7 @@ if(KATANA_TEST_WINDOW)
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DCHECK_TOOLBARS=ON"
             "-DDRIVE=%DrawToolBar"
-            "-DEXPECT=toolbar button EditToolBar > editUndoButton: ${_undo_sign} clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n]+toolbar button EditToolBar > editRedoButton: ${_undo_sign} clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*title bar button View[0-9]+ > ViewKindButton: ${_kind_sign} clear of its icon x 4[.][.]17 y 4[.][.]17[\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
+            "-DEXPECT=toolbar button EditToolBar > editUndoButton: ${_undo_sign} clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n]+toolbar button EditToolBar > editRedoButton: ${_undo_sign} clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 26[.][.]30 y 26[.][.]30 clear of its icon x 6[.][.]25 y 6[.][.]25[\r\n].*title bar button View[0-9]+ > ViewKindButton: ${_kind_sign} clear of its icon x 3[.][.]16 y 3[.][.]16[\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The same after View > Toolbars > Large Icons and with Delete Vertex -
@@ -3188,7 +3188,7 @@ if(KATANA_TEST_WINDOW)
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DCHECK_TOOLBARS=ON"
             "-DDRIVE=*viewToolBarIconsLarge|>DELETEVERTEX|?draw.vertex.delete|?draw.vertex.insert|%DrawToolBar"
-            "-DEXPECT=draw[.]vertex[.]delete: Delete Vertex, checked[\r\n]+draw[.]vertex[.]insert: Insert Vertex, unchecked[\r\n].*toolbar button EditToolBar > editUndoButton: ${_undo_sign_large} clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n]+toolbar button EditToolBar > editRedoButton: ${_undo_sign_large} clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*title bar button View[0-9]+ > ViewKindButton: ${_kind_sign} clear of its icon x 4[.][.]17 y 4[.][.]17[\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
+            "-DEXPECT=draw[.]vertex[.]delete: Delete Vertex, checked[\r\n]+draw[.]vertex[.]insert: Insert Vertex, unchecked[\r\n].*toolbar button EditToolBar > editUndoButton: ${_undo_sign_large} clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n]+toolbar button EditToolBar > editRedoButton: ${_undo_sign_large} clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 34[.][.]38 y 34[.][.]38 clear of its icon x 6[.][.]33 y 6[.][.]33[\r\n].*title bar button View[0-9]+ > ViewKindButton: ${_kind_sign} clear of its icon x 3[.][.]16 y 3[.][.]16[\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_large_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The check at the owner's display scale, 125% (as
@@ -3216,7 +3216,7 @@ if(KATANA_TEST_WINDOW)
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DCHECK_TOOLBARS=ON"
             "-DDRIVE=%DrawToolBar"
-            "-DEXPECT=toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*title bar button View[0-9]+ > ViewKindButton: ${_kind_sign_125} clear of its icon x 5[.][.]22 y 5[.][.]22 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
+            "-DEXPECT=toolbar button DrawToolBar > toolFamilyButton[.]Draw[.]Circle: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Arc: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Ellipse: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolFamilyButton[.]Draw[.]Vertices: sign x 33[.][.]38 y 33[.][.]38 clear of its icon x 8[.][.]32 y 8[.][.]32 [(]device pixels at a ratio of 1[.]25[)][\r\n].*title bar button View[0-9]+ > ViewKindButton: ${_kind_sign_125} clear of its icon x 4[.][.]21 y 4[.][.]21 [(]device pixels at a ratio of 1[.]25[)][\r\n].*toolbars and title bars: 7 buttons with a menu, each drawing its sign clear of its icon"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toolbar_signs_125_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_headless

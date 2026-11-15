@@ -88,7 +88,7 @@ pub const SCREEN_FIT_FOOTER: &str = "screenFitFooter";
 // one row rather than three widths of word.
 
 /// The room between a dialog's edge and what its body or footer holds, on every side.
-pub const PADDING: f32 = 12.0;
+pub const PADDING: f32 = crate::theme::style::DIALOG_PADDING as f32;
 
 /// The title bar's height: a 24-point row with 4 above and below it.
 pub const TITLE_HEIGHT: f32 = 32.0;
@@ -134,10 +134,10 @@ struct LabelColumn {
 
 /// The gaps of a form (`form`): 12 between a label and its field, 4 between rows (the
 /// design system's gap inside a group).
-pub const FORM_SPACING: Vec2 = Vec2::new(12.0, 4.0);
+pub const FORM_SPACING: Vec2 = Vec2::new(PADDING, crate::theme::style::GAP);
 
 /// The space between two groups of a dialog's body (the design system's gap between groups).
-pub const GROUP_GAP: f32 = 8.0;
+pub const GROUP_GAP: f32 = crate::theme::style::GROUP_GAP;
 
 /// The tag of a dialog's footer `Ui` and of a `button_row`'s, which `in_footer` reads: a button
 /// drawn in one is given FOOTER_BUTTON_WIDTH at least (drive::controls).
@@ -258,8 +258,9 @@ fn rule(ui: &Ui, x: egui::Rangef, y: f32) {
         .hline(x, y, Stroke::new(1.0, palette::border().to_egui()));
 }
 
-/// Draws `add` in a child of `ui`, top down, tagged as a dialog's footer.
-fn footer_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+/// Draws `add` in a child of `ui`, top down, tagged as a dialog's footer: a button drawn in it is
+/// FOOTER_BUTTON_WIDTH at least (dialog_layout::footer draws its row in one).
+pub(crate) fn footer_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     ui.scope_builder(
         UiBuilder::new()
             .layout(Layout::top_down(Align::Min))

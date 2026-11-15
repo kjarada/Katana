@@ -5,6 +5,15 @@
 //! managers, the plot and sheet dialogs, the start screen and the update dialogs are spaced alike;
 //! the colours are the theme's tokens (theme::palette), never a literal.
 //!
+//! ONE HOME FOR EACH PART. The spacing scale is theme::style's; the dialog frame's padding, footer
+//! button width, label colour and footer tag are shell::dialog's; a primary button's look is
+//! drive::controls::primary_look. This module adds what those do not have - the grid form of
+//! fixed-width fields the managers use, sections that hold their rows, the footer row drawn with
+//! egui::Sides, and the tables' look - and names the shared parts again only so its callers read
+//! one module. NOT DONE: the grid form here beside shell::dialog's measured label column (`form`,
+//! `labelled`) is two ways of laying out a form; docs/desktop.md, "Not done", says what folding
+//! them would take.
+//!
 //! WHY FIXED WIDTHS. An egui dialog is sized by what it holds (its Area is as large as its content
 //! was last frame), so a field told to fill "the available width" fills the screen on the first
 //! frame and then holds the dialog that wide. A form therefore gives its fields one width of its
@@ -18,16 +27,20 @@
 use egui::{Align, Layout, Response, RichText, Sides, Ui};
 
 use crate::drive::controls;
+use crate::shell::dialog;
 use crate::theme;
 
+pub use crate::shell::dialog::form_label;
+
 /// The gap between groups (a section and the next, a table and its buttons).
-pub const GAP: f32 = 8.0;
+pub const GAP: f32 = theme::style::GROUP_GAP;
 
 /// The gap inside a group (a label and its field, the rows of a form).
-pub const INNER: f32 = 4.0;
+pub const INNER: f32 = theme::style::GAP;
 
-/// The gap above a section's heading, so that sections read as blocks without boxes round them.
-pub const SECTION_GAP: f32 = 12.0;
+/// The gap above a section's heading, so that sections read as blocks without boxes round them:
+/// the dialog's padding, the next step of the spacing scale.
+pub const SECTION_GAP: f32 = dialog::PADDING;
 
 /// The width of a form's label column: a label of about sixteen characters at 13 px fits, and a
 /// longer one widens the column (egui's Grid takes the widest cell).
@@ -38,7 +51,7 @@ pub const LABEL_WIDTH: f32 = 110.0;
 pub const FIELD_WIDTH: f32 = 260.0;
 
 /// The least a footer button is wide, so that "OK", "Close" and "Apply" are one size.
-pub const BUTTON_MIN_WIDTH: f32 = 72.0;
+pub const BUTTON_MIN_WIDTH: f32 = dialog::FOOTER_BUTTON_WIDTH;
 
 /// The rows a table shows before it scrolls: enough to read a list down without the table
 /// pushing the dialog off the screen.
@@ -82,25 +95,21 @@ pub fn form_with<R>(
 }
 
 /// Sets `ui` up for an EDITABLE choice `width` wide in all: drive::controls draws one as a field
-/// and a list button beside it, the field `text_edit_width` and the button `combo_width` wide, so
-/// in a form (which makes `combo_width` the field width) the button would be as wide as a field.
+/// `text_edit_width` wide and its list's arrow beside it, a control's height square, so in a form
+/// of fields `width` wide the field is given less the arrow and the gap, and the two end where
+/// the form's other fields do.
 pub fn editable_choice_width(ui: &mut Ui, width: f32) {
-    ui.spacing_mut().combo_width = EDITABLE_CHOICE_BUTTON;
     ui.spacing_mut().text_edit_width =
         (width - EDITABLE_CHOICE_BUTTON - ui.spacing().item_spacing.x).max(0.0);
 }
 
-/// The width of an editable choice's list button: its arrow and the button's padding.
-pub const EDITABLE_CHOICE_BUTTON: f32 = 24.0;
+/// The width of an editable choice's list arrow (drive::controls draws it a control's height
+/// square).
+pub const EDITABLE_CHOICE_BUTTON: f32 = theme::style::CONTROL_HEIGHT;
 
 /// A form of FIELD_WIDTH fields (`form_with`).
 pub fn form<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     form_with(ui, salt, FIELD_WIDTH, add)
-}
-
-/// A form's label: in the secondary text colour, so the values are what the eye reads first.
-pub fn form_label(ui: &mut Ui, text: &str) -> Response {
-    ui.label(RichText::new(text).color(theme::text_muted().to_egui()))
 }
 
 /// A label `width` wide, in the secondary text colour, for a row of a form drawn as rows of its own
@@ -152,16 +161,20 @@ pub fn inline<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 /// The dialog's footer row: `left` at the left (a check box, a reply), and `right` at the right,
 /// drawn from the right edge inwards - so the PRIMARY button is drawn first and so sits last, at
-/// the far right. A separator above parts it from the body.
+/// the far right. In the dialog frame's footer, the frame's rule is above it already; drawn in a
+/// body, a separator of its own parts it from what is above. Either way the row is a footer's
+/// (shell::dialog::footer_ui), so its buttons share the footer's least width.
 pub fn footer<L, R>(
     ui: &mut Ui,
     left: impl FnOnce(&mut Ui) -> L,
     right: impl FnOnce(&mut Ui) -> R,
 ) -> (L, R) {
-    ui.add_space(INNER);
-    ui.separator();
-    ui.add_space(INNER);
-    ui.scope(|ui| {
+    if !dialog::in_footer(ui) {
+        ui.add_space(INNER);
+        ui.separator();
+        ui.add_space(INNER);
+    }
+    dialog::footer_ui(ui, |ui| {
         ui.spacing_mut().item_spacing.x = GAP;
         Sides::new().shrink_left().show(ui, left, |ui| {
             ui.spacing_mut().item_spacing.x = GAP;
@@ -193,20 +206,10 @@ pub fn primary(ui: &mut Ui, name: &str, text: &str) -> Response {
     controls::button_as(ui, name, text, drawn)
 }
 
-/// The primary button's look, showing `shown`: in the accent while `enabled`, else as any button
-/// is disabled (an accent fill on a button that does nothing would invite the click).
+/// The primary button's look (drive::controls::primary_look), showing `shown`, BUTTON_MIN_WIDTH
+/// wide at least wherever it is drawn.
 pub fn primary_button(shown: &str, enabled: bool) -> egui::Button<'static> {
-    let words = if enabled {
-        RichText::new(shown).color(theme::accent_text().to_egui())
-    } else {
-        RichText::new(shown)
-    };
-    let drawn = egui::Button::new(words).min_size(egui::vec2(BUTTON_MIN_WIDTH, 0.0));
-    if enabled {
-        drawn.fill(theme::accent().to_egui())
-    } else {
-        drawn
-    }
+    controls::primary_look(shown, enabled).min_size(egui::vec2(BUTTON_MIN_WIDTH, 0.0))
 }
 
 /// A heading over a part of a dialog that is not drawn as a `section` (its controls are drawn
@@ -258,7 +261,7 @@ pub fn table_row_colour(row: usize, chosen: &[bool], style: &egui::Style) -> Opt
     if chosen.get(row - 1).copied().unwrap_or(false) {
         return Some(selected_row_colour());
     }
-    (row % 2 == 0).then_some(style.visuals.faint_bg_color)
+    row.is_multiple_of(2).then_some(style.visuals.faint_bg_color)
 }
 
 /// A chosen row's background: the accent at SELECTED_ROW_OPACITY.

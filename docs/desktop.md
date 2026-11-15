@@ -729,6 +729,96 @@ it was whatever grey the toolkit defaulted to. A dark drawing in a light
 frame is most of why the application looked unfinished. Three files under
 `crates/katana_window/src/` fix that: the palette, the style and the icons.
 
+### The look of 2026-11-16: modern dark, tidied
+
+The owner, on 2026-11-16: "panels are oversized and everything looks wrong ...
+make [it] look pretty, the main window and all dialogs and icons". The
+owner's choices: **modern dark** (low-contrast dark chrome, the drawing the
+brightest thing on the screen, ONE accent colour, crisp line icons) and
+**tidy, not rethink** (the same panels, menus and dialogs, narrower and
+better spaced). Every control's name, action, reply and behaviour stayed as
+it was: it is a change of look only.
+
+**The tokens** (`crates/katana_window/src/theme/palette.rs`): window
+`#1e1f22`, panel `#25262a`, raised `#2d2f34`, hover `#363940`, input
+`#1a1b1e` (a field is a well below its panel), border `#3a3c42`, text
+`#d4d6db`, muted text `#9a9ea6`, disabled text `#5f636b`, accent `#4c8dff`
+(hover `#6aa1ff`), selection `#2f4a7a` (a chosen row, its text still the
+text colour), error `#ff6b6b`. The viewport keeps `#1e2329`: it is content,
+and the plan painter's contrast figures are worked against it. Text on the
+accent stays dark (`#0f1419`, 5.8:1); white was rejected, at 3.2:1 it fails
+WCAG's 4.5:1 for body text.
+
+**Type and spacing** (`crates/katana_window/src/theme/style.rs`): the UI
+text is 13 px (`PLATFORM_POINTS` 9.75), small text 12 and headings 14, all
+moved together by View > Text Size. One spacing scale, 2 / 4 / 8 / 12 / 16:
+`GAP` 4 inside a group, `GROUP_GAP` 8 between groups, `PANEL_PADDING` 8,
+`DIALOG_PADDING` 12; controls are `CONTROL_HEIGHT` 24 high. Corners are 4 on
+a control and 6 on a window or popup, which has a soft shadow straight down.
+A menu's section title is in sentence case, small and muted, where the
+items' text starts: the design has no capitals.
+
+**The main window** (`crates/katana_window/src/main_window/layout.rs`,
+`panels.rs`): the menu bar 26 high (was 42), the side columns 39 wide (45),
+the Drafting bar 30 and the status bar 24 (the bottom 54, was 73), panels
+240 wide (300), the command line 110 high (150), the seams between them 4
+(5). At 1360 x 860 the views get 794 x 549, where they had 660 x 473. The
+toolbars stay in three rows: two would not fit at 1366 without buttons of
+28 px, which would undo the icons' 20 px design size (rejected). Each row is
+one band with a rule under it and its toolbars' names centred in small
+muted text. The Drafting bar's toggles are words (their actions have no
+icons, and they drew as ten blank squares); the Layers and Reference Data
+panels' buttons are 24 px icon tools under the same names; the layer tree
+has eye and padlock switches in place of two unnamed check boxes.
+
+**The dock chrome** (`crates/katana_window/src/dock_chrome.rs`): a title bar
+24 high with 20 px buttons and a 14 px icon at 3,3. A panel is one surface,
+its bar the grey of its body; a view's bar is the frame's grey, raised to the
+panel grey with the accent's 2 px stroke while it is the active view.
+
+**A dialog** (`crates/katana_window/src/shell/dialog.rs`) is three bands
+edge to edge: a title bar 32 high, the body with 12 of padding, and the
+footer under a rule. A body is laid out at most `BODY_WIDTH` 520 wide unless
+the dialog asks for more (`DialogFrame::width`, or its own width), and at
+least 320. Before, the frame lent a body the whole screen, so anything that
+fills - a separator, a wrapped label, a list that does not shrink, a
+right-to-left row - held the dialog as wide as the screen. A form's labels
+are the muted text in one column and its fields start at one edge; a footer
+has what reads the drawing at the left (Preview, a status) and Close then
+the primary action at the right, the primary filled in the accent
+(`drive::controls::primary`), every footer button 72 wide at least. Tabs
+are a strip with the accent's 2 px bar under the one in front. Tables have
+a raised header row, faint stripes and the chosen row lit in the accent at
+35 %, and scroll after 12 rows.
+
+**Two ways of laying out a form, for now.** `shell::dialog::form` and
+`labelled` give every labelled row of a body one label column, measured
+from its widest label (150 at most, a longer label wraps), so the fields of
+a whole dialog, inside a group or not, start at one edge; the survey, terrain,
+GIS and geo dialogs use them. The managers, the plot and sheet dialogs, the
+start screen, annotation, BIM, IFC and update dialogs use
+`crates/katana_window/src/dialog_layout.rs`'s grid form, a column of 110
+and fields of one fixed width (260 by default). They were written side by
+side by two agents. The integration kept one home for every part they share
+- the spacing scale is `theme::style`'s, the padding, footer width, label
+colour and footer tag `shell::dialog`'s, the primary button's look
+`drive::controls::primary_look` - and left the two form layouts (Not done,
+below).
+
+**The icons** are drawn in one line style ("`icons.rs`", below): two weights, a
+single tint, the accent only for an active tool.
+
+**How the tests moved.** No test was weakened; the numbers that pinned the
+old geometry were changed to the new design with the reason beside each:
+the dock chrome's bar widths and button places
+(`crates/katana_window/tests/drive/chrome.rs`), the kind switcher, 34 x 22
+to 32 x 20 (`crates/katana_window/tests/drive/flyout_button.rs`, and the toolbar sign test in
+`tests/CMakeLists.txt`, its 125 % numbers the 100 % ones scaled by 1.25),
+and a title-bar tool's width in the workspace tests. The dialog frame's own
+rules are tested in `crates/katana_window/tests/foundation/dialog_layout.rs`
+(footer buttons at the right edge, the primary last; one edge for every
+field; a long label wrapping; the body's width).
+
 **`palette.rs` - every chrome colour is a named token**
 (`crates/katana_window/src/theme/palette.rs`). `window`, `panel`,
 `raised`, `hover`, `border`, `text`, `text_muted`, `accent` and so on, as
@@ -755,8 +845,9 @@ them - which is why no part of the window names a font now. The face is
 egui's embedded sans (Ubuntu-Light, which has no bold face; the C++ took the
 platform's UI face, Segoe UI on Windows); which face the window carries is
 the owner's to decide (`docs/rust.md`, "Decisions waiting on the owner"), and
-changes in `style.rs` only. The sizes are still a step from the platform's
-9 points (`PLATFORM_POINTS`). The fixed-pitch font
+changes in `style.rs` only. The sizes are a step from `PLATFORM_POINTS`,
+9.75 points (13 px) since the look of 2026-11-16, where it was the
+platform's 9. The fixed-pitch font
 is the first the machine has of Cascadia Mono, Consolas, DejaVu Sans Mono,
 Liberation Mono and Menlo, then the platform's own, at the same size as the
 chrome, so a column of coordinates in a report lines up and is the size of
@@ -776,7 +867,8 @@ C++'s toolkit did. First, a menu section shows its title: the
 Survey, Terrain and GIS menus were grouped under titled sections
 ("Surfaces", "Point Cloud - PDAL") and for weeks not one title was seen,
 because the C++'s style drew each section as a plain separator. `menu_section`
-draws the title in small muted capitals
+draws the title in small muted text, in sentence case (it was capitals until
+the look of 2026-11-16)
 (`theme::a_menu_section_shows_its_title_under_the_stylesheet`). Every long menu is now in titled sections: File
 (Drawing, Import and Export, Scripts, Plot, Project), View (Display,
 Viewports, 3D Views, Window), Format (Tables and Libraries, Across the
@@ -800,12 +892,18 @@ four reasons: they are crisp at every size because nothing is resampled; they
 take their colours from the theme, so a theme change recolours all of them; a
 function that is wrong does not compile, where a resource path that is wrong
 is a blank button; and an SVG or PNG set would need an image decoder or an
-SVG renderer, a dependency added for decoration. The language is one rule
-applied everywhere: a 1.7-unit round stroke, neutral for the object and ACCENT
-for the part the command acts on - the arrow of Import, the new geometry of a
-draw tool, the cut line of a section. 1.7 rather than the usual 2.0 because at
-16 px the heavier stroke closes up small counters (the label of Save, the
-inside of the magnet).
+SVG renderer, a dependency added for decoration. The style (2026-11-16) is
+one line language: two weights only, `tool_icons::STROKE` (1.8 units, 1.5 px
+at the 20 px design size) and `FINE` (1.2 units, 1 px), held at those pixel
+weights below 20 px so a menu's 16 px icon is not lighter than a toolbar's;
+round joins; one tint for every filled area; no gradients. The set had a
+dozen weights and eleven tints before. Colours go by mode
+(`icon_colours`): at rest the object is the muted text colour and the part
+the command acts on - the arrow of Import, the new geometry of a draw tool,
+the cut line of a section - the text colour; an ACTIVE icon (a checked tool)
+is the text colour and the accent; a disabled one the disabled colour. The
+accent was the acting part's colour at rest, which made a toolbar a field of
+blue in which the running tool did not stand out.
 
 **The application icon comes from the same painter.** `katana_make_icons`
 writes `resources/katana.ico` (nine sizes, PNG-compressed entries), a 256 px
@@ -1164,8 +1262,18 @@ person ("The Command Reference and the keyboard shortcuts", below).
 reviewed, and the same run can drive the menus and dialogs step by step:
 `docs/headless.md`.
 
-**Not done.** There is no light theme. The dialogs (corridor, plot) are
-themed but plain. The views inside the workspace are not kept between
+**Not done.** There is no light theme. Two form layouts (above, "Two ways
+of laying out a form"): folding them is moving `dialog_layout.rs`'s grid
+forms (about ten `form` / `form_with` calls and twelve `fixed_label` rows,
+in the managers, plot, start, annotation, BIM and IFC dialogs) onto
+`shell::dialog::form` and `labelled`, then deleting the grid form; the
+scope and filter widget
+(`crates/katana_window/src/customisation/scope_filter_widget.rs`) keeps a
+label layout of its own as well. No semibold face: a heading is the body
+face drawn strong (the face is the owner's decision). The side columns and
+toolbar rows do not grow with Large toolbar icons. The view layers popup
+was not restyled; the Alignment Manager's Name and PIs fields are narrow.
+The views inside the workspace are not kept between
 sessions (above, "How the window starts"); the dock chrome's hooks
 (`minimised_names`, `minimise_named`) are ready for it. The Text Size is the
 window's; a dialog that set a font of its own other than the fixed-pitch one
@@ -4832,6 +4940,11 @@ they are easiest to break:
   was with the edits still in the grid (`ROADTEMPLATE SET <t> <c> key=value
   <c> key=value`). A verb that takes one thing at a time is given a form that
   takes several rather than being run in a loop by the dialog.
+- **A dialog gives its body a width.** The frame lends a body at most
+  `BODY_WIDTH` (`crates/katana_window/src/shell/dialog.rs`); a dialog that
+  needs more says how much, and nothing in a body fills "the available
+  width" of a screen. Columns side by side are parted by a gap, never a
+  vertical separator, which stretches to the whole room's height.
 - **A headless session never opens a modal box**, and every action, menu,
   field, button and tab has a control name, so tests and the headless driver
   can find it.
