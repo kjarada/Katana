@@ -1175,7 +1175,7 @@ below). The format is detected unless FORMAT
 names it, and a detection that is not certain is refused, naming the
 candidates. The verb lives in the session and not the interpreter because
 `cad` may not see `surveyio`; the window runs the same function
-(`MainWindow::run_workbench_line`). `katana_surveyio::reader::report_input_for`, which the
+(`Executor::run_workbench_line`). `katana_surveyio::reader::report_input_for`, which the
 wizard and the Survey Jobs dialog had in the window's code, moved to
 `rust/crates/katana_surveyio/src/reader.rs` so the verb uses the same one. Tests:
 the reader's `opcode_field_file` cases in
@@ -3141,7 +3141,7 @@ regex naming what came before the refusal so a run stopped earlier cannot
 pass. Sixteen `qt_survey_*` tests run this way.
 
 The Point Manager dock wears the window's dock chrome - minimise to the tray,
-float, close - through `SurveyServices::chrome`, which the workbench tells to
+float, close - through the window's dock chrome, which the workbench tells to
 forget the dock before deleting it.
 
 Not done: the wizard cannot order a point list's strings as the file

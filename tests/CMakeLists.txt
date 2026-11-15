@@ -245,6 +245,29 @@ if(Python3_Interpreter_FOUND)
     # `katana_standard_pictures_script` is the test of how `katana_standard_current` holds the catalogue's pictures
     # (test_pictures.py), on one-pixel pictures it writes itself in a scratch folder.
     add_test(NAME katana_standard_pictures_script COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_pictures.py")
+
+    # `rust_layering`: each crate of rust/crates is a layer's, and depends only on what tools/check_layering.cmake
+    # (the layer table) allows that layer, and re-exports no third-party crate. It is shown, on a fixture that breaks
+    # each rule, to see the breach: a check that cannot see a violation passes as quietly as one that finds none.
+    set(_rust_fixtures "${CMAKE_CURRENT_SOURCE_DIR}/rust_check_fixtures")
+    add_test(NAME rust_layering
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py" "${PROJECT_SOURCE_DIR}")
+    foreach(_case IN ITEMS core_depends_on_math reexports_third_party not_a_layer)
+        add_test(NAME rust_layering_catches_${_case}
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py" --partial
+                    --crates "${_rust_fixtures}/layering/${_case}/crates" "${PROJECT_SOURCE_DIR}")
+    endforeach()
+    set_tests_properties(rust_layering_catches_core_depends_on_math PROPERTIES
+        PASS_REGULAR_EXPRESSION "katana_core/Cargo.toml: layer 'core' must not depend on 'math'")
+    set_tests_properties(rust_layering_catches_reexports_third_party PROPERTIES
+        PASS_REGULAR_EXPRESSION "lib[.]rs: re-exports the third-party crate 'rusqlite'")
+    set_tests_properties(rust_layering_catches_not_a_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "katana_plotting: is not a layer of tools/check_layering[.]cmake")
+    add_test(NAME rust_layering_catches_missing_layer
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py"
+                --crates "${_rust_fixtures}/layering/missing_layer/crates" "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(rust_layering_catches_missing_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "layer 'math' has no crate in rust/crates")
     # Step 3's round-trip gate (rust/crates/katana_app/tests/round_trip.rs) compares the projects
     # the two programs save through tools/project_dump.py, a dump made with Python's own sqlite3
     # so that the judge is neither program. `project_dump_self_test` is the dump's own test, on

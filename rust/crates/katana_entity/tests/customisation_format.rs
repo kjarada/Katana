@@ -1018,8 +1018,8 @@ mod customisation_format {
     // The example docs/customisation.md prints under "A worked example",
     // character for character: a file a person may well copy to start their
     // own. It reads as what it says, and it is laid out as the writer lays a
-    // file out. The C++ case's copy of it is held to the document by the `docs`
-    // test (tools/check_docs.py, check_worked_example); this is a copy of that.
+    // file out. This copy is held to the document by the `docs` test
+    // (tools/check_docs.py, check_worked_example), which reads it from here.
     #[test]
     fn the_worked_example_of_the_document_is_written_as_it_is_printed() {
         let example = r##"{

@@ -1658,7 +1658,7 @@ run and reply panel, and how a dialog hears that its job ended - is
 
 **Tests.** `rust/crates/katana_app/tests/geo_raster/grid_verb.rs` (the executor, a Session and the
 MCP server's `katana_run_commands`), `rust/crates/katana_window/tests/gis_terrain/grid_dem_dialog.rs`,
-`cli.raster_grid_*` (the cli tests' `grid.cmake`) and
+`cli.raster_grid_*` (`tests/cli/geo/grid.cmake`) and
 `qt_grid_points_to_dem_dialog_grids_the_drawing_headless`
 (`tests/geo/headless/grid.cmake`). Every expected value is worked from the
 plane the points are surveyed on, z = 100 + x/10 + y/20: a linear grid
@@ -1790,7 +1790,7 @@ made is offered to the next.
 
 **Tests.** `rust/crates/katana_app/tests/geo_raster/dem_verbs.rs` (the executor, a Session and the
 MCP server), `rust/crates/katana_window/tests/gis_terrain/dem_tools_dialog.rs`,
-`cli.raster_*` (the cli tests' `dem.cmake`) and
+`cli.raster_*` (`tests/cli/geo/dem.cmake`) and
 `qt_dem_tools_clip_then_footprint_through_the_dialog_headless`
 (`tests/geo/headless/dem.cmake`). The values, by hand, on plane.asc (40 x 30
 cells of 1 m, z = 100 + 0.05x, read as Float32):

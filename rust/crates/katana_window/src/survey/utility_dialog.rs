@@ -1452,7 +1452,7 @@ impl UtilityToolsDialog {
                         "utilitySchema",
                         &mut self.schema,
                         "the delivery schema: a .csv of attributes and value lists",
-                        "The schema file (include/katana/survey/subsurface/delivery_schema.hpp); \
+                        "The schema file (rust/crates/katana_survey/src/subsurface/delivery_schema.rs); \
                          tools/utility_schema_domains.py makes one from a TfNSW Utility Schema \
                          workbook",
                     );

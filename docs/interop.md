@@ -870,7 +870,7 @@ is what it runs.
 
 Until 2026-09-26 these verbs were written twice: once in `session.rs`,
 printing prose to stdout for `katana_cli` and `katana_mcp`, and again in
-`MainWindow::dispatch_line`, logging other prose in the window. The two had
+`Executor::dispatch_line`, logging other prose in the window. The two had
 drifted - the window framed and asked, the CLI kept no surfaces - and neither
 reply could be read by a program. They are now verbs of the one
 geoprocessing executor (`rust/crates/katana_app/src/geo/`, `docs/geoprocessing.md`, "The
@@ -991,7 +991,7 @@ warning text="..."
 
 Tests: `gis_verbs::*`, `gis_session::*` and `gis_records::*`
 (`rust/crates/katana_app/tests/geo_io/gis_verbs.rs`), `mcp_server::import_returns_structured_records`,
-the `cli.gis_*` checks (the cli tests' `gis_verbs.cmake`), the
+the `cli.gis_*` checks (`tests/cli/geo/gis_verbs.cmake`), the
 window's `qt_gis_*_headless` (`tests/geo/headless/gis_verbs.cmake`) - of
 which `qt_gis_import_line_gives_the_sessions_records_headless` expects the
 very records `cli.gis_import_line_gives_the_records_the_window_gives` does -
@@ -1152,7 +1152,7 @@ directly, are gone.
 
 Tests: `import_options::*` and `raster_bands::*`
 (`rust/crates/katana_app/tests/geo_io/import_options.rs`), the `cli.import_*` checks of
-the cli tests' `import_options.cmake`,
+`tests/cli/geo/import_options.cmake`,
 `mcp_server::import_takes_its_filter_scope_and_preview_arguments_as_the_words_a_person_types`,
 and `vector_import_dialog::the_fields_build_exactly_the_typed_line` with
 its neighbours (`rust/crates/katana_window/tests/gis_vector/import_dialogs.rs`).
@@ -1291,7 +1291,7 @@ gone. A headless run still refuses the item's file dialog and names the
 (`docs/mcp.md`, "I3 and I4").
 
 Tests: `export_options::*` (`rust/crates/katana_app/tests/geo_io/export_options.rs`), the
-`cli.export_*` checks of the cli tests' `export_options.cmake`,
+`cli.export_*` checks of `tests/cli/geo/export_options.cmake`,
 `mcp_server::export_takes_the_shared_scope_and_its_options_as_the_words_a_person_types`,
 and `vector_export_dialog::the_fields_build_exactly_the_typed_line_and_run_hands_it_over`
 with `vector_export_line::*` (`rust/crates/katana_window/tests/gis_vector/export_dialog.rs`).
@@ -1383,7 +1383,7 @@ later reply - Check's - gives none for the same file: Check blanked them
 import dialogs' status lines are plain text: GDAL's words are shown as they
 are, where a `<code>` in one was taken for markup and vanished
 (`vector_import_dialog::a_message_is_shown_as_typed_not_as_markup`). INFO runs as a background job in the window, so the dialog is told when
-the job ends (`MainWindow::await_job`, which reads the `job id=<n> ...
+the job ends (`Executor::await_job`, which reads the `job id=<n> ...
 state=started` record the line answered with). MCP: `katana_dataset_info`
 (`docs/mcp.md`).
 

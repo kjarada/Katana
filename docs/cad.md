@@ -761,7 +761,7 @@ invalidation on every edit for no gain anyone has measured. The comment in
 `max(length / 2000, 0.1 m)` between stations, the design profile beside them
 when there is one) and shows. The open section view is cut again with the same
 function from the alignment and design it kept, when the drawing's surfaces
-change (`MainWindow::recut_sections`; `docs/terrain.md`, "Hidden is a matter of
+change (`Executor::recut_sections`; `docs/terrain.md`, "Hidden is a matter of
 the picture"), so there is still one routine. The alignment path chords the
 centreline at 10 mm: the section samples at most every 100 mm along it, so a
 finer polyline would cost time and change nothing the section reports.

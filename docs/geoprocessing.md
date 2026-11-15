@@ -728,7 +728,7 @@ the toolbox's forms the specs they are made from.
 `GeoWorkbench` (`rust/crates/katana_window/src/geo/geo_workbench.rs`) is built as the online
 and utility workbenches are. The window's GIS actions (`rust/crates/katana_window/src/main_window/actions.rs`) hand it the
 window's document, interpreter, reference rasters and surfaces, and
-`MainWindow::run_workbench_line` asks it first. So a typed line and a dialog's
+`Executor::run_workbench_line` asks it first. So a typed line and a dialog's
 line through `MainWindow::run_verb_line` reach it alike.
 
 - **What answers at once is logged** (LIST, HELP, a refusal).
@@ -743,7 +743,7 @@ line through `MainWindow::run_verb_line` reach it alike.
   place" when the reply is `target=in-place` and names none (it said "...
   deleted on ."; `gis_clip_dialog::its_line_cuts_a_pipe_in_place_through_the_executor`).
 - **Interactively, it logs `job id=<n> title="..." state=started`.** When
-  the job ends, `GeoServices::finished` and the listeners
+  the job ends, the window's geo services' `finished` and the listeners
   (`GeoWorkbench::add_finished_listener`) are told. That is how a dialog learns
   what its line did.
 
@@ -757,7 +757,7 @@ every front end. The executor gives a phase a staging copy
 (`Context::surfaces`), made as prepare and as apply begin, and commits
 what the phase changed as one undo step named after the verb; a phase that
 fails commits nothing (`docs/terrain.md`, "Surfaces in the drawing").
-`MainWindow::sync_scene_surfaces` rebuilds the scene's list whenever the
+`Executor::sync_scene_surfaces` rebuilds the scene's list whenever the
 Document's surface generation moves. A second surface of a name is
 "name (2)": the store keeps names unique so that `SURFACE <name>` finds
 one. The verb table's SURFACE row takes only LIST, INFO, REMOVE, FROM and
@@ -870,7 +870,7 @@ The tests: `rust/crates/katana_gis/tests/processing/` holds the bridge, policy
 and contract tests, `rust/crates/katana_interop/tests/drawing_bindings/` the
 bindings', and `rust/crates/katana_app/tests/geo_*/` the surface store's, the
 executor's and the verb's, run through a Session (`geo_session::a_gdal_line_runs_through_the_session_and_its_raster_is_a_reference`).
-the cli tests' `gdal.cmake` holds the `cli.gdal_*` tests,
+`tests/cli/geo/gdal.cmake` holds the `cli.gdal_*` tests,
 `tests/geo/headless/gdal.cmake` the window's, and
 `rust/crates/katana_window/tests/host/geo_workbench.rs` the workbench's. Every expected
 value is worked by hand and quoted beside it:
@@ -1022,7 +1022,7 @@ names any it adds; `pipeline_verb::*` fail without the fix).
 Tests: `rust/crates/katana_window/tests/gis_terrain/pipeline_builder.rs`,
 `rust/crates/katana_app/tests/geo_frame/pipeline_verb.rs`,
 `cli.gdal_pipeline_contours_then_buffer_from_a_raster_to_a_layer`
-(the cli tests' `pipeline.cmake`) and
+(`tests/cli/geo/pipeline.cmake`) and
 `qt_gdal_toolbox_pipeline_tab_runs_its_steps_headless`
 (`tests/geo/headless/pipeline.cmake`). By hand: plane.asc spans
 100.025 .. 101.975, so contours every 0.5 m are 100.5, 101.0 and 101.5, each
@@ -1219,7 +1219,7 @@ Where it differs from the plan: the extent is grown outwards to whole cells
 waits for T0's block in the bindings, so the dialog's `gridToSurface` is
 not offered yet. The shared pieces of the DEM verbs are
 `rust/crates/katana_app/src/geo/dem_support.rs`, and of their dialogs
-`rust/crates/katana_window/src/geo/geo_dialog_support.rs`; `GeoServices::views` is new, so
+`rust/crates/katana_window/src/geo/geo_dialog_support.rs`; the window's geo services' `views` is new, so
 a dialog's scope offers the window's views.
 
 ### T7: DEM tools: mosaic, clip, fill, footprint, reproject, difference
@@ -1357,7 +1357,7 @@ and the dialog shows the job's reply when the workbench says it ended
 (`gis_buffer_dialog::an_interactive_run_shows_its_jobs_reply_when_it_ends`);
 headless it is there when Run returns (`qt_gis_buffer_dialog_headless`,
 `qt_gis_dissolve_dialog_headless`). The scope's View choice lists the
-window's views, from `GeoServices::views` - the workspace, as every other
+window's views, from the window's geo services' `views` - the workspace, as every other
 workbench of the window is given it. (Built alone, this lane found the
 workspace as the window's one `ViewWorkspace` child; the terrain lane and the
 toolbox lane each added a views service, and when the lanes were merged the
@@ -1772,7 +1772,7 @@ what it cannot carry, and returns GDAL's warnings. KML, KMZ and GPX are
 converted to longitude and latitude from the project's coordinate system,
 which EXPORT now passes on every front end. Tests:
 `rust/crates/katana_interop/tests/interop_core/vector_fidelity.rs`,
-the cli tests' `vector_fidelity.cmake`,
+`tests/cli/geo/vector_fidelity.cmake`,
 `tests/geo/headless/vector_fidelity.cmake`.
 
 ### I2: Every driver: FORMATS
@@ -1785,7 +1785,7 @@ it answers at prepare, as `GDAL LIST` does. `katana_formats` and
 `katana://formats` share its records; GIS > Processing - GDAL > Formats...
 is the I2 block of `menu_table.rs`. Tests: `rust/crates/katana_interop/tests/interop_core/formats.rs`,
 `rust/crates/katana_window/tests/gis_vector/formats_dialog.rs`,
-the cli tests' `formats.cmake`, `tests/geo/headless/formats.cmake`.
+`tests/cli/geo/formats.cmake`, `tests/geo/headless/formats.cmake`.
 
 ### I3: IMPORT options
 
@@ -1822,7 +1822,7 @@ its first. Added beyond it: `attributes=no` (the dialog's "keep attributes"
 box had no word) and `resolution=` (the cloud dialog's COPC level of
 detail had none). Tests: `rust/crates/katana_app/tests/geo_io/import_options.rs`,
 `rust/crates/katana_window/tests/gis_vector/import_dialogs.rs`,
-the cli tests' `import_options.cmake`, and
+`tests/cli/geo/import_options.cmake`, and
 `mcp_server::import_takes_its_filter_scope_and_preview_arguments_as_the_words_a_person_types`.
 
 ### I4: EXPORT on the shared scope and filter
@@ -1852,7 +1852,7 @@ reach it headless - the widget tests drive it by control name, and the
 `EXPORT` line is the headless path. Tests:
 `rust/crates/katana_app/tests/geo_io/export_options.rs`,
 `rust/crates/katana_window/tests/gis_vector/export_dialog.rs`,
-the cli tests' `export_options.cmake`, and
+`tests/cli/geo/export_options.cmake`, and
 `mcp_server::export_takes_the_shared_scope_and_its_options_as_the_words_a_person_types`.
 
 ### D1: INFO as structured data, STATS, CHECK
@@ -1864,7 +1864,7 @@ own `raster info` and `vector info` JSON through the bridge - which
 `katana_interop::dataset_info::describe_source` now uses in place of the adapter's reading - or
 gives that JSON back; a folder is `dataset identify`, CHECK `dataset check`.
 The Dataset Information dialog runs the INFO lines through the window's one
-executor and hears a job's end through `MainWindow::await_job`; MCP
+executor and hears a job's end through `Executor::await_job`; MCP
 `katana_dataset_info`.
 
 - **Deviations.** The records are built from `katana_interop::SourceDescription`,
@@ -1874,7 +1874,7 @@ executor and hears a job's end through `MainWindow::await_job`; MCP
   options of `describe_source`, so the import dialogs could use them too.
   Statistics come from the band's `STATISTICS_` metadata (14 digits), not
   the JSON's rounded keys (3 decimals).
-- **For the other packages.** `MainWindow::await_job(started, done)` is how a
+- **For the other packages.** `Executor::await_job(started, done)` is how a
   dialog hears what its line did once the job it started ends (the
   toolbox's reply, a lane's dialog); it reads the `job` record the line
   answered with.

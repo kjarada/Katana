@@ -633,7 +633,7 @@ screen is one more that a smaller screen proves wrong.
   what it draws, and forgetting it is visible in the dialog's own code, not a
   rule a reader must remember. The eleven C++ cases about finding a footer in
   a Qt layout, the filter, and a dialog shown again are exempt for that
-  (`rust/parity.toml`). *Rejected in the C++, for the record:*
+  (the parity list, retired with the C++). *Rejected in the C++, for the record:*
   `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that was
   too tall (it let the window shrink and clipped or overlapped what no longer
   fitted, and nothing scrolled).
@@ -909,7 +909,7 @@ would not fit in the widest window.
 A family of tools - Circle's six, Arc's five, Ellipse's three, the eighteen
 Vertices tools - is one button on the Draw toolbar
 (`rust/crates/katana_window/src/tools/tool_menus.rs`). Until 2026-09-30 it was Qt's split
-button (`QToolButton::MenuButtonPopup`), and the sign of its menu sat on its
+button (Qt's MenuButtonPopup), and the sign of its menu sat on its
 icon. The C++ theme's `QToolButton` rule had padding and a border, and for
 such a rule `QStyleSheetStyle` reserved no width for a split button's arrow
 strip (its `PM_MenuButtonIndicator` was 0), yet still laid the strip over the
@@ -1460,7 +1460,7 @@ run by a test through the window
 (`qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless`).
 Link This View and Show the Selection on Hidden Layers are toggles, and
 their check was never seen: the C++ stylesheet drew a menu item that had an
-icon by its `QMenu::icon` rule and drew no check mark for it at all, so
+icon by its QMenu icon rule and drew no check mark for it at all, so
 they - and Grid, Object Snap and every other toggle with an icon - looked
 the same on as off, pixel for pixel, and Link This View on a linked view
 unlinked it with nothing on screen to say it was on. A checked item's icon
@@ -1855,7 +1855,7 @@ be maximised, and one view is active), and of a tab nothing but its dock's
 control name.
 
 **Minimise is a tray, and why.** A floating dock keeps the window's
-shortcuts (in the C++ it had to stay a `Qt::Tool` window for that, which has
+shortcuts (in the C++ it had to stay a Qt tool window for that, which has
 no taskbar button, so the window manager's minimise would have lost it), and
 a docked panel is not a window at all. So Minimise HIDES the dock and puts a
 button for it on `MinimisedToolBar` at the bottom of the main window (its
@@ -1935,7 +1935,7 @@ the views would; a floating active view left minimised during an arrange
 stays hidden and active, since only the tray button (`DockChrome::restore`)
 restores it. The Survey
 Point Manager dock (`SurveyPointsDock`) wears the chrome now that
-`SurveyServices::chrome` hands it over, and the workbench has the chrome
+the window's dock chrome hands it over, and the workbench has the chrome
 forget the dock before deleting it; its minimise, tray and float have been
 seen only in a screenshot, with no automated test.
 
@@ -2993,7 +2993,7 @@ Not done:
 Switching a layer off in the C++'s layer panel crashed the application. The
 chain was: the box's `itemChanged` signal -> `execute(updateLayer)` -> the
 document's change listener -> `refreshAll()` -> `refreshLayers()` ->
-`QTreeWidget::clear()`, all synchronous, all while the item whose `setData`
+QTreeWidget's clear(), all synchronous, all while the item whose `setData`
 raised the signal was still on Qt's stack. `clear()` deleted it, and
 `setData` read its parent pointer on the way out. The property table had the
 same shape of bug behind an edited value. The C++'s listener then queued one
@@ -3149,7 +3149,7 @@ Each now reaches the same code on every front end
   <file>...`, beside `katana_cli`'s, written twice because the readers of
   the older files lived where the interpreter could not see them - and the
   two had come to differ. Both are gone from the window
-  (`MainWindow::dispatch_line` hands the line on), with the prose they
+  (`Executor::dispatch_line` hands the line on), with the prose they
   printed: a load now answers `loaded file=... name=... definitions_added=...`
   a file, the names the rules ask for that nothing defines, and the
   `customisation` record; a file named twice is `repeated file=...`; a file
@@ -3168,7 +3168,7 @@ Each now reaches the same code on every front end
 - `UPDATE`, the whole family, is the session's
   (`rust/crates/katana_app/src/update_verbs.rs`): `CHECK`, `STATUS`, `DOWNLOAD CONFIRM`,
   `APPLY CONFIRM`, `SKIP`, `BLOCKED CLEAR`, `SET AUTO` and `TOKEN`.
-  `MainWindow::run_workbench_line` takes it before every other family and the
+  `Executor::run_workbench_line` takes it before every other family and the
   update workbench runs it - the three lines that take time as jobs, the rest
   at once ("Help > Check for Updates", below). A headless window answers
   `CHECK` and `STATUS` when they are typed and has `DOWNLOAD` and `APPLY`
@@ -3185,7 +3185,7 @@ once skipped only a line whose first character was `#`, and refused an
 indented note that the window skipped; it reads the same rule now
 (`cli.an_indented_note_in_a_script_runs_nothing`,
 `mcp_server::a_scripts_indented_note_runs_nothing`). The window runs the same files three ways, all
-through one function, `MainWindow::run_script`
+through one function, `Executor::run_script`
 (`rust/crates/katana_window/src/script_runner.rs`):
 
 - **File > Run Script...** (`fileRunScript`) opens a non-modal dialog
@@ -3233,7 +3233,7 @@ refused, `script=pasted` in its record; whatever was typed before the paste
 starts the first line. The single-line field used to show the breaks as
 blanks and run the whole as one line of nonsense. Pasted while a tool waits
 for typed text - the lines of a Text or a Multiline Text - they are that text
-instead (`MainWindow::type_lines_into_tool`): each line typed in turn, as though
+instead (`Executor::type_lines_into_tool`): each line typed in turn, as though
 typed and entered, and a blank line left out, since to Text it is the Enter
 that finishes and a paragraph break in what was copied is not. Run as a
 script, a label's words were once taken for commands - `RECT 0,0 5,5` pasted
@@ -3270,7 +3270,7 @@ own code keeps, so nothing is written twice:
   the verb and needed no edit here
   (`command_reference::the_updates_section_is_the_update_verbs_own_help` holds every line of the help to
   be in the section, and the section to have no line of its own);
-- **Window**: `window_help_text`, the verbs `MainWindow::dispatch_line` and
+- **Window**: `window_help_text`, the verbs `Executor::dispatch_line` and
   `run_workbench_line` take before the interpreter (`SCRIPT`, `IMPORT`,
   `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
   whose usage the Geoprocessing section gives - `PLOTSHEETS`, `PLOT`,
@@ -3535,7 +3535,7 @@ refused for a job they never started: a check asked for - typed, Check now,
 or Help > Check for Updates with nothing known yet - while the AUTOMATIC
 check is on its way takes that one over. It is not started twice; the dialog
 says Checking, and its answer is logged and shown as a typed check's is.
-`MainWindow::run_workbench_line`
+`Executor::run_workbench_line`
 takes `UPDATE` lines before every other family, as the session does, so a
 `DOWNLOAD` or an `APPLY` typed on the command line goes exactly the way the
 buttons go - the buttons build those very lines. `HELP UPDATE` prints the
@@ -3976,7 +3976,7 @@ a second implementation of a session verb.
 - **Headless, the line waits for its job,** so what it did is logged, and
   captured by `runVerbLine`, before the next line.
 - **Interactively it logs `job id=<n> title="..." state=started`,** and when
-  the job ends it tells `GeoServices::finished` and any listener a dialog
+  the job ends it tells the window's geo services' `finished` and any listener a dialog
   added (`GeoWorkbench::add_finished_listener`). A cancelled job applies
   nothing, whenever the cancel arrived.
 
@@ -4001,7 +4001,7 @@ executor, as the dialogs below do.
 (`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per
 tool) and the dialogs after them do no work of their own: each
 writes the line its fields describe into its Command field and hands it to
-`GeoServices::run`, the window's one executor. `GeoRunPanel`
+the window's geo services' `run`, the window's one executor. `GeoRunPanel`
 (`rust/crates/katana_window/src/geo/geo_dialog_support.rs`) is the Command, Preview, Run and
 Reply they share: an interactive run answers `job id=<n> ... state=started`,
 so the panel shows "running" and takes the reply from the workbench's
@@ -4009,7 +4009,7 @@ finished listeners when the job ends; a headless run's reply is the runner's
 own. A dialog is kept once made, a child of the window, so `--dialog` finds it
 by the name its action carries. Their scope and filter controls are Global
 Modify's (`ScopeFilterWidget`), given the window's views through
-`GeoServices::views`.
+the window's geo services' `views`.
 
 **The terrain dialogs** (Terrain > Surface From, GIS > Export Surface as DEM,
 and the Terrain > Analysis items) share
@@ -4084,7 +4084,7 @@ letter shared in one menu:
 (`Document::surfaces`; `docs/terrain.md`, "Surfaces in the drawing"), saved
 with the project and changed one undo step at a time, so `SURFACE <name>`
 finds the same surface on every front end and the window keeps none of its
-own. `MainWindow::sync_scene_surfaces` rebuilds the views' list from the
+own. `Executor::sync_scene_surfaces` rebuilds the views' list from the
 Document whenever its generation moves - at once, inside the notification,
 because the list points at surfaces a step may have replaced - keeping how
 each was shown and taking whether it is shown from the drawing. Surfaces
@@ -4124,7 +4124,7 @@ fields mean (`katana_ifc::front_end::format_export_line`, `katana_ifc::front_end
 is edited in `ifcExportCommand` and `ifcImportCommand`, and hands it to the
 window's command line through its context's `run_line`
 (`MainWindow::run_ifc_command`, `rust/crates/katana_window/src/main_window_ifc.rs`), which
-echoes it as typed and runs it by `MainWindow::run_ifc_line` - the code a typed
+echoes it as typed and runs it by `Executor::run_ifc_line` - the code a typed
 line runs, which reads it with the grammar `katana_cli` reads it with
 (`rust/crates/katana_ifc/src/front_end.rs`). So there is nothing a dialog can do that
 a typed line, a script or an agent cannot, and the reply - key=value records
@@ -4151,8 +4151,8 @@ only" with nothing selected is refused rather than writing the whole drawing -
 as `EXPORT ... SELECTED` is.
 
 With the geoprocessing executor in the window, which takes `IMPORT`,
-`EXPORT` and `INFO` of every other file, `MainWindow::run_workbench_line` asks
-`MainWindow::run_ifc_line` first, before the geo workbench: a typed line and a
+`EXPORT` and `INFO` of every other file, `Executor::run_workbench_line` asks
+`Executor::run_ifc_line` first, before the geo workbench: a typed line and a
 dialog's line through `runVerbLine` reach the workbench before
 `dispatch_line`, so without it the executor read an IFC line's options as
 part of a path (`qt_ifc_typed_export_and_import_are_the_command_lines_headless`

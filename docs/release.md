@@ -644,8 +644,8 @@ action by tag, by a short digest, by branch, the key read by another job,
 `secrets: inherit`, a configure without the update keys, the tag typed into a
 script, a widened exclude list ...) and requires the check to refuse each by
 name, with the empty file, a file of comments, CRLF line ends and a missing
-file as the degenerate inputs; `release_workflow_bash_steps_parse` and
-`release_workflow_pwsh_steps_parse` run the real file through the shells'
+file as the degenerate inputs; release_workflow_bash_steps_parse and
+release_workflow_pwsh_steps_parse run the real file through the shells'
 parsers, and `update_tools_check_release_workflow_scripts` breaks a step of
 each kind (the `$LASTEXITCODE:` case as it was) and checks the same. The last
 three are registered only where the shell answers, since a test that could
@@ -693,7 +693,7 @@ package's by the rehearsal that follows. Then:
 * `INFO samples/gis/terrain.asc` must name its coordinate system as
   `EPSG:32630`: that shows GDAL reads the `.prj`, and **nothing about PROJ's
   data**: GDAL recognises a WGS 84 UTM zone from its parameters
-  (GDAL's `AutoIdentifyEPSG`) and names it with `proj.db` missing.
+  (GDAL's `OSRAutoIdentifyEPSG`) and names it with `proj.db` missing.
   It was once taken for the check of the packaged PROJ data; shown on a copy
   of the package with `share/proj` hidden, it still names `EPSG:32630`.
   `CRS SET EPSG:7856` is the check: it reads the code from the database and
@@ -979,7 +979,7 @@ per-machine installer.
   wrong in one way each - no licence file, a page of Unix line ends with no
   licence, a template with no page, notices no install rule names - and read
   the refusal. (The C++ build also ran it on its own configure,
-  `packaging_installer_shows_the_licence`; the test runner writes no CPack
+  packaging_installer_shows_the_licence; the test runner writes no CPack
   configuration, so that test went with the C++: "Not done".)
   The release smoke test checks that each package holds the notices. *Seen,
   2026-10-15:* the interactive installer, run on a machine that already had
@@ -1019,7 +1019,7 @@ per-machine installer.
   NSIS does; an instruction that is compiled and never reached it cannot see.
   Each `packaging_nsis_check_catches_*` test breaks one rule in that text and
   requires the check to name it. Until 2026-11-15, where NSIS was installed,
-  `packaging_nsis_installer_builds_from_the_real_configuration` also ran the
+  packaging_nsis_installer_builds_from_the_real_configuration also ran the
   C++ build's own CPack configuration over a small tree, compiled the
   installer with `makensis` and held the script CPack generated to the same
   rules; the runner has no CPack configuration of its own, so it went with
@@ -1522,9 +1522,9 @@ not exist in it, and with the plain note "Katana X.Y.Z".
 * **The packaging's own configure is checked by nobody.** The C++ build ran
   `tools/check_install_rules.cmake` and `tools/check_installer_licence.cmake`
   on its own configure, and built a real NSIS installer from its CPack
-  configuration (`packaging_installs_only_present_first_party_files`,
-  `packaging_installer_shows_the_licence`,
-  `packaging_nsis_installer_builds_from_the_real_configuration`). The test
+  configuration (packaging_installs_only_present_first_party_files,
+  packaging_installer_shows_the_licence,
+  packaging_nsis_installer_builds_from_the_real_configuration). The test
   runner writes no install rules, so those three went with the C++; the
   checks' fixture tests remain. A runner test that configures the packaging
   project into a scratch folder and runs the two checks on it would bring
