@@ -145,8 +145,8 @@ shows.
 
 **Delete is the view's while a vertex grip is hot.** The window's Erase
 holds Delete as a shortcut, and the view is asked first whether it claims a
-key before the window's shortcuts may have it (`PlanView::shortcut_override`,
-the C++'s Qt `ShortcutOverride`). The view once claimed only Ctrl+Z there, so
+key before the window's shortcuts may have it (`PlanView::shortcut_override`).
+The view once claimed only Ctrl+Z there, so
 in the window Delete on a hot vertex erased the whole polyline: the view's own
 Delete path was never reached, and only a bare view in a test ever took it.
 The view now claims Delete when a vertex grip is hot
@@ -441,7 +441,7 @@ and Segment to Arc drew a straight line. The rules now, in
   own refusal, a point on a vertex, applies. That rule turned down the
   marked middle of every segment 16 px long or less, the one the prompt
   had just offered, while the verb inserted there. (This paragraph, and
-  the tool's C++ header, said a typed point was refused ONLY where geometry
+  the tool's own comment in the C++, said a typed point was refused ONLY where geometry
   refused it; it never was, at a pick.) Rejected: a typed point taking the
   nearest vertex at any distance - the 50 m delete, typed.
 - **R3, the preview is the click.** Each one-polyline tool PLANS its edit
@@ -650,9 +650,10 @@ Rejected, and why:
 - **The two-click Insert** (pick the polyline, then the point): the pick
   only chose the polyline, the segment came from the point, and the band
   between them showed neither; a run of inserts cost two clicks each.
-- **A second preview entry point** (`previewFor`, a new C++ virtual taking the
-  pick): 46 `preview` overrides and `-Woverloaded-virtual` (in Rust, a second
-  trait method beside `preview` on every tool). The view's pick
+- **A second preview entry point** (a second `preview` taking the pick): a
+  second trait method beside `preview` on every one of the 46 tools (in the
+  C++, a new virtual that 46 overrides and `-Woverloaded-virtual` stood in the
+  way of). The view's pick
   reaches a tool through its context instead (`docs/tools.md`).
 - **Colours in the theme's palette** (`crates/katana_window/src/theme/palette.rs`): its
   tokens are the chrome's, and it says the views keep their drawing colours.
@@ -1000,7 +1001,7 @@ tests named below):
 | Cut Section along the selection | along a curve polyline's or a spline's chords |
 | Alignment Manager, PIs from the selection | a curve polyline refused: its vertices are tangent points, not PIs |
 | the object snap in the window | one owner, the document's drafting settings: View > Snap Modes, the drafting toolbar, `SNAP` and new views read and write the same, where the views had kept a copy that a click in the menu or a new view wrote back over the toolbar's modes; `SNAP` with `modes=`, `add=` or `remove=` typed in the window is the drawing verb (`SNAP <mode> ON\|OFF` stays the window's shorthand) |
-| the Properties panel's Geometry group (`property_panel.rs`) | a curve polyline its vertices, closed, arcs, heights, length and area when closed; an ellipse its centre, radii, rotation, sweep and length; a spline its degree, control and fit points and length. Main moved these rows out of `main_window.cpp` into the tree panel while this branch was open, and the second merge of main (after PR #9 and #11) carried the three kinds across |
+| the Properties panel's Geometry group (`property_panel.rs`) | a curve polyline its vertices, closed, arcs, heights, length and area when closed; an ellipse its centre, radii, rotation, sweep and length; a spline its degree, control and fit points and length. Main moved these rows out of the C++'s main window into the tree panel while this branch was open, and the second merge of main (after PR #9 and #11) carried the three kinds across |
 | View > Panels > Vertices | Edit Vertices' icon, since main's `--check-menus` now requires an icon and a status tip on every item and that tool opens this panel |
 
 ## Not done

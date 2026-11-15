@@ -23,8 +23,9 @@ widget: the open document, selection and picking, snapping, the view transform
 and the command-line interpreter. All of it is unit tested without a GUI, and
 the desktop window and the CLI drive exactly the same objects. That split is
 what lets the engine be exercised, scripted and regression-tested with no
-display attached — and it is what will let an application API expose the
-same operations without duplicating logic (Rule 2).
+display attached — and it is what lets `katana_cli` and `katana_mcp` expose the
+same operations as the window without duplicating logic: there is one
+implementation of each edit, and every front end reaches it.
 
 ## Document
 
@@ -43,12 +44,12 @@ as session data outside the model, the loaded style library and survey map
   a delete, a merge, a rename - it is CLEARED, not followed: no command event
   carries a rename's new name, and falling back to ByLayer can never put new
   work in the wrong style. PURGE keeps it although nothing wears it yet.
-* `setStyleLibrary` and `set_survey_map` replace the library or the map whole,
+* `set_style_library` and `set_survey_map` replace the library or the map whole,
   notify, and bump `library_generation()` or `survey_map_generation()`. A cache
   of flattened definitions, thumbnails or code lookups keys on those counters
-  - never on a `LineStyle*` or `SurveyRule*`, which dangle when the whole is
-  replaced, and never on "a listener fired", which a selection click also
-  does. Both are an EDIT of the session's customisation: its origin becomes
+  - never on the identity of a line style or survey rule, which is gone when
+  the whole is replaced (in the C++ such a pointer dangled), and never on "a
+  listener fired", which a selection click also does. Both are an EDIT of the session's customisation: its origin becomes
   `edited` and it is no longer kept.
 * The rest of what a session knows of its customisation is
   `customisation_state()` (`crates/katana_cad/src/customisation_state.rs`): its
@@ -58,7 +59,7 @@ as session data outside the model, the loaded style library and survey map
   file or a built-in that did not read (`docs/customisation.md`, "The
   replies": `start`). `install_customisation` installs a
   whole `katana_entity::Customisation` and `customisation()` gives the session back
-  as one. `DocumentChange::Customisation` is its change bit - outside
+  as one. `DocumentChange::CUSTOMISATION` is its change bit - outside
   `DRAWING`, and no part of a Replaced drawing - and
   `customisation_generation()` its counter; a colour table also bumps
   `library_generation()`, since what is baked from a definition holds the
@@ -326,12 +327,12 @@ unchanged: the resource, the tool's text and its structured content were
 compared byte for byte with the previous `katana_mcp` over one session
 (`mcp_server::the_status_tool_and_resource_say_what_the_status_verb_says` pins them with
 the text written out by hand). Asking changes nothing and is no undo step. A
-name that is not UTF-8 is written with U+FFFD rather than thrown. File >
+name that is not UTF-8 is written with U+FFFD rather than failing the reply. File >
 Drawing Summary copies `STATUS JSON` (`docs/desktop.md`).
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
-(`MainWindow::run_command_line`, whose `dispatch_line` the window's dialogs run
+(`Executor::run_command_line`, whose `dispatch_line` the window's dialogs run
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
@@ -449,14 +450,14 @@ it, and the sheets print it in the title block, so it is set in one place:
 - The dialog is non-modal (`MainWindow::show_project_crs`, control name
   `projectCrsDialog`, the File item's data), made afresh each time it is
   opened from closed. Until 2026-09-26 the File item and the status bar button
-  ran it with `exec()`, so `--dialog fileProjectCrs` hung a headless run. That
-  was the hidden modality section 1 of the contributors' rules forbids. GIS >
-  Online Data's Set Project CRS still waits for it in a person's session,
+  ran it as a modal dialog in its own event loop, so `--dialog fileProjectCrs`
+  hung a headless run. That was hidden modality, which no dialog may have: a
+  headless run never blocks on a question. GIS > Online Data's Set Project CRS still waits for it in a person's session,
   because it imports into the system chosen. A headless session gets the
   non-modal dialog there too, and Online Data reads the system again when it
   refreshes. Set builds `CRS SET <text>` (Local Coordinates `CRS CLEAR`) and
-  runs it through the window's command runner, as section 1 of the
-  contributors' rules asks of a dialog; its refusal is the verb's, shown in
+  runs it through the window's command runner, as every dialog hands its
+  work to the one executor; its refusal is the verb's, shown in
   `projectCrsCheck`.
 - **`CRS SET` takes the rest of the line as typed** (2026-09-29). The
   interpreter's tokenizer removes every double quote, and the verb used to
@@ -497,10 +498,15 @@ window, `qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless`.
 ## Threading and ownership
 
 Single-threaded; everything belongs to the GUI thread (`docs/architecture.md`,
-"Threading"). `MainWindow` owns the
-`Document`, which owns the model, the command stack and the project store. The
-viewport holds a reference to the document and must not outlive it. Listeners
-must not mutate the document re-entrantly.
+"Threading"). The window's `Executor`
+(`crates/katana_window/src/main_window/executor.rs`) owns the `Document`, which
+owns the model, the command stack and the project store. A view is handed the
+document, borrowed, each time it draws or takes an event, and keeps no
+reference of its own between frames, so none can outlive it (the C++'s
+viewport held a pointer and had to be destroyed first). Work off the GUI
+thread never sees the document: a background job computes from copies and
+applies its result on the GUI thread (`docs/terrain.md`, "Background jobs").
+Listeners must not mutate the document re-entrantly.
 
 ## Performance
 
@@ -514,7 +520,7 @@ some time after the index was in use.)
 That last clause is load-bearing, and it used not to hold. The pre-filter works
 on whole ENTITIES, so a 3000-vertex surveyed string near the cursor contributed
 all 3000 of its segments to the pairwise loop — 4.5 million intersections on
-every mouse move, since snapping runs synchronously in `mouseMoveEvent`.
+every mouse move, since snapping runs synchronously as the view takes the move.
 Polyline segments are now culled individually against the cursor's reach box
 before they enter the candidate list. The cull is exact rather than an
 approximation: every candidate is accepted only within `aperture` of the cursor
@@ -522,8 +528,8 @@ and lies on the curve that produced it, so a segment whose bounding box misses
 the reach box cannot carry a point that would have been accepted.
 
 Measured on the C++, on a 16-thread 2.5 GHz x86-64, Release, one `snap()` call
-over the middle of a polyline (the C++ benchmark `bench_cad.cpp`, which went
-with the C++; the Rust port has no benchmark of its own yet):
+over the middle of a polyline (the C++'s benchmark, which went with it; the
+Rust has no benchmark of its own yet):
 
 | Polyline vertices | Before | After |
 |---|---|---|
@@ -545,7 +551,9 @@ narrow so that a different index could be put behind them.
 ## Spatial indexing
 
 Snapping, picking and box selection each walked every entity in the model.
-Measured in Release, 4-vertex strings scattered over a 1 km square:
+Every figure in this section was measured on the C++ (Release), before the
+port; the Rust carries the same index and the same crossover, and has no
+benchmark of its own yet. 4-vertex strings scattered over a 1 km square:
 
 | Entities | Snap per mouse move | Share of the 16 ms budget |
 |---|---|---|
@@ -605,7 +613,7 @@ a repaint has to draw happens on **every frame** — every pan, every zoom — s
 it was the scan that mattered most. At 500 000 entities zoomed to 1% of the
 extent it cost 22.3 ms per repaint to find the 500 entities on screen.
 
-Measured, 100 000 entities, by the share of the drawing's **area** on screen:
+Measured on the C++, 100 000 entities, by the share of the drawing's **area** on screen:
 
 | Area on screen | Visible | Scan | Indexed |
 |---|---|---|---|
@@ -621,8 +629,8 @@ one up again, against a single ordered traversal. A zoom-extents repaint is
 exactly that case, and it is common.
 
 So `for_each_candidate` chooses. Below ~35% of the indexed area it queries the
-index; above it, it scans. The threshold is the measured crossover, not a
-guess, and the table above is in the module beside it (`spatial_query.rs`). After the change a
+index; above it, it scans. The threshold is the crossover measured on the C++,
+not a guess (to be measured again on the Rust when it has benchmarks), and the table above is in the module beside it (`spatial_query.rs`). After the change a
 zoomed-out repaint costs 4360 µs against the scan's 4337 µs — the same, within
 noise — while the zoomed-in case keeps its full win:
 
@@ -958,19 +966,19 @@ which paints it onto the window canvas's PDF document
 (`crates/katana_window/src/canvas/pdf.rs`).
 
 **One drawing code, two surfaces.** The plot calls the same `draw_entities`
-and `draw_alignments` the screen uses, with the widget's `ViewTransform`
-temporarily replaced by the sheet's - device pixels of the PDF at its
-resolution - and put back afterwards. There is no second renderer for paper,
-so the plot and the screen cannot disagree about anything but the paper.
-That is Rule 3 applied to output: the renderer is never a second source of
-truth, and neither is the plotter.
+and `draw_alignments` the screen uses, through the view's `ViewTransform`
+replaced by the sheet's - device pixels of the PDF at its resolution. There is
+no second renderer for paper, so the plot and the screen cannot disagree about
+anything but the paper: the renderer is never a second source of truth, and
+neither is the plotter.
 
 **Line weights finally mean what they say.** `Layer::line_weight` has been
 documented as "millimetres on paper" since the layer table was built,
 validated, persisted,
 and read by nothing that draws, because there was no paper. On screen every
 line is still a 1.5 px hairline - a screen has no paper for a weight to be
-millimetres of. On the plot the pen is `lineWeight * pixelsPerMillimetre`,
+millimetres of. On the plot the pen is the line weight times the device
+pixels per millimetre,
 where a millimetre is `dpi / 25.4` device pixels by definition. The dash
 pattern generator already took the pen width as a parameter, so linetypes
 keep their model-unit lengths on paper too.
@@ -984,10 +992,12 @@ fits. The first draft of the fit test checked only the sheet's width and got
 the 10 km case wrong - on a landscape sheet the height binds first - and was
 corrected from that derivation, not from the output.
 
-**The sheet transform owns the margins.** The PDF writer's own page margins
-are set to zero; a non-zero writer margin would shift the page under a
-transform that already accounts for the margin, and the drawing would land
-off-centre by exactly that amount.
+**The sheet transform owns the margins.** The PDF page is the whole paper
+(`crates/katana_window/src/canvas/pdf.rs`, written with the `krilla` crate),
+and the margins are in the sheet transform alone. A margin applied twice - by
+the transform and by the writer, as the C++'s Qt PDF writer would have done
+unless its own were set to zero - lands the drawing off-centre by exactly that
+amount.
 
 **Not plotted.** Rasters and point clouds: at 300 dpi on A1 a backdrop image
 would be resampled to tens of megapixels per plot, and a point cloud drawn
@@ -995,13 +1005,13 @@ point by point would take minutes. Both are a later slice with their own
 decisions about resolution. The grid, the snap marker and the selection are
 screen furniture and are not drawn either.
 
-**The PDF itself is tested, not only the arithmetic.** The PDF writing ran
-inside the C++'s Qt widget and needed an application, which the unit-test
-suites did not create - so the application grew a `--plot` switch: `katana
-<project> --plot out.pdf [--fit | --scale N] [--paper A3] [--portrait]
-[--dpi N]` plots and exits without showing a window. The `qt_plot_headless`
-test runs it under `QT_QPA_PLATFORM=offscreen` on the sample project and
-checks the exit code, that a file of plausible size came out, and that it
+**The PDF itself is tested, not only the arithmetic.** The window has a
+`--plot` switch: `katana <project> --plot out.pdf [--fit | --scale N] [--paper
+A3] [--portrait] [--dpi N]` plots and exits without showing a window (it was
+added because the C++'s PDF writing needed a Qt application, which its unit
+suites did not create; it is kept because it tests the program as shipped).
+The `qt_plot_headless` test runs it on the sample project and checks the exit
+code, that a file of plausible size came out, and that it
 begins with `%PDF`. Two rules it follows are worth keeping. It copies the
 sample project before opening it, because opening can touch the project
 directory and a test must never change repository data. And it compares the
@@ -1124,7 +1134,7 @@ window's dialog (`docs/desktop.md`, "Global Modify"), the command line's
 
 `plan_global_modify` turns them into ONE command (a `katana_commands::command_stack::Transaction`
 named `GLOBAL_MODIFY`), so one Undo puts back every entity, layer and style
-(Rule 2), and a report, `GlobalModifyPlan`, worked out before anything runs:
+(one edit, one undo step), and a report, `GlobalModifyPlan`, worked out before anything runs:
 what matched, which entities, layers and styles change, and what is left
 alone and why. `summary()` is what the dialog shows as its preview and
 `MODIFY` prints. Decisions worth knowing:
@@ -1707,8 +1717,9 @@ viewport, the plot and every preview and thumbnail:
 - **Symbols on lines (decision D8)**: at every vertex, and the symbol's name
   never laid as a pattern - `resolve_line_pattern`, "Point symbols" above.
 
-**Nothing keeps a `LineStyle*` past the call.** A pointer into the library
-dangles as soon as `setStyleLibrary` replaces it. What is kept across frames
+**Nothing keeps a reference into the library past the call.** The library is
+replaced whole by `set_style_library` (in the C++ a kept pointer then
+dangled; the Rust's borrow rules refuse one). What is kept across frames
 is a `FlatDefinition` - a definition's strokes flattened once into runs, with
 `factor` and the origin applied and its texts COPIED - in a `DefinitionCache`
 keyed by name and `library_generation()`: the first question at a new
@@ -1798,8 +1809,8 @@ thumbnails; the style manager's Diagnostics tab lists the collision flags
 (`katana_cad::style_manager_rows::style_diagnostics`). Not yet: the 3D view draws neither symbols nor library
 linestyles; and `NamePicker` paints every picture as it is built, the
 drawing's own linetypes' uncached on every rebuild, so the code manager, whose
-two pickers list about 800 definitions, takes about 2.4 s to build in a Debug
-build on the reference map. Painting lazily, or caching the model pictures,
+two pickers list about 800 definitions, took about 2.4 s to build in a Debug
+build of the C++ on the reference map (not measured in the Rust yet). Painting lazily, or caching the model pictures,
 would help.
 
 ## The decisions of 2026-09-23 (D1 to D9), and where each lives
@@ -1809,7 +1820,7 @@ listed here so a later change can find the code that carries each one.
 
 | | Decision | Where it is implemented |
 |---|---|---|
-| D1 | The style library, the survey map and the rest of the session's customisation (its colour table, linework codes, automation) are SESSION data on `katana_cad::document::Document`: not undoable, not in the project - the project records only the customisations' NAMES. Edits are made in an editor buffer and committed with `setStyleLibrary`/`set_survey_map` (Apply/Revert) or by a verb, and are KEPT by `CUSTOMISE KEEP`, which writes the session to the user's own customisation file (the previous one as `.bak`; refused when the file changed on disk since it was read, and retired when the session equals the built-in), or EXPORTED by `CUSTOMISE EXPORT`. A load MERGES by default; Replace is explicit. *Rejected: the customisation as a table in the project beside Layer and Linetype* (one real customisation is 792 definitions and 35,000 strokes, written into every project that used it, and two projects could then disagree about what a linestyle looks like); *rejected: an undoable customisation* (a library is shared by every project of a site, and an undo of one drawing must not change another's lines); *rejected: edits that persist when the project is saved* (a project would then carry a customisation the user never kept, and open differently elsewhere). | `Document::set_style_library`/`set_survey_map`, `install_customisation` and the generation counters; `katana_cad::customisation_merge::merge_customisation` and `LoadMode` (`customisation_merge.rs`), which every front end reaches through the one `CUSTOMISE [REPLACE]` verb (QT-21 fixed); `CUSTOMISE KEEP`/`REVERT`/`RESET` and `startCustomisation` (`customisation_host.rs`); the Survey Code Manager's buffer, Apply and Revert, and its Export Codes... (the session's customisation cut down to the buffer's rules by `katana_entity::customisation::customisation_to_json`); the symbol library's Export Selected... (the same cut, to the selected definitions). `docs/customisation.md`, `docs/survey_coding.md` |
+| D1 | The style library, the survey map and the rest of the session's customisation (its colour table, linework codes, automation) are SESSION data on `katana_cad::document::Document`: not undoable, not in the project - the project records only the customisations' NAMES. Edits are made in an editor buffer and committed with `set_style_library`/`set_survey_map` (Apply/Revert) or by a verb, and are KEPT by `CUSTOMISE KEEP`, which writes the session to the user's own customisation file (the previous one as `.bak`; refused when the file changed on disk since it was read, and retired when the session equals the built-in), or EXPORTED by `CUSTOMISE EXPORT`. A load MERGES by default; Replace is explicit. *Rejected: the customisation as a table in the project beside Layer and Linetype* (one real customisation is 792 definitions and 35,000 strokes, written into every project that used it, and two projects could then disagree about what a linestyle looks like); *rejected: an undoable customisation* (a library is shared by every project of a site, and an undo of one drawing must not change another's lines); *rejected: edits that persist when the project is saved* (a project would then carry a customisation the user never kept, and open differently elsewhere). | `Document::set_style_library`/`set_survey_map`, `install_customisation` and the generation counters; `katana_cad::customisation_merge::merge_customisation` and `LoadMode` (`customisation_merge.rs`), which every front end reaches through the one `CUSTOMISE [REPLACE]` verb (QT-21 fixed); `CUSTOMISE KEEP`/`REVERT`/`RESET` and `startCustomisation` (`customisation_host.rs`); the Survey Code Manager's buffer, Apply and Revert, and its Export Codes... (the session's customisation cut down to the buffer's rules by `katana_entity::customisation::customisation_to_json`); the symbol library's Export Selected... (the same cut, to the selected definitions). `docs/customisation.md`, `docs/survey_coding.md` |
 | D2 | A linetype name: a non-vertex library definition wins (no dash on its strokes), else a model Linetype, else solid. `ByLayer` as a Style linetype inherits the layer's. | `katana_cad::style_resolver::resolve_linetype`; `katana_entity::display::is_by_layer`, `resolved_linetype`; `linetype_choices`, `linetype_collisions`; `STYLE SET ... linetype`; 12da export's `linestyle_of` |
 | D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its customisation lists it as a symbol (`LineStyle::symbol`; until 2026-10-06 the sign was its file's name containing "symbol", which one customisation holding both kinds under one name can no longer give). Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `katana_cad::style_catalogue::classify_definition` (`DefinitionKind::listed_as_symbol`), `symbol_choices`, `keep_current`, `filter_choices`; `LineStyle::symbol`; `code_table_row_matches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
 | D4 | Survey coding chooses a code's style by appearance and reuses one that draws alike; new names follow from the rules. | `katana_cad::survey_coding::apply_survey_codes` (`Appearance`, `draws_as`, `existing_style_for`, `name_for`) |
@@ -1832,19 +1843,19 @@ freed memory: a crash five runs in six, and a clean run the sixth time.
 ends it when dropped (`crates/katana_cad/src/document.rs`); it is
 `#[must_use]`, so a registration cannot be made without something owning it.
 The handle holds the registry weakly (`Weak`), because the C++ met an
-ordering that is easy to forget: Qt deleted child widgets in `~QWidget`,
-which ran AFTER the window's own members - the `Document` among them - had
-been destroyed, so the viewport's handle died after the document it pointed
-to and had to find nothing there rather than something freed. The Rust keeps
-the weak hold, so a handle that outlives its document is still harmless
-whatever the order of drops. `notify()` walks a copy of the ids so that a
+ordering that is easy to forget: its toolkit destroyed child widgets after
+the window's own members - the `Document` among them - so the viewport's
+handle died after the document it pointed to and had to find nothing there
+rather than something freed. The Rust keeps the weak hold, so a handle that
+outlives its document is still harmless whatever the order of drops. `notify()` walks a copy of the ids so that a
 listener may end a registration while notifications run.
 
-**Rejected:** `QPointer` or a Qt signal in place of the C++ std::function. The
-Document is in `katana_cad`, which never saw Qt (Rule 4), and the fix
-belongs where the defect is - a registry that hands out an obligation should
-hand out the means to discharge it.
+**Rejected:** a notification mechanism of the window's toolkit in place of a
+plain callback. The Document is in `katana_cad`, which never sees the window
+(the layering rule, `docs/architecture.md`), and the fix belongs where the
+defect is - a registry that hands out an obligation should hand out the means
+to discharge it.
 
 `qt_import_12da_then_toggle_headless` runs the scenario; the proof that the
-mechanism works is in `cad.rs`, since a run that survives by luck
-still passes the headless test.
+mechanism works is in `crates/katana_cad/tests/interpreter/cad.rs`, since a
+run that survives by luck still passes the headless test.

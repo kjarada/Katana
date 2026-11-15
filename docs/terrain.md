@@ -1,25 +1,32 @@
 # Terrain
 
-Decisions and measurements for `katana_terrain`. `PLAN.MD` sections 19 (Phase
-14), 24 (Phase 19) and 32 govern this area.
+Decisions and measurements for `katana_terrain` (TIN surfaces, constrained
+triangulation, contours, volumes, tiled terrain) and for the terrain verbs,
+dialogs and background jobs built on it in `katana_cad`, `katana_app` and
+`katana_window`.
 
-## Where the time actually goes
+## Where the time went (measured on the C++)
 
-Terrain was the largest area of the codebase with no benchmark, so Phase 19's
-outstanding list had been written from the shape of the API rather than from
-evidence: it named a task graph, work stealing, TBB and SIMD. A benchmark of
-the C++ (`bench_terrain.cpp`) was added to settle it. Rule 6 — profile before
-optimising. Every number in this section is the C++'s: the benchmark went with
-the C++ (2026-11-15), the Rust port has none of its own yet, and the Rust's
-times are not to be read off this table.
+The algorithms of this layer were shaped by measurements of the C++ Katana,
+before the port to Rust (`docs/rust.md`). Every number in this section and in
+the performance sections below is the C++'s: its benchmarks went with it
+(2026-11-15), the Rust has none of its own yet, and the Rust's times are not to
+be read off these tables. They are kept because they are the reason for the
+designs the Rust carries over unchanged: the pair clipping of
+`compare_surfaces`, the fixed blocks of its parallel sums, contours traced
+level by level in parallel, and the TIN build taken off the window's thread.
 
-Release, GCC 16.2 UCRT64, 16 × 2496 MHz, L3 18 MiB, `--benchmark_min_time=0.3s`.
-(First recorded here as GCC 15.2, from CLAUDE.md. The MSYS2 toolchain had been
-upgraded to 16.2 an hour before these were taken - `pacman.log`, 2026-09-21
-00:15 - so 16.2 is the compiler that produced every number in this file.)
-Points are a fixed-seed LCG scatter over a 1 km square with a rolling ground
-surface, which is what a lidar ground classification delivers; a flat plane
-would have measured faster than any real job.
+Terrain was then the largest area with no benchmark, so the list of planned
+optimisations had been written from the shape of the API rather than from
+evidence: it named a task graph, work stealing, TBB and SIMD. A benchmark was
+added to settle it, on the rule that one profiles before optimising.
+
+Release, GCC 16.2 UCRT64, 16 × 2496 MHz, L3 18 MiB. Points are a fixed-seed
+LCG scatter (Press et al., *Numerical Recipes* 3rd ed., section 7.1, chosen
+over the C++ standard library's generators, whose output differs between
+implementations) over a 1 km square with a rolling ground surface, which is
+what a lidar ground classification delivers; a flat plane would have measured
+faster than any real job.
 
 | Benchmark | Time | Note |
 | --- | --- | --- |
@@ -41,8 +48,8 @@ would have measured faster than any real job.
 **`compare_surfaces` was the bottleneck, not `build_tin`.** Twelve seconds, on a
 site that is not large, for the single number an earthworks job exists to
 produce — 7.2× the worst `build_tin` in the table and 32× the cost of building
-the design surface it compares against. Nothing in Phase 19's original
-outstanding list would have touched it. It has since been fixed; the diagnosis
+the design surface it compares against. Nothing in the list of planned
+optimisations would have touched it. It has since been fixed; the diagnosis
 is kept because it is the reason the fix took the shape it did.
 
 The reason is in `volume.rs`: the overlay merges both triangulations into one
@@ -81,8 +88,8 @@ the global triangulation was building, obtained pairwise.
 Pairs are found through `katana_geometry::spatial_index::SpatialIndex` over the design triangles,
 which is the broad phase the codebase already has rather than a second one.
 
-**12 150 ms to 2 141 ms, 5.7x**, with 765 tests passing and no expected value
-changed. `build_tin`, `elevation_at` and `contours` were re-measured after the
+**12 150 ms to 2 141 ms, 5.7x**, with the C++ suite's 765 tests passing and no
+expected value changed. `build_tin`, `elevation_at` and `contours` were re-measured after the
 change and did not move.
 
 Two things improved besides the time:
@@ -106,8 +113,8 @@ rejected. With `> 0` the same case would build a sliver of some arbitrary tiny
 area, and `compare_surfaces::a_surface_against_itself_is_exactly_zero` would no longer
 hold.
 
-**What the cull is tested against.** CLAUDE.md section 4 requires proving a
-culled run finds what an exhaustive one did.
+**What the cull is tested against.** A culled run must be shown to find what
+an exhaustive one did.
 `compare_surfaces::every_piece_of_the_common_ground_is_found_by_the_indexed_search` uses the one quantity
 known in closed form: both surfaces carry the corners of the same 100 m square,
 so the pieces must tile exactly 10 000 m^2, and any pair the index failed to
@@ -122,20 +129,20 @@ query box by 5 cm loses only sub-millimetre boundary slivers and is not caught.
 cost was spread across roughly two million pair clips, which the `TaskPool`
 suits: existing triangles are independent and the only shared state is the
 compensated sums. It now runs on the pool with per-block sums combined in block
-order - see *compareSurfaces and contours on the TaskPool* below: about 220 ms
+order - see *compare_surfaces and contours on the TaskPool* below: about 220 ms
 on this benchmark, and the same bits at any thread count.
 
 **`build_tin` is second, and it is the one every user reaches** — it runs on
-import and on every surface rebuild. 1681 ms at 400 000 points is over
-`PLAN.MD` section 32's interaction budget by two orders of magnitude, although
-it is a batch operation rather than a per-frame one. Cost per point rises from
+import and on every surface rebuild. 1681 ms at 400 000 points is two orders of
+magnitude past anything that feels interactive, although it is a batch
+operation rather than a per-frame one. Cost per point rises from
 3.49 µs at 25k to 4.20 µs at 400k, consistent with the n log n of incremental
 Delaunay insertion rather than with anything quadratic.
 
-Parallelising it is not straightforward and the plan should not pretend
-otherwise: incremental Delaunay insertion is sequential by construction, and
-Rule 7 requires the same triangulation whatever the thread count, so a
-work-stealing insert is ruled out rather than merely unimplemented.
+Parallelising it is not straightforward, and nothing here pretends otherwise:
+incremental Delaunay insertion is sequential by construction, and parallel code
+must give the same output whatever the thread count, so the same triangulation,
+and a work-stealing insert is ruled out rather than merely unimplemented.
 
 **`elevation_at` and `contours` are not problems.** `elevation_at` at 499 ns
 sustains 2 M/s, so a cross section over a 1 km alignment spends under a
@@ -146,24 +153,15 @@ of a single pass over the triangles rather than one pass per level. That is the
 right shape already. (The levels are since traced in parallel, and the fixed
 part was mostly the level range of each triangle being found twice; see below.)
 
-### Why a fixed-seed LCG rather than `<random>`
-
-The C++ standard fixes the *distribution* interfaces but not the output of
-`std::mt19937`-fed distributions across implementations, so `<random>` would
-give different points on a different standard library and the timings could not
-be compared with the ones in this table. The LCG constants (Press et al.,
-*Numerical Recipes* 3rd ed., section 7.1) are plain arithmetic on `uint32_t` and
-produce an identical sequence everywhere.
-
-## compareSurfaces and contours on the TaskPool
+## compare_surfaces and contours on the TaskPool
 
 Both were serial on a 16-thread machine, and both are embarrassingly parallel.
 Both now take an optional `&TaskPool` (none: `TaskPool::shared()`), as the
-rasteriser does, and both give the **same bits at any thread count** - Rule 7 -
-which `TaskPool::new(0)` against 1, 2, 3, 7 and 15 workers asserts bit for bit in
+rasteriser does, and both give the **same bits at any thread count**, as all
+parallel code here must, which `TaskPool::new(0)` against 1, 2, 3, 7 and 15 workers asserts bit for bit in
 `volume.rs` and `contours.rs`.
 
-**compareSurfaces.** The existing surface is cut into blocks of a *fixed* 256
+**compare_surfaces.** The existing surface is cut into blocks of a *fixed* 256
 triangles. Each block clips its triangles against their design candidates and
 sums its own pieces in index order (existing triangle ascending, candidates in
 ascending id, fan pieces in order) into its own compensated sums; the block sums
@@ -172,7 +170,7 @@ therefore set by the data alone. The block size must never follow the thread
 count, or that would stop being true. 256 triangles are a few hundred
 microseconds of clipping, so the dispatch cost is noise, and 200k triangles
 still make about 800 blocks to balance. Each block's sums fill one cache line
-(`alignas(64)`), because neighbouring blocks are written by different threads.
+(`#[repr(align(64))]`), because neighbouring blocks are written by different threads.
 
 One consequence is stated rather than hidden: summing per block changes the
 last bits compared with the old single running sum. Both are compensated sums of
@@ -217,17 +215,18 @@ control:
 | `BM_ArchiveTinContours/10` (1 m, 1 056 contours) | 19.5 / 23.8 | 19.6 / 20.6 | **11.6 / 13.0** | 11.3 / 12.7 |
 | `BM_ArchiveTinContours/1` (0.1 m, 10 752) | 84.1 / 92.2 | 73.3 / 80.3 | **35.7 / 41.3** | 30.5 / 34.1 |
 
-The archive benchmarks read the file named by `KATANA_BENCH_TIN_12DA` (and the
-section ones `KATANA_BENCH_DRAWING_12DA`), and they skip with a message when it
-is unset. Survey data does not belong in the repository.
+The C++'s archive benchmarks read the survey file from an environment variable
+and skipped when it was unset: survey data does not belong in the repository,
+and a Rust benchmark of real data will have to do the same.
 
 **Not done, and why.** Contours on a real TIN scale less well (1.7-2.6x) than
 the comparison, because the serial CSR bucketing and the few long levels at a
 1 m interval are left: the bucket fill must stay in triangle order, and a
 parallel fill needs per-chunk offsets for every level, up to 100 000 levels. At
-12-41 ms it was not worth that memory. `build_tin` was not split: CGAL's
-constrained Delaunay insertion is sequential, and Rule 7 requires the one
-triangulation a serial build gives. Tiling the input (`TiledTerrain`) changes
+12-41 ms it was not worth that memory. `build_tin` was not split: constrained
+Delaunay insertion is sequential (CGAL's then, `spade`'s in the Rust,
+`crates/katana_terrain/src/cdt_backend.rs`), and parallel code must give the
+one triangulation a serial build gives. Tiling the input (`TiledTerrain`) changes
 the triangles along every seam, so it is a different surface, not a faster
 route to the same one. The TIN build is therefore taken off the GUI thread
 instead (*Background jobs*, below).
@@ -245,9 +244,7 @@ anything. The pair clipping above is now `katana_terrain::overlay::visit_overlay
 (`crates/katana_terrain/src/overlay.rs`), which `compare_surfaces` visits with
 the same arithmetic in the same order, so its answers are the bits they were;
 the region, stockpile, difference and envelope work cut the ground through the
-same clipper. The C++ header said the overlay "merges both triangulations into
-one constrained triangulation"; that was the design before the fix above, and
-it was corrected to say what it does, as `volume.rs` does.
+same clipper.
 
 ## Section crossings
 
@@ -271,7 +268,9 @@ horizontal and a diagonal alignment, fails the same way when the side test has
 no margin. Entities are visited in
 ascending id on both paths, so ties at one station keep their order.
 
-| `--alternate 3`, min / median ms | old search | boxes only | boxes and side | the same, again |
+Measured on the C++, A/B with an A/A control (`--alternate 3`), min / median:
+
+| min / median ms | old search | boxes only | boxes and side | the same, again |
 | --- | --- | --- | --- | --- |
 | 28k-entity survey drawing, 60 m cross section | 15.3 / 20.9 | 4.1 / 5.4 | **4.2 / 5.2** | 4.2 / 5.1 |
 | the same, with the document's index | 14.7 / 21.1 | 0.003 | **0.003** | 0.003 |
@@ -302,10 +301,10 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   surface verbs below, the window's Surfaces panel, an import's TINs, the
   corridor surface, the section view, the sheets' sections, the 3D view, the
   IFC export and the dialogs' surface lists all read the Document's. The
-  window's `sceneSurfaces_` is the 3D scene's list made FROM it
-  (`MainWindow::sync_scene_surfaces`), and holds the shared surfaces it
-  points at, so an undo that drops the last step holding one cannot free it
-  under a view.
+  window's scene list (`SceneStore::surfaces`) is the 3D views' list made FROM
+  it (`Executor::sync_scene_surfaces`), and each `SurfaceItem` holds the
+  shared surface it shows, so an undo that drops the last step holding one
+  cannot free it under a view.
 - **A change is made on a copy and committed.** `Document::set_surfaces`
   takes a whole store and makes it the drawing's as one undo step named by
   the caller ("SURFACE FROM", "SURFACE RENAME"). A copy costs a pointer per
@@ -322,12 +321,15 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   change, undo and redo included, and never fall
   (`surface_document::the_generation_rises_on_every_change_undo_and_redo_included_and_never_falls`);
   an undo puts back a store with the revision it had then. A step reports
-  `DocumentChange::Surfaces` or `SurfaceStyles` (both in `DRAWING`), from
+  `DocumentChange::SURFACES` or `SURFACE_STYLES` (both in `DRAWING`), from
   the stack's listener comparing the generations, as `tables_changed` compares
-  the tables'. The window rebuilds its scene list AT ONCE on that
-  notification, not on the deferred refresh the panels use: the list points
-  at surfaces, and a deferred rebuild would leave it pointing at a replaced
-  store until the event loop ran.
+  the tables'. The window takes what it heard at the start of its next frame
+  (`Executor::follow_drawing`), before any view draws, and rebuilds the scene
+  list then, once however many changes a command or a script made. The C++
+  had to rebuild it inside the notification, because its views pointed at the
+  surfaces and a deferred rebuild left them pointing at a replaced store; the
+  Rust list holds its surfaces, so a stale list is only an old picture, and it
+  never outlives the frame.
 - **An import is one step.** `Document::surfaces_command` is the same change
   as a command, for a transaction that does more: an archive IMPORT puts its
   TINs in the transaction with its entities, and an IFC import goes through
@@ -364,8 +366,8 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   follows them: it keeps its recipe, the section's own alignment and the design
   profile with its name (`ViewState::section_design`), and when the drawing's
   surfaces change - hidden, shown, edited, merged, removed, undone, redone - the
-  window cuts it again from the event loop, once for all that a command or a
-  script changed (`MainWindow::recut_sections`, `ViewWorkspace::recut_sections`,
+  window cuts it again at its next frame, once for all that a command or a
+  script changed (`Executor::recut_sections`, `ViewWorkspace::recut_sections`,
   `qt_an_open_section_is_cut_again_when_the_surfaces_change_headless`). The cut
   is `katana_cad::terrain::section_cut::cut_drawing_section` (`crates/katana_cad/src/terrain/section_cut.rs`), which Terrain >
   Cut Section uses too, so the two cannot differ in which surfaces they take or
@@ -383,7 +385,7 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   surface cuts it again. Any change to the surfaces moves the generation,
   giving a surface another style included - it does not tell which part of a
   surface changed - so that cuts again too, needlessly and harmlessly; editing a
-  style's own settings does not (`SurfaceStyles` is a change of its own, and a
+  style's own settings does not (`SURFACE_STYLES` is a change of its own, and a
   section holds no style). A hidden surface is still read by every verb -
   sampled, draped, exported, a corridor's ground - which is why the corridor and
   the IFC export list them all.
@@ -407,8 +409,8 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
 
 One rule for a surface's name, in one place (`SurfaceStore::check_name`, which
 `add` and `rename` apply, so every verb and dialog that names a surface
-does): not empty, UTF-8 (the project and the JSON replies write it, and the
-writer throws on anything else), and no double quote or line break. A line
+does): not empty, UTF-8 (the project and the JSON replies write it, and a
+JSON string holds nothing else), and no double quote or line break. A line
 names a surface in quotes and the tokenizer has no escape inside them, so a
 TIN named `PAD "A"` in a 12d archive or an IFC file could be listed and never
 removed, renamed, styled or exported by name: the Surfaces panel's own
@@ -528,20 +530,20 @@ arrangement, so they need no schema change.
   writes
   (`drawing_surface_verbs::the_json_of_styles_that_only_stand_in_says_so_and_a_healthy_set_does_not`).
 - **Text is UTF-8, and refused where it enters.** The set is written as JSON,
-  whose writer throws on a byte that is not UTF-8, and a style's name and
-  description are typed at katana_cli, which on Windows used to hand the verbs
-  the ANSI code page. `check_surface_style` is the one door: a name or
-  description that is not UTF-8 is InvalidArgument, with a message that does
-  not carry the bytes, so every route to a style - SURFACESTYLE NEW, SET and
-  RENAME, the style manager, a project's own JSON - ends in it. A
-  description may not hold a double quote or a line break either, for the
-  reason a name may not: a line cannot carry them. `surface_styles_to_json` still
-  never throws (nlohmann's `replace` handler: U+FFFD for a byte that got past
-  the door, since it also answers `SURFACESTYLE LIST JSON`), and what a save
-  writes is guarded apart - `Document::write_surface_state` re-checks the set
-  and refuses the save, naming the style, rather than write a U+FFFD into the
-  project. The door never lets such a set into the Document, so no test could
-  hand the save the set it refuses; the guard is a function of the set,
+  which holds only UTF-8, and in the C++ a style's name and description typed
+  at katana_cli on Windows arrived in the ANSI code page. `check_surface_style`
+  is the one door: a name or description that is not UTF-8 is InvalidArgument,
+  with a message that does not carry the bytes, so every route to a style -
+  SURFACESTYLE NEW, SET and RENAME, the style manager, a project's own JSON -
+  ends in it. A Rust `String` is UTF-8 by construction, so that half of the
+  door cannot fail for a style that exists; it is kept because it is where the
+  rule is stated, for whatever reaches a style as bytes. A description may not
+  hold a double quote or a line break either, for the reason a name may not: a
+  line cannot carry them. `surface_styles_to_json` never fails, since it also
+  answers `SURFACESTYLE LIST JSON`, and what a save writes is guarded apart -
+  `Document::write_surface_state` re-checks the set and refuses the save,
+  naming the style. The door never lets such a set into the Document, so no
+  test could hand the save the set it refuses; the guard is a function of the set,
   `katana_cad::terrain::surface_document_io::surface_styles_metadata_value` (`crates/katana_cad/src/terrain/surface_document_io.rs`),
   which `write_surface_state` calls and a test calls with the sets the door
   refuses
@@ -616,12 +618,11 @@ surface - its name with a check box for shown, a style combo, its source and
 triangles - and Rename, Copy, Remove, Zoom To and Edit Styles (which opens
 Terrain > Surface Styles, `terrainSurfaceStyles`). Every change is the verb
 line a person would type, through the window's one executor. It reads the
-drawing again on the event loop, never inside the document's notification
-(`docs/desktop.md`, "Panels refresh on the event loop, never inside their own
-signal"): the change may come from its own check box or combo
+drawing as it is drawn, every frame, never inside the document's notification
+(`docs/desktop.md`): the change may come from its own check box or combo
 (`surfaces_panel_widget::a_change_made_elsewhere_is_shown_on_the_event_loop_not_inside_the_notification`).
-The window's scene list is the one thing rebuilt inside the notification,
-for the pointer reason above; it builds no widget, and it opens a 3D view and
+The window's scene list is rebuilt at the start of the frame (above); it
+builds no widget, and it opens a 3D view and
 frames it only for a surface that is NEW to the scene - neither its TIN nor
 its name was in the list. An edit, its undo and its redo put a new TIN under
 the same name and are not that: counting them so opened a 3D view in the
@@ -724,7 +725,7 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
 - **The drawing is taken by the shared scope** (`docs/cad.md`, "Scope and
   filter"): `SURFACE FROM DRAWING WHERE DRAWN` is what the drawing shows,
   which is what the dialog offers first; `SURFACE FROM LAYERS ground ONLY`
-  one layer. As the plan wrote it, `DRAWING` may also come before a
+  one layer. As first specified, `DRAWING` may also come before a
   narrower scope (`FROM DRAWING LAYERS ground`), naming the source. The
   rules that turn entities into survey points and breaklines are
   `katana_cad::geo::surface_input::surface_input` (`crates/katana_cad/src/geo/surface_input.rs`),
@@ -786,9 +787,8 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
 - **One dialog for the three Surface From items.** Each opens it on its own
   source, with Reference Data's chosen cloud or raster first, so the options
   the verb has (a window, a cap, classes, a name, the drawing's scope) are
-  in the window too. Its fields follow the plan's `<d>` rule
-  (`surfaceFromScope`, `surfaceFromCommand` ...), where the plan's text said
-  `surfaceScope`.
+  in the window too. Its fields are named for the dialog
+  (`surfaceFromScope`, `surfaceFromCommand` ...), as every dialog's are.
 
 ### Not done
 
@@ -880,7 +880,7 @@ method=tin|grid cell= levels= count= major= minor= layer= smoothed=` and
   Taking `layer=` as the option wherever it stands was rejected: the
   window's "Only those that match" layer filter would have become the
   output layer.
-- **The dialog has a `contourClip` box** beside the plan's fields: the
+- **The dialog has a `contourClip` box** beside the fields first designed: the
   shared scope controls always name a scope, and "no boundary" is none of
   them.
 - **GDAL carries a raster's contours to its edge, a surface's stop at its
@@ -972,8 +972,8 @@ record of the reference raster, `saved file=` with `save=`, then one
 
 ### Decided
 
-- **Rendered once, into the picture, not at draw time.** The plan said a
-  display style of an elevation raster; drawing it at draw time would put
+- **Rendered once, into the picture, not at draw time.** The first design was
+  a display style of an elevation raster; drawing it at draw time would put
   GDAL in the painter. A derived picture is drawn by the code that draws
   every raster, plots with the sheet, and can be saved; `display_style` says
   which picture it is. Restyling is running the verb again.
@@ -987,7 +987,7 @@ record of the reference raster, `saved file=` with `save=`, then one
 ### Not done
 
 - **Restyling a raster already there.** A shading is a new reference raster;
-  the Reference Data dock's display menu the plan sketched is D2's.
+  a display menu on the Reference Data dock is the place for it.
 - **A legend on the sheet.** The legend is in the reply (and the dialog's);
   placing it on a sheet is the plotting legend's work.
 
@@ -1289,7 +1289,7 @@ LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
 - **The kept raster is the answer, 1 and 0,** not GDAL's 255 and 0: it is
   what another verb reads (RASTER ZONAL of it counts the seen cells of a
   lot), and its picture is a separate tinted copy.
-- **Rejected: the fixture of the plan** (a 5 m wall, the observer at 1.7 m,
+- **Rejected: the fixture first proposed** (a 5 m wall, the observer at 1.7 m,
   hidden from 20 x 5 / (5 - 1.7)). An eye below the wall top sees nothing
   behind it, so no shadow ends; the fixture here puts the eye above a 1 m
   wall, where the shadow's far edge is the similar-triangles value.
@@ -1357,13 +1357,12 @@ thread of its own. The contract that keeps the single-threaded document safe:
   channel and asks egui for a repaint; the next frame drains the channel and
   the window runs the Apply, which changes the document as one command, or
   hands the result to the window. Nothing a job computed is visible before it
-  is applied. (The C++ posted the completion with
-  `QMetaObject::invokeMethod`; egui has no event loop of its own to post to,
-  and the reasons for a channel over polling or an async executor are in
-  `jobs.rs`.)
+  is applied. (The C++ posted the completion to Qt's event loop; egui has no
+  event loop of its own to post to, and the reasons for a channel over polling
+  or an async executor are in `jobs.rs`.)
 * **Cancel is cooperative, and a cancelled job never applies.** Work that
   watches `JobControl::stop_requested()` ends early. Work that cannot, such as a
-  CGAL triangulation, runs to its end, and its result is then discarded.
+  triangulation, runs to its end, and its result is then discarded.
 * **Failure is never lost.** An `Error` returned by the work, or a panic in it
   or in the Apply step, arrives in the job's finish as a failure with the
   message (`host::jobs`, `run_work` and `complete`, the one home of these
@@ -1373,8 +1372,7 @@ thread of its own. The contract that keeps the single-threaded document safe:
   reads them into the status bar (a label, a progress bar that shows *busy*
   until a job reports a fraction, and Cancel). The same frames measure the
   longest pause - the wall time from one frame's start to the next's, the
-  freeze a person would feel, where the C++ read the longest event-loop pause
-  off a 10 ms timer.
+  freeze a person would feel.
 * **Dropping the runner** asks every job to stop, then joins every thread, and
   drops the ends not yet taken, so no Apply or finish runs after it is gone and
   a finish may safely reach the window that owned it.
@@ -1388,12 +1386,10 @@ from its path: GDAL keeps its error handlers per thread, and the reader opens
 its own dataset. A headless run waits for the job, so the screenshot or report
 that follows sees the surface: it has no frames to wait in, so it waits on the
 channel (`wait_completed`), waking at least once a tick so the measure keeps
-being taken. (The C++ waited in a nested Qt event loop (`QEventLoop`), quit by the job's
-completion; its first version called `processEvents(WaitForMoreEvents)`, which
-on Windows slept through both the worker's post and the timer and never
-returned.)
+being taken.
 
-Measured on the C++ (Debug, offscreen, three runs): a
+Measured on the C++ (Debug, offscreen, three runs), whose runner had the same
+contract, the pause then read off a 10 ms timer: a
 60 000-point `build_tin` as a job took 2.79-2.90 s of work, and the GUI loop's
 longest pause was 10-11 ms, one timer tick. A 400 ms job paused it 11-14 ms. The
 control test blocks the GUI thread for 250 ms while a job runs, and the measure
@@ -1402,7 +1398,8 @@ From Point Cloud on `samples/gis/survey_scan.las` (29 512 ground points)
 triangulated in 1.28 s in the background, and the event loop paused at most
 24 ms, the Apply step included.
 
-**The ratio test was fragile in Release on a fast machine.**
+**The ratio test was fragile in Release on a fast machine** (in the C++; the
+Rust test carries the fix over).
 `job_runner::a_triangulation_run_as_a_job_leaves_the_event_loop_running` holds the longest pause
 under half the work's time, and the same 60 000 points take far less than
 the Debug figure above in a Release build: 89 ms on the macOS release runner
@@ -1426,7 +1423,7 @@ such pause seen. More points were rejected: in Debug they would multiply a
 pass that is already past 400 ms. A triangulation run on the GUI thread
 still fails, since the pause is then the whole 400 ms.
 
-On real data (Release, headless, three runs), Surface From Drawing on the
+On real data (the C++, Release, headless, three runs), Surface From Drawing on the
 owner's *Test 4 without tin* archive (27 886 entities, giving 197 287 vertices
 and 394 561 triangles) triangulated in 2.27-2.77 s on the job. Before, the GUI
 thread was blocked for all of that. Adding the result took 10-12 ms of GUI time.
@@ -1441,22 +1438,21 @@ Also still on the GUI thread after a surface lands: the 3D view rebuilds its
 scene on the next paint. That too is the render view's cost, not the build's.
 
 Only one job at a time gets the shared `TaskPool`. A `parallel_ranges` issued
-while the pool is busy runs inline, so a compareSurfaces job and a 3D frame at
+while the pool is busy runs inline, so a compare_surfaces job and a 3D frame at
 the same moment will make one of them serial. That is slower, never wrong, and
 it cannot deadlock (`task_pool.rs`).
 
 ## Where the compensated sum lives now
 
-Every area and volume here goes through a Neumaier compensated sum. It was
-`detail::CompensatedSum`, private to the C++ terrain layer, until the
-corridor quantities in `cad` needed the same thing; a second copy would have
-been the defect CLAUDE.md section 1 names, so it moved to the public
-`katana_math::summation::CompensatedSum` (`crates/katana_math/src/summation.rs`) and the
-terrain layer now names it (`crates/katana_terrain/src/summation.rs`) - the call sites in `volume.rs` and
-`tin_surface.rs` read as they always did, and the 17 volume and area tests
-passed unchanged through the move.
+Every area and volume here goes through a Neumaier compensated sum,
+`katana_math::summation::CompensatedSum` (`crates/katana_math/src/summation.rs`),
+which the terrain layer names for its call sites
+(`crates/katana_terrain/src/summation.rs`). In the C++ it was first private to
+the terrain layer; when the corridor quantities in `cad` needed the same thing
+it moved to the math layer rather than be copied, since two of one mechanism
+is a defect, and the volume and area tests passed unchanged through the move.
 
-It is tested directly for the first time. The property that took two tries to
+It is tested directly. The property that took two tries to
 pin: Neumaier's variant differs from Kahan's exactly when a term is larger
 than the running sum, so the test adds 1e15 FIRST and then a million 0.1s -
 each of which plain addition rounds up to 0.125, the ulp at 1e15, landing at
@@ -1494,7 +1490,7 @@ knife-edge case whose deciding vertices sit exactly on a base triangle's box
 edge. Shrinking the query box by 2 m fails it; that was checked by doing it.
 
 `elevations_at` spreads over `TaskPool` at a grain of 256 positions, a number
-taken from the measured 1.09 us cost of one `elevation_at` - below one chunk it
+taken from the measured 1.09 us cost of one `elevation_at` in the C++ - below one chunk it
 runs inline rather than waking the pool, because waking it costs more than the
 work. `TiledTerrain::build_all` puts one tile in each chunk. Both are asserted to
 give bit-identical answers to the serial path, and `build_all` now builds every
@@ -1504,22 +1500,23 @@ behaviour change and it is stated in `tiled_terrain.rs`.
 ## Hoisting a triangle's doubled area
 
 `Triangle2::twice_signed_area()` is exposed so that a caller evaluating many
-points against one triangle can hoist it. `barycentric(p)` is now literally
-`barycentric(p, twiceSignedArea())` behind an `is_degenerate()` check, so the
+points against one triangle can hoist it, and pass it to
+`Triangle2::barycentric_with_area`. `barycentric(p)` is literally that call
+with `twice_signed_area()` behind an `is_degenerate()` check, so the
 arithmetic is bit-identical and lives in one place rather than two.
 
 ## SIMD: tried, measured, left scalar
 
-The terrain module has no AVX2 kernels. Two were written, both bit-identical to
-their scalar references at every thread count and on both levels
-(`simd_scalar.terrain` and `simd_avx2.terrain` passed), and neither paid when
-measured against a same-binary control. The rule in docs/performance.md is that
-a kernel that does not pay stays scalar, so both were removed. The code is in
-the history of branch `simd-terrain` (commit `25c6010`) if the question comes up
-again.
+The terrain layer has no AVX2 kernels, in the Rust as in the C++. Two were
+written for the C++, both bit-identical to their scalar references at every
+thread count and on both levels, and neither paid when measured against a
+same-binary control. The rule in `docs/performance.md` is that a kernel that
+does not pay stays scalar, so both were removed, and the port did not bring
+them back. The C++ code is in the history of branch `simd-terrain` (commit
+`25c6010`) if the question comes up again.
 
 - **Contour level ranges** (`contours()`, the `floor` and settling loops of
-  `firstLevelAbove`, four triangles per step). No change outside the A/A
+  its first level above a height, four triangles per step). No change outside the A/A
   spread, on generated ground or on the owner's TIN, at a coarse or a fine
   interval. The phase is limited by loading each corner's elevation through the
   triangle's vertex indices. The kernel has to gather those loads, and on this
@@ -1535,7 +1532,7 @@ pair clip, every lane's polygon grows and shrinks differently, and the
 compensated sums have to be added in piece order.
 
 Measured on the C++, on an i7-1270P under heavy load from other agents' builds, with the
-same binary at both levels (`KATANA_SIMD=scalar|avx2`) and a byte-identical copy
+same binary at both levels (chosen by an environment variable) and a byte-identical copy
 of it as the A/A control. The four arms ran in alternating rounds, reversing
 the order every round, as the C++'s `compare_benchmarks.py --alternate` did. Each
 cell is min / median real time.
