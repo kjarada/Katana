@@ -1,1 +1,0 @@
-TEST(CoreA, IsReal) {}

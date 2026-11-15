@@ -1,0 +1,17 @@
+# THE TEST KEYS. Two Ed25519 keys that are not secret: RFC 8032, section 7.1, TEST 1 (the
+# "active" key) and TEST 2 (the "spare"). Anyone can sign with them, which is the point: a test
+# key must never be one that a release could be signed with. The seeds and public keys were
+# checked against OpenSSL: the public key it derives from each seed is the one the RFC prints.
+#
+# They are in the test programs alone (rust/crates/katana_update/tests/test_key and
+# rust/crates/katana_updater's katana_updater_test and katana_update_e2e), none of which is
+# installed. This file is where the checks that the programs which ship hold none of them read
+# the keys: tests/update/CMakeLists.txt (check_no_test_keys.cmake),
+# rust/crates/katana_updater/tests/shipped.rs, and tests/update/tool_tests/test_fixtures.py, which
+# holds the Python side's seeds (tests/update/fixtures/keys) to the same keys. Each reads every
+# quoted run of 64 lower-case hexadecimal digits, and there must be four.
+
+kTestActiveSeedHex = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+kTestActivePublicHex = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+kTestSpareSeedHex = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"
+kTestSparePublicHex = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"

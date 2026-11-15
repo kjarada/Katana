@@ -6,7 +6,7 @@
 # on the layer asked for.
 add_test(NAME qt_gis_check_dialog_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>PLINE 30,0 40,10 40,0 30,10 CLOSE|@gisCheck|!gisCheckScopeDrawing|gisCheckMarkers=qa/geometry|?gisCheckCommand|!gisCheckRun|?gisCheckStatus|?gisCheckProblems|>LIST"
         "-DEXPECT=gisCheckCommand: GIS CHECK DRAWING markers=qa/geometry.*gisCheckStatus: 1 problems on 1 entities.*gisCheckProblems: self-intersection \\| 1 \\| 35,5 \\| \\| Self-intersection.*2 entities.*Point  layer=qa/geometry"

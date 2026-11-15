@@ -1,14 +1,25 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Katana VERSION 0.3.0 LANGUAGES CXX)
+# The version is written here and nowhere else: rust/crates/katana_update/build.rs reads it from
+# this line into every program, and the update tests hold the programs to it.
+project(Katana VERSION 0.3.0 LANGUAGES NONE)
+
+# CMake builds nothing. Katana is built by cargo (rust/, docs/rust.md); CMake is the TEST RUNNER
+# of the programs cargo built: it registers every process-level test - the `cli.` lines through
+# katana_cli and katana_mcp (tests/cli), the window's headless checks through
+# tools/check_screenshot.cmake (tests/), the update programs' tests (tests/update) - and the
+# repository's checks that need no build (the docs, Katana Standard, the release tools), and
+# `ctest --test-dir <build>` runs them. No compiler is looked for and no library is found.
+#
+# Rejected: a new runner for the 600-odd process tests. Their definitions, and the scripts they
+# run, are the specification the C++ programs were held to and the Rust ones now are; moved to
+# another runner they would have to be rewritten, and a rewrite is where an expectation drifts.
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Python is a convenience, never a requirement of the build: the docs test
-# (tools/check_docs.py), the IFC and utility-schema checks and the customisation
-# censuses run when it is found and are not registered when it is not. The
-# built-in customisation is compiled in with #embed (src/katana_cad/CMakeLists.txt)
-# and needs none.
+# Python is a convenience, never a requirement: the docs test (tools/check_docs.py), the IFC and
+# utility-schema checks, the release tools' tests and the customisation censuses run when it is
+# found and are not registered when it is not.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     set(KATANA_PYTHON "${Python3_EXECUTABLE}")
@@ -16,229 +27,83 @@ else()
     set(KATANA_PYTHON "python")
 endif()
 
-# The C++ standard the whole project is built to. A variable rather than a
-# constant so that a build can be made to another standard and MEASURED
-# against this one rather than argued about - see docs/performance.md.
-set(KATANA_CXX_STANDARD "26" CACHE STRING "C++ standard (23 or 26)")
-set_property(CACHE KATANA_CXX_STANDARD PROPERTY STRINGS 23 26)
+# ---------------------------------------------------------------------------
+# The programs under test: cargo's release folder.
+#
+#   KATANA_PROGRAMS     where cargo put the programs: $CARGO_TARGET_DIR/release when the
+#                       configure's environment names a CARGO_TARGET_DIR (tools/build_visible.sh
+#                       sets one); else, on Linux and macOS, ~/katana-build/<checkout>/cargo/release,
+#                       the folder build_visible.sh's WSL phase builds in; else, on Windows,
+#                       rust/target/release, cargo's own default for rust/Cargo.toml.
+#   KATANA_RUNTIME_BIN  the folder of the libraries the programs load, put first on each test's
+#                       PATH: on Windows, MSYS2 UCRT64's bin (GDAL, PDAL, PROJ), where it is
+#                       installed; elsewhere the programs' own folder, since cargo writes the
+#                       libraries' run-time path into them (build_visible.sh's RUSTFLAGS).
+#
+# Each program is then KATANA_PROGRAM_<name> - KATANA_PROGRAM_katana, _katana_cli, _katana_mcp,
+# _katana_updater, and the three test programs of rust/crates/katana_updater - which is what a
+# test names where the C++ build's tests named $<TARGET_FILE:<name>>. A program that is not there
+# is not a reason to register fewer tests: a test of it then fails, which is what it should do.
+# ---------------------------------------------------------------------------
+if(DEFINED ENV{CARGO_TARGET_DIR} AND NOT "$ENV{CARGO_TARGET_DIR}" STREQUAL "")
+    set(_katana_default_programs "$ENV{CARGO_TARGET_DIR}/release")
+elseif(CMAKE_HOST_WIN32)
+    set(_katana_default_programs "${PROJECT_SOURCE_DIR}/rust/target/release")
+else()
+    get_filename_component(_katana_checkout_name "${PROJECT_SOURCE_DIR}" NAME)
+    set(_katana_default_programs "$ENV{HOME}/katana-build/${_katana_checkout_name}/cargo/release")
+endif()
+set(KATANA_PROGRAMS "${_katana_default_programs}" CACHE PATH
+    "The folder of the programs cargo built (cargo's release folder), which the tests run")
+file(TO_CMAKE_PATH "${KATANA_PROGRAMS}" KATANA_PROGRAMS)
 
-set(CMAKE_CXX_STANDARD ${KATANA_CXX_STANDARD})
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if(CMAKE_HOST_WIN32 AND EXISTS "C:/msys64/ucrt64/bin")
+    set(_katana_default_runtime "C:/msys64/ucrt64/bin")
+else()
+    set(_katana_default_runtime "${KATANA_PROGRAMS}")
+endif()
+set(KATANA_RUNTIME_BIN "${_katana_default_runtime}" CACHE PATH
+    "The folder of the libraries the programs load, first on every program test's PATH")
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+if(CMAKE_HOST_WIN32)
+    set(KATANA_PROGRAM_SUFFIX ".exe")
+else()
+    set(KATANA_PROGRAM_SUFFIX "")
+endif()
+foreach(_katana_program IN ITEMS katana katana_cli katana_mcp katana_updater
+                                 katana_updater_test katana_updater_stub katana_update_e2e)
+    set(KATANA_PROGRAM_${_katana_program}
+        "${KATANA_PROGRAMS}/${_katana_program}${KATANA_PROGRAM_SUFFIX}")
+endforeach()
+if(NOT EXISTS "${KATANA_PROGRAM_katana_cli}")
+    message(STATUS "No katana_cli at ${KATANA_PROGRAM_katana_cli} yet: build with cargo "
+                   "(docs/rust.md) before running ctest, or set KATANA_PROGRAMS to the folder "
+                   "the programs are in")
 endif()
 
-option(KATANA_BUILD_TESTS "Build unit and integration tests" ON)
-option(KATANA_BUILD_BENCHMARKS "Build the benchmark executable" ON)
-option(KATANA_BUILD_QT_APP "Build the Qt 6 desktop application" ON)
-option(KATANA_BUILD_IO "Build the GDAL/PDAL interoperability module" ON)
-option(KATANA_DEPLOY_RUNTIME
-       "Copy the runtime DLLs and the GDAL/PROJ data beside the built programs" ON)
-option(KATANA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
-option(KATANA_ENABLE_SANITIZERS "Instrument with ASan/UBSan where the toolchain supports it" OFF)
-option(KATANA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation (requires clang-tidy)" OFF)
-option(KATANA_ENABLE_CPPCHECK "Run cppcheck during compilation (requires cppcheck)" OFF)
-# Compile through ccache when it is installed (MSYS2:
-# mingw-w64-ucrt-x86_64-ccache), unless the configure names a launcher of its
-# own: a fresh build tree of a checkout, or a branch switched away from and
-# back, then compiles only what the cache has not seen. docs/building.md,
-# "Build and test speed", has what a cold and a warm cache measured.
-#
-# Without ccache's base_dir, so a second worktree does not share the first
-# one's entries. base_dir makes ccache hand the compiler paths relative to the
-# build tree, and __FILE__ with them: the survey-format and customisation
-# tests that find their fixtures beside __FILE__ then looked in the wrong
-# place, and 160 cases failed.
-option(KATANA_CCACHE "Compile through ccache when it is found" ON)
-if(KATANA_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
-    find_program(KATANA_CCACHE_PROGRAM ccache)
-    if(KATANA_CCACHE_PROGRAM)
-        set(CMAKE_CXX_COMPILER_LAUNCHER "${KATANA_CCACHE_PROGRAM}")
-        message(STATUS "Compiling through ${KATANA_CCACHE_PROGRAM} (KATANA_CCACHE=OFF to stop)")
+# The families of process tests, each on by default: a runner with no display, say, can leave
+# the window's out.
+option(KATANA_TEST_CLI "Register the cli. tests, which run katana_cli and katana_mcp" ON)
+option(KATANA_TEST_WINDOW "Register the window's headless checks, which run katana" ON)
+
+# The built-in customisations the programs are built with: the files that
+# rust/crates/katana_cad/build.rs compiles in when they are there, the default first. The tests
+# that depend on which of them a build holds read this list.
+set(KATANA_BUILTIN_FILES "")
+foreach(_katana_builtin IN ITEMS katana-standard nsw)
+    set(_katana_builtin_file
+        "${PROJECT_SOURCE_DIR}/resources/customisation/${_katana_builtin}.customisation.json")
+    if(EXISTS "${_katana_builtin_file}")
+        list(APPEND KATANA_BUILTIN_FILES "${_katana_builtin_file}")
     endif()
-endif()
-# Who publishes the build: the company in katana.exe's version resource, the
-# installer's publisher, and the name the packages are signed under
-# (cmake/KatanaSign.cmake, docs/release.md "Signing").
-set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the programs, installer and signatures")
+endforeach()
 
-# Where the reference customisation is kept in the legacy formats, the ones
-# the Katana customisation format is to take the place of: two style libraries
-# and two survey code files, with their colour table in a `support` folder
-# beside them. It is third-party material under its author's own licence, so
-# the folder is git-ignored - it is on the owner's machine and in no clone -
-# and nothing committed needs it. (The Katana-format file converted from it,
-# the built-in customisation, is a different thing and IS tracked:
-# src/katana_cad/CMakeLists.txt.) Only the converter of those formats
-# (src/katana_archive12d/legacy; docs/customisation.md, "Converting a
-# customisation from the legacy formats") is run on it, and only the tests of
-# the legacy readers and writers read it (tests/archive12d): they skip when the
-# folder is absent or holds no file in those formats. The test that converted
-# it to the census's figures was removed on 2026-11-03, the owner's decision:
-# the built-in is the committed JSON file, and the legacy files are no longer
-# needed. The program reads none of it. Defined here, above the modules and
-# the tests, because both the converter's module and its test suite are to see
-# one value.
-# The owner's folder is named for the program its files came from; the name is
-# assembled so that no tracked file spells it (CLAUDE.md, section 9).
-string(CONCAT _katana_reference_folder "1" "2d Refrence Files")
-set(KATANA_REFERENCE_CUSTOMISATION_DIR "${PROJECT_SOURCE_DIR}/docs/${_katana_reference_folder}" CACHE PATH
-    "Folder of the reference customisation in the legacy formats; the legacy readers' reference tests read it and skip when it is absent or holds no such file")
-
-# ---------------------------------------------------------------------------
-# Where things are built.
-#
-# CMake's default mirrors the source tree inside the build tree, which is how
-# the application came to be at build/release/src/katana_qt/katana_qt_app.exe -
-# a path that reads as though the executable were in the sources, and that
-# nobody could be expected to find. Everything a person runs now lands in
-# <build>/bin, with the tests and benchmarks one level down so that bin itself
-# holds only what ships:
-#
-#   <build>/bin/katana.exe          the application
-#   <build>/bin/katana_cli.exe      the command-line front end
-#   <build>/bin/tests/              one test executable per module
-#   <build>/bin/benchmarks/
-#   <build>/lib/                    static libraries
-#
-# Set before any add_subdirectory, because the variables initialise each
-# target's property at the moment the target is created. `cmake --install`
-# (or the `bundle` target) turns bin/ into a self-contained folder; see
-# cmake/KatanaPackaging.cmake.
-# ---------------------------------------------------------------------------
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-set(KATANA_TEST_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
-set(KATANA_BENCHMARK_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/benchmarks")
-
-include(GNUInstallDirs)
-include(KatanaTargetDefaults)
-include(KatanaSimd)
-include(KatanaSanitizers)
-include(KatanaStaticAnalysis)
-include(KatanaThirdParty)
-
-# The update system's pinned public keys (cmake/KatanaUpdateKeys.cmake). They are
-# PLACEHOLDERS until the owner runs the key steps in docs/update.md, and a build
-# with them can neither verify nor receive an update. ON makes this configure FAIL
-# while they are placeholders: release.yml turns it on, so a release can never ship
-# with them. OFF (the default) leaves development and CI test builds alone.
+# The update system's pinned public keys (cmake/KatanaUpdateKeys.cmake), which
+# rust/crates/katana_update/build.rs compiles into the programs. ON makes this configure FAIL
+# while they are placeholders, as KATANA_REQUIRE_UPDATE_KEYS in cargo's environment fails the
+# build.
 option(KATANA_REQUIRE_UPDATE_KEYS "Refuse to configure while the update keys are placeholders" OFF)
 include(KatanaUpdateKeys)
 
-# Directory holding the toolchain runtime DLLs (MinGW). Tests need it on PATH.
-get_filename_component(KATANA_RUNTIME_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
-
-if(KATANA_BUILD_TESTS)
-    include(CTest)
-    enable_testing()
-    katana_provide_googletest()
-    include(GoogleTest)
-endif()
-
-# ---------------------------------------------------------------------------
-# Modules, lowest layer first. The allowed dependency direction is recorded in
-# tools/check_layering.cmake and verified by the `layering` test.
-# ---------------------------------------------------------------------------
-set(KATANA_MODULES
-    katana_core
-    # The auto-update engine, of layer `update` (core only), and the fourth
-    # program, the helper that swaps the files (docs/update.md). Both sit beside
-    # core: katana_app and katana_qt link the library, nothing links them back.
-    katana_update
-    katana_updater
-    katana_math
-    katana_geometry
-    katana_entity
-    katana_commands
-    katana_storage
-    katana_geodesy
-    katana_survey
-    katana_surveyio
-    katana_terrain
-    katana_archive12d
-    katana_dxf
-    katana_ifc
-    katana_render
-    katana_cad
-)
-if(KATANA_BUILD_IO)
-    # katana_io first: katana_interop builds on it.
-    list(APPEND KATANA_MODULES katana_io katana_interop)
-endif()
-if(KATANA_BUILD_QT_APP)
-    list(APPEND KATANA_MODULES katana_qt)
-endif()
-list(APPEND KATANA_MODULES katana_app)
-
-# Restricts the configured modules (and their test suites), e.g.
-#   -DKATANA_MODULE_FILTER="katana_core;katana_math;katana_geometry;katana_terrain"
-# so that one module can be built in isolation while others are in flux.
-set(KATANA_MODULE_FILTER "" CACHE STRING "If non-empty, only these modules are configured")
-
-foreach(module IN LISTS KATANA_MODULES)
-    if(KATANA_MODULE_FILTER AND NOT module IN_LIST KATANA_MODULE_FILTER)
-        continue()
-    endif()
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${module}/CMakeLists.txt")
-        add_subdirectory(src/${module})
-    endif()
-endforeach()
-
-# A filtered configuration must still be a COMPLETE one.
-#
-# CMake turns a link against a target that does not exist into a bare -lname and
-# says nothing, so excluding a module that another included module depends on
-# configures cleanly, builds every object file, and then fails at LINK time with
-# "ld returned 1" and no indication of why. That happened: a build directory
-# carried a KATANA_MODULE_FILTER from before katana_cad depended on
-# katana_terrain and katana_render, and the failure looked like a code
-# regression rather than a stale cache.
-#
-# PLAN.MD section 36 forbids silent failures, so the graph is checked here and
-# named precisely.
-set(_katana_missing "")
-foreach(module IN LISTS KATANA_MODULES)
-    if(NOT TARGET ${module})
-        continue()
-    endif()
-    set(_deps "")
-    foreach(_property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-        get_target_property(_value ${module} ${_property})
-        if(_value)
-            list(APPEND _deps ${_value})
-        endif()
-    endforeach()
-    foreach(_dep IN LISTS _deps)
-        # Only first-party modules; third-party names are found by find_package.
-        if(_dep MATCHES "^katana_" AND NOT TARGET ${_dep})
-            list(APPEND _katana_missing "${module} needs ${_dep}")
-        endif()
-    endforeach()
-endforeach()
-if(_katana_missing)
-    list(REMOVE_DUPLICATES _katana_missing)
-    list(JOIN _katana_missing "
-  " _text)
-    message(FATAL_ERROR
-        "KATANA_MODULE_FILTER excludes a module that another one depends on:
-  ${_text}
-"
-        "Add the missing modules to KATANA_MODULE_FILTER, or clear it to configure them all. "
-        "Without this check the configure succeeds and the LINK fails with no explanation.")
-endif()
-
-if(KATANA_BUILD_TESTS)
-    add_subdirectory(tests)
-endif()
-
-if(KATANA_BUILD_BENCHMARKS)
-    add_subdirectory(benchmarks)
-endif()
-
-include(KatanaFormat)
-include(KatanaPackaging)
+enable_testing()
+add_subdirectory(tests)

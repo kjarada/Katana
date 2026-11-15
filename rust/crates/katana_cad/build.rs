@@ -1,30 +1,32 @@
-//! The built-in customisations the C++ build compiles into the cad library with #embed, read from
-//! the same files and with the same defaults, so that one build of the checkout gives both programs
-//! the same built-ins (src/katana_cad/CMakeLists.txt, cmake/KatanaBuiltInDefault.cmake):
+//! The built-in customisations compiled into the cad library, with the defaults the C++ build
+//! declared for them (its src/katana_cad/CMakeLists.txt, gone with the C++):
 //!
-//! * KATANA_BUILTIN_CUSTOMISATION, THE built-in, the default a program starts with: the argument
-//!   of `katana_declare_builtin_default(...)` in src/katana_cad/CMakeLists.txt. Not read from
-//!   cargo's environment, as update's build.rs reads its own: a variable of that name is the
-//!   run-time seam (customisation_host.rs), which the suite and a person set for a run, and a
-//!   `KATANA_BUILTIN_CUSTOMISATION=none cargo test` must not build a program with no built-in.
-//!   A configure given another file (`-DKATANA_BUILTIN_CUSTOMISATION=...`) changes the C++ alone
-//!   (docs/rust.md, "Not done").
-//! * KATANA_ALTERNATE_CUSTOMISATIONS, the others, a ;-separated list: the cache default that
-//!   src/katana_cad/CMakeLists.txt declares, or the variable of that name in cargo's environment,
-//!   which nothing sets yet.
-//! * KATANA_REQUIRE_BUILTIN_CUSTOMISATION, which fails a configure whose default is not there, is
+//! * KATANA_BUILTIN_CUSTOMISATION, THE built-in, the default a program starts with: DEFAULT below.
+//!   Not read from cargo's environment, as update's build.rs reads its own: a variable of that
+//!   name is the run-time seam (customisation_host.rs), which the suite and a person set for a
+//!   run, and a `KATANA_BUILTIN_CUSTOMISATION=none cargo test` must not build a program with no
+//!   built-in.
+//! * KATANA_ALTERNATE_CUSTOMISATIONS, the others, a ;-separated list: ALTERNATES below, or the
+//!   variable of that name in cargo's environment.
+//! * KATANA_REQUIRE_BUILTIN_CUSTOMISATION, which fails a build whose default is not there, is
 //!   read from the environment as update's KATANA_REQUIRE_UPDATE_KEYS is.
 //!
-//! A file is offered as CMake's `_katana_builtin_candidate` offers it: a path that names no file,
-//! or names a directory, is not offered, which is how a build is made without one; a path whose
-//! real path holds a quote, a backslash or a line break is not offered either (the C++ writes it
-//! into a C string literal, which cannot hold them, and the two programs offer the same files); an
-//! alternate whose real path is already offered is offered once. The table goes into
-//! `$OUT_DIR/builtin_table.rs`, one `include_bytes!` per file, the default first; an empty file
-//! stands for itself as one zero byte, as the C++'s `#embed ... if_empty(0)` does.
+//! A file is offered as the C++ build's `_katana_builtin_candidate` offered it: a path that names
+//! no file, or names a directory, is not offered, which is how a build is made without one; a path
+//! whose real path holds a quote, a backslash or a line break is not offered either (the C++ wrote
+//! it into a C string literal, which cannot hold them); an alternate whose real path is already
+//! offered is offered once. The table goes into `$OUT_DIR/builtin_table.rs`, one `include_bytes!`
+//! per file, the default first; an empty file stands for itself as one zero byte, as the C++'s
+//! `#embed ... if_empty(0)` did. The test runner's KATANA_BUILTIN_FILES (the checkout's
+//! CMakeLists.txt) lists the same two files.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+
+// The default built-in, and the alternates as a ;-separated list, in the checkout.
+const DEFAULT: &str =
+    "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json";
+const ALTERNATES: &str = "${PROJECT_SOURCE_DIR}/resources/customisation/nsw.customisation.json";
 
 fn main() {
     let manifest = PathBuf::from(
@@ -35,35 +37,20 @@ fn main() {
         .canonicalize()
         .unwrap_or_else(|error| panic!("cannot find the checkout {}: {error}", checkout.display()));
 
-    let lists = checkout.join("src/katana_cad/CMakeLists.txt");
-    let text = read(&lists);
     let source_dir = cmake_text(&checkout);
     let expand = |value: &str| {
         if let Some(at) = value.replace("${PROJECT_SOURCE_DIR}", "").find("${") {
             panic!(
-                "{}: build.rs knows only ${{PROJECT_SOURCE_DIR}} in a built-in's path, not the \
-                 variable at byte {at} of \"{value}\"",
-                lists.display()
+                "build.rs knows only ${{PROJECT_SOURCE_DIR}} in a built-in's path, not the \
+                 variable at byte {at} of \"{value}\""
             );
         }
         value.replace("${PROJECT_SOURCE_DIR}", &source_dir)
     };
 
-    let default = declared_default(&text).unwrap_or_else(|| {
-        panic!(
-            "{} has no katana_declare_builtin_default(<file>)",
-            lists.display()
-        )
-    });
-    let default = expand(&default);
-    let alternates = configured("KATANA_ALTERNATE_CUSTOMISATIONS").unwrap_or_else(|| {
-        cache_default(&text, "KATANA_ALTERNATE_CUSTOMISATIONS").unwrap_or_else(|| {
-            panic!(
-                "{} declares no KATANA_ALTERNATE_CUSTOMISATIONS",
-                lists.display()
-            )
-        })
-    });
+    let default = expand(DEFAULT);
+    let alternates =
+        configured("KATANA_ALTERNATE_CUSTOMISATIONS").unwrap_or_else(|| ALTERNATES.to_owned());
 
     let mut files: Vec<PathBuf> = Vec::new();
     let mut has_default = false;
@@ -129,12 +116,6 @@ fn main() {
     }
 }
 
-fn read(path: &Path) -> String {
-    println!("cargo:rerun-if-changed={}", path.display());
-    std::fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
-}
-
 // The value a build was configured with, from cargo's environment; None when it names none.
 fn configured(name: &str) -> Option<String> {
     println!("cargo:rerun-if-env-changed={name}");
@@ -151,37 +132,6 @@ fn cmake_text(path: &Path) -> String {
     } else {
         text
     }
-}
-
-// The argument of `katana_declare_builtin_default(<file>)` where it is called (a line of its
-// own, not a comment), without its quotes.
-fn declared_default(text: &str) -> Option<String> {
-    const CALL: &str = "katana_declare_builtin_default(";
-    let line_start = text.match_indices(CALL).map(|(at, _)| at).find(|&at| {
-        text[..at]
-            .rsplit('\n')
-            .next()
-            .is_some_and(|before| before.trim().is_empty())
-    })?;
-    let rest = &text[line_start + CALL.len()..];
-    let argument = rest[..rest.find(')')?].trim();
-    Some(String::from(
-        argument
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .unwrap_or(argument),
-    ))
-}
-
-// The quoted default of `set(<name> "<value>" CACHE ...)`, the value on the line after the name
-// or beside it.
-fn cache_default(text: &str, name: &str) -> Option<String> {
-    let opening = format!("set({name}");
-    let start = text.find(&opening)? + opening.len();
-    let rest = text[start..].trim_start().strip_prefix('"')?;
-    let value = &rest[..rest.find('"')?];
-    let after = rest[value.len() + 1..].trim_start();
-    after.starts_with("CACHE").then(|| value.to_owned())
 }
 
 // CMake's truth: ON, YES, TRUE, Y and a number other than 0 (its documentation of if(<constant>)).

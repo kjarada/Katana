@@ -12,7 +12,7 @@ under test:
 
   - the releases are made by the REAL producer, tools/update_make_manifest.py, run as a program the way the
     release workflow runs it, and signed by openssl with the published RFC 8032 test key
-    (tests/update/fixtures/keys, tests/update/test_key.hpp);
+    (tests/update/fixtures/keys, tests/update/test_keys.txt);
   - they are served over HTTP by tools/update_fake_feed.py on 127.0.0.1, port 0;
   - katana_update_e2e (tests/update/e2e_main.cpp) is the engine - check, plan, stage, preflight, launchApply,
     recover - with the test key as its trust and a socket client that can reach the loopback address only;

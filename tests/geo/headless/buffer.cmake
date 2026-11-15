@@ -6,7 +6,7 @@
 # 100 x 2 rectangle, 200 m2, which LIST then shows on gis/buffer.
 add_test(NAME qt_gis_buffer_dialog_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>LINE 0,0 100,0|@gisBuffer|!gisBufferScopeDrawing|gisBufferDistance=1|gisBufferCaps=flat|?gisBufferCommand|!gisBufferRun|?gisBufferStatus|?gisBufferReply|>LIST"
         "-DEXPECT=gisBufferCommand: GIS BUFFER DRAWING distance=1 caps=flat.*gisBufferStatus: Done as one undo step: 1 created, 0 changed, 0 deleted on gis/buffer.*buffer distance=1 side=both caps=flat.* area=200\\.000.*Polyline  layer=gis/buffer  vertices=4  closed  length=204  area=200"
@@ -17,7 +17,7 @@ add_test(NAME qt_gis_buffer_dialog_headless
 # UNDO brings both lots back.
 add_test(NAME qt_gis_dissolve_dialog_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>RECT 0,0 50,40|>RECT 50,0 100,40|@gisDissolve|!gisDissolveScopeDrawing|gisDissolveReplace=on|?gisDissolveCommand|!gisDissolveRun|?gisDissolveStatus|>LIST|>UNDO|>LIST"
         "-DEXPECT=gisDissolveCommand: GIS DISSOLVE DRAWING REPLACE.*gisDissolveStatus: Done as one undo step: 1 created, 0 changed, 2 deleted on gis/dissolve.*1 entities.*Polyline  layer=gis/dissolve  .*area=4000.*1 undone.*2 entities"

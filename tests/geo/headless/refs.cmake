@@ -11,7 +11,7 @@
 # by classification, then removed.
 add_test(NAME qt_reference_dock_builds_refs_lines_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>IMPORT \"${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc\"|>IMPORT \"${PROJECT_SOURCE_DIR}/samples/gis/survey_scan.las\"|%ReferenceDataDock|referenceList=terrain|referenceOpacity=50%|!referenceHide|!referenceShow|!referenceOverviews|referenceList=survey_scan|referenceColour=Classification|!referenceRemove|>REFS"
         "-DEXPECT=reference id=1 kind=raster name=terrain [^\r\n]*visible=yes opacity=0\\.5 .*reference id=1 kind=raster name=terrain [^\r\n]*visible=no .*reference id=1 kind=raster name=terrain [^\r\n]*visible=yes .*REFS OVERVIEWS writes [^\r\n]*/terrain\\.asc\\.ovr beside the raster's file; add CONFIRM.*reference id=2 kind=pointcloud name=survey_scan [^\r\n]*color=classification .*removed id=2 kind=pointcloud name=survey_scan.*references rasters=1 clouds=0 missing=0"

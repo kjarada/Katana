@@ -2,10 +2,10 @@
 # (decision D1, docs/release.md "The Windows installer", cmake/NSIS.template.in), without
 # running it:
 #
-#   cmake -DTEMPLATE=<cmake/NSIS.template.in> [-DREGISTRY_HEADER=<include/katana/update/registry.hpp>]
+#   cmake -DTEMPLATE=<cmake/NSIS.template.in> [-DREGISTRY_SOURCE=<rust/crates/katana_update/src/registry.rs>]
 #         [-DMUTATE=<name>] -P check_nsis_script.cmake
 #   cmake -DSCRIPT=<project.nsi> [-DEXPECT_VERSION=0.2.0] [-DEXPECT_FILES=bin/katana.exe;...]
-#         [-DREGISTRY_HEADER=...] [-DMUTATE=<name>] -P check_nsis_script.cmake
+#         [-DREGISTRY_SOURCE=...] [-DMUTATE=<name>] -P check_nsis_script.cmake
 #
 # TEMPLATE is configured here with sample values for the variables CPack supplies (what
 # KatanaPackaging.cmake sets, and what the generator derives from a staged tree), so it runs
@@ -15,7 +15,7 @@
 #   * no administrator rights asked for, and nothing machine-wide written: no HKLM or any
 #     other hive but HKCU, no "all users" shell context, no Program Files or system folder;
 #   * the folder is %LOCALAPPDATA%\Programs\Katana, and the registry holds what the updater
-#     reads and Settings > Apps shows (include/katana/update/registry.hpp); a copy that is
+#     reads and Settings > Apps shows (rust/crates/katana_update/src/registry.rs); a copy that is
 #     already installed is offered as the folder again; no folder at all, or one that cannot
 #     be written to, is refused before anything is put down, by a silent run too;
 #   * installed over a copy of Katana, it clears the updater's record of that copy's version
@@ -27,7 +27,7 @@
 #     install folder recursively, so what a person put there stays; it stops when its folder
 #     is not known; outside the folder it clears the updater's state folder and no other,
 #     keeps the person's choices about updating, and removes the helper's RunOnce value under
-#     the name the helper gives it (REGISTRY_HEADER, when given, is where that name is read);
+#     the name the helper gives it (REGISTRY_SOURCE, when given, is where that name is read);
 #   * the Desktop shortcut (cmake/KatanaPackaging.cmake, CPACK_NSIS_CREATE_ICONS_EXTRA): one, to
 #     the program and under the name of the Start menu's, with no icon of its own (the program's
 #     is the Start menu's), starting in the install folder, made between the two macros of the
@@ -517,16 +517,16 @@ katana_require("the updater's state folder, which is the only one outside the in
     [=[!define KATANA_UPDATE_STATE "$LOCALAPPDATA\Katana\update"]=])
 katana_require_in_uninstaller("clear what the updater staged outside the install folder" [=[Call un.RemoveUpdateState]=])
 katana_require("the person's choices about updating, which the uninstaller keeps" [=[StrCmp $1 "state.json" state_skip]=])
-# The command the helper registers to run at the next logon (registry.hpp): removed under the
-# name the helper gives it, read from that header when it is given, so that the two cannot
+# The command the helper registers to run at the next logon (registry.rs): removed under the
+# name the helper gives it, read from that source when it is given, so that the two cannot
 # come to differ unnoticed.
 set(_run_once_name "")
-if(REGISTRY_HEADER)
-    file(READ "${REGISTRY_HEADER}" _registry_header)
-    if(_registry_header MATCHES "kRunOnceName = \"([A-Za-z0-9_]+)\"")
+if(REGISTRY_SOURCE)
+    file(READ "${REGISTRY_SOURCE}" _registry_source)
+    if(_registry_source MATCHES "RUN_ONCE_NAME: &str = \"([A-Za-z0-9_]+)\"")
         set(_run_once_name "${CMAKE_MATCH_1}\"")
     else()
-        katana_problem("${REGISTRY_HEADER} has no  kRunOnceName = \"<name>\": the name of the helper's RunOnce value cannot be read from it")
+        katana_problem("${REGISTRY_SOURCE} has no RUN_ONCE_NAME: &str = \"<name>\": the name of the helper's RunOnce value cannot be read from it")
     endif()
 endif()
 katana_require_in_uninstaller("remove the helper's RunOnce value under the name the helper gives it"

@@ -1,0 +1,2443 @@
+# The cli.* tests: lines through the real katana_cli and katana_mcp, each matched against what
+# the program printed (docs/headless.md, docs/mcp.md). The programs are cargo's
+# (KATANA_PROGRAM_katana_cli and KATANA_PROGRAM_katana_mcp, the top CMakeLists.txt); each test's
+# name and expectation are the ones the C++ programs were held to, moved here from
+# src/katana_app/CMakeLists.txt when the C++ went, so that the Rust programs are held to them.
+# The families in files of their own are beside this one: text_cli.cmake, update_*.cmake,
+# road_cli.cmake, road_objects_cli.cmake and geo/*.cmake (one per package of the geoprocessing
+# plan).
+
+if(KATANA_TEST_CLI)
+    set(_leader_json_space "[ \t\r\n]*")
+    set(_leader_points_before "\"points\":${_leader_json_space}\\[${_leader_json_space}\\[${_leader_json_space}0\\.0,${_leader_json_space}0\\.0${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}5\\.0,${_leader_json_space}5\\.0${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}10\\.0,${_leader_json_space}5\\.0${_leader_json_space}\\]${_leader_json_space}\\]")
+    set(_leader_points_after "\"points\":${_leader_json_space}\\[${_leader_json_space}\\[${_leader_json_space}0\\.0,${_leader_json_space}0\\.0${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}7\\.125,${_leader_json_space}8\\.5${_leader_json_space}\\],${_leader_json_space}\\[${_leader_json_space}10\\.0,${_leader_json_space}5\\.0${_leader_json_space}\\]${_leader_json_space}\\]")
+    add_test(NAME cli.leader_points_and_frames_are_edited_and_undone
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            ${KATANA_PROGRAM_katana_cli}
+            -c "LEADER 0,0 5,5 10,5 text=Note"
+            -c "LEADER SET 1 vertex=1 at=7.125,8.5 callout=box landingangle=180"
+            -c "LEADER LIST 1 JSON" -c UNDO -c "LEADER LIST 1 JSON")
+    set_tests_properties(cli.leader_points_and_frames_are_edited_and_undone PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "\"callout\":${_leader_json_space}\"box\".*${_leader_points_after}.*\"callout\":${_leader_json_space}\"none\".*${_leader_points_before}"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.leader_point_edits_refuse_an_out_of_range_vertex
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            ${KATANA_PROGRAM_katana_cli}
+            -c "LEADER 0,0 5,5 text=Note"
+            -c "LEADER SET 1 vertex=2 at=7,8 callout=box" -c "POINT 1,1")
+    set_tests_properties(cli.leader_point_edits_refuse_an_out_of_range_vertex PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: InvalidArgument: leader vertex index is out of range"
+        FAIL_REGULAR_EXPRESSION "point created")
+    # SELECT by kind across a scope (docs/cad.md, "Scope and filter"): of two
+    # leaders and a line, SELECT DRAWING WHERE TYPE=leader takes the two
+    # leaders, so COLOR recolours those two and not the line.
+    add_test(NAME cli.select_takes_a_kind_across_the_drawing_and_colour_changes_only_those
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            ${KATANA_PROGRAM_katana_cli}
+            -c "LEADER 0,0 5,5 text=A" -c "LEADER 0,10 5,15 text=B" -c "LINE 0,0 10,0"
+            -c "SELECT DRAWING WHERE TYPE=leader" -c "COLOR #00FF00")
+    set_tests_properties(cli.select_takes_a_kind_across_the_drawing_and_colour_changes_only_those
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "scope=drawing where=\"TYPE=leader\" matched=2 selected=2 types=leader:2[\r\n]+2 recoloured"
+        FAIL_REGULAR_EXPRESSION "error")
+    # MODIFY ... SET STYLE.SYMBOLSCALE= (docs/cad.md, "Global Modify"): the
+    # square 0.3 wide that a point's style draws, doubled to 0.6.
+    add_test(NAME cli.modify_scales_the_symbol_size_of_the_styles_its_scope_wears
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+            ${KATANA_PROGRAM_katana_cli}
+            -c "STYLE NEW Pit symbol square" -c "STYLE SET Pit symbolsize 0.3" -c "POINT 0,0"
+            -c "SELECT ALL" -c "STYLE APPLY Pit" -c "MODIFY DRAWING SET STYLE.SYMBOLSCALE=2"
+            -c "STYLE LIST")
+    set_tests_properties(cli.modify_scales_the_symbol_size_of_the_styles_its_scope_wears
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "1 entity matched; changing 1 style\\. One UNDO restores it\\.[\r\n]+  Pit  [^\r\n]*symbol=square@0\\.6([\r\n]|$)"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # End-to-end: draw, save, reopen in a second process, and query.
+    set(_project "${CMAKE_CURRENT_BINARY_DIR}/cli-smoke.katana")
+    add_test(NAME cli.save
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "LAYER NEW Survey #FF0000" -c "LAYER SET Survey"
+                -c "RECT 0,0 30,20" -c "CIRCLE 15,10 5" -c "SAVE \"${_project}\"")
+    add_test(NAME cli.reopen
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_project}\"" -c "LIST")
+    add_test(NAME cli.rejects_bad_input
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "CIRCLE 0,0 -1")
+    add_test(NAME cli.cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_project}")
+
+    set_tests_properties(cli.cleanup PROPERTIES FIXTURES_SETUP cli_project)
+    set_tests_properties(cli.save PROPERTIES FIXTURES_REQUIRED cli_project FIXTURES_SETUP cli_saved)
+    set_tests_properties(cli.reopen PROPERTIES
+        FIXTURES_REQUIRED cli_saved
+        PASS_REGULAR_EXPRESSION "2 entities.*Polyline.*layer=Survey.*area=600")
+    set_tests_properties(cli.rejects_bad_input PROPERTIES WILL_FAIL TRUE)
+
+    # Names and paths outside ASCII, through the real programs (text_cli.cmake).
+    include("${CMAKE_CURRENT_SOURCE_DIR}/text_cli.cmake")
+
+    # VERTEX INSERT with a point OF the polyline (docs/drawing.md, "What a
+    # vertex tool acts on"): "#1@4,0.3" is the place on it nearest (4,0.3),
+    # ON the line, as the window's Insert Vertex puts a click; "#1.s1" with
+    # after=1 is segment 1's middle. By hand on (0,0) (10,0) (10,10): the
+    # first is (4,0), the new vertex 1; segment 1 is (10,0)-(10,10), and its
+    # middle (10,5) the new vertex 2.
+    add_test(NAME cli.vertex_insert_takes_a_point_on_the_polyline
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLINE 0,0 10,0 10,10" -c "VERTEX INSERT 1 #1@4,0.3"
+                -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_takes_a_point_on_the_polyline PROPERTIES
+        PASS_REGULAR_EXPRESSION "vertices=4 [^\r\n]* inserted=1.*index=1 x=4 y=0 z=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.vertex_insert_takes_a_segments_middle
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLINE 0,0 10,0 10,10"
+                -c "VERTEX INSERT 1 #1.s1 after=1" -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_takes_a_segments_middle PROPERTIES
+        PASS_REGULAR_EXPRESSION "vertices=4 [^\r\n]* inserted=2.*index=2 x=10 y=5 z=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    # "#1@4,0.3,101.5": on the line at (4,0), with 101.5 its height - what
+    # x,y,z typed at the window's Insert Vertex does.
+    add_test(NAME cli.vertex_insert_on_the_line_takes_a_height
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLINE 0,0 10,0 10,10"
+                -c "VERTEX INSERT 1 #1@4,0.3,101.5" -c "VERTEX LIST 1")
+    set_tests_properties(cli.vertex_insert_on_the_line_takes_a_height PROPERTIES
+        PASS_REGULAR_EXPRESSION "inserted=1.*index=1 x=4 y=0 z=101[.]5 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # STRAIGHTEN walks forward from the first number, as it always has, so an
+    # existing line does what it did. On the hexagon (0,0) (10,0) (20,0)
+    # (20,10) (10,10) (0,10), from 3 to 1 forward is 4, 5 and 0, leaving
+    # (10,0) (20,0) (20,10); side=short takes the window's side, the one with
+    # fewer between - vertex 2 alone - leaving five.
+    add_test(NAME cli.straighten_walks_forward_and_takes_the_short_side_when_asked
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE"
+                -c "PLINE 0,0 10,0 20,0 20,10 10,10 0,10 CLOSE" -c "STRAIGHTEN 1 3 1"
+                -c "STRAIGHTEN 2 3 1 side=short" -c "VERTEX LIST 1")
+    set_tests_properties(cli.straighten_walks_forward_and_takes_the_short_side_when_asked PROPERTIES
+        PASS_REGULAR_EXPRESSION "id=1 [^\r\n]*vertices=3.*id=2 [^\r\n]*vertices=5.*index=0 x=10 y=0 .*index=1 x=20 y=0 .*index=2 x=20 y=10 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # The survey-code verbs, on a customisation of the tests' own: its codes are
+    # nobody else's. REPLACE puts its rules in the place of whatever rules the
+    # session started with. By index: 0 KT* feature, 1 KX* feature with no
+    # layer, 2 KT* a built-in symbol, "cross". It is a Katana customisation
+    # file, written out by hand from the format's chapter of
+    # docs/customisation.md. (The file a session refuses, a survey code file
+    # of another program, is further down.)
+    set(_codes "${CMAKE_CURRENT_BINARY_DIR}/cli-codes.customisation.json")
+    file(WRITE "${_codes}" [=[{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "cli-codes",
+  "codes": [
+    {"key": "KT*", "sets": "feature", "layer": "KATANA TEST", "colour": "red", "linestyle": "0", "comment": "[KT*] Katana test"},
+    {"key": "KX*", "sets": "feature", "colour": "red"},
+    {"key": "KT*", "sets": "symbol", "symbol": {"name": "cross", "size": 2}}
+  ]
+}
+]=])
+    set(_replace "CUSTOMISE REPLACE \"${_codes}\"")
+    # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
+    set(_eol "[\r\n]+")
+    add_test(NAME cli.code_explain
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "CODE EXPLAIN KT01"
+                -c "CODE EXPLAIN kt01")
+    # CODE LIST and CODE CHECK: the loaded codes one a line, and their lint.
+    # They were a verb of their own, named after the survey code file.
+    add_test(NAME cli.code_list
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "CODE LIST katana")
+    # Loaded again WITHOUT replace: merged, so each of its (code, section)
+    # groups - KT* feature, KX* feature, KT* symbol - replaces
+    # itself. A code's loaded rules are gathered at its first rule (so that
+    # what the load brought outranks what it left of that code), which makes
+    # KX* rule #2: KT* feature, KT* symbol, KX* feature.
+    add_test(NAME cli.code_check_after_a_merge
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "CUSTOMISE \"${_codes}\""
+                -c "CODE CHECK")
+    add_test(NAME cli.code_applies_and_reports
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "POINT 1,1" -c "SELECT ALL"
+                -c "PROP SET code KT01" -c "CODE" -c "CODE CENSUS")
+    # CODE on a scope, previewed: the scope words and PREVIEW reach katana_cli
+    # as they reach every front end. Two points coded KT01, entity 1 on layer
+    # 0 and entity 2 on layer a. The scope takes the one on layer a, the
+    # preview says what coding it would do, and LIST then shows it where it was.
+    add_test(NAME cli.code_on_a_scope_previews_and_changes_nothing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "POINT 1,1" -c "LAYER NEW a"
+                -c "LAYER SET a" -c "POINT 2,2" -c "SELECT ALL" -c "PROP SET code KT01"
+                -c "CODE LAYERS a PREVIEW" -c "LIST")
+    # A path whose first word is "replace" is a file, not the REPLACE keyword:
+    # a keyword is the WHOLE first word (cad/customisation_verbs.hpp), and a
+    # quoted path with a blank in it is one word. Taken for the keyword by the
+    # parser this session once had, the file was dropped ("REPLACE needs a
+    # file") or, given twice, replaced the loaded rules instead of merging. Run
+    # beside the file, so that the path's first word really is "replace". By
+    # hand: cli-codes has 3 rules over 2 keys (KT*, KX*) and this file 1 rule
+    # over RM*, so a merge holds 4 rules over 3 keys, and naming the same file
+    # twice in one load adds its rule once.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/replace me.customisation.json" [=[{
+  "format": "katana-customisation",
+  "version": 1,
+  "name": "replace me",
+  "codes": [
+    {"key": "RM*", "sets": "feature", "layer": "REPLACE ME"}
+  ]
+}
+]=])
+    add_test(NAME cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "customise replace \"${_codes}\""
+                -c "CUSTOMISE \"replace me.customisation.json\"" -c "CUSTOMISE")
+    add_test(NAME cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}"
+                -c "CUSTOMISE \"replace me.customisation.json\" \"replace me.customisation.json\""
+                -c "CUSTOMISE")
+    set_tests_properties(cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
+        cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
+        PROPERTIES PASS_REGULAR_EXPRESSION "4 survey code rules over 3 distinct codes")
+    # A load of definitions alone keeps the rules (audit QT-21): the symbol
+    # fixture is merged in after the tests' codes, and their 3 rules over 2
+    # codes are still there. By hand: the fixture holds four symbols and no
+    # rule, and none of the four is in a session that has only cli-codes'.
+    # The fixtures are the committed ones every customisation test reads.
+    set(_data "${PROJECT_SOURCE_DIR}/tests/data/customisation")
+    set(_symbols "${_data}/test_symbols.customisation.json")
+    add_test(NAME cli.a_library_alone_merged_in_keeps_the_survey_codes
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}"
+                -c "CUSTOMISE \"${_symbols}\"" -c "CUSTOMISE")
+    set_tests_properties(cli.a_library_alone_merged_in_keeps_the_survey_codes PROPERTIES
+        PASS_REGULAR_EXPRESSION "loaded file=[^\r\n]*test_symbols\\.customisation\\.json\"? name=test_symbols definitions_added=4 definitions_replaced=0 codes_added=0 codes_replaced=0 .*3 survey code rules over 2 distinct codes")
+
+    # A saved project records the customisations it was drawn with - by the
+    # NAME each declares, never a file's - and a later session that opens it
+    # without one of them is told which (a warning; the project still opens).
+    # Saved with the symbol fixture, whose name is test_symbols, merged in,
+    # then opened in a second process that never loads it. With the fixture
+    # loaded first, nothing is missing.
+    set(_recorded "${CMAKE_CURRENT_BINARY_DIR}/cli-recorded.katana")
+    add_test(NAME cli.recorded_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}")
+    add_test(NAME cli.a_saved_project_records_its_customisation
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE \"${_symbols}\""
+                -c "LINE 0,0 10,0" -c "SAVE \"${_recorded}\"")
+    add_test(NAME cli.opening_a_project_names_the_customisations_not_loaded
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_recorded}\"")
+    add_test(NAME cli.opening_a_project_with_its_customisation_loaded_warns_of_nothing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE \"${_symbols}\""
+                -c "OPEN \"${_recorded}\"")
+    set_tests_properties(cli.recorded_cleanup PROPERTIES FIXTURES_SETUP cli_recorded_clean)
+    set_tests_properties(cli.a_saved_project_records_its_customisation PROPERTIES
+        FIXTURES_REQUIRED cli_recorded_clean FIXTURES_SETUP cli_recorded)
+    set_tests_properties(cli.opening_a_project_names_the_customisations_not_loaded PROPERTIES
+        FIXTURES_REQUIRED cli_recorded
+        PASS_REGULAR_EXPRESSION "opened .*warning: this project was drawn with customisations that are not loaded: \"test_symbols\"[\r\n]")
+    set_tests_properties(cli.opening_a_project_with_its_customisation_loaded_warns_of_nothing PROPERTIES
+        FIXTURES_REQUIRED cli_recorded
+        PASS_REGULAR_EXPRESSION "opened "
+        FAIL_REGULAR_EXPRESSION "not loaded")
+
+    # Three sessions on one project of their own. The first saves it with the
+    # symbol fixture loaded; the second opens it without the fixture (warned)
+    # and saves it unedited; the third, again without it, must still be told:
+    # a session that never had the customisation cannot judge it, so its save
+    # keeps the name. The second session rewrote the record from what it had
+    # loaded, and the third opened in silence.
+    set(_resaved "${CMAKE_CURRENT_BINARY_DIR}/cli-resaved.katana")
+    add_test(NAME cli.resaved_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_resaved}")
+    add_test(NAME cli.a_project_is_saved_with_a_symbol_file_loaded
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE \"${_symbols}\""
+                -c "LINE 0,0 10,0" -c "SAVE \"${_resaved}\"")
+    add_test(NAME cli.an_unedited_save_where_a_file_is_missing_succeeds
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_resaved}\"" -c "SAVE")
+    add_test(NAME cli.a_file_missing_when_the_project_was_saved_is_still_named_on_opening
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_resaved}\"")
+    set_tests_properties(cli.resaved_cleanup PROPERTIES FIXTURES_SETUP cli_resaved_clean)
+    set_tests_properties(cli.a_project_is_saved_with_a_symbol_file_loaded PROPERTIES
+        FIXTURES_REQUIRED cli_resaved_clean FIXTURES_SETUP cli_resaved_first)
+    set_tests_properties(cli.an_unedited_save_where_a_file_is_missing_succeeds PROPERTIES
+        FIXTURES_REQUIRED cli_resaved_first FIXTURES_SETUP cli_resaved_second
+        PASS_REGULAR_EXPRESSION "saved[\r\n]")
+    set_tests_properties(cli.a_file_missing_when_the_project_was_saved_is_still_named_on_opening
+        PROPERTIES FIXTURES_REQUIRED cli_resaved_second
+        PASS_REGULAR_EXPRESSION "not loaded: \"test_symbols\"[\r\n]")
+
+    # A rule's section and fields are in the Katana customisation format's
+    # words (feature, symbol, layer), which the replies give since the survey
+    # code file's own (map_data, vertex_symbol_data, model) left them: the four
+    # expressions below were changed word for word from the table "The words
+    # a rule is shown by" in docs/customisation.md, not from what a run printed.
+    set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION
+        "Code \"KT01\": prefix match, matched${_eol}  layer: KATANA TEST  <- rule #0 KT\\* \\(feature\\).*  symbol: cross, size 2  <- rule #2 KT\\* \\(symbol\\)${_eol}  linestyle \"0\": a plain line${_eol}  symbol \"cross\": drawn by Katana itself${_eol}  colour \"red\": #FF0000${_eol}Code \"kt01\": no rule matches it${_eol}  near miss: key \"KT\\*\" differs only in letter case")
+    # A ';' is written "\\;": bare, it splits the expression into a list and the
+    # test passes on any one part (docs/testing.md). The line is the whole of
+    # what CODE LIST prints for KT*, by hand from the three rules above: its
+    # two sections, then layer, linestyle, symbol, colour and comment.
+    set_tests_properties(cli.code_list PROPERTIES PASS_REGULAR_EXPRESSION
+        "KT\\*  \\[prefix\\; 2 rules: feature, symbol\\]  layer KATANA TEST\\; linestyle 0\\; symbol cross\\; colour red\\; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
+    # The merge's record for the file: nothing added, and 3 replaced - its
+    # keys counted once for each section it gives them rules in (KT* feature,
+    # KX* feature, KT* symbol). The first load of the line ADDED those three,
+    # so this can only be the second's. A path with a blank in it is written
+    # in quotes, hence the optional one.
+    set_tests_properties(cli.code_check_after_a_merge PROPERTIES PASS_REGULAR_EXPRESSION
+        "loaded file=[^\r\n]*cli-codes\\.customisation\\.json\"? name=cli-codes definitions_added=0 definitions_replaced=0 codes_added=0 codes_replaced=3 colours_added=0 colours_replaced=0 linework=no automation=no.*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no layer${_eol}  rule #2 KX\\* \\(feature\\): warning, no layer")
+    # Each reply begins with what its scope took: no scope word is the whole
+    # drawing, which holds the one point the test draws.
+    set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
+        "scope=drawing matched=1${_eol}1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched\\; layer 0 -> KATANA TEST\\; style cross \\(created\\)\\; 1 changed${_eol}Applied as one command.*scope=drawing matched=1${_eol}1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, layer KATANA TEST")
+    # By hand: layer a holds entity 2 alone (matched=1); KT* gives the layer
+    # KATANA TEST and the symbol cross, so the row is the one above with the
+    # layer it would leave, a; a preview ends "Preview: nothing was changed.",
+    # and the point is still on layer a in the LIST that follows.
+    set_tests_properties(cli.code_on_a_scope_previews_and_changes_nothing PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "scope=layers layers=a sublayers=yes matched=1${_eol}1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*  KT01: 1 entity, prefix, matched\\; layer a -> KATANA TEST\\; style cross \\(created\\)\\; 1 changed${_eol}Preview: nothing was changed\\.${_eol}.*2  Point  layer=a  at 2,2")
+
+    # CUSTOMISE alone says what the session holds as records, after the two
+    # count lines: its name and where it came from, then each source by the
+    # name it declares and what it brought - "is my code file loaded?" is what
+    # a count could not answer - then the switches and the linework codes by
+    # the keys CUSTOMISE SET takes. By hand: a session that started with
+    # nothing takes the first load's name; cli-codes brought 3 rules over 2
+    # keys and no definition; the switches are on and the seven spellings the
+    # defaults until a customisation says otherwise.
+    add_test(NAME cli.customise_alone_names_the_sources_loaded
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "CUSTOMISE")
+    set_tests_properties(cli.customise_alone_names_the_sources_loaded PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "3 survey code rules over 2 distinct codes${_eol}customisation name=cli-codes origin=loaded kept=no definitions=0 codes=2 rules=3 colours=0${_eol}source name=cli-codes definitions=no rules=yes${_eol}automation auto\\.codes=on auto\\.linework=on${_eol}linework linework\\.start=ST linework\\.end=END linework\\.close=CL linework\\.arcstart=BC linework\\.arcend=EC linework\\.join=JPN linework\\.rectangle=RECT")
+
+    # A survey code file of another program is not a Katana customisation
+    # file: refused in the reader's words, naming the file, with nothing
+    # loaded and the batch stopped there (so the point is never drawn). Its
+    # element names are that format's own.
+    set(_legacy "${CMAKE_CURRENT_BINARY_DIR}/cli-legacy.mapfile")
+    file(WRITE "${_legacy}" [=[<?xml version="1.0"?>
+<xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
+  <map_file>
+    <version>11.0</version>
+    <map_data>
+      <item><key>KT*</key><model>KATANA TEST</model><colour>red</colour><linestyle>0</linestyle><comment>[KT*] Katana test</comment></item>
+      <item><key>KX*</key><colour>red</colour></item>
+    </map_data>
+    <vertex_symbol_data>
+      <item><key>KT*</key><symbol_data><style>cross</style><size>2</size></symbol_data></item>
+    </vertex_symbol_data>
+  </map_file>
+</xml12d>
+]=])
+    add_test(NAME cli.a_survey_code_file_is_refused_as_not_a_katana_customisation_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE \"${_legacy}\"" -c "POINT 1,1")
+    set_tests_properties(cli.a_survey_code_file_is_refused_as_not_a_katana_customisation_file
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: ParseFailure: not a Katana customisation file; the older formats are converted with katana_customisation_convert \\(a developer's tool, not installed; see docs/customisation.md\\) \\[[^\r\n]*cli-legacy\\.mapfile"
+        FAIL_REGULAR_EXPRESSION "point created|loaded file=")
+
+    # CUSTOMISE EXPORT writes the session as ONE Katana customisation file,
+    # and a second process that loads it holds the same thing. By hand, from
+    # the three committed fixtures: 3 linestyles + 4 symbols = 7 definitions;
+    # 11 rules over 8 distinct keys, in 11 (section, key) groups; one name the
+    # rules ask for that nothing defines, as the survey fixture's own comment
+    # says. The session takes the first loaded customisation's name. The
+    # export lists its three sources, which the second session's load brings
+    # in the file's place, and says the linework codes and the switches (a
+    # whole export does; a part does not).
+    set(_exported "${CMAKE_CURRENT_BINARY_DIR}/cli-exported.customisation.json")
+    add_test(NAME cli.exported_cleanup COMMAND ${CMAKE_COMMAND} -E rm -f "${_exported}")
+    add_test(NAME cli.customise_export_writes_the_session_as_one_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "CUSTOMISE \"${_data}/test_linestyles.customisation.json\" \"${_symbols}\" \"${_data}/test_survey.customisation.json\""
+                -c "CUSTOMISE EXPORT \"${_exported}\"")
+    add_test(NAME cli.an_exported_customisation_replaces_a_second_sessions_with_the_same_counts
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE REPLACE \"${_exported}\"" -c "CUSTOMISE")
+    set_tests_properties(cli.exported_cleanup PROPERTIES FIXTURES_SETUP cli_exported_clean)
+    set_tests_properties(cli.customise_export_writes_the_session_as_one_file PROPERTIES
+        FIXTURES_REQUIRED cli_exported_clean FIXTURES_SETUP cli_exported
+        PASS_REGULAR_EXPRESSION "undefined names=1${_eol}undefined name=\"TEST Missing Symbol\"${_eol}customisation name=test_linestyles origin=loaded kept=no definitions=7 codes=8 rules=11 colours=0${_eol}exported file=[^\r\n]*cli-exported\\.customisation\\.json\"? name=test_linestyles definitions=7 codes=8 rules=11 replaced=no"
+        FAIL_REGULAR_EXPRESSION "error")
+    set_tests_properties(
+        cli.an_exported_customisation_replaces_a_second_sessions_with_the_same_counts PROPERTIES
+        FIXTURES_REQUIRED cli_exported
+        PASS_REGULAR_EXPRESSION "loaded file=[^\r\n]*cli-exported\\.customisation\\.json\"? name=test_linestyles definitions_added=7 definitions_replaced=0 codes_added=11 codes_replaced=0 colours_added=0 colours_replaced=0 linework=yes automation=yes${_eol}.*customisation name=test_linestyles origin=loaded kept=no definitions=7 codes=8 rules=11 colours=0${_eol}source name=test_linestyles definitions=yes rules=no${_eol}source name=test_symbols definitions=yes rules=no${_eol}source name=test_survey definitions=no rules=yes"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # What a session starts with, and the two variables that say so
+    # (cad/customisation_host.hpp). These tests set them on their own command
+    # lines: every other test here starts with whatever the suite gives it.
+    #
+    # KATANA_BUILTIN_CUSTOMISATION names a file that IS the built-in for the
+    # run: the session starts with it and says so, and CUSTOMISE RESET goes
+    # back to it. By hand: the survey fixture is 11 rules over 8 keys and no
+    # definition; a REPLACE of rules alone takes all 8 keys away and leaves
+    # the session its name; with no kept file the reset session is what the
+    # next start gives, so it is kept. KATANA_CUSTOMISATION is unset for the
+    # run, so that one in the caller's environment cannot start it instead.
+    add_test(NAME cli.customise_reset_gives_the_built_in_customisation_the_seam_names
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_data}/test_survey.customisation.json"
+                ${KATANA_PROGRAM_katana_cli} -c "${_replace}" -c "CUSTOMISE RESET" -c "CUSTOMISE")
+    set_tests_properties(cli.customise_reset_gives_the_built_in_customisation_the_seam_names
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "Customisation: test_survey, 0 linestyles and symbols and 11 survey code rules, built in${_eol}.*removed definitions=0 codes=8${_eol}.*customisation name=test_survey origin=loaded kept=no definitions=0 codes=2 rules=3 colours=0${_eol}reset name=test_survey definitions=0 codes=8 rules=11 kept=yes${_eol}.*customisation name=test_survey origin=builtIn kept=yes definitions=0 codes=8 rules=11 colours=0"
+        FAIL_REGULAR_EXPRESSION "error")
+    # ... and `none` says there is no built-in at all, whatever this build
+    # compiled in: the session starts with nothing, says nothing of a
+    # customisation at start-up, and has none to reset to.
+    add_test(NAME cli.a_session_told_there_is_no_built_in_customisation_starts_empty
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE" -c "CUSTOMISE RESET")
+    set_tests_properties(cli.a_session_told_there_is_no_built_in_customisation_starts_empty
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "No customisation is loaded\\.${_eol}  CUSTOMISE <file> \\[<file>\\.\\.\\.\\]  loads Katana customisation files${_eol}customisation name=\"\" origin=none kept=no definitions=0 codes=0 rules=0 colours=0${_eol}.*error: InvalidState: CUSTOMISE RESET needs a built-in customisation, and this program has none"
+        FAIL_REGULAR_EXPRESSION "Customisation: ")
+    # KATANA_CUSTOMISATION names the kept file, the only one a command line
+    # reads or writes: CUSTOMISE KEEP in one process writes the session there,
+    # and the next process starts with it in the built-in's place. By hand:
+    # the built-in is the symbol fixture, 4 definitions and no rule; with the
+    # survey fixture's 11 rules over 8 keys merged in, the session is no
+    # longer the built-in, so KEEP writes it; no file was there, so nothing
+    # was set aside. The second process says "kept", holds the same counts
+    # and both sources, and - kept from this very built-in - is told nothing
+    # of another edition.
+    set(_kept "${CMAKE_CURRENT_BINARY_DIR}/cli-kept.customisation.json")
+    add_test(NAME cli.kept_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${_kept}" "${_kept}.bak" "${_kept}.tmp")
+    add_test(NAME cli.customise_keep_writes_the_session_to_the_file_the_variable_names
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_kept}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "CUSTOMISE \"${_data}/test_survey.customisation.json\"" -c "CUSTOMISE KEEP")
+    add_test(NAME cli.the_next_session_starts_with_the_kept_customisation
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_kept}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE")
+    set_tests_properties(cli.kept_cleanup PROPERTIES FIXTURES_SETUP cli_kept_clean)
+    set_tests_properties(cli.customise_keep_writes_the_session_to_the_file_the_variable_names
+        PROPERTIES FIXTURES_REQUIRED cli_kept_clean FIXTURES_SETUP cli_kept
+        PASS_REGULAR_EXPRESSION "Customisation: test_symbols, 4 linestyles and symbols and 0 survey code rules, built in${_eol}.*kept file=[^\r\n]*cli-kept\\.customisation\\.json\"? written=yes name=test_symbols definitions=4 codes=8 rules=11 backup=none"
+        FAIL_REGULAR_EXPRESSION "error")
+    set_tests_properties(cli.the_next_session_starts_with_the_kept_customisation PROPERTIES
+        FIXTURES_REQUIRED cli_kept
+        PASS_REGULAR_EXPRESSION "Customisation: test_symbols, 4 linestyles and symbols and 11 survey code rules, kept${_eol}.*customisation name=test_symbols origin=kept kept=yes definitions=4 codes=8 rules=11 colours=0${_eol}source name=test_symbols definitions=yes rules=no${_eol}source name=test_survey definitions=no rules=yes"
+        FAIL_REGULAR_EXPRESSION "error|warning")
+    # A kept file that does not read is SAID, on stderr and before anything
+    # else, and the built-in starts in its place rather than nothing: here
+    # the kept file is the survey code file of another program from above.
+    add_test(NAME cli.a_kept_file_that_does_not_read_is_said_and_the_built_in_starts_in_its_place
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_legacy}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE")
+    set_tests_properties(
+        cli.a_kept_file_that_does_not_read_is_said_and_the_built_in_starts_in_its_place PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: the kept customisation is not read, so the built-in customisation is used: ParseFailure: not a Katana customisation file.*Customisation: test_symbols, 4 linestyles and symbols and 0 survey code rules, built in${_eol}.*customisation name=test_symbols origin=builtIn kept=yes definitions=4 codes=0 rules=0 colours=0")
+    # ... and it can be read again for as long as the session runs: CUSTOMISE
+    # JSON has what the start found, as `start`. Standard error reaches
+    # whoever started katana_cli; an agent on the other side of katana_mcp is
+    # never shown it, and read only `origin: builtIn` there. By hand: the
+    # object's keys are in alphabetical order, two blanks a level, a list's
+    # entries a line each; the built-in started and nothing kept did, so the
+    # flag is false; the one problem is the sentence the test above pins.
+    add_test(NAME cli.customise_json_says_what_went_wrong_when_the_session_started
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_symbols}" "KATANA_CUSTOMISATION=${_legacy}"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE JSON")
+    set_tests_properties(cli.customise_json_says_what_went_wrong_when_the_session_started
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"start\": {${_eol}    \"keptFromAnotherBuiltIn\": false,${_eol}    \"problems\": \\[${_eol}      \"the kept customisation is not read, so the built-in customisation is used: ParseFailure: not a Katana customisation file")
+    # The built-in LIBRARY (cad/customisation_host.hpp): the program has more
+    # than one customisation compiled in, Katana Standard the default and NSW an
+    # alternate. These tests are registered where the build compiled in both
+    # (KATANA_BUILTIN_FILES, the top CMakeLists.txt); the seam names
+    # one by NAME, as the name form of KATANA_BUILTIN_CUSTOMISATION takes it.
+    # The counts are those of each file's own census (docs/katana_standard.md
+    # for Katana Standard: 221 definitions, 632 codes, 1103 rules; the NSW
+    # file's tests/cad/customisation/test_builtin_census.cpp: 792, 632, 1,624,
+    # 7 colours); the start-up line spells a count without a separator.
+    set(_have_standard FALSE)
+    set(_have_nsw FALSE)
+    foreach(_built_in_file IN LISTS KATANA_BUILTIN_FILES)
+        if(_built_in_file MATCHES "/katana-standard\\.customisation\\.json$")
+            set(_have_standard TRUE)
+        elseif(_built_in_file MATCHES "/nsw\\.customisation\\.json$")
+            set(_have_nsw TRUE)
+        endif()
+    endforeach()
+    if(_have_standard AND _have_nsw)
+        # CUSTOMISE BUILTIN lists both, the default and the session's marked;
+        # a name makes that built-in the session (not kept: it is not what
+        # the next start gives) and RESET goes back to the run's own, which
+        # IS kept, there being no kept file.
+        add_test(NAME cli.customise_builtin_lists_the_built_ins_and_a_name_makes_one_the_session
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE BUILTIN" -c "CUSTOMISE BUILTIN nsw"
+                    -c "CUSTOMISE BUILTIN" -c "CUSTOMISE RESET")
+        set_tests_properties(
+            cli.customise_builtin_lists_the_built_ins_and_a_name_makes_one_the_session PROPERTIES
+            PASS_REGULAR_EXPRESSION "Customisation: Katana Standard, 221 linestyles and symbols and 1103 survey code rules, built in${_eol}builtins count=2 default=\"Katana Standard\" active=\"Katana Standard\"${_eol}builtin name=\"Katana Standard\" default=yes active=yes definitions=221 codes=632 rules=1103 source=katana-standard\\.customisation\\.json description=[^\r\n]*${_eol}builtin name=NSW default=no active=no definitions=792 codes=632 rules=1624 source=nsw\\.customisation\\.json description=[^\r\n]*${_eol}used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}builtins count=2 default=\"Katana Standard\" active=NSW${_eol}.*reset name=\"Katana Standard\" definitions=221 codes=632 rules=1103 kept=yes"
+            FAIL_REGULAR_EXPRESSION "error")
+        # The seam names a built-in, in any letter case: the run starts with
+        # it, it is the built-in of the run (the list marks it the default)
+        # and RESET gives it back after the other was chosen.
+        add_test(NAME cli.the_seam_names_a_compiled_in_built_in_and_the_session_starts_with_it
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "KATANA_BUILTIN_CUSTOMISATION=nsw"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE" -c "CUSTOMISE BUILTIN"
+                    -c "CUSTOMISE BUILTIN katana standard" -c "CUSTOMISE RESET")
+        set_tests_properties(
+            cli.the_seam_names_a_compiled_in_built_in_and_the_session_starts_with_it PROPERTIES
+            PASS_REGULAR_EXPRESSION "Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, built in${_eol}.*customisation name=NSW origin=builtIn kept=yes definitions=792 codes=632 rules=1624 colours=7${_eol}.*builtins count=2 default=NSW active=NSW${_eol}.*used name=\"Katana Standard\" default=no definitions=221 codes=632 rules=1103 kept=no${_eol}reset name=NSW definitions=792 codes=632 rules=1624 kept=yes"
+            FAIL_REGULAR_EXPRESSION "error")
+        # A word that names no built-in is read as a file, and the reason says
+        # what the program has, because a mistyped name is the likely cause;
+        # the run has no built-in and goes on.
+        add_test(NAME cli.a_seam_word_that_is_no_built_in_is_said_with_the_names_there_are
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "KATANA_BUILTIN_CUSTOMISATION=Nowhere"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE")
+        set_tests_properties(cli.a_seam_word_that_is_no_built_in_is_said_with_the_names_there_are
+            PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: the file KATANA_BUILTIN_CUSTOMISATION names as the built-in customisation is not read: [^\r\n]*it is no built-in customisation of this program either \\(it has \"Katana Standard\", \"NSW\"\\; a file of that name in this folder is \\./Nowhere\\).*No customisation is loaded\\.")
+        # The choice lasts only as a kept file does: the first process chooses
+        # NSW and keeps it (a built-in that is not the run's own is written,
+        # based on itself, like any session), the second starts with it, kept,
+        # and is told nothing of another built-in, the third chooses the
+        # default again and keeps that (nothing is written: the kept file is
+        # set aside) and the fourth starts with the default. Four processes,
+        # one kept file, in order.
+        set(_kept_built_in "${CMAKE_CURRENT_BINARY_DIR}/cli-built-in-kept.customisation.json")
+        add_test(NAME cli.built_in_kept_cleanup
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_kept_built_in}" "${_kept_built_in}.bak"
+                    "${_kept_built_in}.bad")
+        add_test(NAME cli.an_alternate_built_in_kept_is_what_the_next_session_starts_with
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE BUILTIN NSW" -c "CUSTOMISE KEEP")
+        add_test(NAME cli.the_session_after_a_kept_alternate_starts_with_it_and_warns_of_nothing
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE" -c "CUSTOMISE BUILTIN")
+        add_test(NAME cli.choosing_the_default_after_a_kept_alternate_sets_the_kept_file_aside
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE BUILTIN Katana Standard"
+                    -c "CUSTOMISE KEEP")
+        add_test(NAME cli.the_session_after_the_default_was_chosen_again_starts_with_the_default
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    "KATANA_CUSTOMISATION=${_kept_built_in}"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE")
+        set_tests_properties(cli.built_in_kept_cleanup PROPERTIES FIXTURES_SETUP cli_built_in_0)
+        set_tests_properties(cli.an_alternate_built_in_kept_is_what_the_next_session_starts_with
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_0 FIXTURES_SETUP cli_built_in_1
+            PASS_REGULAR_EXPRESSION "Customisation: Katana Standard, 221 linestyles and symbols and 1103 survey code rules, built in${_eol}.*used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}kept file=[^\r\n]*cli-built-in-kept\\.customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.the_session_after_a_kept_alternate_starts_with_it_and_warns_of_nothing PROPERTIES
+            FIXTURES_REQUIRED cli_built_in_1 FIXTURES_SETUP cli_built_in_2
+            PASS_REGULAR_EXPRESSION "Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, kept${_eol}.*customisation name=NSW origin=kept kept=yes definitions=792 codes=632 rules=1624 colours=7${_eol}.*builtins count=2 default=\"Katana Standard\" active=\"\" based_on=NSW${_eol}builtin name=\"Katana Standard\" default=yes active=no [^\r\n]*${_eol}builtin name=NSW default=no active=no "
+            FAIL_REGULAR_EXPRESSION "error|warning")
+        set_tests_properties(
+            cli.choosing_the_default_after_a_kept_alternate_sets_the_kept_file_aside PROPERTIES
+            FIXTURES_REQUIRED cli_built_in_2 FIXTURES_SETUP cli_built_in_3
+            PASS_REGULAR_EXPRESSION "Customisation: NSW, 792 linestyles and symbols and 1624 survey code rules, kept${_eol}.*used name=\"Katana Standard\" default=yes definitions=221 codes=632 rules=1103 kept=no${_eol}kept file=[^\r\n]*cli-built-in-kept\\.customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*cli-built-in-kept\\.customisation\\.json\\.bak"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.the_session_after_the_default_was_chosen_again_starts_with_the_default PROPERTIES
+            FIXTURES_REQUIRED cli_built_in_3
+            PASS_REGULAR_EXPRESSION "Customisation: Katana Standard, 221 linestyles and symbols and 1103 survey code rules, built in${_eol}.*customisation name=\"Katana Standard\" origin=builtIn kept=yes definitions=221 codes=632 rules=1103 colours=28"
+            FAIL_REGULAR_EXPRESSION "error|warning|, kept")
+        # A project saved while an alternate was the session records it by name,
+        # and opened where the default is the session it is "not loaded" - a name
+        # no CUSTOMISE <file> can load. The warning says that the name is a
+        # built-in of this program and what makes it the session, and that verb
+        # does: nothing is missing after it. Three processes, one project, in
+        # order (the seam names the default, no kept file is read).
+        set(_built_in_project "${CMAKE_CURRENT_BINARY_DIR}/cli-built-in-project.katana")
+        add_test(NAME cli.built_in_project_cleanup
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_project}")
+        add_test(NAME cli.a_project_saved_with_an_alternate_built_in_records_its_name
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE BUILTIN NSW" -c "LINE 0,0 10,0"
+                    -c "SAVE \"${_built_in_project}\"")
+        add_test(NAME cli.opening_it_under_the_default_names_the_built_in_and_the_verb_that_loads_it
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_built_in_project}\"")
+        add_test(NAME cli.the_verb_the_warning_names_loads_the_built_in_the_project_was_drawn_with
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_built_in_project}\""
+                    -c "CUSTOMISE BUILTIN NSW" -c "CUSTOMISE")
+        set_tests_properties(cli.built_in_project_cleanup PROPERTIES
+            FIXTURES_SETUP cli_built_in_project_0)
+        set_tests_properties(cli.a_project_saved_with_an_alternate_built_in_records_its_name
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_project_0
+            FIXTURES_SETUP cli_built_in_project_1
+            PASS_REGULAR_EXPRESSION "used name=NSW .*saved to [^\r\n]*cli-built-in-project\\.katana"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.opening_it_under_the_default_names_the_built_in_and_the_verb_that_loads_it
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_project_1
+            PASS_REGULAR_EXPRESSION "opened .*warning: this project was drawn with customisations that are not loaded: \"NSW\"\\; CUSTOMISE BUILTIN NSW makes the built-in \"NSW\" the session${_eol}"
+            FAIL_REGULAR_EXPRESSION "error")
+        set_tests_properties(
+            cli.the_verb_the_warning_names_loads_the_built_in_the_project_was_drawn_with
+            PROPERTIES FIXTURES_REQUIRED cli_built_in_project_1
+            PASS_REGULAR_EXPRESSION "used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}.*customisation name=NSW origin=builtIn kept=no definitions=792 codes=632 rules=1624 colours=7${_eol}source name=NSW "
+            FAIL_REGULAR_EXPRESSION "error|missing name=")
+    endif()
+    # INFO with an entity's id describes the entity, as the interpreter's
+    # INFO does, in a build with the GIS module too: there every INFO was
+    # once read as INFO <file>. A 10 x 5 rectangle: perimeter 30, area 50.
+    add_test(NAME cli.info_with_an_id_describes_the_entity
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "RECT 0,0 10,5" -c "INFO 1")
+    set_tests_properties(cli.info_with_an_id_describes_the_entity PROPERTIES
+        PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
+        FAIL_REGULAR_EXPRESSION "error")
+    # INFO #1 is the entity whatever files the working directory holds: run
+    # beside files called 1 and #1 (a mistyped shell 2>1 makes the first), it
+    # was once read as INFO <file> - "no importer reads files named ''" -
+    # and so were katana_mcp's katana_describe_entity and the window's Entity
+    # Information, which send it. INFO 1 there is the file, as it was.
+    set(_info_dir "${CMAKE_CURRENT_BINARY_DIR}/cli_info_beside_files")
+    file(WRITE "${_info_dir}/1" "")
+    file(WRITE "${_info_dir}/#1" "")
+    add_test(NAME cli.info_hash_id_is_the_entity_beside_a_file_of_that_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "RECT 0,0 10,5" -c "INFO #1"
+        WORKING_DIRECTORY "${_info_dir}")
+    set_tests_properties(cli.info_hash_id_is_the_entity_beside_a_file_of_that_name PROPERTIES
+        PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A line whose first non-blank is '#' is a note, indented or not, in a
+    # file with Windows line ends - the rule File > Run Script keeps. An
+    # indented note was once a command here, and stopped the script the
+    # window ran through.
+    set(_notes "${CMAKE_CURRENT_BINARY_DIR}/cli_scripts/indented notes.kcs")
+    file(WRITE "${_notes}"
+        "# a note\r\nRECT 0,0 10,5\r\n\r\n  # an indented note\r\n\t# and a tabbed one\r\nCIRCLE 5,5 1\r\nLIST\r\n")
+    add_test(NAME cli.an_indented_note_in_a_script_runs_nothing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} "${_notes}")
+    set_tests_properties(cli.an_indented_note_in_a_script_runs_nothing PROPERTIES
+        PASS_REGULAR_EXPRESSION "rectangle created${_eol}circle created${_eol}2 entities"
+        FAIL_REGULAR_EXPRESSION "error")
+    # The window's own verbs are refused by name, saying where they run,
+    # rather than as unknown commands: a script written for File > Run Script
+    # that plots fails here saying so. Each stops the batch (exit 1). GRID and
+    # EXAGGERATION were unknown commands here until 2026-09-30; VIEWS and ZOOM
+    # the interpreter refuses itself, having no window to act on
+    # (cad/view_verbs.hpp).
+    foreach(_verb IN ITEMS "PLOT a.pdf" "PLOTSHEETS" "SNAPSHOT a.png" "ONLINE PROVIDERS"
+                           "SCRIPT a.kcs" "GRID ON" "EXAGGERATION 2" "VIEWS LINK 1,2"
+                           "ZOOM IN")
+        string(REGEX REPLACE " .*" "" _name "${_verb}")
+        string(TOLOWER "${_name}" _name)
+        add_test(NAME cli.the_windows_${_name}_verb_is_refused_saying_where_it_runs
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    ${KATANA_PROGRAM_katana_cli} -c "${_verb}" -c "POINT 1,1")
+        set_tests_properties(cli.the_windows_${_name}_verb_is_refused_saying_where_it_runs
+            PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: Unsupported: [A-Z]+ is the desktop window's"
+            FAIL_REGULAR_EXPRESSION "unknown command|point created")
+    endforeach()
+    # And the refusal fails the batch, as any refused line does.
+    add_test(NAME cli.a_window_verb_in_a_batch_fails_it
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLOT a.pdf")
+    set_tests_properties(cli.a_window_verb_in_a_batch_fails_it PROPERTIES WILL_FAIL TRUE)
+
+    add_test(NAME cli.paper_style_scale_lists_no_invented_views_in_a_new_session
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "VIEWS SCALE LIST")
+    set_tests_properties(cli.paper_style_scale_lists_no_invented_views_in_a_new_session PROPERTIES
+        PASS_REGULAR_EXPRESSION "views=0" FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.paper_style_scale_refuses_an_unsaved_view_by_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "VIEWS SCALE 1 500" -c "POINT 1,1")
+    set_tests_properties(cli.paper_style_scale_refuses_an_unsaved_view_by_name PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: NotFound: no saved plan view 1"
+        FAIL_REGULAR_EXPRESSION "unknown command|point created")
+
+    # STATUS and STATUS JSON: the record katana_mcp's katana_status gives,
+    # here as a verb (cad/document_status.hpp). One rectangle, selected, one
+    # undo step.
+    add_test(NAME cli.status_reports_the_drawing_in_text_and_json
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "RECT 0,0 10,5" -c "SELECT ALL" -c STATUS
+                -c "STATUS JSON")
+    set_tests_properties(cli.status_reports_the_drawing_in_text_and_json PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "Entities: 1  Layers: 1  Alignments: 0${_eol}Current layer: 0${_eol}Selected: 1  Undo steps: 1  Redo steps: 0${_eol}.*  \"entities\": 1,${_eol}.*  \"selected\": 1,${_eol}.*  \"undoSteps\": 1${_eol}}"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # An alignment's PIs read back exactly, rewritten as one line, and its
+    # setting-out table a record a station with the key stations named - what
+    # Terrain > Alignment Manager runs and shows (docs/cad.md). R = 50 round
+    # the right angle at (100,0) puts the TC at chainage 50 and the CT at
+    # 50 + 25 pi = 128.540.
+    add_test(NAME cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "ALIGN NEW road 0,0 100,0 100,100"
+                -c "ALIGN PIS road 0,0 100,0,50 100,100" -c "ALIGN PIS road"
+                -c "ALIGN STATIONS road 1000")
+    # PARCEL as Survey > Parcel Report runs it: the report the dialog shows,
+    # and LABEL naming the layer the labels went on (4 courses and the area).
+    add_test(NAME cli.parcel_reports_and_labels_naming_the_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLINE 0,0 100,0 100,50 0,50 CLOSE" -c "PARCEL 1"
+                -c "PARCEL 1 LABEL 2")
+    set_tests_properties(cli.parcel_reports_and_labels_naming_the_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m.*5 labels created on layer 0, the current layer"
+        FAIL_REGULAR_EXPRESSION "error")
+    # HATCH SET and STYLE NEW with a field, as the Hatch Patterns tab runs
+    # them: the pattern edited to a crosshatch, a style made hatching with it.
+    add_test(NAME cli.hatch_set_edits_a_pattern_and_a_style_is_made_with_it
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "HATCH NEW brick 45 0.25"
+                -c "HATCH SET brick 45 0.5 135 0.5" -c "STYLE NEW paving HATCH brick"
+                -c "HATCH LIST" -c "STYLE LIST")
+    set_tests_properties(cli.hatch_set_edits_a_pattern_and_a_style_is_made_with_it PROPERTIES
+        PASS_REGULAR_EXPRESSION "hatch pattern brick updated [(]2 families[)].*style paving created.*brick  [[]45 deg @ 0[.]5[]]  [[]135 deg @ 0[.]5[]].*paving  [^\n]*hatch=brick"
+        FAIL_REGULAR_EXPRESSION "error")
+    set_tests_properties(cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "pi index=1 x=100 y=0 radius=50 spiral_in=0 spiral_out=0.*station=50[.]000 x=50[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^ ]+ radius=50[.]000 turn=left key=TC.*station=128[.]540 x=100[.]000 y=50[.]000 direction=90[.]000 [^ ]+ radius=straight key=CT.*key=end"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # The help says what STYLE's linetype takes and what CUSTOMISE loads - a
+    # Katana customisation file - and names no product and no other program's
+    # file: a survey code file (.mapfile) and a style library (.4d) no longer
+    # load, so no help text may send a person to one. The Customise block is
+    # the interpreter's; the session had one of its own, which named both.
+    add_test(NAME cli.the_help_says_customise_loads_katana_customisation_files
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} --help)
+    set_tests_properties(cli.the_help_says_customise_loads_katana_customisation_files PROPERTIES
+        PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*Customise CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\] +load Katana customisation files, merged"
+        FAIL_REGULAR_EXPRESSION "1[2]d (customisation|linestyle|symbol|mapfile|librar)|[.]4d|[.]mapfile|MAPFILE")
+
+    # LIST takes no words: LIST LAYER x once listed the whole drawing, as
+    # though it had filtered it. Refused with its usage; LIST alone lists.
+    add_test(NAME cli.list_refuses_words_it_does_not_take
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LINE 0,0 10,0" -c "LIST" -c "LIST LAYER 0")
+    set_tests_properties(cli.list_refuses_words_it_does_not_take PROPERTIES
+        PASS_REGULAR_EXPRESSION "1 entities.*error: InvalidArgument: usage: LIST [(]every entity; INFO id describes one[)]")
+
+    # HELP typed as a line is the session's whole help, as --help and
+    # katana_help are: IFC and the window-only verbs are the session's, not
+    # the interpreter's, and were missing from it. ? is HELP's alias.
+    add_test(NAME cli.help_typed_as_a_line_is_the_whole_session_help
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "HELP" -c "?")
+    set_tests_properties(cli.help_typed_as_a_line_is_the_whole_session_help PROPERTIES
+        PASS_REGULAR_EXPRESSION "Customise CUSTOMISE \\[REPLACE\\].*IFC       IMPORT <file\\.ifc>.*Window    PLOT, PLOTSHEETS.*Customise CUSTOMISE \\[REPLACE\\].*IFC       IMPORT <file\\.ifc>.*Window    PLOT, PLOTSHEETS"
+        FAIL_REGULAR_EXPRESSION "error: ")
+endif()
+
+# The sheet verbs with no window (docs/plotting.md, "Sheets on the command
+# line"): a drawing laid out on a sheet, renamed, the title block filled and
+# the set listed, one fact per line; a refused verb stops the script.
+if(KATANA_TEST_CLI)
+    add_test(NAME cli.sheet_verbs_lay_out_edit_and_list_the_sheets
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LINE 0,0 300,100" -c "GENERATE fit"
+                -c "SHEET RENAME 1 SITE PLAN" -c "TITLEBLOCK organisation \"Example Surveys\""
+                -c "SHEETS")
+    add_test(NAME cli.a_refused_sheet_verb_stops_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SHEET NEW PLAN" -c "SHEET REMOVE 2"
+                -c "SHEET NEW NEVER REACHED")
+    set(_eol "[\r\n]+")
+    set_tests_properties(cli.sheet_verbs_lay_out_edit_and_list_the_sheets PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "generated 1 sheet: 1.*renamed sheet 1 id=s1 name=\"SITE PLAN\".*organisation=\"Example Surveys\"${_eol}1 sheet${_eol}sheet 1 id=s1 name=\"SITE PLAN\" paper=A3 orientation=landscape frame=a3_landscape legendblock=on views=1${_eol}  view id=vp1 kind=plan scale=1000 rect=")
+    set_tests_properties(cli.a_refused_sheet_verb_stops_the_script PROPERTIES
+        PASS_REGULAR_EXPRESSION "no sheet 2: the set has 1 sheet"
+        FAIL_REGULAR_EXPRESSION "NEVER REACHED")
+    # A pass expression makes ctest ignore the exit code, so the exit code of
+    # the same refusal is a test of its own: the script must fail.
+    add_test(NAME cli.a_refused_sheet_verb_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
+    set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+    # GENERATE grid leaves out a tile with nothing drawn in it (docs/plotting.md,
+    # "The generators"): two short lines 800 m apart are 800 x 100 m, at 1:500
+    # five tiles of 192.5 x 125 m from x -81.25 (400 - 5 x 192.5 / 2). The
+    # lines are in the first (to x 111.25) and the last (from x 688.75), so
+    # the key plan and two tiles are laid out and three tiles left out.
+    add_test(NAME cli.generate_grid_leaves_out_tiles_with_nothing_drawn_in_them
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LINE 0,0 10,10" -c "LINE 790,90 800,100"
+                -c "GENERATE grid scale=500")
+    set_tests_properties(cli.generate_grid_leaves_out_tiles_with_nothing_drawn_in_them PROPERTIES
+        PASS_REGULAR_EXPRESSION "generated 3 sheets: 1 to 3.*skipped 3 of 5 tiles, with nothing drawn in them"
+        FAIL_REGULAR_EXPRESSION "error")
+    # GENERATE fit rotate=on, what the Sheets editor's "Rotate the drawing to
+    # fill the sheet" writes: a 450 x 20 m strip along 45 degrees (its
+    # corners by hand, to a millimetre) is 1:2000 square and 1:1250 turned
+    # 3.62 degrees (docs/plotting.md, "In the editor").
+    add_test(NAME cli.generate_fit_rotate_turns_the_plan_to_fill_the_sheet
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LINE -152.028,-166.170 166.170,152.028"
+                -c "LINE 166.170,152.028 152.028,166.170" -c "LINE 152.028,166.170 -166.170,-152.028"
+                -c "LINE -166.170,-152.028 -152.028,-166.170" -c "GENERATE fit rotate=on legend=off"
+                -c "VIEW LIST")
+    set_tests_properties(cli.generate_fit_rotate_turns_the_plan_to_fill_the_sheet PROPERTIES
+        PASS_REGULAR_EXPRESSION "generated 1 sheet: 1.*view id=vp1 kind=plan rect=[^\r\n]* scale=1250 centre=[^\r\n]* rotation=3\\.6[12]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # SHEETS APPEND, what the Sheets editor's Sheet Set > Append Sheets From
+    # File runs: a set saved, the sheet renamed, and the saved set appended
+    # after it, renumbered s2 (docs/plotting.md, "The Sheet Set menu and Page
+    # Setup").
+    set(_append_file "${CMAKE_CURRENT_BINARY_DIR}/cli append set.json")
+    add_test(NAME cli.sheets_append_puts_another_sets_sheets_after_these
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SHEET NEW NORTH" -c "SHEETS SAVE \"${_append_file}\""
+                -c "SHEET RENAME 1 COVER" -c "SHEETS APPEND \"${_append_file}\"" -c "SHEETS")
+    set_tests_properties(cli.sheets_append_puts_another_sets_sheets_after_these PROPERTIES
+        PASS_REGULAR_EXPRESSION "appended 1 sheet from \"[^\"]*cli append set\\.json\": 2.*2 sheets${_eol}sheet 1 id=s1 name=\"COVER\"[^\r\n]*${_eol}sheet 2 id=s2 name=\"NORTH\""
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# The annotation styles with no window (docs/annotation.md): the lines the
+# window's style managers send, typed. A SET of three fields undone by ONE
+# UNDO: INFO reads the defaults back (tables.hpp: DIMTXT 2.5, closed filled
+# arrows, model units).
+if(KATANA_TEST_CLI)
+    add_test(NAME cli.a_dimension_style_set_of_several_fields_is_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "DIMSTYLE NEW site"
+                -c "DIMSTYLE SET site TEXT 3.5 HEAD Tick PAPER on" -c "DIMSTYLE INFO site"
+                -c "UNDO" -c "DIMSTYLE INFO site")
+    set_tests_properties(cli.a_dimension_style_set_of_several_fields_is_one_undo_step PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "name=site text=3\\.5 [^\r\n]*head=Tick [^\r\n]*paper=on layers=0 reads=10\\.000[\r\n]+.*name=site text=2\\.5 [^\r\n]*head=ClosedFilled [^\r\n]*paper=off layers=0"
+        FAIL_REGULAR_EXPRESSION "error")
+    # The line Annotate > Edit Text sends, typed: the words over two lines, a
+    # style and a justification in ONE TEXTEDIT, which one UNDO takes back.
+    # Notes is 3.5 mm on paper, 3.5 m at the default 1:1000.
+    add_test(NAME cli.textedit_changes_several_keys_of_a_text_in_one_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "TEXTSTYLE NEW Notes paper=3.5"
+                -c "TEXT 10,20 2.5 old"
+                -c "TEXTEDIT 1 text=\"PIT 12\\nIL 10.50\" style=Notes justify=MC"
+                -c "INFO 1" -c "UNDO" -c "INFO 1")
+    set_tests_properties(cli.textedit_changes_several_keys_of_a_text_in_one_step PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "1  Text  layer=0  \"PIT 12.nIL 10\\.50\"  height=3\\.5  style=Notes  justify=MC.*1  Text  layer=0  \"old\"  height=2\\.5[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # The rules tab's lines, typed: a rule added switched off with its type
+    # labels nothing even named (auto_label.cpp, ruleMatches); switched on,
+    # it is previewed and run by name while another rule waits. One label a
+    # target: the rectangle once for its area (auto_label.hpp).
+    add_test(NAME cli.chosen_label_rules_are_previewed_and_run_by_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LABELSTYLE DEFAULTS" -c "RECT 0,0 20,20"
+                -c "AUTOLABEL RULE ADD lots style=\"Lot Area\" type=Polyline enabled=off"
+                -c "AUTOLABEL RULE ADD sides style=\"Bearing Distance\""
+                -c "AUTOLABEL PREVIEW lots" -c "AUTOLABEL RULE SET lots enabled=on"
+                -c "AUTOLABEL PREVIEW lots" -c "AUTOLABEL RUN lots" -c "AUTOLABEL RULE LIST")
+    set_tests_properties(cli.chosen_label_rules_are_previewed_and_run_by_name PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "preview created=0 kept=0 removed=0 skipped=0[\r\n]+.*preview created=1 kept=0 removed=0 skipped=0[\r\n]+rule=lots labels=1[\r\n]+autolabel created=1 kept=0 removed=0 skipped=0[\r\n]+rule=lots labels=1[\r\n]+.*name=lots style=\"Lot Area\" layer=\"\" code=\"\" type=Polyline labellayer=\"\" enabled=on"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# Smart leaders with no window (docs/annotation.md, "Smart leaders"): a
+# leader reading a point's attribute is saved; a second process opens it,
+# changes the attribute and lists the leader, whose note is read afresh off
+# the point (9.5 to two places is "9.50"). An exact place along - the end of
+# a square's closing side, 4 x 100 = 400 along - and balloons numbered again
+# from 10 across the sheet. A leader that would say nothing stops the script
+# and fails it.
+if(KATANA_TEST_CLI)
+    set(_leaders "${CMAKE_CURRENT_BINARY_DIR}/cli-leaders.katana")
+    add_test(NAME cli.leaders_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_leaders}")
+    add_test(NAME cli.a_smart_leader_is_saved_with_the_point_it_reads
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 0,0" -c "SELECT 1" -c "PROP SET invert 10.25"
+                -c "LEADER #1 5,5 template=\"IL {prop.invert:.2f}\"" -c "SAVE \"${_leaders}\"")
+    add_test(NAME cli.a_reopened_smart_leader_reads_its_note_off_the_point_afresh
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "OPEN \"${_leaders}\"" -c "SELECT 1"
+                -c "PROP SET invert 9.5" -c "LEADER LIST")
+    add_test(NAME cli.a_leader_is_put_exactly_along_and_balloons_are_numbered_again
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "PLINE 0,0 100,0 100,100 0,100 C"
+                -c "LEADER #1.along3:1 -20,-20 template=\"CH {chainage:.0f}\""
+                -c "BALLOON 30,0 35,5" -c "BALLOON 10,20 15,25"
+                -c "BALLOON RENUMBER start=10 order=x")
+    add_test(NAME cli.a_leader_that_would_say_nothing_stops_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 0,0"
+                -c "LEADER #1 5,5 template=\"IL {prop.invert:.2f}\""
+                -c "LEADER 0,0 1,1 text=NEVER_REACHED")
+    add_test(NAME cli.a_leader_that_would_say_nothing_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 0,0"
+                -c "LEADER #1 5,5 template=\"IL {prop.invert:.2f}\"")
+    set_tests_properties(cli.leaders_cleanup PROPERTIES FIXTURES_SETUP cli_leaders)
+    set_tests_properties(cli.a_smart_leader_is_saved_with_the_point_it_reads PROPERTIES
+        FIXTURES_REQUIRED cli_leaders FIXTURES_SETUP cli_leaders_saved
+        PASS_REGULAR_EXPRESSION "created leader id=2 text=\"IL 10.25\" associative=yes target=1")
+    set_tests_properties(cli.a_reopened_smart_leader_reads_its_note_off_the_point_afresh PROPERTIES
+        FIXTURES_REQUIRED cli_leaders_saved
+        PASS_REGULAR_EXPRESSION "id=2 .*target=1 anchor=position smart=yes .*text=\"IL 9.50\"")
+    set_tests_properties(cli.a_leader_is_put_exactly_along_and_balloons_are_numbered_again PROPERTIES
+        PASS_REGULAR_EXPRESSION "created leader id=2 text=\"CH 400\" associative=yes target=1 anchor=\"along 3 1\".*balloons=2 renumbered=2")
+    set_tests_properties(cli.a_leader_that_would_say_nothing_stops_the_script PROPERTIES
+        PASS_REGULAR_EXPRESSION "would say nothing"
+        FAIL_REGULAR_EXPRESSION "NEVER_REACHED")
+    set_tests_properties(cli.a_leader_that_would_say_nothing_fails_the_script PROPERTIES
+        WILL_FAIL TRUE)
+
+    # The leader verbs over the shared scope and filter (docs/annotation.md,
+    # "Scope and filter"): two leaders on layer notes and one on layer 0. By
+    # hand, LAYERS notes takes two (matched=2) and ALIGN puts their notes at
+    # x = 70; a scope that takes nothing (a layer filter nothing passes) is
+    # said, matched=0, and the script goes on.
+    add_test(NAME cli.leaders_take_a_scope_and_say_how_many_they_took
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "LAYER NEW notes" -c "LAYER SET notes"
+                -c "LEADER 0,0 5,5 text=A" -c "LEADER 50,50 55,55 text=B"
+                -c "LAYER SET 0" -c "LEADER 100,100 110,110 text=C"
+                -c "LEADER LIST LAYERS notes" -c "LEADER ALIGN LAYERS notes x=70"
+                -c "LEADER FREEZE DRAWING WHERE LAYER=nowhere")
+    set_tests_properties(cli.leaders_take_a_scope_and_say_how_many_they_took PROPERTIES
+        PASS_REGULAR_EXPRESSION "scope=layers layers=notes sublayers=yes matched=2.*aligned leaders=2 x=70.*scope=drawing where=.LAYER=nowhere. matched=0.*frozen leaders=0"
+        FAIL_REGULAR_EXPRESSION "error")
+    # Ids and a scope together are refused by name, and the script stops.
+    add_test(NAME cli.leaders_named_by_id_and_by_scope_are_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "LEADER 0,0 5,5 text=A" -c "LEADER FREEZE 1 DRAWING"
+                -c "LEADER 9,9 9,9 text=NEVER_REACHED")
+    set_tests_properties(cli.leaders_named_by_id_and_by_scope_are_refused PROPERTIES
+        PASS_REGULAR_EXPRESSION "by id or by a scope"
+        FAIL_REGULAR_EXPRESSION "NEVER_REACHED")
+    # Balloons numbered again by scope: the layer notes' two become 10 and 11,
+    # the one on layer 0 keeps its 1.
+    add_test(NAME cli.balloons_of_one_layer_are_numbered_again_by_scope
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "LAYER NEW notes" -c "BALLOON 0,0 5,5" -c "LAYER SET notes"
+                -c "BALLOON 10,0 15,5" -c "BALLOON 20,0 25,5"
+                -c "BALLOON RENUMBER LAYERS notes start=10" -c "LEADER LIST")
+    set_tests_properties(cli.balloons_of_one_layer_are_numbered_again_by_scope PROPERTIES
+        PASS_REGULAR_EXPRESSION "scope=layers layers=notes sublayers=yes matched=2[\r\n]+balloons=2 renumbered=2.*text=1[\r\n]+.*text=10[\r\n]+.*text=11"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# UTILITY on the sample investigation (samples/utilities, worked by hand in
+# docs/subsurface_utilities.md). E1-3 is a radar pick at 350 mm claimed as
+# QL-B: the report must say so. The pothole W1-X1 checks the detection W1-3:
+# hypot(0.080, 0.060) = 0.100 in plan; top 19.155 against the detection's
+# centre 19.180 + 0.075 = 19.255, so -0.100. The stormwater design crosses
+# W1's W1-2 -> W1-3, a QL-B stretch, clear by 0.372 m vertically at the
+# drawn levels but not across QL-B's 500 mm - within tolerance, not clear.
+if(KATANA_TEST_CLI)
+    set(_utilities "${PROJECT_SOURCE_DIR}/samples/utilities")
+    add_test(NAME cli.utility_report_grades_the_sample_and_names_the_over_claim
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVER 0.6")
+    add_test(NAME cli.utility_verify_compares_the_pothole_with_its_detection
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY VERIFY \"${_utilities}/schedule.csv\"")
+    add_test(NAME cli.utility_clearance_shows_the_crossing_within_tolerance
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY CLEARANCE \"${_utilities}/schedule.csv\" \"${_utilities}/design.csv\" WIDTH 0.375")
+    add_test(NAME cli.utility_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVR 0.6")
+    set_tests_properties(cli.utility_report_grades_the_sample_and_names_the_over_claim PROPERTIES
+        PASS_REGULAR_EXPRESSION "4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    set_tests_properties(cli.utility_verify_compares_the_pothole_with_its_detection PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 +W1-3 +W1-X1 +0\\.100 +ok +-0\\.100 +ok")
+    set_tests_properties(cli.utility_clearance_shows_the_crossing_within_tolerance PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 W1-2 -> W1-3 +QL-B +within tolerance +-0\\.263 +0\\.300 +0\\.372")
+    set_tests_properties(cli.utility_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY DRAW on the same sample: W1 is three runs (QL-B, the QL-A
+    # trench between the potholes, the QL-C stretch past the detected
+    # spacing), E1 two, T1 and G1 one each, and a point per vertex - 21
+    # entities on 11 layers, the first record carrying the bounds a window
+    # frames.
+    add_test(NAME cli.utility_draw_adds_the_graded_sample_to_the_drawing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\"" -c "LAYER LIST")
+    set_tests_properties(cli.utility_draw_adds_the_graded_sample_to_the_drawing PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*utilities/water/QL-A  #2F80ED  \\(1 entities\\)${_eol}  utilities/water/QL-B  #2F80ED  \\(1 entities\\)${_eol}  utilities/water/QL-C  #2F80ED  \\(1 entities\\)${_eol}  utilities/water/points  #2F80ED  \\(6 entities\\)")
+
+    # A service of one located vertex cannot be graded, and refuses the whole
+    # draw by its id: nothing is drawn and the script stops, failing.
+    set(_one_vertex "${CMAKE_CURRENT_BINARY_DIR}/cli utility one vertex.csv")
+    file(WRITE "${_one_vertex}"
+        "line,point,easting,northing,method,h_unc,type\n"
+        "W1,W1-1,0,0,EML,0.1,water\n"
+        "W1,W1-2,10,0,EML,0.1,\n"
+        "W9,W9-1,5,5,EML,0.1,water\n")
+    add_test(NAME cli.utility_draw_refuses_a_line_it_cannot_grade
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "UTILITY DRAW \"${_one_vertex}\"" -c "LAYER LIST")
+    set_tests_properties(cli.utility_draw_refuses_a_line_it_cannot_grade PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "line W9 cannot be graded: a utility line needs at least two vertices; nothing was drawn"
+        FAIL_REGULAR_EXPRESSION "utilities drawn|utilities/water")
+    add_test(NAME cli.utility_a_refused_draw_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "UTILITY DRAW \"${_one_vertex}\"")
+    set_tests_properties(cli.utility_a_refused_draw_fails_the_script PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY CHECK against a schema written by hand, as any client's can be
+    # (delivery_schema.hpp): the sample gives each service's material once,
+    # so the rows after the first are empty - 11 errors. The whole check is
+    # shown, and the script fails, so a delivery can be gated on it. The
+    # refusal's one line goes to stderr and the check to stdout, which ctest
+    # merges in no fixed order, so the check is matched on its own; which
+    # stream takes what is pinned in tests/app/test_session.cpp, by
+    # Session.ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes.
+    set(_example_schema "${CMAKE_CURRENT_BINARY_DIR}/cli-utility-schema.csv")
+    file(WRITE "${_example_schema}"
+        "kind,attribute,value,detail,label\n"
+        "schema,Example Services Schema,1,,\n"
+        "identifier,line,,,\n"
+        "field,line,Alphanumerical,Yes,Line\n"
+        "field,material,Free Text,Yes,Material\n")
+    add_test(NAME cli.utility_check_with_errors_shows_the_whole_check
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY CHECK \"${_utilities}/schedule.csv\" SCHEMA \"${_example_schema}\"")
+    set_tests_properties(cli.utility_check_with_errors_shows_the_whole_check PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "Delivery schema check against Example Services Schema v1${_eol}14 rows, 4 assets \\(line\\): 11 errors, 0 warnings.*material is empty \\(11 rows")
+    add_test(NAME cli.utility_check_with_errors_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY CHECK \"${_utilities}/schedule.csv\" SCHEMA \"${_example_schema}\"")
+    set_tests_properties(cli.utility_check_with_errors_fails_the_script PROPERTIES WILL_FAIL TRUE)
+
+    # The same verbs on what is drawn (docs/subsurface_utilities.md, "Drawing
+    # data"), by the scope words MODIFY takes. The sample drawn and reported
+    # from the drawing is the sample's report, after the record of what the
+    # scope took: its 7 runs and 14 points, 4 lines, all of each.
+    add_test(NAME cli.utility_report_of_the_drawing_is_the_report_of_the_schedule_drawn
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY REPORT DRAWING MINCOVER 0.6")
+    set_tests_properties(cli.utility_report_of_the_drawing_is_the_report_of_the_schedule_drawn
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "scope=drawing matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    # Written back as a schedule, which reads again as the sample does.
+    set(_scheduled "${CMAKE_CURRENT_BINARY_DIR}/cli utility scheduled.csv")
+    add_test(NAME cli.utility_schedule_writes_the_drawing_back_as_a_schedule_that_reads_again
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY SCHEDULE \"${_scheduled}\" DRAWING"
+                -c "UTILITY REPORT \"${_scheduled}\" MINCOVER 0.6")
+    set_tests_properties(cli.utility_schedule_writes_the_drawing_back_as_a_schedule_that_reads_again
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "utilities scheduled path=\"[^\"]*cli utility scheduled\\.csv\" lines=4 vertices=14${_eol}scope=drawing matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    # REGRADE at a 20 m detected spacing: W1's 12.5 m past the pothole is
+    # traced now, QL-B, as DRAW at that spacing draws it; the other three
+    # services grade as they did, but every point in scope takes the 20 m
+    # it was graded with (utility.spacing), so all four lines change. A
+    # regrade then told nothing grades each line at the 20 m it now carries,
+    # not the default 10 m: nothing changes.
+    add_test(NAME cli.utility_regrade_grades_what_is_drawn_again
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY REGRADE LAYERS utilities SPACING 20"
+                -c "UTILITY REGRADE LAYERS utilities")
+    set_tests_properties(cli.utility_regrade_grades_what_is_drawn_again PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "utilities regraded changed=4 lines=4 vertices=14 segments=10 entities=21 layers=10 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}scope=layers layers=utilities sublayers=yes matched=21 lines=4 completed=0 ignored=0${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000.*utilities regraded changed=0 lines=4 .*line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000")
+    # VIEW is the window's plan view: headless it is refused, naming the
+    # window typed in, which takes the gas main's run and two points.
+    add_test(NAME cli.utility_view_is_refused_headless_naming_area
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\"" -c "UTILITY REPORT VIEW")
+    set_tests_properties(cli.utility_view_is_refused_headless_naming_area PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "VIEW is the window's plan view, and there is none here; give the window instead: AREA x0,y0,x1,y1")
+    add_test(NAME cli.utility_area_takes_what_lies_in_the_window
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY VERIFY AREA 333990,6250006.5,334050,6250008")
+    set_tests_properties(cli.utility_area_takes_what_lies_in_the_window PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "scope=area area=333990,6250006\\.5,334050,6250008 matched=3 lines=1 completed=0 ignored=0")
+
+    # UTILITY CHECK against the real TfNSW Utility Schema, when this checkout
+    # has the owner's copy (it is theirs to keep, not the repository's - see
+    # .gitignore). tools/utility_schema_domains.py makes the schema file, then
+    # the TfNSW-shaped sample is checked; its comments list the mistakes left
+    # in it on purpose, and each must be found. PASS_REGULAR_EXPRESSION
+    # ignores the exit status, which is 1 because there are errors.
+    set(_tfnsw_workbook
+        "${PROJECT_SOURCE_DIR}/docs/TfNSW Reference Files/Utility-Schema-and-Specification-v1.2.xlsx")
+    if(EXISTS "${_tfnsw_workbook}" AND Python3_Interpreter_FOUND)
+        set(_tfnsw_schema "${CMAKE_CURRENT_BINARY_DIR}/tfnsw-utility-schema.csv")
+        add_test(NAME cli.utility_check_schema_from_the_workbook
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/utility_schema_domains.py"
+                    "${_tfnsw_workbook}" "${_tfnsw_schema}")
+        add_test(NAME cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    ${KATANA_PROGRAM_katana_cli}
+                    -c "UTILITY CHECK \"${_utilities}/schedule_tfnsw.csv\" SCHEMA \"${_tfnsw_schema}\"")
+        set_tests_properties(cli.utility_check_schema_from_the_workbook PROPERTIES
+            FIXTURES_SETUP cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "43 fields, 25 domains, 1084 values \\(schema version 1\\.2\\)")
+        set_tests_properties(cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong PROPERTIES
+            FIXTURES_REQUIRED cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "7 rows, 3 assets \\(AssetIdentifier\\): 7 errors, 2 warnings.*TfNSW_ContractOrgCode is mandatory and has no column.*DateInfoObtained \"2026-09-20\" is not a date.*Depth is empty \\(2 rows.*UtilityInstallDate is empty \\(2 rows.*AssetStatus \"In service\" is listed as \"In Service\"")
+    endif()
+endif()
+
+# UTILITY DRAW of what an import left in the drawing (docs/subsurface_utilities.md,
+# "Services from surveyed and imported geometry"). located_services.geojson is
+# the sample investigation as a GIS delivers it - plan strings, points shot on
+# the ground, the services' and the points' attributes under the GIS's own
+# names - and FIELDS reads those as the schedule's columns. It must draw what
+# schedule.csv draws: W1 as worked by hand in the doc, and a report of 4
+# lines and 14 vertices naming E1-3's over-claim.
+if(KATANA_TEST_CLI)
+    set(_eol "[\r\n]+")
+    set(_utilities "${PROJECT_SOURCE_DIR}/samples/utilities")
+    set(_located_fields "line=ASSET_ID,point=PT_ID,type=ASSET_TYPE,owner=OWNER,material=MATERIAL,diameter_mm=DIA_MM,status=STATUS,config=CONFIG,description=DESC,method=METHOD,h_unc=H_UNC,v_unc=V_UNC,ql=QL,level=LEVEL,level_ref=LEVEL_REF,path=PATH,verifies=VERIFIES")
+    add_test(NAME cli.utility_draw_takes_the_services_an_import_left_in_the_drawing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "IMPORT \"${_utilities}/located_services.geojson\""
+                -c "UTILITY DRAW DRAWING FIELDS ${_located_fields}"
+                -c "UTILITY REPORT LAYERS utilities MINCOVER 0.6")
+    set_tests_properties(cli.utility_draw_takes_the_services_an_import_left_in_the_drawing
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}scope=drawing matched=18 lines=4 points=14 loose=0 drawn=0 ignored=0${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*scope=layers layers=utilities sublayers=yes matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C"
+        FAIL_REGULAR_EXPRESSION "error")
+    # Nothing says how W1's first vertex was located: the draw is refused by
+    # that vertex, nothing is drawn, and the script fails.
+    add_test(NAME cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "IMPORT \"${_utilities}/located_services.geojson\""
+                -c "UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID" -c "LAYER LIST")
+    set_tests_properties(cli.utility_draw_of_geometry_with_no_method_is_refused_by_the_vertex
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "line W1: vertex W1-1 \\(#[0-9]+\\) says no method it was located by; give METHOD"
+        FAIL_REGULAR_EXPRESSION "utilities drawn|utilities/water")
+    add_test(NAME cli.utility_draw_of_geometry_refused_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "IMPORT \"${_utilities}/located_services.geojson\""
+                -c "UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID")
+    set_tests_properties(cli.utility_draw_of_geometry_refused_fails_the_script PROPERTIES
+        WILL_FAIL TRUE)
+endif()
+
+# A .ifc through the command line both ways (docs/ifc.md). samples/ifc/
+# scenario.txt draws MC01 and a kerb, a fence, a pit, a point and a text;
+# with the sample schedule, the export holds the alignment, 4 services of 10
+# graded segments - 6 of them in 3D, as tests/ifc/test_export.cpp works out -
+# 14 located points and the 5 entities, and read back into a new drawing it
+# is the 29 objects and MC01's 4 PIs again. The sample written to a delivery
+# schema (schedule_tfnsw.csv), with the schema of tests/ifc: W-0001's 3 points, E-0001's 2 and
+# G-0001's 2 make 4 segments, in 3D where a depth is recorded at both ends -
+# all but G-0001's, which is from the records.
+if(KATANA_TEST_CLI)
+    set(_ifc "${CMAKE_CURRENT_BINARY_DIR}/cli site.ifc")
+    set(_ifc_delivery "${CMAKE_CURRENT_BINARY_DIR}/cli delivery.ifc")
+    add_test(NAME cli.ifc_the_scenario_and_the_sample_services_exported_and_imported_back
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${_ifc}\" UTILITIES \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule.csv\""
+                -c "NEW" -c "IMPORT \"${_ifc}\"" -c "ALIGN LIST")
+    set_tests_properties(cli.ifc_the_scenario_and_the_sample_services_exported_and_imported_back
+        PROPERTIES FIXTURES_SETUP cli_ifc_file PASS_REGULAR_EXPRESSION
+        "ifc exported file=\"cli site\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+\ncounts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5 entities_skipped=0 surfaces=0.*ifc imported file=\"cli site\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*MC01  4 PIs  1000\\.000 to 1339\\.016")
+    add_test(NAME cli.ifc_a_delivery_schedule_exported_with_its_schema
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "EXPORT \"${_ifc_delivery}\" UTILITIES \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule_tfnsw.csv\" SCHEMA \"${PROJECT_SOURCE_DIR}/tests/ifc/data/delivery_schema.csv\" NODRAWING")
+    set_tests_properties(cli.ifc_a_delivery_schedule_exported_with_its_schema
+        PROPERTIES FIXTURES_SETUP cli_ifc_delivery_file PASS_REGULAR_EXPRESSION
+        "counts alignments=0 services=3 segments=4 segments_3d=3 located_points=7 entities_written=0 ")
+    # A project's own rules (samples/ifc/classification_rules.csv), tried
+    # before the defaults: a point on a lighting layer is a column, not a
+    # survey annotation.
+    add_test(NAME cli.ifc_a_projects_rules_classify_what_the_defaults_would_not
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LAYER NEW Lighting/Poles" -c "LAYER SET Lighting/Poles"
+                -c "POINT 10,10" -c "LAYER NEW Drainage/Headwalls" -c "LAYER SET Drainage/Headwalls"
+                -c "POINT 30,10"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli rules.ifc\" RULES \"${PROJECT_SOURCE_DIR}/samples/ifc/classification_rules.csv\"")
+    set_tests_properties(cli.ifc_a_projects_rules_classify_what_the_defaults_would_not PROPERTIES
+        PASS_REGULAR_EXPRESSION "\nclass name=IfcColumn count=1\nclass name=IfcDistributionChamberElement count=1\nclass name=IfcDistributionSystem count=1\n")
+    # The sample schedule drawn (UTILITY DRAW) and the drawing exported: the
+    # services the schedule's own export writes, class for class. The draw's
+    # reply gives the runs - W1 three (QL-B, QL-A, QL-C), E1 two (QL-B,
+    # QL-C), T1 and G1 one each - and its 14 located vertices; so W1's three
+    # and G1's one are pipes, E1's two are conduits (IfcCableCarrierSegment,
+    # its "4 x 100 mm conduits"), T1's one a cable, each vertex a survey
+    # annotation, and one system a service.
+    set(_ifc_drawn "${CMAKE_CURRENT_BINARY_DIR}/cli drawn services.ifc")
+    add_test(NAME cli.ifc_a_drawn_services_plan_goes_out_by_service
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "UTILITY DRAW \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule.csv\""
+                -c "EXPORT \"${_ifc_drawn}\"")
+    set_tests_properties(cli.ifc_a_drawn_services_plan_goes_out_by_service PROPERTIES
+        FIXTURES_SETUP cli_ifc_drawn_file PASS_REGULAR_EXPRESSION
+        "entities_written=21 entities_skipped=0 surfaces=0\nclass name=IfcAnnotation count=14\nclass name=IfcCableCarrierSegment count=2\nclass name=IfcCableSegment count=1\nclass name=IfcDistributionSystem count=4\nclass name=IfcPipeSegment count=4\n")
+    add_test(NAME cli.ifc_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "EXPORT \"${_ifc}\" UTILITIS x.csv")
+    set_tests_properties(cli.ifc_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+    # Everything File > Export IFC and Import IFC can choose is a word an
+    # agent can type (docs/ifc.md, "Using it"). PREVIEW answers with the
+    # objects and writes nothing: the file named is never made. With
+    # NOALIGNMENTS the scenario is its 5 entities and no IfcAlignment. INFO
+    # describes it; IMPORT ... NOELEMENTS TAKECRS brings nothing but gives
+    # the new drawing the file's EPSG:7856, as its own step; IFC RULES writes
+    # the defaults.
+    set(_ifc_never "${CMAKE_CURRENT_BINARY_DIR}/cli never written.ifc")
+    file(REMOVE "${_ifc_never}")
+    add_test(NAME cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${_ifc_never}\" PREVIEW"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\" NOALIGNMENTS NOSURFACES"
+                -c "INFO \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\""
+                -c "NEW"
+                -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\" NOELEMENTS TAKECRS"
+                -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\" TOLERANCE 0.01 KEEPCRS"
+                -c "CRS"
+                -c "IFC RULES \"${CMAKE_CURRENT_BINARY_DIR}/cli default rules.csv\"")
+    set_tests_properties(cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "ifc previewed file=\"cli never written\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+\ncounts alignments=1 .*object from=\"layer Survey/Kerb\" count=1 class=\"IfcKerb\" predefined=\"NOTDEFINED\" object_type=\"\" system=\"\" why=\"rule kerb\".*ifc exported file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+\ncounts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=5 .*ifc described file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=5 alignments=0 .*ifc imported file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=0 alignments=0 .*note text=\"the project is now in EPSG:7856, the file's coordinate system\".*ifc imported file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=5 .*crs id=EPSG:7856 .*ifc rules file=\"cli default rules\\.csv\" rules=[0-9]+")
+    # PREVIEW wrote nothing: the file it named does not exist.
+    add_test(NAME cli.ifc_preview_writes_no_file
+        COMMAND ${CMAKE_COMMAND} -E rm "${_ifc_never}")
+    set_tests_properties(cli.ifc_preview_writes_no_file PROPERTIES WILL_FAIL TRUE
+        DEPENDS cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line)
+    # What would be contradictory is refused by name, and fails the script.
+    add_test(NAME cli.ifc_selected_with_nothing_selected_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli selected.ifc\" SELECTED")
+    set_tests_properties(cli.ifc_selected_with_nothing_selected_is_refused PROPERTIES
+        WILL_FAIL TRUE)
+    add_test(NAME cli.ifc_takecrs_with_local_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT \"${_ifc}\" LOCAL TAKECRS")
+    set_tests_properties(cli.ifc_takecrs_with_local_is_refused PROPERTIES WILL_FAIL TRUE)
+    # ifc: the road model (docs/ifc.md, "Road model") goes out with the drawing;
+    # NOROADMODEL - File > Export IFC's "Road model" box - leaves it out, and is
+    # refused given twice. The scenario has no corridor, so the reply has no
+    # road record and is the scenario's own: this one shows that the word is
+    # TAKEN and does no harm. That it LEAVES THE ROAD OUT is road_cli.cmake's
+    # cli.ifc_noroadmodel_leaves_a_corridors_road_model_out, against
+    # cli.ifc_export_writes_a_corridors_road_model_by_default, which run a
+    # corridor.
+    add_test(NAME cli.ifc_noroadmodel_is_a_word_of_the_export_line
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL PREVIEW")
+    set_tests_properties(cli.ifc_noroadmodel_is_a_word_of_the_export_line PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "ifc previewed file=\"cli roadless\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+\ncounts alignments=1 services=0 segments=0 segments_3d=0 located_points=0 entities_written=5 entities_skipped=0 surfaces=0\nclass name="
+        FAIL_REGULAR_EXPRESSION "road elements=")
+    add_test(NAME cli.ifc_noroadmodel_given_twice_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli roadless.ifc\" NOROADMODEL NOROADMODEL")
+    set_tests_properties(cli.ifc_noroadmodel_given_twice_is_refused PROPERTIES WILL_FAIL TRUE)
+    # A leader goes into the file as the note it says, not as its template
+    # (docs/ifc.md, "Drawing entities"): a point at RL 12 on a surface at RL 10,
+    # a preset=level leader ("RL {rl:.3f}" says "RL 12.000") and a preset=surface
+    # one ("{dsurface.ground:+.3f}" says 12 - 10 = "+2.000"), exported and read
+    # back - the IFC import turns an IfcTextLiteral into a Text. The template is
+    # in the reply that made the leader, so what must not appear is a TEXT that
+    # holds a brace.
+    add_test(NAME cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "PLINE3D 0,0,10 100,0,10 100,100,10 0,100,10 CLOSE"
+                -c "SURFACE FROM DRAWING NAME ground"
+                -c "POINT 50,50" -c "SELECT 2" -c "PROP SET elevation 12 real" -c "SELECT NONE"
+                -c "LEADER #2 60,60 preset=level" -c "LEADER #2 40,60 preset=surface"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli leaders.ifc\" NOSURFACES"
+                -c "NEW" -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli leaders.ifc\"" -c "LIST")
+    set_tests_properties(cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "Text  layer=0  \"RL 12\\.000\".*Text  layer=0  \"\\+2\\.000\""
+        FAIL_REGULAR_EXPRESSION "Text  layer=0  \"[^\"]*[{]")
+
+    # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
+    # EXPRESS rules, no proxy, and the alignment's geometry against its
+    # business logic. Only where the Python that configured the build can
+    # import ifcopenshell - a check of the output, never a build requirement.
+    if(Python3_Interpreter_FOUND)
+        execute_process(COMMAND "${KATANA_PYTHON}" -c "import ifcopenshell"
+            RESULT_VARIABLE _ifcopenshell_missing OUTPUT_QUIET ERROR_QUIET)
+        if(_ifcopenshell_missing EQUAL 0)
+            add_test(NAME cli.ifc_the_scenario_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc}")
+            set_tests_properties(cli.ifc_the_scenario_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_file)
+            add_test(NAME cli.ifc_the_delivery_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_delivery}")
+            set_tests_properties(cli.ifc_the_delivery_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_delivery_file)
+            add_test(NAME cli.ifc_the_drawn_services_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_drawn}")
+            set_tests_properties(cli.ifc_the_drawn_services_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_drawn_file)
+        endif()
+    endif()
+endif()
+
+# A .dxf through the command line both ways, natively - no GDAL, so it runs
+# in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
+# area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;
+# exported, a new drawing, imported back. Three layers go out: 0, Survey and
+# Survey/Kerb - the last as "Survey$Kerb" with its path beside it. The replies
+# are the records every build writes (import_records.hpp), with GDAL or
+# without.
+if(KATANA_TEST_CLI)
+    set(_dxf "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dxf")
+    add_test(NAME cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LAYER NEW Survey/Kerb #FF0000"
+                -c "LAYER SET Survey/Kerb" -c "RECT 0,0 30,20" -c "CIRCLE 15,10 5"
+                -c "TEXT 5,5 2.5 \"LOT 42\"" -c "EXPORT \"${_dxf}\"" -c "NEW"
+                -c "IMPORT \"${_dxf}\"" -c "LIST")
+    set_tests_properties(cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "exported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf driver=DXF format=\"DXF R2000\" entities=3 skipped=0 layers=3 .*imported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf format=\"DXF R2000\" entities=3 layers=3 .*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
+endif()
+
+# INFO, COPC and IMPORT ... LOCAL, on the sample GIS data. Expected values are
+# the files' own: terrain.asc's header says 120 x 90 cells of 1.5 from a
+# lower-left corner at (-5, -5), so it spans to (175, 130); `pdal info`
+# counts 40 000 points in survey_scan.las.
+if(KATANA_TEST_CLI)
+    set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
+    add_test(NAME cli.archive_custom_colours_and_native_leaders_are_imported
+        COMMAND ${CMAKE_COMMAND}
+            "-DPROGRAM=${KATANA_PROGRAM_katana_cli}"
+            "-DFIXTURES=${PROJECT_SOURCE_DIR}/tests/archive12d/data"
+            -P "${PROJECT_SOURCE_DIR}/tests/archive12d/check_drafting_import.cmake")
+    set_tests_properties(cli.archive_custom_colours_and_native_leaders_are_imported PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
+        TIMEOUT 90)
+    set(_copc "${CMAKE_CURRENT_BINARY_DIR}/cli-scan.copc.laz")
+    # INFO reports a band's statistics when a sidecar beside the file holds
+    # them, and every GDAL run on the shared sample writes one for as long as
+    # it runs (docs/geoprocessing.md, "Sidecars"), so this reply depended on
+    # which other test ran beside it. It reads a copy of its own, made when the
+    # build is configured, which nothing else reads.
+    set(_info_raster "${CMAKE_CURRENT_BINARY_DIR}/cli-info-raster")
+    file(COPY "${_gis}/terrain.asc" "${_gis}/terrain.prj" DESTINATION "${_info_raster}")
+    add_test(NAME cli.info_raster
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "INFO ${_info_raster}/terrain.asc")
+    add_test(NAME cli.info_point_cloud
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "INFO ${_gis}/survey_scan.las")
+    # Converted, then described: the description must now say COPC, with
+    # every point kept.
+    add_test(NAME cli.copc_cleanup COMMAND ${CMAKE_COMMAND} -E rm -f "${_copc}")
+    add_test(NAME cli.copc_then_info
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "COPC ${_gis}/survey_scan.las ${_copc}"
+                -c "INFO ${_copc}")
+    # Audit QT-13/14: the raster's LOCAL is refused by name, where it used to
+    # be left on the path and reported as a missing file "terrain.asc LOCAL".
+    add_test(NAME cli.local_is_refused_for_reference_data
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT ${_gis}/terrain.asc LOCAL")
+    set_tests_properties(cli.info_raster PROPERTIES PASS_REGULAR_EXPRESSION
+        "dataset file=[^ ]*/terrain\\.asc kind=raster driver=AAIGrid [^\r\n]*[\r\n]+raster width=120 height=90 bands=1 georeferenced=yes cell=1\\.5,1\\.5 bounds=-5,-5,175,130")
+    set_tests_properties(cli.info_point_cloud PROPERTIES PASS_REGULAR_EXPRESSION
+        "pointcloud points=40000 [^\r\n]*copc=no")
+    set_tests_properties(cli.copc_cleanup PROPERTIES FIXTURES_SETUP cli_copc)
+    set_tests_properties(cli.copc_then_info PROPERTIES FIXTURES_REQUIRED cli_copc
+        PASS_REGULAR_EXPRESSION "converted source=[^ ]*/survey_scan\\.las file=[^ ]*/cli-scan\\.copc\\.laz format=copc.*pointcloud points=40000 [^\r\n]*copc=yes")
+    set_tests_properties(cli.local_is_refused_for_reference_data PROPERTIES
+        PASS_REGULAR_EXPRESSION "LOCAL is not supported for rasters and point clouds")
+    # A QUOTED path and LOCAL, as katana_import sends them: LOCAL was taken off
+    # and the quotes left on, so the file was looked for by its quoted name.
+    # parcels.geojson spans (180, 0) to (365, 165) (its coordinates, by hand),
+    # so moved to put that lower-left corner at 0,0 it spans (0, 0) to
+    # (185, 165). Its 8 features, the spoil heaps a MultiPolygon of two, are 9
+    # entities.
+    add_test(NAME cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT \"${_gis}/parcels.geojson\" LOCAL")
+    set_tests_properties(cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin PROPERTIES
+        PASS_REGULAR_EXPRESSION "imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 [^\r\n]*bounds=0,0,185,165[^\r\n]*[\r\n]+placed placement=local east=-180 north=0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # ALONGSIDE puts the parcels' corner (180, 0) on the rectangle's
+    # (1000, 2000); OFFSET moves it by exactly 10,-20.5. Each says its move.
+    add_test(NAME cli.import_alongside_and_offset_place_the_data_and_say_the_move
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "RECT 1000,2000 1010,2005"
+                -c "IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE" -c UNDO
+                -c "IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5")
+    set_tests_properties(cli.import_alongside_and_offset_place_the_data_and_say_the_move PROPERTIES
+        PASS_REGULAR_EXPRESSION "bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500"
+        FAIL_REGULAR_EXPRESSION "error")
+    # OPEN #1 and OPEN SELECTION open a polyline for editing: they share the
+    # verb with OPEN of a project but do not replace the drawing
+    # (CommandInterpreter::replacesDocument), so its reference layers - the
+    # DEM imported first - are still there, where they were cleared with a
+    # project's. The drawing has no project here, so REFS RESTORE does not run.
+    add_test(NAME cli.open_of_a_polyline_keeps_the_reference_layers
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT ${_gis}/terrain.asc"
+                -c "PLINE 0,0 10,0 10,10 CLOSE" -c "OPEN #1" -c REFS
+                -c "SELECT #1" -c "OPEN SELECTION" -c REFS)
+    set_tests_properties(cli.open_of_a_polyline_keeps_the_reference_layers PROPERTIES
+        PASS_REGULAR_EXPRESSION "kind=polyline closed=no [^\r\n]*[\r\n]+(reference id=[^\r\n]*[\r\n]+)+references rasters=1 clouds=0 missing=0.*kind=polyline closed=no [^\r\n]*[\r\n]+(reference id=[^\r\n]*[\r\n]+)+references rasters=1 clouds=0 missing=0"
+        FAIL_REGULAR_EXPRESSION "error;references rasters=0")
+endif()
+
+# Labels by hand and their layout, as an agent types them (docs/annotation.md,
+# "The verbs"). Two numbered points at one place (1, 2) labelled in a style
+# that may not move its labels: the first label (3) is placed and the second
+# (4) finds no room, and LABEL LAYOUT names it on a line of its own. Pinned
+# elsewhere with LABEL SET, both are placed - the pinned one counted as
+# displaced, since it is away from its own place with a leader back to its
+# point (label_layout.cpp gives a dragged label that candidate).
+if(KATANA_TEST_CLI)
+    add_test(NAME cli.label_layout_names_the_label_that_found_no_room
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "LABELSTYLE NEW pt kind=point text={point} displace=off"
+                -c "POINT 0,0" -c "SELECT 1" -c "PROP SET point P1"
+                -c "POINT 0,0" -c "SELECT 2" -c "PROP SET point P2"
+                -c "LABEL 1 2 style=pt" -c "LABEL LAYOUT" -c "LABEL SET 4 at=50,50"
+                -c "LABEL LAYOUT")
+    set_tests_properties(cli.label_layout_names_the_label_that_found_no_room PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "considered=2 placed=1 displaced=0 suppressed=1 orphaned=0[\r\n]+label=3 piece=0 [^\r\n]*[\r\n]+label=4 piece=0 suppressed=yes.*updated label id=4.*considered=2 placed=2 displaced=1 suppressed=0 orphaned=0")
+endif()
+
+# The geoprocessing verbs' cli.* tests, one file per package of the
+# geoprocessing plan (geo/*.cmake), so the lanes add tests without editing
+# this file. Included here, where katana_cli and the test variables are.
+if(KATANA_TEST_CLI)
+    file(GLOB _katana_geo_cli_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/geo/*.cmake")
+    foreach(_geo_cli_test IN LISTS _katana_geo_cli_tests)
+        include("${_geo_cli_test}")
+    endforeach()
+endif()
+
+# The UPDATE verbs' cli.* tests (docs/update.md), one file per area in
+# update_*.cmake beside this one, so the task that writes the verbs adds them
+# without editing this file. Included here, where katana_cli and the test
+# variables are.
+if(KATANA_TEST_CLI)
+    file(GLOB _katana_update_cli_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/update_*.cmake")
+    foreach(_update_cli_test IN LISTS _katana_update_cli_tests)
+        include("${_update_cli_test}")
+    endforeach()
+endif()
+
+# The properties as a tree, one level a line (property_outline.hpp; the
+# Properties panel reads the same outline). A point given two vertices'
+# attributes and a group: the top level has the group, its own value and the
+# vertex branch; UNDER vertex lists vertex 2 before vertex 10 (numbers, not
+# text); DRAWING with a second point says where the two differ.
+if(KATANA_TEST_CLI)
+    add_test(NAME cli.prop_tree_reads_the_attributes_one_level_at_a_time
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 0,0" -c "SELECT 1"
+                -c "PROP SET vertex/10/QL C" -c "PROP SET vertex/2/QL A"
+                -c "PROP SET Asset/Owner Council" -c "PROP SET code KERB"
+                -c "PROP TREE" -c "PROP TREE UNDER vertex"
+                -c "POINT 5,5" -c "SELECT 2" -c "PROP SET code POLE" -c "PROP TREE DRAWING")
+    set_tests_properties(cli.prop_tree_reads_the_attributes_one_level_at_a_time PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "scope=selection matched=1 under=\"\" entries=3 from=0 shown=3[\r\n]+path=Asset children=1 values=1[\r\n]+path=code value=KERB type=text[\r\n]+path=vertex children=2 values=2[\r\n]+scope=selection matched=1 under=vertex entries=2 from=0 shown=2[\r\n]+path=vertex/2 children=1 values=1[\r\n]+path=vertex/10 children=1 values=1.*scope=drawing matched=2 under=\"\" entries=3 from=0 shown=3[\r\n]+path=Asset children=1 values=1[\r\n]+path=code varies=yes holders=2"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# SURVEY READ and SURVEY IMPORT (survey_verbs.hpp) on the hand-built field
+# file tests/surveyio/data/fld/setup.fld. READ: 16 records read and 2 skipped
+# (record 20, a 07 one value short, and record 21, opcode 18, a circle feature
+# the reader does not import), 1 setup, 12
+# observations (4 pointings of 3), CP1 and CP2 entered, 101 and 102 observed,
+# the one EB/01 feature, and the system its header comments name. IMPORT
+# reduces it with the defaults and draws 4 points on LAYER, one undo step:
+# worked by hand from CP1 (1000 E, 5000 N) oriented on CP2 due north at circle
+# 0, shot 101 (45 deg, zenith 95 deg, 50 m) is 50 sin 95 = 49.810 m out at
+# 45 deg, so at 1035.221 E 5035.221 N; shot 102 is face right (zenith 275
+# deg), so its circle reading 90.5 deg is 270.5 deg on face left, 30 sin 85 =
+# 29.886 m out: 970.115 E 5000.261 N. The regexes hold those to the
+# millimetre, which is the error budget of that hand working: the reduction
+# also means the orientation with the check measurement to CP2 (circle 0.001
+# deg, 1.8" on the mean, 0.44 mm across at 50 m) and applies curvature and
+# refraction, which the working leaves out.
+if(KATANA_TEST_CLI)
+    set(_fld "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/setup.fld")
+    add_test(NAME cli.survey_read_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld}\"" -c "STATUS")
+    set_tests_properties(cli.survey_read_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=setup\\.fld format=opcode-field-file parser=1\\.2 read=16 skipped=2 warnings=2[\r\n]+content setups=1 observations=12 points=2 unpositioned=2 features=1 control=0[\r\n]+declared crs=\"Australia/GDA2020, Zone 56\" epsg=none[\r\n]+warning record=20 [^\r\n]+[\r\n]+warning record=21 text=\"opcode 18 \\(circle feature\\) is not one this reader imports\".*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld}\" LAYER survey/fld"
+                -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.survey_import_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/fld .*layer=survey/fld  at 1000,5000[\r\n]+[^\r\n]+at 1000,5100[\r\n]+[^\r\n]+at 1035\\.22[01][0-9]*,5035\\.22[01][0-9]*[\r\n]+[^\r\n]+at 970\\.11[45][0-9]*,5000\\.26[01][0-9]*.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # A file that is not there, and an option SURVEY does not have: refused.
+    add_test(NAME cli.survey_refuses_a_missing_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${CMAKE_CURRENT_BINARY_DIR}/no such.fld\"")
+    set_tests_properties(cli.survey_refuses_a_missing_file PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME cli.survey_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld}\" LAYER x")
+    set_tests_properties(cli.survey_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+    # An RTK job, tests/surveyio/data/fld/gnss.fld: each coordinate written
+    # " 2" (a blank before the opcode) with its date and time in the column
+    # after it, and its receiver's "GNSS Solution" in an attribute group (124,
+    # 125); a keyed-in 02; a bare 20. Detected without FORMAT; all 35 records
+    # read (the version line and lines 11-37 and 41-47), two warnings - the
+    # file is Windows-1252 (record 0), and R001's second GNSS position, at
+    # record 41, differs from its first - no setup; CM1, keyed in, the one
+    # point with coordinates; R001 to R004 placed by their 5 GNSS positions;
+    # 2 features (KB 1 closed by the 20, KB 1 again after it); the system the
+    # header names. IMPORT draws the 5 points where the file puts them, X the
+    # easting, R001 by its first position: the reduction's entered point CM1
+    # first, then the GNSS ones in the order the file names them.
+    set(_fld_gnss "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/gnss.fld")
+    add_test(NAME cli.survey_read_gnss_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld_gnss}\"")
+    set_tests_properties(cli.survey_read_gnss_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=gnss\\.fld format=opcode-field-file parser=1\\.2 read=35 skipped=0 warnings=2[\r\n]+content setups=0 observations=5 points=1 unpositioned=4 features=2 control=0[\r\n]+declared crs=\"Local grid A\" epsg=none[\r\n]+warning record=0 text=\"the file is not UTF-8[^\r\n]+[\r\n]+warning record=41 text=\"point 'R001' is given a GNSS position here"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_gnss_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld_gnss}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_gnss_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=5 layer=survey/points .* at 500000,6200000[\r\n]+[^\r\n]+ at 500010,6200020[\r\n]+[^\r\n]+ at 500020,6200020[\r\n]+[^\r\n]+ at 500020,6200030[\r\n]+[^\r\n]+ at 500040,6200040[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A resection, tests/surveyio/data/fld/resection.fld: 128 sets up on S1,
+    # whose block ("5" and "7" without their zero) runs to the 129, then
+    # shots with 16, 42, 43 and 71, a coded check (06), and a 03 on K1.
+    # READ: all 27 records and nothing to warn of - the two offsets are
+    # applied to the shots they follow - 2 setups, 24 observations (8
+    # pointings of 3), K1 and K2 entered, S1, 101, 102 and 103 unpositioned,
+    # the EB 01, NS 01 and PF strings, and what the file does not carry: S1's
+    # coordinates. IMPORT: the file does not state where S1 is, so the
+    # reduction resects it (docs/survey.md, "The reduction's resection") from
+    # its block - the pointings before the 129, K1 on both faces and K2 on
+    # face left - and drew only K1, K2 and 103 before it could. By hand: S1
+    # is 100 m from K1 and 141.421 m (100 sqrt 2 = 141.4214) from K2, which
+    # are 100 m apart due east of each other, so S1 is 100 m due north of K1
+    # - the mirror point south of K1 is ruled out by the readings, K2 being
+    # read 45 degrees left of K1 - at 1000 E, 5100 N; K1 read at 180, its
+    # azimuth, so the orientation is 0. K2's 141.421 is 0.36 mm short of that,
+    # and the least squares of the four observations (worked apart by the
+    # script of tests/survey/test_reduction_resection.cpp's model) puts S1 at
+    # 1000.00033 E, 5100.00000 N, orientation 0.525". From there 101 is read
+    # at 90, 50 m out, its tangential offset 0.25 m to the right making it
+    # hypot(50, 0.25) m at 90 + atan(0.25 / 50): 1050.00033 E, 5099.74987 N;
+    # 102 at 95, its radial offset making it 50.5 m: 1050.30815 E,
+    # 5095.59851 N. The check after the 129 (06: K2 at 135.001, 141.420) is a
+    # check of S1, a misclosure, not one of its pointings (checks=1). The
+    # fixture's heights were written for the reader and disagree by 1.1 m:
+    # 20.049 from K1 and 21.149 from K2, weighted by the zeniths (a pair at
+    # 100 m, one face at 141.4 m) and the target heights' 2 mm - 2.249 and
+    # 2.869 mm - give 20.46773 and, with one redundancy, both flagged at
+    # |w| = 1.0993 m / hypot(2.249, 2.869) mm = 301.57, each with a
+    # resection_residual record. K1, oriented on K2 due east at circle 90
+    # (orientation 0), still radiates 103 at 45 deg, 10 m out (zenith 90):
+    # 1000 + 10 sin 45 = 1007.071 E, 5000 + 10 cos 45 = 5007.071 N.
+    set(_fld_resection "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/resection.fld")
+    add_test(NAME cli.survey_read_resection_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld_resection}\"")
+    set_tests_properties(cli.survey_read_resection_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=resection\\.fld format=opcode-field-file parser=1\\.2 read=27 skipped=0 warnings=0[\r\n]+content setups=2 observations=24 points=2 unpositioned=4 features=3 control=0[\r\n]+declared crs=\"Local grid B\" epsg=none[\r\n]+not_carried .*not_carried text=\"no coordinates for the 1 setup\\(s\\) made by resection"
+        FAIL_REGULAR_EXPRESSION "error|warning record")
+    add_test(NAME cli.survey_import_resection_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld_resection}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_resection_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=4[\r\n]+reduction method=[a-z]+ adjustments=[0-9]+ rejected=[0-9]+[\r\n]+reduction_warning text=\"height difference at S1: K1 is flagged by the Baarda w, critical 3\\.29 \\(value -301\\.57\\).*resection setup=S1 point=S1 from=K1,K2 northing=5100\\.0000[0-9]* easting=1000\\.00032[0-9]* height=20\\.46772[0-9]* [^\r\n]* redundancy=1\\+1 flagged=2 dilution=[0-9.]+ weak=0 checks=1 file_offset=none radiated_from=none radiation_offset=none unapplied_scale_factor=none[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K1\" [^\r\n]* state=flagged[\r\n]+resection_residual setup=S1 observation=\"height difference at S1: K2\" [^\r\n]* state=flagged[\r\n]+6 entities[\r\n]+[^\r\n]+ at 1000,5000[\r\n]+[^\r\n]+ at 1100,5000[\r\n]+[^\r\n]+ at 1000\\.00032[0-9]*,5100(\\.0000[0-9]*)?[\r\n]+[^\r\n]+ at 1050\\.00032[0-9]*,5099\\.74987[0-9]*[\r\n]+[^\r\n]+ at 1050\\.30814[0-9]*,5095\\.59850[0-9]*[\r\n]+[^\r\n]+ at 1007\\.07106[0-9]*,5007\\.07106[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|has no position")
+    # A free station in the structure of a field controller's resections,
+    # tests/surveyio/data/fld/free_station.fld, every name and number
+    # invented: M1, M2 and M3 entered; 128 sets up on FS1 (instrument height
+    # 0); each mark read on both faces with its target height (1.600, 1.600,
+    # 1.800) and level sights; 129; the controller's residual comments; M1
+    # restated; a check (06) to M1; two shots. READ: 25 records, no warning;
+    # 1 setup, 27 observations (9 pointings of 3), 3 points, FS1, 201 and 202
+    # unpositioned, the EB 01 string. IMPORT resects FS1 - by hand at 300000 E,
+    # 6200000 N, which the readings were made from: M1 100 m at azimuth
+    # atan2(60, 80) = 36.869897646, M2 100 m at 233.130102354, M3 200 m at
+    # 143.130102354 degrees, each read 12.5 less (the circle's turn) to 8
+    # decimals - and radiates 201 at reading 102.5 (azimuth 115), 50 m:
+    # 300000 + 50 sin 115 = 300045.31539 E, 6200000 + 50 cos 115 = 6199978.86909
+    # N, and 202 at 192.5 (205), 30 m: 299987.32145 E, 6199972.81077 N. Its
+    # height is the weighted mean of what the block's marks give with
+    # curvature and refraction (level sights, instrument height 0): M1 and M2
+    # 18.401 + 1.600 - 100^2 x 6.8278e-8 = 20.000317, M3 18.203 + 1.800 -
+    # 200^2 x 6.8278e-8 = 20.000269, weighted 1 / ((S x 3"/sqrt 2)^2 +
+    # (2 mm)^2) - the target height's 2 mm; the instrument's is common to all
+    # and here 0 - so 2.249 mm at 100 m and 2.869 mm at 200 m: 20.00030586.
+    # Redundancy 3 in plan (3 readings and 3 distances for N, E and the
+    # orientation) and 2 in height; the check (06) to M1 after the 129 is a
+    # check of FS1 (checks=1), not one of its pointings. Its precision is the
+    # a-priori one (the readings fit exactly, so the global test does not fail
+    # above), with no mark's centring or height (instrument height 0): by a
+    # separate script of the textbook model (normal equations of the three
+    # readings, weighted 1 / ((3"/sqrt 2)^2 + (1 mm / D)^2), and three
+    # distances, weighted 1 / (hypot(2 mm, 2 ppm S)^2 + (1 mm)^2)), sN 1.142423
+    # and sE 1.152938 mm; the height's, 1 / sqrt(sum 1 / sigma^2) over 2.248933,
+    # 2.248933 and 2.868937 mm, 1.390860 mm.
+    set(_fld_free_station "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/free_station.fld")
+    add_test(NAME cli.survey_read_free_station_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld_free_station}\"")
+    set_tests_properties(cli.survey_read_free_station_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=free_station\\.fld format=opcode-field-file parser=1\\.2 read=25 skipped=0 warnings=0[\r\n]+content setups=1 observations=27 points=3 unpositioned=3 features=1 control=0[\r\n]+declared crs=\"Local grid D\" epsg=none"
+        FAIL_REGULAR_EXPRESSION "error|warning record")
+    add_test(NAME cli.survey_import_free_station_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld_free_station}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_free_station_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=6 layer=survey/points reduction_warnings=2[\r\n]+.*resection setup=FS1 point=FS1 from=M1,M2,M3 northing=(6200000|6199999\\.9999)[0-9.]* easting=(300000|299999\\.9999)[0-9.]* height=20\\.0003058[0-9]* sigma_n=0\\.001142422[0-9]* sigma_e=0\\.001152937[0-9]* sigma_h=0\\.001390860[0-9]* redundancy=3\\+2 flagged=0 dilution=[0-9.]+ weak=0 checks=1 file_offset=none radiated_from=none radiation_offset=none unapplied_scale_factor=none[\r\n]+6 entities[\r\n]+[^\r\n]+ at 300060,6200080[\r\n]+[^\r\n]+ at 299920,6199940[\r\n]+[^\r\n]+ at 300120,6199840[\r\n]+[^\r\n]+ at 300000,6200000[\r\n]+[^\r\n]+ at 300045\\.3153[0-9]*,6199978\\.869[0-9]*[\r\n]+[^\r\n]+ at 299987\\.3214[0-9]*,6199972\\.8107[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|has no position|flagged by")
+    # A setup on RTK marks, tests/surveyio/data/fld/rtk_setup.fld: A (1000,
+    # 5000) and B (1000, 5100), each written " 2" with its receiver's
+    # solution, a setup on A reading 30 degrees on B, and two shots at circle
+    # 120, 10 m and 20 m out and level, each followed by an offset. READ: all
+    # 18 records (the version line, 100, two coordinates with a group of
+    # three records each, 03, 05, 04, 05, 07, 42, 07, 43), nothing to warn
+    # of; 11 observations - the setup's 9 and the marks' GNSS positions - and
+    # no point with coordinates of its own. IMPORT: A and B are GNSS
+    # positions, which the reduction places before any setup, so the setup is
+    # oriented on B, due north: 0 - 30 = -30 degrees, and circle 120 is due
+    # east. 101 is 10 m east and its radial offset 0.5 m further out: 1010.5,
+    # 5000; 102 is 20 m east and its tangential offset 0.5 m to the right
+    # looking east, south: 1020, 4999.5. Were the marks calculated points,
+    # which the reduction does not place, they would not orient it: the
+    # circle taken as set would put 101 at 1008.66, 4995.
+    set(_fld_rtk_setup "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/rtk_setup.fld")
+    add_test(NAME cli.survey_read_rtk_setup_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld_rtk_setup}\"")
+    set_tests_properties(cli.survey_read_rtk_setup_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=rtk_setup\\.fld format=opcode-field-file parser=1\\.2 read=18 skipped=0 warnings=0[\r\n]+content setups=1 observations=11 points=0 unpositioned=4 features=1 control=0[\r\n]+declared crs=\"Local grid C\" epsg=none"
+        FAIL_REGULAR_EXPRESSION "error|warning record")
+    add_test(NAME cli.survey_import_rtk_setup_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld_rtk_setup}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_rtk_setup_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1010\\.5,5000[\r\n]+[^\r\n]+ at 1020,4999\\.5[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error|backsight has no position")
+    # Two setups with two backsights to different points each,
+    # tests/surveyio/data/fld/two_backsights.fld. A backsight orients its
+    # setup where it reads a horizontal circle to a point with a position, or
+    # states an azimuth; the first that can names the setup's backsight, and
+    # the other is read as a measurement of its point. K (1000, 5000) first
+    # backsights R3, entered due north, at circle 30, then R4, which nothing
+    # places, at circle 120, 50 m out, and shoots 502 at circle 120, 10 m,
+    # level; set up on K again, it first backsights R5, which nothing places,
+    # at circle 0, 40 m out, then R3 at 30, and shoots 503 at circle 210,
+    # 10 m. READ: all 13 records, and two warnings - each backsight to a point
+    # nothing places (records 12 and 15) is read as a measurement of it.
+    # IMPORT: R3 orients both setups, 0 - 30 = -30 degrees: circle 120 is due
+    # east, so R4 is at 1050, 5000 and 502 at 1010, 5000; circle 0 is 330, so
+    # R5 is at 1000 - 40 sin 30 = 980, 5000 + 40 cos 30 = 5034.641; circle 210
+    # is due south, so 503 is at 1000, 4990. The last backsight naming it had
+    # taken R4 for the first setup's with R3's circle, the reduction taking
+    # that circle for a grid azimuth less the reading on R4 (30 - 120 = -90):
+    # 502 at 1005, 5008.66. The first naming it took R5 for the second's,
+    # its circle taken for a grid azimuth: 503 at 995, 4991.34.
+    set(_fld_two_backsights "${PROJECT_SOURCE_DIR}/tests/surveyio/data/fld/two_backsights.fld")
+    add_test(NAME cli.survey_read_two_backsights_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_fld_two_backsights}\"")
+    set_tests_properties(cli.survey_read_two_backsights_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=two_backsights\\.fld format=opcode-field-file parser=1\\.2 read=13 skipped=0 warnings=2[\r\n]+content setups=2 observations=18 points=2 unpositioned=4 features=2 control=0[\r\n]+declared crs=\"Local grid G\" epsg=none[\r\n]+warning record=12 text=\"a backsight to 'R4', where setup K backsights 'R3' \\(record 11\\), the first that can orient it, with a horizontal circle, and coordinates the file gives: this one is read as a measurement of its point\"[\r\n]+warning record=15 text=\"a backsight to 'R5', where setup K \\(2\\) backsights 'R3' \\(record 16\\), the first that can orient it, with a horizontal circle, and coordinates the file gives: this one is read as a measurement of its point\""
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_two_backsights_field_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld_two_backsights}\"" -c "LIST")
+    set_tests_properties(cli.survey_import_two_backsights_field_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=6 layer=survey/points .* at 1000,5000[\r\n]+[^\r\n]+ at 1000,5100[\r\n]+[^\r\n]+ at 1050,5000[\r\n]+[^\r\n]+ at 1010,5000[\r\n]+[^\r\n]+ at 980,5034\\.641[0-9]*[\r\n]+[^\r\n]+ at 1000,4990[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error|backsight has no position")
+    # The same verbs on the hand-built GSI-16 job
+    # tests/surveyio/data/leica/rounded_seconds_gsi16.gsi, whose angle words
+    # write 60 seconds where a writer rounded up without carrying the minute
+    # (docs/survey.md, "Leica GSI"). READ: 6 records; 11 observations - every
+    # shot's circle reading, zenith angle and distance but P3's circle
+    # reading of 090 00 61.0, the one word refused; and 2 warnings, that
+    # refusal and one for the three 60-second words, each read as the next
+    # minute. IMPORT, worked by hand: STN1 (5000 E, 6000 N) is oriented on
+    # CP01, keyed in due north, at circle 0. P1 at circle 044 59 60.0 = 45 deg
+    # and zenith 089 59 60.0 = 90 deg, 100 m, is 100 m out at 45 deg: 5070.711
+    # E 6070.711 N. P2 at 135 deg and zenith 086 27 60.0 = 86 deg 28 min, 200
+    # m, is 200 sin(86 deg 28') = 199.6198 m out, less the curvature and
+    # refraction term (1 - k/2) V H / R (reduceSlope; k 0.13, R 6 371 000 m)
+    # of 0.4 mm: 199.6195 m at 135 deg, 5141.1523 E 5858.8477 N (worked with
+    # a 75-digit pi). Read as 086 27 00 it would be 3.6 mm nearer (2.5 mm in
+    # each coordinate, 5141.1497 E), and P1 read as 044 59 00 lands 2.9 cm
+    # away; refused, as they were, neither is radiated and 2 points are drawn,
+    # not 4. The READ warning lists the records of the three 60-second words
+    # and shows the first as written and as read. A ';' in these expressions
+    # is written "\\;": bare, CMake splits the expression there into a list of
+    # alternatives, and the test passes on either fragment - these three did,
+    # with the parser version wrong.
+    set(_gsi "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/rounded_seconds_gsi16.gsi")
+    add_test(NAME cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_gsi}\"")
+    set_tests_properties(cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=rounded_seconds_gsi16\\.gsi format=leica-gsi parser=1\\.2 read=6 skipped=0 warnings=2[\r\n]+content setups=1 observations=11 points=2 unpositioned=3 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=6 text=\"word 21 '0000000009000610' is not a sexagesimal angle: the seconds run to 59[^\r\n]*[\r\n]+warning record=4 text=\"3 angle words write 60 seconds, where a sexagesimal angle's seconds run to 59 \\(at records 4, 5\\; the first, word 21, 044 59 60\\.0, read as 045 00 00\\.0\\)[^\r\n]*read as the next minute, within the writer's rounding of what was measured\""
+        FAIL_REGULAR_EXPRESSION "error")
+    set(_gsi_p1 "at 5070\\.71[01][0-9]*,6070\\.71[01][0-9]*")
+    set(_gsi_p2 "at 5141\\.1522[0-9]*,5858\\.8477[0-9]*")
+    add_test(NAME cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_gsi}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/gsi .*(${_gsi_p1}.*${_gsi_p2}|${_gsi_p2}.*${_gsi_p1})"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A negative vertical reading, on the hand-built GSI-8 job
+    # tests/surveyio/data/leica/negative_vertical_gsi8.gsi: no zenith angle is
+    # negative - it is a damaged word, or an instrument's vertical angle
+    # setting (GSI ONLINE's SET 44) reaching the file (docs/survey.md, "Leica
+    # GSI"). READ: 5 records; 8 observations - every shot's circle reading,
+    # zenith angle and distance but P1's V of -005 00 00.0, refused at record
+    # 4 - and that one warning, with a note on what it suggests of the file's
+    # other vertical readings. IMPORT, worked by hand: STN1 (5000 E, 6000 N)
+    # is oriented on CP01, keyed in due north, at circle 0. P2 at circle -045
+    # 00 00.0, the direction 315 deg, and zenith 90 deg, 100 m, is 100 m out
+    # at 315 deg (reduceSlope's curvature and refraction term is a product
+    # with SD cos z, zero at 90 deg): 5000 - 100 sin 45 deg = 4929.2893
+    # E, 6000 + 100 cos 45 deg = 6070.7107 N. P1, with no zenith angle, is not
+    # radiated: 3 points are drawn. Wrapped onto the circle, as the reader once
+    # did, its V was 355 00 00.0, a face-right zenith of 5 deg, and P1 was
+    # drawn 100 sin 5 deg = 8.7156 m out at 225 deg: 4993.8372 E 5993.8372 N,
+    # which the FAIL expression refuses.
+    set(_gsi_negative_v
+        "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/negative_vertical_gsi8.gsi")
+    add_test(NAME cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_gsi_negative_v}\"")
+    set_tests_properties(cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=negative_vertical_gsi8\\.gsi format=leica-gsi parser=1\\.2 read=5 skipped=0 warnings=1[\r\n]+content setups=1 observations=8 points=2 unpositioned=2 features=0 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=4 text=\"word 22 '-00500000' is negative, which no zenith angle is \\(a damaged word, or an instrument whose vertical angle setting - GSI ONLINE's SET 44[^\r\n]*\\; that value was not read\".*not_carried text=\"GSI does not record the vertical angle setting: word 22 was read as a zenith angle, the instruments' usual setting\\; 1 reading was refused as negative, which no zenith angle is \\(the first at record 4\\)"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_gsi_negative_v}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=3 layer=survey/gsi .*at 4929\\.2893[0-9]*,6070\\.7106[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error|at 4993\\.8")
+    # A shot's own horizontal distance and height difference (32, 33), on the
+    # hand-built GSI-8 job tests/surveyio/data/leica/derived_distances_gsi8.gsi
+    # (docs/survey.md, "Leica GSI"). Each shot's slope distance is 80.000 m,
+    # and its 32 and 33 are what an instrument computes for that at a zenith
+    # of 094 30 00.0: 80 sin 94.5 deg = 79.753 m, 80 cos 94.5 deg = -6.277 m.
+    # Q1's V, -004 30 00.0, is refused as negative and Q2 has none, so neither
+    # slope distance can be reduced to horizontal; Q3's V is read. Worked by
+    # hand (a 75-digit pi): STN1 (5000 E, 6000 N) is oriented on CP01, keyed
+    # in due north, at circle 0. Q1 at 52 deg and Q2 at 142 deg are radiated
+    # by their own 79.753 m, a recorded horizontal distance and used as it
+    # is: 5062.8462 E 6049.1008 N and 5049.1008 E 5937.1538 N. Q3 at 232 deg
+    # is radiated by its slope distance and zenith angle: 80 sin 94.5 deg =
+    # 79.75339 m, plus the curvature and refraction term (1 - k/2) V H / R of
+    # +0.07 mm (V = 80 cos 94.5 deg is negative), 79.75346 m - 4937.1534 E
+    # 5950.8989 N, 0.4 mm from where its own 32 would put it (4937.1538 E).
+    # The import says that Q3's 32 and 33 were not carried, and that Q1's and
+    # Q2's slope distances were not. Parser 1.1 dropped Q1's and Q2's 32 and
+    # 33 as derived too, said so of 3 blocks "beside the measured slope
+    # distance and zenith angle", and drew 3 points, not 5.
+    set(_gsi_derived "${PROJECT_SOURCE_DIR}/tests/surveyio/data/leica/derived_distances_gsi8.gsi")
+    add_test(NAME cli.survey_import_gsi_radiates_a_shot_with_no_zenith_angle_by_its_own_horizontal_distance
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_gsi_derived}\" LAYER survey/gsi"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_gsi_radiates_a_shot_with_no_zenith_angle_by_its_own_horizontal_distance
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "parser=1\\.2 read=6 skipped=0 warnings=1[\r\n]+content setups=1 observations=12 .*not_carried text=\"1 block's instrument-computed horizontal distance \\(32\\) or height difference \\(33\\) beside a zenith angle and a distance that were read: not carried[^\r\n]*[\r\n]+not_carried text=\"2 blocks have a slope distance \\(31\\) and no zenith angle that was read \\(none recorded, or one refused at its record\\; the first at record 4\\)[^\r\n]*[\r\n]+settings file= set=0 differ=0[\r\n]+imported job=job-1 entities=5 layer=survey/gsi .*at 5062\\.8462[0-9]*,6049\\.1008[0-9]*[\r\n]+[^\r\n]*at 5049\\.1008[0-9]*,5937\\.1537[0-9]*[\r\n]+[^\r\n]*at 4937\\.1534[0-9]*,5950\\.8988[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error")
+    # CRS SET with a WKT - GDA2020 / MGA zone 56 as OGC WKT1, its names in
+    # double quotes and one of them holding blanks - as an agent or a script
+    # passes it: the verb once lost the quotes with the line's tokens, and
+    # PROJ refused the WKT "InvalidCRS: not a coordinate system"
+    # (test_project_crs.cpp). A WKT whose names hold no blank - an ESRI .prj's
+    # GDA2020_MGA_Zone_56 - PROJ reads even without its quotes, so it could
+    # not show the fault.
+    add_test(NAME cli.crs_set_takes_a_wkt_with_its_quotes
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "CRS SET PROJCS[\"GDA2020 / MGA zone 56\",GEOGCS[\"GDA2020\",DATUM[\"Geocentric_Datum_of_Australia_2020\",SPHEROID[\"GRS 1980\",6378137,298.257222101]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",153],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",10000000],UNIT[\"metre\",1],AUTHORITY[\"EPSG\",\"7856\"]]")
+    set_tests_properties(cli.crs_set_takes_a_wkt_with_its_quotes PROPERTIES
+        PASS_REGULAR_EXPRESSION "crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\" kind=\"projected\" units=metre"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A machine-wide PROJ_LIB or PROJ_DATA (another GIS package leaves one,
+    # naming data of its own - usually a database of an older PROJ's layout)
+    # replaces the share/proj PROJ finds beside its DLL, and Katana, with no
+    # usable proj.db, could not name a coordinate system: CRS SET failed with
+    # "not a coordinate system: give an EPSG code" for a valid code, and INFO
+    # lost the EPSG code of a file's .prj. Here the variable names a folder
+    # with no database in it: a process of its own is the only way to set it,
+    # since PROJ reads it at its first search. Both the geodesy contexts
+    # (CRS SET) and GDAL's (INFO) fall back on the data Katana carries.
+    # The expectations are the registry's, not a run's: EPSG:28356 is "GDA94 /
+    # MGA zone 56", and tests/data/proj_fallback/mga56.prj is its ESRI WKT
+    # (GDA_1994_MGA_Zone_56, which only the database can turn into that code).
+    # Windows: the package carries share/proj there; the Linux and macOS
+    # toolchains of this project's builds may be a distribution's PROJ, which
+    # has no data beside its library to fall back on.
+    if(WIN32)
+        set(_empty_proj "${CMAKE_CURRENT_BINARY_DIR}/cli_empty_proj")
+        file(MAKE_DIRECTORY "${_empty_proj}")
+        # Two tests with their names written out (tools/check_docs.py reads
+        # the names a document cites from the add_test lines).
+        set(_proj_fallback_pass
+            "crs id=EPSG:28356 name=\"GDA94 / MGA zone 56\" kind=\"projected\" units=metre.*dataset file=[^ ]*/mga56\\.asc kind=raster driver=AAIGrid crs=\"GDA94 / MGA zone 56 \\(EPSG:28356\\)\"")
+        add_test(NAME cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "PROJ_LIB=${_empty_proj}"
+                    ${KATANA_PROGRAM_katana_cli}
+                    -c "CRS SET EPSG:28356"
+                    -c "INFO ${PROJECT_SOURCE_DIR}/tests/data/proj_fallback/mga56.asc")
+        set_tests_properties(cli.proj_lib_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            PROPERTIES PASS_REGULAR_EXPRESSION "${_proj_fallback_pass}"
+                       FAIL_REGULAR_EXPRESSION "error")
+        add_test(NAME cli.proj_data_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "PROJ_DATA=${_empty_proj}"
+                    ${KATANA_PROGRAM_katana_cli}
+                    -c "CRS SET EPSG:28356"
+                    -c "INFO ${PROJECT_SOURCE_DIR}/tests/data/proj_fallback/mga56.asc")
+        set_tests_properties(cli.proj_data_naming_no_database_falls_back_on_the_proj_data_katana_carries
+            PROPERTIES PASS_REGULAR_EXPRESSION "${_proj_fallback_pass}"
+                       FAIL_REGULAR_EXPRESSION "error")
+    endif()
+endif()
+
+# SURVEY READ and SURVEY IMPORT on the hand-built Sokkia SDR33 file
+# tests/surveyio/data/sdr/traverse.sdr. READ: 40 records read and 7 skipped
+# (lines 33 to 39, deleted with "DD" and "DDDD"), 2 setups, 36 observations
+# (12 face 1 and face 2 records of 3), CP1 and CP2 keyed in, T1 and T2
+# observed, the CTRL and TRAV codes; 8 warnings: one at the first record
+# that states coordinates (8), since the header's coordinate order, option
+# 2, is read east first where no Sokkia file shows the order, and one for
+# each deleted record. IMPORT reduces it with the defaults and draws 4
+# points on LAYER, one undo step. Worked by hand: from CP1 (500000 E,
+# 5000000 N) oriented on CP2 due north at circle 0, T1 is at circle 90,
+# zenith 87 on both faces, the mean of its four slope distances 150.0015 m;
+# 150.0015 sin 87 = 149.7959282 m east, less the curvature and refraction
+# term (1 - k/2) V H / R with the reduction's own k = 0.13
+# (kDefaultRefractionCoefficient: the file's 0.14 is the field book's, for
+# its reduced views, and would move T1 by a micrometre) and R = 6371000 m:
+# 0.935 x 7.8505 x 149.7959 / 6371000 = 0.1726 mm, so 500149.7957556 E,
+# 5000000 N. From T1, its circle zeroed on CP1 (the azimuth back to CP1 is
+# 270), T2 at circle 90 is at azimuth 90 + 270 - 0 = 360, due north, zenith
+# 91, 80.001 m: 80.001 sin 91 = 79.9888155 m north, plus the same term,
+# 0.935 x 1.39622 x 79.98882 / 6371000 = 0.0164 mm (V is negative):
+# 5000079.9888319 N. LIST writes 12 significant digits, so the regexes hold
+# the easting to a micrometre and the northing to ten; without the curvature
+# and refraction term T1 would be at 500149.795928.
+if(KATANA_TEST_CLI)
+    set(_sdr "${PROJECT_SOURCE_DIR}/tests/surveyio/data/sdr/traverse.sdr")
+    add_test(NAME cli.survey_read_sokkia_sdr
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY READ \"${_sdr}\"" -c "STATUS")
+    set_tests_properties(cli.survey_read_sokkia_sdr PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "survey file=traverse\\.sdr format=sokkia-sdr parser=1\\.0 read=40 skipped=7 warnings=8[\r\n]+content setups=2 observations=36 points=2 unpositioned=2 features=2 control=0[\r\n]+declared crs=none epsg=none[\r\n]+warning record=8 text=\"the header's coordinate order option is 2, east-north-elevation, and the coordinates are read easting first[^\r\n]*check a known point\"[\r\n]+warning record=33 text=\"a deleted record \\(marked 'DD'\\), 01NM \\(instrument\\), is not imported\".*warning record=39 text=\"a deleted record \\(marked 'DDDD'\\), 13TS \\(note\\), is not imported\".*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_sokkia_sdr
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_sdr}\" LAYER survey/sdr"
+                -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.survey_import_sokkia_sdr PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=4 layer=survey/sdr .*layer=survey/sdr  at 500000,5000000[\r\n]+[^\r\n]+at 500000,5000100[\r\n]+[^\r\n]+at 500149\\.795756,5000000[\r\n]+[^\r\n]+at 500149\\.795756,5000079\\.98883[\r\n].*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# SURVEY IMPORT's reduction settings (survey_verbs.hpp, docs/survey.md "The
+# reduction settings of SURVEY IMPORT"): SET's items and a SETTINGS file,
+# both the settings' text form. The file is
+# tests/surveyio/data/sdr/traverse_without_coordinates.sdr - traverse.sdr
+# with its two 08 coordinate records taken out - so without control it
+# places nothing; FORWARD puts CP1 on the drawing at 500000 E 5000000 N
+# 100 Z (1 m due north of 500000,4999999), and control=CP1;drawing;fixed;...
+# holds it there. Worked by hand (the working is repeated, with the heights,
+# in tests/app/test_survey_verbs.cpp): setup CP1 is oriented on the 07's
+# azimuth 0 less its reading 0 on CP2, the backsight, which nothing else
+# places. CP2, four pointings of 100.006 m at zenith 89.36977 (face right
+# 270.63023), is H = 100.006 sin 89.36977 = 99.9999502 m due north less the
+# curvature and refraction term (1 - k/2) V H / R = 0.935 x 1.1000027 x
+# 99.99995 / 6371000 = 0.0161 mm, k = 0.13 and R = 6 371 000 m the
+# reduction's own: 5000099.9999340 N. T1 and T2 are where
+# cli.survey_import_sokkia_sdr has them, worked there: 500149.7957556 E
+# 5000000 N and 500149.7957556 E 5000079.9888319 N - T2's setup is oriented
+# on CP1 at 270 by the coordinates, as it was by the file's. CP1 itself is
+# the drawing's point and is not drawn again: 3 points. A job is numbered
+# with the next entity number (cad's newJobId), so the job numbers below
+# count what the lines before made. With
+# curvature_refraction=false the terms go: CP2 5000099.9999502 N, T1
+# 500000 + 150.0015 sin 87 = 500149.7959282 E, T2 5000079.9888155 N. LIST
+# writes 12 significant digits. Each refusal is followed by STATUS, which
+# must not run: katana_cli stops at the first failing line.
+if(KATANA_TEST_CLI)
+    set(_sdr_bare "${PROJECT_SOURCE_DIR}/tests/surveyio/data/sdr/traverse_without_coordinates.sdr")
+    set(_settings "${PROJECT_SOURCE_DIR}/tests/app/data/survey_settings")
+    set(_place_cp1 "FORWARD 500000,4999999,100 0 1 0 CP1")
+    # ';' separates a CMake list's items, so a control line's are written
+    # $<SEMICOLON> in a command (a '\;' reaches the program as it is); in a
+    # regex, where a ';' would make two regexes either of which passes the
+    # test, '.' stands for it.
+    set(_s "$<SEMICOLON>")
+    set(_hold_cp1 "control=CP1${_s}drawing${_s}fixed${_s}0${_s}fixed${_s}0${_s}fixed${_s}0")
+    set(_held_cp1 "setting key=control value=CP1.drawing.fixed.0.fixed.0.fixed.0[\r\n]")
+    set(_held_points "layer=0  at 500000,5000000[\r\n]+[^\r\n]+layer=survey/points  at 500000,5000099\\.99993[\r\n]+[^\r\n]+at 500149\\.795756,5000000[\r\n]+[^\r\n]+at 500149\\.795756,5000079\\.98883[\r\n]")
+    # The file alone first: it places nothing. The three reduction warnings
+    # of the held import are the humidity, the atmospheric correction and
+    # the orientation on the file's azimuth; CP1 is not among points "named
+    # with no coordinates", since the drawing gives it a position.
+    add_test(NAME cli.survey_import_holds_a_point_of_the_drawing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_sdr_bare}\""
+                -c "${_place_cp1}" -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_holds_a_point_of_the_drawing PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=0 .*settings file= set=1 differ=1[\r\n]+${_held_cp1}imported job=job-3 entities=3 layer=survey/points reduction_warnings=3[\r\n].*${_held_points}"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_takes_its_settings_from_a_file
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SETTINGS \"${_settings}/hold_cp1.txt\""
+                -c "LIST")
+    set_tests_properties(cli.survey_import_takes_its_settings_from_a_file PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "settings file=hold_cp1\\.txt set=0 differ=1[\r\n]+${_held_cp1}settings_warning text=\"line 8: setting 'later\\.setting' is not known to this version and was ignored\"[\r\n]+imported job=job-2 entities=3 .*${_held_points}"
+        FAIL_REGULAR_EXPRESSION "error")
+    add_test(NAME cli.survey_import_set_changes_a_key_the_settings_file_leaves
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SETTINGS \"${_settings}/hold_cp1.txt\" SET curvature_refraction=false"
+                -c "LIST")
+    set_tests_properties(cli.survey_import_set_changes_a_key_the_settings_file_leaves PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "settings file=hold_cp1\\.txt set=1 differ=2[\r\n]+setting key=curvature_refraction value=false[\r\n]+${_held_cp1}.*at 500000,5000099\\.99995[\r\n]+[^\r\n]+at 500149\\.795928,5000000[\r\n]+[^\r\n]+at 500149\\.795928,5000079\\.98882[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # Every refusal the options document, each in the words of the parser,
+    # the validation or the reduction that makes it. Named arguments, not a
+    # table: a list would split the control lines at their ';'.
+    function(katana_survey_refusal name options said)
+        add_test(NAME cli.survey_import_refuses_${name}
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    ${KATANA_PROGRAM_katana_cli} -c "${_place_cp1}"
+                    -c "SURVEY IMPORT \"${_sdr_bare}\" ${options}" -c "STATUS")
+        set_tests_properties(cli.survey_import_refuses_${name} PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: ${said}"
+            FAIL_REGULAR_EXPRESSION "Entities:|imported job")
+    endfunction()
+    katana_survey_refusal(an_unknown_setting "SET bogus=1"
+        "InvalidArgument: 'bogus' is not a reduction setting; the settings are atmospheric, .*, iterations\\.max, control \\[SET bogus=1\\]")
+    katana_survey_refusal(a_setting_that_is_not_a_number "SET refraction.k=abc"
+        "ParseFailure: line 2 of the reduction settings: 'abc' is not a number \\(refraction\\.k\\) \\[SET refraction\\.k=abc\\]")
+    katana_survey_refusal(a_setting_outside_its_range "SET refraction.k=2"
+        "InvalidArgument: the coefficient of refraction must lie between -1 and 1 \\[SET refraction\\.k=2\\]")
+    katana_survey_refusal(settings_from_a_newer_katana "SETTINGS \"${_settings}/newer_version.txt\""
+        "Unsupported: these reduction settings were written by a newer Katana \\(settings version 2\\); this one reads up to version 1 \\[SETTINGS [^\r\n]*newer_version\\.txt\\]")
+    katana_survey_refusal(a_settings_file_that_is_not_there "SETTINGS \"${_settings}/no such settings.txt\""
+        "FileImportFailure: the settings file cannot be read \\[[^\r\n]*no such settings\\.txt: ")
+    katana_survey_refusal(a_control_point_the_drawing_does_not_have
+        "SET control=CP9${_s}drawing${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0"
+        "NotFound: Control point CP9 is not on the drawing, so it cannot be held\\.")
+    katana_survey_refusal(a_control_point_the_file_gives_no_coordinates
+        "SET control=CP1${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0"
+        "NotFound: Control point CP1 is not a point with coordinates in the file, so it cannot be held\\.")
+    katana_survey_refusal(a_set_with_no_items "SET"
+        "InvalidArgument: SET needs at least one <key>=<value>; usage: ")
+    katana_survey_refusal(a_setting_given_twice "SET atmospheric=none atmospheric=auto"
+        "InvalidArgument: 'atmospheric' is given twice \\[SET atmospheric=auto\\]")
+    katana_survey_refusal(a_control_point_held_twice
+        "SET ${_hold_cp1} control=CP1${_s}drawing${_s}free${_s}0${_s}free${_s}0${_s}fixed${_s}0"
+        "InvalidArgument: control point 'CP1' is listed twice")
+    # CP1 drawn twice, 100 km apart: the reduction would hold whichever was
+    # drawn first, so the import refuses to hold it and names both places,
+    # to a tenth of a millimetre (cad::reduceForDrawing).
+    add_test(NAME cli.survey_import_refuses_a_point_the_drawing_has_at_two_places
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_place_cp1}"
+                -c "FORWARD 600000,4999999,100 0 1 0 CP1"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}" -c "STATUS")
+    set_tests_properties(cli.survey_import_refuses_a_point_the_drawing_has_at_two_places
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "error: InvalidArgument: Control point CP1 is on the drawing 2 times, at E 500000\\.0000 N 5000000\\.0000 Z 100\\.0000 and E 600000\\.0000 N 5000000\\.0000 Z 100\\.0000, so which one to hold is not known. rename or delete all but one\\."
+        FAIL_REGULAR_EXPRESSION "Entities:|imported job")
+    # After the import, where CP1 was held - the drawing's entity 1, the
+    # point FORWARD made - and what the adjustment made of the data: nothing
+    # adjusted and nothing rejected, as the defaults have it. A number is the
+    # shortest text that reads back exactly, so 5 000 000 is 5e+06.
+    add_test(NAME cli.survey_import_says_where_it_held_and_what_it_adjusted
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_place_cp1}"
+                -c "SURVEY IMPORT \"${_sdr_bare}\" SET ${_hold_cp1}")
+    set_tests_properties(cli.survey_import_says_where_it_held_and_what_it_adjusted PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-2 entities=3 layer=survey/points reduction_warnings=3[\r\n]+held id=CP1 from=drawing entity=1 northing=5e\\+06 easting=5e\\+05 height=100[\r\n]+reduction method=radiation adjustments=0 rejected=0[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A network, the import wizard's own fixture: two setups, on A and on B,
+    # each with a direction and a distance to the other and to P and Q. The
+    # network takes a setup's directions as angles from its backsight: 4
+    # angles and 6 distances, 10 observations; A and B held in plan, the
+    # unknowns are P and Q, 4; a redundancy of 6 (worked in
+    # tests/app/test_survey_verbs.cpp, which holds the variance factor and
+    # the global test to the reduction's own report).
+    add_test(NAME cli.survey_import_says_what_a_network_adjustment_made_of_the_data
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli}
+                -c "SURVEY IMPORT \"${PROJECT_SOURCE_DIR}/tests/qt_widgets/survey/data/network_gsi8.gsi\" SET adjustment.method=network control=A${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0 control=B${_s}file${_s}fixed${_s}0${_s}fixed${_s}0${_s}free${_s}0")
+    set_tests_properties(cli.survey_import_says_what_a_network_adjustment_made_of_the_data
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "reduction method=\"network, horizontal\" adjustments=1 rejected=[0-9]+[\r\n]+adjustment method=\"network least squares \\(horizontal\\)\" observations=10 unknowns=4 redundancy=6 variance_factor=[0-9][0-9.e+-]* global_test=(passed|failed) flagged=[0-9]+ rejected=[0-9]+[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
+    # CODES and LINEWORK (survey_verbs.hpp; docs/survey.md, "SURVEY IMPORT
+    # codes and strings what it draws") on a program with NO survey codes. The
+    # RTK job above draws its 5 points and nothing is asked of the job: the two
+    # records say why, each after the other - no survey codes, unless the line
+    # itself said off, which is said first. What a customisation then does with
+    # the same file is the three tests at the end of this file, through the
+    # program, and tests/app/test_survey_verbs.cpp (SurveyVerbs), in process.
+    #
+    # KATANA_BUILTIN_CUSTOMISATION=none is the seam (cad/customisation_host.hpp):
+    # the session starts through cad::startCustomisation and reads it, so these
+    # start with no customisation whatever the build compiled in. They were
+    # written before the session did - it then seeded from an older table and
+    # never read the variable - and held only where that table was empty.
+    add_test(NAME cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "SURVEY IMPORT \"${_fld_gnss}\""
+                -c "NEW" -c "SURVEY IMPORT \"${_fld_gnss}\" CODES off" -c "STATUS")
+    set_tests_properties(cli.survey_import_says_why_it_coded_nothing_and_takes_codes_off PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "imported job=job-1 entities=5 layer=survey/points [^\r\n]+[\r\n]+.*coded none reason=no-survey-codes[\r\n]+linework none reason=no-survey-codes[\r\n]+.*imported job=[^\r\n]+[\r\n]+.*coded none reason=off[\r\n]+linework none reason=no-survey-codes[\r\n]+.*Entities: 5 "
+        FAIL_REGULAR_EXPRESSION "error")
+    katana_survey_refusal(codes_that_are_neither_on_nor_off "CODES maybe"
+        "InvalidArgument: CODES takes on or off, and 'maybe' is neither. usage: ")
+    # LINEWORK (cad/linework_verbs.hpp; docs/survey_coding.md, "LINEWORK on the
+    # command line") through katana_cli, again with no survey codes: two
+    # points coded "KB ST" and "KB END", numbered 1 and 2, ten metres apart.
+    # Nothing selected, so the scope is the drawing: 2 entities, both points.
+    # No rule knows KB, and a control code alone makes a line when the run is
+    # asked for by name: one line of two points on their layer, noted as
+    # unstyled. PREVIEW says so and draws nothing; the run draws entity 3, a
+    # polyline 10 long. A SECOND run takes the 2 points and that line, finds
+    # the line the drawing already holds and draws nothing: the 2 points it
+    # runs through are left out as already drawn, 1 line, and the drawing is
+    # still 3 entities (it was 4, the same line twice, until the run was told
+    # to look). It is no undo step, so the one UNDO that follows takes the
+    # first run's line back, to the 2 points.
+    add_test(NAME cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 0,0" -c "POINT 10,0"
+                -c "SELECT 1" -c "PROP SET code \"KB ST\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET code \"KB END\" text" -c "PROP SET point 2 text"
+                -c "SELECT NONE" -c "LINEWORK PREVIEW" -c "LINEWORK" -c "LINEWORK" -c "LIST"
+                -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.linework_strings_points_by_their_control_codes_as_one_undo_step
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1 preview=yes[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+linework scope=drawing matched=3 considered=2 lines=0 unplaced=0 notes=1[\r\n]+left_out=2 reason=already-drawn lines=1[\r\n]+note kind=\"no rule for its code: nothing styles the line\" count=1[\r\n]+3 entities[\r\n]+.*Polyline +layer=0 +vertices=2[^\r\n]*length=10[^0-9.].*Entities: 2 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # SURVEY IMPORT and LINEWORK on a program that HAS survey codes: the
+    # hand-written fixture tests/data/field_codes/test_field_codes, named as
+    # the built-in of the run through the seam, and the RTK job gnss.fld above.
+    # Every value below is worked out from those two files, by hand. (The
+    # fixture is not beside the three of tests/data/customisation: the window's
+    # headless checks load every file of that folder and pin what three hold.)
+    #
+    # The customisation: one linestyle, "FIELD Kerb", no symbol, and three
+    # rules - KB* a LINE on FIELD KERB in that linestyle, EB* a line, CTRL a
+    # point code - so the session says 1 and 3 as it starts, each noun by its
+    # count: ONE definition is "1 linestyle or symbol".
+    #
+    # The file, in the order its points are drawn (cli.survey_import_gnss_
+    # field_file): CM1 keyed in with no code at 500000,6200000; then the four
+    # shots coded KB with string number 1 - R001 at 500010,6200020, R002 at
+    # 500020,6200020, R003 at 500020,6200030, and, after the bare 20 that
+    # CLOSES the string, R004 at 500040,6200040, which begins KB 1 again and
+    # is alone in it.
+    #
+    # So an import that says nothing of codes or linework - both switches are
+    # on until a customisation says otherwise - draws the 5 points; codes the
+    # 4 that carry KB (all four matched, by KB*, onto the ONE layer FIELD KERB
+    # in the ONE style named after the linestyle); and strings the file's
+    # lines: the closed KB 1 through R001, R002 and R003, which makes no layer
+    # and no style of its own. Two things are in no line - CM1, which has no
+    # code, and the second KB 1, of one point, which is a fault and so the
+    # last of the reduction's warnings. The line is a right-angled triangle
+    # with legs of 10: 10 + 10 + sqrt(200) = 34.1421..., area 50. LIST shows
+    # the points on their layers and the line; ONE undo takes points, line,
+    # layers, style and job back, to an empty drawing. KATANA_CUSTOMISATION is
+    # unset for the run, so that a kept file of the caller's cannot start it.
+    # (Between the start-up line and `imported` stand the file's own records,
+    # as SURVEY READ gives them, and `settings`: docs/survey.md, "The reply".)
+    set(_field_codes
+        "${PROJECT_SOURCE_DIR}/tests/data/field_codes/test_field_codes.customisation.json")
+    set(_field_start "Customisation: test_field_codes, 1 linestyle or symbol and 3 survey code rules, built in")
+    set(_gnss_onto "SURVEY IMPORT \"${_fld_gnss}\" LAYER fieldwork")
+    add_test(NAME cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_gnss_onto}" -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(
+        cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "${_field_start}${_eol}.*imported job=job-1 entities=5 layer=fieldwork [^\r\n]+${_eol}.*reduction_warning text=\"1 string\\(s\\) of the file are in no line \\(fewer than two of its points have a position: 1\\)\\.\"${_eol}coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework lines=1 unplaced=2 layers=0 styles=0${_eol}(.*[\r\n])?6 entities${_eol}[^\r\n]*Point +layer=fieldwork +at 500000,6200000${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030${_eol}[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040${_eol}[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+    # ... and with both words off it is the import of before, though the
+    # codes are there: the 5 points on the layer the line named, no layer or
+    # line of a rule, and no warning about a string - nothing was strung.
+    add_test(NAME cli.survey_import_with_codes_and_linework_off_draws_its_points_alone
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_gnss_onto} CODES off LINEWORK off" -c "LIST"
+                -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.survey_import_with_codes_and_linework_off_draws_its_points_alone
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "${_field_start}${_eol}.*imported job=job-1 entities=5 layer=fieldwork [^\r\n]+${_eol}.*coded none reason=off${_eol}linework none reason=off${_eol}(.*[\r\n])?5 entities${_eol}[^\r\n]*Point +layer=fieldwork +at 500000,6200000${_eol}[^\r\n]*Point +layer=fieldwork +at 500010,6200020${_eol}[^\r\n]*Point +layer=fieldwork +at 500020,6200020${_eol}[^\r\n]*Point +layer=fieldwork +at 500020,6200030${_eol}[^\r\n]*Point +layer=fieldwork +at 500040,6200040${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error|FIELD KERB|Polyline|in no line")
+    # LINEWORK typed after an import that was told LINEWORK off. The points
+    # are coded (the first two records), and the verb then strings them BY
+    # THEIR CODES, not as the file strung them: the four shots of KB 1 in
+    # point order are one OPEN line of 4 vertices, R001 to R004 - 10 + 10 +
+    # sqrt(20*20 + 10*10) = 42.3606... long - on FIELD KERB, and CM1 has no
+    # code. The job took the first entity id for its number, so the points are
+    # entities 2 to 6 and the line is 7. Asked again, the verb finds the line
+    # the drawing holds and draws nothing: the 4 points it runs through are
+    # left out, 1 line. That second run is no undo step, so ONE undo takes the
+    # line back and leaves the import's 5 points. The scope is said, DRAWING,
+    # so that the test does not rest on what an import leaves selected.
+    add_test(NAME cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                ${KATANA_PROGRAM_katana_cli} -c "${_gnss_onto} LINEWORK off" -c "LINEWORK DRAWING"
+                -c "LINEWORK DRAWING" -c "LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.linework_typed_after_an_import_strings_its_points_by_their_codes_once
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "coded points=4 matched=4 unmatched_codes=0 layers=1 styles=1${_eol}linework none reason=off${_eol}(.*[\r\n])?linework scope=drawing matched=5 considered=5 lines=1 unplaced=1 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=4 vertices=4 closed=no layer=\"FIELD KERB\" entity=7${_eol}unplaced reason=\"no code\" points=1${_eol}linework scope=drawing matched=6 considered=5 lines=0 unplaced=1 notes=0${_eol}left_out=4 reason=already-drawn lines=1${_eol}unplaced reason=\"no code\" points=1${_eol}6 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=4 +open +length=42[.]3606[0-9]*${_eol}.*Entities: 5 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # LINEWORK's PROPERTY word, with no survey codes (seam none): two points
+    # ten metres apart, coded "KB ST" and "KB END" and numbered 1 and 2, but
+    # under the property "fcode", which is not among the names a code is
+    # looked for under. Asked with no property the verb finds no code on
+    # either point: 2 unplaced, "no code", no line. Asked PROPERTY fcode it
+    # reads them: one line of two points, noted as unstyled, and the run draws
+    # entity 3, a polyline 10 long.
+    add_test(NAME cli.linework_property_reads_the_codes_a_drawing_keeps_under_its_own_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 0,0" -c "POINT 10,0"
+                -c "SELECT 1" -c "PROP SET fcode \"KB ST\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET fcode \"KB END\" text" -c "PROP SET point 2 text"
+                -c "SELECT NONE" -c "LINEWORK PREVIEW" -c "LINEWORK PROPERTY fcode PREVIEW"
+                -c "LINEWORK PROPERTY fcode" -c "LIST")
+    set_tests_properties(cli.linework_property_reads_the_codes_a_drawing_keeps_under_its_own_name
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=2 considered=2 lines=0 unplaced=2 notes=0 preview=yes${_eol}unplaced reason=\"no code\" points=2${_eol}linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1 preview=yes${_eol}string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0${_eol}note kind=\"no rule for its code: nothing styles the line\" count=1${_eol}linework scope=drawing matched=2 considered=2 lines=1 unplaced=0 notes=1${_eol}string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3${_eol}note kind=\"no rule for its code: nothing styles the line\" count=1${_eol}3 entities${_eol}[^\r\n]*Point +layer=0 +at 0,0${_eol}[^\r\n]*Point +layer=0 +at 10,0${_eol}[^\r\n]*Polyline +layer=0 +vertices=2 +open +length=10"
+        FAIL_REGULAR_EXPRESSION "error")
+    # LINEWORK's CHORD word, on the fixture customisation (KB* is a line
+    # rule on FIELD KERB). A half circle of radius 10 about the origin: BC at
+    # (10,0), a point on it at (0,10), EC at (-10,0), coded under "fcode".
+    # At the verb's own 0.005 each quarter turn takes 25 chords (a chord of
+    # angle a strays 10 (1 - cos(a/2)) from the arc, 5 mm at 3.62 degrees, and
+    # 90 / 3.62 = 24.9), so the line has 1 + 25 + 25 = 51 vertices. At CHORD
+    # 0.35 a quarter takes 3 chords of 30 degrees (the sagitta is 0.341; two
+    # chords of 45 degrees stray 0.761), so 1 + 3 + 3 = 7 vertices, six
+    # chords of 2 * 10 * sin(15 degrees) = 5.17638 each: length 31.0582854.
+    # PREVIEW says both and draws nothing; the run draws entity 4.
+    add_test(NAME cli.linework_chord_sets_how_finely_a_curve_is_drawn
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=${_field_codes}"
+                ${KATANA_PROGRAM_katana_cli} -c "POINT 10,0" -c "POINT 0,10" -c "POINT -10,0"
+                -c "SELECT 1" -c "PROP SET fcode \"KB1 BC\" text" -c "PROP SET point 1 text"
+                -c "SELECT 2" -c "PROP SET fcode \"KB1\" text" -c "PROP SET point 2 text"
+                -c "SELECT 3" -c "PROP SET fcode \"KB1 EC\" text" -c "PROP SET point 3 text"
+                -c "SELECT NONE" -c "LINEWORK PROPERTY fcode PREVIEW"
+                -c "LINEWORK PROPERTY fcode CHORD 0.35 PREVIEW"
+                -c "LINEWORK PROPERTY fcode CHORD 0.35" -c "LIST")
+    set_tests_properties(cli.linework_chord_sets_how_finely_a_curve_is_drawn
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 preview=yes${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=51 closed=no layer=\"FIELD KERB\"${_eol}linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0 preview=yes${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=7 closed=no layer=\"FIELD KERB\"${_eol}linework scope=drawing matched=3 considered=3 lines=1 unplaced=0 notes=0${_eol}string name=KB1 key=KB\\* number=1 points=3 vertices=7 closed=no layer=\"FIELD KERB\" entity=4${_eol}4 entities${_eol}.*Polyline +layer=FIELD KERB +vertices=7 +open +length=31[.]05828[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# Katana Standard (docs/katana_standard.md), the customisation under
+# resources/customisation whose survey code keys are the NSW customisation's
+# and whose look is Katana's own, loaded by CUSTOMISE REPLACE into a session
+# whose built-in is none, so the run is the same on every machine.
+#
+# The first test imports the invented field file
+# tests/data/katana_standard/street_corner.fld. Every value is worked out by
+# hand from the file and from the library's codes (docs/katana_standard.md),
+# before the program was asked.
+#
+# The file has twenty entered coordinates, P01 to P20, in ten features:
+#   BT string 1, P01 to P04, then opcode 20 closing the string - a title
+#       boundary, the rectangle (330000,6250000) to (330020,6250030): 20 by
+#       30, so 100 round and 600 square;
+#   KB string 1, P05 to P07, along y = 6249990 from 330000 to 330024: a kerb
+#       top 24 long;
+#   FE string 1, P08 to P10, along x = 330030 from 6250005 to 6250015: a
+#       general fence 10 long;
+#   WM string 1, P11 to P13, along y = 6249980 from 330000 to 330024: a water
+#       main, 24 long;
+#   EU string 1, P14 and P15, 20 long: a buried power line;
+#   and five single points: PWSV (an isolating valve), PT04 (a tree trunk),
+#   PGUL (a gully pit), PBMK (a bench mark) and PWSW, which no code answers.
+# So the import draws 20 points and 5 lines. 19 points are coded, 1 is not (PWSW:
+# no key has it for a prefix, so only the bare `*` fits it, and that rule names
+# no layer, no linestyle and no symbol). The coded points make 9 layers - one
+# for each code but the unmatched - and 9 styles, one for each code: the style
+# of a line is named by its linestyle, of a point by its symbol, and the plain
+# kerb line is "Plain". 5 points are in no line: PWSW for having no rule, and
+# the valve, the trunk, the pit and the mark, which are point codes. The
+# entities are 2 to 21 (the job takes number 1) and the lines 22 to 26, in the
+# order of the strings.
+#
+# A prompt is an attribute with no value, so entity 12, the first point of the
+# main, carries its five prompts and the service word `utility.type=water`;
+# entity 15, the power line's first point, carries three prompts and
+# `utility.type=electricity`; entity 22, the boundary, carries nothing the key
+# applies, and entity 23, the kerb, the zone `Check Zone=3` that the key
+# applies. One undo takes the import back.
+if(KATANA_TEST_CLI)
+    set(_ks_json "${PROJECT_SOURCE_DIR}/resources/customisation/katana-standard.customisation.json")
+    set(_ks_fld "${PROJECT_SOURCE_DIR}/tests/data/katana_standard/street_corner.fld")
+    set(_ks_points
+        "cadastre/lots/title 330000,6250000" "cadastre/lots/title 330020,6250000"
+        "cadastre/lots/title 330020,6250030" "cadastre/lots/title 330000,6250030"
+        "drainage/kerbs/top 330000,6249990" "drainage/kerbs/top 330012,6249990"
+        "drainage/kerbs/top 330024,6249990"
+        "fences/fence/general 330030,6250005" "fences/fence/general 330030,6250010"
+        "fences/fence/general 330030,6250015"
+        "utilities/water/main 330000,6249980" "utilities/water/main 330012,6249980"
+        "utilities/water/main 330024,6249980"
+        "utilities/electricity/main 330000,6249970" "utilities/electricity/main 330020,6249970"
+        "utilities/water/fitting 330012,6249980" "vegetation/trees/trunk 330008,6250012"
+        "drainage/structures/pit 330006,6249991" "control/marks/level 330020,6250030"
+        "survey/points 330005,6250020")
+    set(_ks_points_regex "")
+    foreach(_item IN LISTS _ks_points)
+        string(REPLACE " " ";" _item "${_item}")
+        list(GET _item 0 _layer)
+        list(GET _item 1 _at)
+        string(APPEND _ks_points_regex "[^\r\n]*Point +layer=${_layer} +at ${_at}${_eol}")
+    endforeach()
+    set(_ks_lines_regex
+        "[^\r\n]*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=fences/fence/general +vertices=3 +open +length=10${_eol}[^\r\n]*Polyline +layer=utilities/water/main +vertices=3 +open +length=24${_eol}[^\r\n]*Polyline +layer=utilities/electricity/main +vertices=2 +open +length=20${_eol}")
+    # `weight` is stored and not yet applied (docs/katana_standard.md, "Pen weights"), so every style here keeps
+    # the entity's own 0.25 whatever the rules say (0.18 for a trunk, 0.50 for a boundary); this test is about the
+    # colour, the linestyle and the symbol, and its weight is any number so that the day weights are applied it
+    # does not fail for a reason that has nothing to do with them.
+    set(_ks_styles_regex
+        " *Gully Grate +linetype=continuous +weight=[0-9.]+ +colour=#00A800 +symbol=Gully Grate[^\r\n]*${_eol} *Level Benchmark +linetype=continuous +weight=[0-9.]+ +colour=#0999C9 +symbol=Level Benchmark[^\r\n]*${_eol} *Narrow Tree Trunk +linetype=continuous +weight=[0-9.]+ +colour=#5C8627 +symbol=Narrow Tree Trunk[^\r\n]*${_eol} *Plain +linetype=continuous +weight=[0-9.]+ +colour=#907368[^\r\n]*${_eol} *Post and Wire Fence +linetype=Post and Wire Fence +weight=[0-9.]+ +colour=#A18C65[^\r\n]*${_eol} *Surveyed Boundary +linetype=Surveyed Boundary +weight=[0-9.]+ +colour=#796EDA[^\r\n]*${_eol} *Underground Cable +linetype=Underground Cable +weight=[0-9.]+ +colour=#E07000[^\r\n]*${_eol} *Water Isolation Valve +linetype=continuous +weight=[0-9.]+ +colour=#2F80ED +symbol=Water Isolation Valve[^\r\n]*${_eol} *Water Supply Pipe +linetype=Water Supply Pipe +weight=[0-9.]+ +colour=#2F80ED[^\r\n]*${_eol}")
+    # A ';' in a regex would make two regexes either of which passes the test, so the reduction
+    # warning's own semicolon is written '.' below.
+    add_test(NAME cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE REPLACE \"${_ks_json}\""
+                -c "SURVEY IMPORT \"${_ks_fld}\"" -c "LIST"
+                -c "SELECT 12" -c "PROP" -c "SELECT 15" -c "PROP" -c "SELECT 22" -c "PROP"
+                -c "SELECT 23" -c "PROP"
+                -c "SELECT NONE" -c "STYLE LIST" -c "UNDO" -c "STATUS")
+    set_tests_properties(cli.katana_standard_imports_a_field_file_and_reports_the_mistyped_code
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "loaded file=[^\r\n]*katana-standard\\.customisation\\.json\"? name=\"Katana Standard\" definitions_added=221 definitions_replaced=0 codes_added=1103 codes_replaced=0 colours_added=28 colours_replaced=0[^\r\n]*${_eol}customisation name=\"Katana Standard\" origin=loaded kept=no definitions=221 codes=632 rules=1103 colours=28${_eol}survey file=street_corner\\.fld format=opcode-field-file parser=1\\.2 read=23 skipped=0 warnings=0${_eol}content setups=0 observations=0 points=20 unpositioned=0 features=10 control=0${_eol}declared crs=\"Local grid A\" epsg=none${_eol}.*imported job=job-1 entities=20 layer=survey/points reduction_warnings=2${_eol}.*reduction_warning text=\"No rule for the code\\(s\\): PWSW\\.\"${_eol}reduction_warning text=\"5 point\\(s\\) are in no line \\(no rule for its code and no control code: 1. its code is a point code: 4\\)\\.\"${_eol}coded points=20 matched=19 unmatched_codes=1 layers=9 styles=9${_eol}unmatched_code text=PWSW${_eol}linework lines=5 unplaced=5 layers=0 styles=0${_eol}25 entities${_eol}${_ks_points_regex}${_ks_lines_regex}1 selected${_eol} *12: Condition= \\(text\\) Depth \\(m\\)= \\(text\\) Diameter \\(mm\\)= \\(text\\) Material= \\(text\\) Owner= \\(text\\) code=WM \\(text\\) [^\r\n]*utility\\.type=water \\(text\\)${_eol}1 selected${_eol} *15: Condition= \\(text\\) Depth \\(m\\)= \\(text\\) Owner= \\(text\\) code=EU \\(text\\) [^\r\n]*utility\\.type=electricity \\(text\\)${_eol}1 selected${_eol} *22: code=BT \\(text\\) elevations=24\\.1 24\\.35 25\\.02 24\\.88 \\(text\\) string=1 \\(text\\)${_eol}1 selected${_eol} *23: Check Zone=3 \\(text\\) code=KB \\(text\\) elevations=23\\.9 23\\.95 24\\.01 \\(text\\) string=1 \\(text\\)${_eol}0 selected${_eol}${_ks_styles_regex}1 undone${_eol}.*Entities: 0 "
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # CODE CHECK, the lint of the loaded codes. The library keeps one clean rule
+    # set per key, so the lint has nothing to report: 1103 is the number of
+    # rules tools/katana_standard/census.py counts in the file, and "no
+    # problems" is what tools/katana_standard/parity.py finds when it reads the
+    # file for the same eleven kinds of fault (`candidate_defects total=0`). One
+    # duplicate, shadowed or unresolved rule and the reply is a count of errors
+    # and warnings instead.
+    add_test(NAME cli.katana_standard_code_check_finds_no_problem
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE REPLACE \"${_ks_json}\"" -c "CODE CHECK")
+    set_tests_properties(cli.katana_standard_code_check_finds_no_problem
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "customisation name=\"Katana Standard\" origin=loaded kept=no definitions=221 codes=632 rules=1103 colours=28${_eol}.*1103 rules checked: no problems found"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # CONTROL WORDS. No field-file reader Katana has carries `ST`, `BC`, `CL`
+    # or `RECT` (the file strings by its own number and opcode 20), so these
+    # reach the linework as a code kept in a point's property - here "fcode",
+    # named by LINEWORK PROPERTY - as in cli.linework_chord_sets_how_finely_a_
+    # curve_is_drawn. Ten points, three strings, worked out by hand:
+    #   KB2, points 1 to 3 at (10,0), (0,10), (-10,0), coded "KB2 BC",
+    #       "KB2", "KB2 EC": a half circle of radius 10 about the origin. At
+    #       CHORD 0.35 a quarter turn takes 3 chords of 30 degrees (the sagitta
+    #       of a chord of angle a is 10 (1 - cos(a/2)): 0.341 for 30 degrees,
+    #       under 0.35; for two chords of 45 degrees, 0.761, over it), so the
+    #       line has 1 + 3 + 3 = 7 vertices and six chords of 2 * 10 *
+    #       sin(15 degrees) = 5.17638 each, a length of 31.0582854;
+    #   BU3, points 4 to 6 at (100,0), (110,0), (110,5), the third coded
+    #       "BU3 RECT": the rectangle with the side from the first to the
+    #       second, 10 long, reaching the third point, 5 from that side: 10 by 5,
+    #       so 4 vertices, closed, 30 round and 50 square;
+    #   BT4, points 7 to 10 at (0,50), (20,50), (20,80), (0,80), coded
+    #       "BT4 ST", "BT4", "BT4", "BT4 CL": the 20 by 30 rectangle closed
+    #       by CL, 4 vertices, 100 round and 600 square.
+    # The strings are in name order (BT4, BU3, KB2), so the lines are entities
+    # 11, 12 and 13. The layers are those of the codes: the title boundaries,
+    # the building walls and the kerb tops. BT, BU and KB are keys of the
+    # library, and `BC`, `ST` and `CL` are control words only after the key
+    # (the first token of a code is always the key).
+    set(_ks_controls "")
+    set(_ks_serial 0)
+    foreach(_spec IN ITEMS "10,0|KB2 BC" "0,10|KB2" "-10,0|KB2 EC"
+                           "100,0|BU3" "110,0|BU3" "110,5|BU3 RECT"
+                           "0,50|BT4 ST" "20,50|BT4" "20,80|BT4" "0,80|BT4 CL")
+        math(EXPR _ks_serial "${_ks_serial} + 1")
+        string(REPLACE "|" ";" _spec "${_spec}")
+        list(GET _spec 0 _at)
+        list(GET _spec 1 _code)
+        list(APPEND _ks_controls
+            -c "POINT ${_at}" -c "SELECT ${_ks_serial}"
+            -c "PROP SET fcode \"${_code}\" text" -c "PROP SET point ${_ks_serial} text")
+    endforeach()
+    add_test(NAME cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line
+        COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                "KATANA_BUILTIN_CUSTOMISATION=none"
+                ${KATANA_PROGRAM_katana_cli} -c "CUSTOMISE REPLACE \"${_ks_json}\"" ${_ks_controls}
+                -c "SELECT NONE" -c "LINEWORK PROPERTY fcode CHORD 0.35 PREVIEW"
+                -c "LINEWORK PROPERTY fcode CHORD 0.35" -c "LIST")
+    set_tests_properties(cli.katana_standard_strings_control_words_into_a_curve_a_rectangle_and_a_closed_line
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0 preview=yes${_eol}string name=BT4 key=BT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"?${_eol}string name=BU3 key=BU\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"?${_eol}string name=KB2 key=KB\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"?${_eol}linework scope=drawing matched=10 considered=10 lines=3 unplaced=0 notes=0${_eol}string name=BT4 key=BT\\* number=4 points=4 vertices=4 closed=yes layer=\"?cadastre/lots/title\"? entity=11${_eol}string name=BU3 key=BU\\* number=3 points=3 vertices=4 closed=yes layer=\"?buildings/outline/wall\"? entity=12${_eol}string name=KB2 key=KB\\* number=2 points=3 vertices=7 closed=no layer=\"?drainage/kerbs/top\"? entity=13${_eol}13 entities${_eol}.*Polyline +layer=cadastre/lots/title +vertices=4 +closed +length=100 +area=600${_eol}[^\r\n]*Polyline +layer=buildings/outline/wall +vertices=4 +closed +length=30 +area=50${_eol}[^\r\n]*Polyline +layer=drainage/kerbs/top +vertices=7 +open +length=31[.]05828[0-9]*"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
+# ---- road objects (docs/road_objects.md) ----
+# The ROADOBJECT verbs' cli.* tests, in their own file beside this one, so the
+# family's tests are kept with each other. Included here, where katana_cli and
+# the test variables are.
+if(KATANA_TEST_CLI)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/road_objects_cli.cmake")
+endif()
+# ---- end road objects ----
+# ---- road model (docs/road_design.md) ----
+# The road verbs' cli.* tests, in road_cli.cmake beside this one.
+if(KATANA_TEST_CLI)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/road_cli.cmake")
+endif()

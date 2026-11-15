@@ -18,7 +18,7 @@
 //!
 //! trust.rs promises that the trust root is a parameter and only the test programs pass a test
 //! key; the helper's library holds none, and the two test programs name the tests' own module of
-//! them (src/bin/). The key list is read from tests/update/test_key.hpp, as tests/update/
+//! them (src/bin/). The key list is read from tests/update/test_keys.txt, as tests/update/
 //! CMakeLists.txt reads it, so that there is one. Of the four programs the C++ check looks at, the
 //! helper is the one the port has written so far; katana, katana_cli and katana_mcp join the list
 //! when they are written in Rust.
@@ -38,12 +38,12 @@ use std::process::Command;
 use std::time::Duration;
 use support::{Ran, checkout, find_on_path, one_spaced, run, work_folder};
 
-// The 64-digit hexadecimal strings of tests/update/test_key.hpp: the two seeds and the two public
+// The 64-digit hexadecimal strings of tests/update/test_keys.txt: the two seeds and the two public
 // keys, read as tests/update/CMakeLists.txt reads them (every quoted run of lower-case hexadecimal
 // digits, those of 64 kept), and held to there being four.
 fn test_keys() -> String {
-    let header = std::fs::read_to_string(checkout().join("tests/update/test_key.hpp"))
-        .expect("tests/update/test_key.hpp");
+    let header = std::fs::read_to_string(checkout().join("tests/update/test_keys.txt"))
+        .expect("tests/update/test_keys.txt");
     let mut keys: Vec<&str> = Vec::new();
     for (at, _) in header.match_indices('"') {
         let rest = &header[at + 1..];
@@ -58,7 +58,7 @@ fn test_keys() -> String {
     assert_eq!(
         keys.len(),
         4,
-        "tests/update/test_key.hpp should hold four 64-digit keys (two seeds, two public keys); \
+        "tests/update/test_keys.txt should hold four 64-digit keys (two seeds, two public keys); \
          check_no_test_keys.cmake reads them from there"
     );
     keys.join(",")

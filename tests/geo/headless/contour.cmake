@@ -11,7 +11,7 @@
 # raster is a reference layer, no entity).
 add_test(NAME qt_contours_dialog_draws_contours_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=@terrainContours|contourInterval=1|?contourCommand|!contourRun|?contourReply|>LIST|>UNDO|>LIST"

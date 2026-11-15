@@ -9,7 +9,7 @@
 # one closed polyline. A typed UNDO takes the area away in one step.
 add_test(NAME qt_slope_analysis_dialog_draws_the_class_areas_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/geo/data/plane.asc"
         "-DDRIVE=@terrainSlope|slopeClasses=2,10|?slopeCommand|!slopeRun|?slopeReply|>LIST|>UNDO|>LIST"
