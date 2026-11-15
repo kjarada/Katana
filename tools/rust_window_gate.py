@@ -151,7 +151,15 @@
 #       has no Qt.
 #   (c) Times and scratch: seconds=<d>.<ddd> reads seconds=<s>, and
 #       katana-scratch/<pid>-<ns> reads katana-scratch/<process>, as in the
-#       cli gate (ctest_tree.SECONDS and SCRATCH say why).
+#       cli gate (ctest_tree.SECONDS and SCRATCH say why). Also, added after
+#       the first sound run (2026-11-15): a log line's leading UTC time
+#       (2026-11-15T02:55:19.862Z WARNING [command] ...) reads <time>, being
+#       the moment of the run (LOG_TIME); and the status bar's frame time,
+#       "drawn 0.5 ms" with or without "(kept, 0.1 ms)", reads "drawn <ms>",
+#       being a measured time, and "kept" saying only whether the toolkit
+#       painted the view once more from its kept picture - Qt paints on
+#       update(), egui every frame (FRAME_TIME). The count before it ("Plan
+#       21") is still compared.
 #   (d) Pixel measures that two toolkits' antialiasing and text metrics make
 #       differ even with the geometry the same (PIXEL_MEASURES). The list
 #       starts empty: a field is added only when a run shows it differing,
@@ -399,6 +407,10 @@ QT_LINES = (
 # expected first, added with the run that shows it.
 PIXEL_MEASURES = []
 
+# (c), the two added to ctest_tree's: a log line's UTC time, and the frame time.
+LOG_TIME = re.compile(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z(?= [A-Z]+ \[)', re.M)
+FRAME_TIME = re.compile(r'drawn [0-9]+(?:\.[0-9]+)? ms(?: \(kept, [0-9]+(?:\.[0-9]+)? ms\))?')
+
 
 def is_absolute(path):
     return path.startswith('/') or re.match(r'[A-Za-z]:[/\\]', path) is not None
@@ -457,6 +469,8 @@ def normalised(data, paths):
         text = text.replace(path, placeholder)
     text = ctest_tree.SECONDS.sub('seconds=<s>', text)
     text = ctest_tree.SCRATCH.sub(r'katana-scratch\1<process>', text)
+    text = LOG_TIME.sub('<time>', text)
+    text = FRAME_TIME.sub('drawn <ms>', text)
     for pattern, replacement, _ in PIXEL_MEASURES:
         text = pattern.sub(replacement, text)
     return text.split('\n')

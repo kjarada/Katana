@@ -755,8 +755,25 @@ impl MainWindow {
         if let Some(dialog) = dialogs.alignments.as_mut() {
             dialog.ui(ui, exec);
         }
-        if let Some(editor) = dialogs.sheets.as_mut() {
-            editor.ui(ui, exec);
+        // The sheet editor is the C++'s second top-level window: drawn while it is shown, over the
+        // whole screen in an area of its own - not in the room the main window's layout leaves,
+        // which by now is below the screen (its toolbar was grabbed at y 886 of 860).
+        if let Some(editor) = dialogs.sheets.as_mut()
+            && editor.is_visible()
+        {
+            let screen = ctx.content_rect();
+            egui::Area::new(egui::Id::new("katanaSheetEditorWindow"))
+                .order(egui::Order::Middle)
+                .fixed_pos(screen.min)
+                .movable(false)
+                .show(&ctx, |ui| {
+                    let mut window = ui.new_child(egui::UiBuilder::new().max_rect(screen));
+                    window.set_clip_rect(screen);
+                    window
+                        .painter()
+                        .rect_filled(screen, 0.0, crate::theme::palette::window().to_egui());
+                    editor.ui(&mut window, exec);
+                });
         }
         if let Some(dialog) = dialogs.ifc_import.as_mut() {
             dialog.ui(ui, exec);

@@ -911,13 +911,14 @@ impl DockTitleBar {
         }
         // The tools the bar hides are still its buttons, hidden as the C++'s were
         // (setVisible(false)): a press of one is refused as hidden (main.cpp's "--press: V's button
-        // B is hidden"), not as a button the bar does not have. Drawn invisible and sizeless.
+        // B is hidden"), not as a button the bar does not have. Drawn invisible and sizeless, in a
+        // child that takes no room in the bar: a scope_builder would move the bar's cursor back to
+        // its corner, and the dock's contents would start under it rather than under the bar.
         let hidden_at = Rect::from_min_size(layout.lead.min, Vec2::ZERO);
         for tool in self.tools.iter().filter(|tool| !tool.shown) {
             let button = tool.button.clone();
-            ui.scope_builder(UiBuilder::new().max_rect(hidden_at).invisible(), |ui| {
-                let _ = title_bar_button(ui, hidden_at, &button, icons);
-            });
+            let mut hidden = ui.new_child(UiBuilder::new().max_rect(hidden_at).invisible());
+            let _ = title_bar_button(&mut hidden, hidden_at, &button, icons);
         }
         for (which, at) in &layout.buttons {
             let button = self.window_button(*which, facts);

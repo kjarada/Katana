@@ -2385,10 +2385,11 @@ mod definition_editor {
                 let _ = alone.ui(&ctx, &mut host);
             })
             .expect("the manager is drawn");
+        // Its own name: only the window's workbench names its copy styleManagerDialog.
         let door = |name: &str| {
             harness
                 .snapshot()
-                .control(STYLES, name)
+                .control(katana_window::style_manager::STYLE_MANAGER, name)
                 .cloned()
                 .unwrap_or_else(|| panic!("{name} is drawn"))
         };

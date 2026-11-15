@@ -255,7 +255,7 @@ mod customisation_workbench {
             bench.trigger(name);
             bench.draw();
             assert!(
-                bench.harness.target_record(&drawn).is_some(),
+                bench.harness.target_record(&dialog).is_some(),
                 "{name}: the same one, shown again"
             );
         }

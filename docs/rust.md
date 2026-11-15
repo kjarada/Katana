@@ -63,7 +63,7 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 236 of 267 at its first sound run, its fix-up round in progress |
+| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 266 of 267 after its fix-up round, 265 with the C++'s streams (the two left are Qt's own pixel metrics, under Not done) |
 | 8-9 | not started |
 
 ### Step 1: the foundation crates
@@ -1144,6 +1144,47 @@ The fix-up round's main-window share (composition and logging) found:
   `editRedoMenu`), made from the history whenever they are asked for; the
   buttons were plain text buttons without them.
 
+The fix-up round ran four agents (the owner raised the limit to four
+mid-round): the main window and the driver (FX1), the dialogs and managers
+(FX2), the window's composition and logging (FX3, above), and the plan
+view's tools, the 3D view, annotation and online data (FX4). FX1's and
+FX2's findings are under Not done, "Found in the window gate's fix-up
+round". FX4 found:
+
+- **A click's answer is logged before the pointer step's record**: the
+  views' events waited for the next frame, where the C++'s signals logged
+  them during the click; eight tool tests differed only in that order.
+- **A 3D view framed before its first paint takes its size first**
+  (`zoom_extents_on` sizes the camera), where it fitted the aspect as
+  square: the window frames a view a surface import opened before any
+  paint. Worked by hand from the camera's framing: 435.4 at 328 by 447,
+  321.4 square, the C++'s 435.32.
+- **The Properties panel follows the drawing**, as the C++ window's
+  document listener refreshed it; nothing showed the selection before.
+
+The integration found three more:
+
+- **A control drawn hidden in a title bar takes no room in it.** FX3 drew
+  the bar's hidden tools in a `scope_builder`, which advances the bar's
+  cursor past its child: a zero-sized child at the bar's corner put the
+  dock's contents under the corner, and a 3D view took 598 points where
+  the bar leaves 574. They are drawn in a `new_child`, which allocates
+  nothing (the twin of `ViewLinks.AThreeDViewNotYetPaintedFramesTheSceneBeforeItZooms`
+  found it).
+- **The sheet editor is drawn as a window of its own** while it is shown,
+  over the screen in an area of its own: it was drawn in the room the main
+  window's layout left, below the screen, and the two tests that grab its
+  toolbar wrote nothing. A grab of a target that took no room now says so,
+  with the rectangle it recorded.
+- **The gate normalises two times** (its normalisation (c)): a log line's
+  UTC time, and the status bar's frame time with its "(kept, ...)",
+  which differ between two runs of the C++ itself.
+
+Evidence, 2026-11-15, after the fix-up round: cargo test 9,172 passed and
+1 failed (the maximise twin under Not done; 9,173 of 9,173 in the run
+before); the window gate 267 tests, 266 passed, 265 with the C++'s
+streams - left, the two pixel metrics under Not done.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -2081,9 +2122,20 @@ pin classifies every algorithm GDAL lists.
   backup of the schema-9 file, so the dump's name order put them the other
   way. Both programs name a backup by the time it is made; the cause is not
   found yet.
+- **The window gate's last two differences are Qt's own pixel metrics**:
+  at 125 % the 3D view's kind switcher's arrow inks rows 11 to 16 where
+  the C++ test expects 11 to 17 (its comment: Fusion draws the arrow into
+  a cached pixmap and scales it, which spreads it into one more row; the
+  Rust draws the shape at the device's scale, whose exact edges, 11.875 to
+  16.875, cover 11 to 16), and Undo's and Redo's arrows 40..49 where
+  Fusion's are 39..50; and the toolbars' natural widths along the top are
+  2 to 22 points off the C++'s. Matching them is drawing as Qt draws
+  (its pixmap scaling, its toolbar handle, spacing and size hints), not a
+  defect of either program; until then the 125 % test fails and the
+  toolbar-fit test passes with other numbers.
 - **One workspace twin fails now and then**:
   `view_chrome::a_maximised_view_fills_the_workspace_and_restore_gives_every_view_back_its_place`
-  failed in 2 of 6 runs at wave 3's integration ("view 2 is docked": the
+  failed in 2 of 6 runs at wave 3's integration, and in 1 of about 4 since ("view 2 is docked": the
   3D view had no place in the dock) and passed on its own, with the other
   workspace twins and in the whole run. The harness's clock is simulated,
   the tests run headless with no GPU, and the dock code keeps no state

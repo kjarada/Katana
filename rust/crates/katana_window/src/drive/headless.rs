@@ -357,6 +357,16 @@ impl Headless {
             whole.width(),
             whole.height(),
         );
+        // A target that took no room on the screen has no picture: said, with what it recorded,
+        // rather than an empty file that cannot be written.
+        if crop.width <= 0 || crop.height <= 0 {
+            return Err(format!(
+                "the window drew target {name} with no room to grab ({:?} on a {} x {} screen)",
+                target.rect,
+                whole.width(),
+                whole.height()
+            ));
+        }
         Ok(whole.copy(crop))
     }
 
