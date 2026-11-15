@@ -8,7 +8,7 @@
 
 use crate::canvas::{Path, RectF};
 
-use super::tool_icons::{STROKE, ToolInk, arc, polyline, pt, rectangle};
+use super::tool_icons::{FINE, STROKE, ToolInk, arc, polyline, pt, rectangle};
 
 /// The family's polyline: (3,18) (10,7) (21,14), vertices as nodes.
 fn base_polyline(ink: &mut ToolInk<'_>, nodes: bool) {
@@ -25,13 +25,13 @@ fn base_polyline(ink: &mut ToolInk<'_>, nodes: bool) {
 }
 
 fn plus(ink: &mut ToolInk<'_>, x: f64, y: f64) {
-    ink.line(x - 2.5, y, x + 2.5, y, true, 1.4);
-    ink.line(x, y - 2.5, x, y + 2.5, true, 1.4);
+    ink.line(x - 2.5, y, x + 2.5, y, true, STROKE);
+    ink.line(x, y - 2.5, x, y + 2.5, true, STROKE);
 }
 
 fn cross(ink: &mut ToolInk<'_>, x: f64, y: f64) {
-    ink.line(x - 2.2, y - 2.2, x + 2.2, y + 2.2, true, 1.4);
-    ink.line(x - 2.2, y + 2.2, x + 2.2, y - 2.2, true, 1.4);
+    ink.line(x - 2.2, y - 2.2, x + 2.2, y + 2.2, true, STROKE);
+    ink.line(x - 2.2, y + 2.2, x + 2.2, y - 2.2, true, STROKE);
 }
 
 pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
@@ -74,9 +74,9 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "draw.vertex.edit" {
         base_polyline(ink, true);
         // A table beside it: the Vertices panel.
-        ink.stroke(&rectangle(13.0, 16.0, 9.0, 6.0), true, 1.1);
-        ink.line(13.0, 19.0, 22.0, 19.0, true, 1.0);
-        ink.line(16.5, 16.0, 16.5, 22.0, true, 1.0);
+        ink.stroke(&rectangle(13.0, 16.0, 9.0, 6.0), true, FINE);
+        ink.line(13.0, 19.0, 22.0, 19.0, true, FINE);
+        ink.line(16.5, 16.0, 16.5, 22.0, true, FINE);
         return true;
     }
     if tool_id == "draw.vertex.straighten" {
@@ -156,7 +156,7 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     }
     if tool_id == "draw.vertex.height" {
         base_polyline(ink, true);
-        ink.line(10.0, 7.0, 10.0, 21.0, true, 1.1);
+        ink.line(10.0, 7.0, 10.0, 21.0, true, FINE);
         ink.label(15.5, 20.0, 7.5, "Z", true);
         return true;
     }
@@ -180,8 +180,8 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         );
         ink.node(3.0, 19.0, false);
         ink.node(21.0, 7.0, false);
-        ink.line(3.0, 19.0, 21.0, 19.0, false, 1.0);
-        ink.line(21.0, 19.0, 21.0, 7.0, false, 1.0);
+        ink.line(3.0, 19.0, 21.0, 19.0, false, FINE);
+        ink.line(21.0, 19.0, 21.0, 7.0, false, FINE);
         return true;
     }
     if tool_id == "draw.vertex.arc" {
@@ -271,7 +271,7 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
             STROKE,
         );
         for (x, y) in [(3.0, 19.0), (10.0, 11.0), (21.0, 14.0)] {
-            ink.line(x, y, x, y - 7.0, false, 1.0);
+            ink.line(x, y, x, y - 7.0, false, FINE);
             ink.node(x, y, false);
         }
         return true;
@@ -373,9 +373,9 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         let mut circle = Path::new();
         circle.add_ellipse(RectF::new(7.0, 8.0, 10.0, 10.0));
         ink.stroke(&circle, true, STROKE);
-        ink.line(2.0, 18.0, 22.0, 18.0, false, 1.0);
-        ink.line(4.0, 5.0, 13.0, 21.0, false, 1.0);
-        ink.line(20.0, 5.0, 11.0, 21.0, false, 1.0);
+        ink.line(2.0, 18.0, 22.0, 18.0, false, FINE);
+        ink.line(4.0, 5.0, 13.0, 21.0, false, FINE);
+        ink.line(20.0, 5.0, 11.0, 21.0, false, FINE);
         return true;
     }
     if tool_id == "draw.arc.sed" {

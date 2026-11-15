@@ -3,15 +3,15 @@
 //! the accent: the span a distance covers, the area filled, the angle's arc. They read at 16 px,
 //! so no mark is closer than a stroke to the next.
 
-use super::tool_icons::{STROKE, ToolInk, arc, circle, polyline, pt};
+use super::tool_icons::{FINE, STROKE, TINT, ToolInk, arc, circle, polyline, pt};
 
 pub fn paint_inquiry_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "inquiry.distance" {
         // Two picked points and the span between them, with the witness ticks a dimension has
         // at its ends.
         ink.line(5.0, 17.0, 19.0, 7.0, true, STROKE);
-        ink.line(3.3, 14.6, 6.7, 19.4, true, 1.2);
-        ink.line(17.3, 4.6, 20.7, 9.4, true, 1.2);
+        ink.line(3.3, 14.6, 6.7, 19.4, true, FINE);
+        ink.line(17.3, 4.6, 20.7, 9.4, true, FINE);
         ink.node(5.0, 17.0, false);
         ink.node(19.0, 7.0, false);
         return true;
@@ -22,7 +22,7 @@ pub fn paint_inquiry_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
             &[pt(4.0, 18.0), pt(7.0, 6.0), pt(19.0, 4.0), pt(20.0, 17.0)],
             true,
         );
-        ink.fill(&lot, true, 110);
+        ink.fill(&lot, true, TINT);
         ink.stroke(&lot, false, STROKE);
         return true;
     }

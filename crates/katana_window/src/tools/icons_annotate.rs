@@ -9,11 +9,11 @@
 
 use std::f64::consts::PI;
 
-use super::tool_icons::{STROKE, ToolInk, arc, circle, polyline, pt, rectangle};
+use super::tool_icons::{FINE, STROKE, ToolInk, arc, circle, polyline, pt, rectangle};
 
-/// Thinner than the dimension line, as on a drawing, but not the 1.1 of a construction line: a
-/// diagonal that thin anti-aliases away at 16 px.
-const EXTENSION_WIDTH: f64 = 1.3;
+/// Thinner than the dimension line, as on a drawing: the set's FINE, which weight_at holds at a
+/// pixel at 16 px, where the 1.1 of the old construction lines anti-aliased away.
+const EXTENSION_WIDTH: f64 = FINE;
 
 /// A filled arrowhead with its point at (x, y), pointing along (dx, dy), which need not be a unit
 /// vector.
@@ -51,22 +51,22 @@ fn paint_text(ink: &mut ToolInk<'_>) {
         STROKE,
     );
     ink.line(7.9, 12.0, 16.1, 12.0, true, STROKE);
-    ink.line(4.0, 21.0, 21.0, 21.0, false, 1.1);
+    ink.line(4.0, 21.0, 21.0, 21.0, false, FINE);
     ink.node(4.0, 21.0, false);
 }
 
 fn paint_multiline_text(ink: &mut ToolInk<'_>) {
     // Text's capital A, smaller, over two lines of text inside the frame of one block: several
     // lines that are one thing.
-    ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), false, 1.1);
+    ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), false, FINE);
     ink.stroke(
         &polyline(&[pt(6.0, 11.0), pt(9.5, 5.0), pt(13.0, 11.0)], false),
         true,
         STROKE,
     );
     ink.line(7.5, 8.8, 11.5, 8.8, true, STROKE);
-    ink.line(6.0, 14.5, 18.0, 14.5, false, 1.4);
-    ink.line(6.0, 18.0, 15.0, 18.0, false, 1.4);
+    ink.line(6.0, 14.5, 18.0, 14.5, false, STROKE);
+    ink.line(6.0, 18.0, 15.0, 18.0, false, STROKE);
 }
 
 fn paint_linear_dimension(ink: &mut ToolInk<'_>) {
@@ -156,8 +156,8 @@ fn paint_leader(ink: &mut ToolInk<'_>) {
     arrowhead(ink, TIP_X, TIP_Y, dx, dy);
     // Two lines of it, centred on the landing as the tool places a note; a third merged the
     // three into one block at 16 px.
-    ink.line(16.0, 7.0, 21.5, 7.0, false, 1.6);
-    ink.line(16.0, 11.0, 20.0, 11.0, false, 1.6);
+    ink.line(16.0, 7.0, 21.5, 7.0, false, STROKE);
+    ink.line(16.0, 11.0, 20.0, 11.0, false, STROKE);
 }
 
 fn paint_angular_dimension(ink: &mut ToolInk<'_>) {
@@ -232,8 +232,8 @@ fn paint_radial_dimension(ink: &mut ToolInk<'_>, diameter: bool) {
 fn paint_ordinate_dimension(ink: &mut ToolInk<'_>) {
     // The datum's two axes at the bottom left, a feature, and its leader rising to where the
     // value is written.
-    ink.line(3.0, 21.0, 21.0, 21.0, false, 1.1);
-    ink.line(3.0, 21.0, 3.0, 3.0, false, 1.1);
+    ink.line(3.0, 21.0, 21.0, 21.0, false, FINE);
+    ink.line(3.0, 21.0, 3.0, 3.0, false, FINE);
     ink.node(3.0, 21.0, false);
     ink.node(13.0, 16.0, false);
     ink.stroke(
@@ -309,8 +309,8 @@ fn paint_label(ink: &mut ToolInk<'_>) {
     // tool's icon.
     ink.node(5.0, 19.0, false);
     ink.stroke(&rectangle(9.0, 4.0, 12.5, 10.0), true, STROKE);
-    ink.line(11.5, 7.5, 18.5, 7.5, true, 1.6);
-    ink.line(11.5, 11.0, 16.5, 11.0, true, 1.6);
+    ink.line(11.5, 7.5, 18.5, 7.5, true, STROKE);
+    ink.line(11.5, 11.0, 16.5, 11.0, true, STROKE);
 }
 
 // ---- the preset leaders (annotate_leader_presets) ----------------------------------------------
@@ -382,9 +382,9 @@ fn paint_cut_fill_leader(ink: &mut ToolInk<'_>) {
         EXTENSION_WIDTH,
     );
     preset_leader(ink, 5.0, 19.5, 10.5, 5.5, 12.5);
-    ink.line(15.5, 2.5, 15.5, 6.5, true, 1.4);
+    ink.line(15.5, 2.5, 15.5, 6.5, true, STROKE);
     arrowhead(ink, 15.5, 10.5, 0.0, 1.0);
-    ink.line(20.5, 10.5, 20.5, 6.5, true, 1.4);
+    ink.line(20.5, 10.5, 20.5, 6.5, true, STROKE);
     arrowhead(ink, 20.5, 2.5, 0.0, -1.0);
 }
 

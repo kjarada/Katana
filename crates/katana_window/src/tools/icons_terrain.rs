@@ -5,7 +5,7 @@
 
 use crate::canvas::PointF;
 
-use super::tool_icons::{STROKE, ToolInk, polyline, pt, rectangle};
+use super::tool_icons::{STROKE, TINT, ToolInk, polyline, pt, rectangle};
 
 /// The corners of the TIN and its centre, on the 24-unit grid.
 const CORNERS: [PointF; 4] = [
@@ -32,7 +32,7 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         ink.fill(
             &polyline(&[CORNERS[0], CORNERS[3], CENTRE], true),
             true,
-            120,
+            TINT,
         );
         ink.line(9.0, 18.0, 15.0, 14.0, true, STROKE);
         return true;
@@ -55,26 +55,26 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         // The TIN with no centre yet, and the new vertex with its plus.
         draw_tin(ink, false);
         ink.dot(12.0, 12.0, 2.4, true);
-        ink.line(12.0, 6.5, 12.0, 9.0, true, 1.4);
-        ink.line(12.0, 15.0, 12.0, 17.5, true, 1.4);
-        ink.line(6.5, 12.0, 9.0, 12.0, true, 1.4);
-        ink.line(15.0, 12.0, 17.5, 12.0, true, 1.4);
+        ink.line(12.0, 6.5, 12.0, 9.0, true, STROKE);
+        ink.line(12.0, 15.0, 12.0, 17.5, true, STROKE);
+        ink.line(6.5, 12.0, 9.0, 12.0, true, STROKE);
+        ink.line(15.0, 12.0, 17.5, 12.0, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.deletepoint" {
         // The centre vertex, crossed out.
         draw_tin(ink, true);
-        ink.line(8.5, 8.5, 15.5, 15.5, true, 2.0);
-        ink.line(15.5, 8.5, 8.5, 15.5, true, 2.0);
+        ink.line(8.5, 8.5, 15.5, 15.5, true, STROKE);
+        ink.line(15.5, 8.5, 8.5, 15.5, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.movepoint" {
         // The vertex where it was, and an arrow in the accent to where it goes.
         draw_tin(ink, false);
         ink.dot(8.5, 13.5, 2.0, false);
-        ink.line(11.0, 12.8, 17.5, 10.2, true, 1.8);
-        ink.line(17.5, 10.2, 14.4, 9.6, true, 1.8);
-        ink.line(17.5, 10.2, 15.6, 12.7, true, 1.8);
+        ink.line(11.0, 12.8, 17.5, 10.2, true, STROKE);
+        ink.line(17.5, 10.2, 14.4, 9.6, true, STROKE);
+        ink.line(17.5, 10.2, 15.6, 12.7, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.deleteinside" {
@@ -92,7 +92,7 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "terrain.edit.breakline" {
         // A bold line across the TIN.
         draw_tin(ink, true);
-        ink.line(3.0, 13.0, 21.0, 9.0, true, 2.6);
+        ink.line(3.0, 13.0, 21.0, 9.0, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.boundary" {
@@ -112,7 +112,7 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "terrain.edit.hole" {
         // The TIN with a void cut in it, the void's rim in the accent.
         draw_tin(ink, false);
-        ink.fill(&rectangle(9.0, 9.0, 6.0, 6.0), true, 70);
+        ink.fill(&rectangle(9.0, 9.0, 6.0, 6.0), true, TINT);
         ink.stroke(&rectangle(9.0, 9.0, 6.0, 6.0), true, STROKE);
         return true;
     }

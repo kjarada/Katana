@@ -9,7 +9,7 @@ use std::f64::consts::PI;
 
 use crate::canvas::Path;
 
-use super::tool_icons::{STROKE, ToolInk, arc, polyline, pt, rectangle};
+use super::tool_icons::{STROKE, TINT, ToolInk, arc, polyline, pt, rectangle};
 
 /// A chevron arrowhead with its tip at (x, y), pointing along `degrees` counter-clockwise from
 /// east as on paper (the painter's y points down).
@@ -146,21 +146,21 @@ fn paint_stretch(ink: &mut ToolInk<'_>) {
     arrow_head(ink, 16.0, 12.0, 0.0, 2.8);
 }
 
-/// Three rows of three: the original, bottom left, and its eight copies.
+/// Three rows of three on a 7-unit pitch: the original, bottom left, an outlined square, and its
+/// eight copies small square marks, bright. They were nine solid 4.5-unit blocks 2 units apart,
+/// the heaviest glyph of the Modify menu; outlined at that size their insides closed up at 20 px.
+/// Marks 3.6 units square leave 3.4 of air between them, which a menu's 16 px still shows.
 fn paint_array_rectangular(ink: &mut ToolInk<'_>) {
     for row in 0..3_i32 {
         for column in 0..3_i32 {
-            let original = row == 2 && column == 0;
-            ink.fill(
-                &rectangle(
-                    3.5 + 6.5 * f64::from(column),
-                    3.5 + 6.5 * f64::from(row),
-                    4.5,
-                    4.5,
-                ),
-                !original,
-                255,
-            );
+            let x = 5.0 + 7.0 * f64::from(column);
+            let y = 5.0 + 7.0 * f64::from(row);
+            if row == 2 && column == 0 {
+                ink.fill(&rectangle(x - 2.2, y - 2.2, 4.4, 4.4), false, TINT);
+                ink.stroke(&rectangle(x - 2.2, y - 2.2, 4.4, 4.4), false, STROKE);
+            } else {
+                ink.fill(&rectangle(x - 1.8, y - 1.8, 3.6, 3.6), true, 255);
+            }
         }
     }
 }
@@ -173,7 +173,7 @@ fn paint_array_polar(ink: &mut ToolInk<'_>) {
         ink.dot(
             12.0 + 8.0 * angle.cos(),
             12.0 - 8.0 * angle.sin(),
-            2.4,
+            2.0,
             item != 0,
         );
     }

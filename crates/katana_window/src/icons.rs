@@ -7,17 +7,28 @@
 //! ```text
 //! * They are crisp at every size and on every HiDPI scale, because nothing is ever resampled -
 //!   a 20 px toolbar icon and a 40 px one at 200% are both painted directly.
-//! * They follow the theme. The neutral strokes take the palette's text colour and the accent
-//!   takes palette::accent(), so changing the theme recolours every icon; a bitmap set would
-//!   need redrawing per theme.
+//! * They follow the theme. The two tones are the palette's colours (icon_colours), so changing
+//!   the theme recolours every icon; a bitmap set would need redrawing per theme.
 //! * They cannot go missing. A resource path that is wrong at run time is a blank button; a
 //!   function that is wrong does not compile.
 //! ```
 //!
-//! The visual language is one thing, applied everywhere: a 1.7-unit stroke with round caps and
-//! joins, neutral for the object and ACCENT for the part the command acts on - the arrow of
-//! Import, the new geometry of a draw tool, the cut line of a section. An icon that needs a
-//! sentence to explain belongs in a menu, not on a toolbar.
+//! The visual language is one thing, applied everywhere (the design system of 2026-11-16): line
+//! drawings on the 24-unit grid with round caps and joins, in two weights only - STROKE, 1.5 px
+//! at a toolbar's 20 px, and FINE, 1 px, for detail inside a shape - held at those pixels at the
+//! smaller sizes a menu (16 px) and a title bar (14 px) show (tool_icons::weight_at). Areas take
+//! one light tint (TINT) under their outline, never a solid fill; solid marks are only the small
+//! ones a drawing has - a node, a dot, an arrowhead. No gradients, no shading.
+//!
+//! Two tones. Each mark is drawn in the QUIET tone (the object) or the BRIGHT one (the part the
+//! command acts on - the arrow of Import, the new geometry of a draw tool, the cut line of a
+//! section); the code calls the bright one "accent", its name from before. Which colours the two
+//! tones are is the mode's (icon_colours): at rest the secondary text colour and the text colour,
+//! so a toolbar is quiet and its icons still say what each command acts on; ACTIVE - the tool
+//! that runs, the toggle that is on - the text colour and the accent, the one place the accent
+//! is; disabled, both the disabled text colour. Until 2026-11-16 every icon's bright part was the
+//! accent blue at rest, and a toolbar of them was a field of blue in which the running tool did
+//! not stand out. An icon that needs a sentence to explain belongs in a menu, not on a toolbar.
 //!
 //! The application icon (the katana on its tile) is painted by the same code, which is what
 //! `katana_make_icons` writes out as resources/katana.ico for the executable's Windows resource.
@@ -41,12 +52,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::bim::road_object_icons::paint_road_object_icon;
 use crate::canvas::{
-    Brush, Canvas, Color, Image, LinearGradient, Path, Pen, PenCap, PenJoin, PenStyle, PointF,
-    RectF, RenderHint, Transform,
+    Brush, Canvas, Color, Image, Path, Pen, PenCap, PenJoin, PenStyle, PointF, RectF, RenderHint,
+    Transform,
 };
 use crate::theme::palette;
 use crate::tools::tool_icons::{
-    GRID, STROKE, ToolInk, circle, paint_tool_icon, polyline, pt, rectangle, start,
+    FINE, GRID, STROKE, TINT, ToolInk, circle, paint_tool_icon_weighted, polyline, pt, rectangle,
+    start, weight_at,
 };
 
 /// The application's icons, in their declaration order (icons.hpp).
@@ -728,13 +740,13 @@ fn draw_vector_glyph(ink: &mut ToolInk<'_>) {
 
 fn draw_raster_glyph(ink: &mut ToolInk<'_>) {
     ink.stroke(&rectangle(3.0, 8.0, 12.0, 12.0), false, STROKE);
-    ink.line(7.0, 8.0, 7.0, 20.0, false, 1.1);
-    ink.line(11.0, 8.0, 11.0, 20.0, false, 1.1);
-    ink.line(3.0, 12.0, 15.0, 12.0, false, 1.1);
-    ink.line(3.0, 16.0, 15.0, 16.0, false, 1.1);
-    ink.fill(&rectangle(3.0, 8.0, 4.0, 4.0), false, 110);
-    ink.fill(&rectangle(7.0, 12.0, 4.0, 4.0), false, 110);
-    ink.fill(&rectangle(11.0, 16.0, 4.0, 4.0), false, 110);
+    ink.line(7.0, 8.0, 7.0, 20.0, false, FINE);
+    ink.line(11.0, 8.0, 11.0, 20.0, false, FINE);
+    ink.line(3.0, 12.0, 15.0, 12.0, false, FINE);
+    ink.line(3.0, 16.0, 15.0, 16.0, false, FINE);
+    ink.fill(&rectangle(3.0, 8.0, 4.0, 4.0), false, TINT);
+    ink.fill(&rectangle(7.0, 12.0, 4.0, 4.0), false, TINT);
+    ink.fill(&rectangle(11.0, 16.0, 4.0, 4.0), false, TINT);
 }
 
 fn draw_cloud_glyph(ink: &mut ToolInk<'_>) {
@@ -778,7 +790,7 @@ fn draw_arrow_out(ink: &mut ToolInk<'_>) {
 /// A survey point: a ring with a dot at its centre, as a mark is drawn on a plan. In the accent
 /// for a point the command creates.
 fn draw_mark(ink: &mut ToolInk<'_>, x: f64, y: f64, accent: bool) {
-    ink.stroke(&circle(x, y, 2.2), accent, 1.3);
+    ink.stroke(&circle(x, y, 2.2), accent, FINE);
     ink.dot(x, y, 0.8, accent);
 }
 
@@ -796,14 +808,14 @@ fn draw_station(ink: &mut ToolInk<'_>, x: f64, y: f64) {
 
 /// Grid north above a mark: a thin line from `from` up to `to` with its head.
 fn draw_north(ink: &mut ToolInk<'_>, x: f64, from: f64, to: f64) {
-    ink.line(x, from, x, to, false, 1.1);
+    ink.line(x, from, x, to, false, FINE);
     ink.stroke(
         &polyline(
             &[pt(x - 1.7, to + 2.5), pt(x, to), pt(x + 1.7, to + 2.5)],
             false,
         ),
         false,
-        1.1,
+        FINE,
     );
 }
 
@@ -856,7 +868,7 @@ fn draw_pencil(ink: &mut ToolInk<'_>) {
 /// A label: a rounded note with its words, and its leader down to what it labels.
 fn draw_note(ink: &mut ToolInk<'_>, x: f64, y: f64, accent: bool) {
     ink.stroke(&rounded(x, y, 11.0, 7.0, 1.5), accent, STROKE);
-    ink.line(x + 2.5, y + 3.5, x + 8.5, y + 3.5, accent, 1.2);
+    ink.line(x + 2.5, y + 3.5, x + 8.5, y + 3.5, accent, FINE);
 }
 
 /// A capital A drawn in strokes, `height` tall with its foot at (x, bottom).
@@ -915,7 +927,7 @@ fn draw_orthographic_view(ink: &mut ToolInk<'_>, dx: f64, dy: f64) {
         cx + 5.0 * dy,
         cy + 5.0 * dx,
         true,
-        2.4,
+        STROKE,
     );
     let tip_x = 12.0 - 6.2 * dx;
     let tip_y = 12.0 - 6.2 * dy;
@@ -971,7 +983,7 @@ fn draw_isometric_view(ink: &mut ToolInk<'_>, dx: f64, dy: f64) {
         &[pt(12.0, 6.0), pt(17.5, 9.0), pt(12.0, 12.0), pt(6.5, 9.0)],
         true,
     );
-    ink.fill(&top, false, 70);
+    ink.fill(&top, false, TINT);
     ink.stroke(
         &polyline(
             &[
@@ -1006,7 +1018,8 @@ fn draw_isometric_view(ink: &mut ToolInk<'_>, dx: f64, dy: f64) {
 // ---- the icons ---------------------------------------------------------------------------------
 
 /// Paints `which` into `rect` with the given colours. Exposed so that the contact sheet and the
-/// tests can paint without going through the cache.
+/// tests can paint without going through the cache. `rect` is taken as the icon's size on screen
+/// for its weights (weight_at): right wherever a canvas pixel is a screen pixel.
 pub fn paint_icon(
     canvas: &mut dyn Canvas,
     which: Icon,
@@ -1014,12 +1027,25 @@ pub fn paint_icon(
     neutral: Color,
     accent: Color,
 ) {
+    paint_icon_weighted(canvas, which, rect, neutral, accent, weight_at(rect.width));
+}
+
+/// paint_icon with the strokes `weight` times as wide as drawn (weight_at): for a caller that
+/// knows the icon's size on screen, which `rect` in device pixels does not say.
+pub fn paint_icon_weighted(
+    canvas: &mut dyn Canvas,
+    which: Icon,
+    rect: RectF,
+    neutral: Color,
+    accent: Color,
+    weight: f64,
+) {
     canvas.save();
     canvas.set_render_hint(RenderHint::Antialiasing, true);
     canvas.translate(rect.x, rect.y);
     canvas.scale(rect.width / GRID, rect.height / GRID);
     {
-        let mut ink = ToolInk::new(canvas, neutral, accent);
+        let mut ink = ToolInk::new(canvas, neutral, accent).weighted(weight);
         let ink = &mut ink;
         match which {
             Icon::New => {
@@ -1074,21 +1100,11 @@ pub fn paint_icon(
                 draw_disk(ink, true);
             }
             Icon::SaveAs => {
+                // The disk, and the pencil every editing icon has (draw_pencil) writing on
+                // it: until 2026-11-16 a solid pencil of its own, the one filled glyph on
+                // the File toolbar.
                 draw_disk(ink, false);
-                ink.fill(
-                    &polyline(
-                        &[
-                            pt(10.5, 21.5),
-                            pt(11.5, 17.5),
-                            pt(18.5, 10.5),
-                            pt(21.5, 13.5),
-                            pt(14.5, 20.5),
-                        ],
-                        true,
-                    ),
-                    true,
-                    255,
-                );
+                draw_pencil(ink);
             }
             Icon::Import => {
                 draw_tray(ink);
@@ -1180,8 +1196,10 @@ pub fn paint_icon(
                     ],
                     true,
                 );
-                ink.fill(&arrow, true, 255);
-                ink.stroke(&arrow, false, STROKE);
+                // An outlined pointer with the set's tint inside, not a solid one: at rest
+                // it is as quiet as its neighbours, and active it is the accent's outline.
+                ink.fill(&arrow, true, TINT);
+                ink.stroke(&arrow, true, STROKE);
             }
             Icon::Point => {
                 ink.line(12.0, 3.0, 12.0, 8.0, false, STROKE);
@@ -1218,7 +1236,7 @@ pub fn paint_icon(
                 // The radius goes off at 45 degrees. Drawn horizontally it made the
                 // icon read as a minus sign in a ring.
                 ink.stroke(&circle(12.0, 12.0, 8.0), true, STROKE);
-                ink.line(12.0, 12.0, 17.66, 6.34, false, 1.1);
+                ink.line(12.0, 12.0, 17.66, 6.34, false, FINE);
                 ink.node(12.0, 12.0, false);
                 ink.node(17.66, 6.34, false);
             }
@@ -1296,38 +1314,31 @@ pub fn paint_icon(
             }
             Icon::Grid => {
                 ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), false, STROKE);
-                ink.line(9.0, 3.0, 9.0, 21.0, false, 1.1);
-                ink.line(15.0, 3.0, 15.0, 21.0, false, 1.1);
-                ink.line(3.0, 9.0, 21.0, 9.0, false, 1.1);
-                ink.line(3.0, 15.0, 21.0, 15.0, false, 1.1);
+                ink.line(9.0, 3.0, 9.0, 21.0, false, FINE);
+                ink.line(15.0, 3.0, 15.0, 21.0, false, FINE);
+                ink.line(3.0, 9.0, 21.0, 9.0, false, FINE);
+                ink.line(3.0, 15.0, 21.0, 15.0, false, FINE);
                 ink.dot(15.0, 9.0, 2.2, true);
             }
             Icon::Snap => {
-                // A horseshoe magnet, drawn as one thick stroke so the bend is a true
-                // semicircle, with the pole tips in the accent.
-                let mut magnet = start(7.5, 4.0);
-                magnet.line_to(pt(7.5, 13.5));
-                magnet.cubic_to(pt(7.5, 19.5), pt(16.5, 19.5), pt(16.5, 13.5));
-                magnet.line_to(pt(16.5, 4.0));
-                let canvas = ink.canvas();
-                canvas.set_brush(Brush::none());
-                canvas.set_pen(Pen::with(
-                    neutral,
-                    4.2,
-                    PenStyle::Solid,
-                    PenCap::Flat,
-                    PenJoin::Round,
-                ));
-                canvas.draw_path(&magnet);
-                canvas.set_pen(Pen::with(
-                    accent,
-                    4.2,
-                    PenStyle::Solid,
-                    PenCap::Flat,
-                    PenJoin::Bevel,
-                ));
-                canvas.draw_line(pt(7.5, 4.0), pt(7.5, 7.5));
-                canvas.draw_line(pt(16.5, 4.0), pt(16.5, 7.5));
+                // A horseshoe magnet in outline - the outer and inner curves of one bent
+                // bar, true semicircles about (12, 13) - and its two poles tinted and
+                // banded in the bright tone, where it pulls. It was one 4.2-unit stroke with
+                // a pen of its own, the heaviest glyph on the toolbar.
+                let mut magnet = start(5.0, 4.0);
+                magnet.line_to(pt(5.0, 13.0));
+                magnet.arc_to(RectF::new(5.0, 6.0, 14.0, 14.0), 180.0, 180.0);
+                magnet.line_to(pt(19.0, 4.0));
+                magnet.line_to(pt(14.0, 4.0));
+                magnet.line_to(pt(14.0, 13.0));
+                magnet.arc_to(RectF::new(10.0, 11.0, 4.0, 4.0), 0.0, -180.0);
+                magnet.line_to(pt(10.0, 4.0));
+                magnet.close_subpath();
+                ink.fill(&rectangle(5.0, 4.0, 5.0, 4.5), true, TINT);
+                ink.fill(&rectangle(14.0, 4.0, 5.0, 4.5), true, TINT);
+                ink.stroke(&magnet, false, STROKE);
+                ink.line(5.0, 8.5, 10.0, 8.5, true, STROKE);
+                ink.line(14.0, 8.5, 19.0, 8.5, true, STROKE);
             }
             Icon::Layers => {
                 ink.stroke(
@@ -1380,10 +1391,10 @@ pub fn paint_icon(
             }
             Icon::SurfaceFromRaster => {
                 ink.stroke(&rectangle(3.0, 3.0, 10.0, 10.0), false, STROKE);
-                ink.line(8.0, 3.0, 8.0, 13.0, false, 1.1);
-                ink.line(3.0, 8.0, 13.0, 8.0, false, 1.1);
-                ink.fill(&rectangle(3.0, 3.0, 5.0, 5.0), false, 110);
-                ink.fill(&rectangle(8.0, 8.0, 5.0, 5.0), false, 110);
+                ink.line(8.0, 3.0, 8.0, 13.0, false, FINE);
+                ink.line(3.0, 8.0, 13.0, 8.0, false, FINE);
+                ink.fill(&rectangle(3.0, 3.0, 5.0, 5.0), false, TINT);
+                ink.fill(&rectangle(8.0, 8.0, 5.0, 5.0), false, TINT);
                 ink.stroke(
                     &polyline(
                         &[
@@ -1444,7 +1455,7 @@ pub fn paint_icon(
                     false,
                     STROKE,
                 );
-                ink.line(3.0, 20.0, 21.0, 20.0, false, 1.1);
+                ink.line(3.0, 20.0, 21.0, 20.0, false, FINE);
                 ink.dashed(&polyline(&[pt(12.0, 3.5), pt(12.0, 20.0)], false), true);
             }
             Icon::SectionAlignment => {
@@ -1463,7 +1474,7 @@ pub fn paint_icon(
                     &[pt(5.5, 8.4), pt(8.5, 15.0), pt(15.5, 15.0), pt(18.5, 11.3)],
                     true,
                 );
-                ink.fill(&cut, true, 70);
+                ink.fill(&cut, true, TINT);
                 ink.line(3.0, 7.8, 21.0, 11.9, false, STROKE);
                 ink.stroke(
                     &polyline(
@@ -1473,7 +1484,7 @@ pub fn paint_icon(
                     true,
                     STROKE,
                 );
-                ink.line(3.0, 20.0, 21.0, 20.0, false, 1.1);
+                ink.line(3.0, 20.0, 21.0, 20.0, false, FINE);
             }
             Icon::CorridorSurface => {
                 let mut left = start(4.0, 21.0);
@@ -1482,9 +1493,9 @@ pub fn paint_icon(
                 right.quad_to(pt(12.0, 13.0), pt(21.0, 7.0));
                 ink.stroke(&left, false, STROKE);
                 ink.stroke(&right, false, STROKE);
-                ink.line(4.5, 17.0, 11.4, 17.6, true, 1.3);
-                ink.line(6.6, 11.6, 13.4, 13.4, true, 1.3);
-                ink.line(10.6, 6.6, 17.0, 9.6, true, 1.3);
+                ink.line(4.5, 17.0, 11.4, 17.6, true, FINE);
+                ink.line(6.6, 11.6, 13.4, 13.4, true, FINE);
+                ink.line(10.6, 6.6, 17.0, 9.6, true, FINE);
             }
             Icon::ImportVector => {
                 draw_vector_glyph(ink);
@@ -1520,10 +1531,10 @@ pub fn paint_icon(
                 // An octree seen from above: a square quartered, one quarter quartered
                 // again, points in the cells - the structure COPC writes into the file.
                 ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), false, STROKE);
-                ink.line(12.0, 3.0, 12.0, 21.0, false, 1.1);
-                ink.line(3.0, 12.0, 21.0, 12.0, false, 1.1);
-                ink.line(16.5, 12.0, 16.5, 21.0, true, 1.1);
-                ink.line(12.0, 16.5, 21.0, 16.5, true, 1.1);
+                ink.line(12.0, 3.0, 12.0, 21.0, false, FINE);
+                ink.line(3.0, 12.0, 21.0, 12.0, false, FINE);
+                ink.line(16.5, 12.0, 16.5, 21.0, true, FINE);
+                ink.line(12.0, 16.5, 21.0, 16.5, true, FINE);
                 for p in [
                     pt(7.5, 7.5),
                     pt(16.5, 7.5),
@@ -1540,19 +1551,19 @@ pub fn paint_icon(
                 // A file's page, and the "i" of information beside it rather than on
                 // it, so the two never cross at 16 px.
                 ink.stroke(&rectangle(3.0, 3.0, 10.0, 13.0), false, STROKE);
-                ink.line(5.5, 7.0, 10.5, 7.0, false, 1.1);
-                ink.line(5.5, 10.0, 10.5, 10.0, false, 1.1);
-                ink.line(5.5, 13.0, 10.5, 13.0, false, 1.1);
+                ink.line(5.5, 7.0, 10.5, 7.0, false, FINE);
+                ink.line(5.5, 10.0, 10.5, 10.0, false, FINE);
+                ink.line(5.5, 13.0, 10.5, 13.0, false, FINE);
                 ink.stroke(&circle(17.5, 17.5, 4.0), true, STROKE);
                 ink.dot(17.5, 15.6, 0.9, true);
-                ink.line(17.5, 17.6, 17.5, 19.8, true, 1.4);
+                ink.line(17.5, 17.6, 17.5, 19.8, true, STROKE);
             }
             Icon::Processing => {
                 // A dataset in, the accent path of a run, and the result out: the
                 // same two boxes as any conversion, joined by the step between them.
                 ink.stroke(&rectangle(3.0, 3.0, 8.0, 8.0), false, STROKE);
-                ink.line(3.0, 7.0, 11.0, 7.0, false, 1.1);
-                ink.line(7.0, 3.0, 7.0, 11.0, false, 1.1);
+                ink.line(3.0, 7.0, 11.0, 7.0, false, FINE);
+                ink.line(7.0, 3.0, 7.0, 11.0, false, FINE);
                 ink.stroke(&rectangle(13.0, 13.0, 8.0, 8.0), false, STROKE);
                 ink.stroke(
                     &polyline(&[pt(7.0, 13.0), pt(7.0, 17.0), pt(12.0, 17.0)], false),
@@ -1565,14 +1576,16 @@ pub fn paint_icon(
                     STROKE,
                 );
             }
-            // ---- window buttons: neutral, and heavier than the toolbar set, because
-            // they are shown at 14 px on a title bar where 1.7 units is under a pixel.
+            // ---- window buttons: quiet only, in the set's STROKE. They were drawn heavier
+            // (2.0 to 2.2 units) for a title bar's 14 px; weight_at now holds every icon's
+            // strokes at 1.5 px there.
             Icon::Minimise => {
-                ink.line(6.0, 17.0, 18.0, 17.0, false, 2.2);
+                ink.line(6.0, 17.0, 18.0, 17.0, false, STROKE);
             }
             Icon::Maximise => {
-                ink.stroke(&rounded(5.0, 5.0, 14.0, 14.0, 1.0), false, 2.0);
-                ink.fill(&rectangle(5.0, 5.0, 14.0, 3.0), false, 255);
+                // The window and the line under its title bar: the bar was a solid band.
+                ink.stroke(&rounded(5.0, 5.0, 14.0, 14.0, 1.5), false, STROKE);
+                ink.line(5.0, 9.0, 19.0, 9.0, false, STROKE);
             }
             Icon::Restore => {
                 // Two windows, the front one whole and the back one showing only
@@ -1589,14 +1602,14 @@ pub fn paint_icon(
                         false,
                     ),
                     false,
-                    2.0,
+                    STROKE,
                 );
-                ink.stroke(&rounded(4.0, 9.0, 12.0, 11.0, 1.0), false, 2.0);
-                ink.fill(&rectangle(4.0, 9.0, 12.0, 2.6), false, 255);
+                ink.stroke(&rounded(4.0, 9.0, 12.0, 11.0, 1.5), false, STROKE);
+                ink.line(4.0, 12.5, 16.0, 12.5, false, STROKE);
             }
             Icon::Close => {
-                ink.line(6.5, 6.5, 17.5, 17.5, false, 2.2);
-                ink.line(17.5, 6.5, 6.5, 17.5, false, 2.2);
+                ink.line(6.5, 6.5, 17.5, 17.5, false, STROKE);
+                ink.line(17.5, 6.5, 6.5, 17.5, false, STROKE);
             }
             Icon::Float => {
                 // The main window open at one corner, and an arrow leaving through it.
@@ -1614,13 +1627,13 @@ pub fn paint_icon(
                         false,
                     ),
                     false,
-                    2.0,
+                    STROKE,
                 );
-                ink.line(10.0, 14.0, 20.0, 4.0, false, 2.0);
+                ink.line(10.0, 14.0, 20.0, 4.0, false, STROKE);
                 ink.stroke(
                     &polyline(&[pt(14.0, 4.0), pt(20.0, 4.0), pt(20.0, 10.0)], false),
                     false,
-                    2.0,
+                    STROKE,
                 );
             }
             Icon::Dock => {
@@ -1636,13 +1649,13 @@ pub fn paint_icon(
                         false,
                     ),
                     false,
-                    2.0,
+                    STROKE,
                 );
-                ink.line(20.0, 4.0, 10.0, 14.0, false, 2.0);
+                ink.line(20.0, 4.0, 10.0, 14.0, false, STROKE);
                 ink.stroke(
                     &polyline(&[pt(10.0, 8.0), pt(10.0, 14.0), pt(16.0, 14.0)], false),
                     false,
-                    2.0,
+                    STROKE,
                 );
             }
             // ---- panels
@@ -1703,7 +1716,7 @@ pub fn paint_icon(
                     &[pt(12.0, 3.0), pt(20.0, 7.5), pt(12.0, 12.0), pt(4.0, 7.5)],
                     true,
                 );
-                ink.fill(&top, true, 90);
+                ink.fill(&top, true, TINT);
                 ink.stroke(
                     &polyline(
                         &[
@@ -1731,7 +1744,7 @@ pub fn paint_icon(
                     STROKE,
                 );
                 for x in [8.5, 12.5, 16.5] {
-                    ink.line(x, 20.0, x, 18.3, false, 1.1);
+                    ink.line(x, 20.0, x, 18.3, false, FINE);
                 }
                 ink.stroke(
                     &polyline(
@@ -1843,7 +1856,7 @@ pub fn paint_icon(
             }
             Icon::ZoomTo => {
                 ink.stroke(&circle(10.0, 10.0, 6.5), false, STROKE);
-                ink.line(14.8, 14.8, 20.5, 20.5, false, 2.6);
+                ink.line(14.8, 14.8, 20.5, 20.5, false, STROKE);
                 ink.stroke(&rectangle(7.5, 7.5, 5.0, 5.0), true, STROKE);
             }
             Icon::Help => {
@@ -1874,7 +1887,7 @@ pub fn paint_icon(
                 // From north (90 degrees in Qt's anticlockwise sense) to the line,
                 // atan2(11, 13) = 40.2 degrees: 49.8 degrees clockwise.
                 sweep.arc_to(round, 90.0, -49.8);
-                ink.stroke(&sweep, true, 1.3);
+                ink.stroke(&sweep, true, FINE);
                 draw_mark(ink, 6.0, 18.0, false);
                 draw_mark(ink, 19.0, 7.0, false);
             }
@@ -1906,7 +1919,7 @@ pub fn paint_icon(
                     ],
                     true,
                 );
-                ink.fill(&parcel, true, 130);
+                ink.fill(&parcel, true, TINT);
                 ink.stroke(&parcel, false, STROKE);
                 for p in [
                     pt(3.0, 19.0),
@@ -1928,7 +1941,7 @@ pub fn paint_icon(
                 // The second ray's direction, atan2(13.6, 10) = 53.7 degrees.
                 sweep.arc_to(round, 0.0, 53.7);
                 ink.stroke(&sweep, true, STROKE);
-                ink.stroke(&circle(18.0, 8.0, 2.0), true, 1.3);
+                ink.stroke(&circle(18.0, 8.0, 2.0), true, FINE);
             }
             Icon::SurveyTraverse => {
                 // The legs, which the adjustment corrects, over the stations.
@@ -1948,25 +1961,25 @@ pub fn paint_icon(
                 // A level on its tripod sighting a staff: the sight line is the
                 // reading the book records.
                 ink.stroke(&rounded(2.5, 7.5, 7.0, 3.5, 0.8), false, STROKE);
-                ink.line(6.0, 11.0, 3.0, 21.0, false, 1.3);
-                ink.line(6.0, 11.0, 9.0, 21.0, false, 1.3);
+                ink.line(6.0, 11.0, 3.0, 21.0, false, FINE);
+                ink.line(6.0, 11.0, 9.0, 21.0, false, FINE);
                 // Solid: at 20 px a dashed sight line this short is a single dash.
                 ink.line(10.0, 9.25, 15.5, 9.25, true, STROKE);
                 ink.stroke(&rectangle(16.0, 3.0, 5.0, 18.0), false, STROKE);
                 for y in [6.0, 10.0, 14.0, 18.0] {
-                    ink.fill(&rectangle(16.0, y, 2.5, 2.0), false, 160);
+                    ink.fill(&rectangle(16.0, y, 2.5, 2.0), false, TINT);
                 }
             }
             Icon::SurveyConverter => {
                 // A globe and a grid, and the conversion between them both ways.
                 ink.stroke(&circle(7.5, 7.5, 5.0), false, STROKE);
-                ink.line(2.5, 7.5, 12.5, 7.5, false, 1.1);
+                ink.line(2.5, 7.5, 12.5, 7.5, false, FINE);
                 let mut meridian = Path::new();
                 meridian.add_ellipse(RectF::new(7.5 - 2.2, 7.5 - 5.0, 2.0 * 2.2, 2.0 * 5.0));
-                ink.stroke(&meridian, false, 1.1);
+                ink.stroke(&meridian, false, FINE);
                 ink.stroke(&rectangle(13.0, 13.0, 8.0, 8.0), false, STROKE);
-                ink.line(17.0, 13.0, 17.0, 21.0, false, 1.1);
-                ink.line(13.0, 17.0, 21.0, 17.0, false, 1.1);
+                ink.line(17.0, 13.0, 17.0, 21.0, false, FINE);
+                ink.line(13.0, 17.0, 21.0, 17.0, false, FINE);
                 let mut there = start(14.5, 4.5);
                 there.quad_to(pt(18.5, 4.5), pt(18.5, 10.5));
                 ink.stroke(&there, true, STROKE);
@@ -1989,7 +2002,7 @@ pub fn paint_icon(
                 // makes (the accent), beside a point already there.
                 ink.stroke(&rounded(2.5, 3.0, 8.5, 12.0, 0.8), false, STROKE);
                 for y in [6.5, 9.0, 11.5] {
-                    ink.line(4.5, y, 9.0, y, false, 1.1);
+                    ink.line(4.5, y, 9.0, y, false, FINE);
                 }
                 ink.line(12.5, 9.0, 17.6, 9.0, true, STROKE);
                 ink.stroke(
@@ -2013,28 +2026,28 @@ pub fn paint_icon(
                 );
                 ink.stroke(&rounded(13.0, 3.0, 8.5, 12.0, 0.8), false, STROKE);
                 for y in [6.5, 9.0, 11.5] {
-                    ink.line(15.0, y, 19.5, y, true, 1.1);
+                    ink.line(15.0, y, 19.5, y, true, FINE);
                 }
             }
             Icon::SurveyPointManager => {
                 // A table of points: a header row, a column of marks (the accent),
                 // and rows of values.
                 ink.stroke(&rounded(2.5, 3.5, 19.0, 17.0, 0.8), false, STROKE);
-                ink.line(2.5, 8.0, 21.5, 8.0, false, 1.1);
-                ink.line(9.0, 3.5, 9.0, 20.5, false, 1.1);
+                ink.line(2.5, 8.0, 21.5, 8.0, false, FINE);
+                ink.line(9.0, 3.5, 9.0, 20.5, false, FINE);
                 for y in [11.2, 14.7, 18.2] {
                     ink.dot(5.7, y, 1.1, true);
-                    ink.line(11.0, y, 19.5, y, false, 1.1);
+                    ink.line(11.0, y, 19.5, y, false, FINE);
                 }
             }
             Icon::SurveyPointReport => {
                 // A page listing points: a mark heading it, then lines of text.
                 ink.stroke(&rounded(4.0, 2.5, 16.0, 19.0, 0.8), false, STROKE);
                 draw_mark(ink, 8.0, 7.0, true);
-                ink.line(12.0, 6.0, 17.5, 6.0, false, 1.1);
-                ink.line(12.0, 8.5, 16.0, 8.5, false, 1.1);
+                ink.line(12.0, 6.0, 17.5, 6.0, false, FINE);
+                ink.line(12.0, 8.5, 16.0, 8.5, false, FINE);
                 for y in [12.5, 15.5, 18.5] {
-                    ink.line(6.5, y, 17.5, y, false, 1.1);
+                    ink.line(6.5, y, 17.5, y, false, FINE);
                 }
             }
             Icon::FormatStyles => {
@@ -2045,15 +2058,15 @@ pub fn paint_icon(
                 ink.dashed(&polyline(&[pt(3.0, 11.5), pt(21.0, 11.5)], false), false);
                 ink.dashed(&polyline(&[pt(3.0, 18.5), pt(9.8, 18.5)], false), true);
                 ink.dashed(&polyline(&[pt(14.2, 18.5), pt(21.0, 18.5)], false), true);
-                ink.stroke(&circle(12.0, 18.5, 2.2), true, 1.3);
+                ink.stroke(&circle(12.0, 18.5, 2.2), true, FINE);
             }
             Icon::FormatSymbols => {
                 // Four plan symbols in a grid, as the library shows them: a survey
                 // mark, a station, a cross and, in the accent, the one chosen.
                 draw_mark(ink, 6.5, 6.5, false);
                 draw_station(ink, 17.5, 7.0);
-                ink.line(4.0, 15.0, 9.0, 20.0, false, 1.3);
-                ink.line(9.0, 15.0, 4.0, 20.0, false, 1.3);
+                ink.line(4.0, 15.0, 9.0, 20.0, false, FINE);
+                ink.line(9.0, 15.0, 4.0, 20.0, false, FINE);
                 ink.stroke(
                     &polyline(
                         &[
@@ -2087,7 +2100,7 @@ pub fn paint_icon(
                     STROKE,
                 );
                 ink.dot(6.0, 8.0, 1.1, false);
-                ink.line(8.5, 8.0, 12.5, 8.0, false, 1.1);
+                ink.line(8.5, 8.0, 12.5, 8.0, false, FINE);
                 ink.stroke(
                     &polyline(&[pt(3.0, 20.0), pt(9.0, 16.5), pt(15.0, 19.0)], false),
                     true,
@@ -2107,8 +2120,8 @@ pub fn paint_icon(
                     false,
                     STROKE,
                 );
-                ink.line(7.4, 13.3, 5.8, 17.9, false, 1.1);
-                ink.line(10.4, 15.0, 8.8, 19.4, false, 1.1);
+                ink.line(7.4, 13.3, 5.8, 17.9, false, FINE);
+                ink.line(10.4, 15.0, 8.8, 19.4, false, FINE);
                 ink.dot(16.5, 19.5, 1.3, true);
                 ink.dot(20.0, 17.0, 1.3, true);
                 ink.dot(20.5, 21.0, 1.3, true);
@@ -2156,7 +2169,7 @@ pub fn paint_icon(
                 ink.stroke(
                     &polyline(&[pt(17.0, 13.8), pt(17.0, 16.5), pt(19.2, 17.8)], false),
                     true,
-                    1.4,
+                    STROKE,
                 );
             }
             Icon::Quit => {
@@ -2216,7 +2229,7 @@ pub fn paint_icon(
                         false,
                     ),
                     true,
-                    1.3,
+                    FINE,
                 );
             }
             Icon::Attributes => {
@@ -2249,8 +2262,8 @@ pub fn paint_icon(
             Icon::SnapIntersection => {
                 ink.line(3.0, 6.0, 21.0, 18.0, false, STROKE);
                 ink.line(3.0, 18.0, 21.0, 6.0, false, STROKE);
-                ink.line(9.0, 9.0, 15.0, 15.0, true, 2.2);
-                ink.line(9.0, 15.0, 15.0, 9.0, true, 2.2);
+                ink.line(9.0, 9.0, 15.0, 15.0, true, STROKE);
+                ink.line(9.0, 15.0, 15.0, 9.0, true, STROKE);
             }
             Icon::SnapPerpendicular => {
                 ink.line(3.0, 19.0, 21.0, 19.0, false, STROKE);
@@ -2289,51 +2302,53 @@ pub fn paint_icon(
                 ink.line(7.5, 12.0, 16.5, 12.0, true, STROKE);
             }
             Icon::ThinLines => {
-                ink.line(3.0, 7.0, 21.0, 7.0, false, 3.6);
-                ink.line(3.0, 13.0, 21.0, 13.0, false, 2.0);
-                ink.line(3.0, 18.5, 21.0, 18.5, true, 0.9);
+                // Three line weights, heavy to thin, the thin one bright: the one icon whose
+                // meaning is weight, so the one that draws other weights than STROKE and FINE.
+                ink.line(3.0, 7.0, 21.0, 7.0, false, 2.0 * STROKE);
+                ink.line(3.0, 13.0, 21.0, 13.0, false, STROKE);
+                ink.line(3.0, 18.5, 21.0, 18.5, true, FINE);
             }
             // ---- the viewport layouts: the main view in the accent ------------------------------
             Icon::LayoutSingle => {
-                ink.fill(&rounded(2.5, 4.0, 19.0, 16.0, 1.5), true, 80);
+                ink.fill(&rounded(2.5, 4.0, 19.0, 16.0, 1.5), true, TINT);
                 draw_frame(ink);
             }
             Icon::LayoutSplitVertical => {
-                ink.fill(&rectangle(2.5, 4.0, 9.5, 16.0), true, 80);
+                ink.fill(&rectangle(2.5, 4.0, 9.5, 16.0), true, TINT);
                 draw_frame(ink);
                 ink.line(12.0, 4.0, 12.0, 20.0, false, STROKE);
             }
             Icon::LayoutSplitHorizontal => {
-                ink.fill(&rectangle(2.5, 4.0, 19.0, 8.0), true, 80);
+                ink.fill(&rectangle(2.5, 4.0, 19.0, 8.0), true, TINT);
                 draw_frame(ink);
                 ink.line(2.5, 12.0, 21.5, 12.0, false, STROKE);
             }
             Icon::LayoutThreeLeft => {
-                ink.fill(&rectangle(2.5, 4.0, 9.5, 16.0), true, 80);
+                ink.fill(&rectangle(2.5, 4.0, 9.5, 16.0), true, TINT);
                 draw_frame(ink);
                 ink.line(12.0, 4.0, 12.0, 20.0, false, STROKE);
                 ink.line(12.0, 12.0, 21.5, 12.0, false, STROKE);
             }
             Icon::LayoutThreeTop => {
-                ink.fill(&rectangle(2.5, 4.0, 19.0, 8.0), true, 80);
+                ink.fill(&rectangle(2.5, 4.0, 19.0, 8.0), true, TINT);
                 draw_frame(ink);
                 ink.line(2.5, 12.0, 21.5, 12.0, false, STROKE);
                 ink.line(12.0, 12.0, 12.0, 20.0, false, STROKE);
             }
             Icon::LayoutQuad => {
-                ink.fill(&rectangle(2.5, 4.0, 9.5, 8.0), true, 80);
+                ink.fill(&rectangle(2.5, 4.0, 9.5, 8.0), true, TINT);
                 draw_frame(ink);
                 ink.line(12.0, 4.0, 12.0, 20.0, false, STROKE);
                 ink.line(2.5, 12.0, 21.5, 12.0, false, STROKE);
             }
             // ---- the standard 3D views ----------------------------------------------------------
             Icon::ViewTop => {
-                ink.fill(&rectangle(7.0, 7.0, 10.0, 10.0), true, 110);
+                ink.fill(&rectangle(7.0, 7.0, 10.0, 10.0), true, TINT);
                 ink.stroke(&rectangle(7.0, 7.0, 10.0, 10.0), true, STROKE);
                 ink.dot(12.0, 12.0, 1.3, false);
             }
             Icon::ViewBottom => {
-                ink.fill(&rectangle(7.0, 7.0, 10.0, 10.0), true, 45);
+                ink.fill(&rectangle(7.0, 7.0, 10.0, 10.0), true, TINT);
                 ink.dashed(&rectangle(7.0, 7.0, 10.0, 10.0), true);
             }
             Icon::ViewFront => {
@@ -2397,13 +2412,13 @@ pub fn paint_icon(
             }
             // ---- the window ----------------------------------------------------------------------
             Icon::Panels => {
-                ink.fill(&rectangle(2.5, 4.0, 6.0, 16.0), true, 90);
+                ink.fill(&rectangle(2.5, 4.0, 6.0, 16.0), true, TINT);
                 draw_frame(ink);
                 ink.line(8.5, 4.0, 8.5, 20.0, false, STROKE);
                 ink.line(17.0, 4.0, 17.0, 20.0, false, STROKE);
             }
             Icon::Toolbars => {
-                ink.fill(&rectangle(2.5, 4.0, 19.0, 5.0), true, 90);
+                ink.fill(&rectangle(2.5, 4.0, 19.0, 5.0), true, TINT);
                 draw_frame(ink);
                 ink.line(2.5, 9.0, 21.5, 9.0, false, STROKE);
                 for x in [6.0, 10.0, 14.0] {
@@ -2492,7 +2507,7 @@ pub fn paint_icon(
                 draw_note(ink, 11.5, 2.5, true);
             }
             Icon::ArrangeLeaders => {
-                ink.line(11.0, 2.0, 11.0, 22.0, true, 1.3);
+                ink.line(11.0, 2.0, 11.0, 22.0, true, FINE);
                 for y in [3.0, 10.0, 17.0] {
                     ink.stroke(&rounded(12.0, y, 9.5, 4.5, 1.0), false, STROKE);
                 }
@@ -2502,16 +2517,16 @@ pub fn paint_icon(
             }
             Icon::TextStyles => {
                 draw_letter_a(ink, 8.5, 20.0, 15.0, false);
-                ink.line(15.5, 7.0, 21.5, 7.0, true, 1.5);
-                ink.line(15.5, 12.0, 21.5, 12.0, true, 2.4);
-                ink.line(15.5, 17.0, 21.5, 17.0, true, 1.1);
+                ink.line(15.5, 7.0, 21.5, 7.0, true, STROKE);
+                ink.line(15.5, 12.0, 21.5, 12.0, true, STROKE);
+                ink.line(15.5, 17.0, 21.5, 17.0, true, FINE);
             }
             Icon::LabelStyles => {
                 draw_note(ink, 2.0, 4.0, false);
                 ink.line(4.5, 11.0, 3.0, 19.0, false, STROKE);
-                ink.line(15.5, 12.0, 21.5, 12.0, true, 1.5);
-                ink.line(15.5, 16.0, 21.5, 16.0, true, 2.4);
-                ink.line(15.5, 20.0, 21.5, 20.0, true, 1.1);
+                ink.line(15.5, 12.0, 21.5, 12.0, true, STROKE);
+                ink.line(15.5, 16.0, 21.5, 16.0, true, STROKE);
+                ink.line(15.5, 20.0, 21.5, 20.0, true, FINE);
             }
             Icon::DimensionStyles => {
                 ink.line(4.0, 21.0, 4.0, 8.0, false, STROKE);
@@ -2519,7 +2534,7 @@ pub fn paint_icon(
                 ink.line(4.0, 11.0, 20.0, 11.0, true, STROKE);
                 draw_head(ink, 4.0, 11.0, -1.0, 0.0);
                 draw_head(ink, 20.0, 11.0, 1.0, 0.0);
-                ink.line(9.0, 6.0, 15.0, 6.0, false, 2.2);
+                ink.line(9.0, 6.0, 15.0, 6.0, false, STROKE);
             }
             Icon::LayerVisible => {
                 let mut eye = start(2.5, 12.0);
@@ -2539,10 +2554,14 @@ pub fn paint_icon(
                 ink.dot(12.0, 16.0, 1.4, true);
             }
             Icon::LayerColour => {
-                ink.fill(&rounded(3.0, 3.0, 9.0, 9.0, 1.5), false, 200);
-                ink.fill(&rounded(12.0, 12.0, 9.0, 9.0, 1.5), true, 255);
-                ink.stroke(&rounded(12.0, 3.0, 9.0, 9.0, 1.5), false, STROKE);
-                ink.stroke(&rounded(3.0, 12.0, 9.0, 9.0, 1.5), true, STROKE);
+                // Four swatches, two of them tinted: a palette, in outline. The bright one
+                // was a solid square, the one filled block among the panel's column heads.
+                ink.fill(&rounded(3.0, 3.0, 8.0, 8.0, 1.5), false, TINT);
+                ink.fill(&rounded(13.0, 13.0, 8.0, 8.0, 1.5), true, TINT);
+                ink.stroke(&rounded(3.0, 3.0, 8.0, 8.0, 1.5), false, STROKE);
+                ink.stroke(&rounded(13.0, 3.0, 8.0, 8.0, 1.5), false, STROKE);
+                ink.stroke(&rounded(3.0, 13.0, 8.0, 8.0, 1.5), false, STROKE);
+                ink.stroke(&rounded(13.0, 13.0, 8.0, 8.0, 1.5), true, STROKE);
             }
             Icon::ViewUnlinked => {
                 // Two links a gap apart: at 14 px the gap is two pixels, which is
@@ -2558,7 +2577,7 @@ pub fn paint_icon(
             Icon::ZoomIn | Icon::ZoomOut => {
                 // Zoom To's lens and handle, with the sign where its square was.
                 ink.stroke(&circle(10.0, 10.0, 6.5), false, STROKE);
-                ink.line(14.8, 14.8, 20.5, 20.5, false, 2.6);
+                ink.line(14.8, 14.8, 20.5, 20.5, false, STROKE);
                 ink.line(7.0, 10.0, 13.0, 10.0, true, STROKE);
                 if which == Icon::ZoomIn {
                     ink.line(10.0, 7.0, 10.0, 13.0, true, STROKE);
@@ -2568,7 +2587,7 @@ pub fn paint_icon(
                 // The selection's dashed box, as Select All draws it, under the lens.
                 ink.dashed(&rectangle(3.0, 3.0, 12.5, 12.5), true);
                 ink.stroke(&circle(15.0, 15.0, 4.6), false, STROKE);
-                ink.line(18.3, 18.3, 21.5, 21.5, false, 2.4);
+                ink.line(18.3, 18.3, 21.5, 21.5, false, STROKE);
             }
             Icon::Settings => {
                 // Three sliders, each knob somewhere else along its track, so that at
@@ -2597,7 +2616,7 @@ pub fn paint_icon(
                     &[pt(12.0, 3.0), pt(21.0, 7.5), pt(12.0, 12.0), pt(3.0, 7.5)],
                     true,
                 );
-                ink.fill(&top, true, 90);
+                ink.fill(&top, true, TINT);
                 ink.stroke(&top, true, STROKE);
                 ink.stroke(
                     &polyline(
@@ -2628,8 +2647,8 @@ pub fn paint_icon(
                 cut_side.line_to(pt(20.5, 20.5));
                 cut_side.line_to(pt(13.0, 20.5));
                 cut_side.cubic_to(pt(9.0, 14.0), pt(14.0, 10.0), pt(11.0, 3.5));
-                ink.fill(&fill_side, true, 110);
-                ink.fill(&cut_side, false, 45);
+                ink.fill(&fill_side, true, TINT);
+                ink.fill(&cut_side, false, TINT);
                 let mut meet = start(11.0, 3.5);
                 meet.cubic_to(pt(14.0, 10.0), pt(9.0, 14.0), pt(13.0, 20.5));
                 ink.stroke(&meet, true, STROKE);
@@ -2653,7 +2672,7 @@ pub fn paint_icon(
             | Icon::RoadFence
             | Icon::RoadLineMarking
             | Icon::RoadObjects => {
-                let _ = paint_road_object_icon(which, ink.canvas(), neutral, accent);
+                let _ = paint_road_object_icon(which, ink);
             }
             // ---- end road objects ----
             // ---- surface editing (docs/surface_editing.md) ----
@@ -2717,7 +2736,7 @@ pub fn paint_icon(
                 for x in [9.0, 15.0] {
                     let y = 15.0 - (x - 3.0) * 4.0 / 18.0;
                     ink.dot(x, y, 1.8, true);
-                    ink.line(x - 2.5, y - 2.5, x + 2.5, y + 2.5, true, 1.2);
+                    ink.line(x - 2.5, y - 2.5, x + 2.5, y + 2.5, true, FINE);
                 }
             }
             Icon::SurfaceDeleteLong => {
@@ -2735,14 +2754,14 @@ pub fn paint_icon(
             }
             Icon::SurfaceCombine => {
                 ink.stroke(&rectangle(3.0, 4.0, 18.0, 16.0), false, STROKE);
-                ink.fill(&rectangle(9.0, 9.0, 8.0, 7.0), true, 160);
+                ink.fill(&rectangle(9.0, 9.0, 8.0, 7.0), true, TINT);
                 ink.stroke(&rectangle(9.0, 9.0, 8.0, 7.0), true, STROKE);
             }
             Icon::SurfacesPanel => {
                 // Four vertices of a TIN and the triangles between them; the middle
                 // one filled in the accent, the row picked in the panel.
                 let picked = polyline(&[pt(9.0, 7.0), pt(16.0, 14.0), pt(7.0, 17.0)], true);
-                ink.fill(&picked, true, 90);
+                ink.fill(&picked, true, TINT);
                 ink.stroke(
                     &polyline(
                         &[
@@ -2790,7 +2809,7 @@ pub fn paint_icon(
                     ],
                     true,
                 );
-                ink.fill(&course, false, 90);
+                ink.fill(&course, false, TINT);
                 ink.stroke(&course, false, STROKE);
                 ink.stroke(
                     &polyline(&[pt(4.5, 13.0), pt(12.0, 11.0), pt(19.5, 13.0)], false),
@@ -2825,7 +2844,7 @@ pub fn paint_icon(
                     &[pt(12.0, 4.0), pt(20.0, 8.0), pt(12.0, 12.0), pt(4.0, 8.0)],
                     true,
                 );
-                ink.fill(&top, true, 110);
+                ink.fill(&top, true, TINT);
                 ink.stroke(&top, true, STROKE);
                 ink.stroke(
                     &polyline(
@@ -2855,7 +2874,7 @@ pub fn paint_icon(
                         true,
                     ),
                     true,
-                    120,
+                    TINT,
                 );
                 ink.stroke(
                     &polyline(
@@ -2865,9 +2884,9 @@ pub fn paint_icon(
                     false,
                     STROKE,
                 );
-                ink.line(9.0, 6.0, 17.0, 20.0, false, 1.1);
-                ink.line(5.5, 12.4, 19.1, 13.7, true, 1.1);
-                ink.line(7.5, 8.8, 20.3, 10.1, true, 1.1);
+                ink.line(9.0, 6.0, 17.0, 20.0, false, FINE);
+                ink.line(5.5, 12.4, 19.1, 13.7, true, FINE);
+                ink.line(7.5, 8.8, 20.3, 10.1, true, FINE);
             }
             Icon::Download => {
                 // The cloud is left open underneath, where the arrow comes out of it,
@@ -2905,14 +2924,13 @@ pub fn paint_application_icon(canvas: &mut dyn Canvas, size: u32) {
     // that size and proportions at every other.
     canvas.scale(size_f / 256.0, size_f / 256.0);
 
-    // The tile. Slate, a little lighter at the top, with a hairline rim so it holds its edge on a
-    // dark taskbar and a light desktop alike.
+    // The tile. Flat slate - the window's own dark, as every icon of the set is flat since
+    // 2026-11-16 (it was a gradient, lighter at the top) - with a hairline rim so it holds its
+    // edge on a dark taskbar and a light desktop alike. The mark's colours are its own, not the
+    // theme's: the icon is the same whatever theme the window is in.
     let mut tile = Path::new();
     tile.add_rounded_rect(RectF::new(8.0, 8.0, 240.0, 240.0), 54.0, 54.0);
-    let mut ground = LinearGradient::new(pt(0.0, 8.0), pt(0.0, 248.0));
-    ground.set_color_at(0.0, Color::rgb(0x2f, 0x37, 0x42));
-    ground.set_color_at(1.0, Color::rgb(0x14, 0x18, 0x1d));
-    canvas.fill_path(&tile, &Brush::linear(ground));
+    canvas.fill_path(&tile, &Brush::solid(Color::rgb(0x22, 0x27, 0x2e)));
 
     // A survey grid behind the blade, clipped to the tile: what the product is for, said quietly.
     // Dropped below 48 px, where it would only be noise.
@@ -2997,10 +3015,8 @@ pub fn paint_application_icon(canvas: &mut dyn Canvas, size: u32) {
         blade.line_to(*point);
     }
     blade.close_subpath();
-    let mut steel = LinearGradient::new(root, tip);
-    steel.set_color_at(0.0, Color::rgb(0xb4, 0xc0, 0xce));
-    steel.set_color_at(1.0, Color::rgb(0xf6, 0xf9, 0xfc));
-    canvas.fill_path(&blade, &Brush::linear(steel));
+    // Flat steel; the bright cutting edge below is what gives it its shine.
+    canvas.fill_path(&blade, &Brush::solid(Color::rgb(0xc9, 0xd2, 0xdc)));
     // The cutting edge, a brighter line along one side.
     canvas.set_pen(Pen::with(
         Color::rgba(255, 255, 255, 210),
@@ -3074,20 +3090,24 @@ pub fn application_icon(raster: &dyn Rasteriser) -> Vec<Image> {
 
 // ---- the icon set by name ----------------------------------------------------------------------
 
-/// How an icon is shown (QIcon::Mode, the two the window paints differently).
+/// How an icon is shown (QIcon::Mode, and the state of the button it is on).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum IconMode {
     #[default]
     Normal,
+    /// On a button whose tool runs or whose toggle is on (QIcon::On).
+    Active,
     Disabled,
 }
 
-/// The neutral and accent colours an icon is painted in (PaintedIconEngine::paint). Disabled is
-/// the only mode drawn differently: hover and checked are shown by the button's background, so
-/// that one icon serves a toolbar and a menu without the two disagreeing.
+/// The quiet and the bright tone an icon is painted in (see the module comment): at rest the
+/// secondary text colour and the text colour; active the text colour and the accent; disabled
+/// both the disabled text colour. Hover is shown by the button's background, so that one icon
+/// serves a toolbar and a menu without the two disagreeing.
 pub fn icon_colours(mode: IconMode) -> (Color, Color) {
     match mode {
-        IconMode::Normal => (palette::text(), palette::accent()),
+        IconMode::Normal => (palette::text_muted(), palette::text()),
+        IconMode::Active => (palette::text(), palette::accent()),
         IconMode::Disabled => (palette::text_disabled(), palette::text_disabled()),
     }
 }
@@ -3099,15 +3119,35 @@ pub fn is_named_icon(name: &str) -> bool {
 }
 
 /// Paints the icon named `name` (see the module comment) into `rect` in `mode`'s colours. False,
-/// painting nothing, for a name that is not in the set.
+/// painting nothing, for a name that is not in the set. `rect` is taken as the icon's size on
+/// screen; paint_named_icon_at says how many canvas pixels a screen pixel is.
 pub fn paint_named_icon(canvas: &mut dyn Canvas, name: &str, rect: RectF, mode: IconMode) -> bool {
+    paint_named_icon_at(canvas, name, rect, mode, 1.0)
+}
+
+/// paint_named_icon for a canvas whose pixels are `ratio` to the screen's (the device-pixel
+/// ratio when `rect` is in device pixels), so the weights are those of the icon's size on screen:
+/// a 16 px menu icon at 200 % is painted in 32 device pixels with a 16 px icon's weights.
+pub fn paint_named_icon_at(
+    canvas: &mut dyn Canvas,
+    name: &str,
+    rect: RectF,
+    mode: IconMode,
+    ratio: f64,
+) -> bool {
     let (neutral, accent) = icon_colours(mode);
+    let ratio = if ratio.is_finite() && ratio > 0.0 {
+        ratio
+    } else {
+        1.0
+    };
+    let weight = weight_at(rect.width / ratio);
     if let Some(which) = Icon::from_name(name) {
-        paint_icon(canvas, which, rect, neutral, accent);
+        paint_icon_weighted(canvas, which, rect, neutral, accent, weight);
         return true;
     }
     if name.contains('.') {
-        paint_tool_icon(canvas, name, rect, neutral, accent);
+        paint_tool_icon_weighted(canvas, name, rect, neutral, accent, weight);
         return true;
     }
     false
@@ -3171,7 +3211,7 @@ pub fn icon_image(
     let side = device_pixels(size * ratio);
     let mut image = raster.paint(side, side, 1.0, &mut |canvas: &mut dyn Canvas| {
         let bounds = RectF::new(0.0, 0.0, f64::from(side), f64::from(side));
-        paint_named_icon(canvas, name, bounds, mode);
+        paint_named_icon_at(canvas, name, bounds, mode, ratio);
     });
     image.set_device_pixel_ratio(ratio);
     Some(image)
@@ -3248,8 +3288,9 @@ pub fn texture(
     if !is_named_icon(name) {
         return None;
     }
-    let side = device_pixels(f64::from(size) * f64::from(ctx.pixels_per_point()));
-    let key = format!("icon {name} {side} {mode:?}");
+    let ratio = f64::from(ctx.pixels_per_point());
+    let side = device_pixels(f64::from(size) * ratio);
+    let key = format!("icon {name} {side} {ratio} {mode:?}");
     painted_texture(
         ctx,
         &key,
@@ -3258,7 +3299,7 @@ pub fn texture(
         1.0,
         &mut |canvas: &mut dyn Canvas| {
             let bounds = RectF::new(0.0, 0.0, f64::from(side), f64::from(side));
-            paint_named_icon(canvas, name, bounds, mode);
+            paint_named_icon_at(canvas, name, bounds, mode, ratio);
         },
     )
 }

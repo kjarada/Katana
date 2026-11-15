@@ -52,7 +52,7 @@ use crate::drive::registry::{
     take,
 };
 use crate::icons::{
-    IconMode, Rasteriser, device_pixels, device_rect, paint_named_icon, painted_texture,
+    IconMode, Rasteriser, device_pixels, device_rect, paint_named_icon_at, painted_texture,
 };
 use crate::shell::dialog::popup_menu;
 use crate::theme::palette;
@@ -472,12 +472,16 @@ fn paint_button_icon(canvas: &mut dyn Canvas, paint: &ButtonPaint) {
             match &paint.icon {
                 ButtonIcon::Solid => canvas.fill_rect(square, &Brush::solid(Color::WHITE)),
                 ButtonIcon::Named(name) => {
+                    // Checked is the button's tool running or its toggle on: the icon's bright
+                    // part takes the accent there and nowhere else (icons, the module comment).
                     let mode = if paint.state.disabled {
                         IconMode::Disabled
+                    } else if paint.state.checked {
+                        IconMode::Active
                     } else {
                         IconMode::Normal
                     };
-                    paint_named_icon(canvas, name, square, mode);
+                    paint_named_icon_at(canvas, name, square, mode, ratio);
                 }
                 _ => {}
             }

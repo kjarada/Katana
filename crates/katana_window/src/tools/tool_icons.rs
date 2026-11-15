@@ -2,12 +2,12 @@
 //! icon lives with its family - tools/icons_<family> paints the family's tools - so a tool is
 //! added, drawn and tested in its family's files without editing a shared table.
 //!
-//! The painting conventions are the application's own (icons): a 24-unit grid, a 1.7-unit stroke,
-//! a neutral tone for the object and the accent for what the command does to it. ToolInk carries
-//! them, and the application's own icons are painted with it too: the C++ kept a copy of it in
-//! icons.cpp ("this DUPLICATES icons.cpp's private Ink while that file is being changed by other
-//! work; merging the two into this header is a follow-up"), and the port is that follow-up - one
-//! ink, the same strokes.
+//! The painting conventions are the application's own (icons): a 24-unit grid, two stroke
+//! weights (STROKE and FINE), a quiet tone for the object and a bright one for what the command
+//! does to it. ToolInk carries them, and the application's own icons are painted with it too: the
+//! C++ kept a copy of it in icons.cpp ("this DUPLICATES icons.cpp's private Ink while that file is
+//! being changed by other work; merging the two into this header is a follow-up"), and the port is
+//! that follow-up - one ink, the same strokes.
 //!
 //! A tool's icon is reached by its id through the window's icon set (icons::paint_named_icon,
 //! icons::texture): the C++ toolIcon's QIcon is that set's entry for the id.
@@ -32,11 +32,38 @@ pub use super::icons_terrain::paint_terrain_edit_icon;
 /// The design grid: every coordinate of an icon is in these units, and the painter is scaled so
 /// that 24 of them fill whatever rectangle the icon is painted in.
 pub const GRID: f64 = 24.0;
-/// Stroke weight on that grid. 1.7 is the weight at which a 20 px toolbar icon still reads as a
-/// line drawing and a 16 px menu icon does not fill in; the common 2.0 of icon sets drawn for
-/// 24 px display closes up small counters (the label of Save, the inside of the magnet) when
-/// shown at 16.
-pub const STROKE: f64 = 1.7;
+/// The size the weights below are drawn for: a toolbar's 20 px icon (the design system of
+/// 2026-11-16: "1.5 px strokes on a 16/20 px grid").
+pub const DESIGN_PIXELS: f64 = 20.0;
+/// The one stroke weight of the set, on the grid: 1.5 px at the 20 px design size (1.5 x 24 / 20).
+/// Every outline, every arrow and every drawn line is this weight; an icon does not choose its
+/// own. The set had a dozen weights from 0.9 to 3.6 units before 2026-11-16, which is most of
+/// why it read as several sets.
+pub const STROKE: f64 = 1.8;
+/// The second weight, for detail inside a shape - a grid's cells, a page's lines of text, a
+/// radius under a curve: 1 px at the design size, two thirds of STROKE so that it is visibly the
+/// lesser line without fading out at a menu's 16 px.
+pub const FINE: f64 = 1.2;
+/// A tinted area (a face seen, the main view of a layout, a cut): the tone at this alpha out of
+/// 255. One tint for the whole set, light enough that the strokes stay the drawing - a line icon
+/// with a wash, never a filled glyph.
+pub const TINT: i32 = 64;
+/// The smallest size the weights are held at 1.5 px for; below it they stop thickening, so a
+/// 12 px icon is not drawn with strokes a fifth of its width.
+const SMALLEST_HELD: f64 = 12.0;
+
+/// How much thicker than drawn the strokes are at `logical_pixels` (the icon's size on screen in
+/// the window's own pixels, before the screen's scale): 1 at the design size and above, where the
+/// whole drawing scales; below it, enough that STROKE stays 1.5 px and FINE 1 px - at a menu's
+/// 16 px 1.25, at a title bar's 14 px 1.43. Scaling the weights with the icon instead made a
+/// menu's strokes 1.2 px and a title bar's 1.05: a lighter set beside the toolbar's.
+pub fn weight_at(logical_pixels: f64) -> f64 {
+    if logical_pixels.is_finite() && logical_pixels > 0.0 && logical_pixels < DESIGN_PIXELS {
+        DESIGN_PIXELS / logical_pixels.max(SMALLEST_HELD)
+    } else {
+        1.0
+    }
+}
 
 /// A pen and brush for each of the two tones, and the handful of marks every icon is built from.
 /// Keeping the marks here is what keeps the set consistent: a node is the same node on every
@@ -45,6 +72,8 @@ pub struct ToolInk<'a> {
     canvas: &'a mut dyn Canvas,
     neutral: Color,
     accent: Color,
+    /// What every stroke's width is multiplied by (weight_at).
+    weight: f64,
 }
 
 impl<'a> ToolInk<'a> {
@@ -53,18 +82,28 @@ impl<'a> ToolInk<'a> {
             canvas,
             neutral,
             accent,
+            weight: 1.0,
         }
+    }
+
+    /// The ink with its strokes `weight` times as wide as drawn (weight_at).
+    pub fn weighted(mut self, weight: f64) -> Self {
+        if weight.is_finite() && weight > 0.0 {
+            self.weight = weight;
+        }
+        self
     }
 
     fn tone(&self, accent: bool) -> Color {
         if accent { self.accent } else { self.neutral }
     }
 
-    /// The path stroked with round caps and joins, `width` grid units wide.
+    /// The path stroked with round caps and joins, `width` grid units wide at the design size
+    /// (STROKE or FINE; ThinLines alone shows other weights, since weight is its meaning).
     pub fn stroke(&mut self, path: &Path, accent: bool, width: f64) {
         let pen = Pen::with(
             self.tone(accent),
-            width,
+            width * self.weight,
             PenStyle::Solid,
             PenCap::Round,
             PenJoin::Round,
@@ -78,7 +117,7 @@ impl<'a> ToolInk<'a> {
     pub fn dashed(&mut self, path: &Path, accent: bool) {
         let pen = Pen::with(
             self.tone(accent),
-            STROKE,
+            STROKE * self.weight,
             PenStyle::Custom(vec![1.6, 1.4]),
             PenCap::Flat,
             PenJoin::Round,
@@ -227,17 +266,37 @@ pub fn paint_tool_icon(
     neutral: Color,
     accent: Color,
 ) {
+    paint_tool_icon_weighted(
+        canvas,
+        tool_id,
+        rect,
+        neutral,
+        accent,
+        weight_at(rect.width),
+    );
+}
+
+/// paint_tool_icon with the strokes `weight` times as wide as drawn (weight_at): for a caller
+/// that knows the icon's size on screen, which `rect` in device pixels does not say.
+pub fn paint_tool_icon_weighted(
+    canvas: &mut dyn Canvas,
+    tool_id: &str,
+    rect: RectF,
+    neutral: Color,
+    accent: Color,
+    weight: f64,
+) {
     canvas.save();
     canvas.set_render_hint(RenderHint::Antialiasing, true);
     canvas.translate(rect.x, rect.y);
     canvas.scale(rect.width / GRID, rect.height / GRID);
     {
-        let mut ink = ToolInk::new(canvas, neutral, accent);
+        let mut ink = ToolInk::new(canvas, neutral, accent).weighted(weight);
         if !paint_tool(tool_id, &mut ink) {
             // The initial of the last part of the id, in a frame: visibly a placeholder, never
             // mistaken for a finished icon.
             let leaf = tool_id.rfind('.').map_or(tool_id, |at| &tool_id[at + 1..]);
-            ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), false, 1.0);
+            ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), false, FINE);
             let initial: String = match leaf.chars().next() {
                 Some(first) => first.to_uppercase().collect(),
                 None => String::from("?"),

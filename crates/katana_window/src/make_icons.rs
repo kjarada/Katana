@@ -7,8 +7,9 @@
 //! katana.ico        the application icon, 16 to 256 px, for the Windows resource in katana.rc
 //!                   and for an installer
 //! katana.png        the 256 px icon, for a README or a store listing
-//! icon_sheet.png    every toolbar icon on the theme's own ground, large enough to judge - the
-//!                   way to review the set without launching the application
+//! icon_sheet.png    every icon on the theme's own ground, large enough to judge, then at 20 px
+//!                   at rest and active and at 16 px - the way to review the set without
+//!                   launching the application
 //! ```
 //!
 //! The .ico is COMMITTED (resources/katana.ico) rather than generated during the build.
@@ -25,7 +26,10 @@ use katana_core::path_text::path_to_utf8;
 use katana_core::{ErrorCode, Status};
 
 use crate::canvas::{Brush, Canvas, PointF, RectF, encode_png, write_png};
-use crate::icons::{Rasteriser, all_icons, application_icon_image, default_rasteriser, paint_icon};
+use crate::icons::{
+    IconMode, Rasteriser, all_icons, application_icon_image, default_rasteriser, icon_colours,
+    paint_icon,
+};
 use crate::theme::palette;
 
 /// The sizes katana.ico holds, 16 to 256 px.
@@ -85,28 +89,44 @@ pub fn write_ico(path: &Path, sizes: &[u32], raster: &dyn Rasteriser) -> Status 
     })
 }
 
-/// Every icon at 96 px, eight to a row, on the window colour, then the same icons at the 20 px
-/// they ship at in one row, then the application icon. Large, because the point is to look at
-/// them.
+/// Every icon at 96 px, eight to a row, on the window colour; then all of them at the sizes they
+/// ship at - 20 px at rest, 20 px active (a running tool, a toggle on) and a menu's 16 px - each
+/// wrapped in rows the sheet's width; then the application icon. Large, because the point is to
+/// look at them; the small rows because what reads at 96 does not always read at 20 or 16.
 pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
     const CELL: i32 = 120;
     const ICON: i32 = 96;
     const COLUMNS: i32 = 8;
+    const WIDTH: i32 = COLUMNS * CELL;
+    // The small rows: each size, its pitch, its mode.
+    const SMALL: [(i32, i32, IconMode); 3] = [
+        (20, 30, IconMode::Normal),
+        (20, 30, IconMode::Active),
+        (16, 24, IconMode::Normal),
+    ];
+    const MARGIN: i32 = 16;
     let icons = all_icons();
-    let rows = (icons.len().div_ceil(COLUMNS as usize) + 3) as i32;
+    let large_rows = icons.len().div_ceil(COLUMNS as usize) as i32;
+    let small_height = |pitch: i32| {
+        let across = (WIDTH - 2 * MARGIN) / pitch;
+        icons.len().div_ceil(across as usize) as i32 * pitch + MARGIN
+    };
+    let smalls: i32 = SMALL.iter().map(|&(_, pitch, _)| small_height(pitch)).sum();
+    let height = large_rows * CELL + smalls + 2 * CELL;
     let application: Vec<(u32, crate::canvas::Image)> = [192_u32, 96, 48, 32, 24, 16]
         .into_iter()
         .map(|size| (size, application_icon_image(raster, size)))
         .collect();
     let sheet = raster.paint(
-        (COLUMNS * CELL) as u32,
-        (rows * CELL) as u32,
+        WIDTH as u32,
+        height as u32,
         1.0,
         &mut |canvas: &mut dyn Canvas| {
             canvas.fill_rect(
-                RectF::new(0.0, 0.0, f64::from(COLUMNS * CELL), f64::from(rows * CELL)),
+                RectF::new(0.0, 0.0, f64::from(WIDTH), f64::from(height)),
                 &Brush::solid(palette::window()),
             );
+            let (quiet, bright) = icon_colours(IconMode::Normal);
             for (index, &icon) in (0_i32..).zip(icons) {
                 let column = index % COLUMNS;
                 let row = index / COLUMNS;
@@ -116,22 +136,25 @@ pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
                     f64::from(ICON),
                     f64::from(ICON),
                 );
-                paint_icon(canvas, icon, cell, palette::text(), palette::accent());
+                paint_icon(canvas, icon, cell, quiet, bright);
             }
-            // The same icons at the size they are actually used, 20 px, in one row: what reads
-            // at 96 does not always read at 20, and 20 is what ships.
-            let small_row = (rows - 3) * CELL + 30;
-            for (index, &icon) in (0_i32..).zip(icons) {
-                let cell = RectF::new(
-                    16.0 + f64::from(index) * 27.0,
-                    f64::from(small_row),
-                    20.0,
-                    20.0,
-                );
-                paint_icon(canvas, icon, cell, palette::text(), palette::accent());
+            let mut top = large_rows * CELL + MARGIN / 2;
+            for (size, pitch, mode) in SMALL {
+                let across = (WIDTH - 2 * MARGIN) / pitch;
+                let (quiet, bright) = icon_colours(mode);
+                for (index, &icon) in (0_i32..).zip(icons) {
+                    let cell = RectF::new(
+                        f64::from(MARGIN + (index % across) * pitch),
+                        f64::from(top + (index / across) * pitch),
+                        f64::from(size),
+                        f64::from(size),
+                    );
+                    paint_icon(canvas, icon, cell, quiet, bright);
+                }
+                top += small_height(pitch);
             }
             // The application icon, large and at the sizes a taskbar and a title bar use.
-            let app_row = (rows - 2) * CELL;
+            let app_row = height - 2 * CELL;
             let mut x = 16;
             for (size, image) in &application {
                 let size = *size as i32;
