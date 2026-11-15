@@ -109,6 +109,7 @@ use super::style_preview::{DefinitionAs, StylePreview};
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use crate::annotation::dialog_support::show_dialog;
 use crate::command_word::exact_number;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -1861,56 +1862,70 @@ impl DefinitionEditorDialog {
 
         let live = self.live;
         let in_library = self.in_library;
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(live, |ui| {
-                if controls::button(ui, "definitionNew", "New")
-                    .on_hover_text("An empty definition of the kind shown")
-                    .clicked()
-                {
-                    self.pressed = Some(Pressed::New);
-                }
-            });
-            ui.add_enabled_ui(in_library, |ui| {
-                if controls::button(ui, "definitionDuplicate", "Duplicate")
-                    .on_hover_text("A copy of this definition under a new name")
-                    .clicked()
-                {
-                    self.pressed = Some(Pressed::Duplicate);
-                }
-                if controls::button(ui, "definitionDelete", "Delete")
-                    .on_hover_text(
-                        "Take it out of the library. Refused, listing what uses it, while a \
-                         survey code, a style or a layer names it",
-                    )
-                    .clicked()
-                {
-                    self.pressed = Some(Pressed::Delete);
-                }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if controls::button(ui, "definitionClose", "Close").clicked() {
-                    self.pressed = Some(Pressed::Close);
-                }
-                ui.add_enabled_ui(self.save_enabled, |ui| {
-                    if controls::button(ui, "definitionSave", "Save")
+        let save_enabled = self.save_enabled;
+        let revert_enabled = self.revert_enabled;
+        // New, Duplicate and Delete at the left; at the right, drawn from the right edge in, Save,
+        // the primary, last, then Close and Revert.
+        let (left, right) = layout::footer(
+            ui,
+            |ui| {
+                let mut pressed = None;
+                ui.add_enabled_ui(live, |ui| {
+                    if controls::button(ui, "definitionNew", "New")
+                        .on_hover_text("An empty definition of the kind shown")
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::New);
+                    }
+                });
+                ui.add_enabled_ui(in_library, |ui| {
+                    if controls::button(ui, "definitionDuplicate", "Duplicate")
+                        .on_hover_text("A copy of this definition under a new name")
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Duplicate);
+                    }
+                    if controls::button(ui, "definitionDelete", "Delete")
+                        .on_hover_text(
+                            "Take it out of the library. Refused, listing what uses it, while a \
+                             survey code, a style or a layer names it",
+                        )
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Delete);
+                    }
+                });
+                pressed
+            },
+            |ui| {
+                let mut pressed = None;
+                ui.add_enabled_ui(save_enabled, |ui| {
+                    if layout::primary(ui, "definitionSave", "Save")
                         .on_hover_text(
                             "Put the definition into the session's library, in place of the one \
                              of its name",
                         )
                         .clicked()
                     {
-                        self.pressed = Some(Pressed::Save);
+                        pressed = Some(Pressed::Save);
                     }
                 });
-                ui.add_enabled_ui(self.revert_enabled, |ui| {
-                    if controls::button(ui, "definitionRevert", "Revert")
+                if layout::button(ui, "definitionClose", "Close").clicked() {
+                    pressed = Some(Pressed::Close);
+                }
+                ui.add_enabled_ui(revert_enabled, |ui| {
+                    if layout::button(ui, "definitionRevert", "Revert")
                         .on_hover_text("Forget what was changed here")
                         .clicked()
                     {
-                        self.pressed = Some(Pressed::Revert);
+                        pressed = Some(Pressed::Revert);
                     }
                 });
-            });
-        });
+                pressed
+            },
+        );
+        if let Some(what) = left.or(right) {
+            self.pressed = Some(what);
+        }
     }
 }

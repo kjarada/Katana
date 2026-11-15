@@ -81,8 +81,7 @@ use katana_core::{Error, ErrorCode, Status};
 use katana_entity::entity::to_string;
 use katana_entity::linework_codes::LineworkCodes;
 use katana_entity::{
-    Customisation, EntityId, SurveyBreakline, SurveyMap, SurveyMatchKind, SurveyRule,
-    SurveySection,
+    Customisation, EntityId, SurveyBreakline, SurveyMap, SurveyMatchKind, SurveyRule, SurveySection,
 };
 
 use super::code_manager_form::RuleForm;
@@ -93,15 +92,16 @@ use super::code_manager_support::{
 };
 use super::code_manager_tabs::TabState;
 use super::customisation_context::CustomisationContext;
-use super::name_picker::UNDEFINED_NAME_COLOUR;
-use super::style_preview::StylePreview;
 use super::definition_thumbnails::ThumbnailKind;
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use super::filter_bar::FilterBar;
+use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::scope_filter_widget::ScopeFilterView;
+use super::style_preview::StylePreview;
 use crate::annotation::dialog_support::{show_dialog, table};
 use crate::canvas::Image;
 use crate::command_word::command_word;
+use crate::dialog_layout::{self as layout, TABLE_COLUMN_GAP, TABLE_ROW_GAP, table_row_colour};
 use crate::drive::controls::{self, LineOptions, custom};
 use crate::drive::mailbox::{
     Act, fill_disabled, lists_no, no_button, press_disabled, press_hidden,
@@ -114,8 +114,18 @@ use crate::theme::palette;
 
 const DIALOG: &str = "surveyCodeManagerDialog";
 
-/// The colour of a refusal in the form and the tabs (#d9534f), as the C++'s stylesheets gave it.
-pub(super) const REFUSAL_COLOUR: egui::Color32 = egui::Color32::from_rgb(0xd9, 0x53, 0x4f);
+/// The dialog's body width on every tab (the look of 2026-11-16): the code table and, beside it,
+/// the test field, the explanation and the rule form.
+const BODY_WIDTH: f32 = 1000.0;
+
+/// The code table's width: it scrolls sideways within it when a rule's values are wider.
+const TREE_WIDTH: f32 = 600.0;
+
+/// The colour of a refusal in the form and the tabs: the theme's error token (the C++'s stylesheets
+/// had a red of their own, #d9534f, before the theme had one).
+pub(super) fn refusal_colour() -> egui::Color32 {
+    crate::theme::error().to_egui()
+}
 
 /// The object names of the five tabs' pages, in order.
 pub(super) const TAB_PAGES: [&str; 5] = [
@@ -333,13 +343,34 @@ pub(crate) fn tree_rows(
         }
     }
     let amber = UNDEFINED_NAME_COLOUR.to_egui();
+    // The whole row lit when it is current, the header in the raised token (dialog_layout's table
+    // look); a tree without a header has its first line at the grid's row 0, and no stripes (a
+    // list of groups reads as a list, not a table).
+    let chosen: Vec<bool> = (0..lines.len()).map(|at| current == Some(at)).collect();
+    let has_header = !headers.is_empty();
     let grid = egui::Grid::new(name)
-        .striped(true)
         .num_columns(headers.len().max(1))
+        .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
+        .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+        .with_row_color(move |row, style| {
+            if has_header {
+                table_row_colour(row, &chosen, style)
+            } else {
+                chosen
+                    .get(row)
+                    .copied()
+                    .unwrap_or(false)
+                    .then(layout::selected_row_colour)
+            }
+        })
         .show(ui, |ui| {
-            if !headers.is_empty() {
+            if has_header {
                 for header in headers {
-                    ui.strong(*header);
+                    ui.label(
+                        RichText::new(*header)
+                            .strong()
+                            .color(palette::text_muted().to_egui()),
+                    );
                 }
                 ui.end_row();
             }
@@ -368,7 +399,11 @@ pub(crate) fn tree_rows(
                         if line.marked.get(column).copied().unwrap_or(false) {
                             text = text.color(amber);
                         }
-                        let mut response = ui.selectable_label(current == Some(at), text);
+                        let mut response = ui.add(
+                            egui::Label::new(text)
+                                .sense(egui::Sense::click())
+                                .selectable(false),
+                        );
                         if !line.tip.is_empty() {
                             response = response.on_hover_text(line.tip);
                         }
@@ -599,8 +634,7 @@ impl SurveyCodeManagerDialog {
         for (index, label) in table_chip_labels.iter().enumerate() {
             table_filter.set_chip_label(index, label);
         }
-        table_filter
-            .set_placeholder_text("Search keys, descriptions, layers, linestyles, symbols");
+        table_filter.set_placeholder_text("Search keys, descriptions, layers, linestyles, symbols");
         let buffer = document.survey_map().clone();
         let form = RuleForm::new(&context, Some(document));
         let mut dialog = Self {
@@ -1280,7 +1314,9 @@ impl SurveyCodeManagerDialog {
                     }
                 }
                 _ => {
-                    if let Some(key) = groups.last_mut().and_then(|group| group.children.last_mut())
+                    if let Some(key) = groups
+                        .last_mut()
+                        .and_then(|group| group.children.last_mut())
                     {
                         key.children.push(made);
                     }
@@ -1505,11 +1541,7 @@ impl SurveyCodeManagerDialog {
                 }
             }
             Some(TreeAt::Key(key)) => {
-                let first = self
-                    .buffer
-                    .rules()
-                    .iter()
-                    .position(|rule| rule.key == key);
+                let first = self.buffer.rules().iter().position(|rule| rule.key == key);
                 if let Some(index) = first
                     && let Ok(rule) = self.buffer.at(index)
                 {
@@ -1722,8 +1754,10 @@ impl SurveyCodeManagerDialog {
             self.reload_scopes(document);
             self.show_lines();
         }
-        let mut frame =
-            std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, "Survey Code Manager"));
+        let mut frame = std::mem::replace(
+            &mut self.frame,
+            DialogFrame::new(DIALOG, "Survey Code Manager"),
+        );
         let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         self.update_dirty();
@@ -1956,15 +1990,14 @@ impl SurveyCodeManagerDialog {
                 if self.table_filter_ui(ui) {
                     self.events.push(Event::TableFilter);
                 }
-                let pictures: Vec<Vec<Option<(egui::TextureId, egui::Vec2)>>> = (0..self
-                    .tree
-                    .len())
-                    .map(|row| {
-                        (0..COLUMN_COUNT)
-                            .map(|column| self.tree_texture(ui.ctx(), row, column))
-                            .collect()
-                    })
-                    .collect();
+                let pictures: Vec<Vec<Option<(egui::TextureId, egui::Vec2)>>> =
+                    (0..self.tree.len())
+                        .map(|row| {
+                            (0..COLUMN_COUNT)
+                                .map(|column| self.tree_texture(ui.ctx(), row, column))
+                                .collect()
+                        })
+                        .collect();
                 let lines: Vec<TreeLine<'_>> = self
                     .tree
                     .iter()
@@ -1982,9 +2015,13 @@ impl SurveyCodeManagerDialog {
                     .tree_current
                     .as_ref()
                     .and_then(|at| self.tree.iter().position(|row| row.at == *at));
-                let shown = egui::ScrollArea::vertical()
+                // Its own width, scrolled sideways when the columns are wider: a rule's long
+                // values made the table as wide as the screen and put the form beside it off it.
+                let shown = egui::ScrollArea::both()
                     .id_salt("codeTreeScroll")
                     .max_height(520.0)
+                    .max_width(TREE_WIDTH)
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         tree_rows(ui, "codeTree", &CODE_TABLE_HEADERS, &lines, current)
                     })
@@ -2074,6 +2111,8 @@ impl SurveyCodeManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // One width for every tab, so the dialog does not change size as they are turned.
+        ui.set_width(BODY_WIDTH);
         // Files: what comes into the buffer and what goes out of it.
         ui.horizontal(|ui| {
             if controls::button(ui, "importCodes", "Import Codes...")
@@ -2148,49 +2187,52 @@ impl SurveyCodeManagerDialog {
         if self.asking_close {
             ui.horizontal(|ui| {
                 ui.label("The survey code rules have edits that are not on the drawing yet.");
-                if controls::button(ui, "unappliedApply", "Apply").clicked() {
-                    self.events.push(Event::CloseApply);
+                if controls::button(ui, "unappliedCancel", "Cancel").clicked() {
+                    self.events.push(Event::CloseCancel);
                 }
                 if controls::button(ui, "unappliedDiscard", "Discard").clicked() {
                     self.events.push(Event::CloseDiscard);
                 }
-                if controls::button(ui, "unappliedCancel", "Cancel").clicked() {
-                    self.events.push(Event::CloseCancel);
+                if layout::primary(ui, "unappliedApply", "Apply").clicked() {
+                    self.events.push(Event::CloseApply);
                 }
             });
         }
         // The buffer's state, and the two ways out of it.
         let edited = self.dirty();
-        ui.horizontal(|ui| {
-            let mut said = RichText::new(self.dirty_text.as_str());
-            if edited {
-                said = said.color(UNDEFINED_NAME_COLOUR.to_egui());
-            }
-            controls::label_as(
-                ui,
-                "dirtyIndicator",
-                &self.dirty_text,
-                egui::Label::new(said),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if controls::button(ui, "closeManager", "Close").clicked() {
-                    self.events.push(Event::Close);
-                }
+        let mut said = RichText::new(self.dirty_text.as_str());
+        if edited {
+            said = said.color(UNDEFINED_NAME_COLOUR.to_egui());
+        }
+        let dirty_text = self.dirty_text.clone();
+        let events = &mut self.events;
+        layout::footer(
+            ui,
+            |ui| {
+                controls::label_as(ui, "dirtyIndicator", &dirty_text, egui::Label::new(said));
+            },
+            // Drawn from the right: Apply, the primary, last; then Close and Revert.
+            |ui| {
                 ui.add_enabled_ui(edited, |ui| {
-                    if controls::button(ui, "revertMap", "Revert")
-                        .on_hover_text("Discard the edits and take the drawing's survey map again")
-                        .clicked()
-                    {
-                        self.events.push(Event::Revert);
-                    }
-                    if controls::button(ui, "applyMap", "Apply")
+                    if layout::primary(ui, "applyMap", "Apply")
                         .on_hover_text("Make the edited rules the drawing's survey map")
                         .clicked()
                     {
-                        self.events.push(Event::Apply);
+                        events.push(Event::Apply);
                     }
                 });
-            });
-        });
+                if layout::button(ui, "closeManager", "Close").clicked() {
+                    events.push(Event::Close);
+                }
+                ui.add_enabled_ui(edited, |ui| {
+                    if layout::button(ui, "revertMap", "Revert")
+                        .on_hover_text("Discard the edits and take the drawing's survey map again")
+                        .clicked()
+                    {
+                        events.push(Event::Revert);
+                    }
+                });
+            },
+        );
     }
 }

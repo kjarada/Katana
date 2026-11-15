@@ -34,13 +34,13 @@ use katana_entity::tables::is_built_in_symbol_name;
 use katana_entity::{Color, EntityId, SurveyMatchKind, validate};
 
 use super::code_manager::{
-    CensusRow, Event, Jump, REFUSAL_COLOUR, SurveyCodeManagerDialog, match_class,
+    CensusRow, Event, Jump, SurveyCodeManagerDialog, match_class, refusal_colour,
 };
 use super::code_manager_form::ascii_trimmed;
-use super::linework_labels::linework_control_label;
-use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::definition_editor::index_choice;
 use super::filter_bar::{FilterBar, FilterBarChanges};
+use super::linework_labels::linework_control_label;
+use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::scope_filter_widget::{ScopeChoice, ScopeFilterWidget, ViewsFn};
 use crate::annotation::dialog_support::table;
 use crate::command_word::{command_word, exact_number};
@@ -264,9 +264,10 @@ impl SurveyCodeManagerDialog {
             &mut self.tabs.apply_scope,
             &mut self.tabs.linework_scope,
         ] {
-            scope.views = self.views.clone().map(|views| -> ViewsFn {
-                Box::new(move || views())
-            });
+            scope.views = self
+                .views
+                .clone()
+                .map(|views| -> ViewsFn { Box::new(move || views()) });
         }
     }
 
@@ -1017,8 +1018,8 @@ impl SurveyCodeManagerDialog {
         // From the verb's own first record - "linework scope=... lines=<n> ..." - and never from
         // the plan above alone: what is said to have been drawn is what the line says it drew.
         let first = outcome.reply.split('\n').next().unwrap_or_default();
-        let lines = read_reply_record(first)
-            .and_then(|record| record.value("lines").map(String::from));
+        let lines =
+            read_reply_record(first).and_then(|record| record.value("lines").map(String::from));
         self.tabs.linework_summary = match lines.as_deref() {
             None => format!("Executed. {first}"),
             Some("0") => format!(
@@ -1164,8 +1165,7 @@ impl SurveyCodeManagerDialog {
                     &tabs.census_command_hint,
                 );
                 ui.horizontal(|ui| {
-                    if controls::button(ui, "censusSelect", "Select Entities With Code").clicked()
-                    {
+                    if controls::button(ui, "censusSelect", "Select Entities With Code").clicked() {
                         events.push(Event::CensusSelect);
                     }
                     if controls::button(ui, "censusNewRule", "New Rule From Code").clicked() {
@@ -1258,9 +1258,7 @@ impl SurveyCodeManagerDialog {
                         events.push(Event::ApplyPreview);
                     }
                     if controls::button(ui, "applyExecute", "Execute")
-                        .on_hover_text(
-                            "Run the line above: the codes applied as one undoable step",
-                        )
+                        .on_hover_text("Run the line above: the codes applied as one undoable step")
                         .clicked()
                     {
                         events.push(Event::ApplyExecute);
@@ -1337,7 +1335,7 @@ impl SurveyCodeManagerDialog {
                             }
                             let mut status = RichText::new(tabs.linework_codes_status.as_str());
                             if tabs.linework_codes_bad {
-                                status = status.color(REFUSAL_COLOUR);
+                                status = status.color(refusal_colour());
                             }
                             controls::label_as(
                                 ui,
@@ -1442,9 +1440,7 @@ impl SurveyCodeManagerDialog {
                         events.push(Event::LineworkPreview);
                     }
                     if controls::button(ui, "lineworkExecute", "Execute")
-                        .on_hover_text(
-                            "Run the line above: the lines drawn as one undoable step",
-                        )
+                        .on_hover_text("Run the line above: the lines drawn as one undoable step")
                         .clicked()
                     {
                         events.push(Event::LineworkExecute);

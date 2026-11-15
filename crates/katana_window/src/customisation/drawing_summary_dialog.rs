@@ -49,6 +49,7 @@ use katana_core::text::format_general;
 
 use super::document_watcher::DocumentWatcher;
 use crate::annotation::dialog_support::show_dialog;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, TextOptions, custom};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -304,33 +305,38 @@ impl DrawingSummaryDialog {
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         ui.set_width(BODY_WIDTH);
-        egui::Grid::new("drawingSummaryForm")
-            .num_columns(2)
-            .show(ui, |ui| {
+        layout::form(ui, "drawingSummaryForm", |ui| {
                 let rows = [
-                    ("Project:", "drawingSummaryProject", &self.project),
-                    ("Drawing:", "drawingSummaryDrawing", &self.drawing),
-                    ("Current:", "drawingSummaryCurrent", &self.current),
-                    ("Selection:", "drawingSummarySelection", &self.selection),
-                    ("History:", "drawingSummaryHistory", &self.history),
+                    ("Project", "drawingSummaryProject", &self.project),
+                    ("Drawing", "drawingSummaryDrawing", &self.drawing),
+                    ("Current", "drawingSummaryCurrent", &self.current),
+                    ("Selection", "drawingSummarySelection", &self.selection),
+                    ("History", "drawingSummaryHistory", &self.history),
                 ];
                 for (title, name, text) in rows {
-                    ui.label(title);
+                    layout::form_label(ui, title);
                     controls::label_as(ui, name, text, egui::Label::new(text.as_str()).wrap());
                     ui.end_row();
                 }
             });
         // Says where the customisation is changed: the summary only shows it.
-        controls::label(
+        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+        controls::label_as(
             ui,
             "drawingSummaryCustomisationLabel",
             "Customisation (File > Settings loads, writes or resets it):",
+            egui::Label::new(
+                egui::RichText::new("Customisation (File > Settings loads, writes or resets it):")
+                    .strong(),
+            ),
         );
         // Wrapped at the pane's edge: the reply's records are longer than the pane is wide (the
         // linework record is 143 characters), and left unwrapped the end of each lay out of sight
         // behind a scroll bar. A record still begins its own line and starts with its word, so a
         // wrapped one reads as one.
         let mut report = self.customisation.clone();
+        // The pane as wide as the dialog, so fewer of its records wrap.
+        ui.spacing_mut().text_edit_width = BODY_WIDTH;
         controls::text_with(
             ui,
             "drawingSummaryCustomisation",
@@ -341,10 +347,14 @@ impl DrawingSummaryDialog {
                 monospace: true,
             },
         );
+        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
         ui.add(
             egui::Label::new(
-                "Names the drawing's styles give that no loaded library defines - click one to \
-                 see its styles among the Missing in Styles and Linetypes:",
+                egui::RichText::new(
+                    "Names the drawing's styles give that no loaded library defines - click one \
+                     to see its styles among the Missing in Styles and Linetypes:",
+                )
+                .color(crate::theme::text_muted().to_egui()),
             )
             .wrap(),
         );
@@ -385,26 +395,33 @@ impl DrawingSummaryDialog {
             &self.status,
             egui::Label::new(self.status.as_str()).wrap(),
         );
-        ui.horizontal(|ui| {
-            if controls::button(ui, "drawingSummaryCopyJson", "Copy as JSON")
-                .on_hover_text("Copy the drawing's state as STATUS JSON gives it")
-                .clicked()
-            {
-                self.copy_json(host);
-            }
-            if controls::button(ui, "drawingSummaryRefresh", "Refresh")
-                .on_hover_text("Read the drawing's state again")
-                .clicked()
-            {
-                self.refresh(host.document());
-                self.status = String::from("Read again.");
-            }
-            if controls::button(ui, "drawingSummaryClose", "Close")
-                .on_hover_text("Close the summary")
-                .clicked()
-            {
-                self.closing = true;
-            }
-        });
+        // Copy and Refresh at the left; Close, the only way out, at the right.
+        let ((copied, refreshed), closed) = layout::footer(
+            ui,
+            |ui| {
+                let copied = controls::button(ui, "drawingSummaryCopyJson", "Copy as JSON")
+                    .on_hover_text("Copy the drawing's state as STATUS JSON gives it")
+                    .clicked();
+                let refreshed = controls::button(ui, "drawingSummaryRefresh", "Refresh")
+                    .on_hover_text("Read the drawing's state again")
+                    .clicked();
+                (copied, refreshed)
+            },
+            |ui| {
+                layout::button(ui, "drawingSummaryClose", "Close")
+                    .on_hover_text("Close the summary")
+                    .clicked()
+            },
+        );
+        if copied {
+            self.copy_json(host);
+        }
+        if refreshed {
+            self.refresh(host.document());
+            self.status = String::from("Read again.");
+        }
+        if closed {
+            self.closing = true;
+        }
     }
 }

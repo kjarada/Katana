@@ -61,16 +61,22 @@ use super::customisation_context::CustomisationContext;
 use super::document_watcher::DocumentWatcher;
 use super::scope_filter_widget::{ScopeChoice, ScopeFilterView, ScopeFilterWidget};
 use crate::annotation::dialog_support::show_dialog;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 use crate::survey::survey_dialogs::offstage;
 
 const DIALOG: &str = "globalModifyDialog";
+/// The Modify column's width, beside the scope and filter (scope_filter_widget's own width).
+const MODIFY_WIDTH: f32 = 440.0;
 const TITLE: &str = "Global Modify";
 const BY_LAYER: &str = "ByLayer";
-/// The colour an error is said in (#c0392b), as the summary's stylesheet gave it.
-const ERROR_COLOUR: egui::Color32 = egui::Color32::from_rgb(0xc0, 0x39, 0x2b);
+/// The colour an error is said in: the theme's error token (the summary's stylesheet had a red of
+/// its own, #c0392b, before the theme had one).
+fn error_colour() -> egui::Color32 {
+    crate::theme::error().to_egui()
+}
 
 /// One open view, as the View scope offers it: the shared widget's.
 pub type GlobalModifyView = ScopeFilterView;
@@ -517,11 +523,7 @@ impl GlobalModifyDialog {
 
         let styles = &mut change.styles;
         if self.set_style_colour {
-            styles.colour = Some(read_colour(
-                &self.style_colour,
-                "the styles' colour",
-                true,
-            )?);
+            styles.colour = Some(read_colour(&self.style_colour, "the styles' colour", true)?);
         }
         if self.set_style_linetype {
             styles.linetype = Some(self.style_linetype.text());
@@ -765,13 +767,18 @@ impl GlobalModifyDialog {
                     self.preview_due = true;
                 }
             });
-            ui.group(|ui| {
+            ui.add_space(layout::SECTION_GAP);
+            ui.vertical(|ui| {
+                ui.set_width(MODIFY_WIDTH);
                 ui.vertical(|ui| {
                     ui.strong("Modify");
                     ui.add(
                         egui::Label::new(
-                            "Tick a field to change it; an unticked field is left as each one \
-                             has it.",
+                            egui::RichText::new(
+                                "Tick a field to change it; an unticked field is left as each \
+                                 one has it.",
+                            )
+                            .color(crate::theme::text_muted().to_egui()),
                         )
                         .wrap(),
                     );
@@ -803,7 +810,7 @@ impl GlobalModifyDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let mut said = egui::RichText::new(self.summary.as_str());
         if self.summary_is_error {
-            said = said.color(ERROR_COLOUR);
+            said = said.color(error_colour());
         }
         controls::label_as(
             ui,
@@ -811,29 +818,38 @@ impl GlobalModifyDialog {
             &self.summary,
             egui::Label::new(said).wrap(),
         );
-        ui.horizontal(|ui| {
-            if controls::button(ui, "globalModifyPreview", "Preview")
-                .on_hover_text("Say what Apply would change, changing nothing")
-                .clicked()
-            {
-                self.preview(host.document());
-            }
-            if controls::button(ui, "globalModifySelect", "Select Matches")
-                .on_hover_text("Select what the scope and the filter take, and show it")
-                .clicked()
-            {
-                self.select_matches(host);
-            }
-            if controls::button(ui, "globalModifyApply", "Apply")
-                .on_hover_text("Make the change: one Undo puts everything back")
-                .clicked()
-            {
-                self.apply(host);
-            }
-            if controls::button(ui, "globalModifyClose", "Close").clicked() {
-                self.closing = true;
-            }
-        });
+        // Preview and Select Matches look; Apply changes, so it is the primary, at the right.
+        let ((previewed, selected), (applied, closed)) = layout::footer(
+            ui,
+            |ui| {
+                let previewed = controls::button(ui, "globalModifyPreview", "Preview")
+                    .on_hover_text("Say what Apply would change, changing nothing")
+                    .clicked();
+                let selected = controls::button(ui, "globalModifySelect", "Select Matches")
+                    .on_hover_text("Select what the scope and the filter take, and show it")
+                    .clicked();
+                (previewed, selected)
+            },
+            |ui| {
+                let applied = layout::primary(ui, "globalModifyApply", "Apply")
+                    .on_hover_text("Make the change: one Undo puts everything back")
+                    .clicked();
+                let closed = layout::button(ui, "globalModifyClose", "Close").clicked();
+                (applied, closed)
+            },
+        );
+        if previewed {
+            self.preview(host.document());
+        }
+        if selected {
+            self.select_matches(host);
+        }
+        if applied {
+            self.apply(host);
+        }
+        if closed {
+            self.closing = true;
+        }
     }
 
     /// The tick in front of a field, which enables its editors.

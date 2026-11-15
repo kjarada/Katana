@@ -50,6 +50,7 @@ use katana_entity::{EntityId, Geometry, Model};
 
 use super::dialog_support::{Followed, show_dialog};
 use crate::command_word::{annotation_text_word, command_word, exact_number};
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -617,18 +618,29 @@ impl LabelEditDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let enabled = self.current.id != 0;
         controls::label(ui, "labelEditStatus", &self.status);
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(enabled, |ui| {
-                if controls::button(ui, "labelEditOk", "OK").clicked() {
-                    self.ok_pressed = true;
-                }
-                if controls::button(ui, "labelEditApply", "Apply").clicked() {
-                    self.apply_pressed = true;
-                }
-            });
-            if controls::button(ui, "labelEditCancel", "Cancel").clicked() {
-                self.cancel_pressed = true;
-            }
+        // Drawn from the right: OK, the primary, last; then Cancel and Apply.
+        let (ok, cancel, apply) = layout::footer_buttons(ui, |ui| {
+            let ok = ui
+                .add_enabled_ui(enabled, |ui| {
+                    layout::primary(ui, "labelEditOk", "OK").clicked()
+                })
+                .inner;
+            let cancel = layout::button(ui, "labelEditCancel", "Cancel").clicked();
+            let apply = ui
+                .add_enabled_ui(enabled, |ui| {
+                    layout::button(ui, "labelEditApply", "Apply").clicked()
+                })
+                .inner;
+            (ok, cancel, apply)
         });
+        if ok {
+            self.ok_pressed = true;
+        }
+        if apply {
+            self.apply_pressed = true;
+        }
+        if cancel {
+            self.cancel_pressed = true;
+        }
     }
 }

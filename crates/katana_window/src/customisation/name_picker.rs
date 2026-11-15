@@ -62,6 +62,7 @@ use super::style_painter::{
     CanvasRasterBackend, RasterBackend, StylePaintTarget, paint_style_drawing, painted_extent,
 };
 use crate::canvas::{Canvas, Color, Image, Pen, PenCap, PenJoin, PenStyle, RenderHint};
+use crate::dialog_layout as layout;
 use crate::drive::controls::custom;
 use crate::drive::mailbox::{Act, fill_disabled, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -779,8 +780,15 @@ impl NamePicker {
         let before = self.text.clone();
         let shown = ui.vertical(|ui| {
             let row = ui.horizontal(|ui| {
+                // The field and its list button together as wide as a form's field (the list
+                // button its arrow's width, as dialog_layout's editable choice is).
+                let field_width = (ui.spacing().text_edit_width
+                    - layout::EDITABLE_CHOICE_BUTTON
+                    - ui.spacing().item_spacing.x)
+                    .max(layout::EDITABLE_CHOICE_BUTTON);
                 let mut edit = egui::TextEdit::singleline(&mut self.text)
                     .id_salt(name)
+                    .desired_width(field_width)
                     .hint_text(placeholder);
                 if marked {
                     edit = edit.text_color(UNDEFINED_NAME_COLOUR.to_egui());
@@ -788,6 +796,7 @@ impl NamePicker {
                 let field = ui.add(edit);
                 let list = egui::ComboBox::from_id_salt((name, "items"))
                     .selected_text("")
+                    .width(layout::EDITABLE_CHOICE_BUTTON)
                     .show_ui(ui, |ui| {
                         self.ensure_textures(ui, name);
                         for (at, item) in self.items.iter().enumerate() {

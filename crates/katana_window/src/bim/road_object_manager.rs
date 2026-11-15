@@ -63,6 +63,7 @@ use super::road_dialog_support::{Table, button, cell, field, same_ignoring_case}
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
+use crate::dialog_layout as layout;
 use crate::drive::controls::{TextOptions, custom, label_as, text_with};
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::format::qt_fixed;
@@ -154,6 +155,9 @@ pub fn road_objects_frame(document: &Document, ids: &[String]) -> Option<Box2> {
         centre + Point2::new(half, half),
     ))
 }
+
+/// The list column's width (the look of 2026-11-16): the object table's columns.
+const LIST_WIDTH: f32 = 600.0;
 
 struct Body {
     watcher: DocumentWatcher,
@@ -489,6 +493,10 @@ impl Body {
         let chosen = self.table.selected_rows().len();
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                // The table's column wide: the details box as wide, the key field less its
+                // button (the look of 2026-11-16).
+                ui.set_width(LIST_WIDTH);
+                ui.spacing_mut().text_edit_width = LIST_WIDTH;
                 crate::drive::controls::label(ui, "roadObjectCount", &self.count);
                 if self.table.ui(ui).selection_changed {
                     self.show_info(host.document_mut());
@@ -504,6 +512,7 @@ impl Body {
                     },
                 );
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().text_edit_width = LIST_WIDTH - 80.0;
                     field(
                         ui,
                         "roadObjectKeys",
@@ -545,7 +554,10 @@ impl Body {
             });
             // The shared scope and filter. A road object is a definition on a layer with a plan
             // extent, so the whole drawing is the natural start; the views are the window's.
-            let by_scope = ui.group(|ui| {
+            ui.add_space(layout::SECTION_GAP);
+            // A column of its own: in the row above, a group would lay its title, the scope
+            // and its buttons side by side.
+            let by_scope = ui.vertical(|ui| {
                 ui.strong("Road objects by scope");
                 self.scope.ui(ui);
                 ui.horizontal(|ui| {
@@ -593,11 +605,11 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, "roadObjectManagerClose", "&Close", "").clicked() {
-                self.close = true;
-            }
-        });
+        if layout::footer_buttons(ui, |ui| {
+            button(ui, "roadObjectManagerClose", "&Close", "").clicked()
+        }) {
+            self.close = true;
+        }
     }
 }
 

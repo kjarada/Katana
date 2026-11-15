@@ -45,18 +45,25 @@ use crate::annotation::dialog_support::{show_dialog, spin_value, table};
 use crate::customisation::customisation_context::CustomisationContext;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::name_picker::NamePicker;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, SpinRange, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::format::qt_fixed;
 use crate::host::Host;
 use crate::kept_name_combo::{KeptChoice, KeptNameCombo};
 use crate::shell::DialogFrame;
+use crate::survey::survey_dialogs::hidden;
 
 /// The dialog's name as a drive target (see the module comment).
 pub const LAYER_MANAGER: &str = "layerManager";
 const TITLE: &str = "Layers";
 const DEFAULT_DIMENSION_STYLE: &str = "(default)";
-const ERROR_COLOUR: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x5A, 0x4F);
+/// The dialog's body width: the layer table's nine columns, its buttons, and the form under them.
+const BODY_WIDTH: f32 = 620.0;
+/// The colour a refusal is said in: the theme's error token.
+fn error_colour() -> egui::Color32 {
+    crate::theme::error().to_egui()
+}
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 2).with_suffix(" mm on paper");
 const HEADERS: [&str; 8] = [
     "Layer", "On", "Locked", "Colour", "Linetype", "Weight", "Hatch", "Entities",
@@ -491,7 +498,10 @@ impl LayerManagerDialog {
         }
         // Blanks either end of a typed path are never meant, and a layer level may not start or
         // end with one.
-        let answer = String::from(self.prompt_name.trim_matches(|c: char| c.is_ascii_whitespace()));
+        let answer = String::from(
+            self.prompt_name
+                .trim_matches(|c: char| c.is_ascii_whitespace()),
+        );
         if answer.is_empty() {
             self.say(host, "Give a name first.", true);
             return;
@@ -683,6 +693,7 @@ impl LayerManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        ui.set_width(BODY_WIDTH);
         ui.add_enabled_ui(!self.orphan, |ui| {
             // Read-only: every change goes through the form and a command, so nothing here can
             // run one from inside a view's own change - the shape of the layer-panel crash
@@ -699,103 +710,118 @@ impl LayerManagerDialog {
             if let Some(row) = shown.chosen {
                 self.select_row(host.document(), Some(row));
             }
-            self.form(ui, host);
-            self.prompt_row(ui, host);
+            ui.add_space(layout::INNER);
             self.buttons(ui, host);
+            self.prompt_row(ui, host);
+            self.form(ui, host);
         });
     }
 
     fn form(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.group(|ui| {
-            let heading = ui.strong("Definition");
-            custom(
-                ui,
-                &heading,
-                ControlRecord::new("layerForm", ControlKind::Other),
-            );
-            egui::Grid::new("layerForm").num_columns(2).show(ui, |ui| {
-                ui.label("Linetype");
-                // A name chosen in the picker is read at Save: nothing runs from the choice.
-                let _ = self.linetype.ui(ui, "layerLinetype");
-                ui.end_row();
+        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+        let heading = ui.strong("Definition");
+        custom(
+            ui,
+            &heading,
+            ControlRecord::new("layerForm", ControlKind::Other),
+        );
+        layout::form(ui, "layerForm", |ui| {
+            layout::form_label(ui, "Linetype");
+            // A name chosen in the picker is read at Save: nothing runs from the choice.
+            let _ = self.linetype.ui(ui, "layerLinetype");
+            ui.end_row();
 
-                ui.label("Line weight");
-                if controls::spin(ui, "layerWeight", &mut self.weight, WEIGHT).changed() {
-                    self.weight_edited = true;
+            layout::form_label(ui, "Line weight");
+            if controls::spin(ui, "layerWeight", &mut self.weight, WEIGHT).changed() {
+                self.weight_edited = true;
+            }
+            ui.end_row();
+
+            layout::form_label(ui, "Colour");
+            ui.horizontal(|ui| {
+                let field = controls::line_with(
+                    ui,
+                    "layerColourText",
+                    &mut self.colour_text,
+                    LineOptions {
+                        placeholder: "#RRGGBB",
+                        ..LineOptions::default()
+                    },
+                )
+                .on_hover_text("Type a colour as #RRGGBB (or #RRGGBBAA), or choose one");
+                if field.lost_focus() {
+                    self.finish_colour_text(host);
                 }
-                ui.end_row();
-
-                ui.label("Colour");
-                ui.horizontal(|ui| {
-                    let field = controls::line_with(
+                if controls::button(ui, "layerColour", "Choose...")
+                    .on_hover_text("Pick the colour in a colour dialog")
+                    .clicked()
+                {
+                    self.open_colour_dialog();
+                }
+                if self.colour_dialog_open {
+                    let picked = self.picked_colour;
+                    let mut rgb = [picked.r, picked.g, picked.b];
+                    let response = ui.color_edit_button_srgb(&mut rgb);
+                    custom(
                         ui,
-                        "layerColourText",
-                        &mut self.colour_text,
-                        LineOptions {
-                            placeholder: "#RRGGBB",
-                            ..LineOptions::default()
-                        },
-                    )
-                    .on_hover_text("Type a colour as #RRGGBB (or #RRGGBBAA), or choose one");
-                    if field.lost_focus() {
-                        self.finish_colour_text(host);
+                        &response,
+                        ControlRecord::new("layerColourDialog", ControlKind::Other),
+                    );
+                    if response.changed() {
+                        self.choose_colour(Color::new(rgb[0], rgb[1], rgb[2], picked.a));
                     }
-                    if controls::button(ui, "layerColour", "Choose...")
-                        .on_hover_text("Pick the colour in a colour dialog")
-                        .clicked()
-                    {
-                        self.open_colour_dialog();
-                    }
-                    if self.colour_dialog_open {
-                        let picked = self.picked_colour;
-                        let mut rgb = [picked.r, picked.g, picked.b];
-                        let response = ui.color_edit_button_srgb(&mut rgb);
-                        custom(
-                            ui,
-                            &response,
-                            ControlRecord::new("layerColourDialog", ControlKind::Other),
-                        );
-                        if response.changed() {
-                            self.choose_colour(Color::new(rgb[0], rgb[1], rgb[2], picked.a));
-                        }
-                    }
-                });
-                ui.end_row();
-
-                ui.label("Hatch");
-                self.hatch.ui(ui, "layerHatch");
-                ui.end_row();
-
-                ui.label("Dimension style");
-                self.dimension.ui(ui, "layerDimensionStyle");
-                ui.end_row();
-
-                ui.label("");
-                ui.horizontal(|ui| {
-                    controls::check(ui, "layerVisible", "Visible", &mut self.visible);
-                    controls::check(ui, "layerLocked", "Locked", &mut self.locked);
-                });
-                ui.end_row();
+                }
             });
+            ui.end_row();
+
+            layout::form_label(ui, "Hatch");
+            self.hatch.ui(ui, "layerHatch");
+            ui.end_row();
+
+            layout::form_label(ui, "Dimension style");
+            self.dimension.ui(ui, "layerDimensionStyle");
+            ui.end_row();
+
+            ui.label("");
+            ui.horizontal(|ui| {
+                controls::check(ui, "layerVisible", "Visible", &mut self.visible);
+                controls::check(ui, "layerLocked", "Locked", &mut self.locked);
+            });
+            ui.end_row();
+        });
+        // The form's own two buttons under it: Save, the one that writes, last and in the accent.
+        ui.add_space(layout::INNER);
+        ui.horizontal(|ui| {
+            if controls::button(ui, "layerRevert", "Revert")
+                .on_hover_text("Put the form back as the layer is")
+                .clicked()
+            {
+                self.revert(host.document());
+            }
+            if layout::primary(ui, "layerSave", "Save Changes")
+                .on_hover_text("Write the form to the layer")
+                .clicked()
+            {
+                self.save(host);
+            }
         });
     }
 
     fn prompt_row(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let open = self.prompt.is_some();
-        ui.scope(|ui| {
-            if !open {
-                ui.set_invisible();
-            }
+        // Hidden while closed: still there to be filled and refused as hidden, taking no room.
+        let mut draw = |ui: &mut Ui| {
+            ui.add_space(layout::INNER);
             let row = ui.horizontal(|ui| {
                 controls::label(ui, "layerPromptLabel", &self.prompt_label);
                 let name = controls::line(ui, "layerPromptName", &mut self.prompt_name);
                 let entered =
                     name.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if controls::button(ui, "layerPromptOk", "OK").clicked() || entered {
-                    self.accept_prompt(host);
-                }
                 if controls::button(ui, "layerPromptCancel", "Cancel").clicked() {
                     self.cancel_prompt();
+                }
+                if layout::primary(ui, "layerPromptOk", "OK").clicked() || entered {
+                    self.accept_prompt(host);
                 }
             });
             custom(
@@ -803,7 +829,12 @@ impl LayerManagerDialog {
                 &row.response,
                 ControlRecord::new("layerPrompt", ControlKind::Other),
             );
-        });
+        };
+        if open {
+            draw(ui);
+        } else {
+            hidden(ui, "layerPrompt", draw);
+        }
     }
 
     fn buttons(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -820,18 +851,7 @@ impl LayerManagerDialog {
             {
                 self.ask_new_child(host);
             }
-            if controls::button(ui, "layerSave", "Save Changes")
-                .on_hover_text("Write the form to the layer")
-                .clicked()
-            {
-                self.save(host);
-            }
-            if controls::button(ui, "layerRevert", "Revert")
-                .on_hover_text("Put the form back as the layer is")
-                .clicked()
-            {
-                self.revert(host.document());
-            }
+            ui.separator();
             if controls::button(ui, "layerMove", "Rename or Move...")
                 .on_hover_text(
                     "A layer name is a path, so renaming it to another path moves it, with \
@@ -847,6 +867,7 @@ impl LayerManagerDialog {
             {
                 self.delete(host);
             }
+            ui.separator();
             if controls::button(ui, "layerAssign", "Put Selection Here")
                 .on_hover_text("Move the entities selected in the drawing onto this layer")
                 .clicked()
@@ -865,10 +886,15 @@ impl LayerManagerDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let mut said = egui::RichText::new(self.status.as_str());
         if self.status_is_error {
-            said = said.color(ERROR_COLOUR);
+            said = said.color(error_colour());
         }
-        controls::label_as(ui, "layerStatus", &self.status, egui::Label::new(said).wrap());
-        if controls::button(ui, "closeButton", "Close").clicked() {
+        let status = self.status.clone();
+        let (_, close) = layout::footer(
+            ui,
+            |ui| controls::label_as(ui, "layerStatus", &status, egui::Label::new(said).wrap()),
+            |ui| layout::button(ui, "closeButton", "Close").clicked(),
+        );
+        if close {
             self.closing = true;
         }
     }
