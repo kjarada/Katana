@@ -15,9 +15,11 @@ exemption (`docs/rust.md`, "Tests are the specification").
 
 ## Running
 
-Until the port is built on Windows every run is in WSL, through
-`tools/build_visible.sh`, in a console window the owner watches (the
-contributor instructions, "Show the build"):
+Every run goes through `tools/build_visible.sh`, in a console window the
+owner watches (the contributor instructions, "Show the build"): in WSL with
+`wsl`, natively on Windows in MSYS2 UCRT64 without it. The suite was run in
+WSL alone until 2026-11-16, when the owner asked for the Windows build; the
+native build passes, and the native suite's results are not yet in.
 
 ```sh
 bash tools/build_visible.sh wsl                          # clippy, build, cargo test, then the runner's whole suite
@@ -25,10 +27,18 @@ bash tools/build_visible.sh wsl cargo                    # the Rust workspace al
 bash tools/build_visible.sh wsl cargo -p katana_cad      # one crate's tests
 bash tools/build_visible.sh wsl test -R '^qt_'           # the runner's suite only: the window's headless checks
 bash tools/build_visible.sh wsl test -R '^cli\.'         # the command line's
+bash tools/build_visible.sh                              # any of the above without `wsl`: natively on Windows
 ```
 
-Inside WSL, by hand, the same is `cargo test --release` at the checkout's root and `ctest`
-in the runner's build folder (`~/katana-build/<checkout>/tests`).
+By hand, the same is `cargo test --release` at the checkout's root and
+`ctest` in the runner's build folder: `~/katana-build/<checkout>/tests` in
+WSL, `build/release` on Windows (`docs/building.md`, "The test runner").
+Some tests exist on one platform only: the update layer's swap, registry and
+Credential Manager cases, most of the update end-to-end cases and the
+import-table check of the helper are Windows's, and the GPU device cases need
+an adapter wgpu can open (Mesa's lavapipe in WSL; "Windows and Linux",
+below). On Linux the runner's suite runs under `xvfb-run`; on
+Windows it needs no display server.
 
 Run the WHOLE suite before a commit, not only the crate touched: the `docs`
 test is part of it, and a change in one crate breaks another's tests more
@@ -44,6 +54,7 @@ often than its own.
 | end-to-end command line | `add_test` in `tests/cli/CMakeLists.txt` (and `tests/cli/geo/*.cmake` and the files beside it) | `cli.<what it shows>` | `katana_cli` run as a process |
 | what the programs install | `tests/CMakeLists.txt` | `packaging_check_on_fixture_<what>`, `packaging_check_on_deploy_script_<what>` | `tools/check_install_rules.cmake` ("What the programs hold", below) |
 | the documents' references | `tests/CMakeLists.txt` | `docs` | `tools/check_docs.py` ("The docs test", below) |
+| the crates keep the layer table | `tests/CMakeLists.txt` | `rust_layering`, `rust_layering_catches_<rule>` | `tools/check_rust_layering.py` (`docs/architecture.md`, "Layering") |
 | Katana Standard is what its data makes | `tests/CMakeLists.txt` | `katana_standard_current`, `katana_standard_<check>` | `tools/katana_standard/` (`docs/katana_standard.md`) |
 | the update system end to end, on a feed of the tests' own | `tests/update/e2e.cmake` | `update_e2e_<what it shows>` | `tests/update/update_e2e.py` driving `tools/update_fake_feed.py`, `katana_update_e2e` and `katana_updater_test` ("The update system's tests", below) |
 | the release tools, and the build's promises about updating | `tests/update/CMakeLists.txt` | `update_tools_<tool>`, `update_keys_<what it shows>`, `katana_updater_imports_only_os_dlls`, `update_test_keys_are_in_no_shipped_program` | Python `unittest` files in `tests/update/tool_tests/`; CMake scripts in `tests/update/` |
@@ -51,14 +62,16 @@ often than its own.
 `cargo test -- --list` and `ctest -N` give the current count of each; this
 document does not, because a number here would be stale by the next commit.
 
-The C++ suite also registered the layering check (`layering`, and since the
-port `rust_layering` and `rust_parity`), the link-closure checks of the legacy
-customisation readers and the SIMD kernel checks. The layering check survives
-as `tools/check_rust_layering.py` over the table `tools/check_layering.cmake`,
-not registered (`docs/architecture.md`, "Layering"); the parity check had
-nothing left to compare once the C++ cases were gone; the readers were never
-ported; and `#[target_feature]` leaves the kernel checks nothing to find
-(`docs/performance.md`).
+The repository's own checks are registered beside them where Python is
+found: `docs`, the Katana Standard checks, and `rust_layering`, which holds
+every crate's manifest to the layer table `tools/check_layering.cmake`, with
+its `rust_layering_catches_*` cases on the fixtures of
+`tests/rust_check_fixtures/layering/` that break each rule
+(`docs/architecture.md`, "Layering"). Three families of the C++ suite have no
+Rust counterpart, each for a reason: the parity check had nothing left to
+compare once the C++ cases were gone, the legacy customisation readers whose
+link closure was checked were never ported, and `#[target_feature]` leaves
+the SIMD object checks nothing to find (`docs/performance.md`).
 
 ### A crate's tests
 
@@ -124,10 +137,12 @@ C++ window's, run against the Rust one, and a test's name is how it is cited.
 
 ### Windows and Linux
 
-The suite was written on Windows (MSYS2) and also run on Linux against
-conda-forge's toolchain (`tools/setup_linux_toolchain.py`), which is where
-the Rust is built and tested today (WSL). What differs, and how the tests
-hold on both:
+The process tests were written on Windows (MSYS2), for the C++ programs, and
+also run on Linux against conda-forge's toolchain
+(`tools/setup_linux_toolchain.py`). The Rust has been tested on Linux (WSL)
+until now, and its native Windows suite's results are not yet in; where the two
+differ, the C++ suite's experience below is what is known. What differs, and
+how the tests hold on both:
 
 - **GDAL's drivers differ by build.** conda-forge's GDAL 3.13.2 has no PDF
   driver, so its catalogue has 120 leaf algorithms where MSYS2's has 121
@@ -142,10 +157,8 @@ hold on both:
   (`mesa-vulkan-drivers`) the device cases draw; on a machine with no Vulkan
   driver at all they skip, saying why (`docs/gpu.md`, "Testing").
 
-The C++ suite's further Linux differences - Qt's offscreen plugin's messages,
-which `tools/check_screenshot.cmake` still drops, and the file dialog
-answered with its name box unfocused - are explained, with the evidence, in
-"The eighteen tests that failed in the Linux cloud container" below.
+"What the C++ suite's failures taught", below, keeps the lessons of the
+C++ suite's platform failures that still hold for the Rust tests.
 
 Choose the lighter tool: a crate's test when the behaviour can be reached
 from its crate, a headless check when the behaviour needs the program, its
@@ -227,7 +240,7 @@ script that draws it and a few GIS files. The owner's large real archives are
 kept outside the repository and used for measuring and looking, never
 committed and never needed by a test. A test that reads the git-ignored
 reference customisation, or the compiled-in one, must pass without it
-(`docs/building.md`, "The built-in customisation and the reference folder").
+(`docs/building.md`, "The built-in customisation").
 
 **The suites that read third-party data** are these: `built_in_census`, the
 NSW half of `built_in_renames` and the NSW cases of `built_in_library`
@@ -241,18 +254,17 @@ the program gave: the census's figures are counted by
 `tools/customisation_census.py` and `tools/reference_census.py`, which use none
 of the program's code, and no tracked test or document holds a name from the
 data, only counts (the converted file, being the data, holds them). A build
-with neither was built and run on 2026-10-07, when the file was not tracked
-(`-DKATANA_BUILTIN_CUSTOMISATION` naming a file that does not exist, when that
-file was the only built-in; today the equivalent is
-`-DKATANA_ALTERNATE_CUSTOMISATIONS=` with an empty list, which leaves Katana
-Standard alone; the cad and app suites): it configures, builds and passes.
+without the NSW file is cargo's with `KATANA_ALTERNATE_CUSTOMISATIONS=` (an
+empty list, which leaves Katana Standard alone; `docs/building.md`, "What the
+build reads from its environment"). The C++ build was built and run so on
+2026-10-07, when the file was not tracked, and its cad and app suites passed;
+the Rust has not been run without it.
 
 **What the programs hold** is proved on fixtures, since a check that cannot
 see a violation passes as quietly as one that finds none (`tests/CMakeLists.txt`).
-The C++ build proved it twice: a configure-time walk of the four programs'
-link closure (the legacy customisation readers must be in none of them), and
-the install rules. The readers were never ported, so the first has nothing to
-find and went with the C++; the second stays:
+(The C++ build also walked the programs' link closure for the legacy
+customisation readers, which the Rust never ported, so that check had nothing
+left to find.) What stays:
 
 - the install rules. `tools/check_install_rules.cmake` reads the install
   scripts CMake wrote (the top one and those it includes) and fails on any
@@ -354,7 +366,8 @@ the `openssl` command line; the tree an update must leave is built from the
 specification of the two releases, in a folder of its own, and compared as a
 whole.
 
-**The engine, in process** (`katana_update_tests`, `crates/katana_update/tests/*.rs`).
+**The engine, in process** (`crates/katana_update/tests/*.rs`, a test program
+per file).
 Everything the engine does to the machine goes through an interface -
 `FsOps`, `ProcessOps`, `Launcher`, `RegistryOps`, `CredentialStore`, `Fetch` -
 and the tests hand it fakes: a transport that records what each hop was
@@ -562,7 +575,8 @@ temporary and removed at its end, and the install's has a blank and a letter
 outside ASCII in its name, as a folder under a person's profile has. Five of
 the cases start no program of the install and
 so run on Linux and macOS too; the others are Windows only, where the swap
-is written. `update_e2e_every_case_of_the_driver_is_registered` fails when
+is written, and are first run against the Rust programs by the native
+Windows run. `update_e2e_every_case_of_the_driver_is_registered` fails when
 the driver has a case that nothing registered. They need Python 3.10 and
 `openssl` 3; without them they are not registered - not registered as
 skipped, since a skipped test passes as quietly as one that ran.
@@ -806,9 +820,10 @@ and every document in `docs/` must be listed in `docs/index.md`, and
 `docs/headless.md` must name every switch the window's driver parses
 (`crates/katana_window/src/drive/run.rs` and `steps.rs`) and every `-D`
 variable `tools/check_screenshot.cmake` reads - a new switch is documented in
-the commit that adds it. Documents
-still being brought up to this standard are named in the script's
-`NOT_YET_CHECKED` list, which shrinks as each is fixed.
+the commit that adds it. Every document in `docs/` is checked: the script's
+`NOT_YET_CHECKED` list, which named the documents still being brought up to
+this standard, is empty since the last two passed (2026-11-16), and a
+document is not added to it again.
 
 One check goes further than "what is cited exists". The worked example in
 `docs/customisation.md` is a file a person may copy to start their own, so
@@ -823,226 +838,63 @@ for a check on a document.
 Run it alone with `python tools/check_docs.py` from the checkout root; it
 prints each broken reference with its file and line.
 
-## The eighteen tests that failed in the Linux cloud container
+## What the C++ suite's failures taught
 
-This section and the four after it are the C++ suite's record (GoogleTest,
-Qt's offscreen platform): what failed, why, and what the fix taught. The
-lessons that outlive the C++ are kept in the rules above.
+The C++ suite failed on platforms other than the one it was written on, more
+than once: sixteen tests and two intermittent ones in a Linux container
+(2026-09-26), three on its first Windows run after the Linux fixes
+(2026-09-28), seven on each clang and libc++ build (2026-09-27, fixed
+2026-09-29). Each was traced and fixed then; the record of each, with its
+evidence, is in `git log` for this document. What those failures taught, and
+what the Rust tests still keep of it:
 
-On 2026-09-26 sixteen tests failed, and two more failed now and then, in the
-Linux container (GCC 16, Qt 6.11.2 from conda-forge, offscreen) while they
-passed on the owner's Windows machine. On 2026-09-27 each was traced to its
-cause and fixed; a full `QT_QPA_PLATFORM=offscreen ctest --preset
-linux-release -j 2 --timeout 300` in the container then passes with no
-failures. What was wrong with each, and why it was fixed where it was:
-
-- **Four headless reports** (`qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`,
-  `qt_drawing_summary_and_status_json_describe_the_drawing_headless`,
-  `qt_plot_and_view_image_dialogs_run_their_verbs_headless`,
-  `qt_every_view_menu_item_is_named_and_its_values_are_typed_headless`).
-  Their `-DEXPECT=` wants two report lines next to each other. Linux's
-  offscreen plugin prints "This plugin does not support propagateSizeHints()"
-  between them whenever a window's minimum size changes. The program was not
-  at fault. `tools/check_screenshot.cmake` now drops Qt's window-management
-  "does not support" lines before it matches (`docs/headless.md`). Putting `.*`
-  between the paired lines was rejected: it would stop those checks proving
-  that two reports are adjacent. Without the filter all four fail again.
-- **Three Windows paths** (`script_runner::the_line_it_writes_is_the_line_it_reads`,
+- **A path handed to a test is made native.** On Linux a backslash is a
+  legal file-name character (POSIX.1-2017, 3.170), so a Windows path typed
+  into a test is not a path there; the line-writer tests build their input
+  with the platform's separators
+  (`script_runner::the_line_it_writes_is_the_line_it_reads`,
   `plot_drawing::the_line_it_writes_is_the_line_it_reads`,
-  `snapshot::the_line_it_writes_is_the_line_it_reads`).
-  The tests handed the line writer `C:\...` as a platform's file dialog would
-  on Windows, and expected `/` back. On Linux QDir::fromNativeSeparators
-  rightly leaves `\` alone, because POSIX allows it in a file name
-  (POSIX.1-2017, 3.170). So the code was right and the input was not a native
-  path there. The tests now build their input with QDir::toNativeSeparators.
-  On Windows that is exactly the old backslashed path, so nothing they assert
-  there is weaker. On POSIX there is no separator to convert, and that part of
-  the check can only be made on Windows.
-- **Three file dialogs: one always, two intermittently**
-  (`sheet_view_options::an_image_views_picture_is_chosen_and_copied_in_one_step`,
-  `sheet_set_menu::the_set_is_saved_and_loaded_back_asking_first`,
-  `sheet_set_menu::another_sets_sheets_are_appended_in_one_step`).
-  - What was wrong. The note written on 2026-09-26 guessed a native dialog.
-    That was wrong: a backtrace shows Qt's own widget `QFileDialog` in
-    `exec()`, with its file-system thread running. The cause is in how the
-    tests answered it. QFileDialog::selectFile writes the name into the
-    dialog's file-name box only while that box does not have the keyboard
-    focus (`qfiledialog.cpp`). The box takes the focus when the dialog is
-    activated, which on the offscreen platform happens in the first pass of
-    the dialog's own event loop.
-  - What followed. A 10 ms poll that ran before the activation chose the file.
-    One that ran after it left the box empty, and Open with an empty box
-    keeps the dialog up. The image test's poll always came after, and it had
-    stopped polling, so it waited for ever. The Sheet Set tests' poll came
-    before or after depending on load. Save then wrote the default name, and
-    Load waited.
-  - The fix. The one answer they now share, `choose_file` in
-    `crates/katana_window/tests/support/window_support.rs`, takes the focus off the box before
-    `selectFile`. The image test's helper also cancels a dialog that is still
-    up rather than leaving it, so a choice that does not take fails the test
-    instead of hanging it.
-  - The regression test. qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus
-    activates the dialog first, which is the late poll's case, every time.
-    Without the fix it fails (result 0, no file chosen). With the fix, the
-    three dialog tests and the rest of `SheetSetMenu` and `SheetViewOptions`
-    passed 20 repeats each, 4 at a time, with 4 more CPU-bound processes
-    running.
-  - Making the product force non-native dialogs was not needed and was not
-    done. The widget dialog is what the offscreen platform gives.
-- **Eight GPU desktop cases** (`gpu.GpuSceneView.OnTheDesktop...` x5,
-  `qt_widgets_gpu.RenderViewGpu.OnTheDesktop...` x3).
-  - What was wrong. "Failed to create Vulkan instance: -9" is
-    `VK_ERROR_INCOMPATIBLE_DRIVER`: the Vulkan loader found no driver, because
-    the container had no `mesa-vulkan-drivers`. Both the conda-forge loader in
-    the toolchain and the system one search `/usr/share/vulkan/icd.d`. With
-    the package installed, all eight draw on lavapipe under Xvfb and pass.
-    Pointing `VK_DRIVER_FILES` at nothing brings the -9 back.
-  - The fix. A machine with no Vulkan driver at all is a fact about the
-    machine, so these cases now skip there with that reason, as the device
-    cases already skip without a device (`whyNoVulkanDriver`,
-    `crates/katana_gpu/tests/support/gpu_support.rs`, compiled into the widget tests too). A
-    driver that is there and fails still fails them.
-  - Found on the way. The three `qt_widgets_gpu.*` tests and
-    `gpu_offscreen.*` are plain `add_test`s, and a gtest skip exits 0, so
-    ctest reported a skipped case as passed. They now carry a
-    `SKIP_REGULAR_EXPRESSION`.
-  - For the release workflow. A Linux runner that is to exercise these
-    installs `xvfb` and `mesa-vulkan-drivers` before configuring. Without them
-    the cases skip, saying why, rather than fail.
+  `snapshot::the_line_it_writes_is_the_line_it_reads`), so on Windows they
+  hold the backslashed path and nothing they assert there is weaker.
+- **A machine with no GPU driver is a fact about the machine.** A device
+  case skips with that reason when wgpu finds no adapter, and a driver that
+  is there and fails still fails it
+  (`crates/katana_gpu/tests/support/gpu_support.rs`). A Linux runner that is
+  to exercise them installs Mesa's Vulkan drivers and Xvfb, as WSL has.
+- **Two runs must not share a scratch folder.** Two processes, or two
+  checkouts' runs, that empty one fixed folder under the system temp empty
+  it under each other, and the failure is intermittent. A folder of the
+  process's own (its id in the name) ends it, and cargo's threads of one
+  test binary need one per case. Some Rust tests and programs still take a
+  fixed `katana-...` folder under the system temp; a failure of such a case
+  during another run is to be run again alone before it is believed.
+- **A check must be shown to fire.** The C++ float-to-text check once passed
+  having checked nothing (its compiler could not start); the Rust guard is
+  clippy's disallowed method, and the build proves on a canary crate that the
+  lint fires before it is believed (`docs/building.md`, step 2 of `all`).
+- **A test must stand where the wrong answer would be found.** libc++ made
+  an empty path the working directory where libstdc++ left it empty, and the
+  old check passed or failed by where the test stood; its twin
+  `library_data::an_empty_name_is_refused_wherever_the_working_directory_is`
+  stands inside a prefix that holds the data, so a refusal that leaked
+  through to the working directory would find it.
+- **A platform's own text is expected as that platform writes it.** The
+  keyboard shortcuts are shown as each platform writes them ("⌘L" on macOS),
+  and the search matches the key as typed too
+  (`keyboard_shortcuts_dialog::every_key_is_listed_and_a_clash_is_marked`);
+  the macOS half is held only where the tests run on macOS.
+- **Fused multiply-adds were ruled out once and need not be again.** Rust
+  fuses nothing unasked (`docs/architecture.md`, "Determinism"), as the C++
+  build forced with `-ffp-contract=off`.
 
-What still skips in that run, and why, all for reasons outside the program:
-
-- the tests that read the gitignored reference customisation (the headless
-  quit check was disabled without it too, until it was given a committed
-  fixture as its built-in: `docs/headless.md`, "The customisation a run
-  starts with");
-- the two `online_live` cases (`KATANA_ONLINE_TESTS=1`);
-- the `gpu.*/Hardware` device cases, since the container has no GPU;
-- `gdal_adapter::gdal_is_pointed_at_the_certificates_beside_libcurl`, where the
-  environment already names the certificates;
-- the offscreen registrations of the desktop-only cases:
-  `gpu.GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack`
-  under xcb, which `gpu_offscreen.*` runs, and `qt_widgets.RenderViewGpu.OnTheDesktop...`,
-  which `qt_widgets_gpu.*` runs.
-
-## Three things the Windows run found in the Linux fixes (2026-09-28)
-
-The Linux-container fixes above and the GDAL work were merged and then built
-and run on Windows for the first time, on a Hyper-V guest and on the owner's
-machine. Two of the tests added above were correct only on Linux, and one
-suite could not be listed:
-
-- **qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus**
-  compared QFileDialog::selectedFiles() with the scratch path as
-  `std::filesystem` gives it. Qt returns `/` on every platform (`QDir`: "Qt
-  uses '/' as a universal directory separator"), and on Windows the scratch
-  path has `\`, so the same file failed to compare. It now compares against
-  QDir::fromNativeSeparators of the path. What the dialog chose is unchanged.
-- **`library_data` and `simd_*.core`** made their scratch prefixes under one
-  fixed name. ctest runs the core suite and its `simd_*` reruns at once, so
-  one process removed a folder while another held a file in it open, and the
-  `filesystem_error` ended that run. The name now carries the process id.
-  Evidence: `ctest -R "^LibraryData\.|^simd_.*\.core$" --parallel 8
-  --repeat until-fail:10` failed in its first round before the change and
-  passed all ten after it.
-- **`katana_qt_widget_tests` was listed with the 5 s default discovery
-  timeout**, not the 60 s every other suite has (the C++ build's KatanaTargetDefaults.cmake).
-  On its first launch after a build, on a machine whose virus scanner checks
-  new files, listing it took 10.7 s, so ctest ran nothing. It now has 60 s.
-
-Four `qt_widgets` cases also died on the guest with "OpenBLAS error: Memory
-allocation still failed": 12 test processes at once, each starting OpenBLAS's
-thread pool, on a guest with about 5 GB free. All four passed when run again
-one at a time there, and they passed on the owner's machine, so the program is
-not at fault and nothing was changed for them.
-
-## A sidecar left in samples/gis (2026-09-29, not fixed)
-
-A whole-suite run at `--parallel 4` left `terrain.asc.aux.xml` beside
-`samples/gis/terrain.asc`: GDAL's statistics sidecar, which
+**A sidecar in `samples/gis`.** A C++ whole-suite run once left
+`terrain.asc.aux.xml`, GDAL's statistics sidecar, beside
+`samples/gis/terrain.asc`, which
 `info_verb::info_of_the_sample_terrain_describes_its_raster_and_band` and
 `dataset_info_dialog::it_runs_the_info_lines_and_shows_the_raster_its_bands_and_gdals_json`
-assert is absent (no min or max without statistics being asked for). Both
-passed in that run and failed when run again while the file was there. The
-headless check `tests/geo/headless/info.cmake` asks for the same file's
-statistics, and the sidecar guard in `crates/katana_gis/src/processing/bridge.rs`
-removes what a run made only after the run ends, so a case reading the file
-at the same moment can see it; which test left it behind was not found. The
-file is git-ignored, so nothing shows it but the failure. Delete it before
-running the suite again.
-
-## Fixed scratch folders shared by parallel runs (2026-09-29, not fixed)
-
-A whole-suite run at `--parallel 6`, while two other worktrees on the same
-machine ran theirs, failed
-`pipeline_verb::a_pipeline_ending_in_write_keeps_its_raster_as_a_reference`: "could not
-keep the derived raster: No such file or directory" for `shade.tif` in
-`katana-pipeline-verb` under the system temp folder. It passed run again
-alone, with nothing changed. Its fixture empties one fixed folder,
-`temp_directory_path() / "katana-pipeline-verb"`, before and after every
-case, and ctest runs each case in a process of its own: two cases of the
-fixture at once, or the same case in another checkout's run, empty the
-folder under each other. 29 test files take a fixed `katana-...` folder
-under the system temp in the same way. A folder of each process's own (its
-id in the name) would end it; until then, a failure of such a case during
-another run is to be run again alone before it is believed.
-
-## The clang builds' seven failures (Windows ARM64, macOS)
-
-The first Release run with the whole suite in every job (run 36356917571,
-2026-09-27) failed seven tests on each clang/libc++ build that GCC passes.
-Most were older than the merge: those jobs had run only part of the suite.
-They were reproduced on Windows x86-64 with MSYS2's CLANG64 environment
-(clang 22, libc++), which fails the same five that are not macOS-only, and
-fixed on 2026-09-29:
-
-- **`std::to_string` of a double** (four tests, and `GenerateRotate`).
-  C++26 makes it the shortest text that reads back, as `std::format("{}")`
-  (P2587); GCC 16's library does, libc++ still prints `%f`. So the JobXML
-  reader wrote "measured 1.650000 m", a refused circle said "[-1.000000]",
-  and `generate_rotate::the_fitted_drawing_is_turned_to_fill_the_sheet_in_one_step` typed
-  its strip's corners to the micrometre and got a turn 2.6e-9 rad off. All
-  86 such calls (65 in the program, 21 in tests) now use
-  `katana_core::text::format_exact_real`, the shortest round-trip text: by the
-  standard the same `to_chars` call C++26's `to_string` makes, so GCC's
-  output is unchanged. The C++ build's check_float_to_string.py found any new one (retired with it: the Rust guard is `clippy.toml`'s disallowed methods); a
-  text search cannot, because it cannot tell a double from an int. One test
-  that compared against `std::to_string(-33.865)` - the same call as the code
-  under test - now compares against the literal "-33.865". The tool exits 1
-  when any file could not be checked, as well as on a hit: on 2026-09-30,
-  run without MSYS2's bin on PATH, g++ could not load its DLLs, every one of
-  320 files was "not checked" with no reason given, and the tool still exited
-  0 - a pass that checked nothing. It now names the reason ("the compiler
-  exited 1 and printed nothing") and fails. It fails too, saying "nothing to
-  check", when the compile database gives it no file at all - one that is
-  empty, or lists no source that mentions `to_string`, where the tree has
-  some 320 - which passed as "0 of 0 files checked"; and a source the
-  database names but the checkout lacks is "not checked" rather than a
-  Python traceback. Nothing showed that a check could fire, though: a
-  database whose "compiler" was `true` checked every file, found nothing and
-  exited 0. So before the files, a canary - one `std::to_string(1.0)` - is
-  compiled with the first file's own command and must be reported at its
-  line; when it is not, the tool says "the check cannot fire" and exits 1,
-  and when it is, the summary says so ("the canary to_string(1.0) was
-  reported").
-- **`library_data::missing_data_beside_a_library_is_not_found`.** libc++'s
-  `weakly_canonical` makes an empty path the working directory, which is
-  absolute; libstdc++ leaves it empty. `data_beside_library_file` relied on the
-  latter to refuse an empty name, and on libc++ looked beside the working
-  directory. It now refuses an empty name first. The old check passed or
-  failed by where the test stood, so
-  `library_data::an_empty_name_is_refused_wherever_the_working_directory_is` now stands
-  inside a prefix that does hold `share/gdal`: on clang it failed without the
-  fix and passes with it.
-- **The keyboard shortcuts on macOS** (`keyboard_shortcuts_dialog::every_key_is_listed_and_a_clash_is_marked`,
-  `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`). The table
-  shows a key as the platform writes it, "⌘L" on macOS, and the search read
-  only that, so "ctrl+l" found nothing there - a fault in the dialog, not
-  only in the tests. The search now also matches the key as typed
-  ("Ctrl+L"), and the tests expect each platform's own text. The macOS half
-  is checked only by the macOS job: on Windows and Linux the two texts are
-  the same.
-
-The ARM64-only suspicion, fused multiply-adds, was ruled out: the build
-compiles with `-ffp-contract=off`, and `GenerateRotate` failed on x86-64
-clang too.
+assert is absent; `tests/geo/headless/info.cmake` asks for the same file's
+statistics, and the sidecar guard in
+`crates/katana_gis/src/processing/bridge.rs` removes what a run made only
+after the run ends. Which test left it was not found, and whether the Rust
+suite leaves it has not been seen. The file is git-ignored, so nothing shows
+it but the failure: delete it before running the suite again.

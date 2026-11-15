@@ -90,12 +90,11 @@ brackets so such a citation still resolves.
   rest of the testing rules.
 - **Measure, then claim** (section 4). Measure in Release, before and after,
   with a benchmark committed beside the code so the measurement can be
-  repeated (the C++ build's benchmarks went with the C++ tree and have no
-  Rust twin yet: `docs/performance.md`); put both numbers in the commit message and the module's document.
-  This machine is shared, so a comparison alternates the builds
-  (the C++ build had a script for it, compare_benchmarks.py, retired with the
-  C++ benchmarks) and runs an A/A control beside
-  the A/B one, and reports ratios rather than single absolute numbers
+  repeated, and put both numbers in the commit message and the module's
+  document. The Rust has no benchmarks yet; the figures in
+  `docs/performance.md` are the C++ build's. This machine is shared, so a
+  comparison alternates the builds and runs an A/A control beside the A/B
+  one, and reports ratios rather than single absolute numbers
   (`docs/testing.md`, "Benchmarks").
 - **Judge a build by its exit code.** Clippy runs with `-D warnings`
   (`-Werror` in the C++ build), so a warning is a failure. A build filtered for "error" lines once printed "built" over a
@@ -116,9 +115,10 @@ brackets so such a citation still resolves.
   point at the origin.
 - **Parallel work** (section 5.3). Work that divides into parts with disjoint
   file sets runs as parallel agents, each in its own worktree outside the
-  checkout, each building with a capped job count (`-j 3`) and reporting
-  evidence rather than a description; the merged result is built and tested
-  whole before any of it is believed.
+  checkout, at most the number the owner allows at once, reporting evidence
+  rather than a description; the merged result is built and tested whole,
+  once, before any of it is believed (`KATANA_BUILD_JOBS` caps cargo's jobs
+  when several worktrees build at once, `docs/building.md`).
 - **Report honestly.** A failure is shown with its output; skipped scope is
   named with its reason.
 
@@ -235,12 +235,23 @@ name what it does not depend on. Two rules follow:
 A new layer is a new crate under `crates/` and a row of the layering
 table, in the same commit.
 
-Not done: since the C++ went, the CMake test runner no longer registers the
-layering check (`rust_layering`) and `tools/build_visible.sh` does not run it,
-so `python tools/check_rust_layering.py` is run by hand; registering it again
-is one `add_test`. The practical consequence of the rules: `katana_math` and
-`katana_geometry` have no dependencies beyond the standard library, and their
-tests link nothing else.
+**Unsafe code** is denied in the workspace's lints (`Cargo.toml`,
+`unsafe_code = "deny"`) and allowed, module by module and each with its
+reason, only where a module must be unsafe: the FFI adapters to GDAL, PDAL,
+PROJ, SQLite and libcurl, the operating-system calls of the update layer,
+the SIMD kernels, and the one module that hands the task pool's tasks
+disjoint parts of one buffer (`docs/rust.md`, "The workspace"). On
+2026-11-16 the owner decided that it is to go everywhere it can: safe crates
+in place of the bindings of our own, the hand-written SIMD kernels removed
+in favour of their scalar twins, and `#![forbid(unsafe_code)]` in every
+crate but the two shim boundaries of GDAL's algorithm framework and PDAL.
+That work has not started (`docs/rust.md`, "Not done").
+
+The check runs in every suite as the test runner's `rust_layering` (with
+Python found), beside its `rust_layering_catches_*` cases on those fixtures,
+and by hand as `python tools/check_rust_layering.py`. The practical
+consequence of the rules: `katana_math` and `katana_geometry` have no
+dependencies beyond the standard library, and their tests link nothing else.
 
 ## Error handling
 
@@ -447,10 +458,10 @@ the document that covers it now.
 | Phases 15-16 (§20-21) | 3D rendering, 3D CAD | `docs/render.md` |
 | Phase 17 (§22) | point clouds | `docs/interop.md` |
 | Phase 18 (§23) | spatial indexing | `docs/cad.md`, "Spatial indexing" |
-| Phase 19 (§24) | performance architecture, the task pool, the language standard | `docs/performance.md`; this document, "Threading" |
+| Phase 19 (§24) | performance architecture, the task pool, the language standard (the C++'s, with no Rust counterpart) | `docs/performance.md`; this document, "Threading" |
 | Phase 20 (§25); 20.1, 20.2, 20.3 | file interoperability; where imported data lands, the archive programme, the survey coding programme | `docs/interop.md`, `docs/survey_coding.md` |
 | Phase 21 (§26) | alignments, profiles, corridors, parcels, grading | `docs/geometry.md`, `docs/cad.md` |
-| Phase 22 (§27) | drawing and plotting | `docs/cad.md`, "Plotting to PDF" |
+| Phase 22 (§27) | drawing and plotting | `docs/plotting.md`; `docs/cad.md`, "Plotting to PDF" |
 | Phase 23 (§28) | application API: the command interpreter | `docs/cad.md`, "Command interpreter" |
 | Phases 24-26 (§29-30); §31 | Python AI layer, AI agent, production hardening; the AI safety model (a destructive command needs confirmation) | not started, and Rules 1 and 2 bind them; `Command::is_destructive` is in `docs/model.md`, "Command system" |
 | §45; 45.1 to 45.5 | the survey module and instrument formats | `docs/survey.md` |
