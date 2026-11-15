@@ -268,9 +268,9 @@ if(Python3_Interpreter_FOUND)
                 --crates "${_rust_fixtures}/layering/missing_layer/crates" "${PROJECT_SOURCE_DIR}")
     set_tests_properties(rust_layering_catches_missing_layer PROPERTIES
         PASS_REGULAR_EXPRESSION "layer 'math' has no crate in crates/")
-    # Step 3's round-trip gate (crates/katana_app/tests/round_trip.rs) compares the projects
-    # the two programs save through tools/project_dump.py, a dump made with Python's own sqlite3
-    # so that the judge is neither program. `project_dump_self_test` is the dump's own test, on
+    # tools/project_dump.py dumps a project with Python's own sqlite3, so that a judge of what a
+    # program saved is not the program (it was the round-trip gate's against the C++, gone with
+    # it, and stays for comparing two saves by hand). `project_dump_self_test` is the dump's own test, on
     # projects it builds in a scratch folder: two saves of the same content dump the same whatever
     # their stamps, line ends, backup names and insertion order, and each kind of real difference
     # is seen.

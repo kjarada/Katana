@@ -24,10 +24,11 @@
 #   tools/build_visible.sh close                     close this checkout's windows whose run
 #                                                    has ended
 #
-# Until the port works on Windows (the owner's ruling of 2026-11-05) every run
-# is a `wsl` one. Without `wsl` the same phases run natively on Windows, in
-# MSYS2 UCRT64 (docs/rust.md, "Windows, once the port works"); that mode is
-# kept written for then, and is not run now.
+# With `wsl` a phase runs in the WSL distribution; without it the same phases
+# run natively on Windows, in MSYS2 UCRT64 (docs/rust.md, "Windows, once the
+# port works"; the owner lifted the WSL-only rule on 2026-11-16). After a
+# Windows build, tools/stage_windows.sh puts the programs' DLLs and data where
+# a program started from Explorer finds them.
 #
 # Gone with the C++ (2026-11-15): `build` with its CMake targets, the C++
 # configure and its ninja, and the two gates `gate` and `wgate`, which ran the

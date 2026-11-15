@@ -847,7 +847,7 @@ def catalogue(data, root):
       "lines, an arc cut in two or laid over a ring, and a text set from another corner of its box make other "
       "marks and are another shape to it. A drawing that five strokes or fewer make is not compared at all, "
       "and that is %d of the %d linestyles, most of them one or two lines, or a line and a letter: of a "
-      "linestyle the comparison holds the motif and not its period, and a plain motif is anybody's. No C++ "
+      "linestyle the comparison holds the motif and not its period, and a plain motif is anybody's. No Rust "
       "test repeats the comparison, so it is held where Python is (`katana_standard_originality`)."
       % (n_ls - len(originality.compared({"linestyles": data.linestyles})), n_ls))
     w("- **Katana does not yet apply** `weight`, `group`, `hide`, `surface`, text rules, pipe rules, or a symbol's "
