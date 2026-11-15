@@ -21,12 +21,13 @@ use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_layer_target,
-    gis_scope, gis_word,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_file_field,
+    gis_layer_target, gis_scope, gis_word,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::{button, check, radio};
+use crate::drive::radio;
 use crate::host::Host;
+use crate::shell::dialog;
 use crate::ifc_dialogs::{get_open_file_name, to_native_separators};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -182,8 +183,7 @@ impl GisTool for GisClipDialog {
     }
 
     fn fields_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
-            ui.label("Clip to:");
+        dialog::labelled(ui, "Clip to:", |ui| {
             if radio(
                 ui,
                 "gisClipBySourceDrawing",
@@ -204,15 +204,14 @@ impl GisTool for GisClipDialog {
         });
         let mut browse = false;
         ui.add_enabled_ui(file, |ui| {
-            gis_field(
+            browse = gis_file_field(
                 ui,
-                "gisClipByFile",
+                ("gisClipByFile", "gisClipByFileBrowse"),
                 "File:",
                 &mut self.file,
                 "a GeoPackage, shapefile, GeoJSON ...",
                 "FILE: clip to this file's areas, read by GDAL",
             );
-            browse = button(ui, "gisClipByFileBrowse", "Browse...").clicked();
             gis_field(
                 ui,
                 "gisClipByFileLayer",
@@ -230,7 +229,7 @@ impl GisTool for GisClipDialog {
                 "where=: an SQL WHERE clause on the file's fields",
             );
         });
-        check(
+        gis_check(
             ui,
             "gisClipReplace",
             "Cut the entities in place",

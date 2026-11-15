@@ -16,9 +16,9 @@ use crate::customisation::scope_filter_views;
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
-use crate::drive::{Choice, LineOptions, button, choice, line_with};
+use crate::drive::{Choice, LineOptions, button, choice, line_with, primary};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 
 /// InvalidArgument saying `message`: why a dialog's fields write no line.
 pub(crate) fn invalid(message: impl Into<String>) -> Error {
@@ -68,15 +68,10 @@ pub(crate) fn show_framed<D: Framed>(dialog: &mut D, ui: &mut Ui, host: &mut dyn
     shown.closed
 }
 
-/// A form's row: its label, then what `add` draws beside it (QFormLayout::addRow).
+/// A form's row: its label in the column every dialog's form shares, then what `add` draws
+/// beside it, a field filling the rest (QFormLayout::addRow; shell::dialog::labelled).
 pub(crate) fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        if !label.is_empty() {
-            ui.label(label);
-        }
-        add(ui)
-    })
-    .inner
+    dialog::labelled(ui, label, add)
 }
 
 /// A one-line field with its placeholder.
@@ -121,18 +116,23 @@ pub(crate) fn run_buttons(
     preview: Option<(&str, bool)>,
     run: (&str, &str, bool),
 ) -> (bool, bool) {
-    ui.horizontal(|ui| {
-        let previewed = preview.is_some_and(|(name, ready)| {
-            ui.add_enabled_ui(ready, |ui| button(ui, name, "Preview").clicked())
-                .inner
-        });
-        let (name, text, ready) = run;
-        let ran = ui
-            .add_enabled_ui(ready, |ui| button(ui, name, text).clicked())
-            .inner;
-        (previewed, ran)
-    })
-    .inner
+    // At the right of the row, Run - the dialog's act, in the accent - last.
+    dialog::button_row(
+        ui,
+        |_| {},
+        |ui| {
+            let previewed = preview.is_some_and(|(name, ready)| {
+                ui.add_enabled_ui(ready, |ui| button(ui, name, "Preview").clicked())
+                    .inner
+            });
+            let (name, text, ready) = run;
+            let ran = ui
+                .add_enabled_ui(ready, |ui| primary(ui, name, text).clicked())
+                .inner;
+            (previewed, ran)
+        },
+    )
+    .1
 }
 
 /// A choice whose items carry the word a line writes (a QComboBox's item data): what it shows and

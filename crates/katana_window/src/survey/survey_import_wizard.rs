@@ -125,7 +125,7 @@ use super::survey_templates::{
 use crate::drive::{self, Choice, TextOptions};
 use crate::format::qt_fixed;
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::theme::palette;
 
 /// Points the layout page previews. Enough rows to see that the columns are the right way round
@@ -872,27 +872,42 @@ impl SurveyImportWizard {
         // pressed; Cancel is.
         let busy = form.task.busy();
         let page = form.page;
-        ui.horizontal(|ui| {
-            let buttons = [
-                ("back", "< Back", !busy && page > FILE_PAGE),
-                ("next", "Next >", !busy && page < REPORT_PAGE),
-                (
-                    "import",
-                    "Import",
-                    !busy && page == REPORT_PAGE && !form.blocked,
-                ),
-                ("close", "Close", true),
-            ];
-            for (name, text, enabled) in buttons {
-                if ui
-                    .add_enabled_ui(enabled, |ui| drive::button(ui, name, text))
-                    .inner
-                    .clicked()
-                {
-                    form.pressed.push(name);
+        // At the right: Close, Back and Next, and Import - the wizard's act - last, in the accent.
+        let pressed = dialog::button_row(
+            ui,
+            |_| {},
+            |ui| {
+                let buttons = [
+                    ("close", "Close", true),
+                    ("back", "< Back", !busy && page > FILE_PAGE),
+                    ("next", "Next >", !busy && page < REPORT_PAGE),
+                    (
+                        "import",
+                        "Import",
+                        !busy && page == REPORT_PAGE && !form.blocked,
+                    ),
+                ];
+                let mut pressed = Vec::new();
+                for (name, text, enabled) in buttons {
+                    let clicked = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            if name == "import" {
+                                drive::primary(ui, name, text)
+                            } else {
+                                drive::button(ui, name, text)
+                            }
+                        })
+                        .inner
+                        .clicked();
+                    if clicked {
+                        pressed.push(name);
+                    }
                 }
-            }
-        });
+                pressed
+            },
+        )
+        .1;
+        form.pressed.extend(pressed);
     }
 
     fn file_page(ui: &mut Ui, form: &mut WizardForm) {
@@ -903,6 +918,7 @@ impl SurveyImportWizard {
              asks you: a file is never read with a format nobody chose.",
         );
         ui.horizontal(|ui| {
+            ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Browse...");
             field(ui, "file", &mut form.file, "The file to import", "");
             if drive::button(ui, "browse", "Browse...").clicked() {
                 form.pressed.push("browse");

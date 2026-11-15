@@ -24,10 +24,9 @@ use katana_core::{ErrorCode, Result};
 use super::buffer_dialog::Words;
 use super::geometry_check_dialog::gis_problems_summary;
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_number_option,
-    gis_scope, gis_summary, gis_word,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field,
+    gis_number_option, gis_scope, gis_summary, gis_word,
 };
-use crate::drive::check;
 use crate::host::Host;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -187,7 +186,7 @@ impl GisTool for GisCoverageDialog {
                 "merge=: clean only - which neighbour an overlap goes to; blank is GDAL's \
                  default (the longest shared border)",
             );
-            check(
+            gis_check(
                 ui,
                 "gisCoverageReplace",
                 "Change the areas in place",

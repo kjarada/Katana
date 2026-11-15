@@ -594,8 +594,7 @@ impl ArgumentForm {
         );
         let label = format!("{}{}:", arg.name, if arg.required { " *" } else { "" });
         let placeholder = if is_list(arg.r#type) { "a,b,c" } else { "" };
-        ui.horizontal(|ui| {
-            ui.label(label);
+        crate::shell::dialog::labelled(ui, &label, |ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 let response = match &mut entry.control {
                     Control::Check(on) => check(ui, &name, "", on),
@@ -624,7 +623,6 @@ impl ArgumentForm {
             })
             .inner
         })
-        .inner
     }
 
     /// Draws the form; true when any control was edited this frame.

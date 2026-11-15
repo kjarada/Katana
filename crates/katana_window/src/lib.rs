@@ -87,7 +87,8 @@ pub mod drive {
     pub use action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item, shortcut_text};
     pub use controls::{
         Choice, LineOptions, SpinRange, TextOptions, button, button_as, check, choice, custom,
-        label, label_as, line, line_with, radio, rows, spin, tabs, text, text_with, toggle, whole,
+        label, label_as, line, line_with, primary, primary_button, radio, rows, spin, tabs, text,
+        text_with, toggle, whole,
     };
     pub use harness::{HEADLESS_HEIGHT, HEADLESS_WIDTH, Harness, WorkbenchHost};
     pub use mailbox::{Act, ActId, ActOutcome, Posted, Taken};

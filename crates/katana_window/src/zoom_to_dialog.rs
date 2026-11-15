@@ -31,7 +31,7 @@ use katana_core::Result;
 use crate::customisation::{ScopeFilterWidget, scope_filter_views};
 use crate::drive::controls::{self, Choice};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::theme;
 
 /// What the dialog reads of the window.
@@ -338,35 +338,38 @@ impl ZoomToDialog {
     }
 
     fn body(&mut self, ui: &mut Ui) {
-        ui.set_max_width(520.0);
         self.scope.ui(ui);
-        egui::Grid::new("zoomToForm").num_columns(2).show(ui, |ui| {
-            ui.label("In:");
+        ui.add_space(dialog::GROUP_GAP);
+        dialog::form(ui, |form| {
             let items: Vec<String> = self
                 .view_items
                 .iter()
                 .map(|(_, shown)| shown.clone())
                 .collect();
-            controls::choice(ui, "zoomToView", &items, &mut self.view).on_hover_text(
-                "The view to frame what the scope takes in; the views linked with it follow",
-            );
-            ui.end_row();
-            ui.label("Line:");
+            form.row("In:", |ui| {
+                controls::choice(ui, "zoomToView", &items, &mut self.view).on_hover_text(
+                    "The view to frame what the scope takes in; the views linked with it follow",
+                )
+            });
             let line = match self.line() {
                 Ok(line) => line,
                 Err(error) => error.describe(),
             };
-            controls::label_as(
-                ui,
-                "zoomToLine",
-                &line,
-                egui::Label::new(line.as_str()).wrap().selectable(true),
-            );
-            ui.end_row();
+            form.row("Line:", |ui| {
+                controls::label_as(
+                    ui,
+                    "zoomToLine",
+                    &line,
+                    egui::Label::new(RichText::new(line.as_str()).monospace())
+                        .wrap()
+                        .selectable(true),
+                )
+            });
         });
     }
 
-    /// The status and the buttons: Zoom keeps the dialog open for the next scope; Close closes it.
+    /// The status, and the buttons: Close closes; Zoom - the dialog's act, last and in the accent -
+    /// keeps it open for the next scope.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
         let colour = if self.status_error {
@@ -374,22 +377,33 @@ impl ZoomToDialog {
         } else {
             theme::text()
         };
-        controls::label_as(
+        // The status at the left of the buttons, wrapped in what they leave it.
+        let ((), (close, zoom)) = dialog::button_row(
             ui,
-            "zoomToStatus",
-            &status,
-            egui::Label::new(RichText::new(status.as_str()).color(colour.to_egui()))
-                .wrap()
-                .selectable(true),
+            |ui| {
+                controls::label_as(
+                    ui,
+                    "zoomToStatus",
+                    &status,
+                    egui::Label::new(RichText::new(status.as_str()).color(colour.to_egui()))
+                        .wrap()
+                        .selectable(true),
+                );
+            },
+            |ui| {
+                let close = controls::button(ui, "zoomToClose", "Close").clicked();
+                let zoom =
+                    controls::button_as(ui, "zoomToRun", "&Zoom", controls::primary_button("Zoom"))
+                        .clicked();
+                (close, zoom)
+            },
         );
-        ui.horizontal(|ui| {
-            if controls::button_as(ui, "zoomToRun", "&Zoom", egui::Button::new("Zoom")).clicked() {
-                self.zoom(&mut *host);
-                ui.ctx().request_repaint();
-            }
-            if controls::button(ui, "zoomToClose", "Close").clicked() {
-                self.close();
-            }
-        });
+        if zoom {
+            self.zoom(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if close {
+            self.close();
+        }
     }
 }

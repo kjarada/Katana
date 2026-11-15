@@ -1185,13 +1185,11 @@ impl OnlineDataDialog {
         };
 
         let applies = self.applies();
-        ui.horizontal(|ui| {
-            ui.label("Area:");
+        crate::shell::dialog::labelled(ui, "Area:", |ui| {
             choice(ui, "onlineArea", &self.area_items, &mut self.area);
         });
         let typed = self.area_kind() == OnlineAreaKind::Box;
-        ui.horizontal(|ui| {
-            ui.label("Box:");
+        crate::shell::dialog::labelled(ui, "Box:", |ui| {
             ui.add_enabled_ui(typed, |ui| {
                 line_with(
                     ui,
@@ -1205,8 +1203,7 @@ impl OnlineDataDialog {
                 choice(ui, "onlineBoxCrs", &self.box_crs_items, &mut self.box_crs);
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Resolution:");
+        crate::shell::dialog::labelled(ui, "Resolution:", |ui| {
             ui.add_enabled_ui(applies.resolution_auto, |ui| {
                 check(
                     ui,
@@ -1224,8 +1221,7 @@ impl OnlineDataDialog {
                 );
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Target layer:");
+        crate::shell::dialog::labelled(ui, "Target layer:", |ui| {
             ui.add_enabled_ui(applies.target_layer, |ui| {
                 line_with(
                     ui,
@@ -1238,8 +1234,7 @@ impl OnlineDataDialog {
                 );
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("OpenStreetMap tag:");
+        crate::shell::dialog::labelled(ui, "OpenStreetMap tag:", |ui| {
             ui.add_enabled_ui(applies.tag, |ui| {
                 line_with(
                     ui,
@@ -1252,8 +1247,7 @@ impl OnlineDataDialog {
                 );
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Scene dates:");
+        crate::shell::dialog::labelled(ui, "Scene dates:", |ui| {
             ui.add_enabled_ui(applies.dates, |ui| {
                 check(ui, "onlineUseDates", "Between", &mut self.use_dates);
                 self.from.ui(ui, "onlineFrom");
@@ -1261,8 +1255,7 @@ impl OnlineDataDialog {
                 self.to.ui(ui, "onlineTo");
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Cloud:");
+        crate::shell::dialog::labelled(ui, "Cloud:", |ui| {
             ui.add_enabled_ui(applies.dates, |ui| {
                 spin(
                     ui,
@@ -1273,8 +1266,7 @@ impl OnlineDataDialog {
             });
         });
         // A time-enabled layer's date: the layer's own (the latest) unless one is chosen.
-        ui.horizontal(|ui| {
-            ui.label("Date:");
+        crate::shell::dialog::labelled(ui, "Date:", |ui| {
             ui.add_enabled_ui(applies.time_default, |ui| {
                 check(
                     ui,
@@ -1299,8 +1291,7 @@ impl OnlineDataDialog {
                 .inner
             })
             .inner;
-        ui.horizontal(|ui| {
-            ui.label("Use CRS:");
+        crate::shell::dialog::labelled(ui, "Use CRS:", |ui| {
             line_with(
                 ui,
                 "onlineCrs",
@@ -1437,22 +1428,27 @@ impl OnlineDataDialog {
             .is_some_and(|layer| layer.kind != OnlineLayerKind::Catalogue);
         let status = self.status.clone();
         let is_error = self.status_error;
-        let (import, close) = ui
-            .horizontal(|ui| {
+        // The status at the left; Close, then Import - the dialog's act, in the accent - at the
+        // right.
+        let ((), (close, import)) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
                 let mut text = RichText::new(status.as_str());
                 if is_error {
                     text = text.color(palette::error().to_egui());
                 }
                 label_as(ui, "onlineStatus", &status, egui::Label::new(text).wrap());
+            },
+            |ui| {
+                let close = button(ui, "onlineClose", "Close").clicked();
                 let import = ui
                     .add_enabled_ui(importable, |ui| {
-                        button(ui, "onlineImport", "Import").clicked()
+                        crate::drive::primary(ui, "onlineImport", "Import").clicked()
                     })
                     .inner;
-                let close = button(ui, "onlineClose", "Close").clicked();
-                (import, close)
-            })
-            .inner;
+                (close, import)
+            },
+        );
         if import {
             self.import_chosen(context);
         }

@@ -1041,8 +1041,7 @@ impl Body {
                 }
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Start chainage:");
+        crate::shell::dialog::labelled(ui, "Start chainage:", |ui| {
             field(
                 ui,
                 "alignmentStartStation",
@@ -1174,8 +1173,7 @@ impl Body {
              with no curve - as ALIGN STATIONS prints them. Azimuths are clockwise from grid \
              north.",
         );
-        ui.horizontal(|ui| {
-            ui.label("Interval:");
+        crate::shell::dialog::labelled(ui, "Interval:", |ui| {
             // As it is typed: the table is cheap to make (setting_out_stations caps it), and a
             // headless --fill sets the text without finishing an edit.
             if field(
@@ -1219,8 +1217,7 @@ impl Body {
                 }
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Label style:");
+        crate::shell::dialog::labelled(ui, "Label style:", |ui| {
             self.label_style.ui(ui, "alignmentLabelStyle");
             ui.label("Layer:");
             field(
@@ -1279,14 +1276,18 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            self.status.ui(ui, "alignmentStatus");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if button(ui, "alignmentClose", "Close", "").clicked() {
-                    self.close = true;
-                }
-            });
-        });
+        // The status at the left, Close at the right.
+        let status = &mut self.status;
+        let ((), close) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
+                status.ui(ui, "alignmentStatus");
+            },
+            |ui| button(ui, "alignmentClose", "Close", "").clicked(),
+        );
+        if close {
+            self.close = true;
+        }
     }
 }
 

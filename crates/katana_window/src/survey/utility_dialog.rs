@@ -1298,8 +1298,7 @@ impl UtilityToolsDialog {
                 format!("nothing to run yet: {}", error.message),
             ),
         };
-        ui.horizontal(|ui| {
-            ui.label("Command:");
+        crate::shell::dialog::labelled(ui, "Command:", |ui| {
             controls::line_with(
                 ui,
                 "utilityCommand",
@@ -1371,11 +1370,14 @@ impl UtilityToolsDialog {
 
     /// The dialog's own last row: Close, kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            if controls::button(ui, "utilityClose", "Close").clicked() {
-                self.hide();
-            }
-        });
+        let ((), close) = crate::shell::dialog::button_row(
+            ui,
+            |_| {},
+            |ui| controls::button(ui, "utilityClose", "Close").clicked(),
+        );
+        if close {
+            self.hide();
+        }
     }
 
     /// The fields every grading tool shares, then the tabs and the page in front.
@@ -1797,12 +1799,15 @@ impl UtilityToolsDialog {
 
 /// A one-line field with its placeholder and tip.
 fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip: &str) {
+    // Every path has its Browse... after it: the field leaves it its room.
+    let width = crate::shell::dialog::beside_a_button(ui, "Browse...");
     controls::line_with(
         ui,
         name,
         value,
         LineOptions {
             placeholder,
+            width: Some(width),
             ..LineOptions::default()
         },
     )
@@ -1817,8 +1822,7 @@ fn word_choice(ui: &mut Ui, name: &str, choice: &mut WordChoice, tip: &str) {
 
 /// A form's row: its caption, then what `add` draws.
 fn labelled(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
-    ui.horizontal(|ui| {
-        ui.label(caption);
+    crate::shell::dialog::labelled(ui, caption, |ui| {
         add(ui);
     });
 }

@@ -33,13 +33,14 @@ use katana_core::{Error, ErrorCode, Result};
 use katana_interop::export::vector_export_formats;
 
 use crate::customisation::ScopeChoice;
-use crate::drive::{Choice, button, check, choice};
+use crate::drive::{Choice, choice};
 use crate::geo::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_number_option,
-    gis_scope, gis_summary, gis_word,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_file_field,
+    gis_number_option, gis_scope, gis_summary, gis_word,
 };
 use crate::host::Host;
 use crate::ifc_dialogs::get_save_file_name;
+use crate::shell::dialog;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VectorExportForm {
@@ -341,15 +342,14 @@ impl GisTool for VectorExportDialog {
     }
 
     fn fields_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        gis_field(
+        let browse = gis_file_field(
             ui,
-            "vectorExportFile",
+            ("vectorExportFile", "vectorExportBrowse"),
             "File:",
             &mut self.file,
             "the file to write, e.g. site.gpkg",
             "Its extension picks the format: .gpkg, .geojson, .shp, .kml, .dxf, .12da ...",
         );
-        let browse = button(ui, "vectorExportBrowse", "Browse...").clicked();
         // A .dxf and an archive take the scope alone: the GDAL fields are off for one.
         let gdal = self.gdal();
         // One file layer per drawing layer names each: the layer name goes off.
@@ -366,7 +366,7 @@ impl GisTool for VectorExportDialog {
             );
         });
         ui.add_enabled_ui(gdal, |ui| {
-            check(
+            gis_check(
                 ui,
                 "vectorExportSplit",
                 "One file layer per drawing layer",
@@ -375,7 +375,7 @@ impl GisTool for VectorExportDialog {
             .on_hover_text(
                 "split=layer: each drawing layer becomes a layer of the file, named after it",
             );
-            check(
+            gis_check(
                 ui,
                 "vectorExportAppend",
                 "Add to the file rather than replace it",
@@ -385,8 +385,7 @@ impl GisTool for VectorExportDialog {
                 "append: a GeoPackage keeps its layers and gains this one; a layer name it has \
                  already is refused",
             );
-            ui.horizontal(|ui| {
-                ui.label("Coordinates:");
+            dialog::labelled(ui, "Coordinates:", |ui| {
                 choice(ui, "vectorExportCrs", &self.crs_items, &mut self.crs).on_hover_text(
                     "project: the project's coordinate system (a GeoJSON in longitude and \
                      latitude, as RFC 7946 says); native: the project's where the format allows \
@@ -410,8 +409,7 @@ impl GisTool for VectorExportDialog {
                 "none, e.g. SPATIAL_INDEX=NO",
                 "lco=: the driver's layer creation options, checked likewise",
             );
-            ui.horizontal(|ui| {
-                ui.label("Text:");
+            dialog::labelled(ui, "Text:", |ui| {
                 choice(ui, "vectorExportText", &self.text_items, &mut self.text);
             });
             // Arcs and circles have no exact form in these formats. The tolerance is the sagitta
@@ -425,7 +423,7 @@ impl GisTool for VectorExportDialog {
                 "0.001",
                 "curve=: the largest distance a chord may stray from its arc, in model units",
             );
-            check(
+            gis_check(
                 ui,
                 "vectorExportProperties",
                 "Write entity properties as attributes",

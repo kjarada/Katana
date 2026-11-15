@@ -574,18 +574,26 @@ impl ReferenceState {
 
     fn footer(&mut self, ui: &mut Ui) {
         let count = self.count.clone();
-        ui.horizontal(|ui| {
-            label(ui, "commandReferenceCount", &count);
-            if button(ui, "commandReferenceCopy", "Copy")
-                .on_hover_text("Copy the chosen command, or every command shown")
-                .clicked()
-            {
-                self.copy = true;
-            }
-            if button(ui, "commandReferenceClose", "Close").clicked() {
-                self.close = true;
-            }
-        });
+        // The count at the left; Copy and Close at the right.
+        let ((), (copy, close)) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
+                label(ui, "commandReferenceCount", &count);
+            },
+            |ui| {
+                let copy = button(ui, "commandReferenceCopy", "Copy")
+                    .on_hover_text("Copy the chosen command, or every command shown")
+                    .clicked();
+                let close = button(ui, "commandReferenceClose", "Close").clicked();
+                (copy, close)
+            },
+        );
+        if copy {
+            self.copy = true;
+        }
+        if close {
+            self.close = true;
+        }
     }
 }
 

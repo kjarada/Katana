@@ -685,6 +685,8 @@ impl Framed for SurfaceRasterDialog {
             &mut self.cog,
         );
         let browse = row(ui, "File:", |ui| {
+            ui.spacing_mut().text_edit_width =
+                crate::shell::dialog::beside_a_button(ui, "Browse...");
             field(
                 ui,
                 "surfaceRasterFile",

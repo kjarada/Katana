@@ -1530,8 +1530,7 @@ impl SurfaceStyleManagerDialog {
     /// A surface's style: the drawing's surfaces, and the chosen style given to one.
     fn assign_row(&mut self, ui: &mut Ui, host: &mut dyn Host, asked: &mut Option<Asked>) {
         let style_chosen = self.chosen(host.document()).is_some();
-        ui.horizontal(|ui| {
-            ui.label("Draw surface");
+        crate::shell::dialog::labelled(ui, "Draw surface", |ui| {
             choice(
                 ui,
                 "surfaceStyleSurface",
@@ -1609,19 +1608,23 @@ impl Framed for SurfaceStyleManagerDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let status = self.status.clone();
         let colour = message_colour(self.status_is_error);
-        let close = ui
-            .horizontal(|ui| {
+        // The status at the left, Close at the right.
+        let ((), close) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
                 label_as(
                     ui,
                     "surfaceStyleStatus",
                     &status,
                     egui::Label::new(RichText::new(status.as_str()).color(colour)).wrap(),
                 );
+            },
+            |ui| {
                 button(ui, "surfaceStyleClose", "Close")
                     .on_hover_text("Close the window; unapplied edits are kept")
                     .clicked()
-            })
-            .inner;
+            },
+        );
         if close {
             self.hide();
         }

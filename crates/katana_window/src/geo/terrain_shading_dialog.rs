@@ -467,6 +467,8 @@ impl Framed for TerrainShadingDialog {
             );
         });
         let browse = row(ui, "Save to:", |ui| {
+            ui.spacing_mut().text_edit_width =
+                crate::shell::dialog::beside_a_button(ui, "Browse...");
             field(
                 ui,
                 "shadingSave",

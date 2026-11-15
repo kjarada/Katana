@@ -33,13 +33,13 @@ use katana_core::text::{equals_ignoring_case, parse_finite_double};
 use crate::customisation::{DocumentWatcher, ScopeFilterWidget};
 use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
-use crate::drive::{Choice, button, check, choice, line, whole};
+use crate::drive::{Choice, button, check, choice, line, primary, whole};
 use crate::geo::terrain_dialog_parts::{
     Framed, check_list_with_current, command_field, field, host_views, invalid, row, show_framed,
 };
 use crate::geo::terrain_dialog_support::{line_word, terrain_reply_field};
 use crate::host::{Host, VerbOutcome};
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::{hidden, offstage};
 
 fn number(text: &str) -> Option<f64> {
@@ -720,24 +720,27 @@ impl Framed for SurfaceLevelsDialog {
         let p = surface_levels_prefix(self.kind);
         // Nothing to run until the fields say a line; the placeholder says why.
         let ready = self.command().is_ok();
-        let (preview, run, close) = ui
-            .horizontal(|ui| {
-                let (preview, run) = ui
+        terrain_reply_field(ui, &format!("{p}Reply"), &mut self.reply);
+        // Close, Preview, then Run - the dialog's act, in the accent - at the right.
+        let ((), (close, (preview, run))) = dialog::button_row(
+            ui,
+            |_| {},
+            |ui| {
+                let close = button(ui, &format!("{p}Close"), "Close").clicked();
+                let pressed = ui
                     .add_enabled_ui(ready, |ui| {
                         let preview = button(ui, &format!("{p}Preview"), "Preview")
                             .on_hover_text(
                                 "Run the line with PREVIEW: what it would change, nothing changed",
                             )
                             .clicked();
-                        let run = button(ui, &format!("{p}Run"), "Run").clicked();
+                        let run = primary(ui, &format!("{p}Run"), "Run").clicked();
                         (preview, run)
                     })
                     .inner;
-                let close = button(ui, &format!("{p}Close"), "Close").clicked();
-                (preview, run, close)
-            })
-            .inner;
-        terrain_reply_field(ui, &format!("{p}Reply"), &mut self.reply);
+                (close, pressed)
+            },
+        );
         if preview {
             self.run_line(host, true);
         }
@@ -977,7 +980,10 @@ impl SurfaceCombineDialog {
     fn merge_page(&mut self, ui: &mut Ui) {
         let (up, down) = ui
             .horizontal_top(|ui| {
+                // The list leaves Up and Down their room beside it.
+                let width = dialog::beside_a_button(ui, "Down");
                 ui.vertical(|ui| {
+                    ui.set_width(width);
                     check_list_with_current(
                         ui,
                         "surfaceCombineMergeList",
@@ -1083,24 +1089,27 @@ impl Framed for SurfaceCombineDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // Nothing to run until the fields say a line; the placeholder says why.
         let ready = self.command().is_ok();
-        let (preview, run, close) = ui
-            .horizontal(|ui| {
-                let (preview, run) = ui
+        terrain_reply_field(ui, "surfaceCombineReply", &mut self.reply);
+        // Close, Preview, then Run - the dialog's act, in the accent - at the right.
+        let ((), (close, (preview, run))) = dialog::button_row(
+            ui,
+            |_| {},
+            |ui| {
+                let close = button(ui, "surfaceCombineClose", "Close").clicked();
+                let pressed = ui
                     .add_enabled_ui(ready, |ui| {
                         let preview = button(ui, "surfaceCombinePreview", "Preview")
                             .on_hover_text(
                                 "Run the line with PREVIEW: what it would make, nothing changed",
                             )
                             .clicked();
-                        let run = button(ui, "surfaceCombineRun", "Run").clicked();
+                        let run = primary(ui, "surfaceCombineRun", "Run").clicked();
                         (preview, run)
                     })
                     .inner;
-                let close = button(ui, "surfaceCombineClose", "Close").clicked();
-                (preview, run, close)
-            })
-            .inner;
-        terrain_reply_field(ui, "surfaceCombineReply", &mut self.reply);
+                (close, pressed)
+            },
+        );
         if preview {
             self.run_line(host, true);
         }

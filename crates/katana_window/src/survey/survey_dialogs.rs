@@ -61,7 +61,7 @@ use katana_survey::{LevelAdjustment, TraverseKind, TraverseStochasticModel};
 
 use crate::drive::{self, Choice, LineOptions, TextOptions};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::theme::palette;
 
 // ---- what every survey dialog shares -------------------------------------------------------
@@ -109,15 +109,10 @@ pub(crate) fn offstage<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> 
     add(&mut child)
 }
 
-/// A form row: the label, then what `add` draws beside it (QFormLayout::addRow).
+/// A form row: the label, then what `add` draws beside it (QFormLayout::addRow) - the label in
+/// the column every dialog's form shares, the field filling the rest (shell::dialog::labelled).
 pub(crate) fn form_row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        if !label.is_empty() {
-            ui.label(label);
-        }
-        add(ui)
-    })
-    .inner
+    dialog::labelled(ui, label, add)
 }
 
 /// A one-line field with its placeholder and tooltip.
@@ -387,8 +382,10 @@ impl SurveyToolFrame {
             &mut parts,
             |ui, parts| {
                 let (pane, form, _) = parts;
-                muted(ui, &pane.note);
-                draw(ui, &mut **form);
+                dialog::note(ui, &pane.note);
+                ui.add_space(dialog::GROUP_GAP);
+                dialog::form(ui, |rows| draw(rows.ui(), &mut **form));
+                ui.add_space(dialog::GROUP_GAP);
                 coloured_label(
                     ui,
                     "message",
@@ -408,23 +405,45 @@ impl SurveyToolFrame {
             },
             |ui, parts| {
                 let (_, _, pressed) = parts;
-                ui.horizontal(|ui| {
-                    // Left of the stretch: fillers read the drawing, verbs act on the form.
-                    for filler in fillers {
-                        if drive::button(ui, filler.name, filler.text).clicked() {
-                            **pressed = Some(filler.name);
+                let (filled, acted) = dialog::button_row(
+                    ui,
+                    // At the left: the fillers, which read the drawing into the form.
+                    |ui| {
+                        let mut clicked: Option<&'static str> = None;
+                        for filler in fillers {
+                            if drive::button(ui, filler.name, filler.text).clicked() {
+                                clicked = Some(filler.name);
+                            }
                         }
-                    }
-                    ui.add_space(24.0);
-                    for verb in verbs {
-                        if drive::button(ui, verb.name, verb.text).clicked() {
-                            **pressed = Some(verb.name);
+                        clicked
+                    },
+                    // At the right: Close, the other verbs, and the first verb - the dialog's own
+                    // act - last, in the accent.
+                    |ui| {
+                        let mut clicked: Option<&'static str> = None;
+                        if drive::button(ui, "close", "Close").clicked() {
+                            clicked = Some("close");
                         }
-                    }
-                    if drive::button(ui, "close", "Close").clicked() {
-                        **pressed = Some("close");
-                    }
-                });
+                        let (first, others) = match verbs.split_first() {
+                            Some((first, others)) => (Some(first), others),
+                            None => (None, verbs),
+                        };
+                        for verb in others {
+                            if drive::button(ui, verb.name, verb.text).clicked() {
+                                clicked = Some(verb.name);
+                            }
+                        }
+                        if let Some(verb) = first
+                            && drive::primary(ui, verb.name, verb.text).clicked()
+                        {
+                            clicked = Some(verb.name);
+                        }
+                        clicked
+                    },
+                );
+                if let Some(name) = filled.or(acted) {
+                    **pressed = Some(name);
+                }
             },
         );
         if shown.closed || pressed == Some("close") {
@@ -972,15 +991,16 @@ impl SurveyTraverseDialog {
                 &mut form.start_mark,
                 "E,N or point id",
                 "The backsight - for a loop, the station the first leg runs to",
-            );
-            ui.label("or its azimuth");
+            )
+        });
+        form_row(ui, "or its azimuth:", |ui| {
             field(
                 ui,
                 "startAzimuth",
                 &mut form.start_azimuth,
                 "azimuth or bearing",
                 "Used when no reference mark is given",
-            );
+            )
         });
         form_row(ui, "Legs:", |ui| {
             drive::text_with(
@@ -1006,8 +1026,9 @@ impl SurveyTraverseDialog {
                 &mut form.end_station,
                 "its id",
                 "The station the last leg ends on (link and open)",
-            );
-            ui.label("at");
+            )
+        });
+        form_row(ui, "End station at:", |ui| {
             field_if(
                 ui,
                 link,
@@ -1015,7 +1036,7 @@ impl SurveyTraverseDialog {
                 &mut form.end,
                 "E,N or point id",
                 "Known coordinates of the closing station (link)",
-            );
+            )
         });
         form_row(ui, "Closing angle:", |ui| {
             field_if(
@@ -1036,8 +1057,9 @@ impl SurveyTraverseDialog {
                 &mut form.closing_mark,
                 "E,N or point id",
                 "",
-            );
-            ui.label("or its azimuth");
+            )
+        });
+        form_row(ui, "or its azimuth:", |ui| {
             field_if(
                 ui,
                 link,
@@ -1045,22 +1067,26 @@ impl SurveyTraverseDialog {
                 &mut form.closing_azimuth,
                 "azimuth or bearing",
                 "",
-            );
+            )
         });
         let methods: Vec<&str> = TRAVERSE_METHODS.iter().map(|(label, _)| *label).collect();
         form_row(ui, "Adjustment:", |ui| {
             choice_of(ui, "method", &methods, &mut form.method)
                 .on_hover_text("Least squares weighs the observations by the precisions below")
         });
-        ui.add_enabled_ui(!least_squares, |ui| {
-            drive::check(
-                ui,
-                "balanceAngles",
-                "Balance the angular misclosure first",
-                &mut form.balance_angles,
-            )
+        form_row(ui, "", |ui| {
+            ui.add_enabled_ui(!least_squares, |ui| {
+                drive::check(
+                    ui,
+                    "balanceAngles",
+                    "Balance the angular misclosure first",
+                    &mut form.balance_angles,
+                )
+            })
         });
-        form_row(ui, "Least-squares precision:", |ui| {
+        // The least-squares precisions, a field each: an angle's in seconds, a distance's as
+        // millimetres plus parts per million of its length.
+        form_row(ui, "Angle precision (\"):", |ui| {
             field_if(
                 ui,
                 least_squares,
@@ -1068,8 +1094,9 @@ impl SurveyTraverseDialog {
                 &mut form.angle_sigma,
                 "",
                 "Standard deviation of an angle, seconds",
-            );
-            ui.label("\" angles;");
+            )
+        });
+        form_row(ui, "Distance precision (mm):", |ui| {
             field_if(
                 ui,
                 least_squares,
@@ -1077,8 +1104,9 @@ impl SurveyTraverseDialog {
                 &mut form.distance_sigma,
                 "",
                 "Standard deviation of a distance: mm",
-            );
-            ui.label("mm +");
+            )
+        });
+        form_row(ui, "Distance precision (ppm):", |ui| {
             field_if(
                 ui,
                 least_squares,
@@ -1086,8 +1114,7 @@ impl SurveyTraverseDialog {
                 &mut form.distance_ppm,
                 "",
                 "... plus parts per million of its length",
-            );
-            ui.label("ppm distances");
+            )
         });
     }
 
