@@ -34,10 +34,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use egui::{RichText, Ui};
-use katana_cad::Document;
+use katana_cad::{Document, ListenerHandle};
 use katana_cad::annotation::label_layout::shown_label_text;
 use katana_cad::annotation::leader_presets::{leader_context, preset_info, recognise_preset};
 use katana_cad::property_outline::{
@@ -938,6 +940,13 @@ pub struct PropertyTreePanel {
     pending_more: Option<(RowPath, u64)>,
     /// The tree scrolled back to its top at the next frame: a new subject.
     scroll_to_top: bool,
+    /// The drawing's notifications, counted by a listener on the drawing drawn last (by its
+    /// address, `listened`): the panel shows the selection again at the next frame after any, as
+    /// the C++ window's document listener refreshed it (MainWindow::scheduleRefresh, refreshAll).
+    registration: ListenerHandle,
+    notifications: Arc<AtomicU64>,
+    seen_notifications: u64,
+    listened: usize,
 }
 
 impl Default for PropertyTreePanel {
@@ -961,6 +970,35 @@ impl PropertyTreePanel {
             selected: Vec::new(),
             pending_more: None,
             scroll_to_top: false,
+            registration: ListenerHandle::default(),
+            notifications: Arc::new(AtomicU64::new(0)),
+            seen_notifications: 0,
+            listened: 0,
+        }
+    }
+
+    /// The selection shown again when `document` notified since the last look: a selection made,
+    /// an entity edited, an undo. The first look at a drawing listens to it, and shows its
+    /// selection unless `show_selection` showed this drawing already. Without it the panel showed
+    /// nothing until something asked, where the C++ window refreshed it at every change.
+    pub fn follow(&mut self, document: &Document) {
+        let key = std::ptr::from_ref(document) as usize;
+        if key != self.listened || !self.registration.active() {
+            self.listened = key;
+            let counter = Arc::clone(&self.notifications);
+            self.registration = document.add_listener(move || {
+                counter.fetch_add(1, Ordering::AcqRel);
+            });
+            self.seen_notifications = self.notifications.load(Ordering::Acquire);
+            if self.document_key != key {
+                self.show_selection(document);
+            }
+            return;
+        }
+        let heard = self.notifications.load(Ordering::Acquire);
+        if heard != self.seen_notifications {
+            self.seen_notifications = heard;
+            self.show_selection(document);
         }
     }
 
@@ -1370,6 +1408,7 @@ impl PropertyTreePanel {
     /// Ctrl+C) puts the selected rows on `clipboard`.
     pub fn ui(&mut self, ui: &mut Ui, document: &Document, clipboard: &mut dyn Clipboard) {
         let now = Instant::now();
+        self.follow(document);
         self.process_pending(document);
         self.refresh_due(document, now);
         let response = line_with(

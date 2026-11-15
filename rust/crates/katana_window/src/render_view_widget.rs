@@ -1038,6 +1038,14 @@ impl RenderView {
         scene: &RenderScene<'_>,
         state: &mut ViewState,
     ) {
+        // The camera at the view's size first, so frame() fits the aspect the view is seen at.
+        // A Qt view's camera took its size at every resize event; here the layout's size
+        // (take_layout_size) reaches the camera only at a paint, and a view framed before its
+        // first paint - opened by a surface import, then framed by the window - fitted the
+        // unknown aspect as square and kept it, as the resize that would refit it had been taken.
+        if gpu.is_none() && !self.on_gpu {
+            let _ = self.resize_target(state);
+        }
         // The box of what was BUILT, so the framing sees exactly the z the linework was put at
         // (draped, own heights, datum) - and a rebuild is due anyway before the next paint.
         self.framed_empty = false; // so the rebuild below does not frame again
@@ -1402,8 +1410,8 @@ impl RenderView {
             .flatten()
     }
 
-    /// Pixels of the last frame that are not the background, by whichever renderer drew it (the
-    /// GPU child's drawn afresh): a headless run's word that the view shows something.
+    /// Pixels that are not the background in a frame painted afresh, by whichever renderer draws
+    /// it: a headless run's word that the view shows something.
     pub fn painted_pixel_count(&mut self, scene: &RenderScene<'_>, state: &mut ViewState) -> usize {
         let background = BACKGROUND_RGBA & 0x00FF_FFFF;
         if self.on_gpu {
@@ -1423,6 +1431,9 @@ impl RenderView {
             }
             return painted;
         }
+        // Painted afresh first, as the C++ report grabs the widget: the count is of what the view
+        // shows now.
+        let _ = self.paint(scene, state);
         self.framebuffer
             .color()
             .iter()

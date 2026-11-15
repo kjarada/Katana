@@ -1994,6 +1994,10 @@ impl DrivenWindow for MainWindow {
         let record = self
             .exec
             .with_parts(|workspace, parts| workspace.pointer_at(parts, at, click, modifiers));
+        // What the click said (the tool's reply, a refusal) is logged now, before the step prints
+        // the record: the C++ view's signals reach the log during the click, so its reply comes
+        // first. Left to the next frame, it was printed after the record.
+        self.workspace_events();
         self.after_call();
         record
     }

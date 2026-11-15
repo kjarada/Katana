@@ -856,8 +856,10 @@ impl MainWindow {
         }
     }
 
-    /// What the views raised since the last look (the C++ workspace's hooks).
-    fn workspace_events(&mut self) {
+    /// What the views raised since the last look (the C++ workspace's hooks). Also called by the
+    /// headless pointer steps, so what a click said is logged before the step's record, as the
+    /// C++'s signals log it during the click.
+    pub(super) fn workspace_events(&mut self) {
         use crate::view_workspace::WorkspaceEvent;
         for event in self.exec.workspace.take_events() {
             match event {
