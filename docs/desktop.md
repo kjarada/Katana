@@ -3,10 +3,12 @@
 `katana` (the program in `crates/katana_window`, drawn with egui since
 the Rust port; until 2026-11 it was a Qt program): the window, its theme,
 icons and toolbars, the workspace of docked views, the panels and the
-managers, and the rules every dialog follows. Where a passage below names a
-Qt class, it records how the C++ window met a problem and why; the Rust's own
-answer, and why it differs, is in the module comment of the file named beside
-it. What the window drives - the document, selection,
+managers, and the rules every dialog follows. The window is egui on eframe,
+drawn on wgpu, with egui_dock for the workspace of views
+(`docs/rust.md`, "The owner's decisions"). Where a passage below tells how
+the C++ window met a problem, it is the reason for a rule the Rust keeps;
+the Rust's own answer, and why it differs, is in the module comment of the
+file named beside it. What the window drives - the document, selection,
 snapping, the interpreter and the engineering computations - is `katana_cad`,
 in `docs/cad.md`; the drawing tools and their host are `docs/tools.md`; the
 switches that run the window headlessly are `docs/headless.md`.
@@ -84,8 +86,9 @@ file has none, and a clean checkout has the tracked one).
      kind of session this is;
   2. else, in an INTERACTIVE session, `customisation.json` in the per-user
      configuration folder, beside the window's settings file
-     (`UserSettings::default_path`; the C++ used the folder Qt gave the
-     application), where the online sources a person adds are kept too;
+     (`UserSettings::default_path`: `%APPDATA%\Katana` on Windows, else
+     `$XDG_CONFIG_HOME/katana` or `~/.config/katana`), where the online
+     sources a person adds are kept too;
   3. else none: a HEADLESS run with the variable unset. It must be the same
      run on every machine, so it reads and writes no per-user place - as it
      keeps no window layout (`docs/headless.md`, "The customisation a run
@@ -115,7 +118,7 @@ file has none, and a clean checkout has the tracked one).
   typed one does.
 - **Gone: the search beside the executable.** A build with nothing compiled
   in used to look for style libraries and survey code files in the program's
-  folder (the C++'s `findCustomisation`) and load what it found. That was a third
+  folder and load what it found. That was a third
   state, decided at run time by what happened to lie in a folder - the same
   build drew differently on two machines - and it read the files of another
   program, which Katana no longer reads at all. Rejected: keeping it for
@@ -134,17 +137,16 @@ user's folder would be the thing rule 3 is there to prevent.
 **Where the window was.** Until 2026-09-26 every session opened a 1360 x 860
 window, whatever the screen: on a 1366 x 768 laptop it ran off the bottom,
 and on a large screen it was a small window in a corner, with the panels and
-toolbars wherever Qt put them and nothing a person moved kept. The C++ then
-kept, in the application's `QSettings`, the window's place and size, where
-the panels and toolbars were (keyed on the control names every dock and
-toolbar has), which panels were minimised to the tray, the text size, the
-toolbar icon size and whether the toolbars showed their names, and with
-nothing saved fitted the window to its screen (85% of the free area, centred,
-or maximised on a screen smaller than 1440 x 900, where the drawing needs
-every pixel). The Rust keeps a settings file of its own
-(`crates/katana_window/src/host/user_settings.rs`, under the keys the C++
-gave `QSettings`; Qt's binary layout cannot be read, so a layout the C++ saved
-is not carried over), and in it the layout - which panels and toolbars are
+toolbars wherever the toolkit put them and nothing a person moved kept. The
+C++ window then kept the window's place and size as well as its layout, and
+with nothing saved fitted the window to its screen (85% of the free area,
+centred, or maximised on a screen smaller than 1440 x 900). The window keeps
+a settings file of its own (`crates/katana_window/src/host/user_settings.rs`,
+JSON in the per-user configuration folder, under the key names the C++ used,
+`window/layout`, `appearance/textSize` and the rest, so a reader of either
+finds the same names; the C++'s settings were the Windows registry's binary
+form, which is not read, so nothing the C++ saved is carried over), and in it
+the layout - which panels and toolbars are
 shown, and the toolbars' rows - the text size, the toolbar icon size and
 whether the toolbars show their names, written when the window closes and
 read before its first frame (`katana_window::main_window::layout::restore_session`).
@@ -252,8 +254,8 @@ File had seventeen top-level items and has fifteen.
   did not say, and its tip says what it takes. Tests, scripts and
   `--trigger` find an item by its control name, which is why none moved.
 - **Save As offers a folder the person owns.** `MainWindow::save_document_as`
-  proposed the bare name `untitled.katana`, which the C++'s Qt file dialog
-  resolved against the working directory: for a Start menu shortcut or a double-click, the
+  proposed the bare name `untitled.katana`, which a file dialog resolves
+  against the working directory: for a Start menu shortcut or a double-click, the
   program's own folder, `bin/` of the install - read-only in a per-machine
   install, and no place for a project. It now proposes the name beside the
   project already open, else in the person's Documents. Not tested: the
@@ -265,9 +267,8 @@ File had seventeen top-level items and has fifteen.
   Drawing, Plot and Sheets.
 - **Settings is above Quit.** The action is the Format workbench's, which
   owns the dialog ("Settings", below), and is put in when the menus are
-  finished. (The C++ gave it Qt's preferences role, so macOS moved it into the
-  application menu; the egui window draws its own menu bar, and on macOS it
-  stays in File.)
+  finished. The egui window draws its own menu bar, so on macOS too it stays
+  in File, where the C++'s was moved into the application menu.
 - **Every item that asks for a file is refused in a headless run**, naming
   the line that does the same. The GIS menu's three imports and Dataset
   Information were not: reached by name they opened a file dialog nobody
@@ -276,8 +277,8 @@ File had seventeen top-level items and has fifteen.
   of `IMPORT` that are its kind of data's, and `INFO <file>`
   (`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`).
 - **Open Project and Save As never start in the working folder.** A file
-  dialog does when it is given no folder or a bare name (Qt's did, and the
-  Rust's `rfd` dialogs are given a folder for the same reason), and the working folder is the
+  dialog does when it is given no folder or a bare name (so the `rfd` dialogs
+  are always given a folder), and the working folder is the
   program's own `bin\` for a zip copy (Explorer starts a double-clicked exe in
   its folder) and the install folder, hidden under `%LOCALAPPDATA%`, for the
   installed one: the first project was proposed as `bin\untitled.katana`, and
@@ -347,25 +348,21 @@ shares is ticked. A name is written by `named_line`, through `command_word`
 it is empty or holds a blank (`CHLAYER 0`, `CHLAYER "Site Boundary"`), and a
 name holding a double quote or a line break is offered disabled.
 
-**The menu may be gone before its item finishes** - a C++ defect, kept here
-for its rule. The C++ window deleted the menu as it hid (`deleteLater`), and
-a menu hid before it triggered the item chosen. Colour > Choose then opens a modal colour dialog, whose event
-loop - since Qt 6.7, which tracks a deferred delete's event scope as well as
-its loop level - runs that delete while the item is still waiting for the
-colour. The item then reached its runner through the destroyed menu: the
-crash of 2026-11-03, recolouring 774 selected leaders (the dump showed a
-call to `0x200000003` from this item). It was never about leaders; any
-selection crashed the same way. So every item holds its own copies of what it
-calls - the runner, the colour chooser, the tool starter - and never reads the
-menu after it is triggered. The egui menu is rows drawn each frame and owns
-nothing an item calls through, and the rule stands in the Rust as in the C++
-(`crates/katana_window/src/plan_context_menu.rs`).
+**An item never reaches back through its menu.** Every item holds its own
+copies of what it calls - the runner, the colour chooser, the tool starter -
+and never reads the menu after it is triggered
+(`crates/katana_window/src/plan_context_menu.rs`). The egui menu is rows
+drawn each frame and owns nothing an item calls through; the rule is kept
+because the menu may be gone before its item finishes. That was the C++
+crash of 2026-11-03, recolouring 774 selected leaders: the menu was deleted
+while Colour > Choose waited in its modal colour dialog, and the item then
+reached its runner through the deleted menu (any selection crashed the same
+way).
 `plan_context_menu::choosing_a_colour_runs_color_even_when_the_menu_is_destroyed_while_it_asks`
-destroys the menu inside the chooser, as the colour dialog's loop does, with
-a runner that says when it is called through a destroyed copy. Rejected:
-keeping the menu alive until the item returns (in the C++, a `QPointer`
-check, or deleting it from the item): every item would have to remember to do it,
-where a copy cannot be forgotten.
+destroys the menu inside the chooser, with a runner that says when it is
+called through a destroyed copy. Rejected: keeping the menu alive until the
+item returns: every item would have to remember to do it, where a copy
+cannot be forgotten.
 
 **On a grip.** Opened on a selected polyline's grip (`PlanView::grip_at`,
 the grip within the pick aperture of the right-click), the menu begins with
@@ -487,8 +484,7 @@ command, and the log says "New work is drawn in ...". It acts on the choice
 made in the box (`current_style_ui`, `crates/katana_window/src/main_window/panels.rs`),
 and the list is drawn afresh from the drawing each frame, so a headless
 `--fill` sets it as a person's pick does and no rebuild of the list can be
-taken for a choice (the C++ had to keep its `currentIndexChanged` out while
-it rebuilt the list). A
+taken for a choice. A
 current style the list does not hold is shown, marked "(not in the drawing)",
 never replaced by the first choice - the QT-02 lesson. The Properties panel
 has a Style row above its read-only table (`PropertyStyle`, editable, and
@@ -566,8 +562,7 @@ a start screen or remembers the system.
 A menu or a dialog taller than the screen it is on has its bottom off it: the
 last items, the Close button, the results. Until 2026-10-15 nothing kept a
 window on its screen but the main window's own first-run size (above) and
-the choice lists (the C++ style's `SH_ComboBox_Popup`, "The look of the
-application"); the
+the choice lists ("The look of the application"); the
 managers and dialogs of the terrain and road work are a thousand pixels tall
 and more, and a 1366 x 768 laptop leaves 728 under its task bar. Each piece is
 the application's, not each dialog's, because every dialog written to fit one
@@ -575,10 +570,10 @@ screen is one more that a smaller screen proves wrong.
 
 * **Menus scroll.** A menu taller than its screen is ONE column as tall as the
   room there is, which scrolls (`crates/katana_window/src/shell/dialog.rs`,
-  `popup_menu`). The C++ asked Qt for it (`SH_Menu_Scrollable` from its style):
-  without it Qt laid such a menu out in columns side by side - the Terrain menu
-  became a wall of three, as tall as the screen whatever the menu bar's place
-  on it, so its bottom ran under the task bar. A menu that fits is not changed
+  `popup_menu`). Laid out in columns side by side instead, as the C++'s toolkit
+  did until it was told otherwise, the Terrain menu became a wall of three, as
+  tall as the screen whatever the menu bar's place on it, so its bottom ran
+  under the task bar. A menu that fits is not changed
   (`screen_fit::a_menu_taller_than_the_screen_is_one_scrolling_column`,
   `screen_fit::a_menu_that_fits_is_not_scrolled`).
 * **Dialogs are fitted to their screen.** Every dialog of the window is drawn
@@ -621,30 +616,24 @@ screen is one more that a smaller screen proves wrong.
   worth of smaller pages: no dialog has to be redesigned, and a person with room
   sees nothing different. *Rejected:* each dialog sizing itself (the sizes were
   chosen for the developer's screen, and the next dialog would forget).
-* **The footer is declared now, where the C++ found it.** The C++ fitted a Qt
-  dialog already laid out, once, as it was shown, by one application-wide
-  event filter, and so it had to FIND the footer by a stated rule read off the
-  dialog's layout: the last row of buttons in a vertical box (a button box, or
-  a row of buttons, spacing and read-only fields) and everything after it.
-  That rule was chosen over marking each dialog's buttons by name, because a
-  name each dialog set would be one more thing the next dialog forgot. An
-  egui dialog is drawn each frame inside its frame, so there is no finished
-  layout to read: the dialog hands the frame its footer as the second part of
-  what it draws, and forgetting it is visible in the dialog's own code, not a
-  rule a reader must remember. The eleven C++ cases about finding a footer in
-  a Qt layout, the filter, and a dialog shown again are exempt for that
-  (the parity list, retired with the C++). *Rejected in the C++, for the record:*
-  `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that was
-  too tall (it let the window shrink and clipped or overlapped what no longer
-  fitted, and nothing scrolled).
+* **The footer is declared by the dialog.** An egui dialog is drawn each
+  frame inside its frame, so there is no finished layout to read: the dialog
+  hands the frame its footer as the second part of what it draws, and
+  forgetting it is visible in the dialog's own code, not a rule a reader must
+  remember. The C++ fitted a dialog already laid out, once, as it was shown,
+  and had to FIND the footer by a rule read off the layout (the last row of
+  buttons and everything after it); its cases about finding a footer are
+  exempt from the port for that. *Rejected:* letting a dialog that is too tall
+  shrink with no scrolling, which clipped or overlapped what no longer fitted.
 
 **The toolbars along the top: three rows, measured.** A toolbar that has not
 the width for its buttons hides the last ones behind an extension arrow, so
 the arrangement is chosen by what each toolbar needs side by side, which is
-the width at which every action shows (the C++'s `sizeHint().width()`).
-Measured alone with the C++'s headless driver's grab, in px: Survey 565, Terrain 379, GIS
-312, Surface Edit 692 (13 buttons and the surface list), BIM 384; File to
-Format together, about 1,180. With a 12 px handle before each, the second row
+the width at which every action shows (its natural width, the strip's
+layout in `crates/katana_window/src/tools/flyout_button.rs` with the toolbar's
+padding and spacing). Measured alone on the C++ window, in px: Survey 565,
+Terrain 379, GIS 312, Surface Edit 692 (13 buttons and the surface list), BIM
+384; File to Format together, about 1,180. With a 12 px handle before each, the second row
 of Survey, Terrain and GIS needs about 1,290 px and the third, Surface Edit and
 BIM, about 1,100, against the 1,366 of a 1366 x 768 laptop: both fit. The five
 on one row need some 2,400, which no common screen has, so Surface Edit, BIM
@@ -652,12 +641,15 @@ and GIS showed a handle and an arrow only.
 `MainWindow::tool_bar_fit` reads the result off the window (a shown toolbar
 along the top whose button is not visible is one behind its arrow) and
 `katana --check-toolbar-fit 1366x768,1632x918,1920x1080` fails a run that
-finds one, printing each row's size-hint sum beside the width it has:
+finds one, printing each row's natural width beside the width it has:
 `qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless`.
 1632 x 918 is the 85% of a 1920 x 1080 screen that a first run of the C++
 opened at. The test is a run of the real window, as the arrangement is
 `MainWindow`'s (`docs/headless.md`); it is the same run as `--check-menus`
-and `--check-toolbars`.
+and `--check-toolbars`. The Rust's natural widths are 2 to 22 points off the
+C++'s, which laid a toolbar out by its toolkit's metrics (its handle, spacing
+and each button's size hint); every row still fits, and the test passes
+(`docs/rust.md`, "Not done").
 * **Decided: a third row.** A row costs a toolbar's height (about 45 px) of a
   768 px laptop, where the drawing needs it, and the alternatives were each
   weighed against that. *Rejected:* the bottom edge, beside the Drafting bar
@@ -678,10 +670,8 @@ and `--check-toolbars`.
   no Surface Edit and BIM, or with them squeezed on the second row - is
   restored too, with those two seated on a third row (whether the person had
   hidden either is read first and kept), and a toolbar the layout does not
-  place at all is put along the top and shown. (The C++ did the same because
-  what Qt's `restoreState` did with a toolbar its state never mentioned was not
-  documented; the Rust's layout is a JSON object of its own, but the rule is
-  kept.) *Rejected:* raising
+  place at all is put along the top and shown, so a toolbar added later is
+  never lost by an older layout. *Rejected:* raising
   the version with no carry-over, which would send every saved layout back to
   the built one - the panels' places too - for the sake of two toolbars (the
   reason the BIM toolbar did not raise it); keeping the version and testing for
@@ -691,41 +681,23 @@ and `--check-toolbars`.
   fail), one saved before they existed, one of this version with BIM hidden,
   and an older one with Surface Edit hidden. A layout saved by a build of
   2026-10-15, with the bars on the second row, is repaired the same way.
-* **The order of a restore** - a C++ defect, kept for its test. From
-  2026-10-15 to 2026-10-21 every start of the C++ window from a version 1
-  layout saved with the window maximised crashed, before the window drew. The
-  cause was in this order of events:
-  - `restoreGeometry` made the hidden window maximised.
-  - `restoreState` then kept a copy of the restored layout, as Qt does for a
-    window not yet shown that is to be maximised or full screen and that the
-    layout does not fit yet (`QMainWindowLayout`'s `restoredState`), to lay
-    out again once the window has its size.
-  - `seatThirdToolBarRow` moved the two toolbars: `removeToolBar` deletes a
-    toolbar's layout item, which the copy still held.
-  - At the first layout after the window was shown, Qt took the copy and
-    called through the deleted item.
-
-  Qt's own `tabifyDockWidget` and `splitDockWidget` apply that copy before
-  they change the layout; `removeToolBar` and `addToolBar` do not. So now the
-  layout is restored, and moved, while the window is as built - not
-  maximised, where Qt keeps no copy - and what that made is restored once
-  more after the geometry, with nothing moved after it. *Rejected:* restoring
-  again after the moves in a window already maximised, since Qt replaces its
-  copy only when the layout again does not fit and otherwise keeps the stale
-  one; and restoring after the window is shown, which shows it jump. The
-  in-process check above never saw it: it restores into a window already
-  shown. `--check-session-restore` (the
+* **A layout is restored before the first frame.** `--check-session-restore`
+  (the
   `qt_a_layout_saved_maximised_by_an_older_build_restores_before_the_window_is_shown_headless`
-  test) restores one before the first show. Without the fix it crashed, as the
-  owner's window did; with it, it passed. The Rust window keeps no Qt layout
-  and no copy of one, so the order cannot bite it; the check still runs
-  against it, restoring a version 1 layout before the first frame.
+  test) restores a version 1 layout before the window draws, where the
+  in-process check above restores into a window already drawn. It was written
+  for a C++ crash (2026-10-15 to 2026-10-21: a version 1 layout saved with the
+  window maximised crashed every start, through a copy of the layout the
+  toolkit kept for a window not yet shown); the Rust's layout is its own JSON,
+  applied once with nothing kept, so the order cannot bite it, and the check
+  stays as the guard.
 
 Not done: a window narrower
 than about 1,290 px (a 1280-px laptop) still overflows the second row, and
 larger icons or text widen every toolbar (a button is 41 px at Large Icons
 against 33); no setting chooses a density from the screen; a floating dock is
-not fitted.
+not fitted; the native window opens at 1360 x 860 points whatever the screen,
+since its place and size are not kept ("How the window starts").
 
 ## Failure modes
 
@@ -752,9 +724,8 @@ recovery and never deletes the damaged file.
 
 The viewport has been dark (`#1e2329`) from the start, and the window around
 it was whatever grey the toolkit defaulted to. A dark drawing in a light
-frame is most of why the application looked unfinished. Three files fix
-that; the C++ shaped each by what its Qt toolchain did and did not have, and
-the Rust keeps each one's rule.
+frame is most of why the application looked unfinished. Three files under
+`crates/katana_window/src/` fix that: the palette, the style and the icons.
 
 **`palette.rs` - every chrome colour is a named token**
 (`crates/katana_window/src/theme/palette.rs`). `window`, `panel`,
@@ -765,23 +736,23 @@ so the tokens are the only place a colour is decided and a change of theme is
 a change to one file. Nothing else under `crates/katana_window` should
 contain a widget colour literal; the viewports keep their own constants for
 DRAWING colours (grid, snap marker, selection), which are content, not
-chrome. egui draws its own controls, the same on every platform, which is
-why the C++ chose Qt's Fusion style: it was the one built-in style that
-honoured a palette completely - the native Windows style drew light controls
-into a dark palette. The accent is blue, not the red of the logo: in an engineering
+chrome. egui draws its own controls, the same on every platform, so the
+system's light or dark preference never changes the look: both of `style.rs`'s
+`visuals` come from the tokens. (A platform's native controls were what the
+C++ had to avoid - the native Windows style drew light controls into a dark
+palette.) The accent is blue, not the red of the logo: in an engineering
 program red already means "error", and a checked tool must not read as one.
 
 **Text.** The fonts are tokens too (`katana_window::theme::style::ui_font`, `katana_window::theme::style::monospace_font`,
-`katana_window::theme::style::overlay_font`). In the C++ the command line named "Consolas", the plan view's
-prompt and snap tag "Segoe UI" at fixed sizes, and eighteen dialogs'
-reports and command fields Qt's system fixed font - Courier
-New on Windows, wider and lighter than the Consolas beside it - while on
-Windows the menus, the menu bar, tooltips and message boxes each kept the
-font the platform gave that class. Now the whole window is one font:
+`katana_window::theme::style::overlay_font`). The whole window is one font:
 `katana_window::theme::style::set_text_size` sets every text style of the
-context at the chosen size. The face is egui's embedded sans (Ubuntu-Light,
-which has no bold face), where the C++ took the platform's UI face (Segoe UI
-on Windows); which face the window carries is the owner's to decide, and
+context at the chosen size. That was not always so - the command line, the
+plan view's prompt and eighteen dialogs' reports each once named a face and
+size of their own, and the menus and tooltips kept whatever the platform gave
+them - which is why no part of the window names a font now. The face is
+egui's embedded sans (Ubuntu-Light, which has no bold face; the C++ took the
+platform's UI face, Segoe UI on Windows); which face the window carries is
+the owner's to decide (`docs/rust.md`, "Decisions waiting on the owner"), and
 changes in `style.rs` only. The sizes are still a step from the platform's
 9 points (`PLATFORM_POINTS`). The fixed-pitch font
 is the first the machine has of Cascadia Mono, Consolas, DejaVu Sans Mono,
@@ -796,30 +767,29 @@ the widget, is set again with the rest. The drawing's own text face
 is not a theme font: a plot must print the same whatever size the window's
 text is.
 
-**`style.rs` - three things the toolkit did not do.** The C++ had to teach
-Qt's Fusion style three things (its `KatanaStyle`), and the Rust's style
-(`crates/katana_window/src/theme/style.rs`) keeps each. First, the
+**`style.rs` - three things a toolkit's defaults got wrong.** The style
+(`crates/katana_window/src/theme/style.rs`) holds three rules, each learned
+when a default hid something; egui's defaults need them said too, as the
+C++'s toolkit did. First, a menu section shows its title: the
 Survey, Terrain and GIS menus were grouped under titled sections
-("Surfaces", "Point Cloud - PDAL") and not one title had ever been seen:
-Fusion said it did not support sections, so Qt drew each as a plain
-separator, and the stylesheet drew a menu's separators with code that drew no
-text either; the C++ style drew the title in small muted capitals, and so
-does the Rust's (`menu_section`;
-`theme::a_menu_section_shows_its_title_under_the_stylesheet`). Every long menu is now in titled sections: File
+("Surfaces", "Point Cloud - PDAL") and for weeks not one title was seen,
+because the C++'s style drew each section as a plain separator. `menu_section`
+draws the title in small muted capitals
+(`theme::a_menu_section_shows_its_title_under_the_stylesheet`). Every long menu is now in titled sections: File
 (Drawing, Import and Export, Scripts, Plot, Project), View (Display,
 Viewports, 3D Views, Window), Format (Tables and Libraries, Across the
 Drawing, Annotation Styles), Annotate's editors and Leader
 Manager, and the tool menus by their catalogue groups (Lines, Curves,
-Transform, Edit, Dimensions ...; `crates/katana_window/src/tools/tool_menus.rs`). Second, for a
-choice list that cannot be typed into, Fusion dropped a popup the height of
-every item, ignoring the visible-item limit: a drawing's two hundred styles
-ran off the screen. A choice list shows `MAX_VISIBLE_ITEMS` rows and scrolls
-the rest (`theme::a_long_choice_list_scrolls_rather_than_running_off_the_screen`).
-Third, a toolbar's overflow arrow: Qt's was a small dark image made for light
-toolbars, and the style draws it in the muted text colour instead, in whole
-device pixels, and in the accent while a tool runs whose button it hides
-(`paint_overflow_arrow`; "Tool families on the toolbars", below, has why it
-was not seen at all).
+Transform, Edit, Dimensions ...; `crates/katana_window/src/tools/tool_menus.rs`). Second, a
+choice list shows `MAX_VISIBLE_ITEMS` rows and scrolls the rest
+(`theme::a_long_choice_list_scrolls_rather_than_running_off_the_screen`): a
+popup the height of every item, as the C++'s style once dropped, ran a
+drawing's two hundred styles off the screen. Third, a toolbar's overflow
+arrow is two chevrons in the muted text colour, in whole device pixels, and
+in the accent while a tool runs whose button it hides
+(`paint_overflow_arrow`; "The overflow arrow", below): the toolkit's own was
+a small dark image made for light toolbars, and once it was not seen at
+all.
 
 **`icons.rs` - the icons are drawn in code.** Each is a vector drawing on a
 24-unit grid painted through the window's canvas at whatever size and
@@ -827,9 +797,8 @@ device-pixel ratio it is shown at. There are no image files behind them, for
 four reasons: they are crisp at every size because nothing is resampled; they
 take their colours from the theme, so a theme change recolours all of them; a
 function that is wrong does not compile, where a resource path that is wrong
-is a blank button; and the C++'s toolchain had no Qt SVG module and no image
-tools, so an SVG or PNG set would have been a dependency added for
-decoration (as an SVG renderer would be now). The language is one rule
+is a blank button; and an SVG or PNG set would need an image decoder or an
+SVG renderer, a dependency added for decoration. The language is one rule
 applied everywhere: a 1.7-unit round stroke, neutral for the object and ACCENT
 for the part the command acts on - the arrow of Import, the new geometry of a
 draw tool, the cut line of a section. 1.7 rather than the usual 2.0 because at
@@ -846,10 +815,10 @@ nothing for an icon that changes once a year. Below 64 px the sword is drawn
 larger and heavier within its tile; at true proportions it is a few pixels
 wide on a taskbar and disappears. The window takes its icon at run time
 (eframe's viewport icon, `crates/katana_window/src/drive/desktop.rs`).
-The C++ also embedded the icon and a `VERSIONINFO` block in the executable
-(`katana.rc.in`, its numbers from `project(Katana VERSION ...)`); not done in
-the Rust: `katana.exe` carries no Windows resource, so Explorer shows no icon
-or version for the file itself.
+Not done: `katana.exe` carries no Windows resource - no icon and no
+`VERSIONINFO` block, both of which the C++ build embedded - so Explorer shows
+a generic icon and no version for the file itself; the running window has
+its icon.
 
 **Every menu item has an icon and says what it does.** Until 2026-09-26
 sixty menu items had no icon or no status tip, or neither: the snap modes,
@@ -908,23 +877,27 @@ would not fit in the widest window.
 **Tool families on the toolbars: a mark in the corner, not a split button.**
 A family of tools - Circle's six, Arc's five, Ellipse's three, the eighteen
 Vertices tools - is one button on the Draw toolbar
-(`crates/katana_window/src/tools/tool_menus.rs`). Until 2026-09-30 it was Qt's split
-button (Qt's MenuButtonPopup), and the sign of its menu sat on its
-icon. The C++ theme's `QToolButton` rule had padding and a border, and for
-such a rule `QStyleSheetStyle` reserved no width for a split button's arrow
-strip (its `PM_MenuButtonIndicator` was 0), yet still laid the strip over the
-button's right 12 px, painted it after the icon - solid under the pointer and
+(`crates/katana_window/src/tools/tool_menus.rs`). Until 2026-09-30 it was a
+split button, and the split button's drop-down strip was laid over the
+button's right 12 px, painted after the icon - solid under the pointer and
 while the tool ran, cutting the circle's ring - and took presses there: a
 click on the right of the ring opened the menu instead of starting Circle.
-Undo and Redo, the window's other split buttons, had the strip over their
-icons too. The Rust paints every tool button with one painter
-(`paint_tool_button`) and keeps the C++'s geometry pixel for pixel, so the
-toolbar's checks pin the same numbers. Every pixel measure in this section and
-the ones after it was taken on the C++ window and holds for the Rust, which
-paints the same geometry; the Qt stylesheet rules, styles and events these
-paragraphs name are the C++'s, the causes its numbers were chosen against.
 
-The family button is now a `FlyoutButton` (`crates/katana_window/src/tools/flyout_button.rs`).
+**One painter for every tool button.** A family, an action's own button,
+Undo and Redo's split buttons, the overflow button and the docks' title bar
+buttons are all painted by `paint_tool_button` from a `ButtonPaint`, through
+the window's canvas - on the screen as an image kept in the icon cache, and
+for the checks by `drawn_parts`, which paints the button against itself - so
+what `--check-toolbars` measures is what the screen shows. The geometry is
+the one the C++ window settled on, in points: a 1 px border and 4 px padding,
+a 5 px mark inset 2 px, a 12 px press zone, a 12 px strip, a 12 px overflow
+button (the constants at the head of
+`crates/katana_window/src/tools/flyout_button.rs`, each with where it came
+from). The pixel measures in this section and the ones after it were taken on
+the C++ window; the Rust paints the same geometry, and the tests that pinned
+them pin the Rust's.
+
+The family button is a `Flyout` (`crates/katana_window/src/tools/flyout_button.rs`).
 Its icon has the whole button, as on every other tool button, and a small
 triangle in the bottom-right corner - in the 5 px the centred icon leaves
 free at every toolbar icon size, inside the border - says that the button
@@ -933,8 +906,9 @@ tool group. It is muted at rest and lighter under the pointer; it takes the
 accent while the pointer is on its corner, the part of the button that opens
 the family, and while a tool of the family runs. A click anywhere on the icon
 runs the family's first tool. The family opens from a press on the
-triangle's corner, from a press held for the popup delay (600 ms, Qt's
-`DelayedPopup` delay, kept) and from a right click. The corner is 12 px each
+triangle's corner, from a press held for the popup delay (600 ms,
+`POPUP_DELAY_SECONDS`, the delay the C++'s held press had) and from a right
+click. The corner is 12 px each
 way, the width of the strip it replaced, less the icon's square - so less
 area than the strip, an L of 119 square pixels at 20 px icons against its
 396, the icon keeping its whole square; the held press and the right click,
@@ -952,21 +926,14 @@ Vertex / ..."), and elsewhere on the button the tool's, where it showed the
 first tool's alone. The menu is the Draw menu's own submenu, one action per
 tool, so a tool is the same object in both.
 
-**The held press's test failed once on a loaded runner** - the C++'s, before
-the port. `tool_family_buttons::a_click_on_the_icon_runs_the_tool_while_the_mark_a_hold_or_a_right_click_opens_the_family`
-holds a press past the popup delay, then lets go. In release run 41839118311
-(2026-11-04, Windows x86-64 job) the C++'s menu opened, after the delay, and the
-release still started a fourth tool where three were expected. It passed in
-the other four jobs and on the owner's machine (a whole suite there on
-2026-11-05 included). By Qt
-6.11's source this should not have happened:
-- the button's private `popupTimerDone` opens the menu with a blocking `exec`;
-- `updateButtonDown`, on `aboutToHide`, clears the pressed state before the
-  test sends its release, so the release has nothing to click.
-The cause was therefore not found. In the window it could not reach a
-person: the open menu took the release, not the button. The test names the
-tools that started when it fails, so a failure of its Rust twin, which runs
-on the Rust's own press handling, says which tool ran and from where.
+**A held press opens the menu and the release starts nothing.**
+`tool_family_buttons::a_click_on_the_icon_runs_the_tool_while_the_mark_a_hold_or_a_right_click_opens_the_family`
+holds a press past the popup delay, then lets go, and names the tools that
+started when it fails, so a failure says which tool ran and from where. Its
+C++ twin failed once on a loaded release runner (2026-11-04), the release
+starting a fourth tool where three were expected, with a cause never found in
+the toolkit's press handling; the Rust's press is the button's own, worked
+out each frame from the pointer, and the menu once open takes the release.
 
 **A family is framed for its own tool, and its mark lights for any.** A
 tool's button is framed in the accent while its tool runs, the toolbar's one
@@ -975,10 +942,10 @@ family's button is checked while its default action is - the tool its icon
 shows. With another of its tools running (Delete Vertex, Circle 2 Points) the
 button's mark takes the accent and its tooltip ends "Running now: Delete
 Vertex", in the accent; its menu ticks which. Every frame paints the button
-from its family's actions as they are then; the C++ button had to hear of it
-from the family's menu, which every tool's action told when it was checked or
-unchecked (Qt's `ActionChanged` event), since the button itself was told only of
-its default action. Until 2026-09-30 no button showed such a tool running at
+from its family's actions as they are then (`Flyout::family_running`), so
+nothing has to tell the button that a tool started; the C++ button had to be
+told, through its family's menu, and the bookkeeping is gone with it. Until
+2026-09-30 no button showed such a tool running at
 all, and then, for a day, the family's button was framed while ANY of its
 tools ran - so with Delete Vertex running the Vertices button framed Insert
 Vertex's icon, a plus on a polyline: the wrong tool, even the opposite one,
@@ -990,14 +957,10 @@ Draw toolbar's overflow arrow at the window's first size, and a tool running
 behind that arrow lights it (below).
 
 **The families follow their toolbar's icon size.** A button drawn each frame
-is drawn at its bar's icon size, so the Rust needs nothing for it. In the C++
-a button a toolbar made for an action followed the toolbar's icon size; a
-button put on it as a widget did not, and `QToolButton` cached its size hint.
-So after View > Toolbars > Large Icons the families kept the 33 px they were
-made at while the other buttons grew to 41 - their icons drawn at 23 px
-beside the others' 28, their marks squeezed to 3 px against the icon's
-corner - and at Small they stood 4 px wider than the column, until the C++
-made the toolbar's own connection for the families and for Undo and Redo.
+is drawn at its bar's icon size, so nothing has to follow a change of it. The
+tests below hold it all the same (a bar made at a size and one switched to
+it), because the C++'s family buttons once kept the 33 px they were made at
+after View > Toolbars > Large Icons, while the other buttons grew to 41.
 
 **The mark is drawn in the screen's own pixels.** The triangle is filled a
 row at a time, each a pixel wider, without antialiasing: a filled polygon
@@ -1028,27 +991,24 @@ button starts on a whole device pixel, as in a grab, the 6 px mark would
 then cover the icon's last column, or would have to shrink to 5 px.
 
 **The mark goes out when the pointer leaves.** The pointer leaves the button
-over the family's menu to pick from it. In the C++ the mark was lit on the
-corner by Qt's hover events, and while a popup was open Qt told the button
-with a Leave and no HoverLeave, so the mark stayed lit in the accent - the
-colour of a tool running - after the menu closed, and after the tool it
-started had ended, until the pointer next crossed the button; the button
-cleared it on Leave too. The Rust works the hover out each frame from where
-the pointer is, so a mark is lit only while the pointer is on its corner.
+over the family's menu to pick from it. The hover is worked out each frame
+from where the pointer is, so a mark is lit only while the pointer is on its
+corner. (The C++'s was lit by hover events, and a popup's open menu left it
+lit in the accent - the colour of a tool running - after the menu closed and
+the tool had ended, until the pointer next crossed the button; the test that
+caught that drives the pointer onto the menu and holds the Rust to it.)
 
 The alternatives were rendered and measured on 2026-09-30 with a scratch
-prototype compiled against the C++ theme and Qt 6.11.2:
-- reserving the strip in the stylesheet, Qt's own recipe (Qt Style Sheets
-  Examples, "Customizing QToolButton": `padding-right` on
-  `QToolButton[popupMode="MenuButtonPopup"]`) - kept for Undo and Redo,
-  rejected for the families: in the vertical Draw toolbar it widens the bar
-  by 10 px and moves the family icons 5 px left of the column of the others;
-- the arrow as a 7 px corner by the stylesheet alone (`::menu-button` at the
-  bottom right) - no code, but a 7 x 7 target and no hold or right click;
+prototype of the C++ window:
+- a strip of its own beside the icon, as Undo and Redo keep - rejected for
+  the families: in the vertical Draw toolbar it widens the bar by 10 px and
+  moves the family icons 5 px left of the column of the others;
+- the arrow as a 7 px corner and nothing else - a 7 x 7 target and no hold or
+  right click;
 - the arrow below the icon - every family button 7 px taller, 28 px more on
   a Draw toolbar that already overflows the window's first size;
-- the menu on any click (`InstantPopup`) - two clicks for every circle, and a
-  headless `--press` of such a button would wait in the menu's modal loop.
+- the menu on any click - two clicks for every circle, and a headless
+  `--press` of such a button would wait in the menu.
 What the choice costs: a press held is found less readily than an arrow,
 which is why the corner and the right click open the menu too and the
 tooltip names all three; and a right click on a family button no longer
@@ -1056,84 +1016,74 @@ shows the window's list of toolbars - anywhere else on the toolbar it still
 does.
 
 Undo and Redo stay split buttons: the button undoes one step and the arrow
-drops the history ("Undo and Redo lists", below). The theme gives a split
-button's arrow a 12 px strip and pads the button's right side by a pixel
-more (`QToolButton[popupMode="MenuButtonPopup"]`). The strip is laid in the
-button's border rectangle (`QStyleSheetStyle` gives `::menu-button` that
-origin), and Fusion centres its 8 px arrow in it, so each arrow is 9 px from
-its own icon's ink, 13 from the next button's and 2 px in from the button's
-edge (each the columns between the two inks, measured on the Edit toolbar at
-100%). With the 4 px every button has added to a 10 px strip it was 11 px from
-its own icon and 12 from the next, and the row read as four things - undo,
-arrow, redo, arrow; with a 10 px strip and no more it was 7 and 12, but the
-arrow ended a pixel from the button's edge, cut off against the rounded
-highlight under the pointer (at 125%, its ink 37..47 of 49 device pixels;
-now 39..50 of 53). The strip has no hover shade of its own: the stylesheet
-gives it the whole button's hover, never the pointer's part of it (its
-`SC_ToolButton` is the whole button), so a shade lay on the strip with the
-pointer on the icon too, a band of the pressed colour that read as pressed.
-A 1 px divider on the strip's left edge, shown under the pointer, was tried
-in its place and dropped: the divider takes its pixel from the strip, and
-the arrow was drawn differently at rest and under the pointer. Along the top
-the 13 px each cost nothing.
+drops the history ("Undo and Redo lists", below). A split button
+(`ToolButtonLook::SPLIT`, `split_paint`, `split_button_at`) pads its right
+side by 13 px, a pixel more than its 12 px strip (`split_strip`), which is
+laid in the button's border rectangle at its right; the 8 px down arrow is
+centred in it (`paint_fusion_arrow`, the shape the C++'s Fusion style drew),
+so each arrow is 9 px from its own icon's ink, 13 from the next button's and
+2 px in from the button's edge (each the columns between the two inks,
+measured on the Edit toolbar at 100%). With the 4 px every button has added
+to a 10 px strip it was 11 px from its own icon and 12 from the next, and the
+row read as four things - undo, arrow, redo, arrow; with a 10 px strip and no
+more it was 7 and 12, but the arrow ended a pixel from the button's edge, cut
+off against the rounded highlight under the pointer (at 125%, its ink 37..47
+of 49 device pixels; now 39..50 of 53). The strip has no hover shade of its
+own: the whole button is shaded under the pointer, since a shade on the strip
+alone, with the pointer on the icon, read as a band pressed. A 1 px divider
+on the strip's left edge, shown under the pointer, was tried in its place and
+dropped: the divider takes its pixel from the strip, and the arrow was drawn
+differently at rest and under the pointer. Along the top the 13 px each cost
+nothing.
 
 **A view's kind switcher has its arrow beside its icon.** Every view's title
 bar opens with a button that switches what the view shows (Plan, 3D,
-section, elevation), a menu with an arrow beside the icon. The stylesheet
-sets the arrow at the right of the button's padding box in a 13 px box
-(`QStyleSheetStyle`'s default for a `::menu-indicator`), and centres the
-icon in the contents; with only the 2 px every title bar button has, the
-contents ran under the arrow and the icon's frame met it, 2 px over at 100%
-and 3 at 125%. The theme pads a title bar button whose menu opens on a click
-on the right by that box's 13 px
-(`QToolButton[chrome="button"][popupMode="InstantPopup"]`), so the icon,
-4..17 in the 34 px button, is four pixels clear of the arrow, 22..30.
-`--check-toolbars` measures the docks' title bars as well as the toolbars,
-and saw it once it looked. For a day the rule also matched
-`[popupMode="DelayedPopup"]`, the other mode in which a button with a menu
-draws that arrow; but DelayedPopup is `QToolButton`'s default popup mode,
-which every button without a menu keeps, so every title bar button was padded:
+section, elevation), a menu with an arrow beside the icon. The arrow is set
+at the right of the button's padding box in a 13 px box (`INDICATOR`) and
+the icon is centred in the contents; with only the 2 px every title bar
+button has, the contents ran under the arrow and the icon's frame met it,
+2 px over at 100% and 3 at 125%. So a title bar button whose menu opens on a
+click is padded on the right by that box's 13 px
+(`ToolButtonLook::TITLE_BAR_MENU`), and the icon, 4..17 in the 34 px button,
+is four pixels clear of the arrow, 22..30. Only that button takes the look:
+for a day in the C++ the padding reached every title bar button, and
 Minimise, Float, Maximise and a view's Layers and Zoom Extents, fixed at
-22 px, had 5 px of contents, and their 14 px icons were drawn in them -
-Minimise a dot, the others slivers - on every panel and view, at every
-scale. No title bar button has a held-press menu, and one that did would
-draw its arrow over its icon, which `--check-toolbars` fails. Rejected: a
-property of the kind switcher's own for the rule to match - a second marker
-to keep in step with the popup mode, which is what Qt's own recipe matches
-(Qt Style Sheets Examples, "Customizing QToolButton") and which the button
-must have anyway for its menu to open on a click.
+22 px, had 5 px of contents - their 14 px icons drawn as a dot and slivers -
+on every panel and view, at every scale. No title bar button has a
+held-press menu, and one that did would draw its arrow over its icon, which
+`--check-toolbars` fails; it measures the docks' title bars as well as the
+toolbars.
 `title_bar_buttons::every_title_bar_button_draws_its_whole_icon_where_close_draws_its_own`
 measures every button of a panel's and a view's title bars, menu or none,
 against the bar's Close button, which no popup mode rule reaches; the
 checks before it measured only buttons with a menu, and passed with every
 other title bar button broken.
 
-The same padding and border hid a toolbar's OVERFLOW button. A toolbar too
-short for its buttons shows one, 12 px deep (`PM_ToolBarExtensionExtent`),
-and 4 px of padding inside a 1 px border left its arrow 2 px: a dot nobody
-could see, so at the window's first size (1360 x 860) the Draw toolbar's
-Ellipse, Divide, Measure and Vertices tools were behind a button that did
-not show. The theme takes the padding off that one button
-(`QToolButton#qt_toolbar_ext_button`) and keeps its border, so that while
-the toolbar is expanded the button has the accent outline every checked
-tool button has; taking the border too, as was done first, left it a plain
-grey pill. `KatanaStyle` draws the arrow itself: two chevrons in the muted
-text colour, a pixel wide and without antialiasing, painted for the device
-pixels they are shown in (`OverflowArrowEngine`), 7 x 8 px in the button's
-10 rows at 100%. It was two pixmaps, 12 and 24 px, antialiased: at 125% and
-150% Qt scaled the 24 down, and the chevrons came out in grey halos (21
-colours at 125% against 7 at 100%), and at 100% the two 1.5 px chevrons all
-but ran into one shape. While a tool runs whose button the arrow hides - a
+**The overflow arrow.** A toolbar too short for its buttons shows an
+overflow button, 12 px deep (`EXTENSION_EXTENT`; its control name
+`qt_toolbar_ext_button`, kept from the C++, whose tests and theme named it).
+It has no padding inside its 1 px border (`ToolButtonLook::OVERFLOW`): the
+4 px every tool button has left its arrow 2 px, a dot nobody could see, so at
+the window's first size (1360 x 860) the Draw toolbar's Ellipse, Divide,
+Measure and Vertices tools were behind a button that did not show. The
+border stays, so that while the toolbar is expanded the button has the
+accent outline every checked tool button has; taking the border too, as was
+done first, left it a plain grey pill. The arrow is two chevrons in the
+muted text colour, a pixel wide and without antialiasing, painted in the
+device pixels they are shown in (`paint_overflow_arrow`), 7 x 8 px in the
+button's 10 rows at 100%. It was first two pixmaps, 12 and 24 px,
+antialiased: at 125% and 150% the 24 was scaled down, and the chevrons came
+out in grey halos (21 colours at 125% against 7 at 100%), and at 100% the two
+1.5 px chevrons all but ran into one shape. While a tool runs whose button the arrow hides - a
 family with any of its tools running, or a plain tool's button framed - the
 chevrons take the accent (`overflow_lit`, `crates/katana_window/src/tools/flyout_button.rs`): at the first size all
 eighteen Vertices tools are behind the Draw toolbar's arrow, and with Delete
 Vertex running nothing on the toolbars said a tool ran. Only a tool's
 button lights it: Select, which heads the Draw toolbar, is checked while no
-tool runs. It is worked out afresh when a tool starts or stops and when the
-toolbar's layout hides or shows a button, the overflow button among them, so
-a window shown short with a tool already running has the arrow lit as it
-appears; expanded, the toolbar shows every button, and the arrow is not
-lit.
+tool runs. It is worked out each frame (`overflow_lit`) from what the
+toolbar's layout hides and what runs then, so a window shown short with a
+tool already running has the arrow lit as it appears; expanded, the toolbar
+shows every button, and the arrow is not lit.
 
 Tested in `tool_family_buttons::*` - the mark, its press zone and
 the icon apart at 16, 20 and 28 px icons, on a bar made at that size and on
@@ -1199,7 +1149,7 @@ key a person can press - each action's key sequences, each menu's Alt letter
 and each item's underlined letter within its own menu (two items with one
 letter make the key cycle between them instead of choosing) - and lists those
 that reach more than one thing, since a key that reaches two cannot be meant
-for both (Qt disabled an ambiguous shortcut for both). `katana --check-shortcuts` fails a run that has
+for both. `katana --check-shortcuts` fails a run that has
 any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
 Library, In&verse, Toggle Pe&rspective and others; one of the ten was on
@@ -1236,36 +1186,30 @@ the layout on its own, whenever a surface was built or a section cut.
 of the main window. The area is an egui_dock `DockState`, laid out by
 egui_dock's split arithmetic and drawn by the workspace with the window's
 dock chrome; a tab strip is drawn only over a group of more than one view.
-(The C++ made each view a `QDockWidget` inside a nested `QMainWindow`, whose
-dock machinery gave splitting, tabbing and floating onto any screen.) An
+An
 area of its OWN rather than the main window's, because an arrangement ("Four:
 Equal") must move views and never the Layers panel, and a panel should not be
 droppable between two views. Rejected alternatives:
 
 * *Keep the tiles and add pop-out windows.* Two ways of showing a view, and the
   tiled half still rebuilds on every change.
-* *Qt Advanced Docking System*, for the C++ (LGPL-2.1+, packaged by MSYS2 for
-  ucrt64 but not installed). It would have given auto-hide side bars and
-  native floating frames with a real minimise button off the shelf, at the
-  cost of a new third-party dependency, a change to the bundle and a licence
-  decision, which belong to the owner.
-* *egui_dock's own `DockArea`*, for the Rust: it draws a 24-point tab bar over
+* *egui_dock's own `DockArea`*: it draws a 24-point tab bar over
   every dock, where a view has only its 26-point title bar, with close and add
   buttons of its own, and its drags would put a view among the main window's
   panels, which the area of its own is there to prevent. The views and their
   state do not know what hosts them, so either could still be changed.
 
-A view floats as a window inside the main window, not onto another screen:
-not done in the Rust, where the C++'s floating docks could go out onto any
-screen.
+Not done: a view floats as a window inside the main window, and cannot go
+out onto another screen, as the C++'s floating docks could; egui_dock floats
+a tab inside its own window (`docs/rust.md`, "Decisions waiting on the
+owner"). The Float button's tooltip still says it can.
 
 **A view's state lives in `katana_cad::view_set::ViewSet`, not in its widget.** `ViewState`
 holds the kind, the 3D camera, the plan zoom, the layers hidden in that view,
 the reference layers hidden in it and its section. Views are identified by a
 `ViewId` that is monotonic and never reused, like entity ids, so a queued event
 for a closed view cannot find another. States are boxed, so taking a closing
-view's state hands over the very object the set held (as the C++'s
-`unique_ptr` did, each widget holding a reference to its state). Changing a view's kind replaces
+view's state hands over the very object the set held. Changing a view's kind replaces
 only the widget inside the dock, so a 3D view switched to plan and back keeps
 its orbit. `ViewSet::most_recent(kind)` is what Plot, F9 and the Standard Views
 act on: the active view when it is that kind, otherwise the one of that kind
@@ -1283,8 +1227,7 @@ view.
 
 **Zoom Extents frames the active view only** - and the views linked with it
 follow (below, "Linked views"); one view's zoom is not another's business
-unless the user has linked them, and the old container did one thing while
-its C++ header said another. After New, Open and an import every view is framed
+unless the user has linked them. After New, Open and an import every view is framed
 (`zoom_extents_all`), because all of them are looking at a drawing that has
 just changed under them; the link is framed once there, as below.
 
@@ -1299,7 +1242,7 @@ so the rule stays a plain conjunction and a layer switched off in the Layers
 panel cannot linger in some forgotten view. Hiding a path hides everything
 beneath it, the document rule's ancestor semantics (`docs/model.md`, "Layer
 visibility and lock"), tested by
-walking the path's ancestors as `string_view` slices - no allocation, and an
+walking the path's ancestors as slices of the name - no allocation, and an
 immediate return for a view that hides nothing, since this is asked once per
 entity per frame. The overrides reach snapping (`SnapRequest::view`), picking
 and box selection (`SelectionFilter::view`) and the 3D scene
@@ -1316,7 +1259,7 @@ and the workspace repaints the one view that changed. Document listeners carry
 no payload, so a view cannot follow a layer rename; every view's overrides are
 pruned of names that no longer exist after each change, which is what stops a
 later layer reusing the name from being born hidden. A view's Layers button
-(`view_layers_popup.*`) is where they are set: it filters that view alone,
+(`crates/katana_window/src/view_layers_popup.rs`) is where they are set: it filters that view alone,
 and isolating a tree node hides everything but that node's path. The same
 filter has lines - `VIEWS HIDE <id> <layers>`, `VIEWS SHOW <id> <layers>|ALL`
 and `VIEWS ISOLATE <id> <layer>` (`docs/cad.md`, "The window's views: VIEWS
@@ -1438,17 +1381,17 @@ ever): an open chain in the neutral colour while the view moves alone, a
 closed chain in the accent inside an accent frame while it is linked, and a
 tooltip that names the views it moves with. A click builds `VIEWS LINK <id>
 TO <id>` or `VIEWS UNLINK <id>` and runs it through the window's command
-runner, so it is logged as the line it is; afterwards every Link button is
-set from the link with its signals blocked, so a refused line leaves the
-button as it was (`view_links::a_refused_link_leaves_the_button_as_it_was`). The
+runner, so it is logged as the line it is; every Link button is drawn from
+the link as it is, so a refused line leaves the button as it was
+(`view_links::a_refused_link_leaves_the_button_as_it_was`). The
 button shows on plan views only and follows the view's kind; each tool
 always on the bar costs 23 px of the dock's least width (22 px and the bar's
 1 px spacing), which the Link button's test holds to
 (`view_links::the_plan_docks_minimum_width_grows_by_the_link_button_alone`). A checked
-title-bar button had no frame at all in the C++: the stylesheet rule for
-every chrome button came after `QToolButton:checked` with the same weight and
-took it away, so the C++ theme gave them a `:checked` rule of their own; the
-Rust's one button painter frames every checked button alike. View > Link This
+title-bar button is framed in the accent as a checked toolbar button is, by
+the one button painter ("One painter for every tool button"); in the C++ it
+once had no frame at all, its theme's rule for chrome buttons taking the
+checked one's away. View > Link This
 View (`viewLinkActive`, Ctrl+Shift+L; K, as Viewport Layout has L) does the
 Link button's line for the ACTIVE view, and is checked from its link; it is
 disabled while the active view is of a kind that cannot be linked. It took
@@ -1459,8 +1402,8 @@ Unlink All Views (`viewUnlinkAll`) runs `VIEWS UNLINK ALL`; both items are
 run by a test through the window
 (`qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless`).
 Link This View and Show the Selection on Hidden Layers are toggles, and
-their check was never seen: the C++ stylesheet drew a menu item that had an
-icon by its QMenu icon rule and drew no check mark for it at all, so
+their check was once never seen: the C++'s theme drew a menu item that had
+an icon with no check mark at all, so
 they - and Grid, Object Snap and every other toggle with an icon - looked
 the same on as off, pixel for pixel, and Link This View on a linked view
 unlinked it with nothing on screen to say it was on. A checked item's icon
@@ -1586,28 +1529,23 @@ from a title bar is a modal loop a headless press would wait in
 (`view_chrome::the_title_bar_shows_optional_tools_only_where_they_fit_and_no_two_overlap`,
 `view_chrome::optional_tools_never_widen_the_docks_minimum`).
 
-**A bar is measured afresh after every change of its tools.** In the C++,
-hiding a widget invalidated its parent's layout - the bar's own row - and not
-the tools' row nested in it, which went on counting a tool just hidden until
-the bar's next activation. Two things read that stale count. The fit itself: a 3D view
-turned plan wanted In, Out and Selection one after another, found In hidden
-but counted, left no room for Selection, and nothing refitted a bar whose
-size had not changed - a mouse user's only route to two plan views showed
-three tools where a plan opened at that width showed four
+**A bar is measured afresh every time.** The bar keeps no layout to go
+stale: `DockTitleBar::fit` works the tools that fit out from the width each
+time, and `DockTitleBar::minimum_width` from the tools always shown. A stale
+count is what the tests guard against, since the C++'s bar had one - it went
+on counting a tool just hidden - and it showed twice. The fit: a 3D view
+turned plan showed three tools where a plan opened at that width showed four
 (`view_chrome::a_view_turned_into_a_plan_shows_the_tools_a_plan_opened_at_its_width_shows`).
-And the dock, which asks the bar's least width as it lays views out: a view
-split just after its bar dropped tools kept a least width that counted them,
-308 px of a 554 px row where half was 277, and the Quad layout took 34 and
-33 px from the side panels for it
+And the least width the workspace lays views out by: a view split just after
+its bar dropped tools kept a least width that counted them, 308 px of a
+554 px row where half was 277, and the Quad layout took 34 and 33 px from the
+side panels for it
 (`view_chrome::opening_a_view_splits_it_into_equal_halves_whatever_tools_its_bar_shows`,
-`view_chrome::quad_puts_the_views_in_quarters_whatever_tools_their_bars_show`). So
-the C++ marked both rows to be measured again before it fitted the tools and
-again after it showed and hid them. The Rust bar keeps no layout to go stale:
-`DockTitleBar::fit` works the tools that fit out from the width each time, and
-`DockTitleBar::minimum_width` from the tools always shown. Measured after the
-fix, in the 1360 px window, the Quad layout's side panels were 11 and 10 px
-narrower than before the link existed - the Link button's 23 px of the plan
-dock's least width - where they had been 34 and 33 px narrower.
+`view_chrome::quad_puts_the_views_in_quarters_whatever_tools_their_bars_show`).
+Measured after the fix, in the 1360 px window, the Quad layout's side panels
+were 11 and 10 px narrower than before the link existed - the Link button's
+23 px of the plan dock's least width - where they had been 34 and 33 px
+narrower.
 
 **Zoom To** (View > Zoom To, `zoomToDialog`) frames what a scope takes - the
 shared "Apply to" and "Only those that match" (`ScopeFilterWidget`, prefix
@@ -1656,9 +1594,9 @@ the drawing (above).
 
 **Rejected alternatives.** Linking by the visible extent: views of different
 shapes fit one box at different scales, and each move would round each
-view's scale differently, so they drift over a session. Signals from
-widget to widget (Qt's, in the C++), and document notifications: a notification repaints every
-plan view's whole kept drawing, and signals between widgets would be a
+view's scale differently, so they drift over a session. Views telling each
+other directly, and document notifications: a notification repaints every
+plan view's whole kept drawing, and views telling each other would be a
 second way of saying who follows whom, outside the tested model. A toolbar
 drawn over the drawing, or a second row under the title bar: the first
 covers geometry and catches picks, the second costs 26 px of height in
@@ -1831,20 +1769,19 @@ Not done:
 
 The same request asked for panels and views that minimise, float, maximise
 and close. A plain dock's title bar has no Minimise, no Maximise and nowhere
-for a view's own controls: the C++'s `QDockWidget` bar had two buttons,
-Float and Close, drawn by the style - and Fusion drew them light on the dark
-theme, which is why the C++ theme had once stripped them, so no dock could be
-closed or floated except by dragging. `DockTitleBar`
+for a view's own controls (its kind, its layers). `DockTitleBar`
 (`crates/katana_window/src/dock_chrome.rs`) is the whole bar of every
-dock: `[icon] title ... [tools] [_] [float] [max] [x]`, 26 points tall, with
-a view's kind switcher where the icon is and its Layers button among the
-tools. The dock area is egui_dock's: the window draws each tab through
+dock: `[icon] title ... [tools] [_] [float] [max] [x]`, 26 points tall - one
+row of 22-point buttons with 2 above and below - with a view's kind switcher
+where the icon is and its Layers button among the tools. The views' dock
+area is egui_dock's: the workspace draws each tab through
 `DockChrome::dock_ui` and applies what its buttons asked once the area has
 been drawn (`DockChrome::apply`), since egui_dock holds its `DockState`
-while it draws. A dock is dragged by egui_dock's own tab, not by this bar
-(the C++ moved and re-docked a dock by dragging the bar, which therefore had
-to ignore the mouse events it did not use); a double click on the bar is the
-Float button.
+while it draws. A view is dragged by egui_dock's own tab, not by this bar
+(where the C++'s was dragged by its bar); a double click on the bar is the
+Float button. The four panels are laid out by the main window itself
+(`crates/katana_window/src/main_window/layout.rs`), at the C++ window's
+geometry, and wear the same bar.
 
 **One owner.** One `DockChrome` per window holds the tray and the
 bookkeeping, and the panels (`MainWindow`) and the views (`ViewWorkspace`)
@@ -1854,28 +1791,24 @@ is told (`Panel`: Close hides it and the menus bring it back; `View`: it can
 be maximised, and one view is active), and of a tab nothing but its dock's
 control name.
 
-**Minimise is a tray, and why.** A floating dock keeps the window's
-shortcuts (in the C++ it had to stay a Qt tool window for that, which has
-no taskbar button, so the window manager's minimise would have lost it), and
-a docked panel is not a window at all. So Minimise HIDES the dock and puts a
+**Minimise is a tray, and why.** A floating dock is a window inside the main
+window, with the window's shortcuts and no taskbar button of its own, and a
+docked panel is not a window at all. So Minimise HIDES the dock and puts a
 button for it on `MinimisedToolBar` at the bottom of the main window (its
 buttons `Restore<dock>`), and the button puts it back exactly where it was:
 in its place and tab when docked, at its rectangle when floating. Docked,
 the place is egui_dock's tree: the layout as it was when the dock went -
 every split and its share - is kept with it and given back whole when the
 tabs open then are the tabs open now; otherwise the dock is put in the first
-place there is. (The C++ recorded the sizes of the docks around a minimised
-one and set every dock in both directions when it came back, because Qt
-shared a returning dock's shortfall out equally.)
+place there is.
 
 **Rejected: rolling a dock up to its title bar.** Measured offscreen in the
 C++'s 1360 x 860 window: Properties alone in the right area, rolled up, took
 the whole column with it - 270 x 770 became 131 x 26, and the column's space
 went to the drawing sideways; Layers rolled up above Reference Data narrowed
-the left column from 300 to 135 px, and it stayed narrow after unrolling, as
-Qt sized a dock area from its docks' hints. Minimise does the job for docked
-and floating docks alike and moves nothing else, and the Rust does not roll
-up either.
+the left column from 300 to 135 px, and it stayed narrow after unrolling.
+Minimise does the job for docked and floating docks alike and moves nothing
+else.
 
 **Maximise (views only).** A docked view hides every other docked view of its
 window until it is restored, which gives back the sizes they had; a floating
@@ -1886,17 +1819,11 @@ against the wrong neighbours), a tray restore of a docked view ends a
 maximise in its window, and everything is unmaximised before a layout is
 saved.
 
-**A tab group is not dragged whole.** The C++ turned Qt's GroupedDragging
-off in both its windows: with it, dragging a tabbed view dragged its whole
-tab group out into Qt's own window, with a native frame and none of the
-chrome, and a view in it could no longer be floated or docked on its own.
-
 **The side columns own the bottom corners.** The panels run the full height
 of the window and the command line sits under the drawing only, between them
-- the usual CAD arrangement (`crates/katana_window/src/main_window/layout.rs`;
-the C++ gave both bottom corners to the left and right areas with
-`setCorner`, since Qt's default ran the command line under both columns and
-cut them short).
+- the usual CAD arrangement (`crates/katana_window/src/main_window/layout.rs`:
+the command line at 350,637 660 x 150 under the views, between the Layers
+column and Properties).
 
 **The active view is always one on screen.** Zoom Extents and the view
 menus act on the active view (and `most_recent(kind)` prefers it), and its
@@ -1911,21 +1838,16 @@ the order the views were opened; the most recently used would be better, but
 `ViewSet::recent()` is the fix). `open_view` also activates the new view
 when the active one is hidden.
 
-Two Qt 6.11.2 behaviours were measured on the way for the C++ and shaped
-it: a tab group was laid out again AS SOON AS a page was hidden, which is
-why the on-screen test, not a raise, is what picks the right view; and
-`resizeDocks` left a hidden dock out of the total it gave the enclosing row,
-so a view had to be shown before it was sized - a stacked split of a view
-already side by side came out 397 and 197 px of 600 until `open_view` showed
-the new dock first (297 each after).
+A split gives the new view and the old equal halves (297 px each of 600 in a
+stacked split of a view already side by side, where the C++ once gave 397
+and 197), held by `view_chrome::opening_a_view_splits_it_into_equal_halves_whatever_tools_its_bar_shows`.
 
 Tested in `crates/katana_window/tests/workspace/view_chrome.rs` (`view_chrome::*`),
-each test shown failing without its fix. The C++ could not build `MainWindow`
-into its widget test target, so the four panels' bars, their exact minimise
-and restore, F9 from a floating panel and a floating maximise were tested
-only in a hand-run harness; the Rust's window tests build the real window
-(`crates/katana_window/tests/main_window/`), but no case of them was
-written for these yet. Not done: a Window menu; keeping the VIEWS between
+each test shown failing without its fix. The window tests build the real
+window (`crates/katana_window/tests/main_window/`), but no case of them is
+written yet for the four panels' bars, their exact minimise and restore, F9
+from a floating panel and a floating maximise, which the C++ tested only in a
+hand-run harness. Not done: a Window menu; keeping the VIEWS between
 sessions - the panels' places are kept (`MainWindow::save_session` and
 `restore_layout`), and which panels are minimised is not yet
 (`minimised_names` and `minimise_named` are ready for it), and the saved
@@ -1969,7 +1891,7 @@ so `--report` and DRIVE's `?` read it as before). One entity is its groups:
 an agent cannot disagree (`docs/cad.md`, "Properties as a tree: PROP TREE") -
 when a person opens it, and made a page of 200 rows at a time
 (`PROPERTY_PAGE`); a "Show 200 more" row at the end of a level makes the next
-page when clicked or chosen with Enter. The model (`PropertyTreeModel`)
+page when clicked or chosen with Enter. The panel
 draws an expander for a level it has not read, so a vertex with thirty
 attributes costs one row until it is opened. A vertex is numbered from 1, as
 the archive numbers its attributes; its height is shown only where it has one
@@ -1993,16 +1915,16 @@ shortcut menu) puts the selected rows on the clipboard, name and value
 separated by a tab. The panel edits nothing; the Style row above it and
 Edit > Attributes do.
 
-One trap was found on the way in the C++ and is recorded in the model: Qt's
-`QTreeView` called `fetchMore` from inside its own layout of the row it was
-opening, and a fetch there that removed the Show more row cleared the view's
-items under the layout and wrote past their end (valgrind found it in
-`property_panel::a_long_string_is_made_a_page_at_a_time_with_a_show_more_row`). So
-`fetchMore` only reads a level the first time, adding rows and removing none,
-and the next pages come from the Show more row after the click is over
-(`property_panel::opening_a_long_level_as_a_person_does_reads_its_first_page_only`,
-which fails with the old rule because the view then made every page at once).
-The rest is `crates/katana_window/tests/host/property_panel.rs`.
+The model keeps a rule from a trap found in the C++: a level's first read
+(`PropertyTreePanel::fetch_more`) only adds rows and removes none, and the
+next pages come from the Show more row after the click is over, never from
+inside the drawing of the row being opened (in the C++, a fetch there that
+removed the Show more row wrote past the view's items, which valgrind found in
+`property_panel::a_long_string_is_made_a_page_at_a_time_with_a_show_more_row`).
+`property_panel::opening_a_long_level_as_a_person_does_reads_its_first_page_only`
+fails with the old rule, because every page was then made at once. A row's
+tip is plain text, its name on the first line, since egui's tooltips are not
+rich text. The rest is `crates/katana_window/tests/host/property_panel.rs`.
 
 ## The layer manager, and why "move" is "rename"
 
@@ -2289,9 +2211,8 @@ so its unchanged Save compares the `Layer`.
 Two decisions from the first version still hold:
 
 - **The table is read-only; the form edits.** Editing in the table would run
-  a command from inside the table's own change - in the C++, its
-  `itemChanged` signal, the shape of the crash recorded under "Panels refresh
-  on the event loop" below. The table has no edit of its own at all, so the
+  a command from inside the table's own change, the shape of the crash
+  recorded under "Panels refresh on the event loop" below. The table has no edit of its own at all, so the
   bug cannot be written. The
   dialog's own commands do not reload it either: they record what to select
   and the watcher's deferred reload does it, so there is one reload path.
@@ -2740,17 +2661,16 @@ mean something else on every row.
   the line by itself: read in place, a line short of its `]` was reported as
   `unexpected '}'`, a brace of the wrapper
   (`definition_edit::a_refusal_never_cites_a_place_in_text_nobody_typed`).
-- *The box is read character for character*, not as "plain text": in the
-  C++, Qt's `toPlainText` handed a no-break space back as a blank and a line
-  separator as a line break (so it read the box's raw text instead), and both
-  are characters a stroke's text may hold; egui's text box holds the text as
-  typed. A form opened on such a text read as edited before anything was
-  typed - every other definition then refused, Revert no way out - and Save
-  wrote the blank
+- *The box is read character for character*: egui's text box holds the
+  text as typed, so a no-break space and a line separator, both characters a
+  stroke's text may hold, are read back as themselves. Read as "plain text",
+  as the C++'s box first was, a no-break space came back a blank: a form
+  opened on such a text read as edited before anything was typed - every
+  other definition then refused, Revert no way out - and Save wrote the blank
   (`definition_editor::a_text_holding_a_no_break_space_opens_unedited_and_is_saved_character_for_character`).
-  The one character a line of the C++'s Qt box could not hold was a paragraph separator,
-  at which it breaks; a definition whose text has one is not opened, and is
-  told why, rather than shown as two lines that are no stroke.
+  A definition whose text holds a paragraph separator is not opened, and is
+  told why (a rule kept from the C++, whose box broke a line there), rather
+  than shown as two lines that are no stroke.
 - *The box holds strokes and nothing else.* A line can end the list of
   strokes and go on to give the definition members - `]], "atVertices": true,
   ...` - and read as sound JSON. Only the strokes are taken from what was
@@ -2990,32 +2910,28 @@ Not done:
 
 ## Panels refresh on the event loop, never inside their own signal
 
-Switching a layer off in the C++'s layer panel crashed the application. The
-chain was: the box's `itemChanged` signal -> `execute(updateLayer)` -> the
-document's change listener -> `refreshAll()` -> `refreshLayers()` ->
-QTreeWidget's clear(), all synchronous, all while the item whose `setData`
-raised the signal was still on Qt's stack. `clear()` deleted it, and
-`setData` read its parent pointer on the way out. The property table had the
-same shape of bug behind an edited value. The C++'s listener then queued one
-refresh on the event loop however many times it was asked before that ran,
-which also coalesced: a transaction of a hundred commands had rebuilt every
-panel a hundred times. **Rejected:** guarding each slot with a re-entrancy
-flag, because that leaves the next slot to make the same mistake.
+(The title is kept, since other documents cite it; in the egui window the
+"event loop" is the next frame and the "signal" a control's own handler.)
 
-The rule stands: a document change never rebuilds a widget synchronously. In
-the egui window it holds by construction: a panel is drawn from the document
-each frame and keeps no items a change could delete under it, so an edit
-made from inside the panel's own drawing is shown at the next frame, and a
-transaction of a hundred commands draws the panel once.
+**The rule: a document change never rebuilds a panel under the control that
+made it.** In the egui window it holds by construction: a panel is drawn
+from the document each frame and keeps no items a change could delete under
+it, so an edit made from inside the panel's own drawing is shown at the next
+frame, and a transaction of a hundred commands draws the panel once. The
+rule was learned in the C++ window, where switching a layer off crashed the
+application: the box's change handler ran the edit, the document's listener
+rebuilt the layer tree at once, and the item whose handler was still running
+was deleted under it (the property table had the same bug behind an edited
+value). **Rejected** there and here: guarding each handler with a
+re-entrancy flag, because that leaves the next handler to make the same
+mistake.
 
 `katana --toggle-layer NAME --screenshot out.png` flips the box through the
 panel's own handler, headlessly, and refuses to continue if the document and
 the panel disagree afterwards (`toggle_layer_through_panel`,
-`crates/katana_window/src/main_window/panels.rs`; the C++ also compared
-the tree's item pointers before and after). `qt_toggle_layer_headless` runs
-it on the sample; with the C++'s listener made synchronous again it failed
-with "the layer panel was rebuilt inside its own itemChanged signal", which
-is how the test earned its place.
+`crates/katana_window/src/main_window/panels.rs`). `qt_toggle_layer_headless`
+runs it on the sample; it failed against the C++ with its listener made
+synchronous again, which is how the test earned its place.
 
 A related rule, from the same afternoon: **a headless session never opens a
 modal box** - every question the window would ask becomes a line in the log
@@ -3093,7 +3009,7 @@ with it. The menu lists a layer or style whose name holds a quote (a DXF can
 bring one) disabled, with the reason as its tip. The parallel lanes of the
 2026-09-26 UI work first wrote four copies of this rule, and the integration
 folded them into this one; Edit Label and the style managers still carried
-wrappers of their own over it (on Qt's `QString`), and four files their own exact-number
+wrappers of their own over it, and four files their own exact-number
 helper, until these were folded in too.
 
 Not done: these lines still quote a name or a path by hand, always, rather
@@ -4837,8 +4753,8 @@ dialog and knows nothing of updates, so the page's services
 whether a version was put back, the credential store, the user agent, the
 note) are handed over by the
 window: `SettingsDialog::set_updates`, called each time File > Settings is
-triggered, after the workbench has made the dialog (in the C++, because Qt
-called an action's slots in the order they were connected). The page is filled again
+triggered, after the workbench has made the dialog, so the page always has
+the dialog it fills. The page is filled again
 at each opening and each time it is turned to, so a `UPDATE SET AUTO OFF`
 typed meanwhile is shown (`settings_updates::turning_to_the_page_reads_the_state_again_and_runs_nothing`).
 Given no services - a widget test's bare dialog - every control on it is
@@ -4871,8 +4787,8 @@ they are easiest to break:
   between frames in plain fields, and what it asks of the window it asks
   through the `Host` it is drawn with or as events the window reads after
   the call (`WorkspaceEvent`, `ChromeRequest`); no callbacks are stored in
-  it. (The C++ had its own rule for this, no moc: no `Q_OBJECT` and no custom
-  signals, connections as lambdas and state through `std::function` members.)
+  it, so a dialog can be dropped at any time and a test can draw it with a
+  host of its own.
 - **Tables are read-only and a form edits**; a command is never run from a
   list's or table's own change ("Styles and Linetypes").
 - **A view reacting to the Document defers and coalesces** its reload to the
@@ -4908,8 +4824,7 @@ they are easiest to break:
   field, button and tab has a control name, so tests and the headless driver
   can find it.
 - **A dialog keeps no reference to the Document**: it is lent the drawing for
-  each frame or call, so it can never outlive it (the C++ rule was that a
-  dialog holding `Document&` must be deletable before the Document), and a
+  each frame or call, so it can never outlive it, and a
   registration is owned by a `ListenerHandle` (`docs/cad.md`, "A listener
   lives exactly as long as the thing it notifies").
 - **Logic that can be tested below the window lives in `katana_cad`**
