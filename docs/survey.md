@@ -12,26 +12,28 @@ the first thing to know before touching any of it:
 
 | Asked for | Already in the repository |
 |---|---|
-| Survey calculation engine | `katana::survey` - `cogo.hpp`, `traverse.hpp`, `angles.hpp`, `leveling.hpp`, `least_squares.hpp`, `network_adjustment.hpp`, `error_propagation.hpp`, `statistics.hpp` |
-| Normalized survey model | `survey/data_model.hpp` - `SurveyPoint` and four observation kinds |
-| Coordinate systems | `katana::geodesy` - CRS, transformer, units, ellipsoid, geodesic, grid factors, PROJ behind `src/` |
-| XML reading | a strict reader, then private to `archive12d`, now `katana::core::readXml` |
+| Survey calculation engine | `katana_survey` - `cogo.rs`, `traverse.rs`, `angles.rs`, `leveling.rs`, `least_squares.rs`, `network_adjustment.rs`, `error_propagation.rs`, `statistics.rs` |
+| Normalized survey model | `rust/crates/katana_survey/src/data_model.rs` - `SurveyPoint` and four observation kinds |
+| Coordinate systems | `katana_geodesy` - CRS, transformer, units, ellipsoid, geodesic, grid factors, PROJ behind its FFI (`rust/crates/katana_geodesy/src/ffi.rs`) |
+| XML reading | a strict reader, then private to `archive12d`, now `katana_core::xml::read_xml` |
 
 So this programme is an *exchange* subsystem and a *user interface*, not a
-second survey library. The conventions it obeys were set by `data_model.hpp` and
+second survey library. The conventions it obeys were set by `data_model.rs` and
 are not restated per field: metres, **radians**, azimuths clockwise in
 `[0, 2*pi)`, and ordered containers so that no result depends on hashing.
 
 ## Where the manufacturer code is allowed to live
 
-`surveyio` is a layer of its own, allowed `core;math;geometry;survey` in
-`tools/check_layering.cmake`. Two absences in that list are the design.
+`surveyio` is a layer of its own, depending on `katana_core`, `katana_math`,
+`katana_geometry` and `katana_survey` alone (`rust/crates/katana_surveyio/Cargo.toml`;
+the C++ held it to the same list in its layering check). Two absences in that
+list are the design.
 
 **`cad` may not see `surveyio`**, exactly as it may not see `interop` or
 `archive12d`. The brief asks that the CAD application not become dependent on
 Leica, Trimble or Topcon structures. A comment saying so would be a wish; a
 layering rule is a build failure. `app` and `qt` own the parsers, and `cad`
-only ever sees `katana::survey` values, which it was already allowed to see.
+only ever sees `katana_survey` values, which it was already allowed to see.
 
 **`geodesy` is not in the list either**, which is the more interesting one. A
 parser records the coordinate system a file *declares* - a name, an EPSG code,
@@ -55,9 +57,9 @@ parser carries its own answer:
 
 | What | The one place | What it replaced |
 |---|---|---|
-| Bytes to UTF-8 | `katana::core::decodeText` / `decodeTextAs` (`core/text_encoding.hpp`), moved down from `archive12d` | a second decoder written into the CSV reader because surveyio may not see archive12d |
-| Trim, integers, reals, lines | `katana::core` (`core/text.hpp`) | private trims in the XML reader and the 12d reader, and a third in the Trimble parser |
-| Metres per foot and link | `katana::math::units` (`math/unit_ratio.hpp`), which `geodesy/units.cpp` is now built from; `survey::metresPer(LinearUnit)` maps a declared unit onto it | ratios repeated in the CSV template and as rounded doubles in the Topcon parser |
+| Bytes to UTF-8 | `katana_core::text_encoding::decode_text` / `decode_text_as` (`rust/crates/katana_core/src/text_encoding.rs`), moved down from `archive12d` | a second decoder written into the CSV reader because surveyio may not see archive12d |
+| Trim, integers, reals, lines | `katana_core` (`rust/crates/katana_core/src/text.rs`) | private trims in the XML reader and the 12d reader, and a third in the Trimble parser |
+| Metres per foot and link | `katana_math::unit_ratio` (`rust/crates/katana_math/src/unit_ratio.rs`), which `rust/crates/katana_geodesy/src/units.rs` is now built from; `katana_survey::data_model::metres_per(LinearUnit)` maps a declared unit onto it | ratios repeated in the CSV template and as rounded doubles in the Topcon parser |
 
 Two properties of the text helpers are load bearing. They never consult the C
 locale: `std::isspace(0xA0)` is true in a Latin-1 locale and 0xA0 is the second
@@ -65,7 +67,7 @@ byte of "à" in UTF-8, so a locale-dependent trim cut characters in half. And a
 number must occupy its whole token with at most one sign, so "+-1", "1,5",
 "inf" and "1e999" are refusals rather than values.
 
-**Absent is not zero.** `SurveyPoint::elevation` is `std::optional<double>`.
+**Absent is not zero.** `SurveyPoint::elevation` is an `Option<f64>`.
 A coordinate list with no height column, a GSI block with no word 83, a
 two-ordinate LandXML point: each is a mark whose height nobody measured, and 0.0
 in its place is a real height at the datum. The bridge writes no elevation
@@ -74,7 +76,7 @@ one out of the triangulation - and reports how many there were. A level
 adjustment refuses a held or weighted benchmark that has no published height,
 because starting it at zero levels the whole run onto the wrong datum and
 reports a perfect fit; a free point may start anywhere, since the model is
-linear. The rejected alternative was a companion `hasElevation` flag: a flag
+linear. The rejected alternative was a companion `has_elevation` flag: a flag
 and a value can disagree, and every reader of a bare double can forget the flag,
 where an optional has to be opened.
 
@@ -83,7 +85,7 @@ them no coordinates until something reduces the observations. Two of the first
 parsers improvised - one created such a point at the origin with a marker in its
 metadata, another at placeholder ordinates - and either reaches the drawing as a
 real mark at (0, 0) as soon as one consumer forgets the marker. Such a point is
-now a `survey::UnpositionedPoint` in `SurveyProject::unpositionedPoints`: it
+now a `katana_survey::UnpositionedPoint` in `SurveyProject::unpositioned_points`: it
 shares the id space with `points`, observations, stations and features may refer
 to it, and the bridge cannot draw it because it is not in the list the bridge
 draws; the report counts them and says why. Rejected: an optional northing and
@@ -100,14 +102,14 @@ field file ──> surveyio (parse only) ──> survey::SurveyProject ──> c
 ```
 
 The bridge returns a single `CommandPtr`, the same shape
-`cad/survey_coding.hpp` already uses. That is what makes an entire import one
+`rust/crates/katana_cad/src/survey_coding.rs` already uses. That is what makes an entire import one
 undo step, which the brief asks for in its section 19 - not a special case, just
 the command pattern the application already has.
 
 The bridge itself makes layers and points and nothing else: every point lands
 on the import's layer, ByLayer, with its code in a property. Coding those
 points (their rule's layer, style and attributes) and stringing them into
-lines is the FINISH, `cad::withSurveyFinish` (`cad/survey_finish.hpp`), which
+lines is the FINISH, `katana_cad::survey_finish::with_survey_finish` (`rust/crates/katana_cad/src/survey_finish.rs`), which
 wraps the bridge's command so that import, codes and lines are still that one
 command and one undo step. It is off unless asked for
 (`SurveyFinishOptions`, `SurveyJobImport::finish`); `docs/survey_coding.md`,
@@ -116,21 +118,24 @@ is composed inside the job command rather than around it.
 
 ## How five parsers were written at once without colliding
 
-Each format registers itself from its own translation unit through
-`FormatRegistration` (`include/katana/surveyio/format.hpp`), and
-`src/katana_surveyio/` is globbed. Adding a parser is adding a file: no shared
-table, no shared CMake list, nothing for two authors to edit at the same time.
+Each format hands the registry a `FormatRegistration`
+(`rust/crates/katana_surveyio/src/format.rs`) from its own module. Adding a
+parser is adding a file and one line to the list of registrations in
+`format.rs`: no shared table of formats to merge, nothing else for two authors
+to edit at the same time.
 
-That design has one trap, and it was measured rather than guessed. A linker
-pulls a member out of a static archive only to satisfy an undefined symbol, and
-a self-registering object file defines nothing anyone references - so it is
-dropped, the format vanishes from the registry, and the only symptom is a file
-being reported as unrecognised months later. The measurements are recorded in
-`src/katana_surveyio/CMakeLists.txt`; the outcome is that the module is an
-`INTERFACE` target wrapping its archive in `WHOLE_ARCHIVE`, so that no consumer
-has to remember the rule. A correctness rule that must be remembered in `app`,
-in `qt` and in every future consumer is a rule that will be forgotten in one of
-them.
+The C++ registered each format from its own translation unit at static
+initialisation, and that design had one trap, measured rather than guessed: a
+linker pulls a member out of a static archive only to satisfy an undefined
+symbol, and a self-registering object file defines nothing anyone references -
+so it was dropped, the format vanished from the registry, and the only symptom
+was a file reported as unrecognised months later. The C++ answered it by
+wrapping the module's archive in `WHOLE_ARCHIVE` so that no consumer had to
+remember the rule. Rust has no life before `main`, so the port made the list
+explicit instead (`REGISTRATIONS` in `format.rs`): a format missing from it is
+missing in every test as well as in the program, not silently in one consumer.
+A correctness rule that must be remembered in `app`, in the window and in
+every future consumer is a rule that will be forgotten in one of them.
 
 ## What "supported" is allowed to mean
 
@@ -195,24 +200,24 @@ extension.
 | Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev; 2 E-N-Elev and Trimble's 3 east first, each with a warning), a point's latest kept, an observation's POS view (after its 09 or 11) never over a position record; collimation (04) applied per face until another instrument type or job; declares no coordinate system |
 
 The matrix lists the formats that have a section in this file.
-`src/katana_surveyio/` also registers readers for TDS RW5, Topcon GTS-7
+`rust/crates/katana_surveyio` also registers readers for TDS RW5, Topcon GTS-7
 raw, Trimble JobXML and RINEX observation files, and recognises Leica DBX,
 Trimble DC and Topcon GTS-6 in order to refuse them by name with the export
 to make instead. They reach the wizard, `SURVEY READ` and `SURVEY IMPORT`
 through the registry like the rest, but have no row or section here yet;
 that is not done. LandXML survey data has no reader. The import wizard
 reads every format with a reader of its own through that reader
-(`SurveyImportWizard::chooseFormat`), as `SURVEY READ` and `SURVEY IMPORT`
+(`SurveyImportWizard::choose_format`), as `SURVEY READ` and `SURVEY IMPORT`
 do, and refuses a format without one by name.
 
 ## Leica GSI
 
-The reader is `src/katana_surveyio/leica_gsi.cpp`; what an import makes of a
-file is set out in `include/katana/surveyio/leica.hpp`. The specification
+The reader is `rust/crates/katana_surveyio/src/leica_gsi.rs`; what an import makes of a
+file is set out in `rust/crates/katana_surveyio/src/leica.rs`. The specification
 followed is Leica's "GSI ONLINE for Leica TPS and DNA" (November 2003): the
 data word and the word information table on its pages 5-6, the word indices
 in the PUT and GET tables. Every expected value in
-`tests/surveyio/test_leica_gsi.cpp` is worked by hand from a fixture word and
+`rust/crates/katana_surveyio/tests/leica_gsi.rs` is worked by hand from a fixture word and
 that table.
 
 ### Sixty seconds, and the rest of one traverse (2026-09-29, reviewed 2026-09-30)
@@ -266,7 +271,7 @@ from 59.5, and another may round to tenths. The whole-number carry makes the
 angle the same double as the word written with its carry; adding 60/3600 of
 a degree as a real does not for every angle (4.4e-16 rad, one unit in the
 last place, apart at 213 46 60.0; 213 17 60.0 comes out the same both ways),
-and `ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth` fails
+and `leica_gsi::a_carried_angle_is_exactly_the_angle_written_with_its_carry_in_either_width` fails
 when it is done that way.
 
 The carry is made only where the word writes both digits of the seconds in
@@ -279,11 +284,11 @@ and `213.466` is 60 only with the 0 the reader supplies. 1.0 refused both at
 their record; carrying them, as the first version of 1.1 did, turned a
 damaged word into an angle - 192 degrees wrong in the first example - with
 nothing at its record to say so. They are refused there again, with the reason
-(`SixtySecondsTheWordDoesNotWriteInTheirPlaceAreRefusedNotCarried`). The note
+(`leica_gsi::sixty_seconds_the_word_does_not_write_in_their_place_are_refused_not_carried`). The note
 counts only the words whose values became observations: one in a code block,
 whose measurement words are not read, or in a shot at the occupied point is
 not said to be read as the next minute
-(`ASixtySecondWordWhoseValueIsNotKeptIsNotSaidToBeReadAsTheNextMinute`).
+(`leica_gsi::a_sixty_second_word_whose_value_is_not_kept_is_not_said_to_be_read_as_the_next_minute`).
 
 Rejected:
 
@@ -310,12 +315,12 @@ a word is damaged, and it is now refused at its record in every unit. A full
 circle itself - 400.00000 gon, 360 00 00.0, or 359 59 60.0 carried - is read
 as the zero, which it is exactly, as a rounding up at the top of the circle
 writes it
-(`ACircleReadingPastAFullCircleIsRefusedInEveryUnitAndAFullCircleIsZero`).
+(`leica_gsi::a_circle_reading_past_a_full_circle_is_refused_in_every_unit_and_a_full_circle_is_zero`).
 Rejected: refusing 360 degrees itself, as the Format Manager's [0..359] might
 suggest; that is the range of its display field, and 360 00 00.0 is a true
 reading of the zero. A letter in any field of a sexagesimal word is refused
 before the seconds are looked at, so a letter beside a 60 is never carried
-(`ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord`).
+(`leica_gsi::a_letter_in_any_field_of_a_sexagesimal_word_refuses_it_at_its_record`).
 
 **The sign of a reading (second review, 2026-09-30).** GSI ONLINE gives
 every measured value a sign (page 6: "+: Positive value", "-: Negative
@@ -344,11 +349,11 @@ negatives below the horizon, it wrote positives above it, and those read as
 zeniths near the vertical with nothing in their words to show it, so the
 import's note on the vertical angle setting also says how many were refused
 and that the file's other vertical readings may not be zenith angles either
-(`ANegativeVerticalReadingIsRefusedAtItsRecordNotWrappedIntoAFaceRightZenith`;
+(`leica_gsi::a_negative_vertical_reading_is_refused_at_its_record_not_wrapped_into_a_face_right_zenith`;
 through `katana_cli`,
 `cli.survey_read_gsi_refuses_a_negative_vertical_reading_at_its_record` and
 `cli.survey_import_gsi_draws_no_point_from_a_negative_vertical_reading`,
-whose one radiated shot is worked by hand in `src/katana_app/CMakeLists.txt`).
+whose one radiated shot is worked by hand in the test's definition).
 The note counts every refusal, a negative V in a code block's included,
 whose measurement words are not read: each is warned about at its record, and
 each is the same sign of what wrote the file. The 60-second note differs on
@@ -377,7 +382,7 @@ A refused word is now shown with its '-' where it has one - "word 21
 value written. A sexagesimal word that writes no digit, ".", read as 000 00
 00.0, the zeros supplied to a short word, with nothing at its record; it is
 refused, as the same word already was in gon, degrees and mil
-(`ASexagesimalWordOfNothingButAPointIsRefusedNotReadAsZero`).
+(`leica_gsi::a_sexagesimal_word_of_nothing_but_a_point_is_refused_not_read_as_zero`).
 
 The full-circle test held only words far past the circle, and passed with
 either edge of the check removed: with `degrees > 360` alone, which reads
@@ -396,7 +401,7 @@ remote's reader was still 1.0; main was pushed with 1.1 hours later.) Where
 every word 22 is refused, the note on the vertical angle setting now says
 that none was read as a zenith angle, where it said "word 22 was read as a
 zenith angle" and doubted "the file's other" readings, of which there were
-none (`WhenEveryVerticalReadingIsRefusedTheNoteSaysNoneWasReadAsAZenithAngle`).
+none (`leica_gsi::when_every_vertical_reading_is_refused_the_note_says_none_was_read_as_a_zenith_angle`).
 
 **A shot's own horizontal distance and height difference (third review,
 2026-09-30).** Words 32 and 33 are the horizontal distance and height
@@ -419,11 +424,11 @@ passed over, and the first record. A height difference beside a zenith angle
 with no distance, which 1.1 also dropped as derived though nothing could
 compute it, is carried the same way. The derived note now says "beside a
 zenith angle and a distance that were read"
-(`AShotWithNoZenithAngleReadKeepsItsOwnHorizontalDistanceAndHeightDifference`;
+(`leica_gsi::a_shot_with_no_zenith_angle_read_keeps_its_own_horizontal_distance_and_height_difference`;
 through `katana_cli`,
 `cli.survey_import_gsi_radiates_a_shot_with_no_zenith_angle_by_its_own_horizontal_distance`
 on `tests/surveyio/data/leica/derived_distances_gsi8.gsi`, whose three
-radiated points are worked by hand in `src/katana_app/CMakeLists.txt` - two
+radiated points are worked by hand in the test's definition - two
 by their own 32, one by its slope distance and zenith angle, 0.4 mm from
 where its own 32 would put it). Rejected:
 
@@ -450,7 +455,7 @@ The other warnings and notes on the traverse, each checked against the data:
   but zeros are now empty, and the import says how many it read so; a code
   "0" would be written the same way and cannot be told from one. Words 11 and
   41 keep "0": a point needs an id, and a code block exists to give a code
-  (`AnAllZeroPointIdOrCodeBlockCodeIsZeroNotEmpty`). Looking at which blocks
+  (`leica_gsi::an_all_zero_point_id_or_code_block_code_is_zero_not_empty`). Looking at which blocks
   read those words found two that none did, each dropped without a word:
   code information (42-49) in a point's own block, and remark words (71-79)
   in a code block. GSI ONLINE's PUT 41-49 give code information with a code
@@ -460,7 +465,7 @@ The other warnings and notes on the traverse, each checked against the data:
   N". A remark word in a code block could be the point's code and remarks or
   more about the block's own code, and nothing tells which, so it is not
   read, and the import now says so once
-  (`CodeInformationInAPointsOwnBlockIsKeptAndRemarksInACodeBlockAreSaidNotRead`).
+  (`leica_gsi::code_information_in_a_points_own_block_is_kept_and_remarks_in_a_code_block_are_said_not_read`).
   The traverse has neither.
 - **51 of 52 setups had a backsight.** The traverse's first setup has as
   its reference object a mark that is keyed in only when the instrument
@@ -471,7 +476,7 @@ The other warnings and notes on the traverse, each checked against the data:
   the point coordinates, before the setup or after it, other than by the
   setup's own shots: target coordinates (81-83) the instrument computed with
   the orientation the backsight is to give would orient the setup on itself
-  (`AFirstShotToAPointOnlyItsOwnSetupPositionsNamesNoBacksight`). The note
+  (`leica_gsi::a_first_shot_to_a_point_only_its_own_setup_positions_names_no_backsight`). The note
   says how many backsights came from coordinates later in the file.
 - **One distance was measured with another prism constant.** One shot's
   word 51 gives a prism constant where every other shot's is 0, and its
@@ -512,32 +517,32 @@ when every V is refused, parser 1.2), but for the version in the summary
 line: every one of its 1541 shots is words 21, 22 and 31, with no word 32 or
 33 and no negative word 22.
 
-Tests (`tests/surveyio/test_leica_gsi.cpp`, on the hand-built
+Tests (`rust/crates/katana_surveyio/tests/leica_gsi.rs`, on the hand-built
 `tests/surveyio/data/leica/rounded_seconds_gsi16.gsi` and inline blocks):
-`SixtySecondsWithNothingAfterThemAreReadAsTheNextMinute` (086 27 60.0 is
+`leica_gsi::sixty_seconds_with_nothing_after_them_are_read_as_the_next_minute` (086 27 60.0 is
 1.509128026557763641 rad, worked in exact rationals),
-`TheImportSaysOnceHowManyAngleWordsWroteSixtySecondsAndWhereTheyAre`,
-`SecondsPastSixtyAreNoRoundingAndTheirWordIsStillRefusedByRecord`,
-`SixtySecondsWithTenthsOrMinutesOfSixtyAreNoRoundingAndAreRefused`,
-`SixtySecondsTheWordDoesNotWriteInTheirPlaceAreRefusedNotCarried`,
-`ASixtySecondWordWhoseValueIsNotKeptIsNotSaidToBeReadAsTheNextMinute`,
-`ACircleReadingPastAFullCircleIsRefusedInEveryUnitAndAFullCircleIsZero`,
-`ANegativeVerticalReadingIsRefusedAtItsRecordNotWrappedIntoAFaceRightZenith`,
-`WhenEveryVerticalReadingIsRefusedTheNoteSaysNoneWasReadAsAZenithAngle`,
-`AShotWithNoZenithAngleReadKeepsItsOwnHorizontalDistanceAndHeightDifference`,
-`ASexagesimalWordOfNothingButAPointIsRefusedNotReadAsZero`,
-`ALetterInAnyFieldOfASexagesimalWordRefusesItAtItsRecord`,
-`ACarriedAngleIsExactlyTheAngleWrittenWithItsCarryInEitherWidth`,
-`AnAllZeroRemarkOrCodeInformationWordIsEmptyNotTheCodeZero`,
-`AnAllZeroPointIdOrCodeBlockCodeIsZeroNotEmpty`,
-`CodeInformationInAPointsOwnBlockIsKeptAndRemarksInACodeBlockAreSaidNotRead`,
-`AFirstShotToAPointTheFileGivesCoordinatesOnlyLaterIsStillTheBacksight`,
-`AFirstShotToAPointOnlyItsOwnSetupPositionsNamesNoBacksight` and
-`DistancesMeasuredWithAnotherPrismConstantThanTheirSetupsAreCountedAndKeepTheirOwn`;
+`leica_gsi::the_import_says_once_how_many_angle_words_wrote_sixty_seconds_and_where_they_are`,
+`leica_gsi::seconds_past_sixty_are_no_rounding_and_their_word_is_still_refused_by_record`,
+`leica_gsi::sixty_seconds_with_tenths_or_minutes_of_sixty_are_no_rounding_and_are_refused`,
+`leica_gsi::sixty_seconds_the_word_does_not_write_in_their_place_are_refused_not_carried`,
+`leica_gsi::a_sixty_second_word_whose_value_is_not_kept_is_not_said_to_be_read_as_the_next_minute`,
+`leica_gsi::a_circle_reading_past_a_full_circle_is_refused_in_every_unit_and_a_full_circle_is_zero`,
+`leica_gsi::a_negative_vertical_reading_is_refused_at_its_record_not_wrapped_into_a_face_right_zenith`,
+`leica_gsi::when_every_vertical_reading_is_refused_the_note_says_none_was_read_as_a_zenith_angle`,
+`leica_gsi::a_shot_with_no_zenith_angle_read_keeps_its_own_horizontal_distance_and_height_difference`,
+`leica_gsi::a_sexagesimal_word_of_nothing_but_a_point_is_refused_not_read_as_zero`,
+`leica_gsi::a_letter_in_any_field_of_a_sexagesimal_word_refuses_it_at_its_record`,
+`leica_gsi::a_carried_angle_is_exactly_the_angle_written_with_its_carry_in_either_width`,
+`leica_gsi::an_all_zero_remark_or_code_information_word_is_empty_not_the_code_zero`,
+`leica_gsi::an_all_zero_point_id_or_code_block_code_is_zero_not_empty`,
+`leica_gsi::code_information_in_a_points_own_block_is_kept_and_remarks_in_a_code_block_are_said_not_read`,
+`leica_gsi::a_first_shot_to_a_point_the_file_gives_coordinates_only_later_is_still_the_backsight`,
+`leica_gsi::a_first_shot_to_a_point_only_its_own_setup_positions_names_no_backsight` and
+`leica_gsi::distances_measured_with_another_prism_constant_than_their_setups_are_counted_and_keep_their_own`;
 through `katana_cli`, `cli.survey_read_gsi_reads_sixty_seconds_as_the_next_minute`
 and `cli.survey_import_gsi_radiates_the_shots_whose_angles_wrote_sixty_seconds`,
 whose two radiated points are worked by hand to the millimetre in
-`src/katana_app/CMakeLists.txt`, the two on
+the tests' definitions, the two on
 `tests/surveyio/data/leica/negative_vertical_gsi8.gsi` and the one on
 `tests/surveyio/data/leica/derived_distances_gsi8.gsi` named above. The
 window's Survey > Import Survey Data reads a GSI file through the same
@@ -547,7 +552,7 @@ Not done:
 
 - **The reduction's face pairing.** It pairs a setup's i-th face-left
   pointing to a target with its i-th face-right one
-  (`src/katana_survey/reduction.cpp`). Each setup of the traverse has 3 to 9
+  (`rust/crates/katana_survey/src/reduction.rs`). Each setup of the traverse has 3 to 9
   more face-left pointings than face-right ones (3 in 41 of the 52), and in
   the setups looked at they come first, so its pairs cross rounds - the
   first setup's first face-pair warning (15.0") pairs a face-left pointing
@@ -563,14 +568,14 @@ Not done:
   zenith angle read keeps its own height difference (33) as a
   LevelDifferenceObservation, but radiation takes a target's height only
   from its pointing - a zenith angle with a distance
-  (`src/katana_survey/reduction.cpp`) - and a level difference, which has no
+  (`rust/crates/katana_survey/src/reduction.rs`) - and a level difference, which has no
   pointing, enters only a levelling adjustment. So on
   `tests/surveyio/data/leica/derived_distances_gsi8.gsi` Q1 and Q2 are
   placed by their own 32 and drawn with no elevation ("2 point(s) have no
   height in the source"), though the file gives their height difference. It
   is the reduction's, for every format that writes a level difference beside
   a shot, not this reader's.
-- **The backsight check has no tolerance.** `src/katana_survey/reduction.cpp`
+- **The backsight check has no tolerance.** `rust/crates/katana_survey/src/reduction.rs`
   stores each setup's backsight distance and height differences, and the
   report prints them as bare numbers, where face pairs and misclosures are
   marked OUTSIDE TOLERANCE. So the first setup's +39.0 mm, left unoriented
@@ -589,9 +594,9 @@ Not done:
   left as it was. No file seen has shown it: the traverse has no word 42-49
   or 72-79.
 - **Three routines turn degrees, minutes and seconds into radians:** this
-  reader's, `packedDegreesToRadians` in
-  `src/katana_surveyio/topcon_raw_builder.cpp` (GTS-7 and RW5), and
-  `dmsToRadians` in `src/katana_survey/angles.cpp`. Only this one reads 60
+  reader's, `packed_degrees_to_radians` in
+  `rust/crates/katana_surveyio/src/topcon_raw_builder.rs` (GTS-7 and RW5), and
+  `dms_to_radians` in `rust/crates/katana_survey/src/angles.rs`. Only this one reads 60
   seconds as the next minute; the other two refuse it. Carrying it there
   needs evidence from those formats' writers, not this file's. They should
   become one helper with the carry as a choice its caller makes.
@@ -612,10 +617,10 @@ and Named Measurements", 44.5 "Searching for Special Coordinates", 44.6's
 time_text, 44.7 and 44.8, one entry per opcode; the June 2025 edition numbers
 the same sections 1.2 to 1.8 and has the entries and .fld syntax of 128, 129,
 138 and 139, but not their descriptions nor 44.7's resection_measurement
-block. The reader is `src/katana_surveyio/opcode_field_file.cpp`, on the
-Topcon readers' raw builder (`src/katana_surveyio/topcon_raw_builder.hpp`),
+block. The reader is `rust/crates/katana_surveyio/src/opcode_field_file.rs`, on the
+Topcon readers' raw builder (`rust/crates/katana_surveyio/src/topcon_raw_builder.rs`),
 which already turned a journal of setups, backsights and shots into one
-`survey::SurveyProject` - a third copy of that bookkeeping would have been the
+`katana_survey::data_model::SurveyProject` - a third copy of that bookkeeping would have been the
 defect section 2 of the contributors' rules names.
 
 What the format says, and the reader relies on: a record is an opcode
@@ -739,7 +744,7 @@ Decisions that are the reader's own, each stated in the source:
   the receiver's attributes after it. An 02 whose own attributes - those
   after it and before the next record that makes a point or a setup -
   include one named "GNSS Solution" (what the receiver solved) is a
-  `survey::GnssPositionObservation` of an unpositioned point, in the file's
+  `katana_survey::data_model::GnssPositionObservation` of an unpositioned point, in the file's
   grid, with the a-priori GNSS precision of `ReadOptions` (10 mm and 20 mm by
   default); any other 02 is an entered coordinate. The reduction seeds a GNSS
   position before any setup, as it seeds an entered coordinate, so a
@@ -807,7 +812,7 @@ Decisions that are the reader's own, each stated in the source:
   16 named groups, or whose name would take the groups' part of a name past
   512 characters, is read but not named in its attributes' names, with a
   warning - the bounds Katana gives its other "/" tree name, a layer path
-  (`kMaximumLayerDepth` and `kMaximumLayerNameLength`, which surveyio may not
+  (`MAXIMUM_LAYER_DEPTH` and `MAXIMUM_LAYER_NAME_LENGTH`, which surveyio may not
   include): 8 000 groups nested under one point made 8 000 names each holding
   every group's, 1.4 GB for a 342 KB file, and in a test of 2 000 the
   longest name was 10 898 characters; it is now 60. A 124 in the files'
@@ -864,7 +869,7 @@ Decisions that are the reader's own, each stated in the source:
   skipped naming it. Before, they went to the point or setup before - in the
   resection job some 21 000 attribute records had landed on control marks and
   731 shots under the wrong setup, silently.
-- **The backsight.** A setup's backsight (`SurveyStation::backsightPointId`)
+- **The backsight.** A setup's backsight (`SurveyStation::backsight_point_id`)
   is the point of its first 04 that can orient it: a 04 that gives a
   horizontal circle to a point with a position the reduction will find -
   coordinates an 02 gives it anywhere in the file, for the reduction places
@@ -874,12 +879,12 @@ Decisions that are the reader's own, each stated in the source:
   reduction takes that circle as set to the grid, saying so; where no 04
   gives one, the first 04's point. The reader settles it when the file ends,
   so an 02 after the setup, or after the next one begins, still counts. The
-  circle and the azimuth are that point's. `SurveyStation::backsightAzimuth`
+  circle and the azimuth are that point's. `SurveyStation::backsight_azimuth`
   is the circle reading on it, as the model defines it: the horizontal circle
   of the first 04 to it that gives one, as its face-left reading (a
   face-right one less 180 degrees, as the reduction means the pointings to
   the backsight); a later 04 to it changes it no more than a later pointing
-  would. The 04's azimuth is `SurveyStation::statedBacksightAzimuth` - the
+  would. The 04's azimuth is `SurveyStation::stated_backsight_azimuth` - the
   first a 04 to it gives; a later one that differs is kept in the setup's
   metadata, with a warning - which the reduction orients the setup on, less
   the reading on the backsight, only where nothing places the backsight: the
@@ -912,7 +917,7 @@ Decisions that are the reader's own, each stated in the source:
   setup whose first backsight had coordinates and whose second had none drew
   its shots 60 degrees round, with no reader warning; the last 04 naming the
   backsight with its own circle and azimuth; and the 04's azimuth in
-  `backsightAzimuth`: the report then said the circle had been taken for a
+  `backsight_azimuth`: the report then said the circle had been taken for a
   grid azimuth, a backsight with coordinates and no circle reading was
   oriented on the azimuth taken for the circle (a shot at 90 degrees drawn on
   bearing 45), and a face-right 04 after it replaced the azimuth with its
@@ -927,7 +932,7 @@ Decisions that are the reader's own, each stated in the source:
   that the difference holds for the measurements after that 04 is an
   inference from the entry for 50, which says so of its own bearing. The
   model orients a setup once, on one point, so that would split the setup in
-  two - as the SDR reader's `splitSetup` does, where its format says a
+  two - as the SDR reader's `split_setup` does, where its format says a
   backsight record orients what follows it - and each part would still need
   a backsight that can orient it.
 - **Resections (128 ... 129; 138 ... 139 for Helmert).** A 128 is a setup on
@@ -939,7 +944,7 @@ Decisions that are the reader's own, each stated in the source:
   follows any of the file's twelve. The file does not state where the
   resected points are, so the reader gives none, and the reduction computes
   each resection from the setup's pointings to placed points before the 129
-  - the reader marks where its block ends (`kResectionEndMetadata`), so a
+  - the reader marks where its block ends (`RESECTION_END_METADATA`), so a
   check (06) after it checks the station, as it did in the field ("The
   reduction's resection", below) - then radiates the rest from it. Rejected:
   computing the resection in the reader. A resection is an estimate from
@@ -972,8 +977,8 @@ Decisions that are the reader's own, each stated in the source:
   setup S, applied to the shot of record N"). With plan distance h = s sin z
   and rise v = s cos z, and radial r, tangential t and height u, the offset
   position is on circle a + atan2(t, h + r), at plan distance hypot(h + r, t),
-  rising v + u. The arithmetic is the builder's (`offsetShot` in
-  `topcon_raw_builder.hpp`), one home for every reader on it. A radial, a
+  rising v + u. The arithmetic is the builder's (`offset_shot` in
+  `topcon_raw_builder.rs`), one home for every reader on it. A radial, a
   tangential and a height offset of one shot combine, each from the measured
   position; two of one kind leave the shot as measured, since whether the
   second adds to the first or replaces it the description does not say.
@@ -984,7 +989,7 @@ Decisions that are the reader's own, each stated in the source:
   So an offset of a point measured more than once from its setup is kept and
   not applied, with a warning, as is one of a point not shot from the current
   setup (a coordinate, a shot from an earlier setup) and one that would put
-  its point within 0.1 mm of the station (`tolerance::kCoordinate`, the same
+  its point within 0.1 mm of the station (`katana_math::numerics::COORDINATE`, the same
   ground mark). The reduction applies its grid scale factor k and its
   curvature to the offset position's plan distance rather than to the
   measured one, so the offset is scaled by k with the rest: (k - 1) of it,
@@ -1134,7 +1139,7 @@ the copies the owner saved again that day. The whole reply of `SURVEY READ`
 and of `CRS SET EPSG:7856`, `SURVEY IMPORT` and `LIST` is the same before
 (main's build) and after but for the parser's version, now 1.2: 3 482, 862
 and 778 points at the same positions. The version is what a saved job's
-report carries to say which reader made it (`FormatDescriptor::parserVersion`),
+report carries to say which reader made it (`FormatDescriptor::parser_version`),
 and these fixes and the second review's change what some files import.
 
 The fixtures are hand-built in the files' layouts, with invented names and
@@ -1151,10 +1156,10 @@ an entered mark and a point nothing places, one in each order).
 `.gitattributes` stores them byte
 for byte, so a Linux checkout reads the same CRLF lines. Every file under
 `tests/surveyio/data` is detected by
-`OpcodeFieldFile.TheProbeClaimsNoOtherFormatsFixtureOrSample`, which prints
+`opcode_field_file::the_probe_claims_no_other_formats_fixture_or_sample`, which prints
 the table a probe change is compared by: only the field files are claimed.
 
-**`SURVEY READ` and `SURVEY IMPORT`** (`src/katana_app/survey_verbs.hpp`)
+**`SURVEY READ` and `SURVEY IMPORT`** (`rust/crates/katana_app/src/survey_verbs.rs`)
 bring every format surveyio reads to `katana_cli`, `katana_mcp` and the
 window's command line, which until now reached a field file only through the
 import wizard. `SURVEY READ <file> [FORMAT <id>]` says what the reader made of
@@ -1162,7 +1167,7 @@ the file and changes nothing; `SURVEY IMPORT <file> [FORMAT <id>] [LAYER
 <path>]` does what the wizard's Import does with its defaults - the reduction
 with `ReductionSettings`' defaults and the control the file declares, the
 points on `survey/points`, the job kept for Survey > Survey Jobs - as one undo
-step (`cad::ImportSurveyJobCommand`); `SETTINGS` and `SET` give it the
+step (`katana_cad::survey_job::ImportSurveyJobCommand`); `SETTINGS` and `SET` give it the
 wizard's other reduction options and control from the drawing ("The
 reduction settings of SURVEY IMPORT", below), and in that same step it codes
 and strings what it draws ("SURVEY IMPORT codes and strings what it draws",
@@ -1170,11 +1175,11 @@ below). The format is detected unless FORMAT
 names it, and a detection that is not certain is refused, naming the
 candidates. The verb lives in the session and not the interpreter because
 `cad` may not see `surveyio`; the window runs the same function
-(`MainWindow::runWorkbenchLine`). `surveyio::reportInputFor`, which the
+(`MainWindow::run_workbench_line`). `katana_surveyio::reader::report_input_for`, which the
 wizard and the Survey Jobs dialog had in the window's code, moved to
-`include/katana/surveyio/reader.hpp` so the verb uses the same one. Tests:
-the reader's `OpcodeFieldFile` cases in
-`tests/surveyio/test_opcode_field_file.cpp`, `cli.survey_read_field_file`,
+`rust/crates/katana_surveyio/src/reader.rs` so the verb uses the same one. Tests:
+the reader's `opcode_field_file` cases in
+`rust/crates/katana_surveyio/tests/opcode_field_file.rs`, `cli.survey_read_field_file`,
 `cli.survey_import_field_file`, `cli.survey_read_gnss_field_file`,
 `cli.survey_import_gnss_field_file`, `cli.survey_read_resection_field_file`,
 `cli.survey_import_resection_field_file`,
@@ -1182,11 +1187,11 @@ the reader's `OpcodeFieldFile` cases in
 `cli.survey_import_rtk_setup_field_file`,
 `cli.survey_read_two_backsights_field_file`,
 `cli.survey_import_two_backsights_field_file`, `qt_survey_verb_headless`, an agent
-through MCP (`McpServer.AnAgentImportsAFieldFileWhoseSetupStandsOnRtkMarks`),
+through MCP (`mcp_server::an_agent_imports_a_field_file_whose_setup_stands_on_rtk_marks`),
 the wizard's content step, which shows the fixtures as read
-(`SurveyImportWizard.TheContentStepShowsWhatEachFormatsReaderRead`), and the
+(`survey_import_wizard::the_content_step_shows_what_each_formats_reader_read`), and the
 reduction's cases for a stated backsight azimuth in
-`tests/survey/test_reduction.cpp`.
+`rust/crates/katana_survey/tests/reduction.rs`.
 
 Not done:
 
@@ -1196,9 +1201,9 @@ Not done:
 - Offsets are applied by changing the shot they move; a typed offset on the
   pointing, which RW5's off-centre shots and GTS-7's OFFSET records would use
   too, would keep the measured values in the observation. The GTS-7 reader
-  keeps its OFFSET records unapplied (`topcon_gts.cpp`: "moving the point is
+  keeps its OFFSET records unapplied (`topcon_gts.rs`: "moving the point is
   the reduction's work"); applying them would go through the same
-  `offsetShot`, once the signs its source gives its offsets are checked. An
+  `offset_shot`, once the signs its source gives its offsets are checked. An
   offset of a point measured more than once from its setup, of a coordinate,
   or of a shot from another setup, and two of one kind on a shot, are kept and
   not applied.
@@ -1232,7 +1237,7 @@ Not done:
   entered control over a GNSS position - and so has no height; the GNSS
   position's is not used for it.
 - The reduction does not seed a file's calculated coordinates
-  (`seedEntered` in `src/katana_survey/reduction.cpp` seeds entered ones), so
+  (`seed_entered` in `rust/crates/katana_survey/src/reduction.rs` seeds entered ones), so
   a backsight on one - RW5's GPS-derived records, a JobXML point a COGO
   routine computed - has no position unless another setup radiates it, and
   its setup is oriented on its circle reading. The field file's RTK marks are
@@ -1263,10 +1268,10 @@ Not done:
   unless its line sets them (`SET grid_scale=projection`) or a person does in
   Survey > Survey Jobs, so a total-station job imported into a projected
   drawing with the defaults is radiated with ground distances.
-- surveyio has eight file-local digit tests (`isDigit` in leica_dbx.cpp,
-  leica_gsi.cpp, rinex.cpp, rinex_common.cpp, rinex_compact.cpp,
-  topcon_raw_builder.cpp, opcode_field_file.cpp and sokkia_sdr.cpp), and
-  `include/katana/core/text.hpp`, which would be their one home, has none.
+- surveyio has eight file-local digit tests (`is_digit` in leica_dbx.rs,
+  leica_gsi.rs, rinex.rs, rinex_common.cpp, rinex_compact.rs,
+  topcon_raw_builder.rs, opcode_field_file.rs and sokkia_sdr.rs), and
+  `rust/crates/katana_core/src/text.rs`, which would be their one home, has none.
 
 ## The Sokkia SDR file (.sdr)
 
@@ -1275,8 +1280,8 @@ read. The SDR file among them - a traverse of 41 setups in the SDR33 layout,
 written by another program's converter, kept on the owner's machine and not
 committed - was not recognised at all: `SURVEY READ` answered "no registered
 format recognises this file". The reader is
-`src/katana_surveyio/sokkia_sdr.cpp`, on the raw builder the field file
-uses (`src/katana_surveyio/topcon_raw_builder.hpp`).
+`rust/crates/katana_surveyio/src/sokkia_sdr.rs`, on the raw builder the field file
+uses (`rust/crates/katana_surveyio/src/topcon_raw_builder.rs`).
 
 It is read from Sokkia's "Interfacing with the SOKKIA SDR Electronic Field
 Book" (software 04-04.xx, October 1999): the example jobs of chapter 2, the
@@ -1310,7 +1315,7 @@ any round. Every other record is skipped with a warning naming it and its
 type.
 
 **The backsight's two numbers, and the model.** A `07` gives the azimuth to
-the backsight and the circle reading on it. `SurveyStation::backsightAzimuth`
+the backsight and the circle reading on it. `SurveyStation::backsight_azimuth`
 was the only field, and it is the CIRCLE (the model's comment says so, and
 the RW5, GTS-7, JobXML and field-file readers store the circle there); the
 first version of this reader stored the azimuth in it instead, which gave
@@ -1318,7 +1323,7 @@ SDR files the right bearings where the backsight had no coordinates but gave
 the field a second meaning, turned the reduction's "the circle, taken as a
 grid azimuth" warning false, and still lost the orientation correction when
 the backsight was placed but never observed. The model now has
-`SurveyStation::statedBacksightAzimuth`, the azimuth the file states, beside
+`SurveyStation::stated_backsight_azimuth`, the azimuth the file states, beside
 the circle; the reader fills both. The reduction orients a setup on the
 backsight's coordinates when it has them, as before (and with no reading on
 the backsight, less the circle); where nothing places the backsight it takes
@@ -1473,7 +1478,7 @@ Decisions that are the reader's own, each stated in the source:
   first such to a point it observes: chapter 2's OBS-view example has only
   that, and its printed positions (the same job in POS view) follow A = H +
   the keyed azimuth - the reading on that point, to the printed 0.001 ft
-  (`SokkiaSdr.ASetupWithNoBacksightRecordIsOrientedByItsKeyedAzimuth`
+  (`sokkia_sdr::a_setup_with_no_backsight_record_is_oriented_by_its_keyed_azimuth`
   reduces it). A setup with neither takes its readings as azimuths, as the
   field book does when the backsight is skipped (SETX 8.2.1); in the model
   that is a circle with no backsight named, which the reduction takes as set
@@ -1619,7 +1624,7 @@ Decisions that are the reader's own, each stated in the source:
   where nothing else does, SETX 6.1 rule 3); it never supersedes the
   coordinates of any other record, which stand, its own going to the point's
   metadata with a warning naming the observation and its view
-  (`positionPoint`'s `asideBecause`). Straight after is what pairs them: an
+  (`position_point`'s `asideBecause`). Straight after is what pairs them: an
   `08` after an `08` of the same point is a record of its own - SETX 8.5.5
   prints the new averaged position straight after the POS view it averages -
   and so is one with a note or any other record between it and the shot. An
@@ -1730,7 +1735,7 @@ unchecked), it has no collimation to widen a circle test, its 42 instrument
 records name one EDM type, and its one `08` follows no observation of its
 point.
 
-Tests: `tests/surveyio/test_sokkia_sdr.cpp`, on the hand-built
+Tests: `rust/crates/katana_surveyio/tests/sokkia_sdr.rs`, on the hand-built
 `tests/surveyio/data/sdr/traverse.sdr` (its second setup's circle zeroed on
 a backsight whose azimuth is 270) and records written in the test - among
 them Sokkia's own chapter 2 examples: the OBS-view job reduced to its
@@ -1753,23 +1758,23 @@ averaged position after a view; derived views read before their raw twins,
 across a re-orientation and past the next `02`, and one after a second `02`
 whose line only the first observed. Each test of the third and fourth
 reviews was seen to fail with its fix taken out.
-`Reduction.AStatedAzimuthIsTakenLessTheSetupsReadingOnTheBacksightNotLessTheCircle`
-and `Reduction.WithNoReadingOnTheBacksightTheStatedAzimuthIsTakenLessTheCircleSetOnIt`
+`reduction::a_stated_azimuth_is_taken_less_the_setups_reading_on_the_backsight_not_less_the_circle`
+and `reduction::with_no_reading_on_the_backsight_the_stated_azimuth_is_taken_less_the_circle_set_on_it`
 pin the orientation with a reading and a circle that are not zero (the
 earlier tests subtracted zero, so they could not tell the rules apart),
 beside
-`Reduction.ASetupWhoseBacksightNothingPlacesIsOrientedOnTheAzimuthTheFileStatesNotTheCircle`
-and `Reduction.AStatedAzimuthOnABacksightWithNoPositionYetWaitsForTheBacksightsCoordinates`;
-`SurveyProjects.AStatedBacksightAzimuthThatIsNotFiniteIsRejectedAndAFiniteOneIsKeptApart`
+`reduction::a_setup_whose_backsight_nothing_places_is_oriented_on_the_azimuth_the_file_states_not_the_circle`
+and `reduction::a_stated_azimuth_on_a_backsight_with_no_position_yet_waits_for_the_backsights_coordinates`;
+`survey_projects::a_stated_backsight_azimuth_that_is_not_finite_is_rejected_and_a_finite_one_is_kept_apart`
 validates the field; `cli.survey_read_sokkia_sdr` and
 `cli.survey_import_sokkia_sdr`, whose positions are worked by hand in
-`src/katana_app/CMakeLists.txt` to the micrometre (with the reduction's
-refraction coefficient, 0.13, named); `McpServer.AnAgentReadsAndImportsASokkiaSdrFile`;
+the tests' definitions to the micrometre (with the reduction's
+refraction coefficient, 0.13, named); `mcp_server::an_agent_reads_and_imports_a_sokkia_sdr_file`;
 and the wizard's content step, which lists the fixture's two setups. The
 truncation-and-noise test the raw readers share fails on an `Internal`
-error: `readSurvey` turns a reader's exception into one, so it had passed
+error: `read_survey` turns a reader's exception into one, so it had passed
 with a reader that threw (it did, on a `00` line two characters long). The
-Survey Controller probe (`src/katana_surveyio/trimble_dc.cpp`) steps aside
+Survey Controller probe (`rust/crates/katana_surveyio/src/trimble_dc.rs`) steps aside
 for an SDR header with any derivation code, not only `NM`: Sokkia allows
 `ED` as well, and such a file named `.dc` was claimed at 0.5. The probe
 identifies a file by its header: 0.8 on the header alone, 0.95 (0.98 named
@@ -1779,7 +1784,7 @@ line. No other format writes that header, so a file with odd lines in it is
 still identified; it was 0.6, and refused without FORMAT.
 
 The wizard's Browse filter is built from the registry
-(`katana::qt::surveyFileFilter`) and the few patterns no format names
+(`katana_window::survey::survey_import_wizard::survey_file_filter`) and the few patterns no format names
 (`.pnt`, `.xyz`, `.gt6`, `.x01`, RINEX 2's `.??o` and `.??d`); it had been a
 hand-written list that lacked `.fld`, `.gts`, `.gts7` and `.dat`.
 
@@ -1805,7 +1810,7 @@ Not done:
   (`backsight azimuth (radians)`), the GTS-7 reader its bearing (`backsight
   bearing (radians)`), and the JobXML reader only the controller's
   orientation correction (`jxl.orientationCorrection_deg`) - none in
-  `statedBacksightAzimuth`, so a setup of theirs whose backsight has no
+  `stated_backsight_azimuth`, so a setup of theirs whose backsight has no
   coordinates is still oriented on its circle. Filling the field there
   changes those readers' reductions and needs their own formats' checks.
   The field-file reader fills it, as this one does (its `04`'s azimuth; see
@@ -1846,7 +1851,7 @@ Not done:
   is read as one, and the other raw readers set none either, so a check
   belongs in the model or the reduction, for all of them.
 - A file padded with NULs, or saved as UTF-16, is not recognised, since
-  detection's shared `looksLikeText` takes any NUL for binary (FORMAT
+  detection's shared `looks_like_text` takes any NUL for binary (FORMAT
   sokkia-sdr reads both).
 - An observation from a point other than the current setup's is skipped
   rather than begun as a setup; the EDM and reflector offsets of a
@@ -1854,13 +1859,14 @@ Not done:
   applied; notes are kept with their setup, not with the record before or
   after them, since writers of the format disagree which.
 - The mil is defined twice, here and in the GSI reader (`kTwoPi / 6400`),
-  and `survey/angles.hpp` has no mil conversion to share; lifting one there
+  and `rust/crates/katana_survey/src/angles.rs` has no mil conversion to share; lifting one there
   is a change to the GSI reader as well, left for one that edits it. The
-  reader's calendar is the
-  standard library's (`std::chrono::year_month_day`, its month and day
-  ranges checked first, since those types keep only a byte); the RINEX
-  reader (`isLeapYear`, `daysInMonth`) and the subsurface delivery schema
-  still write the leap-year rule out themselves.
+  reader's calendar was the C++
+  standard library's (`std::chrono::year_month_day`); Rust's standard library
+  has no calendar, so the SDR reader writes the leap-year rule out
+  (`plausible_date`, `sokkia_sdr.rs`), as the RINEX reader (`is_leap_year`,
+  `days_in_month`) and the subsurface delivery schema do: three copies of one
+  rule, left for a change that gives `katana_core` a calendar.
 
 ## The reduction settings of SURVEY IMPORT, control from the drawing among them
 
@@ -1877,21 +1883,21 @@ SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>] [SET <key>=<
 (`CODES` and `LINEWORK` are the next section's.)
 
 **One grammar, the job's own.** Both options are the stable text form of the
-settings (`include/katana/survey/reduction_settings.hpp`) that a survey job
+settings (`rust/crates/katana_survey/src/reduction_settings.rs`) that a survey job
 keeps in the project: `SETTINGS` names a file of it, and each `SET` item is
-one line of it. Both are read by `survey::parseReductionSettings`, which
-checks what it read with `survey::validateReductionSettings`, and a refusal
-is in their words. `src/katana_app/survey_verbs.cpp` spells nothing of the
+one line of it. Both are read by `katana_survey::reduction_settings::parse_reduction_settings`, which
+checks what it read with `katana_survey::reduction_settings::validate_reduction_settings`, and a refusal
+is in their words. `rust/crates/katana_app/src/survey_verbs.rs` spells nothing of the
 form: its first line and its keys are taken from what
-`survey::serialiseReductionSettings` writes, so a setting added there is one
+`katana_survey::reduction_settings::serialise_reduction_settings` writes, so a setting added there is one
 `SET` takes at once. A job's settings written out are a `SETTINGS` file that
 imports the same way again
-(`SurveyImportSettings.AJobsSettingsWrittenOutImportTheSameWayAgain`).
+(`survey_import_settings::a_jobs_settings_written_out_import_the_same_way_again`).
 
 **Where the settings start, and what changes them.**
 
 - Without `SETTINGS` the import starts where the wizard's step does: the
-  defaults, holding the control the file declares (`survey::controlFromFile`).
+  defaults, holding the control the file declares (`katana_survey::reduction_settings::control_from_file`).
 - `SETTINGS <file>` replaces that start whole, as a job's stored settings are
   whole: a key it does not give keeps its default, and its control lines are
   all the control there is. A file with none holds nothing, not even what the
@@ -1927,7 +1933,7 @@ have lists them as the build has them):
 
 **Holding a point of the drawing.** The point is one of the drawing's survey
 points - a point entity with the import's point-number property - found as
-the wizard finds it (`cad::reductionContextFor`), and it is the drawing's:
+the wizard finds it (`katana_cad::survey_job::reduction_context_for`), and it is the drawing's:
 not drawn again. On a line, `FORWARD` puts a named one there:
 `FORWARD 300000,6249999,50 0 1 0 BM1` makes BM1 at 300 000 E, 6 250 000 N,
 50 Z, one metre due north of the start and level. Then
@@ -1938,7 +1944,7 @@ does not release it - since the constraints and standard deviations are
 what a traverse or a network adjustment weighs, and radiation weighs
 nothing.
 
-The import reduces with `cad::reduceForDrawing`, as the wizard's preview and
+The import reduces with `katana_cad::survey_job::reduce_for_drawing`, as the wizard's preview and
 Import and the Survey Jobs dialog do, which checks what the settings hold
 from the drawing before the reduction takes it:
 
@@ -1951,7 +1957,7 @@ from the drawing before the reduction takes it:
   were drawn in: `FORWARD` twice, or the wizard's "keep both", gives a
   drawing two CP1s, and the job sat on whichever came first - 100 km out in
   the review's case - with nothing in the reply to say so. Points of one id
-  closer than `math::tolerance::kCoordinate` (0.1 mm) across and in height
+  closer than `katana_math::numerics::COORDINATE` (0.1 mm) across and in height
   are one mark, and hold the same job whichever is taken, so they are held;
   one with a height and one without are two.
 - An id the file never names changes nothing, and the first reduction
@@ -1959,7 +1965,7 @@ from the drawing before the reduction takes it:
   names no point BM1, so holding it changes nothing." A file read by
   surveyio lists every point a setup, an observation or a feature refers to
   among its points or its points without coordinates
-  (`survey::validateProject`), so an id in neither is one nothing in it
+  (`katana_survey::data_model::validate_project`), so an id in neither is one nothing in it
   measures.
 - An id the file gives other coordinates is held where the drawing has it,
   and the first warning gives both: "Control point CP1 is held where the
@@ -1982,7 +1988,7 @@ item; a `settings_warning` is each key of the `SETTINGS` file this version
 skipped, and the encoding it was read in where that was a guess.
 
 After `imported`, where each point was held and what the adjustment made of
-the data (`katana::app::reductionRecords`):
+the data (`katana_app::survey_verbs::reduction_records`):
 
 ```
 held id=BM1 from=drawing entity=1 northing=6250000 easting=3e+05 height=50
@@ -2011,14 +2017,14 @@ outliers were flagged and rejected. A number is the shortest text that reads
 back exactly, as every record writes one, so 300 000 is `3e+05`. Until
 2026-09-30 the reply said nothing of the adjustment, so an agent could run a
 network whose global test failed and not be told: the wizard's words for the
-outcome (`adjustmentSummary`), its rejected count (`rejectedObservations`)
-and the method's words (`methodText`) moved from the window's code
-(`src/katana_qt/survey/survey_job_support.cpp`) to
-`include/katana/survey/report_summary.hpp`, so the reply's `rejected=` is
+outcome (`adjustment_summary`), its rejected count (`rejected_observations`)
+and the method's words (`method_text`) moved from the window's code
+(`rust/crates/katana_window/src/survey/survey_job_support.rs`) to
+`rust/crates/katana_survey/src/report_summary.rs`, so the reply's `rejected=` is
 the count the wizard's message gives, taken one way.
 
 **Refused**, each with the drawing as it was
-(`SurveyImportSettings.EveryRefusalSaysWhyAndLeavesTheDrawingAsItWas`): a
+(`survey_import_settings::every_refusal_says_why_and_leaves_the_drawing_as_it_was`): a
 line with `SET` and no item, an option given twice, `SET` or `SETTINGS` on
 `SURVEY READ`; an item with no `=`, a note (`#`), a line break, a key the
 settings do not have, a value that does not read or lies outside its range,
@@ -2052,7 +2058,7 @@ naming a survey file that is not there is refused for its settings first.
 - The settings are read before the survey file, so a mistyped key costs no
   read of a large file.
 - A `SETTINGS` file is decoded as every text file Katana reads is
-  (`core::decodeText`): saved with a byte order mark, or as UTF-16 by an
+  (`katana_core::text_encoding::decode_text`): saved with a byte order mark, or as UTF-16 by an
   editor, it is the same settings, where the parser alone called the text
   not settings at all. A file that is not UTF-8 is read as Windows-1252 and a
   `settings_warning` says the guess.
@@ -2062,15 +2068,15 @@ naming a survey file that is not there is refused for its settings first.
   deletes one. A control line names an id, not an entity, so the wizard -
   whose pick box lists the id twice - cannot say which was meant either;
   holding an entity would change the settings' stored text form.
-- The checks are `cad::reduceForDrawing`'s, made before the reduction runs
+- The checks are `katana_cad::survey_job::reduce_for_drawing`'s, made before the reduction runs
   and not in it: whether the drawing has an id twice is the drawing's to
   know, and every path that reduces a job against the drawing - the import
   and re-adjustment commands' default, the wizard's and the Survey Jobs
-  dialog's previews, `precomputedReduction`'s fall-back - goes through that
+  dialog's previews, `precomputed_reduction`'s fall-back - goes through that
   one function, so the window and the line refuse and warn alike
-  (`SurveyImportWizard.ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces`,
-  `SurveyJobsDialog.ItsPreviewRefusesToHoldAPointTheDrawingHasAtTwoPlaces`).
-  `survey::reduceAndAdjust` keeps its rule of the first of an id for a
+  (`survey_import_wizard::its_preview_refuses_to_hold_a_point_the_drawing_has_at_two_places`,
+  `survey_jobs_dialog::its_preview_refuses_to_hold_a_point_the_drawing_has_at_two_places`).
+  `katana_survey::reduction::reduce_and_adjust` keeps its rule of the first of an id for a
   context handed to it directly.
 - An id the file never names is a warning, not a refusal: a `SETTINGS` file
   may list a site's whole control, of which one job's file names some.
@@ -2109,21 +2115,21 @@ computed point, so a file that gives it no coordinates leaves it among the
 unpositioned ones, and the import counted it in "N point(s) are named in the
 source with no coordinates ... reducing the observations is what gives them
 a position" - wrong for a point that has one, and said by the wizard too.
-`drawableProject` (`src/katana_cad/survey_job.cpp`) now leaves the drawing's
+`drawable_project` (`rust/crates/katana_cad/src/survey_job.rs`) now leaves the drawing's
 control out of that list as it leaves it out of the points drawn.
-`SurveyJobImportCommand.AControlPointTakenFromTheDrawingIsNotCountedAsHavingNoPosition`
+`survey_job_import_command::a_control_point_taken_from_the_drawing_is_not_counted_as_having_no_position`
 failed ("2 point(s)") without the change.
 
 **The wizard does not hand the line over.** A dialog's work should be the
-line it builds, run by the window's executor (`MainWindow::runVerbLine`) as
-if typed. The wizard's Import still runs `cad::ImportSurveyJobCommand`
+line it builds, run by the window's executor (`MainWindow::run_verb_line`) as
+if typed. The wizard's Import still runs `katana_cad::survey_job::ImportSurveyJobCommand`
 itself, because:
 
-1. Import reuses the reduction its preview ran (`precomputedReduction`,
-   `src/katana_qt/survey/survey_job_support.hpp`), which for a job of more
-   than 20 000 observations and points (`kBackgroundObservations`) ran on a
+1. Import reuses the reduction its preview ran (`precomputed_reduction`,
+   `rust/crates/katana_window/src/survey/survey_job_support.rs`), which for a job of more
+   than 20 000 observations and points (`BACKGROUND_OBSERVATIONS`) ran on a
    pool thread with a busy bar and Cancel, and the wizard reads a file of
-   more than 1 MiB (`kBackgroundReadBytes`) off the GUI thread too. A line
+   more than 1 MiB (`BACKGROUND_READ_BYTES`) off the GUI thread too. A line
    the executor runs is synchronous and cannot be handed an outcome: the
    verb would read the file and reduce it a second time on the GUI thread,
    and a large job would freeze the window where it now shows its progress.
@@ -2136,15 +2142,15 @@ itself, because:
 
 Handing it over needs the executor to run `SURVEY IMPORT` as a background
 job, as the window runs the geoprocessing verbs
-(`src/katana_qt/geo/geo_workbench.hpp`), and a way for the line to take the
+(`rust/crates/katana_window/src/geo/geo_workbench.rs`), and a way for the line to take the
 outcome the preview made. Until then one mechanism holds the two together
-below the line - the same command, the same `cad::reductionContextFor`, the
+below the line - the same command, the same `katana_cad::survey_job::reduction_context_for`, the
 same settings value - and
-`SurveyImportWizard.ItsImportIsTheSurveyImportLinesForTheSameSettings`
+`survey_import_wizard::its_import_is_the_survey_import_lines_for_the_same_settings`
 imports the file with no coordinates both ways, CP1 held from the drawing
 and two settings changed from the defaults, and requires the same job - its
 report but for its time - and the same points on the drawing, bit for bit.
-`SurveyImportWizard.WithSurveyCodesLoadedItsImportIsStillTheSurveyImportLines`
+`survey_import_wizard::with_survey_codes_loaded_its_import_is_still_the_survey_import_lines`
 holds them together where the import does more than draw points: the fixture
 of field codes loaded into both drawings and the RTK job `gnss.fld` imported
 both ways, with the same job - its stored `apply-codes` and `draw-linework`
@@ -2161,7 +2167,7 @@ cli.survey_import_refuses_..., each of which must stop the batch before its
 `STATUS` (the id the drawing has at two places among them),
 `cli.survey_import_says_where_it_held_and_what_it_adjusted` and
 `cli.survey_import_says_what_a_network_adjustment_made_of_the_data`; the
-`SurveyImportSettings` cases in `tests/app/test_survey_verbs.cpp` (the
+`survey_import_settings` cases in `rust/crates/katana_app/tests/file_verbs/survey.rs` (the
 heights too, worked by hand to the micrometre; the start, `SETTINGS` taken
 whole, the merge by id, the reply's order, the refusals, the settings
 refused before a survey file that is not there; the id at two places and at
@@ -2170,13 +2176,13 @@ gives other coordinates, the `reduction` and `adjustment` records from a
 report built by hand and from the network fixture, held there to the
 reduction's own report bit for bit, and a `SETTINGS` file with a byte order
 mark, in UTF-16 and in Windows-1252);
-`McpServer.AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing`
-and `McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`; the wizard's
+`mcp_server::an_agent_imports_a_file_with_no_coordinates_holding_a_point_of_the_drawing`
+and `mcp_server::the_command_tool_names_the_survey_field_file_verbs`; the wizard's
 equivalence above and its preview's refusal, and the Survey Jobs dialog's;
-`SurveyJobDrawingReduction` and
-`SurveyJobImportCommand.ItsReductionRefusesAnIdTheDrawingHasAtTwoPlaces`
-beside the earlier regression in `tests/cad/test_survey_job.cpp`; and
-`ReportSummary` in `tests/survey/test_report_summary.cpp`. The survey file is
+`survey_job_drawing_reduction` and
+`survey_job_import_command::its_reduction_refuses_an_id_the_drawing_has_at_two_places`
+beside the earlier regression in `rust/crates/katana_cad/tests/surveyjobs/survey_job.rs`; and
+`report_summary` in `rust/crates/katana_survey/tests/report_summary.rs`. The survey file is
 `tests/surveyio/data/sdr/traverse_without_coordinates.sdr`, `traverse.sdr`
 with its two 08 coordinate records taken out; the settings files are in
 `tests/app/data/survey_settings/`.
@@ -2185,7 +2191,7 @@ Not done:
 
 - The wizard's Import hands no line to the executor (above).
 - The verb has neither of the wizard's two other import options: what to do
-  with an id the drawing already has (`cad::ExistingPointPolicy`; the verb
+  with an id the drawing already has (`katana_cad::survey_job::ExistingPointPolicy`; the verb
   refuses the import, as the wizard's default does) and a layer per field
   code. The survey codes it applies itself (next section).
 - The window can neither save the settings to a file nor load them from one,
@@ -2200,11 +2206,11 @@ Not done:
   and CP2 in another frame, a setup is oriented from the one to the other -
   1 000 km away for a measured 100 m in the review's case - and the
   report's setups table has the backsight check
-  (`ReportSetup::backsightDistanceDifference`), but no warning names it; the
+  (`ReportSetup::backsight_distance_difference`), but no warning names it; the
   new warning of the held point's other coordinates is the only word. A
   backsight check outside a tolerance is the reduction's to warn of
-  (`src/katana_survey/reduction.cpp`).
-- `survey::rejectedObservations` counts an outlier an adjustment rejects
+  (`rust/crates/katana_survey/src/reduction.rs`).
+- `katana_survey::report_summary::rejected_observations` counts an outlier an adjustment rejects
   twice: once as its rows, which the rejection marks, and once in the
   adjustment's list, so the wizard's "N observation(s) rejected" and the
   reply's `reduction ... rejected=` read 2 for one distance (a scratch copy
@@ -2213,13 +2219,13 @@ Not done:
   reduction's `rejected=2`). Counting only the rows would lose an outlier
   that has none - a stated backsight azimuth - so the fix wants the report
   to say which rejected outliers marked rows, in the reduction's report.
-- `survey::validateReductionSettings` takes any finite positive factor or
+- `katana_survey::reduction_settings::validate_reduction_settings` takes any finite positive factor or
   radius and any prism constant, which `SET` now reaches in one token:
   `grid_scale=fixed grid_scale.fixed_factor=1e300` or `earth_radius_m=1e-300`
   puts points some 1e302 m out, `prism_constant.policy=override
   prism_constant.m=-1e6` 1 000 km, each with no warning. Bounds a surveyor
   would accept belong to that validation
-  (`src/katana_survey/reduction_settings.cpp`).
+  (`rust/crates/katana_survey/src/reduction_settings.rs`).
 
 ## SURVEY IMPORT codes and strings what it draws
 
@@ -2228,7 +2234,7 @@ the layers, the styles and the lines were two more steps a person had to know
 about - `CODE`, then the Survey Code Manager's Linework tab - each its own
 undo step. The owner asked that processing survey data use the customisation.
 The verb now does, in its ONE undo step, through the job's own finish
-(`cad::withSurveyFinish` inside `cad::ImportSurveyJobCommand`;
+(`katana_cad::survey_finish::with_survey_finish` inside `katana_cad::survey_job::ImportSurveyJobCommand`;
 `docs/survey_coding.md`, "One step from field file to finished drawing", has
 the composition and its reasons). What is decided here is the front end:
 when the finish is asked for, and what the reply says of it.
@@ -2238,8 +2244,8 @@ SURVEY IMPORT <file> ... [CODES on|off] [LINEWORK on|off]
 ```
 
 **Whether.** Three things decide it, in this order, in one function that the
-import wizard asks as well (`cad::surveyImportFinish`,
-`include/katana/cad/linework_verbs.hpp`; the wizard hands it its two boxes
+import wizard asks as well (`katana_cad::linework_verbs::survey_import_finish`,
+`rust/crates/katana_cad/src/linework_verbs.rs`; the wizard hands it its two boxes
 where the verb hands it its two words - "The import wizard", below):
 
 1. `CODES on|off` and `LINEWORK on|off`, for the one line. Two words and no
@@ -2263,7 +2269,7 @@ where the verb hands it its two words - "The import wizard", below):
    coded once codes were loaded. A job imported with no codes loaded is a job
    that was not coded, and `CODE` and `LINEWORK` are there for it.
 
-**How.** The colours are the Document's resolver's (`cad::colourLookup`: the
+**How.** The colours are the Document's resolver's (`katana_cad::colour_lookup::colour_lookup`: the
 customisation's own table, then the standard names), so a rule's colour name
 means on a line what it means in the window. The control codes are the
 Document's (`customisationState().linework`). Strings are ordered by point
@@ -2273,7 +2279,7 @@ number; the verb has no `ORDER` (`LINEWORK` has).
 finished import's created entities are its points and then its lines, and the
 lines have a record of their own. `reduction_warnings=` counts what the
 finish left over as well, since those sentences are warnings of the job's
-report (`cad::finishWarnings`): a code with no rule, a string of the file in
+report (`katana_cad::survey_finish::finish_warnings`): a code with no rule, a string of the file in
 no line for a reason other than being a point code. Then, after the
 reduction's warnings:
 
@@ -2293,8 +2299,8 @@ linework lines=2 unplaced=3 layers=0 styles=0
   points in no line. Most of those are no fault (a survey mark is a point),
   which is why the count is not a warning and the warnings say which are.
   `layers` and `styles` are what the LINES made that the coding had not:
-  everything the finish created (`SurveyFinishReport::layersCreated`,
-  `SurveyFinishReport::stylesCreated`) less the coding's own. With the codes
+  everything the finish created (`SurveyFinishReport::layers_created`,
+  `SurveyFinishReport::styles_created`) less the coding's own. With the codes
   on that is usually nothing, since a line goes on the layer and wears the
   style its points were just given; with `CODES off` the line makes them
   itself, and until 2026-10-07 the reply then said `coded none reason=off`
@@ -2312,7 +2318,7 @@ the `resection` records, not straight after `imported` as first planned.
 The lines from `imported` through `held` and `reduction` to the first
 warning, and the resection records at the very end, are held where they
 stand by tests older than the records
-(`SurveyImportSettings.TheReplySaysWhereEachHeldPointWasHeld`,
+(`survey_import_settings::the_reply_says_where_each_held_point_was_held`,
 `cli.survey_import_resection_field_file`, whose `LIST` follows the last
 `resection_residual`), and an expected value is not changed to suit new
 output. A record is found by its first word, so its place costs a reader
@@ -2321,22 +2327,22 @@ nothing.
 Tests, each worked by hand from a field-file fixture and the hand-written
 customisation `tests/data/field_codes/test_field_codes.customisation.json`
 (a kerb that is a line in a colour of the customisation's own, an edge that
-is a plain blue line, a control mark that is a point code): the `SurveyVerbs`
-cases of `tests/app/test_survey_verbs.cpp` - the points on their layers and
+is a plain blue line, a control mark that is a point code): the `survey_verbs`
+cases of `rust/crates/katana_app/tests/file_verbs/survey.rs` - the points on their layers and
 in their styles and the file's closed string drawn, with ONE undo back to the
 drawing before
-(`SurveyVerbs.AnImportCodesItsPointsAndStringsTheFilesLinesAndOneUndoTakesItAllBack`);
+(`survey_verbs::an_import_codes_its_points_and_strings_the_files_lines_and_one_undo_takes_it_all_back`);
 `CODES off`, `LINEWORK off` and both; the switches as the default and each
 word over its own switch, on and off; a drawing with no survey codes, whose
 three replies differ by the two records alone; every `none` reason; an
 unmatched code counted and named, and twelve of them of which ten are named
-(`SurveyVerbs.TenCodesWithNoRuleAreNamedInNameOrderAndTheRestAreCounted`);
+(`survey_verbs::ten_codes_with_no_rule_are_named_in_name_order_and_the_rest_are_counted`);
 a rule that names a layer and no appearance, so that `layers` and `styles`
 differ in both records
-(`SurveyVerbs.EachRecordCountsTheLayersAndTheStylesItsOwnStepMadeAndTheTwoAreNotOneNumber`);
+(`survey_verbs::each_record_counts_the_layers_and_the_styles_its_own_step_made_and_the_two_are_not_one_number`);
 a standard colour name; the records' place; the refusals - and
-`SurveyImportFinishChoice` in
-`tests/cad/customisation/test_linework_verbs.cpp` for the function itself.
+`survey_import_finish_choice` in
+`rust/crates/katana_cad/tests/customisation_verbs/linework_verbs.rs` for the function itself.
 Every `cli.survey_import_*` test older than these passes as it was written:
 `katana_cli` there has no survey codes, each test of a program being started
 with `KATANA_BUILTIN_CUSTOMISATION=none` (`docs/headless.md`, "The
@@ -2409,7 +2415,7 @@ Not done:
   strung by code, not as the file strung it (`docs/survey_coding.md`,
   "`LINEWORK` on the command line", Not done).
 - A delimited point list cannot be imported by the verb at all
-  (`surveyio::readSurvey` has no reader for one). The wizard imports one and
+  (`katana_surveyio::reader::read_survey` has no reader for one). The wizard imports one and
   codes and strings it in the same command ("The import wizard", below); from
   a line its points are coded and strung afterwards, by `CODE` and
   `LINEWORK`.
@@ -2424,9 +2430,9 @@ everything measured from it with it: the owner's resection job has twelve such
 setups, and they held 4 056 of its 4 834 points. The reduction now computes
 such a station from the setup's reduced pointings to points already placed. It
 looks at nothing but the reduced pointings, so it serves every format with
-such a setup, not the field file alone: `resectSetup` in
-`src/katana_survey/reduction_adjust.cpp`, tried from `placeSetups` in
-`src/katana_survey/reduction.cpp`.
+such a setup, not the field file alone: `resect_setup` in
+`rust/crates/katana_survey/src/reduction_adjust.rs`, tried from `place_setups` in
+`rust/crates/katana_survey/src/reduction.rs`.
 
 **When it is tried.** When no setup is left whose station or backsight has
 just been placed, the reduction falls back, one setup at a time, on: 0. the
@@ -2435,14 +2441,14 @@ file's own coordinates for a station nothing positions; 2. the circle as set
 on a backsight nothing positions; 3. giving up, saying why. One at a time, so
 that a resection's radiation can place the points a later one needs: a second
 free station that observes a point only the first radiates is resected from it
-too (`ReductionResection.AResectionTakesThePointsAnEarlierResectionPlaced`),
+too (`reduction_resection::a_resection_takes_the_points_an_earlier_resection_placed`),
 and a setup refused for want of a point is tried again once that point is
-placed (`ReductionResection.ARefusedResectionIsTriedAgainWhenAnotherOfItsTargetsIsPlaced`).
+placed (`reduction_resection::a_refused_resection_is_tried_again_when_another_of_its_targets_is_placed`).
 A fallback and not a first choice: a station that another setup radiates keeps
 that position, as it always did, and where its own setup is oriented on a
 backsight, or the circle as set, that setup's pointings to placed points are
-checks of it (`ReductionResection.AStationAnotherSetupRadiatesIsNotResected`,
-and `ReductionResection.AStationAnotherSetupRadiatedKeepsItWhileItsSetupWaitsForItsBacksight`
+checks of it (`reduction_resection::a_station_another_setup_radiates_is_not_resected`,
+and `reduction_resection::a_station_another_setup_radiated_keeps_it_while_its_setup_waits_for_its_backsight`
 for one whose backsight nothing places). A setup that names no backsight is
 another matter: nothing orients it but the points it observes. The earlier
 versions said its pointings were checks too, and they were not - the setup was
@@ -2454,10 +2460,10 @@ radiation becomes a check of the resection - a misclosure row "R2 by resection
 at setup S2, against its radiation from setup S1", a warning with the
 distance, and `radiated_from` and `radiation_offset` in `SURVEY IMPORT`'s
 record - and the setup is oriented on its resection and radiates the rest
-(`ReductionResection.AFreeStationOnAMarkAnEarlierFreeStationShotIsResectedFromItsOwnBlock`).
+(`reduction_resection::a_free_station_on_a_mark_an_earlier_free_station_shot_is_resected_from_its_own_block`).
 With too few placed points by then, it waits for step 0 like a station nothing
 positions, and is given up with the reason if it never has enough
-(`ReductionResection.AFreeStationOnARadiatedMarkWithTooFewPlacedPointsSaysWhy`).
+(`reduction_resection::a_free_station_on_a_radiated_mark_with_too_few_placed_points_says_why`).
 A station control, an entered or a GNSS point gives is not resected - a
 resection must not move it - nor one another resection placed (Not done).
 Before the file's own coordinates, because a resection is computed from what
@@ -2471,7 +2477,7 @@ resected there instead, and reduces differently: the file's coordinates are
 then a check of the resection - a misclosure row "R by resection at setup S1,
 against the file's own coordinates", a warning with the distance, and
 `file_offset` in `SURVEY IMPORT`'s record - never dropped unseen
-(`ReductionResection.AResectionComesBeforeTheFilesOwnCoordinatesForTheStation`).
+(`reduction_resection::a_resection_comes_before_the_files_own_coordinates_for_the_station`).
 An invented RW5 job of that kind, a third setup G whose `OC` is 50 mm north of
 where its readings put it, went from the file's `OC` for G, with the warning
 that it was used, to G resected from P and Q, 50.0 mm from that `OC` - the
@@ -2481,12 +2487,12 @@ is an assumption about the instrument: a setup whose circle was set a degree
 wrong on a backsight that a resection then places is oriented on that
 backsight's coordinates, the slip found, where the circle taken as a grid
 azimuth would radiate everything from it wrongly
-(`ReductionResection.AResectionComesBeforeTheCircleAsSet`). A setup is tried
+(`reduction_resection::a_resection_comes_before_the_circle_as_set`). A setup is tried
 once its targets are placed, whichever setup places them
-(`ReductionResection.AResectionWaitsForTargetsALaterSetupPlaces`): the
+(`reduction_resection::a_resection_waits_for_targets_a_later_setup_places`): the
 candidates are counted as points are placed, each placement touching only the
 setups that observe that point, so the step adds nothing per placement and
-`ReductionPerformance.SetupsPlacedOneAtATimeCostLinearlyInTheirNumber` holds
+`reduction_performance::setups_placed_one_at_a_time_cost_linearly_in_their_number` holds
 its ratio. A refusal leaves the setup to the later steps, which name it.
 
 **What it needs.** Two placed points each observed with a direction and a
@@ -2495,22 +2501,22 @@ north, east and the orientation (four observations or three of three
 unknowns). Points closer together than sqrt 2 times the settings' target
 centring - the standard deviation of the difference of two centred targets,
 which no pointing to them resolves - count once
-(`ReductionResection.MarksCloserThanTheirCentringCountAsOnePosition`). Any
+(`reduction_resection::marks_closer_than_their_centring_count_as_one_position`). Any
 placed point serves - control, entered, GNSS, radiated, even a station on the
 file's own coordinates - and is held as it is. Face pairs are meaned as the
 reduction means them, and each reduced pointing is one observation. Where the
 file marks the end of the observations its field software resected from (the
-field file's 129: its reader sets `kResectionEndMetadata`, "record N", on the
-setup, `include/katana/survey/data_model.hpp`), only the pointings before it
+field file's 129: its reader sets `RESECTION_END_METADATA`, "record N", on the
+setup, `rust/crates/katana_survey/src/data_model.rs`), only the pointings before it
 enter the resection; a controller's checks after the block - one right after
 it, others after hundreds of shots - are checks of the resected station, each
 a misclosure row, as they were for the field software and as any setup's
 pointings to placed points are
-(`ReductionResection.ACheckAfterTheFilesResectionBlockChecksTheStationAndDoesNotMoveIt`,
-`ReductionResection.ABlockEndThatNamesNoRecordLeavesEveryPointingToTheResection`);
+(`reduction_resection::a_check_after_the_files_resection_block_checks_the_station_and_does_not_move_it`,
+`reduction_resection::a_block_end_that_names_no_record_leaves_every_pointing_to_the_resection`);
 and when a traverse or a network adjustment radiates the side shots again, a
 check places nothing, its target held by the resection
-(`ReductionResection.ACheckAfterTheBlockMovesNothingWhenATraverseRadiatesAgain`).
+(`reduction_resection::a_check_after_the_block_moves_nothing_when_a_traverse_radiates_again`).
 The first version took them into the resection, where they stopped checking;
 the owner's stations moved by up to 7.0 mm (heights 3.1 mm) between the two
 versions, which also differ in their weights (the review measured 6.9 mm for
@@ -2518,19 +2524,19 @@ the checks alone). A file that marks no block gives every pointing to a placed
 point.
 
 **How it is solved.** By the network adjustment itself
-(`adjustHorizontalNetwork`): the station free, the targets held, each
+(`adjust_horizontal_network`): the station free, the targets held, each
 pointing's direction one of a set with an orientation unknown, each horizontal
 distance with phase B's factors - the combined factor, or the height reduction
 and the grid scale - taken at the approximate station
-(`ReductionResection.ItsDistancesTakeTheCombinedFactor`,
-`ReductionResection.ItsDistancesTakeAFixedGridScaleFactor`,
-`ReductionResection.ItsDistancesTakeTheHeightReductionAtTheStationsHeight`);
+(`reduction_resection::its_distances_take_the_combined_factor`,
+`reduction_resection::its_distances_take_a_fixed_grid_scale_factor`,
+`reduction_resection::its_distances_take_the_height_reduction_at_the_stations_height`);
 then by the level adjustment of its trigonometric height differences - the
 instrument and target heights, the reduction's curvature and refraction - to
 the targets with heights. The weights are the reduction's one policy, the
 settings' a-priori precision meaned over the faces in phase A, through the
-helpers the network uses (`withCentring`, `distanceSigmaOf`,
-`heightDifferenceSigmaOf`), for an instrument that is itself the unknown
+helpers the network uses (`with_centring`, `distance_sigma_of`,
+`height_difference_sigma_of`), for an instrument that is itself the unknown
 (`StationModel::Resected`): each pointing carries its own precision and its
 target's centring and height, not the instrument's, which are the same for
 every pointing - treated as independent errors of each, they would weight a
@@ -2539,24 +2545,24 @@ records an instrument height, a mark is under the instrument, and its centring
 and the measured height are added to the station's precision after the least
 squares; an instrument height of zero is a free station with no mark, the
 instrument itself the point
-(`ReductionResection.ResidualsAndPrecisionMatchAnIndependentLeastSquares`,
-`ReductionResection.AFreeStationWithNoMarkUnderItHasNoMarksCentringInItsPrecision`,
-`ReductionResection.TheHeightIsTheWeightedMeanOfTrigonometricHeightsWithCurvature`,
-`ReductionResection.TheHeightIsAWeightedMeanOverSightsOfDifferentLengths`).
+(`reduction_resection::residuals_and_precision_match_an_independent_least_squares`,
+`reduction_resection::a_free_station_with_no_mark_under_it_has_no_marks_centring_in_its_precision`,
+`reduction_resection::the_height_is_the_weighted_mean_of_trigonometric_heights_with_curvature`,
+`reduction_resection::the_height_is_a_weighted_mean_over_sights_of_different_lengths`).
 The last run of each least squares goes through the network's outlier loop, so
 the settings' test - Baarda's w at `outlierSignificance` (critical value 3.29
 at the default 0.001) or Pope's tau - flags a resection's residual as it flags
 a network's, with a warning, and automatic rejection rejects as there: a
 rejected direction takes no part in the orientation either
-(`ReductionResection.AGrossReadingIsRejectedAndTheStationOrientationAndShotsComeFromTheRest`).
-The orientation is the solution's: `orientAndRadiate` orients a resected setup
+(`reduction_resection::a_gross_reading_is_rejected_and_the_station_orientation_and_shots_come_from_the_rest`).
+The orientation is the solution's: `orient_and_radiate` orients a resected setup
 on the weighted mean of azimuth less reading over the directions the resection
 used - the least-squares orientation for where the station stands
-(`ReductionResection.TheOrientationIsTheWeightedMeanOfItsDirectionsAtTheStation`),
+(`reduction_resection::the_orientation_is_the_weighted_mean_of_its_directions_at_the_station`),
 whatever backsight the setup names
-(`ReductionResection.AResectedSetupIsOrientedByItsResectionNotByTheBacksightItNames`),
+(`reduction_resection::a_resected_setup_is_oriented_by_its_resection_not_by_the_backsight_it_names`),
 and which follows the station when a network adjustment moves it
-(`ReductionResection.AResectedSetupFollowsItsStationWhenANetworkMovesIt`) -
+(`reduction_resection::a_resected_setup_follows_its_station_when_a_network_moves_it`) -
 and radiates the rest; the pointings it used are not also checks of it.
 
 **Where it starts, and a station with two answers.** Gauss-Newton finds the
@@ -2595,7 +2601,7 @@ that region about the solution. Where a second solution lies within the bound
 but outside the best one's ellipse, the region has a second part the ellipse
 does not show, the observations do not tell the two apart, and the resection
 is refused, the two positions and their squares named
-(`ReductionResection.TwoPositionsItsObservationsFitAlikeAreRefusedNotEitherPlaced`:
+(`reduction_resection::two_positions_its_observations_fit_alike_are_refused_not_either_placed`:
 50.023 m apart, their squares 0.057 and 0.625, as a separate script of the
 model finds them). Where automatic rejection took an observation out, the
 search is made again without it. In the review's Monte Carlo of that geometry
@@ -2605,12 +2611,12 @@ put the station 50 m off in 10, 5, 3 and 2 of 40 with the pair 3, 5, 10 and
 placed within millimetres. Four directions whose first three read are on the
 danger circle are placed wherever read (20 of 20 in the review's trials, 1 to
 3.5 mm from the truth, where 11 were refused;
-`ReductionResection.AFourthDirectionFixesAStationWhoseFirstThreeTargetsAreOnItsDangerCircle`),
+`reduction_resection::a_fourth_direction_fixes_a_station_whose_first_three_targets_are_on_its_danger_circle`),
 and a distance to one target breaks the danger circle of the directions in the
 tested geometry - a target lies between the station and its reflection in the
 diameter through the distance's target, on the arc away from that target - as a
 surveyor breaks it (12 of 12, where 6 were refused;
-`ReductionResection.ADistanceToOneTargetFixesAStationOnTheDangerCircleOfItsDirections`).
+`reduction_resection::a_distance_to_one_target_fixes_a_station_on_the_danger_circle_of_its_directions`).
 No more is claimed: the third review found the general statement false.
 Rejected: a relative one-position rule - marks closer than their pointings
 resolve at the range count once - which would need a number of standard
@@ -2622,13 +2628,13 @@ whose observations exclude it.
 resected, and in the file's-own-coordinates warning where that follows, and
 never a position: too few placed points (saying what it observes and what a
 resection needs); a value that is not finite; a horizontal distance that is
-not positive (`ReductionResection.ADistanceThatIsNotPositiveIsRefused`);
+not positive (`reduction_resection::a_distance_that_is_not_positive_is_refused`);
 directions alone, every three of them exactly on one line with the station or
-on the circle through it (`ReductionResection.AStationOnOneLineWithItsTargetsIsRefused`,
-`ReductionResection.AStationOnTheDangerCircleIsRefused`) - with a distance,
+on the circle through it (`reduction_resection::a_station_on_one_line_with_its_targets_is_refused`,
+`reduction_resection::a_station_on_the_danger_circle_is_refused`) - with a distance,
 the closed form does not decide, the starts do; a least squares that fails
 from every start - rank deficient, not converging - with its reason
-(`ReductionResection.ALeastSquaresThatFailsIsRefusedWithItsReason`); two
+(`reduction_resection::a_least_squares_that_fails_is_refused_with_its_reason`); two
 positions its observations fit alike (above); and a geometry that does not fix
 the station. The first version refused the station on one line with its
 targets, and on the danger circle, only when the readings were exact: in the
@@ -2651,10 +2657,10 @@ from outside. It refuses all 57 of the first review's degenerate probes (20
 on the danger circle, 20 on one line, 10 with two of three marks 5 mm apart, 7
 mixed) and 9 more with two marks 5, 50 and 500 mm apart at 158 m (placed 0.2
 to 30 m off before), and places its four sound ones exactly
-(`ReductionResection.AStationOnTheDangerCircleReadWithUnequalErrorsIsRefusedNotPlaced`,
-`ReductionResection.AStationOnOneLineWithItsTargetsReadWithErrorsIsRefused`,
-`ReductionResection.TwoMarksAFewMillimetresApartDoNotFixAStationWithTheirDistances`,
-`ReductionResection.TwoOfThreeTargetsAFewMillimetresApartDoNotFixAStationByDirections`).
+(`reduction_resection::a_station_on_the_danger_circle_read_with_unequal_errors_is_refused_not_placed`,
+`reduction_resection::a_station_on_one_line_with_its_targets_read_with_errors_is_refused`,
+`reduction_resection::two_marks_a_few_millimetres_apart_do_not_fix_a_station_with_their_distances`,
+`reduction_resection::two_of_three_targets_a_few_millimetres_apart_do_not_fix_a_station_by_directions`).
 
 A geometric refusal - the two positions, the precision, a least squares rank
 deficient from every start - names the shape of a geometry that fixes nothing
@@ -2678,12 +2684,12 @@ A geometry the criterion passes can still be weak. The resection reports its
 dilution: the a-priori semi-major axis over the standard deviation of the
 least precise single observation's line of position (for a direction, its
 sight length times its standard deviation) - how many times the geometry
-magnifies the observations' errors. Above `kWeakResectionDilution`, 3 - the
+magnifies the observations' errors. Above `WEAK_RESECTION_DILUTION`, 3 - the
 reduction's allowable multiplier, as a traverse's angular misclosure is
 allowed three standard deviations - the station is placed, with the precision
 it has, and flagged weak: a warning with its 95 % uncertainty and the
 dilution, `weak=1`, and "WEAK GEOMETRY" in the report
-(`ReductionResection.AWeakButSoundGeometryIsPlacedAndFlaggedWithItsPrecision`).
+(`reduction_resection::a_weak_but_sound_geometry_is_placed_and_flagged_with_its_precision`).
 Worked by a separate script at the settings' defaults: three marks all round
 the station with distances 0.37 to 0.44, two with distances 90 degrees apart
 1.0, 30 degrees apart 2.7, 10 degrees apart 8.1; three directions 60 degrees
@@ -2696,7 +2702,7 @@ marks within 11 degrees 86 mm against 434 mm. A weak station that had a second
 solution within the bound is now refused with it, not placed. Rejected:
 refusing the weak ones too. Their positions are right to the precision they
 state, and throwing a measurement away is the person's decision
-(`ReductionSettings::autoRejectOutliers` is off by default for that reason);
+(`ReductionSettings::auto_reject_outliers` is off by default for that reason);
 the flag and the warning put it in front of them.
 
 **A network after it.** In a network adjustment the resected station is
@@ -2706,11 +2712,11 @@ takes no more than it did - not a direction as an angle, not a distance, not
 a height difference - and a rejected direction is never the reference, which
 every angle of the setup is measured from, whether the setup names it as its
 backsight or not: a rejected reading takes part in no mean direction
-(`directionRejected`, `meanDirection`). The second review found the network
+(`direction_rejected`, `mean_direction`). The second review found the network
 taking a direction the resection had rejected as that reference, putting its
 60" into every angle, rejecting the right ones and leaving the station 6.8 mm
 off, while the report called the reading rejected
-(`ReductionResection.ANetworkTakesNoReadingItsResectionRejected`).
+(`reduction_resection::a_network_takes_no_reading_its_resection_rejected`).
 
 **What it reports.** `ReductionReport::resections`: per resected setup the
 station, the points it was computed from, its coordinates and one-sigma
@@ -2722,7 +2728,7 @@ height difference with its redundancy number and standardised value. The
 precision is the least squares' a-priori one, scaled by its variance factor
 only where its global test finds the residuals larger than the a-priori
 weights allow, above the test's upper bound
-(`ReductionResection.ThePrecisionIsScaledByTheVarianceFactorOnlyWhereTheGlobalTestFailsAbove`);
+(`reduction_resection::the_precision_is_scaled_by_the_variance_factor_only_where_the_global_test_fails_above`);
 the mark's centring and height are added where there is a mark. The earlier
 versions always scaled it, a posteriori; but on the one to three degrees of
 freedom a resection has, the variance factor is itself uncertain - a
@@ -2743,12 +2749,12 @@ coordinate row says "resection". A resection with no redundancy is warned
 about ("nothing checks the position it gives"), and one with no height too -
 naming why, where the marks were read with zenith angles but no distance,
 which a trigonometric height needs
-(`ReductionResection.AResectionReadWithZenithsButNoDistancesSaysWhyItHasNoHeight`).
+(`reduction_resection::a_resection_read_with_zeniths_but_no_distances_says_why_it_has_no_height`).
 Where the settings reduce no distance to the grid and the drawing's projection
 gives a point scale factor that would change the longest distance by more
 than its standard deviation, the resection has fitted ground distances to grid
 coordinates, and a warning says so, naming the setups, with the factor in the
-record (`ReductionResection.GroundDistancesFittedToAProjectedGridAreSaid`).
+record (`reduction_resection::ground_distances_fitted_to_a_projected_grid_are_said`).
 `SURVEY IMPORT` answers one `resection` record each - `dilution`, `weak`,
 `checks`, `file_offset`, `radiated_from`, `radiation_offset` and
 `unapplied_scale_factor` among its fields - and a `resection_residual` record
@@ -2756,9 +2762,9 @@ for each residual flagged or rejected, so an agent sees which, past the cap on
 listed warnings (`docs/mcp.md`). The network adjustment's rank-deficiency
 message calls what it cannot resolve unknowns, naming a set's orientation
 "orientation(P)", not a coordinate
-(`SurveyHorizontalNetwork.APointOnTheCircleThroughItsThreeTargetsIsRankDeficient`).
+(`survey_horizontal_network::a_point_on_the_circle_through_its_three_targets_is_rank_deficient`).
 
-**Checked.** `tests/survey/test_reduction_resection.cpp`: two placed points
+**Checked.** `rust/crates/katana_survey/tests/reduction_resection.rs`: two placed points
 with distances and three directions alone, each recovering the station they
 were made from; a perturbed resection whose position, orientation, residuals,
 variance factor and precision match a separate script of the textbook model
@@ -2883,7 +2889,7 @@ Not done:
   entered or a GNSS point, or was placed by another resection - a second
   resection block on one station: its targets are not radiated, and its
   warning names the points it could be oriented on
-  (`ReductionResection.ASecondBlockOnAStationAlreadyResectedSaysWhatItCouldBeOrientedOn`).
+  (`reduction_resection::a_second_block_on_a_station_already_resected_says_what_it_could_be_oriented_on`).
   On a known station that would be an orientation alone, and on a resected
   one a second resection of one station, whose two results would need
   combining; orienting every such setup would change every format's setups
@@ -2915,9 +2921,9 @@ Not done:
   starts are the points where two loci meet, and a solution none of them
   descends to within the bound is not looked for.
 - Four decisions have no test that fails without them: the re-queue of a
-  setup that waits for a resection (`reduction.cpp`), the guard that keeps
+  setup that waits for a resection (`reduction.rs`), the guard that keeps
   such a setup out of the first pass, the network branch for a resected
-  station (`reduction_adjust.cpp`) and the scale applied to ground distances
+  station (`reduction_adjust.rs`) and the scale applied to ground distances
   all survived the third review's mutants through every survey test and the
   CLI patterns. Their behaviour was checked by hand and by the review's
   probes, not pinned.
@@ -2925,15 +2931,15 @@ Not done:
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 
 The owner asked on 2026-09-23 for "survey menus and toolbars" with the
-functionality wired. The menu (`src/katana_qt/survey/survey_workbench.*`)
+functionality wired. The menu (`rust/crates/katana_window/src/survey/survey_workbench.rs`)
 has four sections - Survey Points (Import, Export, Point Manager, Point
 Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, Parcel
 Report, the Angle and Bearing Calculator), Traverse and Levelling (Traverse,
 Level Book) and Coordinates (the Coordinate Converter) - plus a Survey Coding
 section that shows actions the window and the Format workbench own: the
 Survey Code Manager, Apply Survey Codes and Process Linework
-(`docs/survey_coding.md`). The first is the same `QAction` object as
-on the Format menu (`SurveyServices::codeManager`), so the two menus cannot
+(`docs/survey_coding.md`). The first is the same action as
+on the Format menu (`SurveyServices::code_manager`), so the two menus cannot
 drift; Apply Survey Codes (`applySurveyCodes`), which runs the `CODE` line on
 the selection or the drawing, is on this menu and the Survey toolbar only,
 and Process Linework (`surveyLinework`), which runs the `LINEWORK` line the
@@ -2943,14 +2949,14 @@ and File > Export, the same objects ("The File menu" there).
 (Load Customisation and Replace Loaded Customisation were here too until
 2026-10-06: `docs/desktop.md`, "The Format menu".) The menu
 ends with Subsurface Utilities (AS 5488), added by a workbench of its own
-(`src/katana_qt/survey/utility_workbench.*`, `docs/subsurface_utilities.md`).
+(`rust/crates/katana_window/src/survey/utility_workbench.rs`, `docs/subsurface_utilities.md`).
 `MainWindow` only makes the menu and toolbar - on a second toolbar row, with
 Terrain and GIS - and hands them over through `SurveyServices`, so the survey
-work never includes `main_window.hpp`.
+work never reaches into `main_window`.
 
-**Nothing here is new surveying** (`include/katana/cad/survey_tools.hpp`).
-Every number comes from `katana::survey` (cogo, traverse, levelling, the
-network adjustment, angles) or `katana::geodesy`; the tools move drawing
+**Nothing here is new surveying** (`rust/crates/katana_cad/src/survey_tools.rs`).
+Every number comes from `katana_survey` (cogo, traverse, levelling, the
+network adjustment, angles) or `katana_geodesy`; the tools move drawing
 entities in and out of those libraries and put the answers into words. Each is
 a structured result plus ONE formatter, and the dialogs and the command line
 (`INVERSE`, `FORWARD`/`RADIATE`, `AREA`) print the same formatter's text, so a
@@ -2958,58 +2964,59 @@ number cannot appear only in a dialog. The dialogs are non-modal and kept by
 the workbench between uses, so one can stay open beside the drawing; Use
 Selection reads the selected points when pressed, never before. The
 conventions are inherited, not invented: drawing x is easting and y northing,
-where `survey::Coordinate2` is (northing, easting), and the swap happens in
-`survey_tools.cpp` only; angles are radians inside, azimuths clockwise from
+where `katana_survey::coordinate::Coordinate2` is (northing, easting), and the swap happens in
+`survey_tools.rs` only; angles are radians inside, azimuths clockwise from
 grid north; heights are optional and ABSENT IS NOT ZERO, so an inverse to a
 point with no height reports no height difference; lengths are in the
 project's unit, and hectares are reported only when that is the metre; no
 scale factor, convergence or curvature is applied (the converter REPORTS the
 grid scale factor and convergence and applies neither). Angle text is what
-`survey::parseDms` and `parseBearing` accept - `36d52m11.63s`, `36:52:11.63`,
+`katana_survey::angles::parse_dms` and `katana_survey::angles::parse_bearing` accept - `36d52m11.63s`, `36:52:11.63`,
 `36-52-11.63`, `36 52 11.63` in a box of its own, decimal degrees, or a
 quadrant bearing `N 36d52m11.63s E` - and there is deliberately no DDD.MMSS
 notation, since `36.5211` would then mean two angles depending on who typed
 it. In a line of several fields (a traverse leg) blanks separate the fields,
 so an angle there has none inside it.
 
-**Parcel Report** (`src/katana_qt/survey/survey_parcel_dialog.hpp`) is the
+**Parcel Report** (`rust/crates/katana_window/src/survey/survey_parcel_dialog.rs`) is the
 window's way to `PARCEL`, which had none: a closed polyline's courses (from
 corner, quadrant bearing to whole seconds, distance) in a table, its area,
 perimeter, centroid and the direction it was drawn, the legal description
 with the name typed, and Label Courses. The numbers and the words are
-`cad::parcelReport`, `cad::formatParcelReport` and `cad::legalDescription` -
+`katana_cad::parcel::parcel_report`, `katana_cad::parcel::format_parcel_report` and `katana_cad::parcel::legal_description` -
 the pane shows exactly what `PARCEL id` prints and the Legal Description tab
 what `PARCEL id LEGAL name` does. Label Courses is the line `PARCEL <id> LABEL
 <height>` through the window's executor (`SurveyServices::run`), one undo
 step, and its reply names the layer the labels went on. Copy and Save CSV
-(`cad::parcelCoursesCsv`, RFC 4180, a negative coordinate's sign kept) and the
+(`katana_cad::parcel::parcel_courses_csv`, RFC 4180, a negative coordinate's sign kept) and the
 legal text's Save open no file dialog in a headless run (`SurveyServices::headless`).
 Its menu item has no mnemonic: every letter of "Parcel Report" is another
-item's in that menu. Tested by `tests/qt_widgets/survey/test_parcel_dialog.cpp`
+item's in that menu. Tested by `rust/crates/katana_window/tests/survey/parcel_dialog.rs`
 and, through the window, `qt_the_parcel_report_computes_labels_and_describes_a_lot_headless`. Not done: the report
 is of the parcel as it was at Compute, as every survey tool's is, and is not
 recomputed when the boundary is edited.
 
-**The points in the drawing** (`include/katana/cad/survey_points.hpp`). A
+**The points in the drawing** (`rust/crates/katana_cad/src/survey_points.rs`). A
 SURVEY POINT is a point entity carrying the point-number property the import
 writes (`point` by default); a point without one is a CAD point, left out of
 every list and, where asked for by id, counted as left out. The Point Manager
 (a dock, `SurveyPointsDock`, filterable and read-only) and the Point Report
-(text, or CSV by `cad::pointReportCsv`, a small RFC 4180 writer, since the
+(text, or CSV by `katana_cad::survey_points::point_report_csv`, a small RFC 4180 writer, since the
 report carries columns a point file does not) both read them through the
 import's own keys, so a point reads back as it went in.
 
-**The import wizard** (`survey_import_wizard.*`) is a paged dialog in six
-steps - File, Format, Layout, System, Options, Report - and a `QDialog`, not a
-`QWizard`, because `QWizard`'s buttons have private names and the headless
-driver presses buttons by name. Its rules are the ones this file started
+**The import wizard** (`survey_import_wizard.rs`) is a paged dialog in six
+steps - File, Format, Layout, System, Options, Report - with buttons of its
+own: the C++ chose a plain dialog over Qt's `QWizard` because that class's
+buttons had private names and the headless driver presses buttons by name,
+and the egui dialog keeps the named buttons. Its rules are the ones this file started
 with:
 
 - **The format is never assumed.** Step 2 lists every candidate with its
   evidence and its `FormatDescriptor` record; a detection that is not
   Identified - and a delimited file never is, its probe being weak by design -
   starts on "(choose the format)", and Next refuses that.
-- **The column order is never guessed.** Step 3 shows `proposeLayout`'s
+- **The column order is never guessed.** Step 3 shows `katana_surveyio::delimited_proposal::propose_layout`'s
   reading of the header, a role box per column of the list as typed (kept
   while a change such as swapping northing and easting passes through a list
   that does not validate yet), the delimiter, header lines, comments,
@@ -3019,12 +3026,12 @@ with:
 - **The unit has no default and nothing is transformed silently.** Step 4
   takes the unit the numbers are in, the system the file is in (unknown unless
   stated) and, only when BOTH a source and a target EPSG code are given, a
-  horizontal transformation through `katana::geodesy`
-  (`cad::transformSurveyProject`, with the unit conversion on both sides;
+  horizontal transformation through `katana_geodesy`
+  (`katana_cad::survey_points::transform_survey_project`, with the unit conversion on both sides;
   heights pass through unchanged and the report says so). The parser still
   transforms nothing. Step 3's preview parses in metres and labels its
   numbers "as written in the file", since the unit comes a step later.
-- **Ids the drawing already has** (`cad::ExistingPointPolicy`): Refuse (the
+- **Ids the drawing already has** (`katana_cad::survey_job::ExistingPointPolicy`): Refuse (the
   default - a clash more often means the wrong file than a wanted update),
   Skip, Replace (the drawing's point deleted in the same command, so one undo
   puts it back) or Keep Both (the report says the drawing now has two).
@@ -3040,12 +3047,12 @@ through the imported points (`drawLinework`), and a note under them
 (`finishNote`) that says what Import will then do.
 
 - **One function decides the finish, for the wizard and the verb**
-  (`cad::surveyImportFinish`): the wizard hands it the two boxes where the
+  (`katana_cad::linework_verbs::survey_import_finish`): the wizard hands it the two boxes where the
   line hands it `CODES` and `LINEWORK`, and gets back the options it gives
   the import - with the Document's colours and control codes, strings ordered
   by point number - or nothing at all while no survey codes are loaded. So
   the two cannot differ, and
-  `SurveyImportWizard.WithSurveyCodesLoadedItsImportIsStillTheSurveyImportLines`
+  `survey_import_wizard::with_survey_codes_loaded_its_import_is_still_the_survey_import_lines`
   compares the whole job and the whole drawing.
 - **The boxes start as the customisation has them switched** (its automation,
   both on until a customisation or `CUSTOMISE SET auto.*` says otherwise),
@@ -3060,8 +3067,8 @@ through the imported points (`drawLinework`), and a note under them
   (`SurveyJobImport::finish`): the job stores `apply-codes` and
   `draw-linework`, a re-adjustment treats it as it was imported, and Remove
   Job takes its lines with its points. **A point list** is no job: its
-  points' command (`cad::importSurveyPoints`) is wrapped in
-  `cad::withSurveyFinish` with no strings of the file's own, so its points
+  points' command (`katana_cad::survey_points::import_survey_points`) is wrapped in
+  `katana_cad::survey_finish::with_survey_finish` with no strings of the file's own, so its points
   are joined by their codes.
 - **A layer per field code gives way to the codes.** `layerPerCode` is
   disabled, with the reason in its tip, while the codes are applied: the
@@ -3072,7 +3079,7 @@ through the imported points (`drawLinework`), and a note under them
   beginning `Survey codes:` and one beginning `Linework:`. What the finish
   DID follows the import, because the finish plans against points that are
   in the drawing: the log, and the end of the report pane, get
-  `cad::describe`'s sentences - the points drawn, how many carry a code and
+  `katana_cad::survey_finish::describe`'s sentences - the points drawn, how many carry a code and
   how many of those have a rule, the layers and styles made, the codes with
   no rule (the first twelve by name), the lines drawn, and the strings and
   points in no line with why. Rejected: a second, wizard-made forecast of
@@ -3084,18 +3091,18 @@ through the imported points (`drawLinework`), and a note under them
   person's selection replaced, and no lines at all. Its note sent the person
   to a menu item that no longer exists to "load a survey code file".
 
-Tests (`tests/qt_widgets/survey/test_survey_import_wizard.cpp`, each worked
+Tests (`rust/crates/katana_window/tests/survey/survey_import_wizard.rs`, each worked
 by hand from the fixture
 `tests/data/field_codes/test_field_codes.customisation.json` and the file it
 imports): the equivalence above; one undo step back to the drawing
 before, with the selection left alone, for a field file
-(`AFieldFilesImportWithItsCodesAndLinesIsOneUndoStep`) and for a point list
-written in the test (`APointListsImportWithItsCodesAndLinesIsOneUndoStep`,
+(`survey_import_wizard::a_field_files_import_with_its_codes_and_lines_is_one_undo_step`) and for a point list
+written in the test (`survey_import_wizard::a_point_lists_import_with_its_codes_and_lines_is_one_undo_step`,
 which also ticks a layer per code and finds none made); the boxes taken from
 the switches, kept across Back and Next, and a layer per code giving way
-(`TheFinishBoxesStartAsTheCustomisationHasThemAndALayerPerCodeGivesWayToTheCodes`);
+(`survey_import_wizard::the_finish_boxes_start_as_the_customisation_has_them_and_a_layer_per_code_gives_way_to_the_codes`);
 and a session with no survey codes
-(`WithNoSurveyCodesTheFinishBoxesAreDisabledAndTheNoteSaysWhy`). Through the
+(`survey_import_wizard::with_no_survey_codes_the_finish_boxes_are_disabled_and_the_note_says_why`). Through the
 real window, with the fixture as the built-in of the run:
 `qt_survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step_headless`.
 Every other `qt_survey_*` check runs with no built-in and draws its points
@@ -3106,17 +3113,19 @@ Katana customisation file, loaded in File > Settings > Import or by typing
 file" until 2026-10-07, after the menu item had gone and that kind of file had
 stopped loading; the label is plain text, so the `<file>` is on the screen and in
 `--report` alike;
-`SurveyImportWizard.TheOptionsStepSaysHowSurveyCodesAreLoadedByTheLineThatLoadsThem`,
+`survey_import_wizard::the_options_step_says_how_survey_codes_are_loaded_by_the_line_that_loads_them`,
 and in the real window
 `qt_the_import_wizards_options_note_names_the_customise_line_headless`).
 
 Saved layout templates live in the user's settings (`survey/templates`), and
-every open template list - the wizard's and the Export dialog's - is refilled
-at once when one is saved or deleted in the process
-(`keepTemplateChoiceCurrent`), and on show for one saved by another Katana.
+every open template list - the wizard's and the Export dialog's - offers one
+the moment it is saved and stops the moment it is deleted: an egui list is
+drawn from the settings every frame (`rust/crates/katana_window/src/survey/survey_templates.rs`),
+which also covers one saved by another Katana, where the C++ refilled each
+list after a save or a delete and again on show.
 
-**Driven headlessly.** Every dialog, field and button has an object name
-(listed at the head of each dialog's header), and `katana` takes
+**Driven headlessly.** Every dialog, field and button has a control name
+(listed at the head of each dialog's module), and `katana` takes
 `--dialog ACTION` (repeatable; first called `--survey-dialog`, which still
 works), `--fill field=text`, `--press button` and `--survey-dock ACTION`,
 among the other steps `docs/cad.md` tables (`--command`, `--enter`,
