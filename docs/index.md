@@ -50,14 +50,9 @@ runner's.
 | [tools.md](tools.md) | the interactive drawing tools, their catalogue and the tool host | `rust/crates/katana_cad/src/tools/`, `rust/crates/katana_window/src/tools/`, `interactive_tool.rs` |
 | [headless.md](headless.md) | `katana_cli`, the window's headless switches and steps, `check_screenshot.cmake`'s variables | `rust/crates/katana_window/src/drive/`, `rust/crates/katana_window/src/bin/katana/main.rs`, `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
 | [mcp.md](mcp.md) | `katana_mcp`, the MCP server that lets Claude run projects in Katana: connecting a client, the tools, what the server adds to the command line | `rust/crates/katana_app/src/mcp/server.rs`, `rust/crates/katana_app/src/bin/katana_mcp/main.rs`, a verb in `rust/crates/katana_app/src/session.rs` |
+| [plan_view.md](plan_view.md) | the plan view: the one painter for the screen, the plot and every sheet, its caches, paper style scale, linked views, what was measured | `rust/crates/katana_window/src/plan_painter.rs`, `rust/crates/katana_window/src/viewport_widget.rs` |
+| [plotting.md](plotting.md) | plotting: sheets, frames and title blocks (taking over `cad.md`'s "Plotting to PDF") | `rust/crates/katana_window/src/plotting/`, `rust/crates/katana_window/src/sheet_painter.rs`, the sheet verbs |
+| [gpu.md](gpu.md) | GPU drawing: the 3D view on wgpu, its precision rule, shaders, fallback and tests | `katana_gpu`, `rust/crates/katana_window/src/gpu_scene_view.rs` |
+| [dxf.md](dxf.md) | DXF exchange: what is read and written, and why a reader of our own | `katana_dxf` |
 | [audit/2026-09-23-defects.md](audit/2026-09-23-defects.md) | the audit's defect register, one ID per defect | mark a defect FIXED in the commit that fixes it (`tools/audit_register.py`) |
 | [audit/2026-09-23-findings.md](audit/2026-09-23-findings.md) | the audit's other findings | - |
-
-Being written, listed so that the map is complete when they land:
-
-| Document | Covers |
-|---|---|
-| [plan_view.md](plan_view.md) | the plan view |
-| [plotting.md](plotting.md) | plotting: sheets, frames and title blocks (taking over `cad.md`'s "Plotting to PDF") |
-| [gpu.md](gpu.md) | GPU drawing (wgpu) |
-| [dxf.md](dxf.md) | DXF exchange |

@@ -43,23 +43,28 @@
 #     `global_modify::match_entities`): its last two names both occur in the
 #     code of one .rs file under rust/, a file's own module name (its stem, or
 #     its folder's name for mod.rs, lib.rs and main.rs) counting as a word in
-#     it. `std::...` and the crates the workspace depends on (`egui::...`,
-#     `wgpu::...`) are not checked.
+#     it. `std::...`, the crates the workspace depends on (`egui::...`,
+#     `wgpu::...`) and GDAL's own C++ classes (`OGRLayer::SetAttributeFilter`,
+#     `GDALDataset::ExecuteSQL`: OGR*, GDAL*, CPL*, OSR*), which a document
+#     cites for what the library does and the Rust reaches through its C API
+#     or the shims, are not checked.
 #   * A Rust test, `suite::case_name`: the twin of the gtest case
-#     Suite.CaseName (tools/check_rust_parity.py's rule, kept here): a
+#     Suite.CaseName (the rule of the retired parity check, kept here): a
 #     #[test] function `case_name` whose innermost module is `suite` - a
 #     `mod suite { ... }`, or the file suite.rs when the function is at its
 #     top. A qualified name whose last name is a #[test] function anywhere,
-#     and of three words or more, is held to this form. A long snake_case name on its own
-#     (`five_or_more_words_like_this`) is checked as a long CamelCase name is.
+#     and of three words or more, is held to this form. A long snake_case
+#     name on its own (`five_or_more_words_like_this`) is checked as a long
+#     CamelCase name is.
 #   * A process test - `cli.<name>`, `qt_<name>_headless`, or any long
 #     snake_case name - registered by add_test(NAME ...) in a CMakeLists.txt or
 #     .cmake file of the CMake test runner (tests/, cmake/, tools/, the root
 #     CMakeLists.txt); a function those files define counts as such a name.
 #   * A long CamelCase name (five humps or more: a Rust type, or a name the
 #     code writes, such as an IFC class) occurs in the code, its string
-#     literals counting here, or is a registered process test. A gtest name, `Suite.CaseName` or `qt_widgets.Suite.Case`, is
-#     reported: the C++ tests are gone, so cite the twin `suite::case_name`.
+#     literals counting here, or is a registered process test. A gtest name,
+#     `Suite.CaseName` or `qt_widgets.Suite.Case`, is reported: the C++
+#     tests are gone, so cite the twin `suite::case_name`.
 #
 # "Occurs in the code" means outside comments, and outside string literals
 # but for the long names above: the port's comments cite the C++ names they
@@ -92,16 +97,13 @@ import sys
 # removed from here in the commit that makes its document pass; the list only
 # shrinks.
 NOT_YET_CHECKED = {
-    'performance.md',
     'terrain.md',
-    'survey_coding.md',
-    'plan_view.md',
     'plotting.md',
-    'dxf.md',
 }
 
-# Documents docs/index.md may name before they exist.
-EXPECTED = {'plan_view.md', 'plotting.md', 'gpu.md', 'dxf.md'}
+# Documents docs/index.md may name before they exist (none, since all four
+# that were being written landed).
+EXPECTED = set()
 
 # src, include and benchmarks are the removed C++ tree: still read as paths so
 # that a citation of one is reported, never as somewhere a name may live.
@@ -132,6 +134,7 @@ QUALIFIED = re.compile(r'^[A-Za-z_]\w*(?:::[A-Za-z_]\w*)+(?:\(.*\))?(?:!)?$')
 CAMEL_TEST = re.compile(r'^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*){4,}$')
 SNAKE_TEST = re.compile(r'^[a-z][a-z0-9]*(?:_[a-z0-9]+){4,}$')
 GTEST = re.compile(r'^(?:qt_widgets\.)?[A-Z][A-Za-z0-9]*\.(?:\*|[A-Z][A-Za-z0-9_]{8,})$')
+THIRD_PARTY_CLASS = re.compile(r'^(?:OGR|GDAL|CPL|OSR)[A-Z]\w*$')
 QT_TEST = re.compile(r'^qt_[a-z0-9_]+_headless$')
 CLI_TEST = re.compile(r'^cli\.[a-z0-9_]+$')
 LINK = re.compile(r'\]\(([^)\s]+)\)')
@@ -457,7 +460,7 @@ def check_name(span, code, counts):
     """None when the qualified name `span` is fine, else why not."""
     name = re.sub(r'(?:\(.*\))?!?$', '', span)
     parts = name.split('::')
-    if parts[0] in code.external:
+    if parts[0] in code.external or THIRD_PARTY_CLASS.match(parts[0]):
         return None
     last, owner = parts[-1], parts[-2]
     # A test is named by a sentence; a short name (`Style::name`) that some
