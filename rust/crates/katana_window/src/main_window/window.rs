@@ -168,6 +168,9 @@ pub struct Dialogs {
     pub plot_sheets: Option<(PlotDialog, katana_cad::plotting::SheetSet)>,
     /// A question the window asks in a small dialog of its own (QInputDialog).
     pub input: Option<super::panels::InputDialog>,
+    /// The name the drawing summary's "Show in Styles and Linetypes" asked for, shown by the
+    /// window after the dialogs' frame (show_missing_in_styles).
+    pub missing_asked: Rc<RefCell<Option<String>>>,
 }
 
 /// The window's UI state (see the module comment).
@@ -228,7 +231,12 @@ impl MainWindow {
 
     /// The window whose 3D views are drawn by `gpu`'s rules (the desktop's).
     pub fn with_gpu(gpu: GpuSession) -> Self {
-        let document = Document::new(None);
+        // The C++'s MainWindow logs warnings and worse to standard error (a command the stack
+        // refused, a storage note), which the headless tests' streams carry.
+        let logger = std::sync::Arc::new(katana_core::log::Logger::new());
+        logger.set_minimum_level(katana_core::log::LogLevel::Warning);
+        logger.add_sink(katana_core::log::make_stderr_sink());
+        let document = Document::new(Some(logger));
         let workspace = ViewWorkspace::with_gpu(&document, gpu);
         let mut exec = Executor::new(workspace, document);
 
@@ -1037,9 +1045,12 @@ impl MainWindow {
         let document = &self.exec.document;
         let dialogs = &mut self.ui.dialogs;
         if dialogs.summary.is_none() {
+            let asked = Rc::clone(&dialogs.missing_asked);
             let context = DrawingSummaryContext {
                 has_runner: true,
-                show_missing: None,
+                show_missing: Some(Rc::new(move |name: &str| {
+                    *asked.borrow_mut() = Some(String::from(name));
+                })),
                 crs: None,
             };
             dialogs.summary = Some(DrawingSummaryDialog::new(document, context));
@@ -1048,6 +1059,15 @@ impl MainWindow {
             summary.refresh(document);
         }
         dialogs.summary_shown = true;
+    }
+
+    /// MainWindow::showMissingInStyles: the style manager shown at its Styles tab, its Missing
+    /// chip on and its search the name.
+    pub fn show_missing_in_styles(&mut self, name: &str) {
+        self.ui
+            .format
+            .show_style_manager(&mut self.exec)
+            .show_missing_named(name);
     }
 
     pub fn show_command_reference(&mut self, section: &str) {
@@ -1084,17 +1104,24 @@ impl MainWindow {
     }
 
     pub fn show_view_image_export(&mut self) {
-        let plot = suggested_plot_file(&self.exec.document);
-        let suggested = Path::new(&plot)
-            .with_extension("png")
-            .to_string_lossy()
-            .into_owned();
+        let suggested = suggested_image_file(&self.exec.document);
         let dialog = self
             .ui
             .dialogs
             .image
-            .get_or_insert_with(|| ViewImageDialog::new(&crate::ifc_dialogs::to_native_separators(&suggested)));
+            .get_or_insert_with(|| ViewImageDialog::new(&suggested));
         dialog.show();
+    }
+
+    /// MainWindow::suggestPlotFiles: on a new, opened or saved drawing, the Plot dialog's and the
+    /// Export View as Image dialog's files follow it, where the person has not chosen another.
+    pub fn suggest_plot_files(&mut self) {
+        if let Some(dialog) = self.ui.dialogs.plot.as_mut() {
+            dialog.suggest_path(&suggested_plot_file(&self.exec.document));
+        }
+        if let Some(dialog) = self.ui.dialogs.image.as_mut() {
+            dialog.suggest_path(&suggested_image_file(&self.exec.document));
+        }
     }
 
     /// File > Plot Sheets: the Plot dialog over every sheet; the page setup is kept only for
@@ -1751,6 +1778,9 @@ impl MainWindow {
     /// What a call asked of the window, carried out: the executor's requests, and the warnings a
     /// person is shown in a box (never headless: the log has them).
     pub(crate) fn after_call(&mut self) {
+        // What the views raised while the call ran, as the C++'s hooks delivered it at once: the
+        // DIST tool's inverse is in the command log before the next --report reads it.
+        self.workspace_events();
         for request in self.exec.take_requests() {
             match request {
                 WindowRequest::Close => self.close(),
@@ -1943,7 +1973,11 @@ impl DrivenWindow for MainWindow {
     }
 
     fn menus(&self) -> Vec<Menu> {
-        self.composed().menus
+        // The menu bar's, then the Edit toolbar's history lists: reportWidget's
+        // findChild<QMenu*> found any of the window's menus by its name.
+        let mut menus = self.composed().menus;
+        menus.extend(super::actions::history_menus(&self.exec.document));
+        menus
     }
 
     fn trigger_action(&mut self, name: &str) -> Status {
@@ -2103,6 +2137,16 @@ impl DrivenWindow for MainWindow {
     fn update_failure_is_boxed(&self, step_kinds: &[String]) -> bool {
         crate::update_dialog::update_failure_is_boxed::<String>(step_kinds)
     }
+}
+
+/// suggestedImageFile: the plot's file with a .png for its suffix, in the system's separators.
+fn suggested_image_file(document: &Document) -> String {
+    let plot = suggested_plot_file(document);
+    let image = Path::new(&plot)
+        .with_extension("png")
+        .to_string_lossy()
+        .into_owned();
+    crate::ifc_dialogs::to_native_separators(&image)
 }
 
 /// The views' kinds by the names the View menu's items carry.

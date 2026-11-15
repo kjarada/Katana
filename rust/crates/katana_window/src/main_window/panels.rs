@@ -228,7 +228,16 @@ impl MainWindow {
         }
         // 1-2: the jobs' ends, and what the drawing did.
         self.exec.deliver_jobs(&ctx);
-        self.exec.follow_drawing();
+        let heard = self.exec.follow_drawing();
+        // A new, opened or saved drawing, or its name changed: the Plot and Export View as Image
+        // dialogs' files follow it (the C++'s fileListener_, suggestPlotFiles).
+        if katana_cad::DocumentChange::of(heard).has(
+            katana_cad::DocumentChange::REPLACED
+                | katana_cad::DocumentChange::SAVED
+                | katana_cad::DocumentChange::METADATA,
+        ) {
+            self.suggest_plot_files();
+        }
         if !self.exec.workspace.has_chrome() {
             self.exec.workspace.set_chrome(chrome_icons());
         }
@@ -258,6 +267,10 @@ impl MainWindow {
 
         // 4: the dialogs, each in its frame.
         self.dialogs_ui(ui);
+        let missing = self.ui.dialogs.missing_asked.take();
+        if let Some(name) = missing {
+            self.show_missing_in_styles(&name);
+        }
 
         // 5: what the clicks asked.
         for name in std::mem::take(&mut self.ui.triggered) {
@@ -413,14 +426,40 @@ impl MainWindow {
             }
             match name {
                 "editUndoButton" | "editRedoButton" => {
-                    let (text, enabled) = if name == "editUndoButton" {
-                        ("Undo", exec.document.history().can_undo())
+                    // Undo and Redo, each with its history dropped down from the strip beside it
+                    // (historyButton): the button is one step, the k-th item of the list UNDO k
+                    // or REDO k, run through the one executor by its action (undoStep<k>).
+                    let history = exec.document.history();
+                    let [undo_menu, redo_menu] = super::actions::history_menus(&exec.document);
+                    let (action, menu) = if name == "editUndoButton" {
+                        (
+                            crate::drive::action::Action::new("editUndo", "&Undo")
+                                .icon("Undo")
+                                .tip("Undo the last command")
+                                .enabled(history.can_undo()),
+                            undo_menu,
+                        )
                     } else {
-                        ("Redo", exec.document.history().can_redo())
+                        (
+                            crate::drive::action::Action::new("editRedo", "&Redo")
+                                .icon("Redo")
+                                .tip("Redo the command that was undone")
+                                .enabled(history.can_redo()),
+                            redo_menu,
+                        )
                     };
-                    child
-                        .add_enabled_ui(enabled, |ui| controls::button(ui, name, text).clicked())
-                        .inner
+                    let icon_size = ui_state.bars.icon_size;
+                    let shown = child
+                        .add_enabled_ui(action.enabled, |ui| {
+                            crate::tools::flyout_button::split_button_at(
+                                ui, rect, name, &action, &menu, icon_size, false,
+                            )
+                        })
+                        .inner;
+                    if let Some(step) = shown.chosen {
+                        ui_state.triggered.push(step);
+                    }
+                    shown.triggered
                 }
                 "CurrentStyleCombo" => {
                     current_style_ui(&mut child, exec, &mut ui_state.panels);
@@ -862,9 +901,9 @@ impl MainWindow {
         }
     }
 
-    /// What the views raised since the last look (the C++ workspace's hooks). Also called by the
-    /// headless pointer steps, so what a click said is logged before the step's record, as the
-    /// C++'s signals log it during the click.
+    /// What the views raised since the last look (the C++ workspace's hooks). Also called after
+    /// each call and by the headless pointer steps, so what a click or a tool said is logged
+    /// before the step's record, as the C++'s signals log it during the click.
     pub(super) fn workspace_events(&mut self) {
         use crate::view_workspace::WorkspaceEvent;
         for event in self.exec.workspace.take_events() {

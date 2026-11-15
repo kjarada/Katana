@@ -41,8 +41,9 @@ use crate::drive::program::MenuSigns;
 use crate::host::{SettingValue, UserSettings};
 use crate::keyboard_shortcuts_dialog::ShortcutRow;
 use crate::tools::flyout_button::{
-    ButtonState, MeasuredButton, SignHolder, Strip, StripItem, TOOL_BAR_PADDING_ACROSS,
-    ToolButtonLook, menu_sign_clashes as measure_signs, split_paint, strip_sign_holder,
+    ButtonIcon, ButtonPaint, ButtonState, MeasuredButton, MenuSign, SignHolder, Strip, StripItem,
+    TOOL_BAR_PADDING_ACROSS, ToolButtonLook, menu_sign_clashes as measure_signs, split_paint,
+    strip_sign_holder,
 };
 
 // ---- the keys of the settings file ---------------------------------------------------------
@@ -374,7 +375,13 @@ pub fn read_layout(text: &str) -> Option<SavedLayout> {
     use katana_core::json::Json;
     let value = Json::parse(text.as_bytes()).ok()?;
     value.as_object()?;
-    let version = value.find("version")?.as_integer()?;
+    // A positive number is read as unsigned, as nlohmann reads it: as_integer alone refused every
+    // layout this window wrote (`"version":2`), the older build's carried over among them.
+    let version = value.find("version").and_then(|number| {
+        number
+            .as_integer()
+            .or_else(|| number.as_unsigned().and_then(|unsigned| i64::try_from(unsigned).ok()))
+    })?;
     let flag = |key: &str, default: bool| {
         value
             .find(key)
@@ -506,12 +513,12 @@ pub fn shortcut_clashes(composed: &Composed) -> (Vec<String>, usize) {
             action.name.clone()
         }
     };
-    for action in composed.actions() {
+    for action in composed.actions().iter().chain(&composed.panel_actions) {
         if let Some(shortcut) = &action.shortcut {
             owners
                 .entry(shortcut_text(shortcut))
                 .or_default()
-                .push(name_of(&action));
+                .push(name_of(action));
         }
     }
     fn letters(menu: &Menu, path: &str, owners: &mut BTreeMap<String, Vec<String>>) {
@@ -554,7 +561,8 @@ pub fn shortcut_clashes(composed: &Composed) -> (Vec<String>, usize) {
 }
 
 /// Help > Keyboard Shortcuts' table: every key the actions answer to, with the menu path its
-/// command is under, in the menus' order; then any action no menu shows.
+/// command is under, in the menus' order; then any action no menu shows: the panels' first, as
+/// the C++'s findChildren<QAction*> met them before the drafting bar's.
 pub fn shortcut_rows(composed: &Composed) -> Vec<ShortcutRow> {
     let mut rows = Vec::new();
     let mut in_menus: BTreeSet<String> = BTreeSet::new();
@@ -585,7 +593,7 @@ pub fn shortcut_rows(composed: &Composed) -> Vec<ShortcutRow> {
     for menu in &composed.menus {
         walk(menu, &menu.title.replace('&', ""), &mut rows, &mut in_menus);
     }
-    for action in composed.actions() {
+    for action in composed.panel_actions.iter().chain(&composed.actions()) {
         if in_menus.contains(&action.name) {
             continue;
         }
@@ -660,7 +668,7 @@ pub fn menu_gaps(composed: &Composed) -> (Vec<String>, usize) {
 }
 
 /// tools::menuSignClashes over the window's toolbars: each toolbar's buttons as its strip draws
-/// them, Undo's and Redo's split buttons among the Edit bar's.
+/// them, Undo's and Redo's split buttons among the Edit bar's; then the views' title bars.
 pub fn menu_sign_clashes(window: &mut MainWindow) -> MenuSigns {
     let composed = window.composed();
     let icon_size = window.ui.bars.icon_size;
@@ -692,6 +700,46 @@ pub fn menu_sign_clashes(window: &mut MainWindow) -> MenuSigns {
             }
         }
         holders.push(holder);
+    }
+    // A view's title bar opens with its kind switcher, a button with a menu at the left of every
+    // view: the C++ measured the docks' title bars after the toolbars, each dock in the order it
+    // was made. Only a view's bar has a button with a menu; it is the bar's leading button.
+    for id in window.exec.workspace.view_ids() {
+        let Some(bar) = window.exec.workspace.title_bar(id) else {
+            continue;
+        };
+        let Some(lead) = bar.leading().filter(|lead| lead.menu) else {
+            continue;
+        };
+        let paint = ButtonPaint {
+            width: lead.width.round() as i32,
+            height: crate::dock_chrome::BUTTON_SIZE.round() as i32,
+            look: ToolButtonLook::TITLE_BAR_MENU,
+            icon: ButtonIcon::Named(lead.icon.clone()),
+            icon_size: crate::dock_chrome::ICON_SIZE.round() as i32,
+            state: ButtonState {
+                disabled: !lead.enabled,
+                ..ButtonState::default()
+            },
+            sign: MenuSign::Indicator(if lead.enabled {
+                crate::theme::palette::text()
+            } else {
+                crate::theme::palette::text_disabled()
+            }),
+            ground: crate::canvas::Color::TRANSPARENT,
+        };
+        holders.push(SignHolder {
+            holder: format!(
+                "title bar button {}",
+                crate::view_workspace::dock_name(id)
+            ),
+            buttons: vec![MeasuredButton {
+                name: lead.name.clone(),
+                has_menu: true,
+                icon_only: true,
+                paint,
+            }],
+        });
     }
     let ratio = f64::from(crate::drive::headless::scale_factor(
         &katana_core::path_text::environment_variable(Some(

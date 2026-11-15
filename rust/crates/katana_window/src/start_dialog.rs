@@ -191,10 +191,10 @@ impl StartDialog {
             now
         };
         let crs = if wanted.is_empty() {
-            Choice::at(0)
+            crs_choice_at(0)
         } else {
             match crs_items.iter().position(|(_, id)| *id == wanted) {
-                Some(at) => Choice::at(at),
+                Some(at) => crs_choice_at(at),
                 None => Choice::editable(&wanted),
             }
         };
@@ -301,7 +301,7 @@ impl StartDialog {
     /// The coordinate system item at `index` chosen.
     pub fn set_crs_index(&mut self, index: usize) {
         if index < self.crs_items.len() {
-            self.crs = Choice::at(index);
+            self.crs = crs_choice_at(index);
             self.sync_crs_text();
         }
     }
@@ -670,4 +670,13 @@ impl StartDialog {
             }
         });
     }
+}
+
+/// The coordinate system box's item `at` chosen. The box is editable whatever is chosen
+/// (crs_->setEditable(true)): an EPSG code, WKT or PROJ string can be typed over a chosen item, and
+/// a fill of a text it does not list is taken as typed.
+fn crs_choice_at(at: usize) -> Choice {
+    let mut choice = Choice::editable("");
+    choice.index = Some(at);
+    choice
 }

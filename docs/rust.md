@@ -1109,6 +1109,41 @@ window gate (`wsl wgate`), first sound run: 267 tests, 236 passed, 198 with
 the C++'s streams, 69 differing; the fix-up round is grouping the 31
 failures and 69 differences by area.
 
+The fix-up round's main-window share (composition and logging) found:
+
+- **The window had no log.** The C++'s MainWindow gives its Document a
+  logger at Warning with a standard-error sink, so a command the stack
+  refuses is a `WARNING [command] rejected` line in every headless run; the
+  Rust window now does the same. Its timestamp is the moment of the run, so
+  the gate needs a normalisation for it, as it needs one for a frame's
+  milliseconds (`FrameStatsLabel: Plan N drawn X ms (kept, Y ms)`), whose
+  "kept" part says only whether the toolkit painted the view once more.
+- **A submenu's status tip is on its row** (`drive::Menu::tip`), where the
+  frozen row had none and `--report` of a menu showed a submenu as its bare
+  title. `signs` stays the one source; the rows take its tips once
+  composed. Rejected: a second table of tips beside `signs`.
+- **Every saved layout was refused**: the reader took the version with
+  `as_integer`, and a positive number is unsigned to the JSON reader, as to
+  nlohmann. Restoring an older build's layout now works as decided above.
+- **File > Quit has the platform's key** (QKeySequence::Quit): none in Qt's
+  Windows keyboard scheme, which is also the offscreen platform's, so none
+  on Windows or in a headless run; Ctrl+Q elsewhere. The Properties tree's
+  Copy (Ctrl+C) is listed in Keyboard Shortcuts as no menu's, after the
+  menus' keys, as findChildren met it.
+- **What a view raised is delivered after every call**, not only at the
+  frame's end: the C++'s hooks ran at once, and a `--report` of the command
+  log after a typed point missed the DIST tool's answer.
+- **A tool its title bar hides is still the bar's button, hidden**: a press
+  of it is refused as hidden, as main.cpp refuses it.
+- **Not done**: the toolbars' natural widths along the top
+  (`--check-toolbar-fit`) are 2 to 22 px off the C++'s, which takes Qt's
+  toolbar metrics (handle, item spacing, the widgets' size hints) to match;
+  and at 125 % the split buttons' arrow is 10 device pixels wide where
+  Fusion's, drawn into a cached pixmap and scaled, is 12.
+- **Undo and Redo drop their history lists down** (`editUndoMenu`,
+  `editRedoMenu`), made from the history whenever they are asked for; the
+  buttons were plain text buttons without them.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of

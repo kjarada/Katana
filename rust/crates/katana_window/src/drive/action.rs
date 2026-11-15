@@ -178,12 +178,14 @@ pub enum MenuItem {
     Menu(Menu),
 }
 
-/// A menu: its object name ("formatMenu"), its title with its '&', and its items.
+/// A menu: its object name ("formatMenu"), its title with its '&', its items, and the status tip
+/// of the item that opens it (menuAction()->setStatusTip), empty for none.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
     pub name: String,
     pub title: String,
     pub items: Vec<MenuItem>,
+    pub tip: String,
 }
 
 impl Menu {
@@ -192,7 +194,15 @@ impl Menu {
             name: String::from(name),
             title: String::from(title),
             items: Vec::new(),
+            tip: String::new(),
         }
+    }
+
+    /// The status tip of the item that opens the menu: what a parent menu's report shows of it in
+    /// brackets, as of an action.
+    pub fn tip(mut self, tip: &str) -> Self {
+        self.tip = String::from(tip);
+        self
     }
 
     pub fn action(mut self, action: Action) -> Self {
@@ -218,7 +228,8 @@ impl Menu {
     /// What `--report NAME` says of a menu (reportWidget): its title without '&', then its items
     /// that are not separators, each without '&' and with its status tip in brackets, joined by
     /// " ; ". A section is a separator to Qt (QMenu::addSection makes a separator action that
-    /// carries the title) and is left out with them. A submenu is its title.
+    /// carries the title) and is left out with them. A submenu is its title, and its status tip
+    /// in brackets when it has one: Qt's submenu is the action menuAction(), reported as any.
     pub fn report(&self) -> String {
         let items: Vec<String> = self
             .items
@@ -232,7 +243,13 @@ impl Menu {
                     Some(line)
                 }
                 MenuItem::Section(_) | MenuItem::Separator => None,
-                MenuItem::Menu(menu) => Some(menu.title.replace('&', "")),
+                MenuItem::Menu(menu) => {
+                    let mut line = menu.title.replace('&', "");
+                    if !menu.tip.is_empty() {
+                        line.push_str(&format!(" [{}]", menu.tip));
+                    }
+                    Some(line)
+                }
             })
             .collect();
         format!("{}: {}", self.title.replace('&', ""), items.join(" ; "))
@@ -371,10 +388,12 @@ mod tests {
             .section("Styles")
             .action(Action::new("formatStyles", "&Styles...").tip("Edit the styles"))
             .separator()
-            .action(Action::new("formatLayers", "&Layers"));
+            .action(Action::new("formatLayers", "&Layers"))
+            .submenu(Menu::new("formatPlain", "&Plain"))
+            .submenu(Menu::new("formatTipped", "&Tipped").tip("Opens more"));
         assert_eq!(
             menu.report(),
-            "Format: Styles... [Edit the styles] ; Layers"
+            "Format: Styles... [Edit the styles] ; Layers ; Plain ; Tipped [Opens more]"
         );
         assert_eq!(
             Action::new("a", "Save && Close").display_text(),
