@@ -1428,11 +1428,30 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             ),
         ),
     );
-    for (bar, _) in &bars {
-        toolbars.items.push(MenuItem::Action(tool_bar_toggle(
-            bar,
-            ui.bars.shown(&bar.name),
-        )));
+    // In the order makeToolBar made them, which is the order the C++ lists them in: Surface Edit
+    // was made before the tools filled it, BIM before GIS.
+    const MADE: [&str; 13] = [
+        "FileToolBar",
+        "EditToolBar",
+        "PropertiesToolBar",
+        "ViewToolBar",
+        "SurfaceEditToolBar",
+        "DrawToolBar",
+        "AnnotateToolBar",
+        "ModifyToolBar",
+        "FormatToolBar",
+        "SurveyToolBar",
+        "TerrainToolBar",
+        "BIMToolBar",
+        "GISToolBar",
+    ];
+    for name in MADE {
+        if let Some((bar, _)) = bars.iter().find(|(bar, _)| bar.name == name) {
+            toolbars.items.push(MenuItem::Action(tool_bar_toggle(
+                bar,
+                ui.bars.shown(&bar.name),
+            )));
+        }
     }
     toolbars.items.push(MenuItem::Section(String::from("Buttons")));
     toolbars.items.push(MenuItem::Action(
