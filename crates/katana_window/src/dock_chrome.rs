@@ -7,9 +7,9 @@
 //!
 //! WHY A TITLE BAR OF OUR OWN (the C++'s reasons, kept). A plain dock's title bar has no Minimise,
 //! no Maximise and nowhere for a view's own controls (its kind, its layers), so every dock wears
-//! this one: [icon] title ... [tools] [_] [float] [max] [x], 26 points tall - one row of 22 point
-//! buttons with 2 above and below, the height of the old style-drawn bar, so the drawing area did
-//! not shrink to make room for the buttons.
+//! this one: [icon] title ... [tools] [_] [float] [max] [x], 24 points tall - one row of 20 point
+//! buttons with 2 above and below (the design of 2026-11-16: a slim bar, a control high; the C++'s
+//! was 26, the old style-drawn bar's height, with 22 point buttons).
 //!
 //! WHY MINIMISE IS A TRAY. A floating dock keeps the window's shortcuts, and a docked panel is not
 //! a window at all, so Minimise HIDES the dock and puts a button for it on a toolbar at the bottom
@@ -53,16 +53,18 @@ use crate::drive::registry::{
 use crate::theme::palette;
 
 /// A title bar button's side: the window buttons of the desktop the person is on are drawn at 10
-/// to 16 px, and four of them and a view's tools must fit a view a third of a screen wide.
-pub const BUTTON_SIZE: f32 = 22.0;
-/// Above and below the buttons: 22 + 2 + 2 is the old style-drawn bar's 26.
+/// to 16 px, and four of them and a view's tools must fit a view a third of a screen wide. 20: the
+/// 14 point icon, its 2 points of padding and the border's point each side, with nothing over.
+pub const BUTTON_SIZE: f32 = 20.0;
+/// Above and below the buttons: 20 + 2 + 2 is the design's control height, 24.
 pub const BAR_PADDING: f32 = 2.0;
 /// The bar's height.
 pub const BAR_HEIGHT: f32 = BUTTON_SIZE + 2.0 * BAR_PADDING;
-/// The icons in the buttons: 14 points in a 22 point button.
+/// The icons in the buttons: 14 points in a 20 point button.
 pub const ICON_SIZE: f32 = 14.0;
-/// The dock's own icon before its title, in its 18 x 22 cell.
-pub const DOCK_ICON_SIZE: f32 = 16.0;
+/// The dock's own icon before its title, in its 18 x 20 cell: the buttons' 14, so the bar's icons
+/// are one size.
+pub const DOCK_ICON_SIZE: f32 = 14.0;
 /// The accent stroke across the top of the active view's bar: the 2 px line under the selected tab,
 /// so the two read as one idea.
 pub const ACTIVE_STROKE: f32 = 2.0;
@@ -101,8 +103,10 @@ fn snap(value: f32, pixels_per_point: f32) -> f32 {
     (value * pixels_per_point).round() / pixels_per_point
 }
 
-/// Paints an icon of the window's set by name into an image so many device pixels square.
-type IconPainter = Box<dyn Fn(&str, u32) -> Option<Image>>;
+/// Paints an icon of the window's set by name into an image so many device pixels square, at a
+/// ratio of so many device pixels a point - an icon's strokes are weighted for its size in points,
+/// so the same 14 point icon is drawn alike at 100 % and 200 %, not as a 28 point one.
+type IconPainter = Box<dyn Fn(&str, u32, f32) -> Option<Image>>;
 
 /// The icons the chrome draws, by name - the window's icon set (I's), lent by the window - kept as
 /// egui textures for each size they are drawn at.
@@ -126,6 +130,12 @@ impl ChromeIcons {
     /// Icons painted by `paint`: the icon `name` in an image `pixels` square, None for no such
     /// icon.
     pub fn new(paint: impl Fn(&str, u32) -> Option<Image> + 'static) -> Self {
+        Self::scaled(move |name, pixels, _| paint(name, pixels))
+    }
+
+    /// Icons painted by `paint`: the icon `name` in an image `pixels` square at `ratio` device
+    /// pixels a point (the screen's), None for no such icon.
+    pub fn scaled(paint: impl Fn(&str, u32, f32) -> Option<Image> + 'static) -> Self {
         Self {
             paint: Some(Box::new(paint)),
             textures: HashMap::new(),
@@ -147,7 +157,7 @@ impl ChromeIcons {
             .textures
             .entry((String::from(name), pixels))
             .or_insert_with(|| {
-                paint(name, pixels)
+                paint(name, pixels, ctx.pixels_per_point())
                     .filter(|image| !image.is_null())
                     .map(|image| {
                         ctx.load_texture(
@@ -170,7 +180,7 @@ pub struct TitleBarButton {
     /// Shown in bold over the tip, and the button's accessible name: what `--report` says.
     pub label: String,
     pub tip: String,
-    /// 22 points; a view's kind switcher is widened to 34 by its workspace.
+    /// 20 points; a view's kind switcher is widened to 32 by its workspace.
     pub width: f32,
     /// Some for a button that can be checked: whether it is (a view's Link).
     pub checked: Option<bool>,
@@ -184,7 +194,7 @@ pub struct TitleBarButton {
 }
 
 impl TitleBarButton {
-    /// makeTitleBarButton: a 22 point button named `name`, its icon `icon`, read as `label`, with
+    /// makeTitleBarButton: a 20 point button named `name`, its icon `icon`, read as `label`, with
     /// `tip` under the label in its tooltip.
     pub fn new(name: &str, icon: &str, label: &str, tip: &str) -> Self {
         Self {
@@ -239,7 +249,7 @@ impl TitleBarButton {
     }
 
     /// Where its icon is drawn, in points from its top left: centred in what its border and
-    /// padding leave (4, 4 in a 22 point button, and in the 34 point kind switcher padded for its
+    /// padding leave (3, 3 in a 20 point button, and in the 32 point kind switcher padded for its
     /// arrow).
     pub fn icon_offset(&self) -> Vec2 {
         let right = if self.menu { MENU_PADDING } else { PADDING };
@@ -382,9 +392,10 @@ pub fn title_bar_button(
         }
         if button.menu {
             // Fusion's arrow, 8 wide and 4 deep, centred in the 13 point box set at the right of
-            // the padding: 22.5 to 30.5 across and 9.5 to 13.5 down in the 34 point switcher.
+            // the padding: 20.5 to 28.5 across in the 32 point switcher, and 8 to 12 down - the
+            // button's middle, on whole points so its flat top is one crisp row.
             let left = rect.min.x + button.width - 11.5;
-            let top = rect.min.y + 9.5;
+            let top = rect.min.y + ((BUTTON_SIZE - 4.0) / 2.0).floor();
             ui.painter().add(Shape::convex_polygon(
                 vec![
                     Pos2::new(left, top),
@@ -801,13 +812,15 @@ impl DockTitleBar {
     ) -> Vec<ChromeRequest> {
         let mut requests = Vec::new();
         // Panels are always readable; views are muted unless active, so the one the menus act on
-        // stands out without the others fading away.
+        // stands out without the others fading away. A panel's bar is its body's grey, the title
+        // a heading of the panel and not a strip of its own; a view's is the frame's, raised to
+        // the panel's grey while it is the active one.
         let marked = self.role == DockRole::View && self.active;
         let painter = ui.painter().clone();
         painter.rect_filled(
             rect,
             CornerRadius::ZERO,
-            if marked {
+            if marked || self.role == DockRole::Panel {
                 palette::panel()
             } else {
                 palette::window()
@@ -1193,7 +1206,38 @@ impl<Tab: DockTab> DockChrome<Tab> {
                 .ui(ui, bar_rect, name, facts, &mut self.icons);
             self.requests.extend(requests);
         }
-        let inner = content(ui);
+        let panel = self.role(name) == Some(DockRole::Panel);
+        let inner = if panel {
+            // A panel's body: the panel's grey, a pixel of border round the whole dock, and its
+            // contents PANEL_PADDING in from the sides (half that under the bar, which is a
+            // heading's space already). A view's widget fills its dock to the edge.
+            let body = Rect::from_min_max(Pos2::new(rect.min.x, rect.min.y + BAR_HEIGHT), rect.max);
+            ui.painter()
+                .rect_filled(body, CornerRadius::ZERO, palette::panel().to_egui());
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::ZERO,
+                Stroke::new(1.0, palette::border().to_egui()),
+                StrokeKind::Inside,
+            );
+            let padding = crate::theme::style::PANEL_PADDING;
+            let room = Rect::from_min_max(
+                Pos2::new(body.min.x + padding, body.min.y + padding / 2.0),
+                Pos2::new(body.max.x - padding, body.max.y - padding / 2.0),
+            );
+            ui.scope_builder(
+                UiBuilder::new()
+                    .max_rect(room)
+                    .layout(Layout::top_down(Align::Min)),
+                |ui| {
+                    ui.set_clip_rect(room.intersect(ui.clip_rect()));
+                    content(ui)
+                },
+            )
+            .inner
+        } else {
+            content(ui)
+        };
         end_target(ui, rect);
         inner
     }

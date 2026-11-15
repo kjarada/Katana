@@ -22,8 +22,9 @@
 //! set a colour are the Visuals here, each from its token.
 //!
 //! The UI's face is egui's embedded sans (Ubuntu-Light; the plan's section 4.10), which has no bold
-//! face: a section title is drawn in capitals, spaced and muted, as theme.cpp draws it, but not
-//! bold. Which face the window carries is the owner's to decide, and changes here only.
+//! face: a section title is drawn a size smaller and muted, in the case it is written in (the
+//! design of 2026-11-16: sentence case, no capitals; theme.cpp drew it in spaced capitals). Which
+//! face the window carries is the owner's to decide, and changes here only.
 //!
 //! The chosen text size is per thread, as theme.cpp's was per process: the window draws on one
 //! thread, and a test binary's cases on many each keep their own.
@@ -40,17 +41,34 @@ use egui::{
 };
 
 use super::palette::{
-    MONOSPACE_FAMILIES, TextSize, accent, accent_text, border, error, hover, monospace_points,
-    overlay_pixels, panel, points_of_pixels, raised, text, text_disabled, text_muted, ui_points,
-    window,
+    MONOSPACE_FAMILIES, TextSize, accent, border, error, hover, input, monospace_points,
+    overlay_pixels, panel, points_of_pixels, raised, selection, text, text_disabled, text_muted,
+    ui_points, window,
 };
 use crate::canvas::raster::RasterCanvas;
 use crate::canvas::{Brush, Canvas, Color, Font, FontSize, Image, IntRect, RectF, RenderHint};
 
-/// The platform's own UI size, in points, that every text size is a step from: Qt's application
-/// font on the platforms the window runs on, 9 points (Segoe UI on Windows, the offscreen
-/// platform's Sans Serif headless).
-pub const PLATFORM_POINTS: f64 = 9.0;
+/// The window's standard UI size, in points, that every text size is a step from: 9.75 points,
+/// 13 pixels at 96 an inch - the design of 2026-11-16 ("one UI face at 13 px"). It was the 9
+/// points of Qt's application font (12 px), which in the UI's light face read small and thin
+/// against the panels.
+pub const PLATFORM_POINTS: f64 = 9.75;
+
+/// What secondary text (TextStyle::Small: a status line, a count, a hint) and a heading
+/// (TextStyle::Heading) take from the UI size, in pixels: 12 and 14 beside the body's 13, the
+/// design's scale. One pixel each way is all the hierarchy the UI's one weight can carry without
+/// a heading shouting.
+pub const SMALL_PIXELS_LESS: f32 = 1.0;
+pub const HEADING_PIXELS_MORE: f32 = 1.0;
+
+/// The design's spacing, in points: a control is CONTROL_HEIGHT high; within a group things are
+/// GAP apart, groups GROUP_GAP; a panel's contents stand PANEL_PADDING in from its edges, a
+/// dialog's DIALOG_PADDING (the scale 2 / 4 / 8 / 12 / 16).
+pub const CONTROL_HEIGHT: f32 = 24.0;
+pub const GAP: f32 = 4.0;
+pub const GROUP_GAP: f32 = 8.0;
+pub const PANEL_PADDING: f32 = 8.0;
+pub const DIALOG_PADDING: i8 = 12;
 
 /// How many rows a choice list shows before it scrolls: QComboBox::maxVisibleItems' default.
 pub const MAX_VISIBLE_ITEMS: usize = 10;
@@ -65,26 +83,30 @@ pub const SECTION_PADDING: f32 = 10.0;
 /// icon (theme.cpp's kIndent).
 pub const INDENT: f32 = 12.0;
 
-/// A section title's size against the menu's, and its letter spacing (theme.cpp's sectionFont:
-/// 85 %, and QFont::PercentageSpacing 104).
-pub const SECTION_SCALE: f64 = 0.85;
-pub const SECTION_LETTER_SPACING: f64 = 104.0;
+/// A section title's size against the menu's, and its letter spacing: the secondary text's 12
+/// pixels to the body's 13, at the face's own spacing. theme.cpp's sectionFont was 85 % in
+/// capitals spaced at 104 %; the design of 2026-11-16 has no capitals, and spacing was only ever
+/// there to let capitals breathe.
+pub const SECTION_SCALE: f64 = 12.0 / 13.0;
+pub const SECTION_LETTER_SPACING: f64 = 100.0;
 
 /// A menu item's icon, in points: Fusion's small icon (PM_SmallIconSize), with the stylesheet's
 /// QMenu::icon padding-left before it.
 pub const MENU_ICON_SIZE: f32 = 16.0;
 pub const MENU_ICON_PADDING: f32 = 6.0;
 
-/// The corner radius of a checked icon's frame (QMenu::icon:checked), and of buttons, inputs and
-/// list items (QPushButton, QLineEdit, QMenu::item), in points.
+/// The corner radius of a checked icon's frame (QMenu::icon:checked), of buttons, inputs and
+/// list items (QPushButton, QLineEdit, QMenu::item), and of a dialog or a popup, in points.
 pub const CHECKED_ICON_RADIUS: u8 = 3;
 pub const CORNER_RADIUS: u8 = 4;
+pub const WINDOW_RADIUS: u8 = 6;
 
 /// How far a disabled control is faded towards what it is drawn on. Qt drew disabled text in
 /// text_disabled(); egui fades a disabled control as a whole. Faded by this much, text() over
-/// window() lands on text_disabled() within a few steps a channel: (0x5c - 0x23) / (0xd7 - 0x23)
-/// is 0.32 in red, 0.35 in green and 0.37 in blue.
-pub const DISABLED_ALPHA: f32 = 0.35;
+/// window() lands on text_disabled() within a few steps a channel: (0x5f - 0x1e) / (0xd4 - 0x1e)
+/// is 0.36 in red, (0x63 - 0x1f) / (0xd6 - 0x1f) 0.37 in green and (0x6b - 0x22) / (0xdb - 0x22)
+/// 0.39 in blue.
+pub const DISABLED_ALPHA: f32 = 0.37;
 
 /// The height of a line of the UI's face (Ubuntu-Light) per pixel of its size, from its hhea
 /// table: an ascender of 932, a descender of -189 and a line gap of 28, per 1000 units.
@@ -141,12 +163,12 @@ pub fn overlay_font(pixels: i32) -> Font {
     }
 }
 
-/// A menu section title's font made from the menu's `base` (theme.cpp's sectionFont): 85 % of it,
-/// never under six points, bold, in capitals, spaced at 104 %.
+/// A menu section title's font made from the menu's `base` (theme.cpp's sectionFont): SECTION_SCALE
+/// of it, never under six points, bold where the face has a bold, in the case it is written in.
 pub fn section_font(base: &Font) -> Font {
     Font {
         size: FontSize::Points(katana_math::cpp::max(6.0, points_of(base) * SECTION_SCALE)),
-        all_uppercase: true,
+        all_uppercase: false,
         letter_spacing_percent: SECTION_LETTER_SPACING,
         ..base.clone()
     }
@@ -181,23 +203,28 @@ pub fn section_font_id() -> FontId {
     )
 }
 
-/// Every text style at `size`: the whole window one font at the chosen size (setTextSize sets the
+/// Every text style at `size`: the whole window one face at the chosen size (setTextSize sets the
 /// application font with no class name, which dropped the fonts the platform set for single
-/// classes), the monospace style the command line's.
+/// classes), secondary text a pixel smaller and a heading a pixel larger, the monospace style the
+/// command line's. All three move with the size together.
 pub fn text_styles(size: TextSize) -> BTreeMap<TextStyle, FontId> {
-    let chrome = FontId::new(
-        pixels_of_points(ui_points(PLATFORM_POINTS, size)),
-        FontFamily::Proportional,
-    );
+    let pixels = pixels_of_points(ui_points(PLATFORM_POINTS, size));
+    let chrome = FontId::new(pixels, FontFamily::Proportional);
     let fixed = FontId::new(
         pixels_of_points(monospace_points(PLATFORM_POINTS, size, 0.0)),
         FontFamily::Monospace,
     );
     [
-        (TextStyle::Small, chrome.clone()),
+        (
+            TextStyle::Small,
+            FontId::new((pixels - SMALL_PIXELS_LESS).max(1.0), FontFamily::Proportional),
+        ),
         (TextStyle::Body, chrome.clone()),
-        (TextStyle::Button, chrome.clone()),
-        (TextStyle::Heading, chrome),
+        (TextStyle::Button, chrome),
+        (
+            TextStyle::Heading,
+            FontId::new(pixels + HEADING_PIXELS_MORE, FontFamily::Proportional),
+        ),
         (TextStyle::Monospace, fixed),
     ]
     .into()
@@ -214,17 +241,33 @@ fn combo_height(spacing: &Spacing, font_pixels: f32) -> f32 {
 }
 
 /// The palette and the stylesheet as egui's Visuals: every colour from its token.
+///
+/// The design of 2026-11-16: a button is a raised key with a pixel of border, a field a well
+/// below its panel, both framed in the accent while focused or pressed; a selected row is the
+/// muted accent (`selection`) under the ordinary text, where the full accent under dark text made
+/// a list read as a row of buttons; a dialog and a popup are the panel's grey with a border and a
+/// soft shadow under them, so a dialog lifts off the window without a frame of its own colour.
 pub fn visuals() -> Visuals {
     let c = |color: Color| color.to_egui();
     let edge = Stroke::new(1.0, c(border()));
+    // Under the pointer the border lightens a third of the way to the secondary text.
+    let lit_edge = Stroke::new(1.0, c(border()).lerp_to_gamma(c(text_muted()), 0.33));
     let focus = Stroke::new(1.0, c(accent()));
-    let widget = |fill: Color, frame: Stroke| WidgetVisuals {
+    let widget = |fill: Color, frame: Stroke, ink: Color| WidgetVisuals {
         bg_fill: c(fill),
         weak_bg_fill: c(fill),
         bg_stroke: frame,
         corner_radius: CornerRadius::same(CORNER_RADIUS),
-        fg_stroke: Stroke::new(1.0, c(text())),
+        fg_stroke: Stroke::new(1.0, c(ink)),
         expansion: 0.0,
+    };
+    // A soft shadow straight down: enough to lift a dialog or a menu off the window, never a
+    // second outline (egui's own is 10 across and 20 down, a smear on a dark ground).
+    let shadow = |blur: u8, down: i8| Shadow {
+        offset: [0, down],
+        blur,
+        spread: 0,
+        color: Color32::from_black_alpha(110),
     };
     Visuals {
         dark_mode: true,
@@ -232,43 +275,74 @@ pub fn visuals() -> Visuals {
         weak_text_color: Some(c(text_muted())),
         widgets: Widgets {
             // Frames, separators and the normal text.
-            noninteractive: widget(panel(), edge),
-            // QPushButton, QLineEdit, QComboBox: raised, with a border.
-            inactive: widget(raised(), edge),
-            hovered: widget(hover(), edge),
+            noninteractive: widget(panel(), edge, text()),
+            // QPushButton, QComboBox: raised, with a border.
+            inactive: widget(raised(), edge, text()),
+            hovered: widget(hover(), lit_edge, text()),
             // Pressed is raised; focus is framed in the accent (QLineEdit:focus).
-            active: widget(raised(), focus),
-            open: widget(raised(), focus),
+            active: widget(hover(), focus, text()),
+            open: widget(raised(), focus, text()),
         },
         // QPalette's Highlight and HighlightedText: lists' selection and selected text.
         selection: Selection {
-            bg_fill: c(accent()),
-            stroke: Stroke::new(1.0, c(accent_text())),
+            bg_fill: c(selection()),
+            stroke: Stroke::new(1.0, c(text())),
         },
         hyperlink_color: c(accent()),
-        // alternate-background-color.
-        faint_bg_color: c(window()),
-        // QPalette::Base: lists, trees and text boxes.
-        extreme_bg_color: c(panel()),
-        // QLineEdit's background.
-        text_edit_bg_color: Some(c(raised())),
+        // alternate-background-color: a striped row, a step off the panel.
+        faint_bg_color: c(window()).lerp_to_gamma(c(panel()), 0.5),
+        // QPalette::Base: lists, trees, scroll areas' troughs.
+        extreme_bg_color: c(input()),
+        // QLineEdit's background: a well below the panel.
+        text_edit_bg_color: Some(c(input())),
         code_bg_color: c(raised()),
         // QPalette::BrightText.
         error_fg_color: c(error()),
-        // QMainWindow and QDialog's background; a menu or a dialog has no shadow of its own.
-        window_fill: c(window()),
+        // QDialog's background and a menu's: the panel's grey, a pixel of border round it, its
+        // corners rounded as a popup's are, and the shadow under it.
+        window_fill: c(panel()),
         window_stroke: edge,
-        window_shadow: Shadow::NONE,
-        popup_shadow: Shadow::NONE,
+        window_corner_radius: CornerRadius::same(WINDOW_RADIUS),
+        window_shadow: shadow(16, 6),
+        menu_corner_radius: CornerRadius::same(WINDOW_RADIUS),
+        popup_shadow: shadow(10, 4),
+        // QMainWindow's: the frame round the docks.
         panel_fill: c(window()),
         disabled_alpha: DISABLED_ALPHA,
+        slider_trailing_fill: true,
         ..Visuals::dark()
+    }
+}
+
+/// The design's spacing (see CONTROL_HEIGHT): egui's defaults made rows of 18 points with 3
+/// between them - text crowded against the frame of every field - and dialogs with 6 points of
+/// margin; these are the scale's numbers.
+fn spacing() -> Spacing {
+    Spacing {
+        // Between the items of a row or a column: GROUP_GAP across (a label and its field), GAP
+        // down (one row of a form and the next).
+        item_spacing: vec2(GROUP_GAP, GAP),
+        window_margin: egui::Margin::same(DIALOG_PADDING),
+        menu_margin: egui::Margin::same(GAP as i8),
+        // A button's label 8 in from its sides; down, CONTROL_HEIGHT centres it.
+        button_padding: vec2(GROUP_GAP, 3.0),
+        // A tree's step in: a checkbox's width and its gap, so a child's box sits under its
+        // parent's label.
+        indent: 16.0,
+        interact_size: vec2(40.0, CONTROL_HEIGHT),
+        combo_width: 140.0,
+        text_edit_width: 220.0,
+        icon_width: 16.0,
+        icon_width_inner: 8.0,
+        icon_spacing: 6.0,
+        menu_spacing: 2.0,
+        ..Spacing::default()
     }
 }
 
 /// The whole style at `size`: makeStyle and styleSheet in one.
 fn style_for(size: TextSize) -> Style {
-    let spacing = Spacing::default();
+    let spacing = spacing();
     let combo_height = combo_height(&spacing, pixels_of_points(ui_points(PLATFORM_POINTS, size)));
     Style {
         text_styles: text_styles(size),
@@ -331,13 +405,13 @@ pub fn menu_separator(ui: &mut Ui) -> Response {
 }
 
 /// A menu's titled section (KatanaStyle's sizeFromContents and drawControl for a separator with
-/// text): the title alone, no rule - the capitals and the space above already part it from the
-/// items before - in the section font, muted, a line of it high with SECTION_PADDING shared above
-/// and below, and set below the middle, since a title belongs to the items after it.
+/// text): the title alone, no rule - the smaller muted face and the space above already part it
+/// from the items before - in the section font, a line of it high with SECTION_PADDING shared
+/// above and below, and set below the middle, since a title belongs to the items after it.
 pub fn menu_section(ui: &mut Ui, title: &str) -> Response {
     let font = section_font_id();
     let color = text_muted().to_egui();
-    let shown = title.to_uppercase();
+    let shown = String::from(title);
     let plain = ui
         .painter()
         .layout_no_wrap(shown.clone(), font.clone(), color);
@@ -354,13 +428,16 @@ pub fn menu_section(ui: &mut Ui, title: &str) -> Response {
             ..TextFormat::default()
         },
     ));
-    let width = galley.size().x + 4.0 * INDENT;
+    // The title starts where the items' text does - their button padding in from the menu's
+    // side - so a section and its items read as one column (theme.cpp's kIndent was the
+    // stylesheet's item padding; egui's menu pads an item by button_padding).
+    let indent = ui.spacing().button_padding.x;
+    let width = galley.size().x + 2.0 * indent + 2.0 * INDENT;
     let height = plain.size().y + SECTION_PADDING;
     let (rect, response) = ui.allocate_at_least(vec2(width, height), Sense::hover());
-    // drawText(area.adjusted(kIndent, kSectionPadding / 2, -kIndent, 0), AlignLeft | AlignVCenter).
     let area = Rect::from_min_max(
-        pos2(rect.left() + INDENT, rect.top() + SECTION_PADDING / 2.0),
-        pos2(rect.right() - INDENT, rect.bottom()),
+        pos2(rect.left() + indent, rect.top() + SECTION_PADDING / 2.0),
+        pos2(rect.right() - indent, rect.bottom()),
     );
     let at = pos2(area.left(), area.center().y - galley.size().y / 2.0);
     ui.painter().galley(at, galley, color);

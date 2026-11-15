@@ -341,15 +341,16 @@ mod view_links {
 
     #[test]
     fn the_plan_docks_minimum_width_grows_by_the_link_button_alone() {
-        // Every tool always shown on a bar adds its 22 px and the bar's 1 px between tools to the
-        // least a view can be narrowed to. A plan view's bar has the Link button; a 3D view's has
+        // Every tool always shown on a bar adds its 20 px (the design of 2026-11-16's title bar
+        // button; the C++'s was 22) and the bar's 1 px between tools to the least a view can be
+        // narrowed to. A plan view's bar has the Link button; a 3D view's has
         // not, and is otherwise the same.
         let mut w = Site::new();
         let plan = w.active();
         let model = w.open(ViewKind::Model3D);
         let plan_bar = w.bar(plan).minimum_width();
         let model_bar = w.bar(model).minimum_width();
-        assert_eq!(plan_bar - model_bar, 23.0);
+        assert_eq!(plan_bar - model_bar, 21.0);
     }
 
     #[test]
