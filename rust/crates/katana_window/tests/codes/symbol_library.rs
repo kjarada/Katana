@@ -20,10 +20,8 @@
 //! picker beside Replace in Styles is the name picker (name_picker), set by set_replacement and
 //! type_replacement.
 //!
-//! Left for the modules they wait for: ThePicturesAndThePlanDrawAPenInTheColourTheSessions-
-//! CustomisationGivesIt (the style preview's picture, CU1's style_preview),
-//! ALegendSampleDrawsAPenInTheColourItsContextsColoursGiveIt (SH1's legend_painter) and
-//! ASheetsLegendDrawsAPenInTheColourThePlansSourceGivesIt (SH1's sheet_painter).
+//! The three cases that paint through the style preview, the legend painter and the sheet painter
+//! were twinned in wave 4, once those had come.
 
 use std::cell::{Cell, RefCell};
 use std::fs;
@@ -31,6 +29,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use katana_cad::plot::{PlotSettings, paper_dimensions};
+use katana_cad::plotting::legend::{LegendEntry, LegendKind};
+use katana_cad::plotting::sheet_set::{Sheet, SheetSet, Viewport, ViewportKind};
 use katana_cad::view_transform::ViewTransform;
 use katana_cad::{CustomisationOrigin, Document};
 use katana_commands::{
@@ -39,24 +40,32 @@ use katana_commands::{
 use katana_entity::customisation::customisation_from_json;
 use katana_entity::tables::symbol_names;
 use katana_entity::{
-    Color, ColourTable, CustomisationSourceNote, EntityId, LineStyle, Model, Stroke, StrokeOp,
-    StrokeText, Style,
+    Color, ColourTable, CustomisationSourceNote, Entity, EntityId, Geometry, Layer, LineStyle,
+    Model, PointGeometry, Stroke, StrokeOp, StrokeText, Style, StyleLibrary,
 };
-use katana_geometry::Point2;
+use katana_geometry::{Box2, Point2};
 use katana_storage::{ProjectMetadata, ProjectStore, capture_model};
-use katana_window::canvas::{Canvas, Color as CanvasColor, Image, Pen, PenCap, PenJoin, PenStyle};
+use katana_window::canvas::{
+    Canvas, Color as CanvasColor, Image, Pen, PenCap, PenJoin, PenStyle, RasterCanvas, RectF,
+    RenderHint,
+};
 use katana_window::customisation::customisation_context::{
     AfterCommit, BeginCommit, CustomisationContext, SelectAndShow,
 };
+use katana_window::customisation::definition_thumbnails::{DefinitionThumbnails, ThumbnailKind};
 use katana_window::customisation::style_painter::{
     CanvasRasterBackend, RasterBackend, style_pen_for,
 };
+use katana_window::customisation::style_preview::{PreviewGround, StylePreview};
 use katana_window::customisation::symbol_library::SymbolLibraryDialog;
 use katana_window::customisation::symbol_library_model::SymbolGridModel;
 use katana_window::host::{Host, RecordingHost};
 use katana_window::plan_painter::{
-    PlanFrame, PlanPaintCache, PlanPaintOptions, PlanPaintStats, paint_plan, plan_source_of,
+    PlanFrame, PlanPaintCache, PlanPaintOptions, PlanPaintStats, PlanSource, paint_plan,
+    plan_source_of,
 };
+use katana_window::plotting::legend_painter::{LegendSampleContext, paint_legend_sample};
+use katana_window::sheet_painter::{SheetPaintCache, SheetPaintOptions, SheetSource, paint_sheet};
 
 use crate::fixture_customisation::{
     customisation_fixture_directory, customisation_fixture_file, install_customisation_fixtures,
@@ -1554,4 +1563,330 @@ mod symbol_library {
         assert_eq!(cache.sprite_count(), 1);
         assert!(holds_purple(&after));
     }
+
+    // ---- wave 4's stragglers: the pictures, the preview, a legend and a sheet -------------------
+
+    #[test]
+    fn the_pictures_and_the_plan_draw_a_pen_in_the_colour_the_sessions_customisation_gives_it() {
+        // A cross 2 m across whose every stroke is in a pen only a customisation can define, and
+        // a point wearing it.
+        let mut host = fixture_host(&FIXTURES);
+        let stroke = |op: StrokeOp, x: f64, y: f64| Stroke {
+            op,
+            point: Point2::new(x, y),
+            ..Stroke::default()
+        };
+        let mark = LineStyle {
+            name: String::from("TEST Purple Mark"),
+            at_vertices: true,
+            symbol: true,
+            strokes: vec![
+                Stroke {
+                    op: StrokeOp::Pen,
+                    pen: String::from("sui test purple"),
+                    ..Stroke::default()
+                },
+                stroke(StrokeOp::Move, -1.0, 0.0),
+                stroke(StrokeOp::Draw, 1.0, 0.0),
+                stroke(StrokeOp::Move, 0.0, -1.0),
+                stroke(StrokeOp::Draw, 0.0, 1.0),
+            ],
+            ..LineStyle::default()
+        };
+        add_to_library(host.document_mut(), mark);
+        style(&mut host, "Purple Marks", "TEST Purple Mark");
+        assert!(
+            host.document_mut()
+                .execute(create_point(
+                    Point2::new(0.0, 0.0),
+                    EntityAttributes {
+                        layer: String::from("0"),
+                        style: String::from("Purple Marks"),
+                        ..EntityAttributes::default()
+                    }
+                ))
+                .is_ok()
+        );
+
+        // The grid's picture of it, and the plan 64 pixels square about the point at 16 pixels a
+        // metre, both on black.
+        let mut pictures = DefinitionThumbnails::new(Arc::new(CanvasRasterBackend));
+        let mut picture = |document: &Document| -> Image {
+            pictures
+                .thumbnail_of(
+                    document,
+                    ThumbnailKind::Symbol,
+                    "TEST Purple Mark",
+                    (64, 64),
+                    CanvasColor::BLACK,
+                )
+                .image
+        };
+        // The plot's painter, as the C++'s default PlanPaintOptions are; the raster backend is
+        // the Rust's way to Qt's, which the C++ painter always reaches.
+        let raster: Arc<dyn RasterBackend> = Arc::new(CanvasRasterBackend);
+        let options = PlanPaintOptions {
+            raster: Some(Arc::clone(&raster)),
+            ..PlanPaintOptions::default()
+        };
+        let plan = |document: &Document| -> Image {
+            let mut image = Image::new(64, 64);
+            image.fill(CanvasColor::BLACK);
+            let mut transform = ViewTransform::default();
+            transform.resize(64.0, 64.0);
+            transform.scale = 16.0;
+            transform.center = Point2::new(0.0, 0.0);
+            let frame = PlanFrame {
+                transform,
+                ..PlanFrame::default()
+            };
+            let mut cache = PlanPaintCache::default();
+            let source = plan_source_of(document);
+            raster.paint_image(&mut image, &mut |canvas: &mut dyn Canvas| {
+                let _ = paint_plan(canvas, &source, &frame, &options, &mut cache);
+            });
+            image
+        };
+
+        // And the preview the managers show a symbol in, on its screen ground, 240 x 160.
+        let mut preview = StylePreview::new(host.document());
+        preview.set_ground(PreviewGround::Screen);
+        preview.set_symbol("TEST Purple Mark", 0.0);
+
+        // Nothing defines the name yet: all three draw the mark, in the entity's pen.
+        let mut blank = Image::new(64, 64);
+        blank.fill(CanvasColor::BLACK);
+        let plain_plan = plan(host.document());
+        assert!(plain_plan != blank, "the plan drew no mark at all");
+        assert!(
+            picture(host.document()) != blank,
+            "the picture drew no mark at all"
+        );
+        assert!(!holds_purple(&picture(host.document())));
+        assert!(!holds_purple(&plain_plan));
+        assert!(!holds_purple(&preview.grab(host.document(), 240, 160, 1.0)));
+
+        // The session's customisation defines it: all three draw it purple, the picture having
+        // been dropped with the generation the table moved.
+        host.document_mut().set_colour_table(purple());
+        assert!(holds_purple(&picture(host.document())));
+        assert!(holds_purple(&plan(host.document())));
+        assert!(holds_purple(&preview.grab(host.document(), 240, 160, 1.0)));
+    }
+
+    // ---- the same pen in a sheet's legend -------------------------------------------------------
+    //
+    // A legend's sample is painted by the same painter, handed the colours by
+    // LegendSampleContext, which a sheet fills from its plan's source. On paper, which is white,
+    // at 8 pixels a millimetre.
+
+    #[test]
+    fn a_legend_sample_draws_a_pen_in_the_colour_its_contexts_colours_give_it() {
+        let mut library = StyleLibrary::new();
+        library.add(purple_ring()).expect("the ring is added");
+        let colours = purple();
+        // The ring is 1 m across: 2 mm at 1:500, 16 pixels, in a black entry.
+        let entry = LegendEntry {
+            kind: LegendKind::Symbol,
+            label: String::from("RINGS"),
+            colour: rgb(0, 0, 0),
+            symbol: String::from("TEST Purple Ring"),
+            ..LegendEntry::default()
+        };
+        let plot = PlotSettings::default();
+        let cell = RectF::new(160.0, 85.6, 80.0, 28.8); // 10 x 3.6 mm about (200, 100)
+        let sample = |table: Option<&ColourTable>| -> Image {
+            let mut image = Image::new(400, 200);
+            image.fill(CanvasColor::WHITE);
+            let context = LegendSampleContext {
+                library: Some(&library),
+                colours: table,
+                plot: Some(&plot),
+                pixels_per_millimetre: 8.0,
+                scale: 500.0,
+                ..LegendSampleContext::default()
+            };
+            RasterCanvas::paint_image(&mut image, &mut |canvas: &mut dyn Canvas| {
+                canvas.set_render_hint(RenderHint::Antialiasing, true);
+                assert!(paint_legend_sample(canvas, &entry, cell, &context));
+            });
+            image
+        };
+
+        // With no colours the pen's name means nothing, and the sample is drawn in the entry's
+        // own black; with them it is purple.
+        let plain = sample(None);
+        let all = whole(&plain);
+        assert!(ink_on_paper(&plain, all) > 20);
+        assert_eq!(purple_on_paper(&plain, all), 0);
+        let coloured = sample(Some(&colours));
+        assert!(purple_on_paper(&coloured, whole(&coloured)) > 20);
+    }
+
+    #[test]
+    fn a_sheets_legend_draws_a_pen_in_the_colour_the_plans_source_gives_it() {
+        // A point wearing the ring, on an A3 sheet with a plan of it on the left (30 to 230 mm
+        // across) and a legend on the right (300 to 400 mm).
+        let mut model = Model::new();
+        model
+            .layers
+            .add(Layer {
+                name: String::from("RINGS"),
+                color: rgb(0, 0, 0),
+                ..Layer::default()
+            })
+            .expect("the layer is added");
+        model
+            .styles
+            .add(Style {
+                name: String::from("Ring"),
+                symbol: String::from("TEST Purple Ring"),
+                ..Style::default()
+            })
+            .expect("the style is added");
+        model
+            .entities
+            .add(Entity {
+                geometry: Geometry::Point(PointGeometry {
+                    position: Point2::new(0.0, 0.0),
+                }),
+                layer: String::from("RINGS"),
+                style: String::from("Ring"),
+                ..Entity::default()
+            })
+            .expect("the point is added");
+        let mut library = StyleLibrary::new();
+        library.add(purple_ring()).expect("the ring is added");
+        let colours = purple();
+
+        let plan = Viewport {
+            id: String::from("vp1"),
+            kind: ViewportKind::Plan,
+            rect: Box2::new(Point2::new(30.0, 40.0), Point2::new(230.0, 240.0)),
+            scale: 500.0,
+            centre: Point2::new(0.0, 0.0),
+            ..Viewport::default()
+        };
+        let legend = Viewport {
+            id: String::from("vpL"),
+            kind: ViewportKind::Legend,
+            rect: Box2::new(Point2::new(300.0, 40.0), Point2::new(400.0, 145.0)),
+            ..Viewport::default()
+        };
+        let mut set = SheetSet::default();
+        set.sheets.push(Sheet {
+            id: String::from("s1"),
+            viewports: vec![plan.clone(), legend.clone()],
+            ..Sheet::default()
+        });
+
+        const PIXELS_PER_MILLIMETRE: f64 = 8.0;
+        let paper = paper_dimensions(set.sheets[0].paper, set.sheets[0].landscape);
+        let painted = |table: Option<&ColourTable>| -> Image {
+            let mut image = Image::new(
+                (paper.width_mm * PIXELS_PER_MILLIMETRE).round() as u32,
+                (paper.height_mm * PIXELS_PER_MILLIMETRE).round() as u32,
+            );
+            // Qt::gray, beyond the paper's edge.
+            image.fill(CanvasColor::rgb(160, 160, 164));
+            let source = SheetSource {
+                plan: PlanSource {
+                    model: Some(&model),
+                    library: Some(&library),
+                    library_generation: 1,
+                    colours: table,
+                    ..PlanSource::default()
+                },
+                ..SheetSource::default()
+            };
+            let options = SheetPaintOptions {
+                pixels_per_millimetre: PIXELS_PER_MILLIMETRE,
+                ..SheetPaintOptions::default()
+            };
+            let mut cache = SheetPaintCache::new();
+            RasterCanvas::paint_image(&mut image, &mut |canvas: &mut dyn Canvas| {
+                let _ = paint_sheet(canvas, &set, 0, &source, &options, &mut cache);
+            });
+            image
+        };
+        // A box of the paper (millimetres, y up) as device pixels (y down), corner to corner.
+        let pixels = |paper_box: &Box2| -> Area {
+            Area {
+                left: (paper_box.min.x * PIXELS_PER_MILLIMETRE).floor() as i32,
+                top: ((paper.height_mm - paper_box.max.y) * PIXELS_PER_MILLIMETRE).floor() as i32,
+                right: (paper_box.max.x * PIXELS_PER_MILLIMETRE).floor() as i32,
+                bottom: ((paper.height_mm - paper_box.min.y) * PIXELS_PER_MILLIMETRE).floor()
+                    as i32,
+            }
+        };
+        let legend_pixels = pixels(&legend.rect);
+        let plan_pixels = pixels(&plan.rect);
+
+        // Handed no colours, the legend still lists the ring - its heading, its label and its
+        // sample are ink - and none of that ink is purple.
+        let plain = painted(None);
+        assert!(ink_on_paper(&plain, legend_pixels) > 100);
+        assert_eq!(purple_on_paper(&plain, legend_pixels), 0);
+        assert_eq!(purple_on_paper(&plain, plan_pixels), 0);
+        // Handed the session's, the sample is purple, as the ring on the plan beside it is.
+        let coloured = painted(Some(&colours));
+        assert!(purple_on_paper(&coloured, legend_pixels) > 20);
+        assert!(purple_on_paper(&coloured, plan_pixels) > 20);
+    }
+}
+
+/// A region of an image in whole pixels, its edges inclusive (QRect from two corners).
+#[derive(Clone, Copy, Debug)]
+struct Area {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+/// The whole of `image` (QImage::rect).
+fn whole(image: &Image) -> Area {
+    Area {
+        left: 0,
+        top: 0,
+        right: image.width() as i32 - 1,
+        bottom: image.height() as i32 - 1,
+    }
+}
+
+/// Every pixel of `area` that lies on `image` (QRect::intersected(image.rect())).
+fn pixels_within(image: &Image, area: Area) -> impl Iterator<Item = CanvasColor> + '_ {
+    let left = area.left.max(0);
+    let top = area.top.max(0);
+    let right = area.right.min(image.width() as i32 - 1);
+    let bottom = area.bottom.min(image.height() as i32 - 1);
+    (top..=bottom).flat_map(move |y| {
+        (left..=right).map(move |x| image.pixel(x as u32, y as u32))
+    })
+}
+
+/// On PAPER, which is white: how many pixels of `area` are ink of the colour 128 0 128, whole or
+/// thinned onto the paper as an antialiased edge is. Such a pixel falls short of white by a share
+/// s of what the colour itself falls short by - 127, 255 and 127 - so its green is short by 255 s
+/// and its red and blue by 127 s each; a quarter covered or more is counted, and each channel may
+/// be 30 out. Black ink, and any grey, falls short by the SAME amount in all three: at a share of
+/// a quarter that is already 32 from what purple would give its red, so the entity's own pen, the
+/// legend's lettering and the grey beyond the paper's edge are none of them counted.
+fn purple_on_paper(image: &Image, area: Area) -> usize {
+    pixels_within(image, area)
+        .filter(|pixel| {
+            let green = 255.0 - f64::from(pixel.g);
+            let share = green / 255.0;
+            share >= 0.25
+                && ((255.0 - f64::from(pixel.r)) - 127.0 * share).abs() <= 30.0
+                && ((255.0 - f64::from(pixel.b)) - 127.0 * share).abs() <= 30.0
+        })
+        .count()
+}
+
+/// How many pixels of `area` are not the paper's white.
+fn ink_on_paper(image: &Image, area: Area) -> usize {
+    pixels_within(image, area)
+        .filter(|pixel| *pixel != CanvasColor::WHITE)
+        .count()
 }

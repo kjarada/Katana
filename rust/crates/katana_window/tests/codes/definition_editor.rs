@@ -25,17 +25,17 @@
 //! built, and the runner's own words shown as they came. ONE test gives it the verb itself, the
 //! interpreter over the same Document.
 //!
-//! Left for the modules they wait for: ThePreviewDrawsWhatIsTypedBeforeAnyOfItIsSaved (the style
-//! preview's pictures, CU1's style_preview), and the five that install the customisation
-//! workbench (TheSymbolLibrarysFourButtonsOpenTheOneEditorTheWorkbenchKeeps,
-//! ASymbolMadeHereIsListedByTheSymbolLibraryThoughItIsNotAtVertices,
-//! TheLinetypesTabOpensTheSameEditorOnALibraryLinestyle,
-//! TheEditorGoesWithTheWorkbenchBeforeTheDocument, TheWindowIsNotClosedOverAFormThatIsNotSaved).
+//! Wave 4's stragglers added ThePreviewDrawsWhatIsTypedBeforeAnyOfItIsSaved (the preview panes,
+//! grabbed at the size the editor draws them) and four of the five that install the customisation
+//! workbench (`Window` below, the C++'s Bench: the workbench driven through its actions and drawn
+//! in the harness, where its dialogs' controls are pressed by their object names). The fifth,
+//! TheWindowIsNotClosedOverAFormThatIsNotSaved, is the main window's.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use katana_cad::definition_users::definition_users;
+use katana_cad::style_manager_rows::LinetypeOrigin;
 use katana_cad::Document;
 use katana_commands::{create_layer, create_linetype, create_style};
 use katana_entity::customisation::definition_to_json;
@@ -44,12 +44,19 @@ use katana_entity::{
     StyleLibrary, StyleUnits, SurveyMap, SurveyRule, SurveySection, SurveySymbol,
 };
 use katana_geometry::Point2;
+use katana_window::canvas::Image;
 use katana_window::customisation::customisation_context::{
     AfterCommit, BeginCommit, CustomisationContext, DefinitionEdit,
 };
+use katana_window::customisation::customisation_workbench::{
+    CustomisationServices, CustomisationWorkbench, STYLES_ACTION, SYMBOLS_ACTION,
+};
 use katana_window::customisation::definition_editor::DefinitionEditorDialog;
-use katana_window::drive::Harness;
+use katana_window::customisation::symbol_library::SymbolLibraryDialog;
+use katana_window::drive::{ControlRecord, Harness};
 use katana_window::host::{Answer, Host, HostParts, RecordingHost, VerbOutcome};
+use katana_window::shell::Workbench;
+use katana_window::style_manager::StyleManagerDialog;
 
 use crate::support::Bench;
 use crate::window_support::interpreter_host;
@@ -2040,4 +2047,488 @@ mod definition_editor {
             issues(&bench)
         );
     }
+
+    // ---- wave 4's stragglers: the preview panes, and the editor the workbench keeps ------------
+
+    #[test]
+    fn the_preview_draws_what_is_typed_before_any_of_it_is_saved() {
+        let mut bench = editor(fixture_host());
+        assert!(new_definition(&mut bench, false));
+        assert!(
+            bench.visible("definitionLinePreview"),
+            "a linestyle is shown along a line too"
+        );
+
+        // The baseline is a definition with NO strokes, which is what a new form is: each pane
+        // already shows what it shows of any definition - its scale bar, and the symbol pane the
+        // mark of the insertion point - so what differs from it below is the strokes and nothing
+        // else.
+        bench.fill("definitionUnits", "paper");
+        bench.fill("definitionLength", "6");
+        let empty_symbol = grab_symbol(&mut bench);
+        let empty_line = grab_line(&mut bench);
+        // Which pane draws it as which: only a symbol has an insertion point.
+        assert!(
+            bench.dialog.symbol_preview().insertion_point().is_some(),
+            "the origin is marked"
+        );
+        assert!(bench.dialog.line_preview().insertion_point().is_none());
+        assert!(bench.dialog.symbol_preview().scale_bar_metres() > 0.0);
+        assert!(bench.dialog.line_preview().scale_bar_metres() > 0.0);
+
+        // Strokes, and still no name: a definition is pictured from its first stroke, though it
+        // cannot be saved until it is named.
+        strokes(&mut bench, "[\"move\", 0, 0],\n[\"draw\", 4, 0]");
+        assert!(!bench.enabled("definitionSave"));
+        assert!(issues(&bench).starts_with("Type a name"), "{}", issues(&bench));
+        let dash_symbol = grab_symbol(&mut bench);
+        let dash_line = grab_line(&mut bench);
+        assert!(differ(&dash_symbol, &empty_symbol));
+        assert!(differ(&dash_line, &empty_line));
+        // Drawn as what it is: nothing in either pane says it is undefined, or a symbol where a
+        // linestyle was meant.
+        assert!(
+            bench.dialog.symbol_preview().notice().is_empty(),
+            "{}",
+            bench.dialog.symbol_preview().notice()
+        );
+        assert!(
+            bench.dialog.line_preview().notice().is_empty(),
+            "{}",
+            bench.dialog.line_preview().notice()
+        );
+        assert!(bench.text("definitionPreviewNote").is_empty());
+
+        // Named, it is the same picture - the name is no part of it - and can be saved; nothing
+        // has reached the library.
+        bench.fill("definitionName", "TEST Dashes");
+        assert!(bench.enabled("definitionSave"));
+        assert!(!differ(&grab_symbol(&mut bench), &dash_symbol));
+        assert!(!differ(&grab_line(&mut bench), &dash_line));
+        assert!(!has_definition(&bench, "TEST Dashes"));
+
+        // Live: another stroke, another picture in BOTH panes - under the same name, which a
+        // cache keyed on names alone would answer with the last.
+        strokes(
+            &mut bench,
+            "[\"move\", 0, 0],\n[\"draw\", 4, 0],\n[\"draw\", 4, 3]",
+        );
+        let hook_symbol = grab_symbol(&mut bench);
+        let hook_line = grab_line(&mut bench);
+        assert!(differ(&hook_symbol, &dash_symbol));
+        assert!(differ(&hook_line, &dash_line));
+
+        // While a line is half typed the last picture that read stays up, and the note under the
+        // panes says it is not of what is typed.
+        strokes(
+            &mut bench,
+            "[\"move\", 0, 0],\n[\"draw\", 4, 0],\n[\"draw\", 4, 3],\n[\"dr",
+        );
+        assert!(!bench.enabled("definitionSave"));
+        assert!(!differ(&grab_symbol(&mut bench), &hook_symbol));
+        assert!(!differ(&grab_line(&mut bench), &hook_line));
+        assert_eq!(
+            bench.text("definitionPreviewNote"),
+            "Not what is typed: the picture is of the last text that read."
+        );
+        // Finished, the note goes.
+        strokes(
+            &mut bench,
+            "[\"move\", 0, 0],\n[\"draw\", 4, 0],\n[\"draw\", 4, 3],\n[\"draw\", 0, 3]",
+        );
+        assert!(bench.text("definitionPreviewNote").is_empty());
+        assert!(differ(&grab_symbol(&mut bench), &hook_symbol));
+
+        // At another plot scale both panes are laid out at it.
+        let before = bench.dialog.symbol_preview().scale_denominator();
+        assert_eq!(bench.dialog.line_preview().scale_denominator(), before);
+        let (other, expected) = if before == 1000 {
+            ("1:200", 200)
+        } else {
+            ("1:1000", 1000)
+        };
+        bench.fill("definitionPlotScale", other);
+        assert_eq!(bench.dialog.symbol_preview().scale_denominator(), expected);
+        assert_eq!(bench.dialog.line_preview().scale_denominator(), expected);
+        bench.fill("definitionPlotScale", &format!("1:{before}"));
+
+        // A symbol has no pattern along a line: that pane goes.
+        bench.fill("definitionKind", "Symbol");
+        assert!(!bench.visible("definitionLinePreview"));
+        // Another definition is not shown under the last one's picture: a new one's panes are
+        // those of no strokes again.
+        bench.fill("definitionKind", "Linestyle");
+        bench.press("definitionRevert");
+        assert!(new_definition(&mut bench, false));
+        bench.fill("definitionUnits", "paper");
+        bench.fill("definitionLength", "6");
+        assert!(!differ(&grab_symbol(&mut bench), &empty_symbol));
+        assert!(!differ(&grab_line(&mut bench), &empty_line));
+        assert!(bench.text("definitionPreviewNote").is_empty());
+    }
+
+    #[test]
+    fn the_symbol_librarys_four_buttons_open_the_one_editor_the_workbench_keeps() {
+        let mut b = Window::new();
+        b.trigger(SYMBOLS_ACTION);
+        assert!(b.bench.symbol_library().is_some());
+        assert!(
+            b.bench.definition_editor().is_none(),
+            "made when first asked for"
+        );
+
+        // New needs no symbol; the other three a definition the library holds, which a built-in
+        // shape is not.
+        assert!(b.select_symbol("circle"));
+        assert!(b.enabled(SYMBOLS, "symbolNew"));
+        for name in ["symbolEdit", "symbolDuplicate", "symbolDelete"] {
+            assert!(!b.enabled(SYMBOLS, name), "{name}");
+        }
+        assert!(b.select_symbol("TEST Valve"));
+        for name in ["symbolNew", "symbolEdit", "symbolDuplicate", "symbolDelete"] {
+            assert!(b.enabled(SYMBOLS, name), "{name}");
+        }
+
+        b.press(SYMBOLS, "symbolEdit");
+        {
+            let editor = b.bench.definition_editor().expect("the editor is made");
+            assert!(editor.is_open());
+            assert_eq!(editor.edited_name(), "TEST Valve");
+        }
+        // Beside the library, not over it; the C++'s parent, the window, is the workbench's
+        // window here, which draws it.
+        let shown = b
+            .harness
+            .target_record(EDITOR)
+            .expect("the editor is drawn");
+        assert!(!shown.modal, "beside the library, not over it");
+
+        // The same editor each time, whichever button asked: the workbench keeps one.
+        b.press(SYMBOLS, "symbolNew");
+        assert_eq!(b.control(EDITOR, "definitionHeading").text, "New symbol");
+        b.press(SYMBOLS, "symbolDuplicate");
+        assert_eq!(b.control(EDITOR, "definitionName").value, "TEST Valve 2");
+
+        // Delete: the definition shown, the line run through the window's executor, and - rule #1
+        // and the style Marks naming it - refused there.
+        {
+            let Window { bench, host, .. } = &mut b;
+            bench
+                .definition_editor()
+                .expect("the editor is made")
+                .reject(host);
+        }
+        b.draw();
+        b.press(SYMBOLS, "symbolDelete");
+        {
+            let editor = b.bench.definition_editor().expect("the editor is made");
+            assert!(editor.is_open(), "shown again");
+            assert_eq!(editor.edited_name(), "TEST Valve");
+        }
+        assert_eq!(b.host.lines(), strings(&[REMOVE_VALVE]));
+        assert!(b.control(EDITOR, "definitionDeleteAnyway").visible);
+        assert!(b.host.document().style_library().find("TEST Valve") == Some(&valve()));
+
+        // A symbol library built on its own has no editor to ask.
+        let mut alone = Bench::new(fixture_host(), |document| {
+            SymbolLibraryDialog::new(document, CustomisationContext::with_runner())
+        });
+        assert!(alone.dialog.select_symbol(&mut alone.host, "TEST Valve"));
+        alone.draw();
+        for name in ["symbolNew", "symbolEdit", "symbolDuplicate", "symbolDelete"] {
+            assert!(!alone.enabled(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_symbol_made_here_is_listed_by_the_symbol_library_though_it_is_not_at_vertices() {
+        // New Symbol, a name, strokes and Save - the path a person takes - leave At vertices
+        // unticked. The Symbol Library lists what cad's symbol_library gives it, and that holds a
+        // definition its customisation LISTS as a symbol (LineStyle::symbol, which New Symbol from
+        // the library sets): nothing has to name it, and it need not be drawn at vertices. (The
+        // catalogue once read no such flag, and a symbol made here was missing from the grid until
+        // a style or a survey code named it - which the headless test of this path then hid by
+        // ticking At vertices.)
+        let mut b = Window::new();
+        b.trigger(SYMBOLS_ACTION);
+        assert!(b.bench.symbol_library().is_some());
+        // The library reloads after a commit at its next frame, as every panel does.
+        let listed = |b: &mut Window, name: &str| {
+            b.draw();
+            b.bench
+                .symbol_library()
+                .expect("the library is made")
+                .shown_names()
+                .iter()
+                .any(|shown| shown == name)
+        };
+        assert!(
+            listed(&mut b, "TEST Valve"),
+            "the grid lists what the library holds"
+        );
+        assert!(!listed(&mut b, "TEST Post"));
+
+        b.press(SYMBOLS, "symbolNew");
+        assert!(b.bench.definition_editor().is_some());
+        b.fill(EDITOR, "definitionName", "TEST Post");
+        b.fill(EDITOR, "definitionStrokes", "[\"move\", 0, 0],\n[\"draw\", 0, 2]");
+        assert!(b.control(EDITOR, "definitionAtVertices").checked != Some(true));
+        assert!(
+            b.enabled(EDITOR, "definitionSave"),
+            "{}",
+            b.bench.definition_editor().map(|e| String::from(e.issues())).unwrap_or_default()
+        );
+        b.press(EDITOR, "definitionSave");
+
+        let post = b.in_library("TEST Post");
+        assert!(post.symbol);
+        assert!(!post.at_vertices);
+        assert!(
+            definition_users(b.host.document(), "TEST Post").empty(),
+            "no rule, style or layer names it"
+        );
+        assert!(listed(&mut b, "TEST Post"));
+
+        // The control: the same two strokes saved as a LINESTYLE - Kind changed in the form - are
+        // in no list of symbols, and the grid does not show them.
+        b.press(SYMBOLS, "symbolNew");
+        b.fill(EDITOR, "definitionName", "TEST Rail");
+        b.fill(EDITOR, "definitionKind", "Linestyle");
+        b.fill(EDITOR, "definitionStrokes", "[\"move\", 0, 0],\n[\"draw\", 0, 2]");
+        assert!(
+            b.enabled(EDITOR, "definitionSave"),
+            "{}",
+            b.bench.definition_editor().map(|e| String::from(e.issues())).unwrap_or_default()
+        );
+        b.press(EDITOR, "definitionSave");
+        let rail = b.in_library("TEST Rail");
+        assert!(!rail.symbol);
+        assert!(!rail.at_vertices);
+        assert!(!listed(&mut b, "TEST Rail"));
+        assert!(listed(&mut b, "TEST Post"));
+    }
+
+    #[test]
+    fn the_linetypes_tab_opens_the_same_editor_on_a_library_linestyle() {
+        let mut b = Window::new();
+        b.trigger(STYLES_ACTION);
+        {
+            let Window { bench, host, .. } = &mut b;
+            bench.style_manager().expect("the manager is made").select_linetype(
+                host.document(),
+                "TEST Kerb",
+                LinetypeOrigin::Library,
+            );
+        }
+        b.draw();
+        assert_eq!(
+            b.bench
+                .style_manager()
+                .expect("the manager is made")
+                .selected_linetypes(),
+            vec![(String::from("TEST Kerb"), LinetypeOrigin::Library)]
+        );
+
+        // The page says where a library linestyle IS edited, under the sentence that it is not
+        // edited on the page.
+        let details = b.control(STYLES, "libraryDetails").text;
+        assert!(
+            details.contains(
+                "are read-only here. Edit Definition opens this one in the definition editor."
+            ),
+            "{details}"
+        );
+        assert!(b.enabled(STYLES, "linetypeEditDefinition"));
+        b.press(STYLES, "linetypeEditDefinition");
+        {
+            let editor = b.bench.definition_editor().expect("the editor is made");
+            assert!(editor.is_open());
+            assert_eq!(editor.edited_name(), "TEST Kerb");
+        }
+        assert_eq!(b.control(EDITOR, "definitionKind").value, "Linestyle");
+
+        // And the symbol library's buttons reach that one, not a second: the workbench keeps one.
+        b.trigger(SYMBOLS_ACTION);
+        assert!(b.select_symbol("TEST Valve"));
+        b.press(SYMBOLS, "symbolEdit");
+        assert_eq!(
+            b.bench
+                .definition_editor()
+                .expect("the editor is made")
+                .edited_name(),
+            "TEST Valve"
+        );
+
+        // A linestyle is BEGUN from this tab too, with no library linestyle to select first: the
+        // button sits with the tab's own, not on the page of one that exists.
+        assert!(b.enabled(STYLES, "linetypeNewDefinition"));
+        b.press(STYLES, "linetypeNewDefinition");
+        assert_eq!(b.control(EDITOR, "definitionHeading").text, "New linestyle");
+        assert_eq!(b.control(EDITOR, "definitionKind").value, "Linestyle");
+        assert_eq!(
+            b.bench
+                .definition_editor()
+                .expect("the editor is made")
+                .edited_name(),
+            ""
+        );
+
+        // A style manager built on its own has no editor to ask: both doors are shut rather than
+        // pressed to no effect.
+        let mut host = fixture_host();
+        let mut alone = StyleManagerDialog::new(&CustomisationContext::with_runner(), host.document());
+        alone.select_linetype(host.document(), "TEST Kerb", LinetypeOrigin::Library);
+        let mut harness = Harness::new();
+        harness
+            .run(|ui| {
+                let ctx = ui.ctx().clone();
+                let _ = alone.ui(&ctx, &mut host);
+            })
+            .expect("the manager is drawn");
+        let door = |name: &str| {
+            harness
+                .snapshot()
+                .control(STYLES, name)
+                .cloned()
+                .unwrap_or_else(|| panic!("{name} is drawn"))
+        };
+        assert!(!door("linetypeEditDefinition").enabled);
+        assert!(!door("linetypeNewDefinition").enabled);
+    }
+
+    #[test]
+    fn the_editor_goes_with_the_workbench_before_the_document() {
+        // The editor holds the workbench's context, and with it the workbench's picture cache:
+        // once the workbench has gone, nothing but this test holds the cache, so no editor is
+        // left - while the drawing is still there.
+        let mut b = Window::new();
+        let thumbnails = b.bench.thumbnails();
+        {
+            let Window { bench, host, .. } = &mut b;
+            let _ = bench.show_definition_editor(host);
+        }
+        assert!(b.bench.definition_editor().is_some());
+        assert!(
+            Rc::strong_count(&thumbnails) > 2,
+            "the workbench and its editor hold it"
+        );
+        let Window { bench, host, .. } = b;
+        drop(bench);
+        assert_eq!(Rc::strong_count(&thumbnails), 1);
+        assert!(host.document().style_library().contains("TEST Kerb"));
+    }
+}
+
+// ---- the customisation workbench (the C++ tests' Bench) ----------------------------------------
+
+/// The targets the workbench's dialogs are drawn as.
+const SYMBOLS: &str = "symbolLibraryDialog";
+const EDITOR: &str = "definitionEditorDialog";
+const STYLES: &str = "styleManager";
+
+/// A window with a Format menu, its customisation workbench over the fixture's drawing, and a
+/// runner that does what CUSTOMISE REMOVE does (fixture_host): the C++'s Bench. Headless, as the
+/// host is.
+struct Window {
+    bench: CustomisationWorkbench,
+    host: RecordingHost,
+    harness: Harness,
+}
+
+impl Window {
+    fn new() -> Self {
+        let services = CustomisationServices {
+            has_runner: true,
+            ..CustomisationServices::default()
+        };
+        Self {
+            bench: CustomisationWorkbench::new(services),
+            host: fixture_host(),
+            harness: Harness::new(),
+        }
+    }
+
+    /// The action triggered, and the events processed.
+    fn trigger(&mut self, action: &str) {
+        assert!(self.bench.trigger(&mut self.host, action), "{action}");
+        self.draw();
+    }
+
+    /// processEvents: the workbench's dialogs drawn until the window is idle; a refused act fails
+    /// the test.
+    fn draw(&mut self) {
+        let (bench, host) = (&mut self.bench, &mut self.host);
+        self.harness
+            .run(|ui| bench.ui(ui, host))
+            .unwrap_or_else(|problem| panic!("{problem}"));
+    }
+
+    fn press(&mut self, target: &str, name: &str) {
+        self.harness.target(target).press(name);
+        self.draw();
+    }
+
+    fn fill(&mut self, target: &str, name: &str, text: &str) {
+        self.harness.target(target).fill(name, text);
+        self.draw();
+    }
+
+    fn control(&self, target: &str, name: &str) -> ControlRecord {
+        self.harness
+            .snapshot()
+            .control(target, name)
+            .cloned()
+            .unwrap_or_else(|| panic!("{target} > {name} is drawn"))
+    }
+
+    fn enabled(&self, target: &str, name: &str) -> bool {
+        self.control(target, name).enabled
+    }
+
+    /// SymbolLibraryDialog::selectSymbol, and the events processed.
+    fn select_symbol(&mut self, name: &str) -> bool {
+        let selected = self
+            .bench
+            .symbol_library()
+            .expect("the library is made")
+            .select_symbol(&mut self.host, name);
+        self.draw();
+        selected
+    }
+
+    fn in_library(&self, name: &str) -> LineStyle {
+        self.host
+            .document()
+            .style_library()
+            .find(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("{name} is in the library"))
+    }
+}
+
+/// QWidget::grab of the editor's symbol pane: painted at the size the editor draws it.
+fn grab_symbol(bench: &mut Editor) -> Image {
+    let Bench { dialog, host, .. } = bench;
+    dialog
+        .symbol_preview_mut()
+        .grab(host.document(), 260, 170, 1.0)
+}
+
+/// The same of the pane along a line.
+fn grab_line(bench: &mut Editor) -> Image {
+    let Bench { dialog, host, .. } = bench;
+    dialog
+        .line_preview_mut()
+        .grab(host.document(), 260, 130, 1.0)
+}
+
+/// Whether two grabs of ONE pane differ anywhere: ink against a baseline, and never a count of
+/// pixels, which a font or a platform's antialiasing moves. The two must be of one size.
+fn differ(a: &Image, b: &Image) -> bool {
+    assert_eq!(
+        (a.width(), a.height()),
+        (b.width(), b.height()),
+        "the pane was resized between the two grabs"
+    );
+    a != b
 }

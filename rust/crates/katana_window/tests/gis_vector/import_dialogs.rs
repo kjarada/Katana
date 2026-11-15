@@ -177,6 +177,52 @@ mod vector_import_dialog {
         assert!(bench.dialog.command().is_err());
         assert!(bench.text("vectorImportCommand").is_empty());
     }
+
+    // The twin of tests/qt_widgets/test_import_placement.cpp's VectorImportDialog case (wave 4's
+    // stragglers), beside the dialog's other cases.
+    #[test]
+    fn the_gis_import_has_the_placement_group_and_names_its_fields() {
+        use katana_cad::import_placement::{ImportPlacement, ImportPlacementMode};
+
+        // The host's settings are its own, in memory: the C++'s OwnSettings.
+        let source = SourceDescription {
+            path: PathBuf::from("parcels.geojson"),
+            kind: SourceKind::Vector,
+            driver: String::from("GeoJSON"),
+            vector_layers: vec![VectorLayerDescription {
+                name: String::from("parcels"),
+                feature_count: 4,
+                geometry_type: String::from("Polygon"),
+                ..VectorLayerDescription::default()
+            }],
+            ..SourceDescription::default()
+        };
+        let mut host = RecordingHost::new();
+        let dialog = VectorImportDialog::new(
+            &source,
+            Box2::default(),
+            GisDialogContext::default(),
+            &mut host,
+        );
+        let mut bench = Bench::new("vectorImportDialog", dialog, host);
+        // The fields' names follow every GIS dialog's <d><Field> rule since the dialog came to
+        // build IMPORT lines (docs/interop.md, "Import options"): they were importSourceLayer,
+        // importTargetLayer and importAttributes. The file's layer list, the C++'s
+        // vectorImportLayers, is vectorImportFileLayers here (wave 2: the scope's own layer list
+        // has that name too, and a name drawn twice in one dialog is refused).
+        assert!(bench.has("vectorImportFileLayers"));
+        assert!(bench.has("vectorImportTarget"));
+        assert!(bench.has("vectorImportAttributes"));
+        assert_eq!(
+            bench.dialog.placement_box().placement(),
+            ImportPlacement::default()
+        );
+        bench.press("importPlacementLocal");
+        assert_eq!(
+            bench.dialog.placement_box().placement().mode,
+            ImportPlacementMode::Local
+        );
+    }
 }
 
 mod import_dialogs {

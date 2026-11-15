@@ -289,6 +289,114 @@ mod customisation_workbench {
     }
 
     #[test]
+    fn the_linework_tab_strings_with_the_customisations_control_codes_and_follows_a_change() {
+        // By hand. The fixture's rule WM* draws a line, so four points coded WM1 are one string,
+        // joined in the order made: (0,0), (10,0), (20,0), (30,0). The third is coded "WM1 GO".
+        // While the start code is the default ST, GO is a token nothing knows: ONE line through the
+        // four, and one note. Once the customisation's start code is GO, the third point begins a
+        // second line: TWO lines of two points, and no note.
+        let mut bench = Bench::new();
+        bench.load_fixture();
+        for line in [
+            "POINT 0,0",
+            "POINT 10,0",
+            "POINT 20,0",
+            "POINT 30,0",
+            "SELECT ALL",
+            "PROP SET code WM1",
+            "SELECT 3",
+            "PROP SET code \"WM1 GO\"",
+            "SELECT NONE",
+        ] {
+            // The C++'s bench.interpreter.run: straight to the interpreter, not through the
+            // window's executor, so not one of the lines it ran.
+            let parts = &mut bench.host.parts;
+            let ran = parts.interpreter.run(&mut parts.document, line);
+            assert!(
+                ran.is_ok(),
+                "{line}: {}",
+                ran.err().map(|e| e.describe()).unwrap_or_default()
+            );
+        }
+        bench.trigger(CODES_ACTION);
+        bench.draw();
+        bench.harness.target("surveyCodeManagerDialog");
+        for name in [
+            "lineworkStart",
+            "lineworkOrder",
+            "lineworkPreview",
+            "lineworkExecute",
+            "lineworkSummary",
+        ] {
+            assert!(bench.harness.control(name).is_some(), "no {name}");
+        }
+        let control = |bench: &Bench, name: &str| {
+            bench
+                .harness
+                .control(name)
+                .unwrap_or_else(|| panic!("no {name}"))
+        };
+        // In the order observed: the points were typed, and carry no number (the C++'s
+        // setCurrentIndex(1)).
+        bench.harness.fill("lineworkOrder", "In the order observed");
+        bench.draw();
+
+        // The summary begins with what the scope took - the drawing's 4 points.
+        assert_eq!(control(&bench, "lineworkStart").value, "ST");
+        bench.harness.press("lineworkPreview");
+        bench.draw();
+        assert_eq!(
+            control(&bench, "lineworkSummary").text,
+            "4 matched. Preview only: 1 lines from 4 points; 0 points not placed; 1 notes. \
+             Execute builds them as one undoable step."
+        );
+
+        {
+            let parts = &mut bench.host.parts;
+            let set = parts
+                .interpreter
+                .run(&mut parts.document, "CUSTOMISE SET linework.start=GO");
+            assert!(
+                set.is_ok(),
+                "{}",
+                set.err().map(|e| e.describe()).unwrap_or_default()
+            );
+        }
+        bench.draw();
+
+        // The tab reads the Document: there is no copy of the codes in the window to ask, and
+        // nothing is said in the log for a change somebody else's line made - that line was
+        // answered where it ran.
+        assert_eq!(
+            control(&bench, "lineworkStart").value,
+            "GO",
+            "the tab shows the customisation's code"
+        );
+        for line in bench.log() {
+            assert!(!line.contains("control codes set"), "{line}");
+        }
+        assert!(bench.host.lines().is_empty(), "a preview runs no line");
+        // Execute with no Preview pressed since: it is the LINEWORK line, which strings with the
+        // codes the customisation has now, not the plan made with ST.
+        bench.harness.press("lineworkExecute");
+        bench.draw();
+        assert_eq!(bench.host.lines(), ["LINEWORK DRAWING ORDER entity"]);
+        assert_eq!(
+            bench.host.document().model().entities.size(),
+            6,
+            "the 4 points and 2 lines"
+        );
+        assert_eq!(bench.host.document().last_created_entities().len(), 2);
+        // In the verb's own first record: the 4 points looked at, 2 lines, and GO no longer a
+        // token nothing knows.
+        assert_eq!(
+            control(&bench, "lineworkSummary").text,
+            "Executed as one undoable step: 2 lines drawn. linework scope=drawing matched=4 \
+             considered=4 lines=2 unplaced=0 notes=0"
+        );
+    }
+
+    #[test]
     fn a_code_manager_opened_later_is_built_on_the_customisations_linework_codes() {
         let mut bench = Bench::new();
         {

@@ -2,12 +2,12 @@
 //! test_sheet_painter and, under plotting/, test_sheet_sections, test_legend_painter,
 //! test_legend_properties (its summary case), test_plan_grid_painter, test_plot_drawing_dialog,
 //! test_plot_output (its PlotOutput suite; TiffWriter is C's), test_plot_style,
-//! test_sheet_tables_painter and test_view_image_export (its Snapshot and ViewImageDialog suites)
-//! - one module a C++ file, the suites as modules inside.
+//! test_sheet_tables_painter and test_view_image_export (its Snapshot and ViewImageDialog suites,
+//! and its ViewImage suite, twinned in wave 4 once the plan view had come) - one module a C++
+//! file, the suites as modules inside.
 //!
 //! Left for the wave that brings what they stand on: test_plan_grid_editor's three cases and
-//! test_legend_properties' scope case (the sheet editor, SH2), and test_view_image_export's
-//! ViewImage suite (the plan view's render to image, VP).
+//! test_legend_properties' scope case (the sheet editor, SH2).
 //!
 //! A sheet is painted into a canvas Image at 4 px a millimetre and read back pixel by pixel, as the
 //! C++ tests read their QImages. Ink is compared against a baseline painted in the same test,
