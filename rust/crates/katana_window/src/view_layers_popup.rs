@@ -574,7 +574,9 @@ impl ViewLayersPopup {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_min_width(MINIMUM_WIDTH);
-                    let spec = TargetSpec::new("ViewLayersPopup", TargetKind::Popup, &self.heading);
+                    // Qt::WA_DeleteOnClose, as the C++ made it.
+                    let spec = TargetSpec::new("ViewLayersPopup", TargetKind::Popup, &self.heading)
+                        .deletes_on_close(true);
                     begin_target(ui, spec);
                     self.body(ui);
                     end_target(ui, ui.min_rect());

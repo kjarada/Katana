@@ -606,6 +606,12 @@ impl StyleManagerDialog {
         Some(Box::new(transaction))
     }
 
+    /// QObject::setObjectName: drawn as `name` rather than STYLE_MANAGER, as the C++ Format
+    /// menu's workbench named its copy styleManagerDialog.
+    pub fn set_object_name(&mut self, name: &str) {
+        self.frame.set_name(name);
+    }
+
     // ---- selection -----------------------------------------------------------------------------
 
     /// The status line.

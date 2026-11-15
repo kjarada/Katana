@@ -111,7 +111,7 @@ const FRAME_MARGIN: f64 = 0.08;
 /// The zoom of a view that has never been framed, in pixels per model unit: ten pixels a metre
 /// shows an empty drawing as a few tens of metres of grid, a sensible first look for a site drawn
 /// in metres.
-const INITIAL_SCALE: f64 = 10.0;
+pub(crate) const INITIAL_SCALE: f64 = 10.0;
 
 /// The smallest a plan view may be made. It used to be 480 x 320, which stopped a dock being
 /// shrunk below that and made its neighbours overlap it (the UX audit of 2026-09-23). Measured in

@@ -237,14 +237,9 @@ mod customisation_workbench {
                 .find(|action| action.name == name)
                 .expect("the action");
             let dialog = action.dialog.clone().expect("the action names the dialog it opens");
-            // The style manager is drawn as styleManager: the C++ workbench renamed its dialog
-            // styleManagerDialog, which the Rust dialog's fixed name does not allow.
-            let drawn = if name == STYLES_ACTION {
-                String::from("styleManager")
-            } else {
-                dialog
-            };
-            let target = bench.harness.target_record(&drawn).expect("shown");
+            // Drawn under the name the action carries: the style manager too, which the workbench
+            // names styleManagerDialog as the C++ workbench did (kStyleManagerName).
+            let target = bench.harness.target_record(&dialog).expect("shown");
             assert!(!target.modal, "{name} is beside the drawing, not over it");
             match name {
                 SYMBOLS_ACTION => {

@@ -317,7 +317,11 @@ impl CustomisationWorkbench {
     pub fn show_style_manager(&mut self, host: &mut dyn Host) -> &mut StyleManagerDialog {
         let first = self.styles.dialog.is_none();
         if first {
-            self.styles.dialog = Some(StyleManagerDialog::new(&self.context(), host.document()));
+            let mut dialog = StyleManagerDialog::new(&self.context(), host.document());
+            // The C++ workbench named its manager so (kStyleManagerName), as it names no dialog of
+            // its own: what --dialog formatStyles finds it by.
+            dialog.set_object_name(STYLE_MANAGER_DIALOG);
+            self.styles.dialog = Some(dialog);
         }
         self.styles.shown = true;
         let dialog = self.styles.dialog.as_mut().expect("made above");

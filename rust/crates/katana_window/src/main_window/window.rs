@@ -491,6 +491,15 @@ impl MainWindow {
         }
         let composed = self.composed();
         let Some(action) = composed.action(name) else {
+            // The sheet editor's, once File > Sheets has made it: it is a child of the C++ window,
+            // so findChild<QAction*> found its actions after the window's own.
+            if let Some(editor) = self.ui.dialogs.sheets.as_mut()
+                && editor.action(&self.exec, name).is_some()
+            {
+                let status = editor.trigger(&mut self.exec, name);
+                self.after_call();
+                return status;
+            }
             return Err(make_error(ErrorCode::NotFound, "no such menu item", name));
         };
         if !action.enabled {
@@ -934,6 +943,8 @@ impl MainWindow {
         let dialogs = &mut self.ui.dialogs;
         if dialogs.layers.is_none() {
             let mut dialog = LayerManagerDialog::new(document);
+            // The action's name plus "Dialog", as the C++ window named it for --dialog.
+            dialog.set_object_name(super::actions::FORMAT_LAYERS_DIALOG);
             dialog.show_first_row(document);
             dialogs.layers = Some(dialog);
         }
@@ -1919,7 +1930,16 @@ impl DrivenWindow for MainWindow {
     }
 
     fn actions(&self) -> Vec<Action> {
-        self.composed().actions()
+        let mut actions = self.composed().actions();
+        // findChildren<QAction*> found the sheet editor's too, once it was made (see trigger).
+        if let Some(editor) = self.ui.dialogs.sheets.as_ref() {
+            for action in editor.actions(&self.exec) {
+                if !actions.iter().any(|known| known.name == action.name) {
+                    actions.push(action);
+                }
+            }
+        }
+        actions
     }
 
     fn menus(&self) -> Vec<Menu> {

@@ -785,7 +785,9 @@ impl SheetEditor {
         let set = host.document().sheet_set();
         let id = main_plan_of(&set, self.current_sheet());
         let mut dialog = SuggestPaperDialog {
-            frame: DialogFrame::new("sheetSuggestPaperDialog", "Choose Paper for a Scale"),
+            // Deleted on close (Qt::WA_DeleteOnClose).
+            frame: DialogFrame::new("sheetSuggestPaperDialog", "Choose Paper for a Scale")
+                .deletes_on_close(true),
             sheet: format!("{}", self.current_sheet() + 1),
             note: format!(
                 "The smallest paper that holds {} at the scale, the other views kept in \

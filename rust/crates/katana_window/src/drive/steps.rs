@@ -34,7 +34,9 @@
 //! THE TARGET is what the steps made the place their fills and presses go and what `--screenshot`
 //! grabs, by the name the registry draws it under; the C++ kept a guarded pointer to it, so a
 //! target that closed itself left the window the target again ("NAME has closed: the window is
-//! grabbed"). Here a target has closed when the last frame did not draw it.
+//! grabbed"). Here a target has closed when the last frame did not draw it, and that is said only of
+//! a dialog that went as it closed (Qt::WA_DeleteOnClose, `DialogFrame::deletes_on_close`): a
+//! dialog the window keeps was only hidden, and the C++'s pointer to it held.
 //!
 //! WHAT IS NOT THE C++'s. Settling is checked: a window that does not come idle after a step, a
 //! name drawn twice in one target, and an act refused all end the run with exit 1 and their
@@ -249,6 +251,10 @@ pub struct StepEngine {
     said_as: String,
     /// The docks `--survey-dock` showed, by their object names, whose status lines end the run.
     docks: Vec<String>,
+    /// The target as a frame last drew it, and whether it goes when it closes (TargetSpec::
+    /// deletes_on_close): the C++'s QPointer to it went null, where a dialog the window keeps
+    /// was only hidden and stayed the target.
+    seen: Option<(String, bool)>,
 }
 
 impl StepEngine {
@@ -285,6 +291,25 @@ impl StepEngine {
             .filter(|name| frame.target(name).is_some())
     }
 
+    /// What `frame` shows of the target, kept for when it has closed: whether it went with it.
+    fn note(&mut self, frame: &Snapshot) {
+        if let Some(name) = self.target.as_deref()
+            && let Some(drawn) = frame.target(name)
+        {
+            self.seen = Some((String::from(name), drawn.deletes_on_close));
+        }
+    }
+
+    /// The target not drawn now went when it closed (the C++'s QPointer null): a dialog the window
+    /// keeps was only hidden, and the C++'s steps still had it. One never seen drawn is taken as
+    /// gone, which is what a frame can tell of it.
+    fn target_gone(&self) -> bool {
+        match (&self.target, &self.seen) {
+            (Some(name), Some((seen, deletes))) if name == seen => *deletes,
+            _ => true,
+        }
+    }
+
     /// Frames until the window is idle; false, said, when it is not.
     fn settle(
         window: &mut dyn DrivenWindow,
@@ -309,6 +334,8 @@ impl StepEngine {
         console: &mut dyn Console,
     ) -> bool {
         let text = step.text.as_str();
+        // What the step before left drawn: a target closed by this step is then known by it.
+        self.note(&headless.snapshot());
         match step.kind {
             StepKind::Trigger => {
                 // --action, in its turn among the steps: a menu command that acts on what the
@@ -709,11 +736,13 @@ impl StepEngine {
             console.err(&format!("{dock}: {status}\n"));
         }
         // Steps that were all --command leave no target: the window is what they changed. So is
-        // it when the target closed itself.
+        // it when the target closed itself. A dialog the window keeps, closed, was only hidden:
+        // the C++ grabbed it as it was, and said nothing; here, with no frame of it to grab, the
+        // window is grabbed, and nothing is said either.
         match self.live_target(frame) {
             Some(target) => String::from(target),
             None => {
-                if !self.said_as.is_empty() {
+                if !self.said_as.is_empty() && self.target_gone() {
                     console.err(&format!(
                         "{} has closed: the window is grabbed\n",
                         self.said_as

@@ -101,7 +101,9 @@ impl TestWindow {
             document: Document::default(),
             headless: false,
             shown: false,
-            frame: DialogFrame::new("testDialog", "Test Dialog"),
+            // Gone when it closes, as the Page Setup dialog of the C++ tests of a closed target
+            // (a_dialog_that_deletes_itself_on_close_leaves_the_window_the_target).
+            frame: DialogFrame::new("testDialog", "Test Dialog").deletes_on_close(true),
             dialog: TestDialog::default(),
             dock_open: false,
             menu_open: false,

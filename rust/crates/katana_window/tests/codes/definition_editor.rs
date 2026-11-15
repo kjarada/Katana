@@ -2496,7 +2496,8 @@ mod definition_editor {
 /// The targets the workbench's dialogs are drawn as.
 const SYMBOLS: &str = "symbolLibraryDialog";
 const EDITOR: &str = "definitionEditorDialog";
-const STYLES: &str = "styleManager";
+/// The workbench names its style manager as the C++ workbench did (kStyleManagerName).
+const STYLES: &str = "styleManagerDialog";
 
 /// A window with a Format menu, its customisation workbench over the fixture's drawing, and a
 /// runner that does what CUSTOMISE REMOVE does (fixture_host): the C++'s Bench. Headless, as the

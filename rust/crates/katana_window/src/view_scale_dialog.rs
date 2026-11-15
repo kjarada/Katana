@@ -55,7 +55,7 @@ impl ViewScaleDialog {
     /// The dialog over the workspace's `views`, on plan view `view`.
     pub fn new(views: Rc<RefCell<ViewSet>>, view: ViewId) -> Self {
         let mut dialog = Self {
-            frame: DialogFrame::new("viewScaleDialog", "Paper Style Scale"),
+            frame: DialogFrame::new("viewScaleDialog", "Paper Style Scale").deletes_on_close(true),
             visible: false,
             views,
             view_items: Vec::new(),

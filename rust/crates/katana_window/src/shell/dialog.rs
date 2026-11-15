@@ -109,6 +109,7 @@ pub struct DialogFrame {
     name: String,
     title: String,
     modal: bool,
+    deletes_on_close: bool,
     placed: Option<Pos2>,
     chrome: Option<Vec2>,
     footer_height: Option<f32>,
@@ -124,6 +125,7 @@ impl DialogFrame {
             name: String::from(name),
             title: String::from(title),
             modal: false,
+            deletes_on_close: false,
             placed: None,
             chrome: None,
             footer_height: None,
@@ -140,8 +142,22 @@ impl DialogFrame {
         self
     }
 
+    /// The same frame, its dialog gone when it closes (Qt::WA_DeleteOnClose): a step after it is
+    /// told the target has closed, where a dialog the window keeps was only hidden and stayed the
+    /// C++ steps' target (TargetSpec::deletes_on_close).
+    pub fn deletes_on_close(mut self, deletes: bool) -> Self {
+        self.deletes_on_close = deletes;
+        self
+    }
+
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// QObject::setObjectName: the dialog drawn, and found by a driver, as `name` from the next
+    /// frame - how the C++ window named its copy of a manager (formatLayersDialog).
+    pub fn set_name(&mut self, name: &str) {
+        self.name = String::from(name);
     }
 
     pub fn title(&self) -> &str {
@@ -255,7 +271,9 @@ impl DialogFrame {
             let layer = area.layer();
             ctx.memory_mut(|memory| memory.set_modal_layer(layer));
         }
-        let spec = TargetSpec::new(&self.name, TargetKind::Dialog, &self.title).modal(self.modal);
+        let spec = TargetSpec::new(&self.name, TargetKind::Dialog, &self.title)
+            .modal(self.modal)
+            .deletes_on_close(self.deletes_on_close);
         let title = self.title.clone();
         let mut footer = footer;
         // The body's part of a minimum height: what the frame takes beyond it, as last measured,

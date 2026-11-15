@@ -1967,10 +1967,10 @@ pin classifies every algorithm GDAL lists.
   tooltip, and a list has no row activation, so the sheet list's rename by
   double click never fires; there are no printers to list; the
   `QT_SCALE_FACTOR=1.25` reruns have no twin; `ErrorCode` has no Cancelled,
-  so a cancel is `InvalidState`; the customisation workbench names the style
-  manager `styleManager` where the C++ renamed it `styleManagerDialog`; the
-  plan painter's road model switch is process-wide, and the twins that set
-  it hold a mutex; the sheet editor's source provider is given only the
+  so a cancel is `InvalidState`; the customisation workbench named the style
+  manager `styleManager` where the C++ renamed it `styleManagerDialog`
+  (since put right, below); the plan painter's road model switch is
+  process-wide, and the twins that set it hold a mutex; the sheet editor's source provider is given only the
   Document (reference data, meshes, surfaces and the logo must reach it
   another way, in wave 4).
 - **Found in the window gate's fix-up round (dialogs and managers):**
@@ -2000,6 +2000,45 @@ pin classifies every algorithm GDAL lists.
     plain text a person reads, as `--report` reads a rich QLabel; Generate
     Sheets, Page Setup and Plot are modal, as `QDialog::open` and `exec`
     make them.
+- **Found in the window gate's fix-up round (the main window and the
+  driver):**
+  - *A view a verb opens* is reported as the C++ reported it. `VIEWS OPEN`'s
+    record came from a view whose widget the Rust makes only when the
+    drawing is next lent, so it said `scale=1` over a 1 x 1 view. The C++'s
+    widget is made at once: its constructor sets the initial zoom (10 px a
+    metre), and the dock's `show()` after `splitDockWidget` gives it the
+    size Qt's split made before `resizeDocks` evened the halves - half the
+    active view's side, 330 of 660 points, where the next layout leaves it
+    328 (`area=-16.5,-22.35,16.5,22.35`, then `-16.4..16.4`). The workspace
+    now starts an unbuilt plan view's state there. Rejected: building the
+    widget inside the verb, which would need the drawing the verbs hold;
+    and giving it its laid-out size at once, which is not what the C++
+    printed. A split along the height halves the dock with its bar, a
+    guess no gate test shows.
+  - *A target that closed* is said to have closed ("NAME has closed: the
+    window is grabbed", "--fill ...: NAME has closed") only when the dialog
+    went with it: the C++'s target is a `QPointer`, null only for a widget
+    deleted (`Qt::WA_DeleteOnClose`: the sheet editor's Page Setup,
+    Generate Sheets, Hidden Layers and Suggest Paper dialogs, the view
+    Layers popup and the paper scale dialog), where a dialog the window
+    keeps is hidden and stays the target. `DialogFrame::deletes_on_close`
+    and `TargetSpec::deletes_on_close` carry the attribute, and the step
+    engine remembers it from the last frame that drew the target. Not
+    done: a fill or a press of a kept dialog after it closed is still
+    refused here, where the C++ acted on the hidden dialog; and such a
+    dialog cannot be grabbed, so the window is.
+  - *The sheet editor's actions reach the window's steps:* the C++ editor is
+    a child of the window, so `findChild<QAction*>` found `sheetGenerate`,
+    `sheetCopySetJson` and `sheetPageSetup` from the window once File >
+    Sheets had made it; `MainWindow::trigger` and `actions` fall back to the
+    editor's, after the window's own. Its toolbar is a target of its own
+    (`sheetToolBar`) for `--panel`.
+  - *The managers' names:* the window names Format > Layers' copy
+    `formatLayersDialog` and the customisation workbench names its style
+    manager `styleManagerDialog`, as the C++ did
+    (`LayerManagerDialog::set_object_name`,
+    `StyleManagerDialog::set_object_name`); a manager made on its own keeps
+    `layerManager` and `styleManager`, which its twins drive it by.
 - **The corpus round trip failed once under the whole suite's load**
   (`every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust`,
   wave 4's run) and passed on its own: the schema-9 project's backups

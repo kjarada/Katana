@@ -177,8 +177,11 @@ impl PlotDialog {
                 },
                 if page_setup { "Page Setup" } else { "Plot Sheets" },
             )
-            // Modal in both modes, as the C++'s open() (Page Setup) and exec() (Plot) make it.
-            .modal(true),
+            // Modal in both modes, as the C++'s open() (Page Setup) and exec() (Plot) make it. The
+            // page setup is only ever sheet_set_menu's openPageSetupDialog, which deleted it on
+            // close.
+            .modal(true)
+            .deletes_on_close(page_setup),
             set: set.clone(),
             current,
             mode,
