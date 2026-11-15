@@ -22,6 +22,10 @@
     reason = "Inner module names identify the C++ suites for the parity checker."
 )]
 #![allow(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "The C++ tests' negated comparisons, which count a NaN as failing, are kept."
+)]
+#![allow(
     clippy::excessive_precision,
     reason = "Expected values are written as the C++ tests wrote them."
 )]

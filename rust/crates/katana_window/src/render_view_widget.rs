@@ -32,6 +32,11 @@
 //! looks at the next call - a model revision that moved rebuilds the drawing, any notification
 //! the selection overlay - which is the C++'s order, a burst of changes folded into one rebuild.
 
+#![allow(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "Keep the C++'s negated comparisons, which refuse NaN."
+)]
+
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::rc::Rc;

@@ -440,9 +440,8 @@ impl AnnotationWorkbench {
     pub fn show_leaders(&mut self, host: &mut dyn Host, tab: i32) -> &mut LeaderManagerDialog {
         let view_set = host.views().map(|views| views.view_set());
         let dialog = self.leaders.shown(|| {
-            let views: Option<LeaderViews> = view_set.map(|set| {
-                let views: LeaderViews = Rc::new(move || scope_filter_views(&set.borrow()));
-                views
+            let views: Option<LeaderViews> = view_set.map(|set| -> LeaderViews {
+                Rc::new(move || scope_filter_views(&set.borrow()))
             });
             LeaderManagerDialog::new(host.document(), LeaderManagerContext { views })
         });

@@ -19,6 +19,11 @@
 //! The pan and zoom are the view's own, not the state's, as in the C++: a change of kind and back
 //! frames the section afresh.
 
+#![allow(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "Keep the C++'s negated comparisons, which refuse NaN."
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 

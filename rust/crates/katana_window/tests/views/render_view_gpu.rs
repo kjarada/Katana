@@ -20,7 +20,9 @@ mod render_view_gpu {
     use katana_window::render_view_widget::GpuSession;
 
     use crate::gpu_support::{DEVICES, device_label, shared_context};
-    use crate::support::{Bench, drawn_near, drawn_pixels, save_for_looking, statuses};
+    use crate::support::{
+        Bench, double_eq, drawn_near, drawn_pixels, save_for_looking, statuses,
+    };
 
     /// The bench's session: the desktop, on the shared device of `kind`, a software device
     /// allowed; None after saying why there is no such device.
@@ -71,9 +73,9 @@ mod render_view_gpu {
             // Five layers, as render_layers draws them; the line is the drawing's.
             assert!(gpu.last_stats().lines >= 1, "{label}");
             let state = scene.state(id);
-            assert_eq!(state.camera.target().x, 50.0, "{label}");
-            assert_eq!(state.camera.target().y, 25.0, "{label}");
-            assert_eq!(state.camera.target().z, 0.0, "{label}");
+            assert!(double_eq(state.camera.target().x, 50.0), "{label}");
+            assert!(double_eq(state.camera.target().y, 25.0), "{label}");
+            assert!(double_eq(state.camera.target().z, 0.0), "{label}");
             assert!(state.camera_framed, "{label}");
             // The GPU child keeps the camera in its logical pixels.
             assert_eq!(state.camera.viewport_width(), gpu.width(), "{label}");
