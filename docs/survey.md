@@ -13,8 +13,8 @@ the first thing to know before touching any of it:
 | Asked for | Already in the repository |
 |---|---|
 | Survey calculation engine | `katana_survey` - `cogo.rs`, `traverse.rs`, `angles.rs`, `leveling.rs`, `least_squares.rs`, `network_adjustment.rs`, `error_propagation.rs`, `statistics.rs` |
-| Normalized survey model | `rust/crates/katana_survey/src/data_model.rs` - `SurveyPoint` and four observation kinds |
-| Coordinate systems | `katana_geodesy` - CRS, transformer, units, ellipsoid, geodesic, grid factors, PROJ behind its FFI (`rust/crates/katana_geodesy/src/ffi.rs`) |
+| Normalized survey model | `crates/katana_survey/src/data_model.rs` - `SurveyPoint` and four observation kinds |
+| Coordinate systems | `katana_geodesy` - CRS, transformer, units, ellipsoid, geodesic, grid factors, PROJ behind its FFI (`crates/katana_geodesy/src/ffi.rs`) |
 | XML reading | a strict reader, then private to `archive12d`, now `katana_core::xml::read_xml` |
 
 So this programme is an *exchange* subsystem and a *user interface*, not a
@@ -25,7 +25,7 @@ are not restated per field: metres, **radians**, azimuths clockwise in
 ## Where the manufacturer code is allowed to live
 
 `surveyio` is a layer of its own, depending on `katana_core`, `katana_math`,
-`katana_geometry` and `katana_survey` alone (`rust/crates/katana_surveyio/Cargo.toml`;
+`katana_geometry` and `katana_survey` alone (`crates/katana_surveyio/Cargo.toml`;
 the C++ held it to the same list in its layering check). Two absences in that
 list are the design.
 
@@ -57,9 +57,9 @@ parser carries its own answer:
 
 | What | The one place | What it replaced |
 |---|---|---|
-| Bytes to UTF-8 | `katana_core::text_encoding::decode_text` / `decode_text_as` (`rust/crates/katana_core/src/text_encoding.rs`), moved down from `archive12d` | a second decoder written into the CSV reader because surveyio may not see archive12d |
-| Trim, integers, reals, lines | `katana_core` (`rust/crates/katana_core/src/text.rs`) | private trims in the XML reader and the 12d reader, and a third in the Trimble parser |
-| Metres per foot and link | `katana_math::unit_ratio` (`rust/crates/katana_math/src/unit_ratio.rs`), which `rust/crates/katana_geodesy/src/units.rs` is now built from; `katana_survey::data_model::metres_per(LinearUnit)` maps a declared unit onto it | ratios repeated in the CSV template and as rounded doubles in the Topcon parser |
+| Bytes to UTF-8 | `katana_core::text_encoding::decode_text` / `decode_text_as` (`crates/katana_core/src/text_encoding.rs`), moved down from `archive12d` | a second decoder written into the CSV reader because surveyio may not see archive12d |
+| Trim, integers, reals, lines | `katana_core` (`crates/katana_core/src/text.rs`) | private trims in the XML reader and the 12d reader, and a third in the Trimble parser |
+| Metres per foot and link | `katana_math::unit_ratio` (`crates/katana_math/src/unit_ratio.rs`), which `crates/katana_geodesy/src/units.rs` is now built from; `katana_survey::data_model::metres_per(LinearUnit)` maps a declared unit onto it | ratios repeated in the CSV template and as rounded doubles in the Topcon parser |
 
 Two properties of the text helpers are load bearing. They never consult the C
 locale: `std::isspace(0xA0)` is true in a Latin-1 locale and 0xA0 is the second
@@ -102,14 +102,14 @@ field file ──> surveyio (parse only) ──> survey::SurveyProject ──> c
 ```
 
 The bridge returns a single `CommandPtr`, the same shape
-`rust/crates/katana_cad/src/survey_coding.rs` already uses. That is what makes an entire import one
+`crates/katana_cad/src/survey_coding.rs` already uses. That is what makes an entire import one
 undo step, which the brief asks for in its section 19 - not a special case, just
 the command pattern the application already has.
 
 The bridge itself makes layers and points and nothing else: every point lands
 on the import's layer, ByLayer, with its code in a property. Coding those
 points (their rule's layer, style and attributes) and stringing them into
-lines is the FINISH, `katana_cad::survey_finish::with_survey_finish` (`rust/crates/katana_cad/src/survey_finish.rs`), which
+lines is the FINISH, `katana_cad::survey_finish::with_survey_finish` (`crates/katana_cad/src/survey_finish.rs`), which
 wraps the bridge's command so that import, codes and lines are still that one
 command and one undo step. It is off unless asked for
 (`SurveyFinishOptions`, `SurveyJobImport::finish`); `docs/survey_coding.md`,
@@ -119,7 +119,7 @@ is composed inside the job command rather than around it.
 ## How five parsers were written at once without colliding
 
 Each format hands the registry a `FormatRegistration`
-(`rust/crates/katana_surveyio/src/format.rs`) from its own module. Adding a
+(`crates/katana_surveyio/src/format.rs`) from its own module. Adding a
 parser is adding a file and one line to the list of registrations in
 `format.rs`: no shared table of formats to merge, nothing else for two authors
 to edit at the same time.
@@ -200,7 +200,7 @@ extension.
 | Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev; 2 E-N-Elev and Trimble's 3 east first, each with a warning), a point's latest kept, an observation's POS view (after its 09 or 11) never over a position record; collimation (04) applied per face until another instrument type or job; declares no coordinate system |
 
 The matrix lists the formats that have a section in this file.
-`rust/crates/katana_surveyio` also registers readers for TDS RW5, Topcon GTS-7
+`crates/katana_surveyio` also registers readers for TDS RW5, Topcon GTS-7
 raw, Trimble JobXML and RINEX observation files, and recognises Leica DBX,
 Trimble DC and Topcon GTS-6 in order to refuse them by name with the export
 to make instead. They reach the wizard, `SURVEY READ` and `SURVEY IMPORT`
@@ -212,12 +212,12 @@ do, and refuses a format without one by name.
 
 ## Leica GSI
 
-The reader is `rust/crates/katana_surveyio/src/leica_gsi.rs`; what an import makes of a
-file is set out in `rust/crates/katana_surveyio/src/leica.rs`. The specification
+The reader is `crates/katana_surveyio/src/leica_gsi.rs`; what an import makes of a
+file is set out in `crates/katana_surveyio/src/leica.rs`. The specification
 followed is Leica's "GSI ONLINE for Leica TPS and DNA" (November 2003): the
 data word and the word information table on its pages 5-6, the word indices
 in the PUT and GET tables. Every expected value in
-`rust/crates/katana_surveyio/tests/leica_gsi.rs` is worked by hand from a fixture word and
+`crates/katana_surveyio/tests/leica_gsi.rs` is worked by hand from a fixture word and
 that table.
 
 ### Sixty seconds, and the rest of one traverse (2026-09-29, reviewed 2026-09-30)
@@ -517,7 +517,7 @@ when every V is refused, parser 1.2), but for the version in the summary
 line: every one of its 1541 shots is words 21, 22 and 31, with no word 32 or
 33 and no negative word 22.
 
-Tests (`rust/crates/katana_surveyio/tests/leica_gsi.rs`, on the hand-built
+Tests (`crates/katana_surveyio/tests/leica_gsi.rs`, on the hand-built
 `tests/surveyio/data/leica/rounded_seconds_gsi16.gsi` and inline blocks):
 `leica_gsi::sixty_seconds_with_nothing_after_them_are_read_as_the_next_minute` (086 27 60.0 is
 1.509128026557763641 rad, worked in exact rationals),
@@ -552,7 +552,7 @@ Not done:
 
 - **The reduction's face pairing.** It pairs a setup's i-th face-left
   pointing to a target with its i-th face-right one
-  (`rust/crates/katana_survey/src/reduction.rs`). Each setup of the traverse has 3 to 9
+  (`crates/katana_survey/src/reduction.rs`). Each setup of the traverse has 3 to 9
   more face-left pointings than face-right ones (3 in 41 of the 52), and in
   the setups looked at they come first, so its pairs cross rounds - the
   first setup's first face-pair warning (15.0") pairs a face-left pointing
@@ -568,14 +568,14 @@ Not done:
   zenith angle read keeps its own height difference (33) as a
   LevelDifferenceObservation, but radiation takes a target's height only
   from its pointing - a zenith angle with a distance
-  (`rust/crates/katana_survey/src/reduction.rs`) - and a level difference, which has no
+  (`crates/katana_survey/src/reduction.rs`) - and a level difference, which has no
   pointing, enters only a levelling adjustment. So on
   `tests/surveyio/data/leica/derived_distances_gsi8.gsi` Q1 and Q2 are
   placed by their own 32 and drawn with no elevation ("2 point(s) have no
   height in the source"), though the file gives their height difference. It
   is the reduction's, for every format that writes a level difference beside
   a shot, not this reader's.
-- **The backsight check has no tolerance.** `rust/crates/katana_survey/src/reduction.rs`
+- **The backsight check has no tolerance.** `crates/katana_survey/src/reduction.rs`
   stores each setup's backsight distance and height differences, and the
   report prints them as bare numbers, where face pairs and misclosures are
   marked OUTSIDE TOLERANCE. So the first setup's +39.0 mm, left unoriented
@@ -595,8 +595,8 @@ Not done:
   or 72-79.
 - **Three routines turn degrees, minutes and seconds into radians:** this
   reader's, `packed_degrees_to_radians` in
-  `rust/crates/katana_surveyio/src/topcon_raw_builder.rs` (GTS-7 and RW5), and
-  `dms_to_radians` in `rust/crates/katana_survey/src/angles.rs`. Only this one reads 60
+  `crates/katana_surveyio/src/topcon_raw_builder.rs` (GTS-7 and RW5), and
+  `dms_to_radians` in `crates/katana_survey/src/angles.rs`. Only this one reads 60
   seconds as the next minute; the other two refuse it. Carrying it there
   needs evidence from those formats' writers, not this file's. They should
   become one helper with the carry as a choice its caller makes.
@@ -617,8 +617,8 @@ and Named Measurements", 44.5 "Searching for Special Coordinates", 44.6's
 time_text, 44.7 and 44.8, one entry per opcode; the June 2025 edition numbers
 the same sections 1.2 to 1.8 and has the entries and .fld syntax of 128, 129,
 138 and 139, but not their descriptions nor 44.7's resection_measurement
-block. The reader is `rust/crates/katana_surveyio/src/opcode_field_file.rs`, on the
-Topcon readers' raw builder (`rust/crates/katana_surveyio/src/topcon_raw_builder.rs`),
+block. The reader is `crates/katana_surveyio/src/opcode_field_file.rs`, on the
+Topcon readers' raw builder (`crates/katana_surveyio/src/topcon_raw_builder.rs`),
 which already turned a journal of setups, backsights and shots into one
 `katana_survey::data_model::SurveyProject` - a third copy of that bookkeeping would have been the
 defect section 2 of the contributors' rules names.
@@ -1159,7 +1159,7 @@ for byte, so a Linux checkout reads the same CRLF lines. Every file under
 `opcode_field_file::the_probe_claims_no_other_formats_fixture_or_sample`, which prints
 the table a probe change is compared by: only the field files are claimed.
 
-**`SURVEY READ` and `SURVEY IMPORT`** (`rust/crates/katana_app/src/survey_verbs.rs`)
+**`SURVEY READ` and `SURVEY IMPORT`** (`crates/katana_app/src/survey_verbs.rs`)
 bring every format surveyio reads to `katana_cli`, `katana_mcp` and the
 window's command line, which until now reached a field file only through the
 import wizard. `SURVEY READ <file> [FORMAT <id>]` says what the reader made of
@@ -1177,9 +1177,9 @@ candidates. The verb lives in the session and not the interpreter because
 `cad` may not see `surveyio`; the window runs the same function
 (`Executor::run_workbench_line`). `katana_surveyio::reader::report_input_for`, which the
 wizard and the Survey Jobs dialog had in the window's code, moved to
-`rust/crates/katana_surveyio/src/reader.rs` so the verb uses the same one. Tests:
+`crates/katana_surveyio/src/reader.rs` so the verb uses the same one. Tests:
 the reader's `opcode_field_file` cases in
-`rust/crates/katana_surveyio/tests/opcode_field_file.rs`, `cli.survey_read_field_file`,
+`crates/katana_surveyio/tests/opcode_field_file.rs`, `cli.survey_read_field_file`,
 `cli.survey_import_field_file`, `cli.survey_read_gnss_field_file`,
 `cli.survey_import_gnss_field_file`, `cli.survey_read_resection_field_file`,
 `cli.survey_import_resection_field_file`,
@@ -1191,7 +1191,7 @@ through MCP (`mcp_server::an_agent_imports_a_field_file_whose_setup_stands_on_rt
 the wizard's content step, which shows the fixtures as read
 (`survey_import_wizard::the_content_step_shows_what_each_formats_reader_read`), and the
 reduction's cases for a stated backsight azimuth in
-`rust/crates/katana_survey/tests/reduction.rs`.
+`crates/katana_survey/tests/reduction.rs`.
 
 Not done:
 
@@ -1237,7 +1237,7 @@ Not done:
   entered control over a GNSS position - and so has no height; the GNSS
   position's is not used for it.
 - The reduction does not seed a file's calculated coordinates
-  (`seed_entered` in `rust/crates/katana_survey/src/reduction.rs` seeds entered ones), so
+  (`seed_entered` in `crates/katana_survey/src/reduction.rs` seeds entered ones), so
   a backsight on one - RW5's GPS-derived records, a JobXML point a COGO
   routine computed - has no position unless another setup radiates it, and
   its setup is oriented on its circle reading. The field file's RTK marks are
@@ -1271,7 +1271,7 @@ Not done:
 - surveyio has eight file-local digit tests (`is_digit` in leica_dbx.rs,
   leica_gsi.rs, rinex.rs, rinex_common.cpp, rinex_compact.rs,
   topcon_raw_builder.rs, opcode_field_file.rs and sokkia_sdr.rs), and
-  `rust/crates/katana_core/src/text.rs`, which would be their one home, has none.
+  `crates/katana_core/src/text.rs`, which would be their one home, has none.
 
 ## The Sokkia SDR file (.sdr)
 
@@ -1280,8 +1280,8 @@ read. The SDR file among them - a traverse of 41 setups in the SDR33 layout,
 written by another program's converter, kept on the owner's machine and not
 committed - was not recognised at all: `SURVEY READ` answered "no registered
 format recognises this file". The reader is
-`rust/crates/katana_surveyio/src/sokkia_sdr.rs`, on the raw builder the field file
-uses (`rust/crates/katana_surveyio/src/topcon_raw_builder.rs`).
+`crates/katana_surveyio/src/sokkia_sdr.rs`, on the raw builder the field file
+uses (`crates/katana_surveyio/src/topcon_raw_builder.rs`).
 
 It is read from Sokkia's "Interfacing with the SOKKIA SDR Electronic Field
 Book" (software 04-04.xx, October 1999): the example jobs of chapter 2, the
@@ -1735,7 +1735,7 @@ unchecked), it has no collimation to widen a circle test, its 42 instrument
 records name one EDM type, and its one `08` follows no observation of its
 point.
 
-Tests: `rust/crates/katana_surveyio/tests/sokkia_sdr.rs`, on the hand-built
+Tests: `crates/katana_surveyio/tests/sokkia_sdr.rs`, on the hand-built
 `tests/surveyio/data/sdr/traverse.sdr` (its second setup's circle zeroed on
 a backsight whose azimuth is 270) and records written in the test - among
 them Sokkia's own chapter 2 examples: the OBS-view job reduced to its
@@ -1774,7 +1774,7 @@ and the wizard's content step, which lists the fixture's two setups. The
 truncation-and-noise test the raw readers share fails on an `Internal`
 error: `read_survey` turns a reader's exception into one, so it had passed
 with a reader that threw (it did, on a `00` line two characters long). The
-Survey Controller probe (`rust/crates/katana_surveyio/src/trimble_dc.rs`) steps aside
+Survey Controller probe (`crates/katana_surveyio/src/trimble_dc.rs`) steps aside
 for an SDR header with any derivation code, not only `NM`: Sokkia allows
 `ED` as well, and such a file named `.dc` was claimed at 0.5. The probe
 identifies a file by its header: 0.8 on the header alone, 0.95 (0.98 named
@@ -1859,7 +1859,7 @@ Not done:
   applied; notes are kept with their setup, not with the record before or
   after them, since writers of the format disagree which.
 - The mil is defined twice, here and in the GSI reader (`kTwoPi / 6400`),
-  and `rust/crates/katana_survey/src/angles.rs` has no mil conversion to share; lifting one there
+  and `crates/katana_survey/src/angles.rs` has no mil conversion to share; lifting one there
   is a change to the GSI reader as well, left for one that edits it. The
   reader's calendar was the C++
   standard library's (`std::chrono::year_month_day`); Rust's standard library
@@ -1883,11 +1883,11 @@ SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>] [SET <key>=<
 (`CODES` and `LINEWORK` are the next section's.)
 
 **One grammar, the job's own.** Both options are the stable text form of the
-settings (`rust/crates/katana_survey/src/reduction_settings.rs`) that a survey job
+settings (`crates/katana_survey/src/reduction_settings.rs`) that a survey job
 keeps in the project: `SETTINGS` names a file of it, and each `SET` item is
 one line of it. Both are read by `katana_survey::reduction_settings::parse_reduction_settings`, which
 checks what it read with `katana_survey::reduction_settings::validate_reduction_settings`, and a refusal
-is in their words. `rust/crates/katana_app/src/survey_verbs.rs` spells nothing of the
+is in their words. `crates/katana_app/src/survey_verbs.rs` spells nothing of the
 form: its first line and its keys are taken from what
 `katana_survey::reduction_settings::serialise_reduction_settings` writes, so a setting added there is one
 `SET` takes at once. A job's settings written out are a `SETTINGS` file that
@@ -2019,8 +2019,8 @@ back exactly, as every record writes one, so 300 000 is `3e+05`. Until
 network whose global test failed and not be told: the wizard's words for the
 outcome (`adjustment_summary`), its rejected count (`rejected_observations`)
 and the method's words (`method_text`) moved from the window's code
-(`rust/crates/katana_window/src/survey/survey_job_support.rs`) to
-`rust/crates/katana_survey/src/report_summary.rs`, so the reply's `rejected=` is
+(`crates/katana_window/src/survey/survey_job_support.rs`) to
+`crates/katana_survey/src/report_summary.rs`, so the reply's `rejected=` is
 the count the wizard's message gives, taken one way.
 
 **Refused**, each with the drawing as it was
@@ -2115,7 +2115,7 @@ computed point, so a file that gives it no coordinates leaves it among the
 unpositioned ones, and the import counted it in "N point(s) are named in the
 source with no coordinates ... reducing the observations is what gives them
 a position" - wrong for a point that has one, and said by the wizard too.
-`drawable_project` (`rust/crates/katana_cad/src/survey_job.rs`) now leaves the drawing's
+`drawable_project` (`crates/katana_cad/src/survey_job.rs`) now leaves the drawing's
 control out of that list as it leaves it out of the points drawn.
 `survey_job_import_command::a_control_point_taken_from_the_drawing_is_not_counted_as_having_no_position`
 failed ("2 point(s)") without the change.
@@ -2126,7 +2126,7 @@ if typed. The wizard's Import still runs `katana_cad::survey_job::ImportSurveyJo
 itself, because:
 
 1. Import reuses the reduction its preview ran (`precomputed_reduction`,
-   `rust/crates/katana_window/src/survey/survey_job_support.rs`), which for a job of more
+   `crates/katana_window/src/survey/survey_job_support.rs`), which for a job of more
    than 20 000 observations and points (`BACKGROUND_OBSERVATIONS`) ran on a
    pool thread with a busy bar and Cancel, and the wizard reads a file of
    more than 1 MiB (`BACKGROUND_READ_BYTES`) off the GUI thread too. A line
@@ -2142,7 +2142,7 @@ itself, because:
 
 Handing it over needs the executor to run `SURVEY IMPORT` as a background
 job, as the window runs the geoprocessing verbs
-(`rust/crates/katana_window/src/geo/geo_workbench.rs`), and a way for the line to take the
+(`crates/katana_window/src/geo/geo_workbench.rs`), and a way for the line to take the
 outcome the preview made. Until then one mechanism holds the two together
 below the line - the same command, the same `katana_cad::survey_job::reduction_context_for`, the
 same settings value - and
@@ -2167,7 +2167,7 @@ cli.survey_import_refuses_..., each of which must stop the batch before its
 `STATUS` (the id the drawing has at two places among them),
 `cli.survey_import_says_where_it_held_and_what_it_adjusted` and
 `cli.survey_import_says_what_a_network_adjustment_made_of_the_data`; the
-`survey_import_settings` cases in `rust/crates/katana_app/tests/file_verbs/survey.rs` (the
+`survey_import_settings` cases in `crates/katana_app/tests/file_verbs/survey.rs` (the
 heights too, worked by hand to the micrometre; the start, `SETTINGS` taken
 whole, the merge by id, the reply's order, the refusals, the settings
 refused before a survey file that is not there; the id at two places and at
@@ -2181,8 +2181,8 @@ and `mcp_server::the_command_tool_names_the_survey_field_file_verbs`; the wizard
 equivalence above and its preview's refusal, and the Survey Jobs dialog's;
 `survey_job_drawing_reduction` and
 `survey_job_import_command::its_reduction_refuses_an_id_the_drawing_has_at_two_places`
-beside the earlier regression in `rust/crates/katana_cad/tests/surveyjobs/survey_job.rs`; and
-`report_summary` in `rust/crates/katana_survey/tests/report_summary.rs`. The survey file is
+beside the earlier regression in `crates/katana_cad/tests/surveyjobs/survey_job.rs`; and
+`report_summary` in `crates/katana_survey/tests/report_summary.rs`. The survey file is
 `tests/surveyio/data/sdr/traverse_without_coordinates.sdr`, `traverse.sdr`
 with its two 08 coordinate records taken out; the settings files are in
 `tests/app/data/survey_settings/`.
@@ -2209,7 +2209,7 @@ Not done:
   (`ReportSetup::backsight_distance_difference`), but no warning names it; the
   new warning of the held point's other coordinates is the only word. A
   backsight check outside a tolerance is the reduction's to warn of
-  (`rust/crates/katana_survey/src/reduction.rs`).
+  (`crates/katana_survey/src/reduction.rs`).
 - `katana_survey::report_summary::rejected_observations` counts an outlier an adjustment rejects
   twice: once as its rows, which the rejection marks, and once in the
   adjustment's list, so the wizard's "N observation(s) rejected" and the
@@ -2225,7 +2225,7 @@ Not done:
   puts points some 1e302 m out, `prism_constant.policy=override
   prism_constant.m=-1e6` 1 000 km, each with no warning. Bounds a surveyor
   would accept belong to that validation
-  (`rust/crates/katana_survey/src/reduction_settings.rs`).
+  (`crates/katana_survey/src/reduction_settings.rs`).
 
 ## SURVEY IMPORT codes and strings what it draws
 
@@ -2245,7 +2245,7 @@ SURVEY IMPORT <file> ... [CODES on|off] [LINEWORK on|off]
 
 **Whether.** Three things decide it, in this order, in one function that the
 import wizard asks as well (`katana_cad::linework_verbs::survey_import_finish`,
-`rust/crates/katana_cad/src/linework_verbs.rs`; the wizard hands it its two boxes
+`crates/katana_cad/src/linework_verbs.rs`; the wizard hands it its two boxes
 where the verb hands it its two words - "The import wizard", below):
 
 1. `CODES on|off` and `LINEWORK on|off`, for the one line. Two words and no
@@ -2328,7 +2328,7 @@ Tests, each worked by hand from a field-file fixture and the hand-written
 customisation `tests/data/field_codes/test_field_codes.customisation.json`
 (a kerb that is a line in a colour of the customisation's own, an edge that
 is a plain blue line, a control mark that is a point code): the `survey_verbs`
-cases of `rust/crates/katana_app/tests/file_verbs/survey.rs` - the points on their layers and
+cases of `crates/katana_app/tests/file_verbs/survey.rs` - the points on their layers and
 in their styles and the file's closed string drawn, with ONE undo back to the
 drawing before
 (`survey_verbs::an_import_codes_its_points_and_strings_the_files_lines_and_one_undo_takes_it_all_back`);
@@ -2342,7 +2342,7 @@ differ in both records
 (`survey_verbs::each_record_counts_the_layers_and_the_styles_its_own_step_made_and_the_two_are_not_one_number`);
 a standard colour name; the records' place; the refusals - and
 `survey_import_finish_choice` in
-`rust/crates/katana_cad/tests/customisation_verbs/linework_verbs.rs` for the function itself.
+`crates/katana_cad/tests/customisation_verbs/linework_verbs.rs` for the function itself.
 Every `cli.survey_import_*` test older than these passes as it was written:
 `katana_cli` there has no survey codes, each test of a program being started
 with `KATANA_BUILTIN_CUSTOMISATION=none` (`docs/headless.md`, "The
@@ -2431,8 +2431,8 @@ setups, and they held 4 056 of its 4 834 points. The reduction now computes
 such a station from the setup's reduced pointings to points already placed. It
 looks at nothing but the reduced pointings, so it serves every format with
 such a setup, not the field file alone: `resect_setup` in
-`rust/crates/katana_survey/src/reduction_adjust.rs`, tried from `place_setups` in
-`rust/crates/katana_survey/src/reduction.rs`.
+`crates/katana_survey/src/reduction_adjust.rs`, tried from `place_setups` in
+`crates/katana_survey/src/reduction.rs`.
 
 **When it is tried.** When no setup is left whose station or backsight has
 just been placed, the reduction falls back, one setup at a time, on: 0. the
@@ -2507,7 +2507,7 @@ file's own coordinates - and is held as it is. Face pairs are meaned as the
 reduction means them, and each reduced pointing is one observation. Where the
 file marks the end of the observations its field software resected from (the
 field file's 129: its reader sets `RESECTION_END_METADATA`, "record N", on the
-setup, `rust/crates/katana_survey/src/data_model.rs`), only the pointings before it
+setup, `crates/katana_survey/src/data_model.rs`), only the pointings before it
 enter the resection; a controller's checks after the block - one right after
 it, others after hundreds of shots - are checks of the resected station, each
 a misclosure row, as they were for the field software and as any setup's
@@ -2764,7 +2764,7 @@ message calls what it cannot resolve unknowns, naming a set's orientation
 "orientation(P)", not a coordinate
 (`survey_horizontal_network::a_point_on_the_circle_through_its_three_targets_is_rank_deficient`).
 
-**Checked.** `rust/crates/katana_survey/tests/reduction_resection.rs`: two placed points
+**Checked.** `crates/katana_survey/tests/reduction_resection.rs`: two placed points
 with distances and three directions alone, each recovering the station they
 were made from; a perturbed resection whose position, orientation, residuals,
 variance factor and precision match a separate script of the textbook model
@@ -2931,7 +2931,7 @@ Not done:
 ## The Survey menu: tools, the import wizard, and the points in the drawing
 
 The owner asked on 2026-09-23 for "survey menus and toolbars" with the
-functionality wired. The menu (`rust/crates/katana_window/src/survey/survey_workbench.rs`)
+functionality wired. The menu (`crates/katana_window/src/survey/survey_workbench.rs`)
 has four sections - Survey Points (Import, Export, Point Manager, Point
 Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, Parcel
 Report, the Angle and Bearing Calculator), Traverse and Levelling (Traverse,
@@ -2949,12 +2949,12 @@ and File > Export, the same objects ("The File menu" there).
 (Load Customisation and Replace Loaded Customisation were here too until
 2026-10-06: `docs/desktop.md`, "The Format menu".) The menu
 ends with Subsurface Utilities (AS 5488), added by a workbench of its own
-(`rust/crates/katana_window/src/survey/utility_workbench.rs`, `docs/subsurface_utilities.md`).
+(`crates/katana_window/src/survey/utility_workbench.rs`, `docs/subsurface_utilities.md`).
 `MainWindow` only makes the menu and toolbar - on a second toolbar row, with
 Terrain and GIS - and hands them over through `SurveyServices`, so the survey
 work never reaches into `main_window`.
 
-**Nothing here is new surveying** (`rust/crates/katana_cad/src/survey_tools.rs`).
+**Nothing here is new surveying** (`crates/katana_cad/src/survey_tools.rs`).
 Every number comes from `katana_survey` (cogo, traverse, levelling, the
 network adjustment, angles) or `katana_geodesy`; the tools move drawing
 entities in and out of those libraries and put the answers into words. Each is
@@ -2978,7 +2978,7 @@ notation, since `36.5211` would then mean two angles depending on who typed
 it. In a line of several fields (a traverse leg) blanks separate the fields,
 so an angle there has none inside it.
 
-**Parcel Report** (`rust/crates/katana_window/src/survey/survey_parcel_dialog.rs`) is the
+**Parcel Report** (`crates/katana_window/src/survey/survey_parcel_dialog.rs`) is the
 window's way to `PARCEL`, which had none: a closed polyline's courses (from
 corner, quadrant bearing to whole seconds, distance) in a table, its area,
 perimeter, centroid and the direction it was drawn, the legal description
@@ -2991,12 +2991,12 @@ step, and its reply names the layer the labels went on. Copy and Save CSV
 (`katana_cad::parcel::parcel_courses_csv`, RFC 4180, a negative coordinate's sign kept) and the
 legal text's Save open no file dialog in a headless run (`SurveyServices::headless`).
 Its menu item has no mnemonic: every letter of "Parcel Report" is another
-item's in that menu. Tested by `rust/crates/katana_window/tests/survey/parcel_dialog.rs`
+item's in that menu. Tested by `crates/katana_window/tests/survey/parcel_dialog.rs`
 and, through the window, `qt_the_parcel_report_computes_labels_and_describes_a_lot_headless`. Not done: the report
 is of the parcel as it was at Compute, as every survey tool's is, and is not
 recomputed when the boundary is edited.
 
-**The points in the drawing** (`rust/crates/katana_cad/src/survey_points.rs`). A
+**The points in the drawing** (`crates/katana_cad/src/survey_points.rs`). A
 SURVEY POINT is a point entity carrying the point-number property the import
 writes (`point` by default); a point without one is a CAD point, left out of
 every list and, where asked for by id, counted as left out. The Point Manager
@@ -3091,7 +3091,7 @@ through the imported points (`drawLinework`), and a note under them
   person's selection replaced, and no lines at all. Its note sent the person
   to a menu item that no longer exists to "load a survey code file".
 
-Tests (`rust/crates/katana_window/tests/survey/survey_import_wizard.rs`, each worked
+Tests (`crates/katana_window/tests/survey/survey_import_wizard.rs`, each worked
 by hand from the fixture
 `tests/data/field_codes/test_field_codes.customisation.json` and the file it
 imports): the equivalence above; one undo step back to the drawing
@@ -3120,7 +3120,7 @@ and in the real window
 Saved layout templates live in the user's settings (`survey/templates`), and
 every open template list - the wizard's and the Export dialog's - offers one
 the moment it is saved and stops the moment it is deleted: an egui list is
-drawn from the settings every frame (`rust/crates/katana_window/src/survey/survey_templates.rs`),
+drawn from the settings every frame (`crates/katana_window/src/survey/survey_templates.rs`),
 which also covers one saved by another Katana, where the C++ refilled each
 list after a save or a delete and again on show.
 

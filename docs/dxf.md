@@ -1,6 +1,6 @@
 # DXF - native import and export
 
-`katana_dxf` (`rust/crates/katana_dxf/src/`) reads and writes DXF
+`katana_dxf` (`crates/katana_dxf/src/`) reads and writes DXF
 drawings itself, with no third-party library. Both front ends send every
 `.dxf` to it: File > Import > Import Any File, File > Export > Export Drawing, a path given to
 `katana.exe`, and the `IMPORT` and `EXPORT` verbs of the window's command line
@@ -33,7 +33,7 @@ core < math < geometry < entity < commands
 ```
 
 `dxf` may see core, math, geometry, entity and commands (its crate's
-dependencies, `rust/crates/katana_dxf/Cargo.toml`). It needs no third-party
+dependencies, `crates/katana_dxf/Cargo.toml`). It needs no third-party
 library, so it builds without GDAL and its parser of untrusted text is plain
 safe Rust. `commands` is there for one thing: `katana_dxf::import_command::import_command`, the import as
 the single undoable step both front ends execute, so they cannot differ about
@@ -43,10 +43,10 @@ The public interface:
 
 | Header | What |
 | --- | --- |
-| `rust/crates/katana_dxf/src/reader.rs` | `read_dxf(bytes)`, `read_dxf_file(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `is_dxf_path`. |
-| `rust/crates/katana_dxf/src/writer.rs` | `write_dxf(model)`, `write_dxf_file(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layer_name_for`. |
-| `rust/crates/katana_dxf/src/import_command.rs` | `import_command(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
-| `rust/crates/katana_dxf/src/codes.rs` | The indexed colours, lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
+| `crates/katana_dxf/src/reader.rs` | `read_dxf(bytes)`, `read_dxf_file(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `is_dxf_path`. |
+| `crates/katana_dxf/src/writer.rs` | `write_dxf(model)`, `write_dxf_file(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layer_name_for`. |
+| `crates/katana_dxf/src/import_command.rs` | `import_command(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
+| `crates/katana_dxf/src/codes.rs` | The indexed colours, lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
 
 ## Reading
 
@@ -164,7 +164,7 @@ without `EOF` (what was read is imported, and the truncation said). Every
 entity is checked with `katana_entity::validate` before it is kept. A block that
 inserts itself, nesting deeper than 16 blocks, an array of more than 100 000
 copies and an import of more than 20 million entities are each stopped and
-said. `rust/crates/katana_dxf/tests/robustness.rs` reads 3 000 damaged copies of the two
+said. `crates/katana_dxf/tests/robustness.rs` reads 3 000 damaged copies of the two
 fixtures - bytes changed, lines cut out and repeated, the file cut short - and
 checks that none crashes and that every success holds only valid geometry.
 
@@ -295,7 +295,7 @@ independent DXF library, and GDAL's driver reads all 27 886 of its entities.
   drawing written by hand (the R12 one with CRLF line ends, as that release's
   writers made them). Every value the tests expect of them is worked out in
   the test beside the check.
-- `rust/crates/katana_dxf/tests/reader.rs`, `writer.rs`, `codes.rs`,
+- `crates/katana_dxf/tests/reader.rs`, `writer.rs`, `codes.rs`,
   `import_command.rs`, `robustness.rs`: `cargo test -p katana_dxf`.
 - `cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer`:
   the command line both ways.

@@ -1,7 +1,7 @@
 # Editing surfaces, and surfaces made of others
 
 The owner asked on 2026-10-15 for "more tools to terrain, editing terrain ...
-mixed terrain". Until then a `TinSurface` (`rust/crates/katana_terrain/src/tin_surface.rs`)
+mixed terrain". Until then a `TinSurface` (`crates/katana_terrain/src/tin_surface.rs`)
 was immutable and nothing changed one: `build_tin` made it, and that was all.
 This document records how a surface is edited now, on every front end, and
 why it is done that way. The surfaces themselves - kept in the drawing,
@@ -11,10 +11,10 @@ saved, undone, styled - are `docs/terrain.md`'s.
 
 | Layer | Where | What |
 |---|---|---|
-| terrain | `rust/crates/katana_terrain/src/tin_edit.rs`, `tin_patch.rs`, `tin_thin.rs` | pure functions: a surface in, a NEW surface or a refusal out |
-| cad | `rust/crates/katana_cad/src/terrain/surface_edit_verbs.rs` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
-| cad | `rust/crates/katana_cad/src/tools/terrain_edit.rs` | nine catalogue tools, category Terrain, each running the verb |
-| qt | `rust/crates/katana_window/src/terrain/surface_edit_ui.rs`, `surface_edit_dialogs.rs`, `rust/crates/katana_window/src/tools/icons_terrain.rs` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
+| terrain | `crates/katana_terrain/src/tin_edit.rs`, `tin_patch.rs`, `tin_thin.rs` | pure functions: a surface in, a NEW surface or a refusal out |
+| cad | `crates/katana_cad/src/terrain/surface_edit_verbs.rs` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
+| cad | `crates/katana_cad/src/tools/terrain_edit.rs` | nine catalogue tools, category Terrain, each running the verb |
+| qt | `crates/katana_window/src/terrain/surface_edit_ui.rs`, `surface_edit_dialogs.rs`, `crates/katana_window/src/tools/icons_terrain.rs` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
 
 The verbs (`HELP SURFACE EDIT` prints them all):
 
@@ -40,11 +40,11 @@ SURFACE OFFSET <name> <dz> NAME <new>
 `<polygon>`, `<line>` and `<points>` are the drawing's data, the three ways
 every verb on drawing data takes it (`docs/cad.md`, "Scope and filter"): `#id
 ...`, coordinates typed in (`x,y[,z] ...`), or `FROM <scope> [WHERE k=v ...]`
-through the one scope parser (`rust/crates/katana_cad/src/scope_verbs.rs`), the
+through the one scope parser (`crates/katana_cad/src/scope_verbs.rs`), the
 reply's first record saying what the scope took (`scope=drawing matched=3
 polygons=2 skipped=1`). A `<polygon>` and a `<line>` are read by the one
 reader of the drawing's polygons that the volumes use too
-(`rust/crates/katana_cad/src/terrain/drawing_shapes.rs`, which says what each kind
+(`crates/katana_cad/src/terrain/drawing_shapes.rs`, which says what each kind
 of entity gives): a polygon is a closed polyline or curve polyline, one
 drawn back to its first vertex, a circle or a full ellipse; a line a line,
 polyline or curve polyline. Where the two readers had differed, the shared
@@ -92,11 +92,11 @@ two polygons where `BOUNDARY` takes one.
 
 Every edit that changes triangles - adding and deleting points, breaklines,
 boundaries, holes, a paste - goes through one mechanism,
-`katana_terrain::tin_patch::rebuild_patch` (`rust/crates/katana_terrain/src/tin_patch.rs`). An edit names a
+`katana_terrain::tin_patch::rebuild_patch` (`crates/katana_terrain/src/tin_patch.rs`). An edit names a
 REGION, the triangles it has to rebuild, and what goes into it: points, new
 breakline segments, the edges of a cut. The region's vertices and the new
 points are triangulated by THE constrained Delaunay kernel
-(`rust/crates/katana_terrain/src/cdt_backend.rs`) with the ring of edges round the
+(`crates/katana_terrain/src/cdt_backend.rs`) with the ring of edges round the
 region as constraints, so the new triangles meet the untouched ones edge for
 edge, and only the region changes. The rest of the surface is the same
 triangles, vertex for vertex.
@@ -133,7 +133,7 @@ triangles, vertex for vertex.
     kernel decides only exactly, so such a point did not split the edge, and a
     new edge that ended at it crossed the old one a few ulps from its own end.
     CGAL's `Exact_predicates_tag`, whose answer the Rust kernel reproduces
-    (`rust/crates/katana_terrain/src/cdt_backend.rs`), moves a crossing it cannot place to the
+    (`crates/katana_terrain/src/cdt_backend.rs`), moves a crossing it cannot place to the
     nearer END of the crossed edge (`Constrained_triangulation_2.h`,
     `insert_intersection`, CGAL 6.2), tens of metres away when the crossed edge
     is a long breakline, and the constraint is reported running through that
@@ -367,7 +367,7 @@ triangles, they do not reshape them.
   overlap (`tin_edit_combine::a_pasted_pad_replaces_the_ground_inside_its_footprint_with_a_clean_seam`:
   the area is the ground's to 1e-6, every seam vertex on the pad's rim at
   the pad's level). Where the top reaches past the base it is kept as it is.
-- **MERGE is `combine_surfaces`** (`rust/crates/katana_terrain/src/super_surface.rs`):
+- **MERGE is `combine_surfaces`** (`crates/katana_terrain/src/super_surface.rs`):
   later members win, a lower member's triangle dropped whole where a later
   one covers any AREA of it, so its seam is ragged by up to a triangle. A
   member that only ABUTS a triangle - shares an edge or a corner, or overlaps
@@ -430,9 +430,9 @@ triangles, they do not reshape them.
   printed `nan` for a FINITE level whose digits and three decimals filled more
   than the 64 characters their formatter had (1e61, a level of 61 digits,
   where 1e60 filled it to the last). The formatter was written twice, in
-  `rust/crates/katana_cad/src/terrain/surface_verbs.rs` and in
-  `rust/crates/katana_app/src/geo/replies.rs`; it is now one, `katana_core::text::format_fixed`
-  (`rust/crates/katana_core/src/text.rs`), whose buffer is the longest fixed text of
+  `crates/katana_cad/src/terrain/surface_verbs.rs` and in
+  `crates/katana_app/src/geo/replies.rs`; it is now one, `katana_core::text::format_fixed`
+  (`crates/katana_core/src/text.rs`), whose buffer is the longest fixed text of
   a double (DBL_MAX, 309 digits) and which the two `fixed3` call. The text of
   an ordinary value is unchanged byte for byte; a value that rounds to nothing
   has no sign ("-0.0004" is "0.000", as before; "-0.0005" is "-0.001": the
@@ -548,7 +548,7 @@ surface (`surfaceEditActive`).
   (`MainWindow::run_verb_line`), the line shown in `<prefix>Command` as it will
   run, Preview running it with PREVIEW. "Only inside a polygon" and Combine's
   clip take the polygon through the shared scope widget
-  (`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`), written as `FROM
+  (`crates/katana_window/src/customisation/scope_filter_widget.rs`), written as `FROM
   <scope>`. The lines are made by pure functions (`surfaceLevelsLine`,
   `surface_combine_line`), tested without a window.
 - **The dialogs follow the Document.** They are non-modal and kept, and they
@@ -557,7 +557,7 @@ surface (`surfaceEditActive`).
   on a line the verb refused (NotFound), and a surface made by a typed line
   could not be chosen until the dialog was closed and shown again (showing it
   from the menu while it was open sends no show event). Each now owns a
-  `DocumentWatcher` (`rust/crates/katana_window/src/customisation/document_watcher.rs`), the
+  `DocumentWatcher` (`crates/katana_window/src/customisation/document_watcher.rs`), the
   last member so it dies first, which says from the event loop that the model
   changed - on every execute, undo and redo, and on New and Open - and the
   lists are read again, keeping what is chosen where it is still there
@@ -568,8 +568,8 @@ surface (`surfaceEditActive`).
   already defers and coalesces, as a table rebuilt inside the command that
   notified once crashed the layer panel (docs/cad.md).
 - **Icons**: `Icon::SurfaceEdit`, `SurfaceLevels`, `SurfaceSmooth`,
-  `SurfaceThin`, `SurfaceDeleteLong`, `SurfaceCombine` (`rust/crates/katana_window/src/icons.rs`)
-  and the tools' own (`rust/crates/katana_window/src/tools/icons_terrain.rs`), each the same
+  `SurfaceThin`, `SurfaceDeleteLong`, `SurfaceCombine` (`crates/katana_window/src/icons.rs`)
+  and the tools' own (`crates/katana_window/src/tools/icons_terrain.rs`), each the same
   small TIN with what the tool does in the accent.
 - `Document::surfaces_command` is const: the command it builds captures the
   Document it will change and changes nothing until the host executes it, so a
@@ -600,7 +600,7 @@ reads `edges_cleared=` and `moved=` in the records
 
 ## Tests
 
-- `rust/crates/katana_terrain/tests/tin_edit.rs`, `tin_edit_combine.rs`,
+- `crates/katana_terrain/tests/tin_edit.rs`, `tin_edit_combine.rs`,
   `super_surface.rs`: every edit on hand-made surfaces - a square of two triangles flipped
   (`tin_edit::flipping_the_diagonal_of_a_square_of_two_triangles_gives_the_other_diagonal`),
   a point in the middle giving four triangles at the worked levels, a hole of
@@ -634,13 +634,13 @@ reads `edges_cleared=` and `moved=` in the records
   leaving the area 16, the 25 vertices and 32 triangles, every other vertex where
   it was and the moved one at 1.5 and not the plane's there), a vertex taken
   across a breakline leaving it as long as it was, and every refusal.
-- `rust/crates/katana_cad/tests/terrain_utility_verbs/surface_edit_verbs.rs`: the verbs through the
+- `crates/katana_cad/tests/terrain_utility_verbs/surface_edit_verbs.rs`: the verbs through the
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
   refusal; `surface_edit_tools.rs`: the tools with `ToolDriver`;
   `drawing_shapes.rs`: the polygons' and lines' reader these verbs
   share with the volumes - each kind of entity, typed corners with and
   without heights, the words, a scope that takes nothing.
-- `rust/crates/katana_window/tests/surfaces/surface_edit_dialogs.rs`: the lines, the
+- `crates/katana_window/tests/surfaces/surface_edit_dialogs.rs`: the lines, the
   dialogs and the toolbar by object name;
   `qt_the_surface_heights_dialog_raises_the_surface_headless`: the real window,
   the dialog opened by its action and its line run through the executor.

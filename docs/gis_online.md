@@ -21,16 +21,16 @@ the domain conversion in `katana_interop`, the window in `katana_window`.
 
 | File | What |
 |---|---|
-| `rust/crates/katana_gis/src/web_access.rs` | `katana_gis::web_access::http_fetch` over GDAL's libcurl (`CPLHTTPFetchEx`), `katana_gis::web_access::redact_url`, `katana_gis::web_access::percent_encode`, `katana_gis::web_access::sha256_hex`, `katana_gis::web_access::parse_xml` |
-| `rust/crates/katana_gis/src/reproject.rs` | `katana_gis::reproject::crs_axis_is_yx`, `katana_gis::reproject::transform_box`, `katana_gis::reproject::reproject_features`, `katana_gis::reproject::warp_to_geotiff`, `katana_gis::reproject::build_true_colour_vrt`, `katana_gis::reproject::clip_vector_file`, `katana_gis::reproject::probe_raster` |
-| `rust/crates/katana_interop/src/online_catalogue.rs` | the catalogue: types, parsing, merging, validation |
-| `rust/crates/katana_interop/src/online_requests.rs` | pure request builders for every service type |
-| `rust/crates/katana_interop/src/online_discovery.rs` | what a custom URL offers, from its capabilities or description |
-| `rust/crates/katana_interop/src/online_fetch.rs` | `katana_interop::online_fetch::fetch_online_layer`, the cache, discovery and catalogue search over the network |
-| `rust/crates/katana_interop/src/online_verbs.rs` | the verbs' grammar and replies |
+| `crates/katana_gis/src/web_access.rs` | `katana_gis::web_access::http_fetch` over GDAL's libcurl (`CPLHTTPFetchEx`), `katana_gis::web_access::redact_url`, `katana_gis::web_access::percent_encode`, `katana_gis::web_access::sha256_hex`, `katana_gis::web_access::parse_xml` |
+| `crates/katana_gis/src/reproject.rs` | `katana_gis::reproject::crs_axis_is_yx`, `katana_gis::reproject::transform_box`, `katana_gis::reproject::reproject_features`, `katana_gis::reproject::warp_to_geotiff`, `katana_gis::reproject::build_true_colour_vrt`, `katana_gis::reproject::clip_vector_file`, `katana_gis::reproject::probe_raster` |
+| `crates/katana_interop/src/online_catalogue.rs` | the catalogue: types, parsing, merging, validation |
+| `crates/katana_interop/src/online_requests.rs` | pure request builders for every service type |
+| `crates/katana_interop/src/online_discovery.rs` | what a custom URL offers, from its capabilities or description |
+| `crates/katana_interop/src/online_fetch.rs` | `katana_interop::online_fetch::fetch_online_layer`, the cache, discovery and catalogue search over the network |
+| `crates/katana_interop/src/online_verbs.rs` | the verbs' grammar and replies |
 | `resources/online/online_sources.json` | the built-in catalogue, compiled in with `#embed` |
-| `rust/crates/katana_window/src/gis_online.rs` | the workbench: the menu section, the one executor, jobs, settings |
-| `rust/crates/katana_window/src/gis_online_dialog.rs` | the dialog |
+| `crates/katana_window/src/gis_online.rs` | the workbench: the menu section, the one executor, jobs, settings |
+| `crates/katana_window/src/gis_online_dialog.rs` | the dialog |
 
 `import_vector` gained three options for this and nothing else:
 `VectorImportOptions::target_crs`, `VectorImportOptions::assumed_source_crs` and
@@ -108,7 +108,7 @@ is not stated). No Northern Territory provider is listed for that reason.
 ## How each service is asked
 
 Every request is built by a pure function of `online_requests.rs`, tested byte
-for byte against the service's specification (`rust/crates/katana_interop/tests/online_requests/online_requests.rs`).
+for byte against the service's specification (`crates/katana_interop/tests/online_requests/online_requests.rs`).
 
 | Type | Request | Paging or tiling | Answer |
 |---|---|---|---|
@@ -250,7 +250,7 @@ Overpass policies require.
 ## Threading, cancellation, retries
 
 `katana_interop::online_fetch::fetch_online_layer` blocks its thread and touches no Document. The
-workbench runs it as a background job (`rust/crates/katana_window/src/jobs.rs`) on inputs
+workbench runs it as a background job (`crates/katana_window/src/jobs.rs`) on inputs
 copied on the GUI thread; the job's Apply runs on the GUI thread and adds the
 entities, with the layers they need, as ONE command - one Ctrl+Z removes an
 import - or the raster to the reference data (which is not undoable, by
@@ -364,7 +364,7 @@ error verb=IMPORT code=InvalidCRS message="the project has no coordinate system,
 ```
 
 `katana_cli` and `katana_mcp` do not have the verbs yet ("Not done"): the
-verbs' executor is the window's workbench (`rust/crates/katana_window/src/gis_online.rs`),
+verbs' executor is the window's workbench (`crates/katana_window/src/gis_online.rs`),
 not the session's geo executor. The session holds reference data now, so
 that is no longer what stands in the way.
 
@@ -374,16 +374,16 @@ attribution.
 
 ## Tests
 
-With no network (the default): `rust/crates/katana_interop/tests/catalogue/online_catalogue.rs` (the
-built-in catalogue complete and valid), `rust/crates/katana_interop/tests/online_requests/online_requests.rs`
+With no network (the default): `crates/katana_interop/tests/catalogue/online_catalogue.rs` (the
+built-in catalogue complete and valid), `crates/katana_interop/tests/online_requests/online_requests.rs`
 (every request byte for byte, axis order, tile arithmetic against the slippy
 map formula, SHA-256 against FIPS 180-2's vectors, STAC choice, Overpass),
-`rust/crates/katana_interop/tests/online_requests/online_fetch.rs` (discovery from the capabilities
+`crates/katana_interop/tests/online_requests/online_fetch.rs` (discovery from the capabilities
 fixtures in `tests/interop/data/online/`, and `fetch_online_layer` end to end
 through a transport that answers from fixtures: paging, joining, the cache,
 cancellation, every limit, keys, a local GeoTIFF and GeoJSON through the same
-path as `file://` URLs), `rust/crates/katana_interop/tests/interop_core/online_verbs.rs`,
-`rust/crates/katana_window/tests/gis_vector/gis_online.rs` (the dialog by object name), and
+path as `file://` URLs), `crates/katana_interop/tests/interop_core/online_verbs.rs`,
+`crates/katana_window/tests/gis_vector/gis_online.rs` (the dialog by object name), and
 `qt_online_verbs_headless` and `qt_online_dialog_headless` (the application,
 a user catalogue of a local file: four lots in MGA 56, one UNDO).
 `OnlineEnvironment::transport` is the seam: empty, requests go to the
@@ -536,7 +536,7 @@ The system proxy is a separate matter, and not done (below).
 - `area=view|drawing|selection|x0,y0,x1,y1` is a second scope grammar, where
   every tool is to act on the one scope and filter: it should be the shared one
   (`[SELECTION|VIEW|DRAWING|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]]`,
-  `rust/crates/katana_cad/src/scope_verbs.rs`), with VIEW refused headless in
+  `crates/katana_cad/src/scope_verbs.rs`), with VIEW refused headless in
   favour of AREA, and the dialog's area choice the shared
   `ScopeFilterWidget`. `lonlat:` has no counterpart there yet. The
   scope-retrofit list from the shared scope's audit owns it.

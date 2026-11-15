@@ -7,7 +7,7 @@
 # the only check of that rule; the table is data, and a crate cannot use a
 # crate it does not name in its manifest, so the manifests are what is read.
 #
-# Each crate of rust/crates is one layer's: katana_<layer>, with two names
+# Each crate of crates/ is one layer's: katana_<layer>, with two names
 # that differ - katana_window is the qt layer's (the window is not Qt) and
 # katana_updater, the helper program, is the update layer's. It checks,
 # against the table's KATANA_ALLOWED_<layer> lines, which it reads rather
@@ -103,19 +103,19 @@ def check(crates_dir, table, partial, root):
                                     'putting its types in the public interface')
     if not partial:
         for layer in sorted(set(table) - present_layers):
-            problems.append(f"layer '{layer}' has no crate in rust/crates")
+            problems.append(f"layer '{layer}' has no crate in crates/")
     return problems, len(crates)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('root', nargs='?', default='.')
-    parser.add_argument('--crates', help='the crates folder (default: <root>/rust/crates)')
+    parser.add_argument('--crates', help='the crates folder (default: <root>/crates)')
     parser.add_argument('--partial', action='store_true',
                         help='do not require a crate for every layer (fixtures)')
     args = parser.parse_args()
     root = os.path.abspath(args.root)
-    crates_dir = os.path.abspath(args.crates or os.path.join(root, 'rust', 'crates'))
+    crates_dir = os.path.abspath(args.crates or os.path.join(root, 'crates'))
     table = read_table(os.path.join(root, 'tools', 'check_layering.cmake'))
     problems, count = check(crates_dir, table, args.partial, root)
     if problems:

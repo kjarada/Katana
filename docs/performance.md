@@ -332,7 +332,7 @@ have their own section below ("SIMD: NEON on 64-bit ARM").
 
 ### Dispatch
 
-`rust/crates/katana_core/src/cpu_features.rs`:
+`crates/katana_core/src/cpu_features.rs`:
 
 - `detected_simd_level()` uses `__builtin_cpu_supports("avx2")` and `("fma")`.
   libgcc sets these only when XGETBV shows that the operating system saves
@@ -477,7 +477,7 @@ The source check was run on a tree built to break the rules. It rejected
 `simd_level::ordinary_code_is_compiled_for_the_baseline_so_the_program_starts_on_any_x64_machine`,
 fails if the files every target compiles are ever built with AVX enabled.
 
-### The facade, `rust/crates/katana_core/src/simd.rs`
+### The facade, `crates/katana_core/src/simd.rs`
 
 The facade is `std::simd` where libstdc++ sets `__glibcxx_simd` (GCC 16 in
 C++26 mode; `__cpp_lib_simd` is deliberately undefined there), and
@@ -564,8 +564,8 @@ Keeping the results bit-identical required three details:
   even in the scalar reference.
 
 The tests hold every kernel to its reference through the public function,
-running at each level in one process (`rust/crates/katana_core/tests/simd_text.rs`,
-`rust/crates/katana_geometry/tests/cases/point_batch.rs`). This covers 3000 generated UTF-16
+running at each level in one process (`crates/katana_core/tests/simd_text.rs`,
+`crates/katana_geometry/tests/cases/point_batch.rs`). This covers 3000 generated UTF-16
 inputs, every position of a bad byte across the first three 64-byte steps,
 text dense with accented letters at every ASCII run length from 0 to 40 and
 every cut near its end, and for the validator: sixteen kinds of error worked
@@ -838,7 +838,7 @@ On 2026-09-26:
   execute an aarch64 program ("Exec format error"); run under qemu by hand,
   `katana_cli` works.
 - The GPU pack kernel's tests need `katana_gpu`, which needs Qt, so its
-  equivalence tests (`rust/crates/katana_gpu/tests/gpu/test_gpu_scene.rs`, all seven, with
+  equivalence tests (`crates/katana_gpu/tests/gpu/test_gpu_scene.rs`, all seven, with
   `gpu_scene.rs`, `scene_origin.rs` and the kernel) were compiled by hand
   against the cross-built libraries and gtest and run under qemu at both
   levels: all passed.
@@ -880,8 +880,8 @@ object checks, `layering` and `docs` pass as before.
 ## SIMD: the software rasteriser (2026-09-24)
 
 The CPU rasteriser draws every headless frame and every 3D view without a
-GPU. Four changes, all in `rust/crates/katana_render/src/rasterizer.rs` and the kernel
-file (the C++ raster_avx2.cpp; `rust/crates/katana_render/src/simd/avx2.rs` is its port). None of them changes a pixel.
+GPU. Four changes, all in `crates/katana_render/src/rasterizer.rs` and the kernel
+file (the C++ raster_avx2.cpp; `crates/katana_render/src/simd/avx2.rs` is its port). None of them changes a pixel.
 
 - **Tiles a triangle cannot reach are not binned.** A triangle whose box
   spans several 64 px tiles is tested at each tile's corners and left out of
@@ -984,7 +984,7 @@ archives, before any change:
 
 What changed:
 
-- **Kernels** (`rust/crates/katana_cad/src/simd/scene_avx2.rs`): the lift, the summed
+- **Kernels** (`crates/katana_cad/src/simd/scene_avx2.rs`): the lift, the summed
   per-vertex TIN normals (one triangle per step, the three corner sums in
   order, so a repeated corner adds twice as the loop did), the per-vertex
   ramp colour and hillshade, per-face mesh shading, and the edge fade.
@@ -1070,7 +1070,7 @@ The plan view draws a cloud by writing pixels into an image, which is then
 composited over the drawing. Before this change the splat read x and y from
 the stored 40-byte point structs, one point after another, and allocated and
 filled a new window-sized image for each cloud on every frame. It now draws
-from a display copy (`rust/crates/katana_geometry/src/point_splat.rs`, `point_splat.rs`), and the
+from a display copy (`crates/katana_geometry/src/point_splat.rs`, `point_splat.rs`), and the
 stored cloud is not changed.
 
 - **The display copy.** Float offsets from a double origin in the middle of

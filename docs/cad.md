@@ -51,7 +51,7 @@ as session data outside the model, the loaded style library and survey map
   does. Both are an EDIT of the session's customisation: its origin becomes
   `edited` and it is no longer kept.
 * The rest of what a session knows of its customisation is
-  `customisation_state()` (`rust/crates/katana_cad/src/customisation_state.rs`): its
+  `customisation_state()` (`crates/katana_cad/src/customisation_state.rs`): its
   name and origin, the sources that went into it, its colour table, linework
   codes and automation switches, whether it is kept, which names the open
   project recorded that are not loaded, and what its start found - a kept
@@ -69,7 +69,7 @@ as session data outside the model, the loaded style library and survey map
   (`docs/survey_coding.md`, "The customisation on the Document").
 
 * `execute`/`undo`/`redo` delegate to the command stack. `execute` wraps each
-  command with the associative update (`rust/crates/katana_cad/src/annotation/associative.rs`):
+  command with the associative update (`crates/katana_cad/src/annotation/associative.rs`):
   when the command moves or reshapes an entity that a dimension, label or
   leader follows, the annotation is brought up to date by the SAME undo
   step, so an undo puts both back together.
@@ -219,7 +219,7 @@ The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
 
 The AS 5488 subsurface utility verbs (`UTILITY REPORT`, `VERIFY`,
 `CLEARANCE`, `CHECK`, `DRAW`, `REGRADE`, `SCHEDULE`, and `HELP UTILITY`) are
-handed to `katana_cad::utilities::utility_verbs::run_utility_verb` (`rust/crates/katana_cad/src/utilities/`);
+handed to `katana_cad::utilities::utility_verbs::run_utility_verb` (`crates/katana_cad/src/utilities/`);
 `docs/subsurface_utilities.md`, "UTILITY on the command line", describes
 them. They were `katana_cli`'s own until 2026-09-25; in the interpreter the
 window's command line, `katana_cli` and `katana_mcp` all have them. `DRAW`,
@@ -273,7 +273,7 @@ offset` are unchanged.
 The survey-code verbs (`CODE [scope] [WHERE ...] [PROPERTY name] [PREVIEW]`,
 `CODE CENSUS [scope] ...`, `CODE EXPLAIN code`, `CODE LIST [filter]`, `CODE
 CHECK`; `docs/customisation.md`, "The verbs", and `docs/survey_coding.md`)
-are handed to `run_survey_code_verb` (`rust/crates/katana_cad/src/survey_code_verbs.rs`)
+are handed to `run_survey_code_verb` (`crates/katana_cad/src/survey_code_verbs.rs`)
 since 2026-09-26; they were `katana_cli`'s own, and the window refused them.
 `CODE` is one undo step, and `CODE CHECK` is refused - its whole lint in
 the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
@@ -286,9 +286,9 @@ that verb was named after another program's file, which no longer loads, and
 is an unknown command now.
 
 The colour names they need are resolved through the Document
-(`katana_cad::colour_lookup::resolve_colour`, `rust/crates/katana_cad/src/colour_lookup.rs`: the
+(`katana_cad::colour_lookup::resolve_colour`, `crates/katana_cad/src/colour_lookup.rs`: the
 customisation's own table, then the standard names of
-`rust/crates/katana_entity/src/colour_names.rs`). The standard names were once a
+`crates/katana_entity/src/colour_names.rs`). The standard names were once a
 table cad could not see, so each front end passed it with
 a colour-lookup setter on the interpreter. No front end passes one any more, and
 the setter went with the last that did (2026-10-07). So did the parameter
@@ -300,14 +300,14 @@ nobody else
 `survey_code_verbs::a_colour_the_customisation_names_itself_is_resolved_from_its_own_table`).
 
 `CUSTOMISE` is the interpreter's too (`run_customisation_verb`,
-`rust/crates/katana_cad/src/customisation_verbs.rs`): the report, `JSON`, a load
+`crates/katana_cad/src/customisation_verbs.rs`): the report, `JSON`, a load
 merged or in place, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`,
 with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
 (`CommandInterpreter::set_customisation_host`). `docs/customisation.md`, "The
 verbs", has the grammar, the replies and the decisions. Every front end runs
 it and none takes a `CUSTOMISE` line of its own: the session of `katana_cli`
 and `katana_mcp` hands the interpreter its host
-(`rust/crates/katana_app/src/session.rs`), and so does the desktop window
+(`crates/katana_app/src/session.rs`), and so does the desktop window
 (`docs/desktop.md`, "How the window starts").
 
 ### STATUS
@@ -317,7 +317,7 @@ changes, how many entities, layers and alignments, the current layer and
 style, the selection, the undo and redo depth and the customisation counts -
 and `STATUS JSON` the same as one JSON object, its keys in alphabetical order
 and indented by two. Both come from `katana_cad::document_status::document_status`
-(`rust/crates/katana_cad/src/document_status.rs`), with `katana_cad::document_status::format_status` and
+(`crates/katana_cad/src/document_status.rs`), with `katana_cad::document_status::format_status` and
 `katana_cad::document_status::status_json`. Until 2026-09-26 this was `katana_mcp`'s alone, built in
 the C++ MCP server as `katana_status` and `katana://status`; the window showed
 pieces of it and nothing could ask for it from the window or `katana_cli`.
@@ -348,7 +348,7 @@ with an entity id (`CommandInterpreter::is_entity_id`, a whole number or `#n`)
 to the interpreter unless a file of that name exists.
 Both front ends add IFC's `IMPORT`, `EXPORT` and `INFO` of a .ifc and
 `IFC RULES`, with one grammar and one set of replies
-(`rust/crates/katana_ifc/src/front_end.rs`, `docs/ifc.md`).
+(`crates/katana_ifc/src/front_end.rs`, `docs/ifc.md`).
 
 In the application a typed line is routed before the interpreter sees it
 (`docs/tools.md`, "The tool host"): while a tool runs, the whole line is that tool's
@@ -359,7 +359,7 @@ drawing.
 
 ### Properties as a tree: PROP TREE
 
-An entity has one flat map of properties (`rust/crates/katana_entity/src/entity.rs`).
+An entity has one flat map of properties (`crates/katana_entity/src/entity.rs`).
 An archive import flattens its attribute groups into it with '/' -
 `Asset/Dimensions/Size` - and a string's per-vertex attributes as
 `vertex/3/QualityLevel`, so a surveyed string of a thousand vertices with
@@ -368,7 +368,7 @@ them on one line; the Properties panel listed all of them as rows, made
 before it could show the first. The owner's request of 2026-09-26 was a tree,
 and "a smart way to load all these information".
 
-`katana_cad::property_outline::property_outline` (`rust/crates/katana_cad/src/property_outline.rs`) reads the
+`katana_cad::property_outline::property_outline` (`crates/katana_cad/src/property_outline.rs`) reads the
 names as the tree their slashes make, ONE LEVEL at a time: the entries
 directly beneath a path, each with how many names are beneath it
 (`children`) and how many values (`values`), and its own value when one is
@@ -403,7 +403,7 @@ the other `PROP` words stay on the selection. `UNDER`, `FROM` and `LIMIT`
 are words of their own rather than a bare path because a property may be
 named anything, a scope word included. A scope that takes nothing is a reply
 (`matched=0 entries=0`); `FROM` past the end is an empty page. Tested in
-`rust/crates/katana_cad/tests/top_verbs/property_outline.rs` and by
+`crates/katana_cad/tests/top_verbs/property_outline.rs` and by
 `cli.prop_tree_reads_the_attributes_one_level_at_a_time`; the panel's use of
 it is `docs/desktop.md`, "The Properties panel: a tree read a level at a
 time".
@@ -421,7 +421,7 @@ it, and the sheets print it in the title block, so it is set in one place:
   stores `EPSG:<code>` whenever the system has a code, so `7856`, `epsg:7856`
   and the system's WKT are one value. Text that names no system is refused
   (`InvalidCRS`) and changes nothing; the value it already has is no step.
-- `rust/crates/katana_cad/src/project_crs.rs` describes a system (its registered
+- `crates/katana_cad/src/project_crs.rs` describes a system (its registered
   name, kind, units and area of use), lists the common ones (the GDA2020 and
   GDA94 MGA zones 49 to 56, the national Albers and geographic systems, WGS 84
   and its UTM zones, Web Mercator, New Zealand's and Great Britain's grids)
@@ -433,7 +433,7 @@ it, and the sheets print it in the title block, so it is set in one place:
   for a place. Replies are one fact per line: `crs id=EPSG:7856 name="GDA2020
   / MGA zone 56" kind="projected" units=metre`.
 - In the window, File > Project Coordinate System
-  (`rust/crates/katana_window/src/project_crs_dialog.rs`) lists the common systems grouped,
+  (`crates/katana_window/src/project_crs_dialog.rs`) lists the common systems grouped,
   searches them, checks a typed one as it is typed, and sets it; the status
   bar shows the system and opens the dialog when clicked; and GIS > Online
   Data's Set Project CRS opens it with the systems for the typed box first.
@@ -471,7 +471,7 @@ it, and the sheets print it in the title block, so it is set in one place:
   time defended on the ground that a WKT's quotes "no command line can
   carry". The fix is in the verb: `CRS SET` reads its system from the line
   after its two words, verbatim (`text_after_tokens` in
-  `rust/crates/katana_cad/src/command_interpreter.rs`), and a text that opens with a
+  `crates/katana_cad/src/command_interpreter.rs`), and a text that opens with a
   quote is still the grammar's quoted argument (`CRS SET "GDA2020 / MGA zone
   56"`). Rejected: an escape for quotes in the tokenizer, which every other
   verb would then have to be read against, for one verb whose argument is by
@@ -490,8 +490,8 @@ it, and the sheets print it in the title block, so it is set in one place:
   system on the project just opened
   (`project_crs_dialog::a_new_drawing_is_shown_afresh_and_set_carries_nothing_over`).
 
-The tests are `rust/crates/katana_cad/tests/top_verbs/project_crs.rs`,
-`rust/crates/katana_window/tests/utilities/project_crs_dialog.rs` and, through the real
+The tests are `crates/katana_cad/tests/top_verbs/project_crs.rs`,
+`crates/katana_window/tests/utilities/project_crs_dialog.rs` and, through the real
 window, `qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless`.
 
 ## Threading and ownership
@@ -585,7 +585,7 @@ arc and centre snap would have silently stopped working the moment the index
 was switched on. `katana_cad::spatial_query::query_extents` therefore indexes the full circle for
 an arc and the bounding box for everything else — while picking still tests the
 true bounding box, so clicking an arc's centre does not select it. Both are
-asserted in `rust/crates/katana_cad/tests/document/indexed_queries.rs`.
+asserted in `crates/katana_cad/tests/document/indexed_queries.rs`.
 
 ### Staying in step
 
@@ -664,12 +664,12 @@ unedited grid was once a step and a drawing to save each time
 **The station table always includes the key stations.** An interval table
 that skipped the TS, SC, CS and ST would be useless in the field, because
 those are the points that get pegged. `katana_cad::alignment_report::setting_out_stations`
-(`rust/crates/katana_cad/src/alignment_report.rs`) merges the key stations with the
+(`crates/katana_cad/src/alignment_report.rs`) merges the key stations with the
 interval stations (each `start + k * interval`, multiplied rather than summed
 so the hundredth is not off by a hundred roundings), sorts them and merges any
 two within `katana_math::numerics::GEOMETRIC`, so a key station that lands on the interval
 is one row - carrying its key. (The first version merged to a nanometre, a
-local epsilon of the kind `rust/crates/katana_math/src/numerics.rs` rules out, and
+local epsilon of the kind `crates/katana_math/src/numerics.rs` rules out, and
 skipped without a word any station it could not find a position for. The last
 key station is the sum of the element lengths, which can differ from the end
 station in the last bit, so the end could have been skipped that way. It is
@@ -687,7 +687,7 @@ rows. More than 100 000 rows is refused before one is made.
 ## The Alignment Manager
 
 Terrain > Alignment Manager... (`AlignmentManagerDialog`,
-`rust/crates/katana_window/src/alignment_manager.rs`) is the window's way to every `ALIGN`
+`crates/katana_window/src/alignment_manager.rs`) is the window's way to every `ALIGN`
 verb, where before the window had none and told a person to type `ALIGN NEW`.
 It follows the rules every manager does (`docs/desktop.md`, "The rules a
 dialog or panel follows"):
@@ -733,8 +733,8 @@ carry control names (`terrainSectionAlongAlignment`,
 section shows the BIM menu's `bimCorridors` and `bimCorridorQuantities`
 (`docs/road_design.md`, "Where the old corridor commands went").
 
-Tested by `rust/crates/katana_cad/tests/top_verbs/alignment_report.rs` (the table worked by hand from
-the circle, `PIS`), `rust/crates/katana_window/tests/roads/alignment_manager.rs` (every
+Tested by `crates/katana_cad/tests/top_verbs/alignment_report.rs` (the table worked by hand from
+the circle, `PIS`), `crates/katana_window/tests/roads/alignment_manager.rs` (every
 button's line, one undo step each, the grids' buffering) and, through the
 window, `qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless` and
 `qt_terrain_commands_point_to_the_alignment_manager_headless`.
@@ -757,7 +757,7 @@ invalidation on every edit for no gain anyone has measured. The comment in
 
 **One section routine for both callers.** "Cut Section Along Selection" and
 "Cut Section Along Alignment..." share `cut_section_along`, which cuts with
-`katana_cad::terrain::section_cut::cut_drawing_section` (`rust/crates/katana_cad/src/terrain/section_cut.rs`: the visible surfaces,
+`katana_cad::terrain::section_cut::cut_drawing_section` (`crates/katana_cad/src/terrain/section_cut.rs`: the visible surfaces,
 `max(length / 2000, 0.1 m)` between stations, the design profile beside them
 when there is one) and shows. The open section view is cut again with the same
 function from the alignment and design it kept, when the drawing's surfaces
@@ -795,7 +795,7 @@ grade. Cut Section Along Alignment... passes the profile through
 
 ## Corridor quantities
 
-`katana_cad::corridor::corridor_quantities` (`rust/crates/katana_cad/src/corridor.rs`) sets a template
+`katana_cad::corridor::corridor_quantities` (`crates/katana_cad/src/corridor.rs`) sets a template
 across an alignment at the design elevation at every station, carries its
 edges to the ground by batter slopes, and sums the cut and fill between the
 finished shape and the ground along the alignment.
@@ -880,7 +880,7 @@ instead (`docs/road_design.md`, "Where the old corridor commands went").
 
 ## Parcels
 
-`katana_cad::parcel::parcel_report` (`rust/crates/katana_cad/src/parcel.rs`) turns any closed
+`katana_cad::parcel::parcel_report` (`crates/katana_cad/src/parcel.rs`) turns any closed
 polyline into its courses as bearings and distances, its area, perimeter and
 centroid; `legal_description` writes the deed wording; `parcel_labels` makes
 the text entities. `PARCEL id`, `PARCEL id LEGAL [name]` and
@@ -950,12 +950,12 @@ the rounded corner exists to look nicer on a drawing.
 
 ## Plotting to PDF
 
-File > Plot to PDF... paints the drawing onto a sheet. `rust/crates/katana_cad/src/plot.rs` holds
+File > Plot to PDF... paints the drawing onto a sheet. `crates/katana_cad/src/plot.rs` holds
 the arithmetic - paper sizes, the scale ladder, the sheet transform and the
 fit rule - and is tested as arithmetic; `PlanView::plot_to_pdf` hands the
-view to `plot_plan_to_pdf` (`rust/crates/katana_window/src/plan_painter.rs`),
+view to `plot_plan_to_pdf` (`crates/katana_window/src/plan_painter.rs`),
 which paints it onto the window canvas's PDF document
-(`rust/crates/katana_window/src/canvas/pdf.rs`).
+(`crates/katana_window/src/canvas/pdf.rs`).
 
 **One drawing code, two surfaces.** The plot calls the same `draw_entities`
 and `draw_alignments` the screen uses, with the widget's `ViewTransform`
@@ -1112,7 +1112,7 @@ The owner asked on 2026-09-25 for "a global modification tool that can act on
 data on a selected view, layers, selected features, etc., that can change
 styles, symbols, layers, colour, etc." - 12d's Change panel, and AutoCAD's
 Quick Select followed by the Properties palette. It is
-`rust/crates/katana_cad/src/global_modify.rs`, in three plain values, so the
+`crates/katana_cad/src/global_modify.rs`, in three plain values, so the
 window's dialog (`docs/desktop.md`, "Global Modify"), the command line's
 `MODIFY` and the tests state a request the same way:
 
@@ -1142,7 +1142,7 @@ alone and why. `summary()` is what the dialog shows as its preview and
   runs; moving onto a layer the drawing lacks makes it, and only when
   something actually moves.
 - **A symbol goes through a style**, found or made by
-  `katana_cad::symbol_assign::assign_symbol_to_points` (`rust/crates/katana_cad/src/symbol_assign.rs`), because
+  `katana_cad::symbol_assign::assign_symbol_to_points` (`crates/katana_cad/src/symbol_assign.rs`), because
   a point carries no symbol of its own. Other entities in scope are counted,
   not moved; a point given a style and a symbol ends in the symbol's style.
 - **A style is shared.** Changing the styles the matched entities wear
@@ -1170,9 +1170,9 @@ alone and why. `summary()` is what the dialog shows as its preview and
 - **One rule for linetype names.** The command line's check that a name is a
   model linetype or a library linestyle, and not a vertex symbol, moved from
   the interpreter to `katana_cad::style_catalogue::check_linetype_name`
-  (`rust/crates/katana_cad/src/style_catalogue.rs`), which Global Modify asks too.
+  (`crates/katana_cad/src/style_catalogue.rs`), which Global Modify asks too.
 
-Tested in `rust/crates/katana_cad/tests/customisation_verbs/global_modify.rs`, each expectation
+Tested in `crates/katana_cad/tests/customisation_verbs/global_modify.rs`, each expectation
 worked out by hand from the drawing its fixture lays out.
 
 ## Scope and filter: one grammar for every verb on drawing data
@@ -1180,7 +1180,7 @@ worked out by hand from the drawing its fixture lays out.
 On 2026-09-26 the owner asked for the utility tools to act "on data on view,
 layer/s, elements, filtered elements, like global change", and for every
 tool to be able to act that way. Global Modify's scope and filter became the
-one mechanism for it (`rust/crates/katana_cad/src/scope_verbs.rs`): one set of
+one mechanism for it (`crates/katana_cad/src/scope_verbs.rs`): one set of
 words, read by one parser and resolved by the one matcher,
 `katana_cad::global_modify::match_entities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
 and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them, and
@@ -1227,7 +1227,7 @@ reads a file asks `katana_cad::scope_verbs::is_scope_word` of its first word: a 
 `WHERE` is the drawing, anything else a path.
 
 It is read in two steps, each tested alone
-(`rust/crates/katana_cad/tests/top_verbs/scope_verbs.rs`):
+(`crates/katana_cad/tests/top_verbs/scope_verbs.rs`):
 
 - `katana_cad::scope_verbs::parse_scope_words` turns words into `ScopeWords`, plain data with
   nothing looked up, and refuses by the word what does not read: two scope
@@ -1309,7 +1309,7 @@ it), rather than the parser learning `SET`
 The `UTILITY` verbs are the second user (`docs/subsurface_utilities.md`,
 "Drawing data"); `PROP TREE` is the third (below, "Properties as a tree").
 The window's side is `ScopeFilterWidget`
-(`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`): Global Modify's "Apply
+(`crates/katana_window/src/customisation/scope_filter_widget.rs`): Global Modify's "Apply
 to" and "Only those that match" as one widget every dialog shares, whose
 `verb_words()` are these words (`docs/desktop.md`, "Global Modify"), and the
 window answering `VIEW` through `scope_view_of`.
@@ -1346,7 +1346,7 @@ scope=drawing where="TYPE=leader" matched=774 selected=774 types=leader:774
 - **A scope that takes nothing is an answer**, not a refusal, and leaves
   nothing selected. `WHERE` alone filters the selection, as for every verb.
 
-Tested in `rust/crates/katana_cad/tests/top_verbs/scope_verbs.rs` (`SelectTakes...`,
+Tested in `crates/katana_cad/tests/top_verbs/scope_verbs.rs` (`SelectTakes...`,
 `SelectCounts...`, `TheTypeTally...`), the `cli.select_takes_a_kind_...` test
 and `mcp_server::an_agent_selects_the_leaders_by_kind_and_recolours_only_them`.
 
@@ -1355,7 +1355,7 @@ and `mcp_server::an_agent_selects_the_leaders_by_kind_and_recolours_only_them`.
 The owner asked on 2026-09-30 for views that pan and zoom together - "zoom in
 a design view and the as-built view zooms in too" - with the controls on each
 view's own bar. The views are the window's (`katana_cad::view_set::ViewSet`, held by the
-workspace), so two verbs reach them (`rust/crates/katana_cad/src/view_verbs.rs`):
+workspace), so two verbs reach them (`crates/katana_cad/src/view_verbs.rs`):
 
 ```
 VIEWS [LIST]                          a record per open view, then views=N linked=M
@@ -1560,14 +1560,14 @@ widget - `IN`, `OUT`, a factor and `CENTRE` - is `katana_cad::view_verbs::apply_
 and tested, and the window's host applies it and then tells the link. A
 test's host does the same with a `ViewSet` of its own, so the grammar, the
 records and the refusals are tested without a window
-(`rust/crates/katana_cad/tests/top_verbs/view_verbs.rs`). With no host - `katana_cli`, `katana_mcp`
+(`crates/katana_cad/tests/top_verbs/view_verbs.rs`). With no host - `katana_cli`, `katana_mcp`
 - both verbs are refused by name, "VIEWS is the desktop window's", never as
 unknown commands (`view_verbs_test::views_and_zoom_are_refused_by_name_without_a_window`,
 and a `cli.` test for each).
 
 **The link is `ViewSet`'s** (`link`, `unlink`, `follow`; `ViewState::linked`
 and `last_moved`), and the rule for one pair of views is
-`rust/crates/katana_cad/src/view_link.rs`: plan to plan, the follower takes the
+`crates/katana_cad/src/view_link.rs`: plan to plan, the follower takes the
 centre and the scale in pixels per unit, EXACTLY, and keeps its own size,
 hidden layers and reference layers - a wider view shows more of the same
 place. Every other pair of kinds returns false, and only plan views may join
@@ -1575,7 +1575,7 @@ for now (`only plan views link: view 3 is 3D`). Plain data like the rest of
 a view's state: not saved, not undoable, never a document notification - a
 notification repaints every plan view's whole kept drawing. The leader rule,
 the resize rule and the rejected alternatives are `docs/desktop.md`'s
-"Linked views"; the tests are `rust/crates/katana_cad/tests/styles/view_set.rs`
+"Linked views"; the tests are `crates/katana_cad/tests/styles/view_set.rs`
 (`view_set::linked_plan_views_take_the_centre_and_scale_of_the_view_that_moved_and_keep_their_own_size`
 and the tests after it).
 
@@ -1592,7 +1592,7 @@ library with pictures - and each item here is one of those, in the layer that
 can test it.
 
 - **Who uses what, in one pass** (`katana_entity::table_usage::table_usage`,
-  `rust/crates/katana_entity/src/table_usage.rs`). Every style, linetype name,
+  `crates/katana_entity/src/table_usage.rs`). Every style, linetype name,
   symbol name, hatch pattern and layer, with the layers, styles and entities
   that reach it. "Reaches" is `resolve_display`'s chain, read through the same
   two functions it reads (`resolved_linetype`, `resolved_hatch_pattern`), so an
@@ -1625,14 +1625,14 @@ can test it.
   `update_linetype_if_changed` return `None` when nothing changed, so no undo
   step is pushed and the project is not marked modified; a Command cannot
   decline to be pushed, which is why it is the caller's helper.
-- **ByLayer is a word** (`rust/crates/katana_entity/src/display.rs`). A linetype had no empty value
+- **ByLayer is a word** (`crates/katana_entity/src/display.rs`). A linetype had no empty value
   to say "ByLayer" with - `""` is a name like any other - so a symbol-only or
   colour-only style overrode the layer's linetype with continuous whether it
   meant to or not. A `Style::linetype` of `ByLayer` (any case, since DXF
   reserves it and `validate(Linetype)` already refused it as a name) now
   inherits the layer's; `LAYER LTYPE` refuses it, because a layer is what
   ByLayer inherits from.
-- **Pickers never drop a value** (`rust/crates/katana_cad/src/style_catalogue.rs`, decision D3).
+- **Pickers never drop a value** (`crates/katana_cad/src/style_catalogue.rs`, decision D3).
   `linetype_choices` offers ByLayer (for a style), the model's linetypes and
   every library definition offered as a linestyle - one entry per name, a
   collision marked; `symbol_choices` the built-in shapes and every library
@@ -1691,7 +1691,7 @@ A name reaches the drawing from `Style::linetype`, `Layer::linetype` or
 dashes, saved in the project) and the session's style library (strokes,
 texts and pens). Until 2026-09-23 the viewport looked in both with no rule for
 which won, the preview looked in one, and the 3D view in the other.
-`rust/crates/katana_cad/src/style_resolver.rs` is now the one answer, for the
+`crates/katana_cad/src/style_resolver.rs` is now the one answer, for the
 viewport, the plot and every preview and thumbnail:
 
 - **A linetype name (decision D2).** A NON-vertex library definition of the
@@ -1745,7 +1745,7 @@ either. Now:
 The reference libraries write some arcs with a negative radius; the sign is not a side, and a
 radius is taken as `|r|` (`docs/survey_coding.md`, "The grammar").
 
-**One painter** (`rust/crates/katana_window/src/customisation/style_painter.rs`). The
+**One painter** (`crates/katana_window/src/customisation/style_painter.rs`). The
 viewport's private painting members became `paint_style_drawing`,
 `paint_style_text` and `style_pen_for`, because a preview could not reach them and
 so drew something else. Everything the caller decides comes in a
@@ -1761,7 +1761,7 @@ texts are clamped at 2000 px, the plain-text ceiling in
 `PlanPainter::draw_text` (a font asked for at hundreds of thousands of
 pixels makes the raster engine allocate glyphs larger than any screen), and
 not drawn under 3 px. The screen and the plot reach the painter through the
-same `paint_plan` (`rust/crates/katana_window/src/plan_painter.rs`, docs/plan_view.md); a
+same `paint_plan` (`crates/katana_window/src/plan_painter.rs`, docs/plan_view.md); a
 plot calls it from `plot_plan_to_pdf`, which needs no widget.
 
 **White prints black (decision D7).** `PlotSettings::white_to_black`, on by
@@ -1829,7 +1829,7 @@ next command - a click on a layer's visibility box - called `update()` on
 freed memory: a crash five runs in six, and a clean run the sixth time.
 
 `add_listener` now returns a `ListenerHandle` that owns the registration and
-ends it when dropped (`rust/crates/katana_cad/src/document.rs`); it is
+ends it when dropped (`crates/katana_cad/src/document.rs`); it is
 `#[must_use]`, so a registration cannot be made without something owning it.
 The handle holds the registry weakly (`Weak`), because the C++ met an
 ordering that is easy to forget: Qt deleted child widgets in `~QWidget`,

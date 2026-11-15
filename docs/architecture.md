@@ -167,7 +167,7 @@ core → math → geometry → { terrain, render, entity } → commands → stor
                                            went with it)
               gis, pointcloud → interop    the GDAL/PDAL adapters and import/export
               update                       core alone; seen only by app and window (the auto-update engine, and
-                                           the helper program rust/crates/katana_updater/src, built on it)
+                                           the helper program crates/katana_updater/src, built on it)
               gpu                          render's rule (never a Document); seen by the window
 ```
 
@@ -176,10 +176,10 @@ application core builds without GDAL and PDAL, and no instrument format's or
 archive reader's own types can reach the drawing. The exact lists are in the
 layering table and nowhere else; the crates' `[dependencies]` follow it.
 
-`update` (`rust/crates/katana_update/src/`; `docs/update.md`)
+`update` (`crates/katana_update/src/`; `docs/update.md`)
 sits beside `math`, not above anything: it depends on `core` and nothing
 else, and only `app` and the window depend on it. The reason is the fourth
-program. `katana_updater` (`rust/crates/katana_updater/src`) replaces the files of an
+program. `katana_updater` (`crates/katana_updater/src`) replaces the files of an
 install while Katana is not running, from a copy of itself in a temporary
 folder, so it must be small and static and link no GDAL, no GUI toolkit and
 nothing of the drawing - and it is built from this layer and `katana_core` alone.
@@ -187,7 +187,7 @@ Three consequences follow from the same rule:
 
 - **The network is injected.** The engine takes a function that fetches
   (`katana_update::Fetch`) as a parameter; `katana_app` makes one from the project's
-  one HTTP stack (`rust/crates/katana_app/src/update_transport.rs`), and a test hands in
+  one HTTP stack (`crates/katana_app/src/update_transport.rs`), and a test hands in
   a fake. The layer never sees libcurl.
 - **The machine is behind interfaces.** Every change to the disk, every
   process started or looked for, the registry and the credential store are
@@ -208,7 +208,7 @@ Three consequences follow from the same rule:
   system's DLLs.
 
 The verbs that drive it, `UPDATE ...`, are the session's
-(`rust/crates/katana_app/src/update_verbs.rs`), not the interpreter's: `cad` cannot see
+(`crates/katana_app/src/update_verbs.rs`), not the interpreter's: `cad` cannot see
 `update`, and an update acts on the program, not on a drawing.
 
 A crate may use the crates it lists as `[dependencies]` in its `Cargo.toml`,
@@ -226,13 +226,13 @@ name what it does not depend on. Two rules follow:
 2. **No third-party types in a public interface** (Rule 4). PROJ, SQLite,
    GDAL, PDAL, wgpu, egui and the other third-party crates appear only
    inside the crate that wraps each - GDAL and PDAL through FFI modules and
-   the three C++ shims under `rust/crates/katana_gis/native/` and
-   `rust/crates/katana_pointcloud/native/`. Each is wrapped by a Katana-owned
+   the three C++ shims under `crates/katana_gis/native/` and
+   `crates/katana_pointcloud/native/`. Each is wrapped by a Katana-owned
    interface - `Result<T>`-based, using Katana's own value types - so that
    replacing a library is a change to one crate rather than to the whole code
    base.
 
-A new layer is a new crate under `rust/crates/` and a row of the layering
+A new layer is a new crate under `crates/` and a row of the layering
 table, in the same commit.
 
 Not done: since the C++ went, the CMake test runner no longer registers the
@@ -246,7 +246,7 @@ tests link nothing else.
 
 There are no silent failures and no error codes that a caller can ignore by
 accident. Every fallible operation returns
-[`katana_core::error::Result<T>`](../rust/crates/katana_core/src/error.rs) (or `Status`, its
+[`katana_core::error::Result<T>`](../crates/katana_core/src/error.rs) (or `Status`, its
 unit form, `Result<()>`), which holds either a value or an `Error` carrying:
 
 * a typed `ErrorCode` — `InvalidGeometry`, `InvalidCRS`,
@@ -270,7 +270,7 @@ lossy export counts what it dropped. `Status` success is `Ok(())`.
 ## Numerical policy
 
 Every tolerance in the code base is a named constant in
-[`numerics.rs`](../rust/crates/katana_math/src/numerics.rs), documented with its unit
+[`numerics.rs`](../crates/katana_math/src/numerics.rs), documented with its unit
 and rationale. Ad-hoc epsilons are forbidden — they are how CAD kernels acquire
 inconsistent behaviour between subsystems.
 
@@ -300,14 +300,14 @@ Two further consequences run through the code:
   and again shifted by (500000, 5000000).
 
 Text and units have one home each, low in the stack, so that every layer can
-reach them: decoding bytes to UTF-8 is `rust/crates/katana_core/src/text_encoding.rs`; trimming,
-case folding (`lowered`, `uppered`) and number parsing is `rust/crates/katana_core/src/text.rs`
+reach them: decoding bytes to UTF-8 is `crates/katana_core/src/text_encoding.rs`; trimming,
+case folding (`lowered`, `uppered`) and number parsing is `crates/katana_core/src/text.rs`
 (locale-independent: the C++ build's rule was never `std::isspace`,
 `std::tolower`, `std::toupper` or `strtod` on file text, since Latin-1's
 toupper makes 0xE0, the lead byte of a three-byte UTF-8 sequence, 0xC0; Rust's
 text functions take no locale, and the port keeps the one home); the exact
-length of a foot or a link is `rust/crates/katana_math/src/unit_ratio.rs`,
-which `rust/crates/katana_geodesy/src/units.rs` is built from
+length of a foot or a link is `crates/katana_math/src/unit_ratio.rs`,
+which `crates/katana_geodesy/src/units.rs` is built from
 (`docs/geodesy.md`). The C++ `katana_cad`'s private case-folding copies were
 swept into `katana_core::text::lowered`, `uppered`, `ascii_lower` and
 `is_ascii_space` before the port; the same sweep of `katana_app` and
@@ -331,14 +331,14 @@ This is a correctness requirement for an engineering tool, not a convenience.
   the thread count, and tests prove it by running with `TaskPool(1)`
   ("Threading", below).
 * Property tests use a fixed-seed generator
-  ([`rust/crates/katana_cad/tests/support/property.rs`](../rust/crates/katana_cad/tests/support/property.rs)), so a failure
+  ([`crates/katana_cad/tests/support/property.rs`](../crates/katana_cad/tests/support/property.rs)), so a failure
   reproduces exactly.
 * Entity ids increase monotonically and are never reused, so a recorded id
   cannot come to mean a different entity after an undo.
 
 ## Logging
 
-[`katana_core::Logger`](../rust/crates/katana_core/src/log.rs) emits structured
+[`katana_core::Logger`](../crates/katana_core/src/log.rs) emits structured
 records: timestamp, level, category, message and key/value fields, rendered as
 `2026-09-19T10:15:30.123Z INFO [command] executed name=CREATE_LINE entities=1`.
 
@@ -355,7 +355,7 @@ The document, its model, the command stack, the project store and every
 control belong to one thread, the window's (or `katana_cli`'s main thread);
 the types are not `Sync` where that matters, so the compiler says so. What runs in parallel does so inside one call,
 through one primitive:
-[`katana_core::TaskPool`](../rust/crates/katana_core/src/task_pool.rs).
+[`katana_core::TaskPool`](../crates/katana_core/src/task_pool.rs).
 
 * **What it is.** A pool of `std::thread`s, created once and kept warm
   (`TaskPool::shared()`, never destroyed), with one worker fewer than the

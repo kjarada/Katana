@@ -27,7 +27,7 @@ bash tools/build_visible.sh wsl test -R '^qt_'           # the runner's suite on
 bash tools/build_visible.sh wsl test -R '^cli\.'         # the command line's
 ```
 
-Inside WSL, by hand, the same is `cargo test --release` in `rust/` and `ctest`
+Inside WSL, by hand, the same is `cargo test --release` at the checkout's root and `ctest`
 in the runner's build folder (`~/katana-build/<checkout>/tests`).
 
 Run the WHOLE suite before a commit, not only the crate touched: the `docs`
@@ -38,8 +38,8 @@ often than its own.
 
 | Kind | Registered by | Named | Where |
 |---|---|---|---|
-| unit, integration, property and regression cases | `#[test]` | `<module>::<case>`, the twin of the C++ `<Suite>.<Case>` in snake case | `rust/crates/<crate>/tests/` (and a crate's own `#[cfg(test)]` modules) |
-| the window's own tests, with no display | `#[test]`, `rust/crates/katana_window/tests/` | `<module>::<case>` | the headless runner (`rust/crates/katana_window/src/drive/`) |
+| unit, integration, property and regression cases | `#[test]` | `<module>::<case>`, the twin of the C++ `<Suite>.<Case>` in snake case | `crates/<crate>/tests/` (and a crate's own `#[cfg(test)]` modules) |
+| the window's own tests, with no display | `#[test]`, `crates/katana_window/tests/` | `<module>::<case>` | the headless runner (`crates/katana_window/src/drive/`) |
 | the whole window, headless | `add_test` in `tests/CMakeLists.txt` (and `tests/geo/headless/`, `tests/update/headless/`, `tests/interop/`) | `qt_<what it shows>_headless` | `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
 | end-to-end command line | `add_test` in `tests/cli/CMakeLists.txt` (and `tests/cli/geo/*.cmake` and the files beside it) | `cli.<what it shows>` | `katana_cli` run as a process |
 | what the programs install | `tests/CMakeLists.txt` | `packaging_check_on_fixture_<what>`, `packaging_check_on_deploy_script_<what>` | `tools/check_install_rules.cmake` ("What the programs hold", below) |
@@ -62,13 +62,13 @@ ported; and `#[target_feature]` leaves the kernel checks nothing to find
 
 ### A crate's tests
 
-A crate's integration tests are `rust/crates/<crate>/tests/<file>.rs` or a
+A crate's integration tests are `crates/<crate>/tests/<file>.rs` or a
 folder with a `main.rs` that names its modules (`mod plan_view;`), each module
 holding the cases of one C++ suite: the twin of `Suite.CaseName` is
 `fn case_name` inside `mod suite`, or at the top of `suite.rs` (the rule
 `tools/check_docs.py` resolves a cited `<suite>::<case_name>` by). Shared helpers
-are a `support` module beside them (`rust/crates/katana_cad/tests/support/`,
-`rust/crates/katana_window/tests/support/window_support.rs`). A crate's tests
+are a `support` module beside them (`crates/katana_cad/tests/support/`,
+`crates/katana_window/tests/support/window_support.rs`). A crate's tests
 can use only what the crate and its `[dev-dependencies]` give them, so the
 math tests cannot rely on SQLite and the geometry tests cannot rely on the
 window - the property the C++ got from one executable per module. A folder of
@@ -87,7 +87,7 @@ list them.
 ### Interactive tools: ToolDriver
 
 A drawing tool is a state machine in `katana_cad` (`docs/tools.md`), tested
-with no window through `rust/crates/katana_cad/tests/support/tool_driver.rs`. `ToolDriver` starts a
+with no window through `crates/katana_cad/tests/support/tool_driver.rs`. `ToolDriver` starts a
 catalogue tool by id and feeds it what a user would - `click(x, y)`,
 `pick(id, x, y)`, typed text, Enter, Undo - and executes the one command a
 finished step returns on its own `Document`, exactly as the plan view does.
@@ -95,10 +95,10 @@ The test then asserts on the document against geometry worked out by hand.
 
 ### The window's tests
 
-`rust/crates/katana_window/tests/` builds the views, the workspace, the dock
+`crates/katana_window/tests/` builds the views, the workspace, the dock
 chrome, the managers, the dialogs and the main window with no display: the
 headless runner draws egui frames on the CPU (`docs/headless.md`), and
-`rust/crates/katana_window/tests/support/window_support.rs` draws a frame,
+`crates/katana_window/tests/support/window_support.rs` draws a frame,
 draws until the window is idle, and finds a control by its name - the object
 name the C++ widget had - to fill or press it, as a person would; the tests
 assert on the `Document`. The C++ widget suite (`qt_widgets.*`) could not
@@ -231,7 +231,7 @@ reference customisation, or the compiled-in one, must pass without it
 
 **The suites that read third-party data** are these: `built_in_census`, the
 NSW half of `built_in_renames` and the NSW cases of `built_in_library`
-(`rust/crates/katana_cad/tests/customisation/`), which read the NSW customisation
+(`crates/katana_cad/tests/customisation/`), which read the NSW customisation
 compiled in as an alternate built-in, found by name. (The C++ build's legacy
 readers' and writers' reference tests, which read the git-ignored reference
 folder, were never ported and went with it.) Each skips, saying why, where
@@ -322,7 +322,7 @@ The other standing rules:
   regression test. Say in the commit that it was done.
 - **A property test must reach the cases it claims to cover**: count the
   interesting hits and assert the count is not trivial. It uses the
-  fixed-seed generator in `rust/crates/katana_cad/tests/support/property.rs` (`property::Random`,
+  fixed-seed generator in `crates/katana_cad/tests/support/property.rs` (`property::Random`,
   `PROPERTY_ITERATIONS`), so every run explores the same inputs and a failure
   reproduces exactly.
 - **Parallel and culled paths are tested against the plain one.** A
@@ -334,7 +334,7 @@ The other standing rules:
   guards a crash that happened only sometimes, the proof of the mechanism
   belongs in a unit test that fails deterministically without the fix
   (`qt_import_12da_then_toggle_headless` and the listener tests in
-  `rust/crates/katana_cad/tests/interpreter/cad.rs`).
+  `crates/katana_cad/tests/interpreter/cad.rs`).
 
 ## The update system's tests
 
@@ -354,17 +354,17 @@ the `openssl` command line; the tree an update must leave is built from the
 specification of the two releases, in a folder of its own, and compared as a
 whole.
 
-**The engine, in process** (`katana_update_tests`, `rust/crates/katana_update/tests/*.rs`).
+**The engine, in process** (`katana_update_tests`, `crates/katana_update/tests/*.rs`).
 Everything the engine does to the machine goes through an interface -
 `FsOps`, `ProcessOps`, `Launcher`, `RegistryOps`, `CredentialStore`, `Fetch` -
 and the tests hand it fakes: a transport that records what each hop was
 sent, a launcher that counts what it was asked to start, a registry that is
 a map. The trust root is a parameter too, so these tests verify releases
 signed with the published test key, which no shipped program trusts
-(`rust/crates/katana_update/tests/test_key/mod.rs`).
+(`crates/katana_update/tests/test_key/mod.rs`).
 
-**The fault loops** (`rust/crates/katana_update/tests/fault_loops.rs`). `FaultFs`
-(`rust/crates/katana_update/src/fault_fs.rs`) wraps a file system, counts its
+**The fault loops** (`crates/katana_update/tests/fault_loops.rs`). `FaultFs`
+(`crates/katana_update/src/fault_fs.rs`) wraps a file system, counts its
 changing operations and can make the k-th one not happen, as if the process
 had died just before it. Three loops rest on it, each run over a 40-file
 release and over the fixture releases the producer made:
@@ -399,7 +399,7 @@ that left the journal in each state a swap passes through. The loops are
 deterministic: the fault is the k-th operation, not a moment in time.
 
 **An update whose helper died during the health check**
-(`rust/crates/katana_update/tests/recover.rs`, the suites `SettleUnproved`, `SettleLoops`,
+(`crates/katana_update/tests/recover.rs`, the suites `SettleUnproved`, `SettleLoops`,
 `ConfirmStarted` and `RecoverSuperseded`; `docs/update.md` has the rule under
 that name). The state is never written by hand: the fixture update is applied
 on a `FaultFs` that dies before the operation a clean run's log names as the
@@ -464,7 +464,7 @@ new one from then on
 (`settle_loops::dying_before_every_change_of_a_windows_confirming_ends_at_the_old_tree_before_its_marker_and_the_new_one_after`).
 Each requires a death at every k, at operation k.
 
-The same through the REAL helper (`rust/crates/katana_updater/tests/helper.rs`):
+The same through the REAL helper (`crates/katana_updater/tests/helper.rs`):
 `katana_updater_test` is killed with `--die-at` before its `HEALTHY` append,
 after a real program stood in for the new version and wrote the marker; then
 `--recover` is run as a logon runs it, the `RunOnce` entry consumed first.
@@ -489,7 +489,7 @@ the three fault loops, and
 
 **The second scan** has a process seam whose answers are a list, one for
 each time it is asked, so that the second can differ from the first
-(`rust/crates/katana_update/tests/apply.rs`, suite `ApplyWait`): nobody and then
+(`crates/katana_update/tests/apply.rs`, suite `ApplyWait`): nobody and then
 `katana_cli` is `blocked` with the install untouched, the download kept and
 no `RunOnce` entry ever registered, and the Retry then installs from that
 same stage
@@ -528,7 +528,7 @@ these tests run without `KATANA_ONLINE_TESTS` ("The loopback rule", above).
 **Three programs the tests build and nothing ships**
 (`tools/check_install_rules.cmake` refuses the first two by name):
 
-- `katana_update_e2e` (`rust/crates/katana_updater/src/bin/katana_update_e2e.rs`): the engine from a
+- `katana_update_e2e` (`crates/katana_updater/src/bin/katana_update_e2e.rs`): the engine from a
   command line - check, plan, stage, preflight, launch, recover - with the
   test key as its trust;
 - `katana_updater_test`: the helper's OWN `main.rs`, compiled with the test
@@ -539,7 +539,7 @@ these tests run without `KATANA_ONLINE_TESTS` ("The loopback rule", above).
   and `--stand-in P`. Without a registry base it uses a registry that has
   nothing, so a test that forgets the option leaves no `RunOnce` entry on
   the machine;
-- `katana_updater_stub` (`rust/crates/katana_updater/src/bin/katana_updater_stub.rs`): a real program
+- `katana_updater_stub` (`crates/katana_updater/src/bin/katana_updater_stub.rs`): a real program
   that stands in for Katana when the helper starts the new version. A test
   never starts a file that is not a program: Windows answers that with a
   message box somebody has to click.
@@ -605,15 +605,15 @@ that cannot see a violation passes as quietly as one that finds none:
   (`cmake/KatanaPackaging.cmake`, "install.json").
 
 **The surfaces.** The verbs run for real over a fake transport, a scratch
-install and the signed fixtures (`rust/crates/katana_app/tests/session/update_verbs.rs`, suite
+install and the signed fixtures (`crates/katana_app/tests/session/update_verbs.rs`, suite
 `UpdateVerbs`); `katana_cli` and the window are started from a build tree,
 which is a development copy and asks no server
 (`tests/cli/update_cli.cmake` and `tests/cli/update_blocked.cmake`,
 the `cli.update_*` cases; `tests/update/headless/update_window.cmake`); the
 dialog, its sentences and the window's decisions are widget tests
-(`rust/crates/katana_window/tests/update/update_dialog.rs`), and the Command Reference's
+(`crates/katana_window/tests/update/update_dialog.rs`), and the Command Reference's
 Updates section is held to the verbs' own help
-(`rust/crates/katana_window/tests/host/command_reference.rs`). Each run of a program is
+(`crates/katana_window/tests/host/command_reference.rs`). Each run of a program is
 given an update state folder of the tests' own (`KATANA_UPDATE_STATE_DIR`),
 and a token of the tests' own or none, so that nothing of whoever runs the
 suite is read or written.
@@ -668,7 +668,7 @@ runs on:
   The swap's tests are the other place the build's version reaches, since
   the helper reads the install it updates. Every install their harness
   writes therefore names the version of the package it came from
-  (`INSTALL_JSON` in `rust/crates/katana_update/tests/apply_harness/mod.rs`: 0.1.0, at or below
+  (`INSTALL_JSON` in `crates/katana_update/tests/apply_harness/mod.rs`: 0.1.0, at or below
   every release a test installs), and a scenario that copies a fixture
   tree, whose own record says the target alone, gives it that record. So
   what is installed there is what the helper's record says, whichever
@@ -676,8 +676,8 @@ runs on:
   0.1.0, which is below this build
   (`apply::an_install_the_harness_writes_is_read_as_its_records_say_and_not_as_this_build`). The
   releases a test writes out for itself are 900.1.0 installed and 900.2.0
-  staged (`build_small_scenario` in `rust/crates/katana_update/tests/apply.rs`,
-  `build_tiny_loop` in `rust/crates/katana_update/tests/recover.rs`) - versions no build
+  staged (`build_small_scenario` in `crates/katana_update/tests/apply.rs`,
+  `build_tiny_loop` in `crates/katana_update/tests/recover.rs`) - versions no build
   of Katana has, as is the version of a release that is given none
   (`apply::the_releases_written_out_here_are_above_the_version_of_any_build`); the fixtures'
   pair and the forty-file pair are 0.9.0 and 0.10.0. Under a record that
@@ -708,7 +708,7 @@ runs on:
   (`qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`).
 
 **Where nothing is installed.** On Linux and macOS the swap is not written,
-and what is held there is the refusal: `rust/crates/katana_update/tests/platform.rs`, and
+and what is held there is the refusal: `crates/katana_update/tests/platform.rs`, and
 `katana_updater_refuses_for_the_platform_and_writes_nothing`, which runs the
 helper with its swap line and with `--recover` and lists its folder
 afterwards.
@@ -718,13 +718,13 @@ What no test covers:
 - **The transport the programs ship with, against a server.** Its rules -
   where the token goes, which redirects are followed, what an answer to a
   range must be - are tested to the letter, over a recorded wire
-  (`rust/crates/katana_update/tests/feed.rs`), and end to end through
+  (`crates/katana_update/tests/feed.rs`), and end to end through
   `katana_update_e2e`. But that program moves its requests over plain
   sockets of its own, because it must not be able to leave the machine. The
   half the shipped programs use instead - `katana_app::update_transport::make_update_fetch`
-  (`rust/crates/katana_app/src/update_transport.rs`) over libcurl, `katana_gis::web_access::http_exchange`
+  (`crates/katana_app/src/update_transport.rs`) over libcurl, `katana_gis::web_access::http_exchange`
   - is run against a server only by the two `OnlineLive` cases of
-  `rust/crates/katana_interop/tests/online_requests/online_fetch.rs`, which need `KATANA_ONLINE_TESTS=1`
+  `crates/katana_interop/tests/online_requests/online_fetch.rs`, which need `KATANA_ONLINE_TESTS=1`
   and a real host, and which ask for no byte range; no test in the ordinary
   run puts it in front of the fake feed. A release is the first place it
   meets a `Range` answer.
@@ -782,7 +782,7 @@ is found) and fails when a document in `docs/` cites something that does not
 exist. The forms it accepts are listed, with how each is checked, at the top
 of the script; in short:
 
-- a repository path (`rust/crates/...`, `tests/...`, `tools/...`, `docs/...`,
+- a repository path (`crates/...`, `tests/...`, `tools/...`, `docs/...`,
   `cmake/...`, `resources/...`, `samples/...`, and the root files), in
   backticks, in a link or in fenced code; paths under a git-ignored folder
   are not checked, since a clean checkout lacks them. A path into the removed
@@ -804,7 +804,7 @@ of the script; in short:
 
 and every document in `docs/` must be listed in `docs/index.md`, and
 `docs/headless.md` must name every switch the window's driver parses
-(`rust/crates/katana_window/src/drive/run.rs` and `steps.rs`) and every `-D`
+(`crates/katana_window/src/drive/run.rs` and `steps.rs`) and every `-D`
 variable `tools/check_screenshot.cmake` reads - a new switch is documented in
 the commit that adds it. Documents
 still being brought up to this standard are named in the script's
@@ -877,7 +877,7 @@ failures. What was wrong with each, and why it was fixed where it was:
     before or after depending on load. Save then wrote the default name, and
     Load waited.
   - The fix. The one answer they now share, `choose_file` in
-    `rust/crates/katana_window/tests/support/window_support.rs`, takes the focus off the box before
+    `crates/katana_window/tests/support/window_support.rs`, takes the focus off the box before
     `selectFile`. The image test's helper also cancels a dialog that is still
     up rather than leaving it, so a choice that does not take fails the test
     instead of hanging it.
@@ -900,7 +900,7 @@ failures. What was wrong with each, and why it was fixed where it was:
   - The fix. A machine with no Vulkan driver at all is a fact about the
     machine, so these cases now skip there with that reason, as the device
     cases already skip without a device (`whyNoVulkanDriver`,
-    `rust/crates/katana_gpu/tests/support/gpu_support.rs`, compiled into the widget tests too). A
+    `crates/katana_gpu/tests/support/gpu_support.rs`, compiled into the widget tests too). A
     driver that is there and fails still fails them.
   - Found on the way. The three `qt_widgets_gpu.*` tests and
     `gpu_offscreen.*` are plain `add_test`s, and a gtest skip exits 0, so
@@ -965,7 +965,7 @@ A whole-suite run at `--parallel 4` left `terrain.asc.aux.xml` beside
 assert is absent (no min or max without statistics being asked for). Both
 passed in that run and failed when run again while the file was there. The
 headless check `tests/geo/headless/info.cmake` asks for the same file's
-statistics, and the sidecar guard in `rust/crates/katana_gis/src/processing/bridge.rs`
+statistics, and the sidecar guard in `crates/katana_gis/src/processing/bridge.rs`
 removes what a run made only after the run ends, so a case reading the file
 at the same moment can see it; which test left it behind was not found. The
 file is git-ignored, so nothing shows it but the failure. Delete it before
@@ -1005,7 +1005,7 @@ fixed on 2026-09-29:
   86 such calls (65 in the program, 21 in tests) now use
   `katana_core::text::format_exact_real`, the shortest round-trip text: by the
   standard the same `to_chars` call C++26's `to_string` makes, so GCC's
-  output is unchanged. The C++ build's check_float_to_string.py found any new one (retired with it: the Rust guard is `rust/clippy.toml`'s disallowed methods); a
+  output is unchanged. The C++ build's check_float_to_string.py found any new one (retired with it: the Rust guard is `clippy.toml`'s disallowed methods); a
   text search cannot, because it cannot tell a double from an int. One test
   that compared against `std::to_string(-33.865)` - the same call as the code
   under test - now compares against the literal "-33.865". The tool exits 1

@@ -37,18 +37,18 @@ No GDAL or PDAL type appears in any public item of the adapters: geometry
 crosses the boundary as plain coordinate arrays (`GeoPoint`), rasters as 8-bit
 RGBA, and failures as `Result<T>`. GDAL is reached through its C API, whose
 errors the adapter collects and converts; PDAL has no C API, so it is reached
-through a C++ shim with a C ABI (`rust/crates/katana_pointcloud/native/pdal_shim.cpp`)
+through a C++ shim with a C ABI (`crates/katana_pointcloud/native/pdal_shim.cpp`)
 that catches every exception PDAL throws and hands it back as an error, so
 nothing unwinds across the interface.
 
 GDAL's algorithm framework - the `gdal raster ...` / `gdal vector ...`
 algorithms - is reached the same way, through `katana_gis::processing`
-(`rust/crates/katana_gis/src/processing`, in `rust/crates/katana_gis/src/processing/`). Drawing
+(`crates/katana_gis/src/processing`, in `crates/katana_gis/src/processing/`). Drawing
 data, surfaces and derived rasters are bound to it in `katana_interop`
-(`rust/crates/katana_interop/src/geo/`). That, the GDAL verb and its executor are
+(`crates/katana_interop/src/geo/`). That, the GDAL verb and its executor are
 `docs/geoprocessing.md`. Two pieces of this layer are shared with it:
 
-- the chords an arc becomes (`rust/crates/katana_interop/src/curve_chords.rs`), which
+- the chords an arc becomes (`crates/katana_interop/src/curve_chords.rs`), which
   EXPORT and the bindings use alike;
 - the grid a surface is sampled on (`katana_interop::geo::raster_products::surface_grid`), which
   `export_surface_raster` now writes.
@@ -232,7 +232,7 @@ result" described the intent, not the code.
 The GDAL investigation of 2026-09-26 reproduced a set of silent losses in
 the vector path, each reported as a success. Each is fixed where the loss
 was, and each has a test that fails without the fix
-(`rust/crates/katana_interop/tests/interop_core/vector_fidelity.rs`;
+(`crates/katana_interop/tests/interop_core/vector_fidelity.rs`;
 `cli.a_lot_with_a_hole_is_exported_as_one_polygon_with_the_projects_crs`,
 `cli.export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude`,
 `cli.export_to_kml_without_a_project_crs_is_refused`,
@@ -246,7 +246,7 @@ result is made with. The adapter reads a layer as a typed table
 (`GdalDataset::read_table`) and writes typed tables
 (`GdalDataset::write_tables`); `read_features` and `write_vector` stay, as the
 same read and write with every value as text. There was a second
-entity-to-feature conversion in the export (`rust/crates/katana_interop/src/export.rs`) beside the bindings', and the
+entity-to-feature conversion in the export (`crates/katana_interop/src/export.rs`) beside the bindings', and the
 losses below came about between the two.
 
 - **A hole is a hole.** A 100 m lot with a 20 m hole, imported and exported
@@ -322,7 +322,7 @@ losses below came about between the two.
   rule lives.
 - **GDAL's warnings** went to the process-wide quiet handler and nowhere
   else. Each read and write collects the warnings GDAL raises on its own
-  thread (`rust/crates/katana_gis/src/cpl_error_collector.rs`) and returns them, each
+  thread (`crates/katana_gis/src/cpl_error_collector.rs`) and returns them, each
   once with a count, among the import's or export's warnings: a shapefile
   shortening `surveyed_by_party` to `surveyed_b` says so
   (`vector_fidelity::warnings_reach_the_reply`). A failure GDAL raises while
@@ -340,7 +340,7 @@ and not the arc (no web service sends arcs). A KML's own fields (`Name`,
 always have. A GPX export writes points as waypoints and lines, closed
 ones included, as routes; `.gpx` and `.kmz` are now written by their names
 ("Formats", below). `origin_shift` is still not
-undone on export (QT-07, above). The bridge (`rust/crates/katana_gis/src/processing/bridge.rs`)
+undone on export (QT-07, above). The bridge (`crates/katana_gis/src/processing/bridge.rs`)
 keeps its own copy of the error collector and of the typed field reading;
 both could move onto the adapter's.
 
@@ -355,8 +355,8 @@ and SQLite written from the command line and not offered by the window
 (audit finding "Three parallel format tables") - they offered `.ecw`, which
 this toolchain's GDAL cannot open, and they left out FlatGeobuf, GeoParquet,
 KMZ, GPX and a zipped shapefile, all of which GDAL here reads and writes.
-So what GDAL can do is read from GDAL (`rust/crates/katana_gis/src/formats.rs`,
-`rust/crates/katana_gis/src/formats.rs`):
+So what GDAL can do is read from GDAL (`crates/katana_gis/src/formats.rs`,
+`crates/katana_gis/src/formats.rs`):
 
 - **The registry.** `katana_gis::formats::formats()` is every driver of this build, read
   once from its driver manager: whether it holds rasters or vectors
@@ -413,7 +413,7 @@ formats that are chiefly imagery (`mbtiles`, `pdf`, `jp2` ...).
   local path now (`katana_gis::formats::is_virtual_path`); whether the rest exists is GDAL's
   to find out.
 - An archive GDAL does not open as it is is opened by its inside
-  (`rust/crates/katana_gis/src/formats_detail.rs`, shared by the open and the
+  (`crates/katana_gis/src/formats_detail.rs`, shared by the open and the
   routing): a `.zip`, `.kmz`, `.tar`, `.tgz` or `.tar.gz` as a folder -
   a shapefile's four files, or several shapefiles, open so as the layers of
   one dataset - else the one member that is a dataset; a `.gz` as the one
@@ -426,7 +426,7 @@ formats that are chiefly imagery (`mbtiles`, `pdf`, `jp2` ...).
   `track_points`) are the vertices of its routes and tracks again: a whole
   GPX import leaves them out and says so, and either is imported by its index.
 
-**`FORMATS`** (`rust/crates/katana_app/src/geo/formats_verbs.rs`, the verb table's I2
+**`FORMATS`** (`crates/katana_app/src/geo/formats_verbs.rs`, the verb table's I2
 row) answers at prepare, changing nothing, in every front end:
 
 ```
@@ -449,7 +449,7 @@ FORMATS OPTIONS <driver> [JSON]
 non-modal, read-only table (`gisFormatsDialog`: `gisFormatsKind`,
 `gisFormatsCapability`, `gisFormatsFilter`, `gisFormatsTable`,
 `gisFormatsCount`, `gisFormatsCommand`, `gisFormatsOptions`,
-`gisFormatsRun`, `gisFormatsClose`; `rust/crates/katana_window/src/geo/formats_dialog.rs`).
+`gisFormatsRun`, `gisFormatsClose`; `crates/katana_window/src/geo/formats_dialog.rs`).
 Its choices make the FORMATS line it shows, and the table is that line's
 records, prepared by the one geoprocessing executor. It does not log a
 hundred records at every keystroke; Run in Command Line hands the line to
@@ -459,7 +459,7 @@ filters are the registry's readable extensions, with a "Zipped GIS data"
 filter for archives; the export dialog lists every writer, and a name typed
 without an extension takes the chosen filter's.
 
-Tests: `rust/crates/katana_interop/tests/interop_core/formats.rs` (`formats::*`, `formats_verb::*`: the
+Tests: `crates/katana_interop/tests/interop_core/formats.rs` (`formats::*`, `formats_verb::*`: the
 registry against GDAL's documented capabilities, the writer for each name,
 FlatGeobuf, GeoParquet, KMZ, GPX and CSV written by their names and read
 back to the micrometre or, in longitude and latitude, to 1e-9 degrees of
@@ -481,7 +481,7 @@ with no extension that IS there keeps `no importer for ''`, and so does an
 extension nobody reads on a file that is not there
 (`gis_verbs::a_path_with_no_extension_that_is_not_there_is_no_such_project_directory_or_file`).
 
-**Not done.** `INFO` (`rust/crates/katana_interop/src/dataset_info.rs`) still checks
+**Not done.** `INFO` (`crates/katana_interop/src/dataset_info.rs`) still checks
 that a file exists before GDAL looks, so it refuses a `/vsi` path that
 IMPORT opens. A zipped shapefile EXPORT writes holds `katana.shp`, the
 layer's name, whatever the archive is called. Routing opens a local file
@@ -550,7 +550,7 @@ returns only the octree levels at or above that point spacing, so level of
 detail is a *query parameter* rather than a data structure Katana owns,
 maintains and keeps correct.
 
-What the engine now offers (`rust/crates/katana_pointcloud/src/point_cloud_engine.rs`):
+What the engine now offers (`crates/katana_pointcloud/src/point_cloud_engine.rs`):
 
 * `PointCloudReadOptions::resolution` - the coarsest spacing acceptable.
 * `convertToCopc(source, destination)` - any PDAL-readable cloud to COPC,
@@ -709,7 +709,7 @@ Decisions, and what was rejected:
   one point in N; Export Point Cloud asks before writing a sample as though it
   were the survey, and points at Convert to COPC for the whole file. The
   writing is the `EXPORT` verb's (`EXPORT <file.las|.laz> [CLOUD <id|name>]
-  [PREVIEW]`, `rust/crates/katana_app/src/geo/export_verb.rs`), so `katana_cli` and
+  [PREVIEW]`, `crates/katana_app/src/geo/export_verb.rs`), so `katana_cli` and
   `katana_export`'s `cloud` write a cloud as the item does. A line has nobody
   to ask, so its reply says it instead: `sample=yes` and a `warning` naming
   COPC (`gis_verbs::export_of_a_point_cloud_writes_the_cloud_as_held_and_says_when_it_is_a_sample`,
@@ -784,7 +784,7 @@ the file is gone and `samples/**/*.aux.xml` ignored), and the sample scan's
 
 Survey data arrives at its own coordinates - (255440, 7410850) in MGA - and a
 drawing is often somewhere else, near 0,0. Where imported data lands is one
-choice with four answers, defined once in `rust/crates/katana_cad/src/import_placement.rs`
+choice with four answers, defined once in `crates/katana_cad/src/import_placement.rs`
 (`katana_cad::import_placement::resolve_import_shift`) and used by every importer and every front end:
 
 | Placement | Typed | The move |
@@ -843,7 +843,7 @@ On every surface:
   coordinates asks the far-apart question through the executor's
   `Context::far_apart` (below, "IMPORT, EXPORT, INFO, REFS and COPC on every
   front end"); the vector dialog's own import asks it through
-  `decide_import_placement` (`rust/crates/katana_window/src/import_placement.rs`). Both show
+  `decide_import_placement` (`crates/katana_window/src/import_placement.rs`). Both show
   the one question box, `ask_far_apart`. A headless window asks nothing and
   keeps the coordinates. A headless File > Import opens no file dialog: it
   names the verb.
@@ -857,7 +857,7 @@ On every surface:
   still means `placement: local`, and the two disagreeing is refused.
 
 Tests: `import_placement::*` and `CadInterpreter.AnImportArgument*`
-(`rust/crates/katana_cad/tests/interpreter/cad.rs`), `Session.AlongsideAndAnOffset*`,
+(`crates/katana_cad/tests/interpreter/cad.rs`), `Session.AlongsideAndAnOffset*`,
 `mcp_server::the_import_tool_refuses_a_placement_it_cannot_say`,
 `cli.import_alongside_and_offset_place_the_data_and_say_the_move`,
 `import_placement_box::*` and `qt_import_placement_typed_on_the_windows_command_line_headless`.
@@ -873,7 +873,7 @@ printing prose to stdout for `katana_cli` and `katana_mcp`, and again in
 `Executor::dispatch_line`, logging other prose in the window. The two had
 drifted - the window framed and asked, the CLI kept no surfaces - and neither
 reply could be read by a program. They are now verbs of the one
-geoprocessing executor (`rust/crates/katana_app/src/geo/`, `docs/geoprocessing.md`, "The
+geoprocessing executor (`crates/katana_app/src/geo/`, `docs/geoprocessing.md`, "The
 executor"), a file each: `import_verb.rs`, `export_verb.rs`,
 `info_verb.rs`, `refs_verb.rs`, `copc_verb.rs`. The session runs them
 inline; the window's geo workbench runs them as background jobs, with
@@ -890,7 +890,7 @@ COPC <source> <destination.copc.laz>
 ### Replies
 
 Records, one per line, as every geoprocessing verb replies
-(`rust/crates/katana_app/src/import_records.rs`, `rust/crates/katana_app/src/geo/gis_records.rs`):
+(`crates/katana_app/src/import_records.rs`, `crates/katana_app/src/geo/gis_records.rs`):
 
 ```
 imported file=<path> kind=vector entities=9 layers=1 features=9 skipped=0 bounds=x0,y0,x1,y1 crs="..."
@@ -919,7 +919,7 @@ warning text="..."
 - **`features`** counts what the reader read, a multi-part feature once per
   part - the sample's spoil heaps, one MultiPolygon, are two.
 - **The DXF records are the same in every build.** The DXF steps live in
-  `rust/crates/katana_app/src/dxf_verbs.rs`, split as the executor runs a line (a pure
+  `crates/katana_app/src/dxf_verbs.rs`, split as the executor runs a line (a pure
   read or write, then the apply), and a build without GDAL runs them back to
   back through `runDxfVerb`. One DXF import, one DXF export, one reply.
 - **This changed the replies.** `imported 9 entities from parcels.geojson`
@@ -958,9 +958,9 @@ warning text="..."
   table's rows gained `takes` (`katana_app::geo::info_verb::takes_info`): `INFO 12` is the entity
   unless a file of that name exists, `INFO #12` always is.
 - **EXPORT and COPC write beside their target, and the apply moves the file
-  into place** (`rust/crates/katana_app/src/geo/staged_files.rs`). A job's work may not
+  into place** (`crates/katana_app/src/geo/staged_files.rs`). A job's work may not
   change what a person can see, and a cancelled job never applies
-  (`rust/crates/katana_window/src/jobs.rs`), but the writers - GDAL's, the DXF and archive
+  (`crates/katana_window/src/jobs.rs`), but the writers - GDAL's, the DXF and archive
   writers, PDAL's COPC - cannot be stopped part way. Written straight to the
   target, a cancel after the write would report a cancel that did not
   happen. So the work writes into a folder of its own beside the target, and
@@ -990,7 +990,7 @@ warning text="..."
   `HELP SHEETS` and `HELP UTILITY` stay the interpreter's.
 
 Tests: `gis_verbs::*`, `gis_session::*` and `gis_records::*`
-(`rust/crates/katana_app/tests/geo_io/gis_verbs.rs`), `mcp_server::import_returns_structured_records`,
+(`crates/katana_app/tests/geo_io/gis_verbs.rs`), `mcp_server::import_returns_structured_records`,
 the `cli.gis_*` checks (`tests/cli/geo/gis_verbs.cmake`), the
 window's `qt_gis_*_headless` (`tests/geo/headless/gis_verbs.cmake`) - of
 which `qt_gis_import_line_gives_the_sessions_records_headless` expects the
@@ -1003,7 +1003,7 @@ Not done:
 - A process that dies mid-write leaves its `.katana-staging-<pid>-<n>`
   folder beside the target.
 - The window's Command Reference (`window_help_text`,
-  `rust/crates/katana_window/src/command_reference_dialog.rs`) keeps its own copies of the
+  `crates/katana_window/src/command_reference_dialog.rs`) keeps its own copies of the
   IFC and CUSTOMISE help blocks rather than reading `ifc_help_text` and the
   interpreter's, so an edit to one is not seen in the other. (The session
   has no CUSTOMISE block of its own any more: the interpreter's help has the
@@ -1016,7 +1016,7 @@ more.
 ## Import options
 
 `IMPORT` grew words that say what of a file is read and how, read by one
-parser in `rust/crates/katana_app/src/geo/import_verb.rs` (the contract's grammar D):
+parser in `crates/katana_app/src/geo/import_verb.rs` (the contract's grammar D):
 
 ```
 IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
@@ -1133,7 +1133,7 @@ IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]
   `CommandInterpreter::import_argument` exactly as before.
 
 **The window.** GIS > Import Vector Data, Import Raster and Import Point
-Cloud (`rust/crates/katana_window/src/gis_import_dialogs.rs`) are built from the file's
+Cloud (`crates/katana_window/src/gis_import_dialogs.rs`) are built from the file's
 description and show the `IMPORT` line their fields make (`<d>Command`);
 Import hands that line to `MainWindow::run_verb_line`, so the dialog does
 nothing an agent cannot. The vector dialog's scope is the shared "Apply to"
@@ -1151,11 +1151,11 @@ directly, are gone.
 (`docs/mcp.md`, "I3 and I4").
 
 Tests: `import_options::*` and `raster_bands::*`
-(`rust/crates/katana_app/tests/geo_io/import_options.rs`), the `cli.import_*` checks of
+(`crates/katana_app/tests/geo_io/import_options.rs`), the `cli.import_*` checks of
 `tests/cli/geo/import_options.cmake`,
 `mcp_server::import_takes_its_filter_scope_and_preview_arguments_as_the_words_a_person_types`,
 and `vector_import_dialog::the_fields_build_exactly_the_typed_line` with
-its neighbours (`rust/crates/katana_window/tests/gis_vector/import_dialogs.rs`).
+its neighbours (`crates/katana_window/tests/gis_vector/import_dialogs.rs`).
 
 Not done:
 
@@ -1176,7 +1176,7 @@ Not done:
 ## Export options
 
 `EXPORT` takes the shared scope and filter, and the options GDAL's formats
-have, read by one parser in `rust/crates/katana_app/src/geo/export_verb.rs`:
+have, read by one parser in `crates/katana_app/src/geo/export_verb.rs`:
 
 ```
 EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
@@ -1224,7 +1224,7 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
   on a .dxf or a .12da are refused by name.
 - **`layername=`, not `layer=`.** An option key is never a WHERE key:
   `WHERE ... LAYER=` would take `layer=<n>` for a filter
-  (`rust/crates/katana_app/src/geo/vector_support.rs`). The plan's grammar said
+  (`crates/katana_app/src/geo/vector_support.rs`). The plan's grammar said
   `layer=`.
 - **`split=layer`** writes one file layer per drawing layer, named after it,
   in the order the layers are first met; refused with `layername=`, and for
@@ -1273,7 +1273,7 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
 **The window.** File > Export > Export Drawing (`fileExportVector`; the GIS
 menu shows the same action) asks for the file, then opens the Export Drawing
 dialog
-(`rust/crates/katana_window/src/gis_export_dialog.rs`), built on the GIS dialog frame: the
+(`crates/katana_window/src/gis_export_dialog.rs`), built on the GIS dialog frame: the
 shared "Apply to" and "Only those that match" controls (`vectorExportScope`,
 starting at the selection when there is one, else the whole drawing), the
 option fields (`vectorExportLayerName`, `vectorExportSplit`,
@@ -1290,13 +1290,13 @@ gone. A headless run still refuses the item's file dialog and names the
 **MCP.** `katana_export` takes the scope and the options as arguments
 (`docs/mcp.md`, "I3 and I4").
 
-Tests: `export_options::*` (`rust/crates/katana_app/tests/geo_io/export_options.rs`), the
+Tests: `export_options::*` (`crates/katana_app/tests/geo_io/export_options.rs`), the
 `cli.export_*` checks of `tests/cli/geo/export_options.cmake`,
 `mcp_server::export_takes_the_shared_scope_and_its_options_as_the_words_a_person_types`,
 and `vector_export_dialog::the_fields_build_exactly_the_typed_line_and_run_hands_it_over`
-with `vector_export_line::*` (`rust/crates/katana_window/tests/gis_vector/export_dialog.rs`).
+with `vector_export_line::*` (`crates/katana_window/tests/gis_vector/export_dialog.rs`).
 The expected coordinates of the conversions are PROJ's `cs2cs` figures for
-330000,6250000 in EPSG:28356, as `rust/crates/katana_interop/tests/interop_core/vector_fidelity.rs`
+330000,6250000 in EPSG:28356, as `crates/katana_interop/tests/interop_core/vector_fidelity.rs`
 records them.
 
 Not done:
@@ -1387,7 +1387,7 @@ the job ends (`Executor::await_job`, which reads the `job id=<n> ...
 state=started` record the line answered with). MCP: `katana_dataset_info`
 (`docs/mcp.md`).
 
-Tests: `info_verb::*` (`rust/crates/katana_app/tests/geo_surfaces/info_verb.rs`) - the terrain's
+Tests: `info_verb::*` (`crates/katana_app/tests/geo_surfaces/info_verb.rs`) - the terrain's
 statistics against the grid's own values read from the text, within the
 half ulp of Float32 GDAL reads it as, and no sidecar; typed GeoJSON fields;
 a folder; CHECK; a `/vsizip` path; a netCDF's multidimensional JSON;
@@ -1489,7 +1489,7 @@ reply rebuilds the table the cell is in.
 **MCP**: `katana_references` (`docs/mcp.md`).
 
 Tests: `refs_verbs::*` and `refs_session::a_saved_project_reopens_with_its_reference_rasters`
-(`rust/crates/katana_app/tests/geo_surfaces/refs_verbs.rs`) - visibility round trip, opacity bounds,
+(`crates/katana_app/tests/geo_surfaces/refs_verbs.rs`) - visibility round trip, opacity bounds,
 colour, rename and remove by name, JSON and INFO, overviews built only with
 CONFIRM (120 x 90 halved is 60 x 45, quartered 30 x 23 - GDAL rounds up),
 every display setting through a record, a derived raster's line kept, a
@@ -1526,7 +1526,7 @@ AddressSanitizer, and it would have been excluded from that had it lived
 behind GDAL.
 
 Only the ZIP container needs a library. That stays in `katana_gis` behind
-`rust/crates/katana_gis/src/zip_container.rs`, opened through GDAL's `/vsizip/`, and only bytes cross
+`crates/katana_gis/src/zip_container.rs`, opened through GDAL's `/vsizip/`, and only bytes cross
 the wall. **Rejected:** a small inflate of our own inside `katana_archive12d`,
 which would have made `.12daz` available without GDAL. Nobody needs that - a
 build without GDAL has no importer at all - and it would have been a second
@@ -1547,7 +1547,7 @@ and its tests linked. None of that is the archive format, and none of it was
 in the product: `katana_archive12d` held the archive only, and a test failed
 if the legacy library got into `katana`, `katana_cli` or `katana_mcp`. The
 Rust port does not carry the legacy readers at all
-(`rust/crates/katana_archive12d/src/lib.rs`): the owner removed the converter's
+(`crates/katana_archive12d/src/lib.rs`): the owner removed the converter's
 test on 2026-11-03, the built-in customisation is the committed JSON file, and
 whether the readers are ported is the owner's decision. The merge that loads one customisation
 on top of another is `katana_cad::customisation_merge::merge_customisation`, over the Katana format. What
@@ -1560,7 +1560,7 @@ formats the converter reads".
 manual defines, with its own vocabulary and no knowledge of entities.
 `to_domain` maps that onto entities, alignments, surfaces and point clouds.
 `write_archive` and `from_domain` are the inverses. The split is what makes
-"every element accounted for" a checkable claim: `coverage.rs` (`rust/crates/katana_archive12d/src/coverage.rs`) lists the
+"every element accounted for" a checkable claim: `coverage.rs` (`crates/katana_archive12d/src/coverage.rs`) lists the
 format's elements with the manual section each comes from, and a test writes
 a minimal instance of every row, reads it, and fails if the reader skips any
 block of it or the import does other than the row claims. The table in this
@@ -1602,7 +1602,7 @@ UTF-16LE with a mark by default, as 12d does, and UTF-8 on request.
 Three conventions were settled against `test Super Alignment.12da`, written
 by 12d Model 15.0C1t, which holds 32 arcs and 16 transitions whose end points
 are all recorded. The reasoning and the numbers are in
-`rust/crates/katana_archive12d/src/plan_geometry.rs`; in short:
+`crates/katana_archive12d/src/plan_geometry.rs`; in short:
 
 1. **A positive radius turns right.** The manual says "+ve is above the line
    connecting the vertices", which does not say which way is up. All 18 arcs
@@ -1639,7 +1639,7 @@ an approximation of anything and is drawn straight and counted.
 ### Where each element goes
 
 The mapping is documented in full at the head of
-`rust/crates/katana_archive12d/src/domain.rs`. The decisions worth defending:
+`crates/katana_archive12d/src/domain.rs`. The decisions worth defending:
 
 - **Models are layers.** 12d model names are already `/`-separated tree names
   (`Stage 1/Water/Drainage`), which is exactly what a Katana layer path is.
@@ -1906,7 +1906,7 @@ Once the module passed its own tests, seven independent reviewers audited it
 by lens - one per chapter of the manual, real files, hostile input, geometry,
 test quality - and every finding was handed to a second reviewer told to
 refute it. Nineteen survived, all fixed, each with a regression test in
-`rust/crates/katana_archive12d/tests/review_findings.rs`. The ones that would have hurt:
+`crates/katana_archive12d/tests/review_findings.rs`. The ones that would have hurt:
 the null-value collision above; documented keys mis-read as flags; arcs and
 text placed at the origin for want of a coordinate; house connections thirty
 metres underground; a superseded alignment that could not be solved dropped
@@ -1921,7 +1921,7 @@ hand afterwards; the test-quality review was not, and is still outstanding.
 ### Coverage
 
 Every element of the 12d Model V15 manual, with what Katana does with it. The
-handling column is asserted by `rust/crates/katana_archive12d/tests/coverage.rs`.
+handling column is asserted by `crates/katana_archive12d/tests/coverage.rs`.
 
 | Element | Manual | Handling | In Katana |
 |---|---|---|---|
@@ -1974,7 +1974,7 @@ reads the same.
 
 ### The round trip, measured
 
-`rust/crates/katana_interop/tests/interop_core/round_trip.rs` imports a fixture, puts everything it
+`crates/katana_interop/tests/interop_core/round_trip.rs` imports a fixture, puts everything it
 gave into a model, exports it, and imports that - three times. The FIRST
 export normalises, because the format has several spellings of one thing and
 Katana writes one of them: an arc goes out as a two-vertex super string, a
@@ -2103,7 +2103,7 @@ kept of them follows the list.
   string **deleted** so that a temporary could not be borrowed by the next
   contributor. In Rust the borrow checker refuses that by itself.
 
-The Rust reader (`rust/crates/katana_archive12d/src/reader.rs`) keeps the
+The Rust reader (`crates/katana_archive12d/src/reader.rs`) keeps the
 case-folded keyword set and the case-folded model map, but folds a token with
 `to_ascii_lowercase` (`text_utilities.rs`), an allocation per fold, where the
 C++ folded into its inline buffer. Not done: the Rust read of a large archive

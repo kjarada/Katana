@@ -15,14 +15,14 @@ Where it lives:
 
 | Part | Files |
 |---|---|
-| templates | `rust/crates/katana_cad/src/road/road_template.rs` |
-| corridors | `rust/crates/katana_cad/src/road/corridor_model.rs` |
-| the engine | `rust/crates/katana_cad/src/road/road_section.rs` |
-| kept in the project | `rust/crates/katana_cad/src/road/road_document.rs` (`Document::road_templates`, `Document::corridors`) |
-| the objects | `rust/crates/katana_cad/src/bim/bim_object.rs` (the corridor's objects too), `rust/crates/katana_cad/src/bim/bim_view.rs` |
-| the verbs | `rust/crates/katana_cad/src/road/road_verbs.rs` |
-| the window | `rust/crates/katana_window/src/bim/` (the workbench, three dialogs), `rust/crates/katana_window/src/plan_painter.rs` (`PlanPainter::draw_road_model`) |
-| the old corridor | `rust/crates/katana_cad/src/corridor.rs` - now the same engine |
+| templates | `crates/katana_cad/src/road/road_template.rs` |
+| corridors | `crates/katana_cad/src/road/corridor_model.rs` |
+| the engine | `crates/katana_cad/src/road/road_section.rs` |
+| kept in the project | `crates/katana_cad/src/road/road_document.rs` (`Document::road_templates`, `Document::corridors`) |
+| the objects | `crates/katana_cad/src/bim/bim_object.rs` (the corridor's objects too), `crates/katana_cad/src/bim/bim_view.rs` |
+| the verbs | `crates/katana_cad/src/road/road_verbs.rs` |
+| the window | `crates/katana_window/src/bim/` (the workbench, three dialogs), `crates/katana_window/src/plan_painter.rs` (`PlanPainter::draw_road_model`) |
+| the old corridor | `crates/katana_cad/src/corridor.rs` - now the same engine |
 
 ## Road templates
 
@@ -316,10 +316,10 @@ that is longer or the later one - either way the other template's last
 interval is drawn with the wrong section.
 
 **One engine.** `katana_cad::corridor::corridor_section`, `corridor_quantities` and
-`corridorSurface` (`rust/crates/katana_cad/src/corridor.rs`) are this engine run on
+`corridorSurface` (`crates/katana_cad/src/corridor.rs`) are this engine run on
 `katana_cad::road::road_template::template_from_assembly` - a lane each side at the assembly's half width
 and crossfall, then a batter of its slopes - with their old refusals checked
-first in their old words. Their tests (`rust/crates/katana_cad/tests/road/corridor.rs`) are
+first in their old words. Their tests (`crates/katana_cad/tests/road/corridor.rs`) are
 unchanged and are the check that the engine is the old one where the two
 meet. The only difference: their stations now include the alignment's key
 stations as well as the profile's.
@@ -341,7 +341,7 @@ is built.
 ## The road model's objects
 
 `katana_cad::bim::bim_object::corridor_objects` builds every corridor and `katana_cad::road::road_section::corridor_solids` makes
-its objects (`rust/crates/katana_cad/src/bim/bim_object.rs`):
+its objects (`crates/katana_cad/src/bim/bim_object.rs`):
 
 - a closed solid per COURSE of each component, per side, per run;
 - one per KERB per side per run;
@@ -511,7 +511,7 @@ have had to repeat. The first command after a project is opened may report
 it once more than it changed; what listens rebuilds from a cache, so that
 costs nothing (below).
 
-**The cache** (`katana_cad::bim::bim_object::bim_model`, `rust/crates/katana_cad/src/bim/bim_object.rs`). Made
+**The cache** (`katana_cad::bim::bim_object::bim_model`, `crates/katana_cad/src/bim/bim_object.rs`). Made
 once per change of what it is made from, in two halves, each keyed on what it
 reads and nothing wider:
 
@@ -703,7 +703,7 @@ what the same corridor made before. QUANTITIES takes a corridor or ALL.
 ## In the window
 
 The BIM menu (`bimMenu`), after Terrain, and the BIM toolbar, on the third row
-beside Surface Edit's (`rust/crates/katana_window/src/bim/road_workbench.rs`), each item building
+beside Surface Edit's (`crates/katana_window/src/bim/road_workbench.rs`), each item building
 its line and running it through the window's one executor:
 
 | Section | Item | Object name | Dialog |
@@ -715,7 +715,7 @@ its line and running it through the window's one executor:
 
 The road objects' items follow, in a section of their own (the road
 objects document, docs/road_objects.md). The dialogs' widgets and what each runs are listed
-in their modules' documentation: `rust/crates/katana_window/src/bim/road_template_manager.rs` (the templates;
+in their modules' documentation: `crates/katana_window/src/bim/road_template_manager.rs` (the templates;
 the components and courses in two grids that are buffers, each applied by ONE
 line - a group of `key=value` for every edited row - so an Apply is one undo
 step and a refused value leaves the template as it was; the components' grid
@@ -727,9 +727,9 @@ build the `ROADTEMPLATE EXPORT` and `IMPORT` lines, and a Replace box that adds
 OVERWRITE to them; a drawing of the
 template across a level road - `katana_cad::road::road_section::template_section` - its courses
 coloured and its vertical exaggerated so a 50 mm course can be seen),
-`rust/crates/katana_window/src/bim/corridor_dialog.rs` (the corridors, their regions and
+`crates/katana_window/src/bim/corridor_dialog.rs` (the corridors, their regions and
 superelevation, Build, Build Strings, Build Surfaces, and the problems) and
-`rust/crates/katana_window/src/bim/corridor_quantities_dialog.rs` (the records of CORRIDOR
+`crates/katana_window/src/bim/corridor_quantities_dialog.rs` (the records of CORRIDOR
 QUANTITIES as a table, Copy and Save CSV with its Replace box, which adds
 OVERWRITE; no file dialog in a headless run).
 
@@ -762,7 +762,7 @@ person's unapplied edits only while what they were made on is as it was:
   to whatever item was showing; Apply now also writes a name in the case the
   corridor already holds it.
   `corridor_dialog::apply_keeps_the_template_and_surface_a_corridor_names_in_another_case` and
-  its neighbours in `rust/crates/katana_window/tests/roads/road_dialogs.rs`. The curve
+  its neighbours in `crates/katana_window/tests/roads/road_dialogs.rs`. The curve
   tolerance is in the line only when it is not what the corridor already has
   (a new corridor has the default), so the lines stay as short as they were
   (`corridor_dialog::the_curve_tolerance_is_in_the_line_only_when_it_is_not_what_the_corridor_holds`).
@@ -844,10 +844,10 @@ class, layer, quantities and properties, and every problem
 
 ## Tests
 
-- `rust/crates/katana_cad/tests/road/road_template.rs`: the standard templates valid and
+- `crates/katana_cad/tests/road/road_template.rs`: the standard templates valid and
   mirrored, a kerb's shapes worked by hand, the checks, the JSON round trip
   exact.
-- `rust/crates/katana_cad/tests/road/road_section.rs`: a street set out at hand-worked
+- `crates/katana_cad/tests/road/road_section.rs`: a street set out at hand-worked
   offsets and levels, its solids, the formation's steps, superelevation at
   the middle of its transition (and of an edge strip and a drain), batters
   daylighting on a plane in cut, fill and on sidelong ground, a side of a
@@ -856,7 +856,7 @@ class, layer, quantities and properties, and every problem
   curve, measured from the alignment's directions and not from the curvature
   they were cut by (an arc, a spiral, a straight, an unusable tolerance, one
   that needs too many).
-- `rust/crates/katana_cad/tests/road/corridor_objects.rs`: course volumes on a straight as
+- `crates/katana_cad/tests/road/corridor_objects.rs`: course volumes on a straight as
   width x thickness x length, every solid closed and turned outward, stable
   ids and IFC classes, a kerb's length and volume, the earthworks against the
   old assembly's end areas and their footprints (a side with cut and fill, a
@@ -870,7 +870,7 @@ class, layer, quantities and properties, and every problem
   earthworks solid of the three standard templates on three grounds (a tilt, a
   sawtooth, two cuts across), where the cases that weld are counted so that the
   property is not satisfied by luck.
-- `rust/crates/katana_cad/tests/road_sheet_verbs/road_verbs.rs`: each verb as one undo step, refusals,
+- `crates/katana_cad/tests/road_sheet_verbs/road_verbs.rs`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache (the
   same object after an edit that left the model as it was, and which half each
   kind of edit makes again, counted: a surface nothing reads neither, the
@@ -880,8 +880,8 @@ class, layer, quantities and properties, and every problem
   group changing none; the template files (written and read back exactly, a
   file's names against the drawing's, the refusals, OVERWRITE for a file and
   for a name).
-- `rust/crates/katana_cad/tests/road/corridor.rs`: the old functions, unchanged, on the new engine.
-- `rust/crates/katana_window/tests/roads/road_dialogs.rs`: each dialog's lines and the
+- `crates/katana_cad/tests/road/corridor.rs`: the old functions, unchanged, on the new engine.
+- `crates/katana_window/tests/roads/road_dialogs.rs`: each dialog's lines and the
   workbench's menu and meshes; the dialogs' state across New, Rename, an
   unrelated command, an undo and a changed drawing (the Corridors dialog's
   fields and combos, the Template Manager's two grids, the listing of the

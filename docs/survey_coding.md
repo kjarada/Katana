@@ -70,7 +70,7 @@ library, one in the linestyle library), while the symbol library alone holds
 only **48** are `mode vertex` - every one of the 193 comes from the symbol
 library. A symbol browser built on `atVertices` would have hidden three
 quarters of the symbols the mapfile actually uses. So the rule (the lead's
-decision D3, `katana_cad::style_catalogue::classify_definition` in `rust/crates/katana_cad/src/style_catalogue.rs`)
+decision D3, `katana_cad::style_catalogue::classify_definition` in `crates/katana_cad/src/style_catalogue.rs`)
 is that a definition is offered as a SYMBOL when any of these holds:
 
 - it is `mode vertex`;
@@ -263,7 +263,7 @@ The check was not simply deleted, because catching a typo is worth something:
 `katana_cad::Document` carries the loaded library and mapfile, and `definition_for`
 is the single place a name is looked up. What a name then DRAWS - which of the
 library and the model's Linetype table wins, and what a symbol falls back to -
-is `rust/crates/katana_cad/src/style_resolver.rs`'s question, described in `docs/cad.md` ("What a
+is `crates/katana_cad/src/style_resolver.rs`'s question, described in `docs/cad.md` ("What a
 style draws").
 
 **Both are session data, by decision (D1).** The library and the map live on
@@ -338,7 +338,7 @@ stored as one `customisation` metadata key, the names separated by line feeds
 a name that is empty or holds a line break or a path separator. See
 `docs/model.md` for the metadata keys an older build keeps for a newer one.
 
-The rules are in `rust/crates/katana_cad/src/customisation_record.rs`, and the
+The rules are in `crates/katana_cad/src/customisation_record.rs`, and the
 Document applies them itself ("The customisation on the Document" below);
 each front end did, before, through lists of its own. A source reaches the
 record as a name and what it brought (`CustomisationSource`):
@@ -377,7 +377,7 @@ record as a name and what it brought (`CustomisationSource`):
 definitions - 4 linestyles and 25 symbols, scale bars and north points among
 them - lost the publisher's word from the front of their names. A project
 saved before records the earlier file names, and its styles can name an
-earlier definition. Both are known to `rust/crates/katana_cad/src/customisation_record.rs`
+earlier definition. Both are known to `crates/katana_cad/src/customisation_record.rs`
 only by hash (`source_name_hash`, FNV-1a), so no earlier name is spelt in the
 repository:
 
@@ -433,7 +433,7 @@ built-in its host has; see "The built-in's earlier names" below.) The table the 
 first name with one of the four general file names, and while one of them
 still used it a project recording the four first names opened there with a
 warning of four missing files. The tables are held to the built-in by
-`built_in_renames` (`rust/crates/katana_cad/tests/customisation/builtin_renames.rs`): the
+`built_in_renames` (`crates/katana_cad/tests/customisation/builtin_renames.rs`): the
 eight file renames answer with the NAME the table is given, and with no name with
 `NSW`, in every build (`customisation_state::the_earlier_file_names_are_answered_by_nsw_and_by_no_other_built_in`
 holds that a session whose built-in is another does not answer them) - and every
@@ -474,7 +474,7 @@ readers are reached now only by their own tests.
 The library and the survey map were all a Document held; each front end kept
 the rest in lists of its own, and a verb in the shared interpreter can reach
 neither. `Document::customisation_state()`
-(`rust/crates/katana_cad/src/customisation_state.rs`) now holds everything else the
+(`crates/katana_cad/src/customisation_state.rs`) now holds everything else the
 session knows of its customisation:
 
 | Member | What it is |
@@ -602,14 +602,14 @@ name; hence the set.
 ### The merge
 
 `katana_cad::merge_customisation()`
-(`rust/crates/katana_cad/src/customisation_merge.rs`) is the rule of "A load goes ON
+(`crates/katana_cad/src/customisation_merge.rs`) is the rule of "A load goes ON
 TOP of what is loaded" above, unchanged, over `katana_entity::Customisation`: the
 session and one or more loaded customisations in, what to install and a
 report out. It is the only merge there is: the older one, over the style library
 and the map as two things (`katana_cad::customisation_merge::merge_customisation`), is gone with the
 front ends that used it. The twelve tests that came with that one were moved
 here and keep their expectations
-(`rust/crates/katana_cad/tests/custedit/customisation_merge.rs`).
+(`crates/katana_cad/tests/custedit/customisation_merge.rs`).
 
 What one customisation holds beyond definitions and rules is merged by what
 it is:
@@ -643,7 +643,7 @@ it is:
 ### The built-in, and the seam
 
 Katana customisation files are compiled into `katana_cad` with `include_bytes!`
-(its build script, `rust/crates/katana_cad/build.rs`, writes the table), as the
+(its build script, `crates/katana_cad/build.rs`, writes the table), as the
 plot frame is: one is the default and the others alternates (`docs/customisation.md`, "The
 built-in"). The files are in the repository - the default is Katana's own but
 for its survey code keys, which are the alternate's, and the alternate is
@@ -710,7 +710,7 @@ customisation's library when there was one and otherwise measured with the
 standard shapes.
 
 The file that is COMPILED IN is held to its census: `built_in_census`
-(`rust/crates/katana_cad/tests/customisation/builtin_census.rs`) gives, for the compiled-in
+(`crates/katana_cad/tests/customisation/builtin_census.rs`) gives, for the compiled-in
 built-in named "NSW" (the reference customisation, an alternate), the figures that were counted by
 `tools/customisation_census.py` over the compiled-in file and by
 `tools/reference_census.py` over the four legacy files it was converted from -
@@ -726,7 +726,7 @@ which are on one machine.
 ### What a session starts with
 
 A front end hands over a `CustomisationHost`
-(`rust/crates/katana_cad/src/customisation_host.rs`): the built-in, which a build may
+(`crates/katana_cad/src/customisation_host.rs`): the built-in, which a build may
 not have, and the path of the file the user keeps their own in, which a front
 end may not have. `startCustomisation(document, host)` installs the kept file
 when it exists and reads (origin `kept`), else the built-in (origin
@@ -759,19 +759,19 @@ what was installed, with counts, and every problem in a sentence.
 
 Reading a file's bytes, turning typed text into a path and reading an
 environment variable that names a file are core's
-(`rust/crates/katana_core/src/path_text.rs`): the UTF-8 path helper was private to
+(`crates/katana_core/src/path_text.rs`): the UTF-8 path helper was private to
 the sheet verbs, with a second copy in the utility verbs. `katana_ifc::front_end::path_from_utf8`
 is core's now too, under the name its callers use; its own conversion threw
 on a name that is not UTF-8. What the standard library does with narrow bytes
 was probed rather than assumed (GCC 16.2, 2026-10-06): `std::filesystem::path`
 converts them as UTF-8 and throws at the first byte that is not. Not done:
-`rust/crates/katana_surveyio/src/reader.rs` keeps a private copy of the old conversion
+`crates/katana_surveyio/src/reader.rs` keeps a private copy of the old conversion
 for a file named inside a field file. Whether a name that is not UTF-8 can
 reach it was not looked into, and it was left as it is.
 
 ### One resolver for a colour name
 
-`katana_cad::resolve_colour()` (`rust/crates/katana_cad/src/colour_lookup.rs`)
+`katana_cad::resolve_colour()` (`crates/katana_cad/src/colour_lookup.rs`)
 is the Document's customisation table, then the standard names;
 `colour_lookup(document)` is the same as a function, in the shape
 `SurveyCodingOptions::colour_of` and `ColourLookup` take. It asks the Document
@@ -783,7 +783,7 @@ holds that.
 ## Drawing it
 
 The viewport, the plot and every preview ask one resolver
-(`rust/crates/katana_cad/src/style_resolver.rs`; `docs/cad.md`, "What a style draws"):
+(`crates/katana_cad/src/style_resolver.rs`; `docs/cad.md`, "What a style draws"):
 
 - a point whose style names a symbol is drawn with the library definition of
   that name, else with the built-in shape of that name, else with the shape
@@ -989,13 +989,13 @@ the map why".)
 ## Asking the map why: explain, list, census, lint
 
 A person looking at a point drawn wrongly has one question - why did this
-code get that? - and until now nothing could answer it. `rust/crates/katana_cad/src/code_table.rs`
+code get that? - and until now nothing could answer it. `crates/katana_cad/src/code_table.rs`
 holds the answers, below both front ends, each a structured result plus ONE
 formatter, so the application and `katana_cli` print the same words (the two
 used to disagree about what applying codes had done; `format_coding_report` is
 now the one report of an application, with a row per code):
 
-The verbs are the `CommandInterpreter`'s (`rust/crates/katana_cad/src/survey_code_verbs.rs`)
+The verbs are the `CommandInterpreter`'s (`crates/katana_cad/src/survey_code_verbs.rs`)
 since 2026-09-26, so the window's command line, `katana_cli` and `katana_mcp`
 all have them; until then they were `katana_cli`'s own, and the window
 answered "unknown command". `CODE` itself - apply the loaded codes, one undo
@@ -1141,7 +1141,7 @@ its style to carry - and the import's warning says so.
 
 A surveyor walking a kerb shoots `KB1`, `KB1`, `KB1` and expects a line, not
 three dots. The mapfile says WHICH codes are lines (`SurveyRule::breakline`)
-and how they look; `rust/crates/katana_cad/src/linework.rs` is what joins them - what
+and how they look; `crates/katana_cad/src/linework.rs` is what joins them - what
 Civil 3D calls Process Linework, TBC Process Feature Codes and Carlson Field
 to Finish. There are two entry points, and a set of points goes through ONE of
 them, never both, or a kerb the file strung and whose points are also coded
@@ -1328,7 +1328,7 @@ property existed.
 Importing a coded field file took three steps a person had to know about -
 import, Apply Survey Codes, Process Linework - each its own undo step, the
 second replacing the selection and the third reachable from one dialog.
-`katana_cad::survey_finish::with_survey_finish` (`rust/crates/katana_cad/src/survey_finish.rs`) makes them
+`katana_cad::survey_finish::with_survey_finish` (`crates/katana_cad/src/survey_finish.rs`) makes them
 ONE command. It owns the command that draws the points, runs it, and then, as
 `SurveyFinishOptions` say (`codes`, `linework`; both OFF by default, so a
 caller that says nothing imports exactly as before):
@@ -1516,7 +1516,7 @@ LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]
 ```
 
 `process_linework` as a verb of the shared interpreter
-(`rust/crates/katana_cad/src/linework_verbs.rs`, `run_linework_verb`), so the window's
+(`crates/katana_cad/src/linework_verbs.rs`, `run_linework_verb`), so the window's
 command line, `katana_cli`, `katana_mcp` and an agent all have it; `HELP
 LINEWORK` is its reference. Until 2026-10-06 the one way to string points was
 a tab of a dialog, which since 2026-10-07 builds this line and runs it
@@ -1648,7 +1648,7 @@ words the tab shows, quoted; a second set of one-word names for them would
 be a second vocabulary to keep in step. A scope that takes nothing is
 answered with zeros.
 
-Tests: `rust/crates/katana_cad/tests/customisation_verbs/linework_verbs.rs` - the grammar's
+Tests: `crates/katana_cad/tests/customisation_verbs/linework_verbs.rs` - the grammar's
 refusals by name, the default scope and each scope word, the preview, a run
 as one undo step with the Document's colour and control codes, both orders,
 a rectangle, a closed string and a join told apart in their records, every
@@ -1697,7 +1697,7 @@ Not done:
 ## The Survey Code Manager
 
 Format > Survey Code Manager... (also on Survey > Survey Coding;
-`rust/crates/katana_window/src/customisation/code_manager*.rs`) is the editor D1 asked for: the
+`crates/katana_window/src/customisation/code_manager*.rs`) is the editor D1 asked for: the
 survey code library a surveyor codes against - Civil 3D's description keys, TBC's feature definitions, Carlson's field-to-finish -
 in one non-modal dialog of five tabs, each over one of the cad foundations
 above, so the dialog decides nothing the CLI would say differently:
@@ -1756,7 +1756,7 @@ first): no line can name a buffer. It once wrote the buffer itself, by a path
 of its own that truncated the file in place. The file
 is the session's customisation cut down to its codes by the ONE rule a part of a customisation is
 written by - both managers' exports and `CUSTOMISE EXPORT <file> CODES`
-(`katana_cad::customisation_part::customisation_part`, `rust/crates/katana_cad/src/customisation_part.rs`;
+(`katana_cad::customisation_part::customisation_part`, `crates/katana_cad/src/customisation_part.rs`;
 `docs/desktop.md`, "Symbol Library", has the table, and
 `docs/customisation.md`, "One rule for a part, whoever writes it", the
 reasons):

@@ -53,7 +53,7 @@ the tables.
 **CGAL decides the programs' licence, through the code translated from it.**
 The C++ program compiled CGAL's 2D Triangulations package in (GPL-3.0-or-later,
 or a commercial licence Katana does not hold). The Rust programs do not
-compile CGAL, but `rust/crates/katana_terrain/src/cdt_backend.rs` translates
+compile CGAL, but `crates/katana_terrain/src/cdt_backend.rs` translates
 its constrained triangulation and perturbed in-circle test into Rust ("Code
 translated into the Rust port", below), and a translation keeps the licence of
 what it translates: the programs as a whole are offered under GPL version 3
@@ -61,14 +61,14 @@ or later, with source. Of what the C++ build compiled in otherwise, Eigen's
 QR and nlohmann/json survive only as translations (below); Boost's headers,
 which came with CGAL, went with it.
 
-**Katana's own C++ shims.** `rust/crates/katana_gis/native/algorithm_shim.cpp`,
-`rust/crates/katana_gis/native/http_shim.cpp` and
-`rust/crates/katana_pointcloud/native/pdal_shim.cpp` are Katana's code, under
+**Katana's own C++ shims.** `crates/katana_gis/native/algorithm_shim.cpp`,
+`crates/katana_gis/native/http_shim.cpp` and
+`crates/katana_pointcloud/native/pdal_shim.cpp` are Katana's code, under
 its licence, compiled by the crates' build scripts because GDAL's algorithm
 framework and HTTP and PDAL have only C++ interfaces; they include GDAL's and
 PDAL's headers (section 2).
 
-**The crates.** The versions are those of `rust/Cargo.lock`, and the licences are each crate's own
+**The crates.** The versions are those of `Cargo.lock`, and the licences are each crate's own
 `license` field as `cargo tree` reported it on 2026-11-07 (recorded). The
 rows up to windows-sys are the crates the port names; the rest come with them. The
 port's JSON is its own (katana_core::json, translated from nlohmann/json, below), so
@@ -152,12 +152,12 @@ and which font the window carries, waits on the owner (docs/rust.md, "Not
 done"), and is to be settled before the first Rust release.
 
 **Fonts embedded in the window.** Compiled into `katana_window` with
-`include_bytes!` (`rust/crates/katana_window/src/canvas/text.rs`), so shipped inside the
+`include_bytes!` (`crates/katana_window/src/canvas/text.rs`), so shipped inside the
 window program.
 
 | Font | Version | Licence | Where | What it asks of Katana |
 |---|---|---|---|---|
-| Liberation Sans (Regular, Bold, Italic, BoldItalic) | 2.1.5 (Ubuntu's `fonts-liberation` 1:2.1.5-3) | SIL Open Font License 1.1 (Copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation; digitized data copyright (c) 2010 Google Corporation, with Reserved Fonts Arimo, Tinos and Cousine) | `rust/crates/katana_window/fonts/` | Keep the copyright notice and licence with the fonts (`fonts/LICENSE-LiberationSans.txt`); the fonts may not be sold by themselves, and a modified font may not bear the Reserved Font Names. Bundling them in a program under another licence is allowed (OFL 1.1, condition 1). |
+| Liberation Sans (Regular, Bold, Italic, BoldItalic) | 2.1.5 (Ubuntu's `fonts-liberation` 1:2.1.5-3) | SIL Open Font License 1.1 (Copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation; digitized data copyright (c) 2010 Google Corporation, with Reserved Fonts Arimo, Tinos and Cousine) | `crates/katana_window/fonts/` | Keep the copyright notice and licence with the fonts (`fonts/LICENSE-LiberationSans.txt`); the fonts may not be sold by themselves, and a modified font may not bear the Reserved Font Names. Bundling them in a program under another licence is allowed (OFL 1.1, condition 1). |
 
 **Code translated into the Rust port.** The Rust port reproduced the C++
 program's behaviour exactly, and in a few places that meant translating a
@@ -170,11 +170,11 @@ are quoted as fdlibm distributes them).
 
 | Translated code | Version | Licence | Rust file | What it asks of Katana |
 |---|---|---|---|---|
-| nlohmann/json: the lexer, parser, serializer, value rules and Grisu2 number text | 3.12.0 | MIT (Copyright (c) 2013-2025 Niels Lohmann; to_chars.hpp also Copyright (c) 2009 Florian Loitsch) | `rust/crates/katana_core/src/json.rs`, `json/sax.rs`, `json/serializer.rs`, `json/to_chars.rs` | Keep the copyright and permission notice (below). |
-| fdlibm `e_remainder.c` (`__ieee754_remainder`) | as distributed in fdlibm 5.3 and its descendants | Sun's notice: permission to use, copy, modify and distribute, provided the notice is preserved | `rust/crates/katana_math/src/cpp.rs` (`remainder`) | Preserve the notice, which the file does word for word. |
-| Eigen: ColPivHouseholderQR, Householder, HouseholderSequence | 3.4 | MPL-2.0 (Copyright (C) 2008-2010 Gael Guennebaud and Benoit Jacob) | `rust/crates/katana_survey/src/lsq_core.rs` | The translated file's source stays available under MPL-2.0, with its notice. Eigen's files carry no "Incompatible With Secondary Licenses" notice, so MPL-2.0 section 3.3 lets the larger work be distributed under the GPL. Recorded; whether a translation counts as a Modification of the covered files is unverified (section 7). |
-| CGAL: Constrained_triangulation_plus_2, Constrained_Delaunay_triangulation_2, Triangulation_2 (the perturbed in-circle test) | 6.2 | GPL-3.0-or-later (Copyright (c) 1997-2012 INRIA Sophia-Antipolis) | `rust/crates/katana_terrain/src/cdt_backend.rs` | The same licence as Katana's; keep the notices. |
-| CGAL: Intersections_2/Segment_2_Segment_2 (the crossing point's construction) | 6.2 | LGPL-3.0-or-later (Copyright (c) 2000 Utrecht University, ETH Zurich, INRIA Sophia-Antipolis and others) | `rust/crates/katana_terrain/src/cdt_backend.rs` | Compatible with GPL-3.0-or-later; keep the notice. |
+| nlohmann/json: the lexer, parser, serializer, value rules and Grisu2 number text | 3.12.0 | MIT (Copyright (c) 2013-2025 Niels Lohmann; to_chars.hpp also Copyright (c) 2009 Florian Loitsch) | `crates/katana_core/src/json.rs`, `json/sax.rs`, `json/serializer.rs`, `json/to_chars.rs` | Keep the copyright and permission notice (below). |
+| fdlibm `e_remainder.c` (`__ieee754_remainder`) | as distributed in fdlibm 5.3 and its descendants | Sun's notice: permission to use, copy, modify and distribute, provided the notice is preserved | `crates/katana_math/src/cpp.rs` (`remainder`) | Preserve the notice, which the file does word for word. |
+| Eigen: ColPivHouseholderQR, Householder, HouseholderSequence | 3.4 | MPL-2.0 (Copyright (C) 2008-2010 Gael Guennebaud and Benoit Jacob) | `crates/katana_survey/src/lsq_core.rs` | The translated file's source stays available under MPL-2.0, with its notice. Eigen's files carry no "Incompatible With Secondary Licenses" notice, so MPL-2.0 section 3.3 lets the larger work be distributed under the GPL. Recorded; whether a translation counts as a Modification of the covered files is unverified (section 7). |
+| CGAL: Constrained_triangulation_plus_2, Constrained_Delaunay_triangulation_2, Triangulation_2 (the perturbed in-circle test) | 6.2 | GPL-3.0-or-later (Copyright (c) 1997-2012 INRIA Sophia-Antipolis) | `crates/katana_terrain/src/cdt_backend.rs` | The same licence as Katana's; keep the notices. |
+| CGAL: Intersections_2/Segment_2_Segment_2 (the crossing point's construction) | 6.2 | LGPL-3.0-or-later (Copyright (c) 2000 Utrecht University, ETH Zurich, INRIA Sophia-Antipolis and others) | `crates/katana_terrain/src/cdt_backend.rs` | Compatible with GPL-3.0-or-later; keep the notice. |
 | libstdc++: `uniform_int_distribution`, `generate_canonical`, `std::clamp` | GCC 16.2 | GPL-3.0-or-later with the GCC Runtime Library Exception (Copyright (C) Free Software Foundation, Inc.) | the tests' random engines (the `tests/support` modules of the geometry, render, entity, dxf, surveyio, terrain and other crates) and `katana_math::cpp::clamp` | The same licence as Katana's. |
 
 nlohmann/json's copyright and permission notice, as its `LICENSE.MIT` gives it:
@@ -214,7 +214,7 @@ The "Imported by" column was read from the import tables of the C++ programs
 and DLLs of a Windows release build (2026-10-08). Those programs imported
 `libgdal`, `libgmp`, `libpdalcpp`, `libproj`, `libsqlite3` and the GCC runtime,
 and `katana.exe` also Qt. The Rust programs link GDAL, PDAL (through its shim),
-PROJ and SQLite (`rust/crates/*/build.rs`), and the GCC runtime the shims and
+PROJ and SQLite (`crates/*/build.rs`), and the GCC runtime the shims and
 those libraries need; they import no Qt, and GMP (which the C++ took for
 CGAL's number types) is reached only through GDAL's own dependencies. Their
 import tables are to be read from the first Rust package (section 7). The

@@ -12,7 +12,7 @@ You contribute under it and keep your copyright.
 ## Your first hour
 
 1. **Build once.** [README, Quick start](README.md#quick-start) has the
-   toolchain and the commands: Katana is one Cargo workspace (`rust/`), built
+   toolchain and the commands: Katana is one Cargo workspace (at the checkout's root), built
    with `cargo build --release` in WSL or on Linux until the owner has it
    built on Windows. To work on one crate, `cargo build -p <crate>` and
    `cargo test -p <crate>` build and test only it and what it stands on.
@@ -51,7 +51,7 @@ not.
       and open the pull request from there (agents push only when the owner
       asks, see "Commits").
 - [ ] `git status` should list only what you changed. Everything local is
-      ignored: `build/`, `rust/target/`, `.vscode/`,
+      ignored: `build/`, `target/`, `.vscode/`,
       `.claude/settings.local.json`, `.claude/worktrees/`, and the third-party
       reference folders under `docs/`, which must never be added.
 - [ ] A second line of work at the same time gets a worktree, not a second
@@ -81,7 +81,7 @@ not.
 
 - [ ] The toolchain is in the README's [Quick start](README.md#quick-start)
       (`python3 tools/setup_linux_toolchain.py`); the build and the test
-      runner are `docs/building.md`. In short, from `rust/`:
+      runner are `docs/building.md`. In short, from the checkout's root:
 
   ```sh
   cargo clippy --release --all-targets -- -D warnings
@@ -102,7 +102,7 @@ not.
       crate's tests and the test runner's process-level tests.
 
   ```sh
-  cargo test --release                         # from rust/
+  cargo test --release                         # from the checkout's root
   bash tools/build_visible.sh wsl              # all of it, the maintainer's way
   ```
 
@@ -136,7 +136,7 @@ not.
     executor, as if it had been typed;
   - `katana_cli`: a verb in the shared `CommandInterpreter`, with `cli.*` tests;
   - `katana_mcp`: it runs session lines, so a verb reaches it; add a tool in
-    `rust/crates/katana_app/src/mcp/` and `docs/mcp.md` when an agent needs
+    `crates/katana_app/src/mcp/` and `docs/mcp.md` when an agent needs
     structured data.
 - [ ] Any tool that reads or changes drawing data takes the shared scope
       (selection, view, layers, drawing, area) and filter. Do not write a second
@@ -160,7 +160,7 @@ not.
 - [ ] Comments say why. The code already says what.
 - [ ] British spelling in prose; in identifiers, the surrounding code's spelling.
 - [ ] A real becomes text through `katana_core::text::format_exact_real`, never
-      `to_string` (`rust/clippy.toml` refuses it). File text is read through
+      `to_string` (`clippy.toml` refuses it). File text is read through
       `katana_core::text`, which takes no locale.
 - [ ] A missing value is an `Option`, never a placeholder number.
 

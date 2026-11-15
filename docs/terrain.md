@@ -242,7 +242,7 @@ has Make Cut/Fill Map and Make Envelope buttons): `docs/volumes.md`.
 Until 2026-10-15 `volume_to_datum` and `compare_surfaces` were exact and tested
 but reachable by no verb, and only the window's corridor quantities measured
 anything. The pair clipping above is now `katana_terrain::overlay::visit_overlay`
-(`rust/crates/katana_terrain/src/overlay.rs`), which `compare_surfaces` visits with
+(`crates/katana_terrain/src/overlay.rs`), which `compare_surfaces` visits with
 the same arithmetic in the same order, so its answers are the bits they were;
 the region, stockpile, difference and envelope work cut the ground through the
 same clipper. The C++ header said the overlay "merges both triangulations into
@@ -289,9 +289,9 @@ unchanged (30.8 before, 31.4 after, 31.7 again).
 ## Surfaces in the drawing
 
 The drawing's TIN surfaces are the Document's: `Document::surfaces()`
-(`rust/crates/katana_cad/src/document.rs`, implemented in
-`rust/crates/katana_cad/src/terrain/surface_document.rs`) holds the one
-`katana_terrain::surface_store::SurfaceStore` (`rust/crates/katana_terrain/src/surface_store.rs`), every
+(`crates/katana_cad/src/document.rs`, implemented in
+`crates/katana_cad/src/terrain/surface_document.rs`) holds the one
+`katana_terrain::surface_store::SurfaceStore` (`crates/katana_terrain/src/surface_store.rs`), every
 change to it is one undo step, and it is saved with the project. Until
 2026-10-15 the store was session data - one in the window, one in each
 headless session - not undoable
@@ -331,14 +331,14 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
 - **An import is one step.** `Document::surfaces_command` is the same change
   as a command, for a transaction that does more: an archive IMPORT puts its
   TINs in the transaction with its entities, and an IFC import goes through
-  `katana_cad::terrain::surface_verbs::import_surfaces` (`rust/crates/katana_cad/src/terrain/surface_verbs.rs`) on
+  `katana_cad::terrain::surface_verbs::import_surfaces` (`crates/katana_cad/src/terrain/surface_verbs.rs`) on
   both front ends (`surface_document::an_import_of_entities_and_surfaces_is_one_step_through_the_command`,
   `gis_verbs::import_of_an_archive_adds_its_surfaces_to_the_drawing_in_the_imports_one_step`).
   A taken name is "name (2)" (`unique_name`). katana_cli's IFC import once
   counted a file's terrain and dropped it; it keeps it now, and its IFC
   export writes the drawing's surfaces.
 - **The geoprocessing executor stages.** `Context::surfaces`
-  (`rust/crates/katana_app/src/geo/geo_verbs.rs`) is a copy of the drawing's store the
+  (`crates/katana_app/src/geo/geo_verbs.rs`) is a copy of the drawing's store the
   executor makes as prepare begins and again as apply begins - for the
   window's background job, when the job ends, from the store as it is then.
   The verbs read and change the copy as they changed the session's store;
@@ -367,7 +367,7 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   window cuts it again from the event loop, once for all that a command or a
   script changed (`MainWindow::recut_sections`, `ViewWorkspace::recut_sections`,
   `qt_an_open_section_is_cut_again_when_the_surfaces_change_headless`). The cut
-  is `katana_cad::terrain::section_cut::cut_drawing_section` (`rust/crates/katana_cad/src/terrain/section_cut.rs`), which Terrain >
+  is `katana_cad::terrain::section_cut::cut_drawing_section` (`crates/katana_cad/src/terrain/section_cut.rs`), which Terrain >
   Cut Section uses too, so the two cannot differ in which surfaces they take or
   in the interval (`section_cut::*`); the views are told by the surfaces'
   generation, which moves for every change to the surfaces and never goes back
@@ -396,7 +396,7 @@ next open, and an UNDO after SURFACE FROM undid the line before it.
   entity edit moves, which a re-cut would refresh but no change to the entities
   asks for.
 - **A surface's style is a name.** `NamedSurface::style` names one of the
-  drawing's display styles (`rust/crates/katana_cad/src/terrain/surface_style.rs`);
+  drawing's display styles (`crates/katana_cad/src/terrain/surface_style.rs`);
   empty is the drawing's default. A name the styles do not have is refused
   by `set_surfaces` - unless a surface already named it: a project whose
   styles a newer Katana wrote names styles this build cannot read, and they
@@ -446,7 +446,7 @@ Storage schema 13 (`docs/model.md`) adds a `surfaces` table of OPAQUE
 records, `katana_storage::project_store::SurfaceRecord` (name, source, style, visible, data), saved
 and loaded in the same transaction as the rest. The storage layer may not see
 the terrain layer, so a record's `data` is the surface's bytes in the terrain
-layer's own form, `rust/crates/katana_terrain/src/tin_codec.rs`, which the Document writes at a
+layer's own form, `crates/katana_terrain/src/tin_codec.rs`, which the Document writes at a
 save and reads at an open.
 
 - **Exact.** Version 1 is a header (magic "KTIN", the version, the two
@@ -542,7 +542,7 @@ arrangement, so they need no schema change.
   and refuses the save, naming the style, rather than write a U+FFFD into the
   project. The door never lets such a set into the Document, so no test could
   hand the save the set it refuses; the guard is a function of the set,
-  `katana_cad::terrain::surface_document_io::surface_styles_metadata_value` (`rust/crates/katana_cad/src/terrain/surface_document_io.rs`),
+  `katana_cad::terrain::surface_document_io::surface_styles_metadata_value` (`crates/katana_cad/src/terrain/surface_document_io.rs`),
   which `write_surface_state` calls and a test calls with the sets the door
   refuses
   (`surface_document::the_save_refuses_a_style_set_the_json_writer_could_not_carry_rather_than_rewrite_its_text`;
@@ -576,7 +576,7 @@ arrangement, so they need no schema change.
 ### On every front end
 
 The interpreter runs the drawing's own SURFACE words and SURFACESTYLE
-(`rust/crates/katana_cad/src/terrain/surface_verbs.rs`), so the window's command line,
+(`crates/katana_cad/src/terrain/surface_verbs.rs`), so the window's command line,
 katana_cli and katana_mcp have them; the geoprocessing table's SURFACE row
 takes only LIST, INFO, REMOVE, FROM and EXPORT (`takes_surface`), and every
 other SURFACE line - these, the surface edits', the volumes' - reaches the
@@ -610,7 +610,7 @@ before an edit costs nothing until the edit makes a new surface.
 `visible`, and so does katana_terrain_list; `katana://surface-styles` is
 SURFACESTYLE LIST JSON (`docs/mcp.md`).
 
-**The Surfaces panel** (`rust/crates/katana_window/src/terrain/surfaces_panel.rs`; Terrain
+**The Surfaces panel** (`crates/katana_window/src/terrain/surfaces_panel.rs`; Terrain
 > Surfaces Panel, View > Panels > Surfaces, hidden until asked for): a row a
 surface - its name with a check box for shown, a style combo, its source and
 triangles - and Rename, Copy, Remove, Zoom To and Edit Styles (which opens
@@ -663,7 +663,7 @@ column's text (`qt_the_surfaces_panel_copies_the_picked_surface_headless`).
 
 ## Surfaces on every front end
 
-The SURFACE verb (`rust/crates/katana_app/src/geo/surface_verbs.rs`) makes, lists and
+The SURFACE verb (`crates/katana_app/src/geo/surface_verbs.rs`) makes, lists and
 writes out the drawing's surfaces ("Surfaces in the drawing", above, for
 what it changes and how that is undone). It runs through the one geoprocessing
 executor (`docs/geoprocessing.md`), so `katana_cli`, `katana_mcp` and the
@@ -727,7 +727,7 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
   one layer. As the plan wrote it, `DRAWING` may also come before a
   narrower scope (`FROM DRAWING LAYERS ground`), naming the source. The
   rules that turn entities into survey points and breaklines are
-  `katana_cad::geo::surface_input::surface_input` (`rust/crates/katana_cad/src/geo/surface_input.rs`),
+  `katana_cad::geo::surface_input::surface_input` (`crates/katana_cad/src/geo/surface_input.rs`),
   moved out of the window so every front end shares them.
 - **A name is the source's,** made unique ("terrain (2)"), unless `NAME`
   gives one, which must be free: AlreadyExists otherwise.
@@ -739,7 +739,7 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
   is replaced only with OVERWRITE (AlreadyExists otherwise), as TO FILE's
   rule has it.
 - **`TO SURFACE <name>`** keeps a GDAL run's raster as a surface
-  (`rust/crates/katana_app/src/geo/bindings.rs`, T0's block): its true values on the
+  (`crates/katana_app/src/geo/bindings.rs`, T0's block): its true values on the
   same capped stride, the spilled raster removed once read.
 
 ### Decided
@@ -799,7 +799,7 @@ height= cell= file=` records, the rasters a terrain verb reads as `RASTER
 
 ## Contours
 
-The CONTOUR verb (`rust/crates/katana_app/src/geo/contour_verbs.rs`) draws contour
+The CONTOUR verb (`crates/katana_app/src/geo/contour_verbs.rs`) draws contour
 lines of a surface or an elevation raster. It runs through the one
 geoprocessing executor, so `katana_cli`, `katana_mcp` (through
 `katana_run_commands`) and the window's command line run the same code, and
@@ -888,7 +888,7 @@ method=tin|grid cell= levels= count= major= minor= layer= smoothed=` and
   the one on the surface made from it y = 0.5 to 29.5 (the cell centres).
   Both are what the engines are; the reply's `method` says which ran.
 
-Tolerances in the contour verb's tests (`rust/crates/katana_app/tests/geo_surfaces/contour_verb.rs`) come from the fixture: `plane.asc` is
+Tolerances in the contour verb's tests (`crates/katana_app/tests/geo_surfaces/contour_verb.rs`) come from the fixture: `plane.asc` is
 read as Float32, each height within 3.815e-6 of its value near 100, which a
 gradient of 0.05 turns into at most 7.63e-5 m along x; on a surface of exact
 heights the tracer is within 1e-9.
@@ -905,7 +905,7 @@ heights the tracer is within 1e-9.
 
 ## Shading
 
-The RASTER SHADE verb (`rust/crates/katana_app/src/geo/shade_verbs.rs`) draws an
+The RASTER SHADE verb (`crates/katana_app/src/geo/shade_verbs.rs`) draws an
 elevation source as a picture and keeps it as a derived reference raster,
 which the plan view and the sheet painter draw as they draw any raster.
 The window's Terrain > Analysis > Terrain Shading (`terrainShadingDialog`)
@@ -945,8 +945,8 @@ record of the reference raster, `saved file=` with `save=`, then one
   (`raster resize --resampling average`, by the smallest whole step that
   fits), since a finer picture would only be decimated again to be drawn.
   A surface is sampled at its CELL, or the cell suggested for its extent.
-- **Ramps** (`rust/crates/katana_interop/src/geo/colour_ramps.rs`, over the one
-  table of `rust/crates/katana_terrain/src/colour_ramps.rs`): terrain (the 3D view's
+- **Ramps** (`crates/katana_interop/src/geo/colour_ramps.rs`, over the one
+  table of `crates/katana_terrain/src/colour_ramps.rs`): terrain (the 3D view's
   elevation tints), earth, diverging (blue, white, red: on design minus
   existing, cut is blue and fill red), slope (green, yellow, red), grey and
   spectral, the colours and their sources named there. Each style has its own - relief
@@ -993,7 +993,7 @@ record of the reference raster, `saved file=` with `save=`, then one
 
 ## Slope and aspect
 
-RASTER SLOPE and RASTER ASPECT (`rust/crates/katana_app/src/geo/slope_verbs.rs`) keep
+RASTER SLOPE and RASTER ASPECT (`crates/katana_app/src/geo/slope_verbs.rs`) keep
 the slope or the aspect of a surface or an elevation raster as a derived
 reference raster, and RASTER SLOPE draws slope classes as areas. The
 window's Terrain > Analysis > Slope and Aspect (`slopeAnalysisDialog`) only
@@ -1075,7 +1075,7 @@ area= polygons=` per class and a `legend value= r= g= b=` per class colour.
 
 ## Statistics by area
 
-RASTER ZONAL (`rust/crates/katana_app/src/geo/zonal_verbs.rs`) measures a surface or an
+RASTER ZONAL (`crates/katana_app/src/geo/zonal_verbs.rs`) measures a surface or an
 elevation raster inside each closed shape a scope takes and writes the
 results on the shapes themselves. The window's Terrain > Analysis >
 Statistics by Area (`zonalStatsDialog`) only builds its line:
@@ -1144,7 +1144,7 @@ with no number has no field), and `zonal stats= prefix= pixels= zones=`.
 ## Sampling and drape
 
 RASTER SAMPLE reports the height of the ground at points, and DRAPE gives
-it to the drawing's points and vertices (`rust/crates/katana_app/src/geo/drape_verbs.rs`).
+it to the drawing's points and vertices (`crates/katana_app/src/geo/drape_verbs.rs`).
 The window's Terrain > Analysis > Drape and Sample Heights (`drapeDialog`,
 tabs Drape and Sample) only builds their lines:
 
@@ -1158,7 +1158,7 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
 - **The ground is read at full precision.** A surface on its own triangles
   (`TinSurface::elevation_at`), exactly - never through a grid of it; a
   raster's file through GDAL's own interpolation
-  (`GDALRasterInterpolateAtPoint`, `rust/crates/katana_gis/src/raster_sampling.rs`),
+  (`GDALRasterInterpolateAtPoint`, `crates/katana_gis/src/raster_sampling.rs`),
   bilinear unless `method=` says. Bilinear on a plane is the plane, which
   is what `drape_and_sample::sample_on_a_plane_is_exact_with_bilinear` holds it to.
   `method=` with a surface is refused, as is `CELL`.
@@ -1176,7 +1176,7 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
   keeps them (`drawing_curves::drape_gives_a_curve_polylines_vertices_their_heights_in_its_geometry_as_one_step`).
   What has no vertices a height belongs to (an arc, a circle, an ellipse, a
   spline, a text) is left and counted by type. The heights are computed on the job's
-  worker (`katana_cad::geo::drape::drape_heights`, `rust/crates/katana_cad/src/geo/drape.rs`,
+  worker (`katana_cad::geo::drape::drape_heights`, `crates/katana_cad/src/geo/drape.rs`,
   given the ground as a callback so katana_cad never sees GDAL) and written
   on the GUI thread by one command (`katana_cad::geo::drape::drape_command`, through
   `katana_entity::entity::set_heights`): one undo step, after the entities are compared with
@@ -1190,7 +1190,7 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
   LOS alike; a raster or a project with no system is read as it is
   (`viewshed::a_raster_in_another_crs_than_the_drawings_is_refused_not_read_at_the_wrong_place`).
 - **A picked point is a typed point.** The dialog's Pick
-  (`PointPick`, `rust/crates/katana_window/src/geo/point_pick.rs`, over the workspace's `ViewAccess::pick_point`) takes the
+  (`PointPick`, `crates/katana_window/src/geo/point_pick.rs`, over the workspace's `ViewAccess::pick_point`) takes the
   next left click in a plan view and writes it into the line as `AT x,y`.
 
 ### Decided
@@ -1224,7 +1224,7 @@ DRAPE SURFACE <name> | RASTER <id|name> | FILE <path> [<scope>]
 
 RASTER VIEWSHED says what can be seen from observers over a surface or an
 elevation raster; LOS says whether one point can be seen from another
-(`rust/crates/katana_app/src/geo/viewshed_verbs.rs`). The window's Terrain > Analysis >
+(`crates/katana_app/src/geo/viewshed_verbs.rs`). The window's Terrain > Analysis >
 Viewshed and Line of Sight (`viewshedDialog`, tabs Viewshed and Line of
 Sight) only builds their lines:
 
@@ -1263,7 +1263,7 @@ LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
   (GDAL's `raster polygonize`), one undo step. The reply has an `observer
   at= [entity=] visible_cells=` per observer and `viewshed observers=
   height= target= max= curvature= visible_cells= area=`.
-- **A sight line is native** (`rust/crates/katana_terrain/src/line_of_sight.rs`):
+- **A sight line is native** (`crates/katana_terrain/src/line_of_sight.rs`):
   no algorithm of GDAL's answers one line with its clearance. It walks from
   the eye to the aim at stations `step=` apart - half a raster cell, or
   every 10 cm on a surface, which is read exactly - and reports `sight
@@ -1309,7 +1309,7 @@ LOS SURFACE <name> | RASTER <id|name> | FILE <path> OBSERVER x,y TARGET x,y
   read as no alpha and every unseen cell drew opaque black over the
   ground. The processing adapter now names a color-map output's bands red,
   green, blue and alpha (`stamp_colour_map_bands`,
-  `rust/crates/katana_gis/src/processing/bridge.rs`) - by the algorithm's definition, and
+  `crates/katana_gis/src/processing/bridge.rs`) - by the algorithm's definition, and
   only when GDAL named none. Rejected: taking any fourth undesignated band
   as alpha in the importer, which would make a four-band image's near
   infrared its transparency. This reaches the shading and slope pictures
@@ -1347,7 +1347,7 @@ and a sight line from an eye at 101.725 to ground at 101.975 that clears).
 ## Background jobs
 
 Long computations no longer run on the GUI thread behind a wait cursor.
-`katana_window::jobs::JobRunner` (`rust/crates/katana_window/src/jobs.rs`) runs a work function on a
+`katana_window::jobs::JobRunner` (`crates/katana_window/src/jobs.rs`) runs a work function on a
 thread of its own. The contract that keeps the single-threaded document safe:
 
 * **Work is pure.** It computes from inputs the job owns, copied on the GUI
@@ -1381,7 +1381,7 @@ thread of its own. The contract that keeps the single-threaded document safe:
 
 Surface From Point Cloud, Raster and Drawing are jobs: the SURFACE FROM line
 the dialog builds runs as the geoprocessing workbench's job
-(`rust/crates/katana_window/src/geo/geo_workbench.rs`). The cloud's ground points and the
+(`crates/katana_window/src/geo/geo_workbench.rs`). The cloud's ground points and the
 drawing's points and breaklines are copied when the line is prepared, on the
 GUI thread (the document is single-threaded). The raster is read by the job,
 from its path: GDAL keeps its error handlers per thread, and the reader opens
@@ -1415,7 +1415,7 @@ It failed again on the macOS runner in release run 41839118311. On
 52.4 ms, against 29.2 ms.
 
 A pause that long is the loaded machine's, not the job's. The triangulation
-is single-threaded (`rust/crates/katana_terrain/src/tin_builder.rs` uses no pool), so it
+is single-threaded (`crates/katana_terrain/src/tin_builder.rs` uses no pool), so it
 does not take the runner's cores from the GUI thread. And the pause does not
 grow with the work: 52 ms of 89 ms on 2026-10-14, then 70 ms and 52 ms of
 the shorter jobs above. That fits a 10 ms timer the system lets slip by
@@ -1451,8 +1451,8 @@ Every area and volume here goes through a Neumaier compensated sum. It was
 `detail::CompensatedSum`, private to the C++ terrain layer, until the
 corridor quantities in `cad` needed the same thing; a second copy would have
 been the defect CLAUDE.md section 1 names, so it moved to the public
-`katana_math::summation::CompensatedSum` (`rust/crates/katana_math/src/summation.rs`) and the
-terrain layer now names it (`rust/crates/katana_terrain/src/summation.rs`) - the call sites in `volume.rs` and
+`katana_math::summation::CompensatedSum` (`crates/katana_math/src/summation.rs`) and the
+terrain layer now names it (`crates/katana_terrain/src/summation.rs`) - the call sites in `volume.rs` and
 `tin_surface.rs` read as they always did, and the 17 volume and area tests
 passed unchanged through the move.
 
@@ -1564,7 +1564,7 @@ DEMs are made and worked on through GDAL's algorithms, on the one
 geoprocessing executor (`docs/geoprocessing.md`): `RASTER GRID` makes one from
 surveyed points, and the DEM tools mosaic, clip, fill, trace, reproject and
 difference them. The results are reference rasters (derived, with the line
-that made them as their derivation), files, or closed polylines on a layer. The DEM verbs share `rust/crates/katana_app/src/geo/dem_support.rs`:
+that made them as their derivation), files, or closed polylines on a layer. The DEM verbs share `crates/katana_app/src/geo/dem_support.rs`:
 a curated verb's own `key=value` options read wherever they stand, band 1 read
 at full precision, a cell's area, and a raster written where a line said kept
 in place.
@@ -1579,7 +1579,7 @@ RASTER GRID [<scope>] [method=linear|invdist|invdistnn|nearest|average|...]
             [OVERWRITE] [PREVIEW]
 ```
 
-`rust/crates/katana_app/src/geo/grid_verbs.rs`. The points the scope takes, and the
+`crates/katana_app/src/geo/grid_verbs.rs`. The points the scope takes, and the
 vertices of its lines and areas, are gridded by GDAL's `vector grid <method>`.
 The scope is the shared one (`SELECTION | DRAWING | VIEW | AREA | LAYERS`,
 then `WHERE`), so the points of one layer, of one code or of what a view shows
@@ -1645,7 +1645,7 @@ output arg=output kind=raster target=reference id=1 name=ground raster=20x20 fil
 ```
 
 **The window.** Terrain > DEM > Grid Points to DEM (`terrainGrid`) opens
-`gridDemDialog` (`rust/crates/katana_window/src/geo/grid_dem_dialog.rs`): the points' scope
+`gridDemDialog` (`crates/katana_window/src/geo/grid_dem_dialog.rs`): the points' scope
 and filter (Global Modify's controls), the method from GDAL's catalogue, cell
 or size, where the heights come from (geometry, or a property the drawing
 holds numbers in), extent, power and radius when the method takes them, and
@@ -1654,10 +1654,10 @@ it in `gridCommand`, and Run hands it to the window's one executor, where it
 runs as a background job with progress and Cancel; the reply comes back into
 `gridReply` when the job ends. What the dialogs share - the command, preview,
 run and reply panel, and how a dialog hears that its job ended - is
-`rust/crates/katana_window/src/geo/geo_dialog_support.rs`.
+`crates/katana_window/src/geo/geo_dialog_support.rs`.
 
-**Tests.** `rust/crates/katana_app/tests/geo_raster/grid_verb.rs` (the executor, a Session and the
-MCP server's `katana_run_commands`), `rust/crates/katana_window/tests/gis_terrain/grid_dem_dialog.rs`,
+**Tests.** `crates/katana_app/tests/geo_raster/grid_verb.rs` (the executor, a Session and the
+MCP server's `katana_run_commands`), `crates/katana_window/tests/gis_terrain/grid_dem_dialog.rs`,
 `cli.raster_grid_*` (`tests/cli/geo/grid.cmake`) and
 `qt_grid_points_to_dem_dialog_grids_the_drawing_headless`
 (`tests/geo/headless/grid.cmake`). Every expected value is worked from the
@@ -1685,10 +1685,10 @@ RASTER DIFFERENCE <raster> [MINUS] <raster> [<scope>] [resampling=<method>]
 <tile>   := RASTER <id|name> | FILE <path|folder|pattern>
 ```
 
-HELP gives the same grammar (`rust/crates/katana_app/src/geo/verb_table.rs`): its
+HELP gives the same grammar (`crates/katana_app/src/geo/verb_table.rs`): its
 first DEM row says what `<raster>` is and the words each tool takes, which
 the rows once left undefined. `geo_verb_usage::every_form_the_help_gives_is_accepted`
-(`rust/crates/katana_app/tests/geo_io/verb_usage.rs`) runs one line of each documented form, with
+(`crates/katana_app/tests/geo_io/verb_usage.rs`) runs one line of each documented form, with
 every option, so a form the help or this page gives that the verb refuses
 fails the suite. `TO SURFACE` triangulates the raster result as `SURFACE
 FROM RASTER` would, under the name given (the GDAL verb's target).
@@ -1702,7 +1702,7 @@ multiples of the cell), so RASTER DIFFERENCE of two surfaces and VOLUME GRID of
 them count the same cells only where the surfaces' rasters happen to start on
 whole multiples (`docs/volumes.md`, "The grid method").
 
-`rust/crates/katana_app/src/geo/dem_verbs.rs`, on GDAL's `raster mosaic`, `clip`,
+`crates/katana_app/src/geo/dem_verbs.rs`, on GDAL's `raster mosaic`, `clip`,
 `fill-nodata`, `footprint`, `reproject` and `calc`. A raster result is a
 derived reference raster (`mosaic`, `clip`, `filled`, `reprojected`,
 `difference`, or NAME's name); the footprint is closed polylines on
@@ -1780,7 +1780,7 @@ output arg=output kind=raster target=reference id=1 name=difference raster=40x30
 ```
 
 **The window.** Terrain > DEM > DEM Tools (`terrainDemTools`) opens
-`demToolsDialog` (`rust/crates/katana_window/src/geo/dem_tools_dialog.rs`), a tab per tool.
+`demToolsDialog` (`crates/katana_window/src/geo/dem_tools_dialog.rs`), a tab per tool.
 Each tab's raster comes from a binding picker (`binding_picker.rs`: a
 reference raster, a surface and its cell, or a file); CLIP's boundaries and
 DIFFERENCE's limit are Global Modify's scope and filter controls. The lines
@@ -1788,8 +1788,8 @@ are made by `dem_tool_command_line`, a pure function, and run through the
 window's one executor. When a job ends the pickers reload, so what one tool
 made is offered to the next.
 
-**Tests.** `rust/crates/katana_app/tests/geo_raster/dem_verbs.rs` (the executor, a Session and the
-MCP server), `rust/crates/katana_window/tests/gis_terrain/dem_tools_dialog.rs`,
+**Tests.** `crates/katana_app/tests/geo_raster/dem_verbs.rs` (the executor, a Session and the
+MCP server), `crates/katana_window/tests/gis_terrain/dem_tools_dialog.rs`,
 `cli.raster_*` (`tests/cli/geo/dem.cmake`) and
 `qt_dem_tools_clip_then_footprint_through_the_dialog_headless`
 (`tests/geo/headless/dem.cmake`). The values, by hand, on plane.asc (40 x 30

@@ -6,9 +6,9 @@ AS 5488 subsurface utility investigation as an IFC 4.3 file (IFC4X3_ADD2), and r
 IFC2X3, IFC4 and IFC4X3 files back into the drawing. It needs no third-party
 library, like `katana_dxf` and `katana_archive12d`: IFC is ISO 10303-21 text,
 and what matters is the mapping, not a model library
-(`rust/crates/katana_ifc/src/export.rs`, "Why a writer of our own"). It sits beside
+(`crates/katana_ifc/src/export.rs`, "Why a writer of our own"). It sits beside
 the other exchange modules in the layering (its crate's dependencies,
-`rust/crates/katana_ifc/Cargo.toml`): it may see `core`, `math`, `geometry`,
+`crates/katana_ifc/Cargo.toml`): it may see `core`, `math`, `geometry`,
 `terrain`, `entity`, `commands` and `survey`, and `katana_app` and
 `katana_window` may see it.
 
@@ -47,7 +47,7 @@ katana_cli -c "INFO site.ifc" -c "IMPORT site.ifc TAKECRS" -c "ALIGN LIST"
 
 The grammar is one function both front ends call
 (`katana_ifc::front_end::parse_export_arguments`, `katana_ifc::front_end::parse_import_arguments` in
-`rust/crates/katana_ifc/src/front_end.rs`), as are reading the files an export names
+`crates/katana_ifc/src/front_end.rs`), as are reading the files an export names
 (`katana_ifc::front_end::read_export_files`), the GlobalId namespace and the replies, so the same
 line writes the same file and answers alike in either. A path is quoted, or
 read up to the first ".ifc" that ends a word, so that one with blanks may be
@@ -84,7 +84,7 @@ drawing's surfaces in the import's one undo step, on every front end
 EXPORT writes the drawing's surfaces unless NOSURFACES.
 INFO describes a file without importing it; IFC RULES writes the default
 classification rules, for a project to edit into its own.
-`rust/crates/katana_app/src/ifc_verbs.rs` is the whole of `katana_cli`'s side.
+`crates/katana_app/src/ifc_verbs.rs` is the whole of `katana_cli`'s side.
 
 ### Replies
 
@@ -145,7 +145,7 @@ the rest of the grammar).
 
 ### In the window
 
-File > Export IFC is a dialog (`rust/crates/katana_window/src/ifc_dialogs.rs`, `docs/desktop.md`)
+File > Export IFC is a dialog (`crates/katana_window/src/ifc_dialogs.rs`, `docs/desktop.md`)
 of the verb's choices, with what the window knows beside them: the file; the
 drawing's entities (or only the selected ones), its alignments, its surfaces
 and its road model (`ifcExportRoadModel`, "Road model (N objects)"; unticked,
@@ -263,7 +263,7 @@ right, R 60 turning left - the tests work each parameter out from the PIs by
 hand: the tangent bearings are atan2(70, 100) and −atan2(30, 100), the
 deflection 0.9021827588 rad, the first arc 80 × (0.9021827588 − 40/160) =
 52.1746 m, the second 60 × 0.9021827588 = 54.1310 m
-(`rust/crates/katana_ifc/tests/export.rs`).
+(`crates/katana_ifc/tests/export.rs`).
 
 ### Subsurface utilities (AS 5488, and the delivery schema they were written to)
 
@@ -272,7 +272,7 @@ its **graded segments** - the standard grades segments, not services - one
 element, grouped by the system. Every **located point** is an `IfcAnnotation`
 SURVEY carrying its evidence, a member of its service's system. The class comes from the service's type and the
 words of its feature, subtype, configuration, material and description
-(`katana_ifc::classification::classify_utility_run`, `rust/crates/katana_ifc/src/classification.rs`):
+(`katana_ifc::classification::classify_utility_run`, `crates/katana_ifc/src/classification.rs`):
 
 | The service | Segment class | System |
 |---|---|---|
@@ -485,7 +485,7 @@ its line: a class the export does not write, a predefined type the class does
 not have, USERDEFINED without an object type. The predefined types are the
 schema's own, generated from IfcOpenShell's IFC4X3_ADD2
 (`tools/ifc_product_classes.py --predefined`,
-`rust/crates/katana_ifc/src/predefined_types.rs`), and every default rule and service
+`crates/katana_ifc/src/predefined_types.rs`), and every default rule and service
 class is checked against them
 (`ifc_rules_file::every_class_the_export_chooses_is_one_the_schema_has`). Save Default
 Rules in the export dialog, and `IFC RULES <file.csv>` on any command line,
@@ -504,7 +504,7 @@ Horizontal BIM: the 3D objects of the drawing's corridors - pavement courses,
 kerbs, footpaths, verges, batters - and of the road objects placed along an
 alignment or a line - barriers, guide posts, signs, light poles, culverts,
 walls, fences, line markings - which `katana_cad::bim::bim_object::bim_model` makes from their
-definitions every time (`rust/crates/katana_cad/src/bim/bim_object.rs`; the road
+definitions every time (`crates/katana_cad/src/bim/bim_object.rs`; the road
 design and road objects documents say how). The export writes them unless the
 line says NOROADMODEL (the window's "Road model" box). Section numbers below
 are those of buildingSMART's IFC 4.3.2.0 documentation, the IFC4X3_ADD2
@@ -513,9 +513,9 @@ schema the file declares.
 **How it reaches the writer.** `katana_ifc` may not see `katana_cad`, so the
 model comes in as plain data: `katana_ifc::export::RoadElement`, field for field what
 `katana_cad::bim::BimObject` is, in an `katana_ifc::export::RoadModelInput` with the model's
-problems. `katana_app::ifc_verbs::road_model_input` (`rust/crates/katana_app/src/ifc_verbs.rs`) converts one
+problems. `katana_app::ifc_verbs::road_model_input` (`crates/katana_app/src/ifc_verbs.rs`) converts one
 into the other, and both front ends call it - `katana_cli`'s EXPORT and the
-window's (`rust/crates/katana_window/src/main_window_ifc.rs`) - so a corridor's elements are
+window's (`crates/katana_window/src/main_window_ifc.rs`) - so a corridor's elements are
 the same objects whichever wrote the file. Three of an object's properties
 say what its fields cannot, matched in any letter case: `ObjectType`, what a
 USERDEFINED class is (without it, the object's kind in capitals, since every
@@ -553,7 +553,7 @@ host. All are unmoved: the coordinates are the drawing's, from the file's
 local origin, which takes the road model into account.
 
 **Which class each object is.** What the builders are asked to write, and
-why; the export writes any class in its list (`rust/crates/katana_ifc/src/product_layout.rs`)
+why; the export writes any class in its list (`crates/katana_ifc/src/product_layout.rs`)
 whose predefined type the schema has:
 
 | Object | Class and predefined type | Why |
@@ -694,7 +694,7 @@ its GlobalId when others are added before it
 The tests export a synthetic corridor of boxes whose volumes are worked out by
 hand - two courses, a kerb, a fill and a cut batter, a marking, a sign, a
 noise wall - and read the file back instance by instance
-(`rust/crates/katana_ifc/tests/road.rs`): the structure and its placements
+(`crates/katana_ifc/tests/road.rs`): the structure and its placements
 (`ifc_export_road::every_element_is_contained_in_its_part_its_road_or_the_site_and_placed_relative_to_it`),
 closed face sets enclosing 17.5 m3 and 4.5 m3
 (`ifc_export_road::a_body_is_a_closed_triangulated_face_set_enclosing_the_meshes_volume`),
@@ -704,7 +704,7 @@ the features on their hosts
 the base quantities against their templates
 (`ifc_export_road::quantities_the_template_names_are_base_quantities_and_the_rest_katanas`)
 and every refusal (`ifc_export_road::what_would_make_an_invalid_file_is_left_out_and_said`);
-`rust/crates/katana_app/tests/file_verbs/ifc.rs` the conversion
+`crates/katana_app/tests/file_verbs/ifc.rs` the conversion
 (`ifc_road_model_input::every_field_of_a_bim_object_reaches_the_element`); and the window's
 box `ifc_export_dialog::the_road_model_box_counts_its_objects_and_unticked_the_line_says_no_road_model`
 and `qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless`.
@@ -725,12 +725,12 @@ timestamp in the header is the caller's.
 ## Import: what comes in, and as what
 
 `katana_ifc::import::read_ifc` parses any ISO 10303-21 file whose schema is an IFC one
-(`rust/crates/katana_ifc/src/step_reader.rs`: complex instances are counted and passed
+(`crates/katana_ifc/src/step_reader.rs`: complex instances are counted and passed
 over, lists deeper than 64 are refused, an error names its line), and
 `katana_ifc::import::import_command` makes the result one undoable step. The product classes
 of IFC2X3, IFC4 and IFC4X3_ADD2, and which are drawn, spatial or positioning,
 are generated from IfcOpenShell's schemas (`tools/ifc_product_classes.py`,
-`rust/crates/katana_ifc/src/product_classes.rs`).
+`crates/katana_ifc/src/product_classes.rs`).
 
 | In the file | In the drawing |
 |---|---|
@@ -798,7 +798,7 @@ mistake in the writer and the same mistake in the reader cannot agree:
   too - 1097, 1097 and 58 instances - and
   `qt_ifc_the_windows_export_is_valid_to_ifcopenshell` checks the first where
   IfcOpenShell is installed.
-- **The road model's file** - the synthetic corridor of `rust/crates/katana_ifc/tests/road.rs`
+- **The road model's file** - the synthetic corridor of `crates/katana_ifc/tests/road.rs`
   with its ground, georeferenced - is written by
   `ifc_export_road::the_road_model_is_written_for_the_validator` (to the file
   `KATANA_IFC_ROAD_FILE` names) and was judged by `tools/check_ifc.py` in the
@@ -855,8 +855,8 @@ mistake in the writer and the same mistake in the reader cannot agree:
   take `VIEW`, `AREA`, `LAYERS a,b [ONLY]` or `WHERE k=v`, nor does the
   export dialog carry the "Apply to" and "Only those that match" controls.
   When this was written (2026-09-26) the shared scope parser and "Apply to"
-  widget did not exist; both do now (`rust/crates/katana_cad/src/scope_verbs.rs`,
-  `rust/crates/katana_window/src/customisation/scope_filter_widget.rs`), so what remains is
+  widget did not exist; both do now (`crates/katana_cad/src/scope_verbs.rs`,
+  `crates/katana_window/src/customisation/scope_filter_widget.rs`), so what remains is
   the wiring: both front ends read the words with the shared parser, resolve
   the scope with `katana_cad::global_modify::match_entities` and pass the entities as
   `ExportOptions::entities`, which the writer already takes, and the reply

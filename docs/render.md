@@ -9,12 +9,12 @@ code comments say the same things next to the lines they govern.
 
 ## What draws what
 
-* The **plan view** (`rust/crates/katana_window/src/viewport_widget.rs`) paints with the window's canvas
-  (`rust/crates/katana_window/src/canvas/`, a painter over tiny-skia) straight
+* The **plan view** (`crates/katana_window/src/viewport_widget.rs`) paints with the window's canvas
+  (`crates/katana_window/src/canvas/`, a painter over tiny-skia) straight
   from the model, and the drawing's surfaces in their styles
   (`docs/surface_display.md`). It is not on the DrawList path.
 * The **3D and Elevation views** are docks of the view workspace
-  (`rust/crates/katana_window/src/view_workspace.rs`), each a `RenderView`. The view owns a
+  (`crates/katana_window/src/view_workspace.rs`), each a `RenderView`. The view owns a
   camera (in the view's `katana_cad::view_set::ViewState`) and a framebuffer and nothing else:
   `SceneBuilder` builds the scene in layers, `katana_cad::scene::render_layers` draws them
   with the software `Rasterizer` into one depth buffer, and the framebuffer's
@@ -186,7 +186,7 @@ Of 80 pixels probed over the framed sample terrain, 20 stalled and 60 dived
 every frame (`katana_cad::scene::render_layers`, and the GPU view's frame), and in no notch of
 any case measured did it clip the point under the cursor.
 
-**The fix** (`rust/crates/katana_cad/src/scene_zoom.rs`): each notch zooms towards
+**The fix** (`crates/katana_cad/src/scene_zoom.rs`): each notch zooms towards
 what the cursor points at.
 
 1. `katana_cad::scene_zoom::pick_drawn_point` finds what is drawn there: the nearest of a terrain or
@@ -518,7 +518,7 @@ through, and one whose codes AND to non-zero is dropped.
   pass. No anti-aliasing yet.
 * **Perspective-correct colour**: c/w and 1/w are interpolated and divided.
 
-## The scene (`rust/crates/katana_cad/src/scene.rs`)
+## The scene (`crates/katana_cad/src/scene.rs`)
 
 Curves are tessellated here, not in the renderer, because how finely an arc is
 chorded is a modelling decision. **What is drawn is what the plan draws**: an
@@ -585,7 +585,7 @@ passes **write no depth**:
 * **The selection's casing is tested but not written**, so the core drawn
   next covers it wherever the two overlap and the casing shows a pixel
   either side: a 3 px core of #FF9F1C over a 5 px casing of (16, 18, 22),
-  and a selected point 9 px over 11 (`rust/crates/katana_cad/src/selection_style.rs`;
+  and a selected point 9 px over 11 (`crates/katana_cad/src/selection_style.rs`;
   `scene_frame::a_selected_line_is_drawn_in_the_selection_colour_between_two_edges_of_its_casing`).
   In the core's own list, the software view drew it right by the bias alone
   (2.0 under the core's 2.5), but the GPU pulls a mark nearer by its width
@@ -673,7 +673,7 @@ the z the build uses; the widget frames what it built.
   surface coloured by elevation, so a height is one colour everywhere; the
   widget draws a small legend of it with its two heights
   (`elevation_ramp_color` is what both use). Its colours, and the slope
-  colours, are the ramp table's (`rust/crates/katana_cad/src/terrain/surface_colouring.rs`):
+  colours, are the ramp table's (`crates/katana_cad/src/terrain/surface_colouring.rs`):
   the elevation ramp to the bit, the slope colours at their stops.
 * **A surface in a display style** (`SceneSurface::display`) is coloured by
   its style - smooth or banded elevation, stops, slope, aspect or flat, on

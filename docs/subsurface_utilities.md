@@ -3,9 +3,9 @@
 Tools for surveying buried services and grading what is known about them by
 the quality levels of AS 5488.1-2019, "Classification of subsurface utility
 information". The code is `katana_survey::subsurface`
-(`rust/crates/katana_survey/src/subsurface/`);
+(`crates/katana_survey/src/subsurface/`);
 the command line reaches it through `UTILITY`
-(`rust/crates/katana_cad/src/utilities/utility_verbs.rs`), a verb of the shared
+(`crates/katana_cad/src/utilities/utility_verbs.rs`), a verb of the shared
 `CommandInterpreter`, so the window's command line, `katana_cli`,
 `katana_mcp` and an agent all run the same code. The calculation sits in
 `katana_survey` because it is survey calculation - positions, tolerances,
@@ -130,7 +130,7 @@ next vertex), `verifies`, and the service's attributes `type`, `owner`,
 It refuses rather than guesses: an unknown column (a misspelt `survace` read
 past would leave every cover uncomputed), `x` and `y` for the coordinates
 (which is which differs between conventions - the same rule as
-`rust/crates/katana_surveyio/src/delimited_points.rs`), an unparseable value, and
+`crates/katana_surveyio/src/delimited_points.rs`), an unparseable value, and
 two rows of one service that give different attributes. Diameter is the one
 column with its unit in its name, because a diameter in a utility schedule is
 millimetres by habit and metres everywhere else in this program. An empty
@@ -263,7 +263,7 @@ as ONE undo step named `UTILITY DRAW` (`utility_drawing::utility_draw_command`).
 all or nothing: a line that cannot be graded - one located vertex, a
 coordinate that is not a number - refuses the whole draw, naming the line,
 and nothing is added. `utilities::draw_utilities` builds the drawing as values
-with no document, which is what `rust/crates/katana_cad/tests/utilities/utility_drawing.rs`
+with no document, which is what `crates/katana_cad/tests/utilities/utility_drawing.rs`
 tests; the command then creates what the drawing lacks, in this order:
 
 - **Linetypes** by quality level, named `utility-ql-b`, `utility-ql-c` and
@@ -447,7 +447,7 @@ groups above them; `bounds=` is the box of every located vertex, for a front
 end to frame - survey data in a real coordinate system usually lands far
 from what is on the screen. `utilities::draw_reply_bounds` reads it back from
 the reply, so every front end reads it the same way. `cli.utility_draw_adds_the_graded_sample_to_the_drawing`
-and `rust/crates/katana_cad/tests/terrain_utility_verbs/utility_verbs.rs` run it on the sample.
+and `crates/katana_cad/tests/terrain_utility_verbs/utility_verbs.rs` run it on the sample.
 
 ## Drawing data: the verbs on what is drawn
 
@@ -460,7 +460,7 @@ what is drawn, and `DRAW` a file or the survey's own geometry (the next
 section). The file stays a source beside the drawing: a delivered
 schedule is still checked before anyone draws it.
 
-`utilities::read_utility_data` (`rust/crates/katana_cad/src/utilities/utility_data.rs`)
+`utilities::read_utility_data` (`crates/katana_cad/src/utilities/utility_data.rs`)
 reads the scope's services from the drawn points:
 
 - **A scope that takes part of a line takes the whole line**, because the
@@ -501,7 +501,7 @@ reads the scope's services from the drawn points:
   (`utility_data::a_path_typed_on_a_point_reads_as_the_schedules_path_column_reads_it`).
 
 Three proofs hold the drawing to the schedule, each a test in
-`rust/crates/katana_cad/tests/terrain_utility_verbs/utility_data.rs`:
+`crates/katana_cad/tests/terrain_utility_verbs/utility_data.rs`:
 
 1. **A schedule drawn and reported from the drawing is the schedule's
    report**, word for word after the scope record, for both samples and with
@@ -604,7 +604,7 @@ so a survey had to be typed into a `.csv` before any of this could grade it.
 
 **`UTILITY DRAW <scope>` draws the geometry in scope as services**
 (`utilities::read_geometry_services`, `utility_data::draw_geometry_services`,
-`rust/crates/katana_cad/src/utilities/utility_data.rs`), exactly as a `DRAW` of the
+`crates/katana_cad/src/utilities/utility_data.rs`), exactly as a `DRAW` of the
 schedule that says the same thing draws it: the same layers, runs and points,
 the points carrying the same rows. So everything after it - `REPORT`,
 `VERIFY`, `CLEARANCE`, `CHECK`, `REGRADE`, `SCHEDULE`, the IFC export - works on
@@ -701,7 +701,7 @@ cannot be a service. A `REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `REGRADE`
 or `SCHEDULE` whose scope takes only such geometry - the survey, not yet
 drawn as services - says that `UTILITY DRAW` with the same scope draws it.
 
-Held by `rust/crates/katana_cad/tests/terrain_utility_verbs/utility_geometry.rs`: a survey read as
+Held by `crates/katana_cad/tests/terrain_utility_verbs/utility_geometry.rs`: a survey read as
 services is, field for field, the schedule written by hand from the same
 field book, and drawn it is that schedule's drawing, entity for entity
 (`utility_geometry::a_survey_drawn_as_services_draws_what_the_schedule_of_the_same_survey_draws`);
@@ -798,7 +798,7 @@ Utility-Schema-and-Specification-v1.2.xlsx in the git-ignored folder
 `cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong`, which checks the
 sample against it. (The two `cli.utility_check_with_errors_*` tests use a
 schema written by hand and run in every checkout.) The format of the schema file is in
-`rust/crates/katana_survey/src/subsurface/delivery_schema.rs`; nothing in the
+`crates/katana_survey/src/subsurface/delivery_schema.rs`; nothing in the
 checker is TfNSW's, so another client's schema can be written by hand.
 
 Two things found in v1.2 while writing the extraction:

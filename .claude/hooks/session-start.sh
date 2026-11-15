@@ -53,11 +53,11 @@ if ! command -v xvfb-run > /dev/null || [ ! -e /usr/share/vulkan/icd.d/lvp_icd.j
     fi
 fi
 
-# The programs are built with cargo (target/ under rust/ unless
+# The programs are built with cargo (target/ at the checkout's root unless
 # CARGO_TARGET_DIR says otherwise); CMake only runs the process-level tests
 # against them. Configure that runner (seconds); the first cargo build of the
 # session is the long step.
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/rust/target}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
 export RUSTFLAGS="${RUSTFLAGS:--C link-arg=-Wl,-rpath,$KATANA_TOOLCHAIN/lib}"
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     {
@@ -70,11 +70,11 @@ cmake --preset linux-release -DKATANA_PROGRAMS="$CARGO_TARGET_DIR/release" > /de
 cat <<'MSG'
 Katana cloud session: the Linux toolchain is installed and the test runner (build/linux-release) is configured.
 
-- Katana is Rust: one Cargo workspace in rust/ (rust/crates/katana_<layer>), the window in egui and wgpu. There is no C++ but three small shims inside rust/crates that GDAL's algorithm framework and PDAL need.
+- Katana is Rust: one Cargo workspace at the checkout's root (crates/katana_<layer>), the window in egui and wgpu. There is no C++ but three small shims inside crates/ that GDAL's algorithm framework and PDAL need.
 - Toolchain: rustc, cargo, GCC (for the shims), PROJ, GDAL and PDAL from conda-forge, in $KATANA_TOOLCHAIN (tools/setup_linux_toolchain.py); cargo, cmake and ctest from it are on PATH.
-- Build: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
-- Lint:  cargo clippy --manifest-path rust/Cargo.toml --locked --workspace --all-targets --release -- -D warnings
-- Test:  cargo test --manifest-path rust/Cargo.toml --locked --workspace --release   (one crate: -p katana_<layer>)
+- Build: cargo build --locked --workspace --release
+- Lint:  cargo clippy --locked --workspace --all-targets --release -- -D warnings
+- Test:  cargo test --locked --workspace --release   (one crate: -p katana_<layer>)
 - Process tests (the cli.* and headless window tests, against the built programs): xvfb-run -a ctest --test-dir build/linux-release -j 4 --output-on-failure
 - github.com downloads are blocked here; crates come through crates.io as Cargo.lock pins them.
 - How work is done in this repository: CLAUDE.md, docs/rust.md and docs/architecture.md, "Working rules". Read those before changing code.

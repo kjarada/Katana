@@ -188,10 +188,10 @@ main() {
         export PATH="${toolchain:+$toolchain:}/c/msys64/ucrt64/bin:$PATH"
         echo "== Katana $phase in $root, $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$log"
         echo "== toolchain first on PATH: ${toolchain:-none, UCRT64}" | tee -a "$log"
-        # cargo's own target folder in the checkout (rust/target, git-ignored), and
+        # cargo's own target folder in the checkout (target, git-ignored), and
         # the runner's preset folder, build/release; it is handed the programs' folder in
         # Windows form, which cmake.exe reads.
-        steps "build/release" "$(cygpath -m "$root/rust/target/release")" "$phase" "$@" 2>&1 |
+        steps "build/release" "$(cygpath -m "$root/target/release")" "$phase" "$@" 2>&1 |
             tee -a "$log"
         code=${PIPESTATUS[0]}
     fi
@@ -215,7 +215,7 @@ steps() {
         if [ $# -gt 0 ]; then
             echo "== cargo test --locked --release $*"
             RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-D warnings" cargo test \
-                --manifest-path rust/Cargo.toml --locked --release "$@" -- --nocapture
+                --locked --release "$@" -- --nocapture
             return
         fi
         cargo_steps build && cargo_steps test
@@ -264,18 +264,18 @@ runner_steps() {
 # `test` is cargo test with the counts of every test binary summed. Every cargo
 # here is given the same flags - RUSTFLAGS as the caller set it, then -D
 # warnings - or each step would rebuild what the one before it built. Every
-# cargo is --locked: the committed rust/Cargo.lock is what is built, so a
+# cargo is --locked: the committed Cargo.lock is what is built, so a
 # build never takes a newer crate on its own (docs/rust.md, "Third-party
 # libraries": a crate is at least two weeks old, and listed in the notices).
 cargo_steps() {
-    local step="$1" manifest=rust/Cargo.toml
+    local step="$1" manifest=Cargo.toml
     local flags="${RUSTFLAGS:+$RUSTFLAGS }-D warnings"
     local jobs=()
     if [ -n "${KATANA_BUILD_JOBS:-}" ]; then
         jobs=(--jobs "$KATANA_BUILD_JOBS")
     fi
     if [ "$step" = build ]; then
-        export CLIPPY_CONF_DIR="$PWD/rust"
+        export CLIPPY_CONF_DIR="$PWD"
         echo "== cargo: $(command -v cargo), $(cargo --version), $(rustc --version)"
         echo "== cargo clippy --locked --workspace --all-targets --release --keep-going ${jobs[*]} -- -D warnings"
         RUSTFLAGS="$flags" cargo clippy --manifest-path "$manifest" --locked --workspace --all-targets \
@@ -303,7 +303,7 @@ cargo_steps() {
 
 # The float-to-text guard. A real becomes text through katana_core's number
 # formatters, never through to_string, whose text is not the shortest
-# round-trip text the replies are held to; rust/clippy.toml forbids the call
+# round-trip text the replies are held to; clippy.toml forbids the call
 # (disallowed-methods, KATANA_REAL_FORMATTER_REQUIRED). This proves the lint
 # still fires, on a crate whose one function makes the forbidden call
 # (tests/rust_check_fixtures/float_to_string): a lint that stopped firing would
@@ -314,7 +314,7 @@ rust_float_guard() {
     echo "== Rust float-to-text canary: the forbidden call must be diagnosed"
     RUSTFLAGS="$flags" cargo clippy \
         --manifest-path tests/rust_check_fixtures/float_to_string/Cargo.toml \
-        --target-dir "${CARGO_TARGET_DIR:-rust/target}/float-format-canary" \
+        --target-dir "${CARGO_TARGET_DIR:-target}/float-format-canary" \
         --release -- -D warnings 2>&1 | tee "$results"
     code=${PIPESTATUS[0]}
     if [ "$code" -eq 0 ] || ! grep -q 'KATANA_REAL_FORMATTER_REQUIRED' "$results"; then

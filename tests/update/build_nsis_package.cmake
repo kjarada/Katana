@@ -3,7 +3,7 @@
 #
 #   cmake -DCPACK_COMMAND=<cpack> -DCPACK_CONFIG=<build>/CPackConfig.cmake -DWORK=<folder>
 #         -DCHECK=<check_nsis_script.cmake> -DEXPECT_VERSION=<x.y.z>
-#         [-DREGISTRY_SOURCE=<rust/crates/katana_update/src/registry.rs>] -P build_nsis_package.cmake
+#         [-DREGISTRY_SOURCE=<crates/katana_update/src/registry.rs>] -P build_nsis_package.cmake
 #
 # What this proves that the sample values of check_nsis_script.cmake cannot: that CPack takes
 # cmake/NSIS.template.in and not its own (cmake/ is on CPACK_MODULE_PATH; a template that

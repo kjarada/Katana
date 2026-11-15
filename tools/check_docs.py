@@ -18,7 +18,7 @@
 # word of 2026-11-15. The forms a document may cite, each checked as said:
 #
 #   * A repository path, in backticks, in a link or in fenced code:
-#     `rust/crates/katana_cad/src/global_modify.rs`, `tests/data/...`,
+#     `crates/katana_cad/src/global_modify.rs`, `tests/data/...`,
 #     `tools/build_visible.sh`, `docs/...`, `cmake/...`, `resources/...`,
 #     `samples/...`, and the root files (CMakeLists.txt, CMakePresets.json,
 #     .gitignore). The file or folder exists, or a glob matches when the path
@@ -26,12 +26,12 @@
 #     since a clean checkout does not have it. A path into the removed C++
 #     tree (src/, include/, benchmarks/, a .cpp/.hpp/.h under tests/) is
 #     reported as such: cite the Rust file it became (the layout mirrors it:
-#     src/katana_qt/x.cpp is rust/crates/katana_window/src/x.rs,
-#     src/katana_cad/y.cpp is rust/crates/katana_cad/src/y.rs), or write the
+#     src/katana_qt/x.cpp is crates/katana_window/src/x.rs,
+#     src/katana_cad/y.cpp is crates/katana_cad/src/y.rs), or write the
 #     history as a sentence without the path.
 #   * A Rust path rooted at a crate: `katana_cad::global_modify::match_entities`,
 #     `katana_entity::Document::set_current_style`. The crate is a folder of
-#     rust/crates; the modules are followed through the files (x.rs or
+#     crates/; the modules are followed through the files (x.rs or
 #     x/mod.rs, or an inline `mod x {`) as far as they go; the first name after
 #     them is declared (fn, struct, enum, trait, type, const, static, mod,
 #     macro_rules!) in that module or below it - a re-export at the crate root
@@ -41,7 +41,7 @@
 #   * A shorter qualified name, `Type::method`, `Enum::Variant` or
 #     `module::item` (`Document::set_current_style`,
 #     `global_modify::match_entities`): its last two names both occur in the
-#     code of one .rs file under rust/, a file's own module name (its stem, or
+#     code of one .rs file under crates/, a file's own module name (its stem, or
 #     its folder's name for mod.rs, lib.rs and main.rs) counting as a word in
 #     it. `std::...`, the crates the workspace depends on (`egui::...`,
 #     `wgpu::...`) and GDAL's own C++ classes (`OGRLayer::SetAttributeFilter`,
@@ -75,10 +75,10 @@
 # instructions, the readme); over all of docs/*.md, that docs/index.md lists
 # every document and names none that does not exist (EXPECTED ones excepted);
 # that docs/headless.md names every switch the window's headless runner
-# parses (rust/crates/katana_window/src/drive/run.rs and steps.rs) and every
+# parses (crates/katana_window/src/drive/run.rs and steps.rs) and every
 # variable tools/check_screenshot.cmake reads; and that the worked example
 # docs/customisation.md prints is, character for character, the text the
-# format's own test (rust/crates/katana_entity/tests/customisation_format.rs)
+# format's own test (crates/katana_entity/tests/customisation_format.rs)
 # reads and writes back.
 #
 # Deliberately NOT checked: bare file names (`numerics.rs` - ambiguous by
@@ -108,12 +108,12 @@ EXPECTED = set()
 # src, include and benchmarks are the removed C++ tree: still read as paths so
 # that a citation of one is reported, never as somewhere a name may live.
 ROOTS = ('src', 'include', 'tests', 'tools', 'docs', 'cmake', 'benchmarks', 'resources',
-         'samples', 'third_party', 'rust')
+         'samples', 'third_party', 'crates', 'packaging')
 REMOVED_TREE = re.compile(r'^(?:src|include|benchmarks)(?:/|$)|^tests/.*\.(?:cpp|hpp|h)$')
 ROOT_FILES = ('CMakeLists.txt', 'CMakePresets.json', '.gitignore', '.clang-format',
-              '.clang-tidy')
-CRATES = os.path.join('rust', 'crates')
-# The C++ shims under rust/crates/*/native (GDAL's algorithm framework and
+              '.clang-tidy', 'Cargo.toml', 'Cargo.lock', 'clippy.toml')
+CRATES = 'crates'
+# The C++ shims under crates/*/native (GDAL's algorithm framework and
 # HTTP, PDAL) are code of the Rust build too.
 CODE_SUFFIXES = ('.rs', '.cpp', '.h')
 # The CMake test runner: where a process test is registered.
@@ -125,7 +125,7 @@ FORBIDDEN = re.compile(r'\bPLAN' + r'\.MD\b|\bPLAN' + r'\.md\b|\bCLAUDE' + r'\.m
                        + r'ME(\.md)?\b|\bplan/[0-9]')
 
 # Not preceded by a word character, a dot, a slash or a hyphen, so that the
-# src/ inside rust/crates/katana_cad/src/... is not read as a path of its own.
+# src/ inside crates/katana_cad/src/... is not read as a path of its own.
 PATH_TOKEN = re.compile(r'(?<![\w./-])(?:\.\./)*(?:' + '|'.join(ROOTS)
                         + r')/[^\s`\'"),;|\]]*')
 ROOT_FILE_TOKEN = re.compile(r'(?<![\w/.])(?:' + '|'.join(re.escape(f) for f in ROOT_FILES)
@@ -303,7 +303,7 @@ class Code:
         # core and alloc are std's too, but katana's own `core` was a C++
         # namespace a stale citation would name: only std is skipped outright.
         self.external = {'std'} | self._dependencies()
-        for directory, folders, names in os.walk(os.path.join(root, 'rust')):
+        for directory, folders, names in os.walk(os.path.join(root, 'crates')):
             # cargo's output, generated sources among it, is not the code.
             folders[:] = [f for f in folders if f != 'target']
             for name in names:
@@ -328,8 +328,8 @@ class Code:
     def _dependencies(self):
         """The crates the workspace depends on, by the name code uses."""
         names = set()
-        for path in glob.glob(os.path.join(self.root, 'rust', '**', 'Cargo.toml'),
-                              recursive=True):
+        for path in [os.path.join(self.root, 'Cargo.toml')] + glob.glob(
+                os.path.join(self.root, 'crates', '**', 'Cargo.toml'), recursive=True):
             section = None
             for line in read(path).splitlines():
                 line = line.strip()
@@ -357,7 +357,7 @@ class Code:
         crate = parts[0]
         source = os.path.join(self.root, CRATES, crate, 'src')
         if not os.path.isdir(source):
-            return 'no crate %s in rust/crates' % crate
+            return 'no crate %s in crates/' % crate
         folder = source
         candidates = [os.path.join(source, 'lib.rs'), os.path.join(source, 'main.rs')]
         current = next((c for c in candidates if os.path.exists(c)), None)
@@ -420,7 +420,7 @@ def path_exists(root, docs_dir, token, doc_path):
     """None when the path is fine (exists, or is skipped), else a reason."""
     token = token.rstrip('.:,')
     if '...' in token or token.endswith('/..'):
-        return None  # a placeholder such as rust/crates/...
+        return None  # a placeholder such as crates/...
     if token.startswith('../'):
         resolved = os.path.normpath(os.path.join(os.path.dirname(doc_path), token))
         relative = os.path.relpath(resolved, root).replace(os.sep, '/')
@@ -580,7 +580,7 @@ def check_switches(root, problems):
         for switch in sorted(set(arms)):
             if not re.search(re.escape(switch) + r'(?![a-z0-9-])', text):
                 problems.append('docs/headless.md: does not name the switch %s '
-                                '(rust/crates/katana_window/src/drive/%s)' % (switch, name))
+                                '(crates/katana_window/src/drive/%s)' % (switch, name))
     if os.path.exists(script):
         source = read(script)
         variables = set(re.findall(r'DEFINED\s+([A-Z][A-Z0-9_]+)', source))
@@ -593,7 +593,7 @@ def check_switches(root, problems):
 
 def check_worked_example(root, problems):
     """The example docs/customisation.md prints under "A worked example" is
-    the text rust/crates/katana_entity/tests/customisation_format.rs reads and
+    the text crates/katana_entity/tests/customisation_format.rs reads and
     writes back byte for byte. A person may copy that example to start a file
     of their own, so it must be what the writer writes; the test
     (customisation::the_worked_example_of_the_document_is_written_as_it_is_printed)
@@ -616,7 +616,7 @@ def check_worked_example(root, problems):
     literal = 'r##"' + '\n'.join(lines[begin:end]) + '\n"##'
     if not os.path.exists(test) or literal not in read(test):
         problems.append('docs/customisation.md:%d: the worked example is not the text '
-                        'rust/crates/katana_entity/tests/customisation_format.rs holds '
+                        'crates/katana_entity/tests/customisation_format.rs holds '
                         '(the_worked_example_of_the_document_is_written_as_it_is_printed)'
                         % (begin + 1))
 

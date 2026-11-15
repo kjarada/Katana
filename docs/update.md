@@ -69,11 +69,11 @@ monthly Windows update and a swap of 3 to 6 seconds.
 
 | Piece | Where | What it is |
 |---|---|---|
-| the engine | `rust/crates/katana_update/src/` | layer `update`, which sees `core` and nothing else: versions, the manifest and its path rules, the signature and the trust gate, the plan, the staged download, the journalled swap, rollback and recovery, the per-user records. It links no HTTP library, no GUI toolkit and no GDAL |
-| the helper | `rust/crates/katana_updater/src/` | `katana_updater`, the fourth program: the swap as a process of its own, static, linked to the engine and `katana_core` alone |
-| the verbs | `rust/crates/katana_app/src/update_verbs.rs`, and the session's part, `rust/crates/katana_app/src/session/update_part.rs` | the `UPDATE` family, one function that runs a line for the context it is handed: `katana_cli`, the window and the agent's tool all run it |
-| the transport | `rust/crates/katana_app/src/update_transport.rs` | the engine's `Fetch`, made of the engine's own rules (`katana_update::feed::make_fetch`) over one request of the project's HTTP stack (`katana_gis::web_access::http_exchange`) |
-| the window | `rust/crates/katana_window/src/update_dialog.rs`, `rust/crates/katana_window/src/update_workbench.rs`, the Updates page of `rust/crates/katana_window/src/customisation/settings_dialog.rs` | the menu item, the status-bar button, the dialog, the automatic check, the close that lets the helper run |
+| the engine | `crates/katana_update/src/` | layer `update`, which sees `core` and nothing else: versions, the manifest and its path rules, the signature and the trust gate, the plan, the staged download, the journalled swap, rollback and recovery, the per-user records. It links no HTTP library, no GUI toolkit and no GDAL |
+| the helper | `crates/katana_updater/src/` | `katana_updater`, the fourth program: the swap as a process of its own, static, linked to the engine and `katana_core` alone |
+| the verbs | `crates/katana_app/src/update_verbs.rs`, and the session's part, `crates/katana_app/src/session/update_part.rs` | the `UPDATE` family, one function that runs a line for the context it is handed: `katana_cli`, the window and the agent's tool all run it |
+| the transport | `crates/katana_app/src/update_transport.rs` | the engine's `Fetch`, made of the engine's own rules (`katana_update::feed::make_fetch`) over one request of the project's HTTP stack (`katana_gis::web_access::http_exchange`) |
+| the window | `crates/katana_window/src/update_dialog.rs`, `crates/katana_window/src/update_workbench.rs`, the Updates page of `crates/katana_window/src/customisation/settings_dialog.rs` | the menu item, the status-bar button, the dialog, the automatic check, the close that lets the helper run |
 | the release tools | `tools/update_make_manifest.py`, `tools/update_verify_release.py`, `tools/update_release_sign.py`, `tools/update_keytool.py` | the producer of a release's update assets, an independent recheck of them, the offline signer, and the owner's key step |
 | the pinned keys | `cmake/KatanaUpdateKeys.cmake` | the two public keys every program verifies with |
 | the installer | `cmake/NSIS.template.in` | per user, so that an update needs no administrator (`docs/release.md`, "The Windows installer") |
@@ -102,7 +102,7 @@ version passed.
 The unit of everything below is the **install root R**, the folder that
 holds `bin/` and `share/` - on macOS `Katana.app/Contents/Resources`, which
 holds `share/` (`katana_update::install::install_root_of_executable` knows both layouts). Four
-records beside the programs say what R is (`rust/crates/katana_update/src/install.rs`):
+records beside the programs say what R is (`crates/katana_update/src/install.rs`):
 
 | Record | Written by | Says |
 |---|---|---|
@@ -133,7 +133,7 @@ installed over the programs that are there. The zip brings its own
 build and never lower it.
 
 **What a package says of itself** (`package_build` in
-`rust/crates/katana_update/src/state.rs`). `version` is the version the package was
+`crates/katana_update/src/state.rs`). `version` is the version the package was
 built as: CPack's script writes `project(Katana VERSION ...)` there, always.
 `sequence` is that of the release the package belongs to, the number that
 release's manifests carry. The release workflow settles it before anything
@@ -262,7 +262,7 @@ there, `reason=elevated`, before the copy is made; the download stays, and
 Katana started the ordinary way applies it ("The verbs"). A machine with
 that protection turned off, and the built-in administrator account, have
 one token and no unelevated half that could interfere, and are not refused
-(`katana_update::process_is_elevated`, `rust/crates/katana_update/src/process.rs`: Windows'
+(`katana_update::process_is_elevated`, `crates/katana_update/src/process.rs`: Windows'
 `TokenElevationType` is `TokenElevationTypeFull`; a process that cannot ask,
 and every system but Windows, is "not elevated").
 
@@ -287,7 +287,7 @@ run `katana_updater --recover` by hand
 ### The per-user folder
 
 What belongs to the person and not to the install is in the **update state
-folder U** (`rust/crates/katana_update/src/state.rs`): `%LOCALAPPDATA%\Katana\update`
+folder U** (`crates/katana_update/src/state.rs`): `%LOCALAPPDATA%\Katana\update`
 on Windows, `$XDG_STATE_HOME/katana/update` elsewhere
 (`~/.local/state/katana/update` when that variable is not set). The
 environment variable `KATANA_UPDATE_STATE_DIR` names another folder - how
@@ -311,7 +311,7 @@ write none of this ("The three surfaces").
 The latest release of the repository IS the feed. No index, no mutable tag
 and no API call: an installed copy reads two files of fixed names from
 whichever release is marked latest, and then the update zip of the release
-the manifest names (`rust/crates/katana_update/src/feed.rs`):
+the manifest names (`crates/katana_update/src/feed.rs`):
 
 ```
 https://github.com/<repo>/releases/latest/download/Katana-update-<target>.json.sig
@@ -342,7 +342,7 @@ assets".
 
 One signed manifest per release and target says what every file of the
 install must hash to, and where each file's bytes are in the update zip
-(`rust/crates/katana_update/src/manifest.rs`). The unit of an update is the FILE,
+(`crates/katana_update/src/manifest.rs`). The unit of an update is the FILE,
 decided by its SHA-256, never the version: a copy fetches the files whose
 hash differs from what it has, whichever versions lie between.
 
@@ -404,7 +404,7 @@ nesting deeper than 16 levels.
 ### The path rules
 
 A path from a manifest is written under only if it passes one rule set
-(`rust/crates/katana_update/src/paths.rs`), used by the engine when it verifies a
+(`crates/katana_update/src/paths.rs`), used by the engine when it verifies a
 manifest and again by the helper before it touches the install - and
 enforced by the producer too, so that a release no install would accept
 cannot be made. A path is relative, uses `/`, and begins with `bin`, `share`,
@@ -424,18 +424,18 @@ ships has an ASCII name, and the producer refuses one that does not.
 
 **The scheme.** Ed25519 (RFC 8032) over the manifest's exact bytes, verified
 in the process by OpenSSL's EVP interface, never by running a program
-(`rust/crates/katana_update/src/signature.rs`). The signature file is one line,
+(`crates/katana_update/src/signature.rs`). The signature file is one line,
 `ed25519 <key id> <base64>`; the key id is the first 16 hexadecimal digits of
 the public key.
 
 **Two keys are pinned** at build time in `cmake/KatanaUpdateKeys.cmake`: the
 ACTIVE key, whose private half signs releases, and a SPARE, which stays
 offline. Either verifies. The keys reach one source file,
-`rust/crates/katana_update/src/trust.rs`, as compile definitions and nothing else can
+`crates/katana_update/src/trust.rs`, as compile definitions and nothing else can
 read them.
 
 **The gate** is one function, `katana_update::trust::verify_manifest`
-(`rust/crates/katana_update/src/trust.rs`), and nothing that reads a network answer
+(`crates/katana_update/src/trust.rs`), and nothing that reads a network answer
 may parse a manifest any other way. In this order, stopping at the first
 failure: the manifest is not empty and not over 8 MiB; the signature line
 parses; this build's keys are not placeholders; the line's key id names a
@@ -456,9 +456,9 @@ is what the four programs pass. Only test executables pass a test key, the
 published RFC 8032 vectors, and none of them is installed:
 the tests of `katana_update`, and `katana_update_e2e` and `katana_updater_test`
 (test programs of the `katana_updater` crate), which link the test trust root
-(`rust/crates/katana_update/tests/test_key/mod.rs`), and the tests of
+(`crates/katana_update/tests/test_key/mod.rs`), and the tests of
 `katana_app`, which build the same trust from the two public keys for
-the verbs' tests (`rust/crates/katana_app/tests/session/update_verbs.rs`). So no
+the verbs' tests (`crates/katana_app/tests/session/update_verbs.rs`). So no
 variable, file or switch at run time changes whose signature counts, and the
 test `update_test_keys_are_in_no_shipped_program` reads the bytes of the four
 programs to see that no test key is in them.
@@ -564,7 +564,7 @@ hand and installed copies are not told of it.
 
 ## Check and download
 
-**The check** (`katana_update::check`, `rust/crates/katana_update/src/check.rs`) fetches
+**The check** (`katana_update::check`, `crates/katana_update/src/check.rs`) fetches
 the signature, then the manifest, each bounded by the engine and not by the
 server (1024 bytes and 8 MiB), and believes neither until
 `katana_update::trust::verify_manifest` has passed. Every way of not learning the answer is
@@ -593,7 +593,7 @@ had changed and ship a mixed tree. A file is fetched when it is absent or
 its hash differs; a `seed` only when it is absent. The reply's
 `files=<changed>/<total>` and `download_bytes=` are this plan's.
 
-**The download** (`katana_update::stage`, `rust/crates/katana_update/src/stage.rs`)
+**The download** (`katana_update::stage`, `crates/katana_update/src/stage.rs`)
 fetches only the changed files, by `Range` requests into the one update zip:
 
 - The producer orders the zip's members `program`, `lib`, `data`, `seed`, so
@@ -684,7 +684,7 @@ window shows that at its next start.
 
 ### The swap
 
-`katana_update::apply` (`rust/crates/katana_update/src/apply.rs`). Every step is a test,
+`katana_update::apply` (`crates/katana_update/src/apply.rs`). Every step is a test,
 and the fault loops break it before each of its file operations
 (`docs/testing.md`).
 
@@ -800,13 +800,13 @@ settled under the update lock by `katana_updater --recover`, by a window of
 the new version, or by step 1 of the next swap ("An update whose helper
 died during the health check", under "Recovery").
 
-The steps are numbered as `rust/crates/katana_update/src/apply.rs` numbers them,
+The steps are numbered as `crates/katana_update/src/apply.rs` numbers them,
 which is how the code and the other documents cite them.
 
 ### The journal
 
 `R/.update/<tx>/journal` is append-only text, one record a line
-(`rust/crates/katana_update/src/journal.rs`):
+(`crates/katana_update/src/journal.rs`):
 
 ```
 <n> <OP> <arg>... <crc>
@@ -848,7 +848,7 @@ less; it cannot reach outside R's `bin`, `share`, `etc` and `lib`
 
 ### Recovery
 
-`katana_update::recover()` (`rust/crates/katana_update/src/recover.rs`) is the FIRST thing
+`katana_update::recover()` (`crates/katana_update/src/recover.rs`) is the FIRST thing
 `main()` does in `katana`, `katana_cli` and `katana_mcp`: a machine that lost
 power, or a helper that was killed in the middle of a swap, is put right the
 next time anything starts. With nothing interrupted - every start but that
@@ -917,13 +917,13 @@ records a rollback refused, whose text is anybody's - and an id counts only
 when it is a transaction id
 (`katana_update::apply::is_valid_transaction_id`), so a line names no place but `U/run-<id>`.
 Which transactions a log names is `update_recovered_transactions`
-(`rust/crates/katana_window/src/update_dialog.rs`), a function of the log's text and of
+(`crates/katana_window/src/update_dialog.rs`), a function of the log's text and of
 which folders are gone
 (`update_decisions::the_helper_copy_of_a_recovered_update_is_listed_only_once_its_transaction_is_over`,
 `update_decisions::only_a_whole_line_that_a_recovery_wrote_names_a_transaction`,
 `update_decisions::what_is_no_transaction_id_in_a_recovery_line_names_no_folder`). Reading the file - not
 through a link, and not one longer than 1 MiB - and listing the copies are
-the workbench's (`rust/crates/katana_window/src/update_workbench.rs`), which no test builds
+the workbench's (`crates/katana_window/src/update_workbench.rs`), which no test builds
 ("Not done").
 
 *Rejected: sweeping every `run-<tx>` in U that no transaction of this
@@ -947,7 +947,7 @@ goes through under it: Windows lets the file of a running program be
 renamed, and renames are all the commit does. That program runs on as old
 code until it is closed. A per-user install is a folder of one profile, so
 this takes an archive unpacked where several accounts reach it
-(`rust/crates/katana_update/src/process_scan_win.rs` gives the reasons the file's
+(`crates/katana_update/src/process_scan_win.rs` gives the reasons the file's
 name alone is not held on).
 
 ### An update whose helper died during the health check
@@ -970,7 +970,7 @@ else settled it but a later update that proved healthy: `--recover` and the
 stayed installed until the person reinstalled. It is settled now, by
 evidence and never by assumption.
 
-**One rule** (`katana_update::recover::settle_pending`, `rust/crates/katana_update/src/recover_internal.rs`)
+**One rule** (`katana_update::recover::settle_pending`, `crates/katana_update/src/recover_internal.rs`)
 for every transaction whose journal says `COMMITTED_PENDING_HEALTH`. Its
 caller holds the update lock. A helper holds that lock from its first step
 to its last and it goes with the process, so holding it is how a settler
@@ -1018,7 +1018,7 @@ start - after which nothing could put the earlier one back, the tree being
 no longer its release.
 
 **Three callers**, which differ only in what they may do
-(`rust/crates/katana_update/src/recover.rs`):
+(`crates/katana_update/src/recover.rs`):
 
 1. **`katana_updater --recover R`** - the `RunOnce` entry at the next logon,
    or a person. It first does what it always did, unchanged
@@ -1176,7 +1176,7 @@ one that was carried out. What a line could not do but did not stop for
 follows its record as `warning text="..."`.
 
 A v1 install asking about the tests' second release, and then downloading it
-(the expectations of `rust/crates/katana_app/tests/session/update_verbs.rs`, worked out there from
+(the expectations of `crates/katana_app/tests/session/update_verbs.rs`, worked out there from
 the fixtures; `installed=0.9.0` is the fixtures' first release, which the
 tests hand to the lines. Read by a program from an install's records it is
 the helper's record of 0.9.0 above a package that names 0.8.0, and so the
@@ -1215,7 +1215,7 @@ unchanged files between them.)
   `malformed`, `platform` where this version does not install, or the
   transport's own token: `offline`, `http_<n>`, `html_page`,
   `partial_downloads`, `bad_range`, `bad_redirect`, `too_many_redirects`,
-  `cancelled` (`rust/crates/katana_update/src/stage.rs` lists the engine's). What
+  `cancelled` (`crates/katana_update/src/stage.rs` lists the engine's). What
   was staged before the failure stays, and the next download does not ask
   for it again.
 - **`APPLY CONFIRM` changes nothing in the install.** It finds the newest
@@ -1433,7 +1433,7 @@ person's.
 Not needed: `kjarada/Katana` is public, and the default feed is read without
 one. The token exists for a release repository that is PRIVATE, where a
 person who holds a read-only token can still update. It is the one secret
-the update system can hold (`rust/crates/katana_update/src/credential.rs`).
+the update system can hold (`crates/katana_update/src/credential.rs`).
 
 - **Where it is kept.** On Windows in the Credential Manager, as a generic
   credential named `Katana/update-token`. Everywhere, the environment
@@ -1478,9 +1478,9 @@ the update system can hold (`rust/crates/katana_update/src/credential.rs`).
 
 | Target | Gets | Why |
 |---|---|---|
-| Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.rs`, `spawn_win.rs` in `rust/crates/katana_update/src/`; `process_scan_win.rs`, `registry_win.rs` in `rust/crates/katana_updater/src/`) |
+| Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.rs`, `spawn_win.rs` in `crates/katana_update/src/`; `process_scan_win.rs`, `registry_win.rs` in `crates/katana_updater/src/`) |
 | Windows on ARM64 | the same code | it was written on a machine with no ARM64 toolchain. The release workflow's ARM64 job built it and ran the helper's `--selftest` and `UPDATE STATUS` of the installed copy (run 38580778852: `selftest=ok`, `kind=installer`); no update has been applied there ("To verify on first release") |
-| Linux x86-64, aarch64 | check and notify: `UPDATE CHECK` and `UPDATE STATUS` work, and the dialog says "This copy cannot update itself: the release notes say where to download it." | the apply's file system and launcher are not written for Linux (`rust/crates/katana_update/src/fsops_posix.rs`, `spawn_posix.rs`: every operation is one refusal). `UPDATE DOWNLOAD` and `UPDATE APPLY` are refused, `reason=platform`, before a request is sent; the helper, which the package carries, refuses a swap and a recovery the same way (exit 13) and writes nothing. The manifests and update zips are published all the same |
+| Linux x86-64, aarch64 | check and notify: `UPDATE CHECK` and `UPDATE STATUS` work, and the dialog says "This copy cannot update itself: the release notes say where to download it." | the apply's file system and launcher are not written for Linux (`crates/katana_update/src/fsops_posix.rs`, `spawn_posix.rs`: every operation is one refusal). `UPDATE DOWNLOAD` and `UPDATE APPLY` are refused, `reason=platform`, before a request is sent; the helper, which the package carries, refuses a swap and a recovery the same way (exit 13) and writes nothing. The manifests and update zips are published all the same |
 | macOS on Apple silicon | check and notify, from a notify-only manifest: `update=available reason=notify_only` | a file changed inside `Katana.app` breaks the seal of the bundle, so nothing is ever replaced there: the package holds no helper, and the refusal stands for good, whatever is later written for Linux |
 
 ## To verify on first release
@@ -1775,7 +1775,7 @@ whatever more the manifest's parser allows (4 GiB).
   The shipped programs cannot be given a test key, which is the point of
   them.
 - **No test in the ordinary run puts the shipped transport in front of a
-  server** (`rust/crates/katana_app/src/update_transport.rs` over libcurl): "To verify
+  server** (`crates/katana_app/src/update_transport.rs` over libcurl): "To verify
   on first release". A test that ran it against the fake feed would have to
   link `katana_app` and be held to the loopback by something other than its
   own construction.

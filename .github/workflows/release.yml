@@ -263,10 +263,10 @@ jobs:
           if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress }
           if (-not (Test-Path $makensis)) { throw "makensis.exe is not at $makensis after installing NSIS" }
           "KATANA_MAKENSIS=$($makensis -replace '\\','/')" >> $env:GITHUB_ENV
-      # The workspace, the four programs among it, into rust/target/release.
-      # --locked: the committed rust/Cargo.lock is what is built.
+      # The workspace, the four programs among it, into target/release.
+      # --locked: the committed Cargo.lock is what is built.
       - name: Build
-        run: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
+        run: cargo build --locked --workspace --release
       # The whole suite, on the machine the package is for: nothing is
       # packaged from a build with a failing test (docs/testing.md). cargo's
       # tests, then the runner's against the programs just built; the
@@ -275,8 +275,8 @@ jobs:
       - name: Test
         run: |
           status=0
-          cargo test --manifest-path rust/Cargo.toml --locked --workspace --release --no-fail-fast || status=$?
-          programs=$(cygpath -m "$PWD/rust/target/release")
+          cargo test --locked --workspace --release --no-fail-fast || status=$?
+          programs=$(cygpath -m "$PWD/target/release")
           cmake -S . -B build/tests -G Ninja -DKATANA_PROGRAMS="$programs" \
             -DKATANA_RUNTIME_BIN="$(cygpath -m "$MINGW_PREFIX/bin")" || exit 1
           ctest --test-dir build/tests --parallel "$(nproc)" --output-on-failure --timeout 900 || status=1
@@ -331,7 +331,7 @@ jobs:
               ;;
           esac
           prefix=$(cygpath -m "$MINGW_PREFIX")
-          programs=$(cygpath -m "$(cd .. && pwd)/rust/target/release")
+          programs=$(cygpath -m "$(cd .. && pwd)/target/release")
           cmake --preset package -DKATANA_PROGRAMS="$programs" -DKATANA_RUNTIME_BIN="$prefix/bin" \
             ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} -DKATANA_PACKAGE_TARGET="$PACKAGE_TARGET" \
             -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
@@ -438,7 +438,7 @@ jobs:
       # of its own, where the installed command line must read a CRS through
       # GDAL and PROJ and must know it is an INSTALLED copy of this target -
       # the installer records its folder under HKCU, which is how the updater
-      # tells it from an unpacked zip (rust/crates/katana_update/src/registry.rs);
+      # tells it from an unpacked zip (crates/katana_update/src/registry.rs);
       # then its uninstaller, which must remove it. /D takes the rest of the
       # line unquoted, so the folder has no space for Start-Process to quote.
       # `_?=` keeps the uninstaller in place, so -Wait waits for it rather
@@ -596,7 +596,7 @@ jobs:
           "$prefix/bin/rustc" --version
           "$prefix/bin/cargo" --version
       - name: Build
-        run: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
+        run: cargo build --locked --workspace --release
       # What the Linux tests need of the machine and a CI image lacks: the
       # graphics driver's GL and EGL loaders, which the package leaves to the
       # system (docs/release.md), and an X server with Mesa's software Vulkan
@@ -615,8 +615,8 @@ jobs:
       - name: Test
         run: |
           status=0
-          cargo test --manifest-path rust/Cargo.toml --locked --workspace --release --no-fail-fast || status=$?
-          cmake -S . -B build/tests -G Ninja -DKATANA_PROGRAMS="$PWD/rust/target/release" || exit 1
+          cargo test --locked --workspace --release --no-fail-fast || status=$?
+          cmake -S . -B build/tests -G Ninja -DKATANA_PROGRAMS="$PWD/target/release" || exit 1
           jobs=$(getconf _NPROCESSORS_ONLN)
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a ctest --test-dir build/tests --parallel "$jobs" --output-on-failure --timeout 900 || status=1
@@ -661,7 +661,7 @@ jobs:
               exit 1
               ;;
           esac
-          programs="$(cd .. && pwd)/rust/target/release"
+          programs="$(cd .. && pwd)/target/release"
           cmake --preset package -DKATANA_PROGRAMS="$programs" -DKATANA_TOOLCHAIN="$KATANA_TOOLCHAIN" \
             -DKATANA_PACKAGE_TARGET="$PACKAGE_TARGET" \
             -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \

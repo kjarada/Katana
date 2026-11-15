@@ -5,16 +5,16 @@ the GPU. This document is the record of the GPU renderer: it takes the same
 `katana_render::DrawList`s and `katana_render::Camera` and draws them through
 wgpu - on Vulkan on Linux and in WSL (Mesa's lavapipe where there is no GPU),
 on Direct3D 12 on Windows (WARP as its software device), on Metal on macOS.
-It is the crate `katana_gpu` (`rust/crates/katana_gpu/src/`), tested in
-`rust/crates/katana_gpu/tests/gpu/` (`cargo test -p katana_gpu`).
+It is the crate `katana_gpu` (`crates/katana_gpu/src/`), tested in
+`crates/katana_gpu/tests/gpu/` (`cargo test -p katana_gpu`).
 
 **Status (2026-11-15).** The C++ renderer this was ported from drew through
 QRhi, Qt's rendering hardware interface, on Direct3D 11, Vulkan and Metal; it
 went with the C++ tree on the owner's word of 2026-11-15, and the Rust is the
 only renderer. Where a passage below records what QRhi did, it says so. What
-changed with the move (`rust/crates/katana_gpu/src/lib.rs`):
+changed with the move (`crates/katana_gpu/src/lib.rs`):
 
-* **The shaders are WGSL modules** (`rust/crates/katana_gpu/src/shaders/`,
+* **The shaders are WGSL modules** (`crates/katana_gpu/src/shaders/`,
   assembled by `shader_library.rs`), checked by naga - the compiler wgpu runs -
   once per process (`shader_compiler.rs`), so a mistake comes back as a
   `Status` carrying naga's own message before wgpu is asked for anything. One
@@ -32,7 +32,7 @@ changed with the move (`rust/crates/katana_gpu/src/lib.rs`):
 
 Not done: the desktop window's 3D views draw with the software rasteriser for
 now, because the window is made before eframe's wgpu device exists and handing
-it that device afterwards is left (`rust/crates/katana_window/src/bin/katana/main.rs`;
+it that device afterwards is left (`crates/katana_window/src/bin/katana/main.rs`;
 `docs/rust.md`, "Not done"). The GPU renderer runs in its tests, on a real GPU
 or the software device, and in `gpu_scene_view.rs` where a host gives it a
 device.
@@ -55,7 +55,7 @@ Camera ─────────────── relative_view_projection (d
 | `shader_compiler.rs` | Every module parsed and validated by naga once per process. |
 | `gpu_renderer.rs` | Draws a packed scene - one draw list, or layers each with its own depth rule - through a camera into whatever render target it is given. Owns buffers and pipelines, not the target. |
 | `offscreen_gpu.rs` | A device (`GpuContext`) and a texture to render into, with read-back and GPU timestamps: what the tests draw with. |
-| `rust/crates/katana_window/src/gpu_scene_view.rs` | The window's view of it, with the 3D view's mouse and keys. |
+| `crates/katana_window/src/gpu_scene_view.rs` | The window's view of it, with the 3D view's mouse and keys. |
 | `renderer_choice.rs` | The fallback rule: GPU or software, and why. |
 
 **What it does differently from the software path**, with the same DrawList:
@@ -132,7 +132,7 @@ order the profile ranked them (2026-09-25):
    moved into `katana_render::DrawList` so that both callers share one copy. When an
    extreme is a zero, the one case where the visiting order decides the
    result (which zero's sign), it falls back to primitive order.
-   `rust/crates/katana_render/tests/draw_list.rs` holds it to the old walk, to the bit, on
+   `crates/katana_render/tests/draw_list.rs` holds it to the old walk, to the bit, on
    2000 generated lists with both zeros, NaN, infinities, unused vertices and
    indices past the end. `set_layers` bounds each layer once and passes the box
    in (`pack_draw_list(list, origin, bounds, out)`).
@@ -309,7 +309,7 @@ depth correction z' = 2z - w keeps z' = w at the near plane, so the shaders'
 near-plane test (w - z < 0) and the mark pull hold there too - but OpenGL's
 window depth adds 1 before halving, which throws away what reversed Z gains,
 so Linux draws on Vulkan and not on OpenGL (wgpu's GLES backend is not
-built, `rust/Cargo.toml`). The C++ suite's
+built, `Cargo.toml`). The C++ suite's
 SerializedShadersDrawWhatTheRuntimeShadersDraw round-tripped whichever
 library the build carried (0 differing pixels on lavapipe); the WGSL has one
 library, so the Rust has no such case.
@@ -496,7 +496,7 @@ QRhi again. In the Rust the window does not yet hand its device to the 3D views
 ## Build
 
 `katana_gpu` is a crate of the workspace and always built: wgpu with the
-Vulkan, Direct3D 12 and Metal backends and the WGSL front end (`rust/Cargo.toml`;
+Vulkan, Direct3D 12 and Metal backends and the WGSL front end (`Cargo.toml`;
 GLES, WebGPU and WebGL are off). The window and the GPU layer name the
 workspace's one wgpu, the version egui-wgpu asks for. Nothing ships beside the
 program for it: the Vulkan loader, `libvulkan.so.1`, comes with the graphics
@@ -511,7 +511,7 @@ rule plus the cloud's plain types, never a `Document`. The window may see
 
 ## Testing
 
-`cargo test -p katana_gpu` (`rust/crates/katana_gpu/tests/gpu/`). The render
+`cargo test -p katana_gpu` (`crates/katana_gpu/tests/gpu/`). The render
 cases draw small DrawLists into a texture through `OffscreenGpu` twice - on
 the machine's GPU and on its software device (lavapipe on Linux and in WSL,
 WARP on Windows) - and **skip** when that device is missing, rather than fail;
@@ -653,7 +653,7 @@ points 17.23 / 17.27, two million 26.30 / 26.11.
 ## Risks
 
 * wgpu moves quickly between versions: it is pinned in the workspace
-  (`rust/Cargo.toml`, the version egui-wgpu asks for) and named only by this
+  (`Cargo.toml`, the version egui-wgpu asks for) and named only by this
   crate and the window. (The C++ renderer's risk was QRhi's semi-public API.)
 * Two renderers to keep in agreement. The GPU tests compare against the CPU with
   tolerances; the CPU stays the bit-exact reference (the determinism rule does

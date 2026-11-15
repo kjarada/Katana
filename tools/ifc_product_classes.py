@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes the rows of PRODUCT_CLASSES (rust/crates/katana_ifc/src/product_classes.rs):
+"""Writes the rows of PRODUCT_CLASSES (crates/katana_ifc/src/product_classes.rs):
 every entity that descends from IfcProduct in the IFC schemas the IFC import
 reads (IFC2X3, IFC4, IFC4X3_ADD2), in the schemas' own spelling, with what the
 import does with it.
@@ -18,7 +18,7 @@ Until 2026-11-15 it wrote the C++ build's product_classes.inc, whose rows the
 Rust table copied one for one; the rows are the same, in the Rust spelling.
 
 With --predefined it prints the rows of PREDEFINED_TYPES
-(rust/crates/katana_ifc/src/predefined_types.rs) instead: every IFC4X3_ADD2
+(crates/katana_ifc/src/predefined_types.rs) instead: every IFC4X3_ADD2
 entity whose PredefinedType is an enumeration, with the enumeration's values -
 what a project's classification rules are checked against, so that a rule
 naming a value the schema does not have is refused when its file is read
@@ -28,7 +28,7 @@ rather than written into an invalid file:
 
 With --layouts it writes nothing: it checks every row of the export's list of
 the classes it writes (PRODUCT_LAYOUTS in
-rust/crates/katana_ifc/src/product_layout.rs - the road model's
+crates/katana_ifc/src/product_layout.rs - the road model's
 IfcCourse, IfcEarthworksCut, IfcEarthworksFill, IfcFooting, IfcLightFixture,
 IfcSlab and IfcSurfaceFeature among them) against IFC4X3_ADD2: the class
 exists and may be instantiated, it has a Tag exactly where the row says (the
@@ -142,7 +142,7 @@ def ancestors(entity):
 
 
 def layouts():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "rust", "crates",
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "crates",
                         "katana_ifc", "src", "product_layout.rs")
     text = open(path, encoding="utf-8").read()
     # The table's two row makers: layout(name, tag, predefined) for an element, and

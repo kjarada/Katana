@@ -62,8 +62,8 @@ A customisation used to be three files in another program's formats: a survey
 code file (`.mapfile`, XML) and two style libraries (`.4d`). The Katana
 customisation format replaces them with ONE file of Katana's own, in JSON,
 holding one value: `katana_entity::Customisation`
-(`rust/crates/katana_entity/src/customisation.rs`;
-tests in `rust/crates/katana_entity/tests/customisation_format.rs` and its
+(`crates/katana_entity/src/customisation.rs`;
+tests in `crates/katana_entity/tests/customisation_format.rs` and its
 neighbours).
 
 ```rust
@@ -87,7 +87,7 @@ other must both reach it (the crates' dependencies): `cad`, which loads,
 merges and edits a customisation, and the archive module, where the readers
 of the older files and their converter were in the C++ build. Its interface
 is text and `katana_core::error::Result`, as
-`rust/crates/katana_entity/src/serialization.rs`'s is.
+`crates/katana_entity/src/serialization.rs`'s is.
 
 ### A worked example
 
@@ -346,7 +346,7 @@ read badly:
 - the rule form's `Goes into a TIN` is `Goes into a surface`.
 
 **One table for the nine section words**: `katana_entity::survey_map::SURVEY_SECTION_WORDS`
-(`rust/crates/katana_entity/src/survey_map.rs`). `katana_entity::to_string()`
+(`crates/katana_entity/src/survey_map.rs`). `katana_entity::to_string()`
 reads it for every reply and label, and this format's reader and writer read
 it for `sets`, so the two cannot come to differ; a word changed in it is a new
 version of the format ("What may never change without a new version"). The
@@ -518,7 +518,7 @@ chords is an undefined cast), a coordinate of 1e29 reached the dash arithmetic,
 and a 50 MB name or three million strokes loaded without complaint. So the
 reader refuses a file past these, naming the entry and the member as it names
 every other refusal, and the writer refuses what the reader would
-(`kCustomisationMost*`, `rust/crates/katana_entity/src/customisation.rs`):
+(`kCustomisationMost*`, `crates/katana_entity/src/customisation.rs`):
 
 | Bound | Is | Refusal says |
 |---|---|---|
@@ -535,7 +535,7 @@ sweep; the others are far above any definition, name or file the built-in or a
 person's customisation holds (the NSW built-in is read by this reader, so it
 is within every one, with room to spare; its census, 792 definitions and 1,624
 rules, is pinned by `BuiltInCensus` and would fail if it were not). Each is tried at the bound (accepted) and one
-past it (refused), in `rust/crates/katana_entity/tests/customisation_bounds.rs`.
+past it (refused), in `crates/katana_entity/tests/customisation_bounds.rs`.
 
 - **The check is where the value is read.** A text over the bound is refused
   by the member that holds it, a number by the member or the stroke, so the
@@ -543,7 +543,7 @@ past it (refused), in `rust/crates/katana_entity/tests/customisation_bounds.rs`.
   STOPS the parse at the rule past the bound, so a file of millions holds the
   bound's worth in memory and no more. A name in a refusal is cut at 240 bytes
   (`in_quotes`), since the entry's name is in every refusal about it.
-- **`katana_cad::style_drawing::add_arc` clamps as well** (`rust/crates/katana_cad/src/style_drawing.rs`): a
+- **`katana_cad::style_drawing::add_arc` clamps as well** (`crates/katana_cad/src/style_drawing.rs`): a
   definition made in code is not held to the file's bounds, and the arc it
   draws is cut to the same two turns, and drawn as nothing when a sweep is not
   a number.
@@ -690,7 +690,7 @@ entry is named `definition "<name>"`.
 
 In the window one definition is made, changed, copied or deleted in the
 definition editor (`docs/desktop.md`, "The definition editor";
-`rust/crates/katana_window/src/customisation/definition_editor.rs`), reached from the Symbol
+`crates/katana_window/src/customisation/definition_editor.rs`), reached from the Symbol
 Library and from the Linetypes tab of Styles and Linetypes. What it shows of
 a definition is this format and nothing beside it:
 
@@ -719,7 +719,7 @@ What the format decides, the editor does not decide again:
   found by reading each line alone, since the reader names a stroke by its
   place and not by a line; and the line and column the reader ends some
   refusals with are left off, being of the joined text and not of the box
-  (`katana_cad::definition_edit::read_stroke_text`, `rust/crates/katana_cad/src/definition_edit.rs`).
+  (`katana_cad::definition_edit::read_stroke_text`, `crates/katana_cad/src/definition_edit.rs`).
 - **A name is fixed once the definition exists.** A name is a definition's
   identity - "once across BOTH lists" - and what a rule's `linestyle`, a
   rule's `symbol` and the drawing's styles and layers hold of it. Nothing
@@ -736,7 +736,7 @@ What the format decides, the editor does not decide again:
   a file writes as `"from": ""` under a named customisation.
 
 **Removing a definition asks who names it.** `katana_cad::definition_users::definition_users`
-(`rust/crates/katana_cad/src/definition_users.rs`) lists the rules that name it as
+(`crates/katana_cad/src/definition_users.rs`) lists the rules that name it as
 their `linestyle` or as their `symbol` - each by its index, its key and its
 `sets` word, `rule #1 AC* (symbol)`, since a rule has no identity but its
 place - and the styles and layers of the drawing that name it. Any rule is
@@ -758,7 +758,7 @@ loaded.
 
 ### Colour names
 
-`rust/crates/katana_entity/src/colour_names.rs`. A rule, a symbol and a pen NAME
+`crates/katana_entity/src/colour_names.rs`. A rule, a symbol and a pen NAME
 their colour; two things turn a name into a colour.
 
 **The standard names**: 27 of them - 14 plain, 7 dark, 6 light - at the RGB
@@ -768,7 +768,7 @@ table (`green` is the primary, and the greys sit either side of `grey`).
 `katana_entity::colour_names::nearest_standard_colour` are that table; it was private to the archive
 module, and moved because `cad` resolves a customisation's colours and may
 not see that module. The archive module's three names for them
-(`rust/crates/katana_archive12d/src/domain.rs`) are re-exports (`use`): the entity
+(`crates/katana_archive12d/src/domain.rs`) are re-exports (`use`): the entity
 functions themselves, not three that forward. *Rejected: forwarding
 functions* (in the C++, a plain call inside the archive namespace found the
 entity function through its argument as well as the archive's own, and two
@@ -824,7 +824,7 @@ original palette to remain loaded.
 
 ### Linework codes
 
-`rust/crates/katana_entity/src/linework_codes.rs`. The spellings of the seven
+`crates/katana_entity/src/linework_codes.rs`. The spellings of the seven
 linework controls are part of a customisation - a team writes `ST` or `S` as
 its field book does - so `LineworkCodes` and its `validate` moved from `cad`
 to this layer, where the file is read. `katana_entity::linework_codes::LineworkCodes` is now an alias
@@ -834,7 +834,7 @@ that named them changed - `katana_cad::validate()` from outside, and a plain
 that forwards*, which is what it first was. The codes are an entity type, so
 the plain call finds `katana_entity::validate` through its argument as well, and
 beside a second function of the same signature it does not compile
-(`rust/crates/katana_cad/tests/styles/linework_code_names.rs` holds both spellings
+(`crates/katana_cad/tests/styles/linework_code_names.rs` holds both spellings
 of the call to compiling). It is the trap `docs/geometry.md` records for the
 chording functions, where the `cad` names were deleted; here the names are
 wanted, so they are made to name the one function.
@@ -983,13 +983,13 @@ survives being read and written.
   `segmentPipe`, and call an entry of `attributes`, `vertexAttributes` or
   `segmentAttributes` a `string`, `vertex` or `segment` attribute
   (`field_specs` and `attributeScopes` in
-  `rust/crates/katana_cad/src/code_table.rs`). They were not among the
+  `crates/katana_cad/src/code_table.rs`). They were not among the
   words that changed ("The words a rule is shown by"), so for these a person
   writing a file from an explanation needs the table of members above.
 - **One refusal still says `model`.** Linework that meets a rule whose layer
   is not a layer name answers "the survey map gives a code a model that is
   not a valid layer name", with `model=` beside it
-  (`rust/crates/katana_cad/src/linework.rs`). No map can hold such a rule
+  (`crates/katana_cad/src/linework.rs`). No map can hold such a rule
   (`SurveyMap::add` refuses it), so nobody is shown it; it was left because
   that file was being rewritten by other work when the words changed.
 - **Explicit zero against "not said"** is not kept for a rule's symbol and
@@ -1004,7 +1004,7 @@ survives being read and written.
   told which member holds it. Reading on would take a JSON reader of this
   format's own.
 - **The style manager keeps a second table of standard colours.** The colour
-  menu of Styles and Linetypes (`rust/crates/katana_window/src/style_manager.rs`,
+  menu of Styles and Linetypes (`crates/katana_window/src/style_manager.rs`,
   `STANDARD_COLOURS` there) lists twelve colours "by the standard colour
   names" from a table of its own, and two of them are not the standard
   colour: its `orange` is 255, 128, 0 where the standard one is 255, 165, 0,
@@ -1054,20 +1054,20 @@ survives being read and written.
 
 Two verbs of the shared `CommandInterpreter` work on a session's
 customisation: `CUSTOMISE`, which loads, writes, keeps and edits it
-(`rust/crates/katana_cad/src/customisation_verbs.rs`), and `CODE`, which applies its
+(`crates/katana_cad/src/customisation_verbs.rs`), and `CODE`, which applies its
 survey codes to a drawing and answers questions about them
-(`rust/crates/katana_cad/src/survey_code_verbs.rs`). Being the interpreter's, each is
+(`crates/katana_cad/src/survey_code_verbs.rs`). Being the interpreter's, each is
 ONE implementation for the window's command line, `katana_cli`, `katana_mcp`
 and an agent. `HELP` lists both in brief and `HELP CUSTOMISE` prints the
 family's whole reference (`katana_cad::customisation_verbs::customisation_verb_help`).
 
 **Where this stands.** The family is in the interpreter and is tested there
-(`rust/crates/katana_cad/tests/customisation_verbs/customisation_verbs.rs`,
-`rust/crates/katana_cad/tests/customisation_verbs/survey_code_verbs.rs`). `CODE` reaches every
+(`crates/katana_cad/tests/customisation_verbs/customisation_verbs.rs`,
+`crates/katana_cad/tests/customisation_verbs/survey_code_verbs.rs`). `CODE` reaches every
 front end, and since 2026-10-07 so does `CUSTOMISE`: no front end takes the
 line itself any more, and each hands the interpreter a host and starts
 through `startCustomisation`. The session of `katana_cli` and `katana_mcp`
-does it in `rust/crates/katana_app/src/session.rs` ("What katana_cli and katana_mcp
+does it in `crates/katana_app/src/session.rs` ("What katana_cli and katana_mcp
 start with", below; the `cli.customise_*` tests); the desktop window in
 `MainWindow::load_default_customisation` (`docs/desktop.md`, "How the window
 starts" and "The Format menu";
@@ -1121,7 +1121,7 @@ reader's own words, the file beside them - a survey code file or a style
 library of another program is `not a Katana customisation file`. A file
 named twice is read once, and the reply says so. What Merge and Replace each
 do to definitions, rules, colours, the settings and the sources is the
-merge's to say (`rust/crates/katana_cad/src/customisation_merge.rs`).
+merge's to say (`crates/katana_cad/src/customisation_merge.rs`).
 
 **`DEFINITIONS` is a merge that takes the definitions and the colours of the
 files and nothing else.** The files' survey code rules, linework codes and
@@ -1135,7 +1135,7 @@ because a source a load lists is taken off what the open project is missing
 cleared would pass for loaded with none of its rules here. A file that holds
 neither a definition nor a colour is refused (`NotFound`, saying where its
 rules are loaded), and nothing is loaded. What it takes of a file is
-`katana_cad::customisation_part::definitions_of_file` (`rust/crates/katana_cad/src/customisation_part.rs`).
+`katana_cad::customisation_part::definitions_of_file` (`crates/katana_cad/src/customisation_part.rs`).
 *Rejected: the Symbol Library running `CUSTOMISE <file>` and taking the rules
 too*, which is what the button did when a file held one kind: rules loaded from
 a symbol browser would go round the Survey Code Manager's buffer, where a
@@ -1172,7 +1172,7 @@ installed - is refused until `NAME` gives one.
 
 **A part** - anything a kind word or `ONLY` chose - is a fragment for
 someone else's session, or for this one later. What it holds is ONE rule,
-`katana_cad::customisation_part::customisation_part` (`rust/crates/katana_cad/src/customisation_part.rs`), which
+`katana_cad::customisation_part::customisation_part` (`crates/katana_cad/src/customisation_part.rs`), which
 the window's two export buttons run as lines - the Survey Code Manager's
 Export Codes is `CUSTOMISE EXPORT <file> CODES` (of the drawing's rules: with
 edits not yet applied it is refused, since no line can name the manager's
@@ -1463,7 +1463,7 @@ the three ways a kept copy is, or is not, from another built-in.
 
 ### What katana_cli and katana_mcp start with
 
-The session those two programs share (`rust/crates/katana_app/src/session.rs`) builds its
+The session those two programs share (`crates/katana_app/src/session.rs`) builds its
 host when it starts, hands it to the interpreter and then calls
 `katana_cad::customisation_host::start_customisation`:
 
@@ -1482,7 +1482,7 @@ host when it starts, hands it to the interpreter and then calls
   variable unset, `KEEP` and `REVERT` are refused, naming it.
 
 Both variables name a file, and both are read through
-`katana_core::path_text::environment_variable` (`rust/crates/katana_core/src/path_text.rs`), never
+`katana_core::path_text::environment_variable` (`crates/katana_core/src/path_text.rs`), never
 `getenv`. On Windows `getenv` gives the bytes of the ANSI code page, in which
 a character the code page lacks is already a `?`: a kept file under a folder
 named in Japanese, on a machine set up for English, was a file under `??` -
@@ -1550,7 +1550,7 @@ a session could start, decided at run time by what lay in a folder, with a
 start-up line and a failure of its own; and what it found were the older
 files. A start is now the kept file, the built-in or nothing.
 
-Tests: `session` in `rust/crates/katana_app/tests/session/session.rs` (the line, the streams,
+Tests: `session` in `crates/katana_app/tests/session/session.rs` (the line, the streams,
 the refusals), and in `tests/cli/CMakeLists.txt`
 `cli.customise_reset_gives_the_built_in_customisation_the_seam_names`,
 `cli.a_session_told_there_is_no_built_in_customisation_starts_empty`,
@@ -1740,7 +1740,7 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   kept clear of it: the scan in `tests/CMakeLists.txt` unsets
   `KATANA_CUSTOMISATION` on every program test (`cli.*`, `*_headless`) that
   does not set it itself, and the in-process tests that pin a start-up clear
-  or set it themselves (`rust/crates/katana_app/tests/support/start_environment.rs`). A program test
+  or set it themselves (`crates/katana_app/tests/support/start_environment.rs`). A program test
   under another name is not reached by the scan, and the check that names
   such a test asks only about the built-in's variable.
 - **A start-up problem does not change the exit status.** `katana_cli` says
@@ -1752,7 +1752,7 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   bare reply have no line for it.
 - **Other variables that name a file are still read with `getenv`**:
   `KATANA_ONLINE_CATALOGUE` and `KATANA_ONLINE_CACHE` in
-  `rust/crates/katana_window/src/gis_online.rs`, which on Windows cannot name a file outside
+  `crates/katana_window/src/gis_online.rs`, which on Windows cannot name a file outside
   the ANSI code page. (`KATANA_CUSTOMISATION` is read through
   `katana_core::path_text::environment_variable` by the window as by the session.)
 - **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
@@ -1772,7 +1772,7 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   (`customisation_verbs::the_line_an_editor_builds_to_remove_a_definition_is_read_as_that_definition_alone`).
 - **`REMOVE` and the window's definition editor ask one function who uses a
   definition** (`katana_cad::definition_users::definition_users`,
-  `rust/crates/katana_cad/src/definition_users.rs`), and still WORD the answer two
+  `crates/katana_cad/src/definition_users.rs`), and still WORD the answer two
   ways. The verb's refusal says `rule #7 AC* (symbol) names it` and `the
   drawing's style "Marks" names it` (`DefinitionUsers::cited`); the editor's
   own list, beside a definition nobody is deleting, says `rule #7 AC*
@@ -1827,7 +1827,7 @@ interpreter in the host (`katana_cad::customisation_host::CustomisationHost`):
 | Session | Its kept file |
 |---|---|
 | any, with the environment variable `KATANA_CUSTOMISATION` set | the file the variable names |
-| the window, interactive, the variable unset | `customisation.json` in the per-user configuration folder (`%APPDATA%\Katana` on Windows, `$XDG_CONFIG_HOME/katana` or `~/.config/katana` elsewhere; `rust/crates/katana_window/src/host/user_settings.rs`) |
+| the window, interactive, the variable unset | `customisation.json` in the per-user configuration folder (`%APPDATA%\Katana` on Windows, `$XDG_CONFIG_HOME/katana` or `~/.config/katana` elsewhere; `crates/katana_window/src/host/user_settings.rs`) |
 | the window headless, `katana_cli` and `katana_mcp`, the variable unset | none |
 
 The window's rule is `MainWindow::load_default_customisation`
@@ -1866,7 +1866,7 @@ way back). Typed, `CUSTOMISE RESET` then `CUSTOMISE KEEP` do the same; a
 renaming the kept file is a reset too: a start that finds no kept file gives
 the built-in.
 
-**Settings** (`rust/crates/katana_window/src/customisation/settings_dialog.rs`;
+**Settings** (`crates/katana_window/src/customisation/settings_dialog.rs`;
 `docs/desktop.md`, "Settings") is where a person sees all of this and does
 the whole-customisation things, each a line of the family. "What is active"
 names the built-in the session is (`settingsActiveBuiltIn`): `Katana Standard
@@ -1975,7 +1975,7 @@ Not done:
 The customisations a program offers are COMPILED INTO it: Katana customisation
 files, embedded in `katana_cad` with `include_bytes!` into one generated table
 (`builtin_table.rs` in cargo's output, written by
-`rust/crates/katana_cad/build.rs`), as the plot frame is. ONE of them is THE
+`crates/katana_cad/build.rs`), as the plot frame is. ONE of them is THE
 built-in, the DEFAULT - Katana Standard, a library made for Katana with the NSW customisation's survey code keys
 and with what each key stands for and does -
 which a program starts with and which `CUSTOMISE RESET` gives; it is parsed
@@ -2120,7 +2120,7 @@ release job against the tracked default having been deleted or a path being wron
 
 ### What holds the product to it
 
-- `built_in_census` (`rust/crates/katana_cad/tests/customisation/builtin_census.rs`): when
+- `built_in_census` (`crates/katana_cad/tests/customisation/builtin_census.rs`): when
   the build offers a built-in named "NSW" (found by name among
   `katana_cad::built_ins()`, not as the default), it holds the census figures -
   792 definitions (471 symbols and 321 linestyles), 155 at vertices, 71 groups,
@@ -2136,7 +2136,7 @@ release job against the tracked default having been deleted or a path being wron
   against a committed fixture and against the compiled-in default; the 29
   renamed definitions are looked up in the NSW alternate's library, which is
   where they are.
-- `built_in_library` (`rust/crates/katana_cad/tests/customisation/builtin_library.rs`): the
+- `built_in_library` (`crates/katana_cad/tests/customisation/builtin_library.rs`): the
   list (default first, one entry a name, found by name in any letter case), the
   seam's name form and its precedence, `built_in_choices`, and what this build
   compiled in - Katana Standard's census (221 definitions, 1,103 rules over 632

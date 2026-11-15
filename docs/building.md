@@ -5,7 +5,7 @@ why the build and the bundle are laid out as they are. How the tests are
 written is `docs/testing.md`; how a release is packaged and published is
 `docs/release.md`.
 
-Katana is Rust (`docs/rust.md`): one Cargo workspace, `rust/Cargo.toml`, with
+Katana is Rust (`docs/rust.md`): one Cargo workspace, `Cargo.toml`, with
 one crate per layer of `tools/check_layering.cmake`. The C++ program it was
 ported from was removed on 2026-11-15, on the owner's word ("if we migrated
 all files to rust, remove c++ i dont want to see it"); this document describes
@@ -32,8 +32,8 @@ Windows build below is written for when the owner says so.
 | Windows ARM64 | MSYS2 CLANGARM64's `rust` | CLANGARM64's clang | CLANGARM64's | CLANGARM64's |
 
 Three files in the crates are C++, and the build compiles them: the shims of
-GDAL's algorithm framework and HTTP in `rust/crates/katana_gis/native` and of
-PDAL in `rust/crates/katana_pointcloud/native`, because those libraries have
+GDAL's algorithm framework and HTTP in `crates/katana_gis/native` and of
+PDAL in `crates/katana_pointcloud/native`, because those libraries have
 only C++ interfaces there (`docs/rust.md`, "Third-party libraries"). They are
 compiled by each crate's `build.rs` with the `cc` crate and the toolchain's
 own compilers, so that the C++ ABI is that of the GDAL and PDAL linked. That
@@ -69,11 +69,11 @@ never run inside WSL: a worktree made by Windows git names its repository by a
 What `all` runs, in order, stopping after a build step that fails:
 
 1. `cargo clippy --locked --workspace --all-targets --release --keep-going -- -D warnings`,
-   with `rust/clippy.toml` (warnings are errors, as `-Werror` made them for
+   with `clippy.toml` (warnings are errors, as `-Werror` made them for
    the C++).
 2. The float-to-text guard: clippy on `tests/rust_check_fixtures/float_to_string`,
    a crate whose one function writes a real with `to_string`, which
-   `rust/clippy.toml` forbids (`KATANA_REAL_FORMATTER_REQUIRED`). The run fails
+   `clippy.toml` forbids (`KATANA_REAL_FORMATTER_REQUIRED`). The run fails
    unless the lint fires, because a lint that stopped firing would pass every
    build and find nothing.
 3. `cargo build --locked --workspace --release`.
@@ -86,7 +86,7 @@ What `all` runs, in order, stopping after a build step that fails:
    through Vulkan (Mesa's lavapipe in WSL). It runs after a failed cargo test
    too, so one run gives both answers, and the run fails if either failed.
 
-Every cargo is `--locked` (the committed `rust/Cargo.lock` is what is built)
+Every cargo is `--locked` (the committed `Cargo.lock` is what is built)
 and given the same `RUSTFLAGS`, or each step would rebuild what the one before
 it built. In WSL the script sets cargo's linker to the prefix's GCC and
 `RUSTFLAGS="-C link-arg=-Wl,-rpath,<prefix>/lib"`, so a program finds GDAL
@@ -97,7 +97,7 @@ is going is refused.
 
 Without `wsl` the same phases run natively on Windows in MSYS2 UCRT64
 (`/c/msys64/ucrt64/bin` first on `PATH`, or `KATANA_TOOLCHAIN_BIN` before it),
-cargo building into `rust/target` and the runner into `build/release` with the
+cargo building into `target` and the runner into `build/release` with the
 `release` preset; the log and status are in `build/windows/`. That mode is
 kept for step 8 and not run now.
 
@@ -133,7 +133,7 @@ Rust programs at the gates.
 
 | Setting | Default | What it is |
 |---|---|---|
-| `KATANA_PROGRAMS` | `$CARGO_TARGET_DIR/release` when that is set; else `~/katana-build/<checkout>/cargo/release` off Windows and `rust/target/release` on it | the folder of the programs cargo built |
+| `KATANA_PROGRAMS` | `$CARGO_TARGET_DIR/release` when that is set; else `~/katana-build/<checkout>/cargo/release` off Windows and `target/release` on it | the folder of the programs cargo built |
 | `KATANA_PROGRAM_<name>` | `<KATANA_PROGRAMS>/<name>` | one program, for `katana`, `katana_cli`, `katana_mcp`, `katana_updater` and the updater's three test programs |
 | `KATANA_RUNTIME_BIN` | MSYS2 UCRT64's `bin` on Windows, else `KATANA_PROGRAMS` | the folder first on every program test's `PATH`, where the libraries are |
 | `KATANA_TEST_CLI`, `KATANA_TEST_WINDOW` | `ON` | the two families of process tests, so that a runner with no display can leave the window's out |
@@ -201,7 +201,7 @@ what is built here runs on Debian 10, Ubuntu 20.04, RHEL 8 and later.
 **PROJ's data.** In a relocated prefix PROJ's compiled-in search path is
 rewritten at install time, and with PDAL loaded PROJ then opened its data
 directory as `proj.db` and as each grid. So Katana looks for PROJ's data
-beside the loaded `libproj` (`rust/crates/katana_core/src/library_data.rs`),
+beside the loaded `libproj` (`crates/katana_core/src/library_data.rs`),
 as it looks for GDAL's beside the GDAL library on Windows, and hands it to
 each PROJ user's own search path: its own contexts, and GDAL's (so PDAL's).
 An explicit `PROJ_DATA` still wins when it works. When it does not - a
@@ -232,7 +232,7 @@ export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$CC
 export CXXFLAGS=-D_LIBCPP_DISABLE_AVAILABILITY MACOSX_DEPLOYMENT_TARGET=13.0
 export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
 export RUSTFLAGS="-D warnings -C link-arg=-Wl,-rpath,$KATANA_TOOLCHAIN/lib"
-cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
+cargo build --locked --workspace --release
 ```
 
 `-D_LIBCPP_DISABLE_AVAILABILITY` because libc++'s availability markup refuses
@@ -252,8 +252,8 @@ rustup's or the MSVC Rust is `docs/rust.md`, "Windows, once the port works".
 With `/c/msys64/ucrt64/bin` first on `PATH`:
 
 ```sh
-cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
-cmake --preset release -DKATANA_PROGRAMS=$(cygpath -m "$PWD/rust/target/release")
+cargo build --locked --workspace --release
+cmake --preset release -DKATANA_PROGRAMS=$(cygpath -m "$PWD/target/release")
 ctest --preset release --parallel 14
 ```
 
@@ -273,7 +273,7 @@ Nothing of this has been run since the owner's ruling (step 8).
 | `katana_updater_test`, `katana_updater_stub`, `katana_update_e2e` | `katana_updater` | what the update tests run and never ship: the helper and the engine with a TEST key in place of the pinned ones, and a stand-in for Katana the helper starts |
 | `katana_make_icons`, `katana_tool_icon_sheet` | `katana_window` | developer tools: the icon files the window and the installer carry, committed (`docs/desktop.md`), and every catalogue tool's icon with its name (`docs/tools.md`) |
 
-They land in `<cargo target>/release`: `rust/target/release` in a Windows
+They land in `<cargo target>/release`: `target/release` in a Windows
 checkout, `~/katana-build/<worktree>/cargo/release` in WSL. Only the first
 four are packaged, by name (`docs/release.md`, "Packaging").
 
@@ -284,10 +284,10 @@ the C++ build took them as CMake options:
 
 | Variable | Read by | Default | Effect |
 |---|---|---|---|
-| `KATANA_UPDATE_REPO` | `rust/crates/katana_update/build.rs` | `kjarada/Katana` | `owner/name` of the GitHub repository whose latest release an installed copy asks for updates |
+| `KATANA_UPDATE_REPO` | `crates/katana_update/build.rs` | `kjarada/Katana` | `owner/name` of the GitHub repository whose latest release an installed copy asks for updates |
 | `KATANA_UPDATE_FEED` | the same | empty | the base URL of a release host of the owner's own, in place of GitHub; it must honour `Range`. With both empty the build has no update feed |
 | `KATANA_REQUIRE_UPDATE_KEYS` | the same | unset | `ON` (CMake's truth: ON, YES, TRUE, Y, a non-zero number) fails the build while `cmake/KatanaUpdateKeys.cmake` holds the placeholder keys; set in every release job |
-| `KATANA_ALTERNATE_CUSTOMISATIONS` | `rust/crates/katana_cad/build.rs` | `resources/customisation/nsw.customisation.json` | a `;`-separated list of further customisation files compiled in, offered by name; one that is no file is not offered |
+| `KATANA_ALTERNATE_CUSTOMISATIONS` | `crates/katana_cad/build.rs` | `resources/customisation/nsw.customisation.json` | a `;`-separated list of further customisation files compiled in, offered by name; one that is no file is not offered |
 | `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` | the same | unset | `ON` fails the build when the default built-in is absent: a guard for a release job against the tracked file being deleted |
 | `KATANA_TOOLCHAIN` | the build scripts of geodesy, gis, pointcloud and storage | unset | the conda-forge prefix: its `lib/` as a link search path and, on Linux, its compilers for the shims |
 | `CC`, `CXX`, `AR` | `cc`, in gis and pointcloud | the toolchain's | the shims' compilers, where another is wanted |
@@ -298,9 +298,9 @@ repository it asks. That is why a release's packaging reads back what the
 build script was given (`docs/release.md`, "Packaging").
 
 The version is `project(Katana VERSION ...)` of the root `CMakeLists.txt`,
-read by `rust/crates/katana_update/build.rs`: the one place a version is
+read by `crates/katana_update/build.rs`: the one place a version is
 written, which the release workflow and the packaging read too. The crates'
-own `version` in `rust/Cargo.toml` is `0.0.0` and is not the product's.
+own `version` in `Cargo.toml` is `0.0.0` and is not the product's.
 
 ## Running
 
@@ -355,7 +355,7 @@ The linestyles, symbols and survey codes a program starts with are compiled
 INTO it, in the window as in `katana_cli` and `katana_mcp`:
 `resources/customisation/katana-standard.customisation.json` is THE built-in,
 and the files `KATANA_ALTERNATE_CUSTOMISATIONS` lists, the NSW file by
-default, are offered beside it by name. `rust/crates/katana_cad/build.rs`
+default, are offered beside it by name. `crates/katana_cad/build.rs`
 embeds each with `include_bytes!`, the default first; a path that names no
 file is not offered, and with none at all the program has no built-in and
 draws plain lines until a customisation is loaded. Nothing is installed
@@ -389,7 +389,7 @@ build:
   `python tools/update_keytool.py pub` rewrites, never a hand. A CMake file
   still, because the release workflow's first job and the runner check it
   with CMake, and the update tools read it (`--keys-cmake`);
-  `rust/crates/katana_update/build.rs` reads the same block, holds it to the
+  `crates/katana_update/build.rs` reads the same block, holds it to the
   same rules (64 hexadecimal digits, no published RFC 8032 test key, the
   spare not the active, the placeholder flag agreeing with the bytes) and
   compiles the keys in. With `KATANA_REQUIRE_UPDATE_KEYS=ON` the build fails
@@ -440,7 +440,7 @@ the tree that runs on its own.
 
 `bin/` sits beside `share/` because that is where the data-hungry libraries
 look: PROJ finds `proj.db` at `<its library>/../share/proj` by itself, and
-`rust/crates/katana_core/src/library_data.rs` finds GDAL's data and libcurl's
+`crates/katana_core/src/library_data.rs` finds GDAL's data and libcurl's
 certificates the same way, beside the library that reads them.
 
 **PDAL needs a home directory.** Run with an EMPTY environment (`env -i`),

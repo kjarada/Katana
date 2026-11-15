@@ -29,7 +29,7 @@ Published by **Jarada**.
 
 ## Quick start
 
-Katana is written in Rust (one Cargo workspace, `rust/Cargo.toml`). It was C++
+Katana is written in Rust (one Cargo workspace, `Cargo.toml`). It was C++
 until 2026-11-15, when the owner had the C++ removed once every layer had its
 Rust twin (`docs/rust.md`). Until the Rust programs are built and tested on
 Windows, they are built in WSL or on Linux:
@@ -50,8 +50,8 @@ The toolchain script installs into `/opt/katana-toolchain`, or into
 maintainer's WSL build puts cargo's output on WSL's own disk
 (`~/katana-build/<checkout>/cargo/release`). What you need is Rust 1.98 or
 later, a C++ compiler for the three shims that reach GDAL's and PDAL's C++
-interfaces (`rust/crates/katana_gis/native/`,
-`rust/crates/katana_pointcloud/native/`), and GDAL, PDAL, PROJ and SQLite; the
+interfaces (`crates/katana_gis/native/`,
+`crates/katana_pointcloud/native/`), and GDAL, PDAL, PROJ and SQLite; the
 window is egui and wgpu, which cargo fetches. The native Windows build (MSYS2
 UCRT64's Rust) is written down in `docs/building.md` and not run yet.
 
@@ -297,7 +297,7 @@ These move every day. Run the commands for today's numbers.
 ## Try it
 
 Build first: [Quick start](#quick-start). The commands below are run from
-`rust/`, where cargo put the programs in `target/release/`.
+the checkout's root, where cargo puts the programs in `target/release/`.
 
 **Run a command line.** `HELP` lists the verbs. A script or a `-c` batch stops
 at the first failing command and exits 1.
@@ -339,7 +339,7 @@ path under `share/katana/samples`, as "First steps" shows).
 Claude Code (`docs/mcp.md` has Claude Desktop and the tools):
 
 ```sh
-claude mcp add katana -- /path/to/Katana/rust/target/release/katana_mcp --project /work/my_site_plan
+claude mcp add katana -- /path/to/Katana/target/release/katana_mcp --project /work/my_site_plan
 ```
 
 Then ask in plain words: "draw a 30 by 20 lot at 1000,2000 and label its bearings".
@@ -355,7 +355,7 @@ It needs no display and no GPU: the headless window is drawn on the CPU.
 **Run the tests.**
 
 ```sh
-cargo test --release                                # every crate's tests, from rust/
+cargo test --release                                # every crate's tests, from the checkout's root
 bash tools/build_visible.sh wsl                     # the maintainer's way: clippy, build, cargo test, then the test runner's suite
 bash tools/build_visible.sh wsl test -R '^qt_'      # the runner's window checks only
 ```
@@ -367,7 +367,7 @@ finds the programs.
 
 ## Architecture
 
-The code is a stack of layers, one crate each under `rust/crates/`. A crate
+The code is a stack of layers, one crate each under `crates/`. A crate
 may use only the crates below it that `tools/check_layering.cmake` allows,
 and `tools/check_rust_layering.py` holds every crate's manifest to that table.
 The diagram shows the main routes, not every allowed edge.
@@ -821,7 +821,7 @@ The toolchains and the test runner are in `docs/building.md`; in short:
 
 | Platform | Toolchain | Commands |
 |---|---|---|
-| Linux and WSL (x64, ARM64) | `python3 tools/setup_linux_toolchain.py` installs Rust, GCC 16 and the libraries from conda-forge | `cargo build --release` in `rust/`, then `cargo test --release` |
+| Linux and WSL (x64, ARM64) | `python3 tools/setup_linux_toolchain.py` installs Rust, GCC 16 and the libraries from conda-forge | `cargo build --release` at the checkout's root, then `cargo test --release` |
 | macOS (Apple silicon) | the same script installs Rust, clang and the libraries | the same |
 | Windows | MSYS2 UCRT64's `rust` (x64) or CLANGARM64's (ARM64) | the same; written down, not run until the owner says so |
 

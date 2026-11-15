@@ -1,18 +1,18 @@
 # The update programs' tests (docs/update.md), and the checks of the promises the build makes
 # about the update system: the pinned keys, the helper's imports, no test key in a program that
 # ships, the Windows installer's script and the release tools. The programs are cargo's: the
-# four that ship and the three test programs of rust/crates/katana_updater - katana_updater_test
+# four that ship and the three test programs of crates/katana_updater - katana_updater_test
 # (the helper with the test key and the test options), katana_updater_stub (the stand-in for
 # Katana that the helper starts) and katana_update_e2e (the engine from a command line) - named
 # KATANA_PROGRAM_<name> (the top CMakeLists.txt). The engine's and the helper's own cases are
-# cargo's (rust/crates/katana_update/tests, rust/crates/katana_updater/tests).
+# cargo's (crates/katana_update/tests, crates/katana_updater/tests).
 
 # ---- where a copy of Katana does not replace its own files (PX) -------------------------------------
 #
 # Linux, until its apply back end is written (task T18), and macOS for good, where a file changed
 # inside Katana.app breaks the seal of the bundle. UPDATE CHECK and UPDATE STATUS work there; a
 # download, a preflight and the helper refuse FOR THE PLATFORM and write nothing. The engine's
-# side of that is cargo's (rust/crates/katana_update/tests); this is the helper's, on those
+# side of that is cargo's (crates/katana_update/tests); this is the helper's, on those
 # systems only (Windows has the real seams):
 #
 #   check_platform_refusal.cmake   the helper that ships and the helper with the test key, each
@@ -170,7 +170,7 @@ endif()
 # key. This looks at the bytes: the four programs that ship must contain none of the RFC 8032
 # keys of test_keys.txt, and the two test programs that DO carry them are the controls, which
 # fail the check unless it sees the keys - so "absent" is not a scan that cannot see. The key
-# list is read from test_keys.txt, as rust/crates/katana_updater/tests/shipped.rs reads it, so
+# list is read from test_keys.txt, as crates/katana_updater/tests/shipped.rs reads it, so
 # there is one.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/test_keys.txt" _katana_test_key_header)
 string(REGEX MATCHALL "\"[0-9a-f]+\"" _katana_quoted_hex "${_katana_test_key_header}")
@@ -382,7 +382,7 @@ set(_katana_nsis_template "${PROJECT_SOURCE_DIR}/cmake/NSIS.template.in")
 set(_katana_nsis_check "${CMAKE_CURRENT_SOURCE_DIR}/check_nsis_script.cmake")
 # Where the helper names its RunOnce value, which the uninstaller must remove under that name
 # (RUN_ONCE_NAME).
-set(_katana_nsis_registry_source "${PROJECT_SOURCE_DIR}/rust/crates/katana_update/src/registry.rs")
+set(_katana_nsis_registry_source "${PROJECT_SOURCE_DIR}/crates/katana_update/src/registry.rs")
 add_test(NAME packaging_nsis_template_is_per_user
     COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}"
             "-DREGISTRY_SOURCE=${_katana_nsis_registry_source}" -P "${_katana_nsis_check}")
