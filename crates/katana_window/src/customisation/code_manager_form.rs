@@ -23,11 +23,11 @@ use katana_entity::{
     SurveyAttribute, SurveyBreakline, SurveyPipe, SurveyRule, SurveySection, validate,
 };
 
-use super::code_manager::{Event, REFUSAL_COLOUR, SurveyCodeManagerDialog};
+use super::code_manager::{Event, SurveyCodeManagerDialog, refusal_colour};
 use super::code_manager_support::ColourField;
 use super::customisation_context::CustomisationContext;
-use super::name_picker::{NamePicker, UNDEFINED_NAME_COLOUR};
 use super::definition_editor::index_choice;
+use super::name_picker::{NamePicker, UNDEFINED_NAME_COLOUR};
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -315,7 +315,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             let mut status = RichText::new(form.model_status.as_str());
             if form.model_bad {
-                status = status.color(REFUSAL_COLOUR);
+                status = status.color(refusal_colour());
             }
             controls::label_as(
                 ui,
@@ -456,8 +456,8 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 "",
             );
             edited |= field(ui, "Size 2", "rulePipeSize2", &mut form.pipe_size2, "", "");
-            edited |= controls::check(ui, "rulePipeActive", "Active", &mut form.pipe_active)
-                .changed();
+            edited |=
+                controls::check(ui, "rulePipeActive", "Active", &mut form.pipe_active).changed();
         }
         ATTRIBUTES_PAGE => {
             ui.label("One attribute a line: <type> <name> = <value>, the type text or integer");
@@ -838,7 +838,7 @@ impl SurveyCodeManagerDialog {
             match form.issues_tone {
                 Tone::Plain => {}
                 Tone::Warning => issues = issues.color(UNDEFINED_NAME_COLOUR.to_egui()),
-                Tone::Refusal => issues = issues.color(REFUSAL_COLOUR),
+                Tone::Refusal => issues = issues.color(refusal_colour()),
             }
             controls::label_as(
                 ui,

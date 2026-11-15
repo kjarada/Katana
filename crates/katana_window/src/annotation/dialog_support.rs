@@ -18,11 +18,15 @@ use egui::{Context, Ui};
 use katana_cad::{Document, DocumentChange, ListenerHandle};
 use katana_math::cpp;
 
+use crate::dialog_layout::{
+    TABLE_COLUMN_GAP, TABLE_ROW_GAP, TABLE_ROWS, rows_height, table_row_colour,
+};
 use crate::drive::controls::{SpinRange, custom};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::theme;
 
 /// The parts of the Document notifications heard since the dialog last looked (see the module
 /// comment).
@@ -130,39 +134,62 @@ pub(crate) fn table(
         }
     }
     let adding = ui.input(|input| input.modifiers.command);
-    let grid = egui::Grid::new(name)
-        .striped(true)
-        .num_columns(headers.len())
+    // The rows chosen, for the row colours: the whole row is lit, as a QTableWidget's selection
+    // is, rather than each cell's own pill (the look of 2026-11-16).
+    let chosen: Vec<bool> = (0..rows.len())
+        .map(|at| current == Some(at) || highlighted.get(at).copied().unwrap_or(false))
+        .collect();
+    // A long table scrolls in its own place, TABLE_ROWS rows high, rather than making the dialog
+    // as tall as the drawing has rows.
+    let scrolled = egui::ScrollArea::vertical()
+        .id_salt((name, "tableScroll"))
+        .max_height(rows_height(ui, TABLE_ROWS + 1.0))
+        .auto_shrink([true, true])
         .show(ui, |ui| {
-            for header in headers {
-                ui.strong(*header);
-            }
-            ui.end_row();
-            for (at, row) in rows.iter().enumerate() {
-                let selected = current == Some(at) || highlighted.get(at).copied().unwrap_or(false);
-                for (column, cell) in row.iter().enumerate() {
-                    if let Some((check_column, states)) = checks
-                        && column == check_column
-                    {
-                        let mut on = states.get(at).copied().unwrap_or(false);
-                        if ui.checkbox(&mut on, cell.as_str()).changed() {
-                            shown.checked = Some((at, on));
+            egui::Grid::new(name)
+                .num_columns(headers.len())
+                .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
+                .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+                .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
+                .show(ui, |ui| {
+                    for header in headers {
+                        ui.label(
+                            egui::RichText::new(*header)
+                                .strong()
+                                .color(theme::text_muted().to_egui()),
+                        );
+                    }
+                    ui.end_row();
+                    for (at, row) in rows.iter().enumerate() {
+                        for (column, cell) in row.iter().enumerate() {
+                            if let Some((check_column, states)) = checks
+                                && column == check_column
+                            {
+                                let mut on = states.get(at).copied().unwrap_or(false);
+                                if ui.checkbox(&mut on, cell.as_str()).changed() {
+                                    shown.checked = Some((at, on));
+                                }
+                                continue;
+                            }
+                            let response = ui.add(
+                                egui::Label::new(cell.as_str())
+                                    .sense(egui::Sense::click())
+                                    .selectable(false)
+                                    .extend(),
+                            );
+                            if response.double_clicked() {
+                                shown.double_clicked = Some(at);
+                            }
+                            if response.clicked() {
+                                shown.chosen = Some(at);
+                                shown.adding = adding;
+                            }
                         }
-                        continue;
+                        ui.end_row();
                     }
-                    let response = ui.selectable_label(selected, cell.as_str());
-                    if response.double_clicked() {
-                        shown.double_clicked = Some(at);
-                    }
-                    if response.clicked() {
-                        shown.chosen = Some(at);
-                        shown.adding = adding;
-                    }
-                }
-                ui.end_row();
-            }
+                })
         });
-    let response = grid.response;
+    let response = scrolled.inner.response;
     if let Some(taken) = &taken
         && taken.posted.act == Act::ScrollTo
     {

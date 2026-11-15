@@ -62,6 +62,7 @@ use super::road_dialog_support::{
 };
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
+use crate::dialog_layout as layout;
 use crate::host::Host;
 use crate::shell::dialog::DialogFrame;
 
@@ -584,68 +585,75 @@ impl Body {
     // ---- drawing --------------------------------------------------------------------------------
 
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The fields a number's or a name's width: the form is two pairs of columns.
+        ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 2.0;
+        ui.spacing_mut().combo_width = layout::FIELD_WIDTH / 2.0;
         if self.list.ui(ui).selection_changed && !self.loading {
             self.fill_chosen(host.document(), true);
         }
 
         // ---- the definition ----
-        ui.group(|ui| {
-            ui.strong("Corridor");
-            egui::Grid::new("corridorDefinition").show(ui, |ui| {
-                ui.label("Name");
-                field(
-                    ui,
-                    "corridorName",
-                    &mut self.name,
-                    "name",
-                    "The name New and Rename give a corridor",
-                );
-                ui.label("Alignment");
-                self.alignment.ui(ui, "corridorAlignment");
-                ui.end_row();
-                ui.label("Template");
-                self.road_template.ui(ui, "corridorTemplate");
-                ui.label("Target surface");
-                self.surface.ui(ui, "corridorSurface");
-                ui.end_row();
-                ui.label("Interval (m)");
-                field(
-                    ui,
-                    "corridorInterval",
-                    &mut self.interval,
-                    "10",
-                    "Metres between sections",
-                );
-                ui.label("Stations");
-                ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            layout::heading(ui, "Corridor");
+            egui::Grid::new("corridorDefinition")
+                .spacing([layout::GAP, layout::INNER])
+                .min_col_width(layout::LABEL_WIDTH * 0.8)
+                .show(ui, |ui| {
+                    layout::form_label(ui, "Name");
                     field(
                         ui,
-                        "corridorFrom",
-                        &mut self.from,
-                        "start",
-                        "The first station; empty: where it begins",
+                        "corridorName",
+                        &mut self.name,
+                        "name",
+                        "The name New and Rename give a corridor",
                     );
+                    layout::form_label(ui, "Alignment");
+                    self.alignment.ui(ui, "corridorAlignment");
+                    ui.end_row();
+                    layout::form_label(ui, "Template");
+                    self.road_template.ui(ui, "corridorTemplate");
+                    layout::form_label(ui, "Target surface");
+                    self.surface.ui(ui, "corridorSurface");
+                    ui.end_row();
+                    layout::form_label(ui, "Interval (m)");
                     field(
                         ui,
-                        "corridorTo",
-                        &mut self.to,
-                        "end",
-                        "The last station; empty: where it ends",
+                        "corridorInterval",
+                        &mut self.interval,
+                        "10",
+                        "Metres between sections",
                     );
-                });
-                ui.end_row();
-                ui.label("Curve tolerance");
-                field(
-                    ui,
-                    "corridorCurveTolerance",
-                    &mut self.curve_tolerance,
-                    "0.001",
-                    "The most a course's area and volume on a curve may be out, as a fraction \
+                    layout::form_label(ui, "Stations");
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 4.0;
+                        field(
+                            ui,
+                            "corridorFrom",
+                            &mut self.from,
+                            "start",
+                            "The first station; empty: where it begins",
+                        );
+                        field(
+                            ui,
+                            "corridorTo",
+                            &mut self.to,
+                            "end",
+                            "The last station; empty: where it ends",
+                        );
+                    });
+                    ui.end_row();
+                    layout::form_label(ui, "Curve tolerance");
+                    field(
+                        ui,
+                        "corridorCurveTolerance",
+                        &mut self.curve_tolerance,
+                        "0.001",
+                        "The most a course's area and volume on a curve may be out, as a fraction \
                      (0.001 is 0.1 %): sections are added inside a curve until the chords are \
                      that close. 0 adds none",
-                );
-                ui.end_row();
-            });
+                    );
+                    ui.end_row();
+                });
             ui.horizontal(|ui| {
                 if button(
                     ui,
@@ -691,8 +699,10 @@ impl Body {
         });
 
         // ---- regions and superelevation, side by side ----
+        ui.add_space(layout::SECTION_GAP);
         ui.horizontal_top(|ui| {
-            ui.group(|ui| {
+            ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 4.0;
+            ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     ui.strong("Regions: another template between two stations");
                     self.regions.ui(ui);
@@ -730,7 +740,8 @@ impl Body {
                     });
                 });
             });
-            ui.group(|ui| {
+            ui.add_space(layout::SECTION_GAP);
+            ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     ui.strong("Superelevation: crossfall each side, percent outward");
                     self.superelevation.ui(ui);
@@ -782,6 +793,7 @@ impl Body {
         });
 
         // ---- what it builds ----
+        layout::heading(ui, "Build");
         ui.horizontal(|ui| {
             if button(
                 ui,
@@ -820,11 +832,11 @@ impl Body {
 
     /// The row of buttons the dialog frame keeps in sight: Close.
     fn footer_ui(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, "corridorClose", "Close", "Close the dialog").clicked() {
-                self.close = true;
-            }
-        });
+        if layout::footer_buttons(ui, |ui| {
+            button(ui, "corridorClose", "Close", "Close the dialog").clicked()
+        }) {
+            self.close = true;
+        }
     }
 }
 

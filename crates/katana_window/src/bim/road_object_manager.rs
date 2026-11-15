@@ -63,6 +63,7 @@ use super::road_dialog_support::{Table, button, cell, field, same_ignoring_case}
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
+use crate::dialog_layout as layout;
 use crate::drive::controls::{TextOptions, custom, label_as, text_with};
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::format::qt_fixed;
@@ -593,11 +594,11 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, "roadObjectManagerClose", "&Close", "").clicked() {
-                self.close = true;
-            }
-        });
+        if layout::footer_buttons(ui, |ui| {
+            button(ui, "roadObjectManagerClose", "&Close", "").clicked()
+        }) {
+            self.close = true;
+        }
     }
 }
 

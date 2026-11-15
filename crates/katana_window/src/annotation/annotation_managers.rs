@@ -60,6 +60,7 @@ use katana_math::numerics::{DEG_TO_RAD, RAD_TO_DEG};
 use super::dialog_support::{Followed, LineCursor, TableShown, show_dialog, spin_value, table};
 use super::form_widgets::{button, check, combo, describe, edit, problem_line};
 use crate::command_word::{annotation_text_word, command_word, exact_number};
+use crate::dialog_layout as layout;
 use crate::drive::action::{Action, Menu, MenuItem, action_item};
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::drive::registry::{ControlKind, ControlRecord};
@@ -583,63 +584,74 @@ impl TextStyleManagerDialog {
                     }
                 });
             });
+            ui.add_space(layout::SECTION_GAP);
             ui.vertical(|ui| {
-                egui::Grid::new("textStyleForm")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("Font");
-                        edit(ui, "textStyleFont", &mut self.font, "the plain face");
-                        ui.end_row();
-                        let boxes = [
-                            (
-                                "Height on paper (0: the text's own)",
-                                "textStylePaperHeight",
-                                &mut self.paper,
-                                TEXT_PAPER,
-                            ),
-                            (
-                                "Width factor",
-                                "textStyleWidthFactor",
-                                &mut self.width,
-                                TEXT_WIDTH,
-                            ),
-                            (
-                                "Oblique",
-                                "textStyleOblique",
-                                &mut self.oblique,
-                                TEXT_OBLIQUE,
-                            ),
-                        ];
-                        for (title, name, value, range) in boxes {
-                            ui.label(title);
-                            controls::spin(ui, name, value, range);
-                            ui.end_row();
+                layout::form(ui, "textStyleForm", |ui| {
+                    layout::form_label(ui, "Font");
+                    edit(ui, "textStyleFont", &mut self.font, "the plain face");
+                    ui.end_row();
+                    let boxes = [
+                        (
+                            "Height on paper",
+                            "textStylePaperHeight",
+                            &mut self.paper,
+                            TEXT_PAPER,
+                        ),
+                        (
+                            "Width factor",
+                            "textStyleWidthFactor",
+                            &mut self.width,
+                            TEXT_WIDTH,
+                        ),
+                        (
+                            "Oblique",
+                            "textStyleOblique",
+                            &mut self.oblique,
+                            TEXT_OBLIQUE,
+                        ),
+                    ];
+                    for (title, name, value, range) in boxes {
+                        layout::form_label(ui, title);
+                        let shown = controls::spin(ui, name, value, range);
+                        if name == "textStylePaperHeight" {
+                            shown.on_hover_text("0: the text's own height");
                         }
+                        ui.end_row();
+                    }
+                    // The boxes in the field column, under the fields they go with.
+                    layout::form_label(ui, "Face");
+                    ui.horizontal(|ui| {
                         check(ui, "textStyleBold", "Bold", &mut self.bold);
                         check(ui, "textStyleItalic", "Italic", &mut self.italic);
-                        ui.end_row();
-                        ui.label("Colour");
-                        edit(
-                            ui,
-                            "textStyleColour",
-                            &mut self.colour,
-                            "ByLayer, or #RRGGBB",
-                        );
-                        ui.end_row();
+                    });
+                    ui.end_row();
+                    layout::form_label(ui, "Colour");
+                    edit(
+                        ui,
+                        "textStyleColour",
+                        &mut self.colour,
+                        "ByLayer, or #RRGGBB",
+                    );
+                    ui.end_row();
+                    layout::form_label(ui, "Mask");
+                    ui.horizontal(|ui| {
                         check(ui, "textStyleMask", "Background mask", &mut self.mask);
                         controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN);
-                        ui.end_row();
-                        check(
-                            ui,
-                            "textStyleReadable",
-                            "Keep readable (turn upside-down text)",
-                            &mut self.readable,
-                        );
-                        ui.end_row();
-                        ui.label("Line spacing");
-                        controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
-                        ui.end_row();
                     });
+                    ui.end_row();
+                    ui.label("");
+                    check(
+                        ui,
+                        "textStyleReadable",
+                        "Keep readable (turn upside-down text)",
+                        &mut self.readable,
+                    );
+                    ui.end_row();
+                    layout::form_label(ui, "Line spacing");
+                    controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
+                    ui.end_row();
+                });
+                ui.add_space(layout::GAP);
                 let mut sample = RichText::new("AaBb 123.456");
                 if self.bold {
                     sample = sample.strong();
@@ -659,14 +671,18 @@ impl TextStyleManagerDialog {
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         problem_line(ui, "textStyleProblem", &self.problem);
-        ui.horizontal(|ui| {
-            if button(ui, "textStyleDelete", "Delete").clicked() {
-                self.pressed = Some(TextPressed::Delete);
-            }
-            if button(ui, "textStyleApply", "Apply").clicked() {
-                self.pressed = Some(TextPressed::Apply);
-            }
-        });
+        // Delete at the left, away from Apply, the primary, at the right.
+        let (deleted, applied) = layout::footer(
+            ui,
+            |ui| button(ui, "textStyleDelete", "Delete").clicked(),
+            |ui| layout::primary(ui, "textStyleApply", "Apply").clicked(),
+        );
+        if deleted {
+            self.pressed = Some(TextPressed::Delete);
+        }
+        if applied {
+            self.pressed = Some(TextPressed::Apply);
+        }
     }
 }
 

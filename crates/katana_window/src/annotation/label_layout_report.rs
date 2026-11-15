@@ -35,6 +35,7 @@ use katana_core::text::{format_exact_real, parse_finite_double};
 use katana_entity::EntityId;
 
 use super::dialog_support::show_dialog;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -386,24 +387,35 @@ impl LabelLayoutReportDialog {
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         controls::label(ui, "labelLayoutStatus", &self.status);
-        ui.horizontal(|ui| {
-            if controls::button(ui, "labelLayoutRun", "Run").clicked() {
-                self.run_pressed = true;
-            }
-            ui.add_enabled_ui(self.select_enabled, |ui| {
-                if controls::button(ui, "labelLayoutSelectSuppressed", "Select Suppressed")
-                    .on_hover_text(
-                        "Select the labels that found no room, to move them (Edit Label) or give \
-                         them another style",
-                    )
-                    .clicked()
-                {
-                    self.select_pressed = true;
-                }
-            });
-            if controls::button(ui, "labelLayoutClose", "Close").clicked() {
-                self.close_pressed = true;
-            }
-        });
+        let select_enabled = self.select_enabled;
+        // Select Suppressed at the left; Run, the primary, last at the right.
+        let (select, (run, close)) = layout::footer(
+            ui,
+            |ui| {
+                ui.add_enabled_ui(select_enabled, |ui| {
+                    controls::button(ui, "labelLayoutSelectSuppressed", "Select Suppressed")
+                        .on_hover_text(
+                            "Select the labels that found no room, to move them (Edit Label) or \
+                             give them another style",
+                        )
+                        .clicked()
+                })
+                .inner
+            },
+            |ui| {
+                let run = layout::primary(ui, "labelLayoutRun", "Run").clicked();
+                let close = layout::button(ui, "labelLayoutClose", "Close").clicked();
+                (run, close)
+            },
+        );
+        if run {
+            self.run_pressed = true;
+        }
+        if select {
+            self.select_pressed = true;
+        }
+        if close {
+            self.close_pressed = true;
+        }
     }
 }

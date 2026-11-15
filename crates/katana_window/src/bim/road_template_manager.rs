@@ -86,6 +86,7 @@ use crate::canvas::{
 };
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
+use crate::dialog_layout as layout;
 use crate::drive::controls::check;
 use crate::format::qt_fixed;
 use crate::host::Host;
@@ -957,7 +958,11 @@ impl Body {
     // ---- drawing --------------------------------------------------------------------------------
 
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // One width, the grids' and the preview's; the fields a short word's unless said.
+        ui.set_width(TEMPLATE_BODY_WIDTH);
+        ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 2.0;
         // ---- the templates ----
+        layout::heading(ui, "Templates");
         if self.list.ui(ui).selection_changed {
             self.list_selection_changed(host.document());
         }
@@ -1087,6 +1092,7 @@ impl Body {
         let height = grid_height(ui.style());
         self.components.set_fixed_height(height);
         self.courses.set_fixed_height(height);
+        layout::heading(ui, "Components");
         note(
             ui,
             "Components out from the centreline, each side in order. Width, crossfall (percent, \
@@ -1141,6 +1147,7 @@ impl Body {
             }
         });
         ui.horizontal(|ui| {
+            ui.spacing_mut().text_edit_width = TEMPLATE_BODY_WIDTH - 80.0;
             field(
                 ui,
                 "roadTemplateComponentKeys",
@@ -1162,6 +1169,7 @@ impl Body {
                 self.press_set_keys(host);
             }
         });
+        layout::heading(ui, "Courses");
         note(
             ui,
             "The chosen component's courses, top down. Thickness, material and IFC type are \
@@ -1225,6 +1233,7 @@ impl Body {
 
         // A drawing of a typical section reads at this height; the grids above it are the
         // dialog's purpose and get the room.
+        layout::heading(ui, "Typical section");
         let width = ui.available_width().max(220.0);
         let road_template = self.preview_template.as_ref();
         let section = self.preview_section.as_ref();
@@ -1248,13 +1257,17 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, "roadTemplateClose", "Close", "Close the manager").clicked() {
-                self.close = true;
-            }
-        });
+        if layout::footer_buttons(ui, |ui| {
+            button(ui, "roadTemplateClose", "Close", "Close the manager").clicked()
+        }) {
+            self.close = true;
+        }
     }
 }
+
+/// The manager's body width (the look of 2026-11-16): the component grid's columns, and the
+/// preview under it as wide.
+const TEMPLATE_BODY_WIDTH: f32 = 860.0;
 
 /// The Road Template Manager (see the module comment).
 pub struct RoadTemplateManagerDialog {

@@ -117,6 +117,7 @@ use katana_update::{
 use crate::command_log::{
     folded, is_update_token_verb_word, same_ignoring_case, update_token_line_words,
 };
+use crate::dialog_layout as layout;
 use crate::drive::controls;
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::host::{Host, VerbOutcome};
@@ -1500,6 +1501,15 @@ pub const UPDATE_BUTTONS: [UpdateButton; 9] = [
 ];
 
 impl UpdateButton {
+    /// Whether it is the button that does what the state offers (check, retry, update, restart):
+    /// the dialog's primary, drawn in the accent.
+    pub const fn acts(self) -> bool {
+        matches!(
+            self,
+            Self::CheckNow | Self::Retry | Self::Install | Self::Restart
+        )
+    }
+
     /// The C++ object name.
     pub const fn name(self) -> &'static str {
         match self {
@@ -1900,7 +1910,7 @@ impl UpdateDialog {
     fn body(&mut self, ui: &mut Ui) {
         // Wide enough for Available's five buttons in one row and its sentence in two lines; the
         // height follows the text.
-        ui.set_min_width(560.0);
+        ui.set_width(560.0);
         // The first sentence is the answer; it is read before anything else. A version, a
         // program's name and a reason are data, never markup: egui draws a label's text as it is.
         let state = update_state_text(&self.view);
@@ -1967,16 +1977,24 @@ impl UpdateDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let mut clicked = None;
-        // In the order the states list them: what acts first, Later last.
-        ui.horizontal(|ui| {
-            for button in UPDATE_BUTTONS {
+        // At the right, drawn from the right edge in: the button that acts (check, retry, update,
+        // restart) first, in the accent, so it sits last; then the rest from Later back, so the
+        // row reads as the states list them with what acts moved to the end.
+        let order = UPDATE_BUTTONS
+            .into_iter()
+            .filter(|button| button.acts())
+            .chain(UPDATE_BUTTONS.into_iter().rev().filter(|button| !button.acts()));
+        layout::footer_buttons(ui, |ui| {
+            for button in order {
                 let enabled = self.enables(button);
                 let mut draw = |ui: &mut Ui| {
                     ui.add_enabled_ui(enabled, |ui| {
-                        if controls::button(ui, button.name(), button.text())
-                            .on_hover_text(button.tip())
-                            .clicked()
-                        {
+                        let shown = if button.acts() {
+                            layout::primary(ui, button.name(), button.text())
+                        } else {
+                            layout::button(ui, button.name(), button.text())
+                        };
+                        if shown.on_hover_text(button.tip()).clicked() {
                             clicked = Some(button);
                         }
                     });

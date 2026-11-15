@@ -14,8 +14,11 @@ use katana_entity::entity::to_string;
 
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 
-/// The colour of a problem line (#d9534f), as the managers' stylesheet gave it.
-const PROBLEM_COLOUR: egui::Color32 = egui::Color32::from_rgb(0xd9, 0x53, 0x4f);
+/// The colour of a problem line: the theme's error token (the managers' stylesheet had a red of
+/// its own, #d9534f, before the theme had one).
+fn problem_colour() -> egui::Color32 {
+    crate::theme::error().to_egui()
+}
 
 /// A number box named `name`: from `minimum` to `maximum`, stepped by `step`, shown to `decimals`
 /// places with `suffix` after.
@@ -71,7 +74,7 @@ pub fn problem_line(ui: &mut Ui, name: &str, text: &str) -> Response {
         ui,
         name,
         text,
-        egui::Label::new(egui::RichText::new(text).color(PROBLEM_COLOUR)).wrap(),
+        egui::Label::new(egui::RichText::new(text).color(problem_colour())).wrap(),
     )
 }
 

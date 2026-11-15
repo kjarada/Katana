@@ -57,11 +57,21 @@ use katana_core::text::{format_general, parse_finite_double, parse_integer};
 use katana_core::{Error, ErrorCode, Result, Status};
 
 use crate::canvas::{Image, encode_png};
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name, to_native_separators};
 use crate::plotting::tiff_writer::write_tiff;
 use crate::shell::DialogFrame;
+
+/// The dialog's body width: a form whose fields are FIELD_WIDTH wide beside its longest label.
+const BODY_WIDTH: f32 = 520.0;
+
+/// The width of the form's fields: long enough to read a path and the command it runs.
+const FIELD_WIDTH: f32 = 360.0;
+
+/// The path field's width: the field column less its Browse button.
+const PATH_WIDTH: f32 = FIELD_WIDTH - 76.0;
 
 /// What a plan view is pictured on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -606,11 +616,9 @@ impl ViewImageDialog {
 
     fn body(&mut self, ui: &mut Ui, host: &dyn Host) {
         // Wide enough for a path and the line it runs to be read whole.
-        ui.set_min_width(560.0);
-        egui::Grid::new("viewImageForm")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("Image:");
+        ui.set_width(BODY_WIDTH);
+        layout::form_with(ui, "viewImageForm", FIELD_WIDTH, |ui| {
+                layout::form_label(ui, "Image");
                 ui.horizontal(|ui| {
                     controls::line_with(
                         ui,
@@ -618,6 +626,7 @@ impl ViewImageDialog {
                         &mut self.path,
                         LineOptions {
                             placeholder: "the image to write: .png, .jpg or .tif",
+                            width: Some(PATH_WIDTH),
                             ..LineOptions::default()
                         },
                     );
@@ -627,7 +636,7 @@ impl ViewImageDialog {
                 });
                 ui.end_row();
 
-                ui.label("Format:");
+                layout::form_label(ui, "Format");
                 if controls::choice(ui, "viewImageFormat", &items(&FORMATS), &mut self.format)
                     .changed()
                 {
@@ -635,15 +644,15 @@ impl ViewImageDialog {
                 }
                 ui.end_row();
 
-                ui.label("View:");
+                layout::form_label(ui, "View");
                 controls::choice(ui, "viewImageView", &items(&VIEWS), &mut self.view);
                 ui.end_row();
 
-                ui.label("Size:");
+                layout::form_label(ui, "Size");
                 controls::choice(ui, "viewImageSize", &items(&SIZES), &mut self.size);
                 ui.end_row();
 
-                ui.label("Custom size:");
+                layout::form_label(ui, "Custom size");
                 let custom = self.custom_size();
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(custom, |ui| {
@@ -655,7 +664,7 @@ impl ViewImageDialog {
                 });
                 ui.end_row();
 
-                ui.label("Background:");
+                layout::form_label(ui, "Background");
                 let plan = self.view.index == Some(0);
                 ui.add_enabled_ui(plan, |ui| {
                     controls::choice(
@@ -670,7 +679,7 @@ impl ViewImageDialog {
                 });
                 ui.end_row();
 
-                ui.label("Command:");
+                layout::form_label(ui, "Command");
                 let made = self.request();
                 let mut command = made
                     .as_ref()
@@ -699,27 +708,35 @@ impl ViewImageDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
-            let status = self.status.clone();
-            controls::label_as(
-                ui,
-                "viewImageStatus",
-                &status,
-                egui::Label::new(status.as_str()).wrap().selectable(true),
-            );
-            let ready = self.request().is_ok();
-            let pressed = ui
-                .add_enabled_ui(ready, |ui| {
-                    controls::button(ui, "viewImageExport", "Export").clicked()
-                })
-                .inner;
-            if pressed {
-                self.export_image(&mut *host);
-                ui.ctx().request_repaint();
-            }
-            if controls::button(ui, "viewImageClose", "Close").clicked() {
-                self.close();
-            }
-        });
+        let status = self.status.clone();
+        let ready = self.request().is_ok();
+        let (_, (pressed, closed)) = layout::footer(
+            ui,
+            |ui| {
+                controls::label_as(
+                    ui,
+                    "viewImageStatus",
+                    &status,
+                    egui::Label::new(status.as_str()).wrap().selectable(true),
+                );
+            },
+            // Drawn from the right: Export, the primary, last.
+            |ui| {
+                let pressed = ui
+                    .add_enabled_ui(ready, |ui| {
+                        layout::primary(ui, "viewImageExport", "Export").clicked()
+                    })
+                    .inner;
+                let closed = layout::button(ui, "viewImageClose", "Close").clicked();
+                (pressed, closed)
+            },
+        );
+        if pressed {
+            self.export_image(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if closed {
+            self.close();
+        }
     }
 }

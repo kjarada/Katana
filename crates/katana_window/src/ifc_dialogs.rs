@@ -56,6 +56,7 @@ use katana_ifc::{
 };
 use katana_survey::subsurface::GradingSettings;
 
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::format::grouped;
 use crate::host::Host;
@@ -203,12 +204,21 @@ fn command_field(ui: &mut Ui, name: &str, line: &str) {
         &mut shown,
         LineOptions {
             read_only: true,
-            width: Some(560.0),
+            width: Some(COMMAND_WIDTH),
             ..LineOptions::default()
         },
     )
     .on_hover_text(COMMAND_TIP);
 }
+
+/// The width of a row's label in both dialogs, so their fields line up (the look of 2026-11-16).
+const LABEL_WIDTH: f32 = 140.0;
+
+/// A path field's width; with its Browse button, the command field's.
+const PATH_WIDTH: f32 = 420.0;
+
+/// The command field's width: a path field and its Browse button.
+const COMMAND_WIDTH: f32 = PATH_WIDTH + 80.0;
 
 /// A path field with its placeholder; true when it changed.
 fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> bool {
@@ -218,7 +228,7 @@ fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> 
         value,
         LineOptions {
             placeholder,
-            width: Some(420.0),
+            width: Some(PATH_WIDTH),
             ..LineOptions::default()
         },
     )
@@ -851,7 +861,7 @@ impl IfcExportDialog {
              5488 investigation graded and typed by its services. Nothing is written as a proxy.",
         );
         ui.horizontal(|ui| {
-            ui.label("File:");
+            layout::fixed_label(ui, "File", LABEL_WIDTH);
             if path_line(
                 ui,
                 "ifcExportFile",
@@ -874,7 +884,7 @@ impl IfcExportDialog {
         let state = self.state.clone();
         let mut changed = false;
         ui.horizontal(|ui| {
-            ui.label("Drawing:");
+            layout::fixed_label(ui, "Drawing", LABEL_WIDTH);
             changed |= controls::check(
                 ui,
                 "ifcExportEntities",
@@ -897,17 +907,21 @@ impl IfcExportDialog {
                 grouped(state.selected as u64)
             )
         };
-        ui.add_enabled_ui(self.entities, |ui| {
-            changed |= controls::check(
-                ui,
-                "ifcExportSelectedOnly",
-                &selected_text,
-                &mut self.selected_only,
-            )
-            .on_hover_text("Only the entities selected in the drawing")
-            .changed();
+        let indent = LABEL_WIDTH + ui.spacing().item_spacing.x;
+        layout::indented(ui, indent, |ui| {
+            ui.add_enabled_ui(self.entities, |ui| {
+                changed |= controls::check(
+                    ui,
+                    "ifcExportSelectedOnly",
+                    &selected_text,
+                    &mut self.selected_only,
+                )
+                .on_hover_text("Only the entities selected in the drawing")
+                .changed();
+            });
         });
-        changed |= controls::check(
+        layout::indented(ui, indent, |ui| {
+            changed |= controls::check(
             ui,
             "ifcExportAlignments",
             &format!("Alignments ({})", grouped(state.alignments as u64)),
@@ -917,19 +931,23 @@ impl IfcExportDialog {
             "Every alignment, as IfcAlignment: its PIs' design and its profile's, with stations",
         )
         .changed();
-        changed |= controls::check(
-            ui,
-            "ifcExportSurfaces",
-            &format!(
-                "The drawing's surfaces ({})",
-                grouped(state.surfaces as u64)
-            ),
-            &mut self.surfaces,
-        )
-        .on_hover_text("The drawing's surfaces, as IfcGeographicElement TERRAIN")
-        .changed();
+        });
+        layout::indented(ui, indent, |ui| {
+            changed |= controls::check(
+                ui,
+                "ifcExportSurfaces",
+                &format!(
+                    "The drawing's surfaces ({})",
+                    grouped(state.surfaces as u64)
+                ),
+                &mut self.surfaces,
+            )
+            .on_hover_text("The drawing's surfaces, as IfcGeographicElement TERRAIN")
+            .changed();
+        });
         // The road model: NOROADMODEL when unticked (docs/ifc.md, "Road model").
-        changed |= controls::check(
+        layout::indented(ui, indent, |ui| {
+            changed |= controls::check(
             ui,
             "ifcExportRoadModel",
             &format!(
@@ -943,12 +961,13 @@ impl IfcExportDialog {
              road objects - as IfcRoad, its parts and their elements",
         )
         .changed();
+        });
         if changed {
             self.choice_changed();
         }
 
         ui.horizontal(|ui| {
-            ui.label("Utility schedule:");
+            layout::fixed_label(ui, "Utility schedule", LABEL_WIDTH);
             if path_line(
                 ui,
                 "ifcExportSchedule",
@@ -969,7 +988,7 @@ impl IfcExportDialog {
         });
         let schema_live = !path_of(&self.schedule).is_empty() || !path_of(&self.schema).is_empty();
         ui.horizontal(|ui| {
-            ui.label("Delivery schema:");
+            layout::fixed_label(ui, "Delivery schema", LABEL_WIDTH);
             ui.add_enabled_ui(schema_live, |ui| {
                 if path_line(
                     ui,
@@ -991,7 +1010,7 @@ impl IfcExportDialog {
             }
         });
         ui.horizontal(|ui| {
-            ui.label("Detected spacing (m):");
+            layout::fixed_label(ui, "Detected spacing (m)", LABEL_WIDTH);
             if controls::line(ui, "ifcExportSpacing", &mut self.spacing)
                 .on_hover_text(
                     "The longest detected spacing that keeps QL-B, in metres: a path interpolated \
@@ -1003,14 +1022,14 @@ impl IfcExportDialog {
             }
         });
         ui.horizontal(|ui| {
-            ui.label("Classification rules:");
+            layout::fixed_label(ui, "Classification rules", LABEL_WIDTH);
             let typed = controls::line_with(
                 ui,
                 "ifcExportRules",
                 &mut self.rules,
                 LineOptions {
                     placeholder: "optional: a project's classification rules (.csv)",
-                    width: Some(330.0),
+                    width: Some(PATH_WIDTH - 160.0),
                     ..LineOptions::default()
                 },
             )
@@ -1051,7 +1070,7 @@ impl IfcExportDialog {
                 .wrap(),
         );
         ui.horizontal(|ui| {
-            ui.label("Command:");
+            layout::fixed_label(ui, "Command", LABEL_WIDTH);
             let line = self.line();
             command_field(ui, "ifcExportCommand", &line);
         });
@@ -1070,26 +1089,38 @@ impl IfcExportDialog {
         // A preview needs everything but the file.
         let preview_live = self.check_without_file().is_empty();
         let export_live = self.check().is_empty();
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(preview_live, |ui| {
-                if controls::button(ui, "ifcExportPreview", "Preview")
-                    .on_hover_text("What would be written, class by class; no file is written")
-                    .clicked()
-                {
-                    self.preview(&mut *host);
-                    ui.ctx().request_repaint();
-                }
-            });
-            ui.add_enabled_ui(export_live, |ui| {
-                if controls::button(ui, "ifcExportExport", "Export").clicked() {
-                    self.export_file(&mut *host);
-                    ui.ctx().request_repaint();
-                }
-            });
-            if controls::button(ui, "ifcExportClose", "Close").clicked() {
-                self.hide();
-            }
-        });
+        // Preview at the left; Export, the primary, last at the right.
+        let (previewed, (exported, closed)) = layout::footer(
+            ui,
+            |ui| {
+                ui.add_enabled_ui(preview_live, |ui| {
+                    controls::button(ui, "ifcExportPreview", "Preview")
+                        .on_hover_text("What would be written, class by class; no file is written")
+                        .clicked()
+                })
+                .inner
+            },
+            |ui| {
+                let exported = ui
+                    .add_enabled_ui(export_live, |ui| {
+                        layout::primary(ui, "ifcExportExport", "Export").clicked()
+                    })
+                    .inner;
+                let closed = layout::button(ui, "ifcExportClose", "Close").clicked();
+                (exported, closed)
+            },
+        );
+        if previewed {
+            self.preview(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if exported {
+            self.export_file(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if closed {
+            self.hide();
+        }
     }
 }
 
@@ -1388,7 +1419,7 @@ impl IfcImportDialog {
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         ui.set_max_width(600.0);
         ui.horizontal(|ui| {
-            ui.label("File:");
+            layout::fixed_label(ui, "File", LABEL_WIDTH);
             if path_line(
                 ui,
                 "ifcImportFile",
@@ -1423,7 +1454,7 @@ impl IfcImportDialog {
         }
         let mut changed = false;
         ui.horizontal(|ui| {
-            ui.label("Bring in:");
+            layout::fixed_label(ui, "Bring in", LABEL_WIDTH);
             changed |= controls::check(
                 ui,
                 "ifcImportAlignments",
@@ -1451,7 +1482,7 @@ impl IfcImportDialog {
                 .changed();
         });
         ui.horizontal(|ui| {
-            ui.label("Place:");
+            layout::fixed_label(ui, "Place", LABEL_WIDTH);
             changed |= controls::check(
                 ui,
                 "ifcImportLocal",
@@ -1462,8 +1493,10 @@ impl IfcImportDialog {
             .changed();
         });
         // Moved to the origin, the data is no longer in the file's system.
-        ui.add_enabled_ui(!self.local, |ui| {
-            changed |= controls::check(
+        let indent = LABEL_WIDTH + ui.spacing().item_spacing.x;
+        layout::indented(ui, indent, |ui| {
+            ui.add_enabled_ui(!self.local, |ui| {
+                changed |= controls::check(
                 ui,
                 "ifcImportTakeCrs",
                 "Take the file's coordinate system when the project has none",
@@ -1474,9 +1507,10 @@ impl IfcImportDialog {
                  project takes the file's",
             )
             .changed();
+            });
         });
         ui.horizontal(|ui| {
-            ui.label("Curves within (m):");
+            layout::fixed_label(ui, "Curves within (m)", LABEL_WIDTH);
             changed |= controls::line(ui, "ifcImportTolerance", &mut self.tolerance)
                 .on_hover_text(
                     "How far a chorded curve - an arc in a polycurve, a transition other than the \
@@ -1488,7 +1522,7 @@ impl IfcImportDialog {
             self.option_changed();
         }
         ui.horizontal(|ui| {
-            ui.label("Command:");
+            layout::fixed_label(ui, "Command", LABEL_WIDTH);
             let line = self.line();
             command_field(ui, "ifcImportCommand", &line);
         });
@@ -1499,23 +1533,34 @@ impl IfcImportDialog {
         let check = self.check_text.clone();
         check_label(ui, "ifcImportCheck", &check, self.check_error);
         let import_live = self.check().is_empty();
-        ui.horizontal(|ui| {
-            if controls::button(ui, "ifcImportDescribe", "Describe")
-                .on_hover_text("Read the file and say what it holds; nothing is imported")
-                .clicked()
-            {
-                self.describe(&mut *host);
-                ui.ctx().request_repaint();
-            }
-            ui.add_enabled_ui(import_live, |ui| {
-                if controls::button(ui, "ifcImportImport", "Import").clicked() {
-                    self.import_file(&mut *host);
-                    ui.ctx().request_repaint();
-                }
-            });
-            if controls::button(ui, "ifcImportClose", "Close").clicked() {
-                self.hide();
-            }
-        });
+        // Describe at the left; Import, the primary, last at the right.
+        let (described, (imported, closed)) = layout::footer(
+            ui,
+            |ui| {
+                controls::button(ui, "ifcImportDescribe", "Describe")
+                    .on_hover_text("Read the file and say what it holds; nothing is imported")
+                    .clicked()
+            },
+            |ui| {
+                let imported = ui
+                    .add_enabled_ui(import_live, |ui| {
+                        layout::primary(ui, "ifcImportImport", "Import").clicked()
+                    })
+                    .inner;
+                let closed = layout::button(ui, "ifcImportClose", "Close").clicked();
+                (imported, closed)
+            },
+        );
+        if described {
+            self.describe(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if imported {
+            self.import_file(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if closed {
+            self.hide();
+        }
     }
 }

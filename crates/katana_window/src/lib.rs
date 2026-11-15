@@ -145,6 +145,7 @@ pub mod theme {
 
 // F0: the small top-level units every dialog uses.
 pub mod command_word;
+pub mod dialog_layout;
 pub mod format;
 pub mod project_folder;
 pub mod view_focus;

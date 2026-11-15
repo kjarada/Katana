@@ -37,6 +37,7 @@ use katana_math::numerics::RAD_TO_DEG;
 
 use super::dialog_support::{Followed, show_dialog};
 use super::form_widgets::describe;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -493,21 +494,25 @@ impl TextEditDialog {
             )
             .wrap(),
         );
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(self.editable, |ui| {
-                if controls::button(ui, "textEditRevert", "Revert")
-                    .on_hover_text("Throw the form's edits away")
-                    .clicked()
-                {
-                    self.revert_pressed = true;
-                }
-                if controls::button(ui, "textEditApply", "Apply")
+        // Drawn from the right: Apply, the primary, last.
+        let editable = self.editable;
+        let (applied, reverted) = layout::footer_buttons(ui, |ui| {
+            ui.add_enabled_ui(editable, |ui| {
+                let applied = layout::primary(ui, "textEditApply", "Apply")
                     .on_hover_text("Store what the form changed, as one undo step (TEXTEDIT)")
-                    .clicked()
-                {
-                    self.apply_pressed = true;
-                }
-            });
+                    .clicked();
+                let reverted = layout::button(ui, "textEditRevert", "Revert")
+                    .on_hover_text("Throw the form's edits away")
+                    .clicked();
+                (applied, reverted)
+            })
+            .inner
         });
+        if reverted {
+            self.revert_pressed = true;
+        }
+        if applied {
+            self.apply_pressed = true;
+        }
     }
 }

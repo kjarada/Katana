@@ -91,6 +91,7 @@ use super::symbol_library_model::{
 use crate::annotation::dialog_support::show_dialog;
 use crate::canvas::{Font, Image, TextMetrics};
 use crate::command_word::command_word;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, SpinRange, custom};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
@@ -102,6 +103,25 @@ use crate::theme::palette;
 
 const DIALOG: &str = "symbolLibraryDialog";
 const TITLE: &str = "Symbol Library";
+
+// The three columns' widths and the lists' height (the look of 2026-11-16): the groups, the grid
+// of five cells a row under its search and chips, and the preview and details; the lists 420 points tall (the grid's height
+// before), so the dialog keeps its title bar and footer on a 768-pixel screen.
+const GROUPS_WIDTH: f32 = 200.0;
+const CENTRE_WIDTH: f32 = 620.0;
+const DETAILS_WIDTH: f32 = 280.0;
+/// The search field over the grid.
+const SEARCH_WIDTH: f32 = 200.0;
+const LISTS_HEIGHT: f32 = 420.0;
+/// The search field and the chips over the grid, which the groups' list runs beside too.
+const GRID_HEADER_HEIGHT: f32 = 56.0;
+/// A grid cell's room under its picture: a caption of two lines.
+const CAPTION_HEIGHT: f32 = 40.0;
+
+/// The secondary text: what the grid's count line says it in.
+fn muted_colour() -> egui::Color32 {
+    palette::text_muted().to_egui()
+}
 
 /// The chips, in SymbolChip's order.
 const CHIP_LABELS: [&str; 5] = [
@@ -1635,9 +1655,12 @@ impl SymbolLibraryDialog {
         let side = SymbolGridModel::PICTURE_SIZE as f32;
         let amber = UNDEFINED_NAME_COLOUR.to_egui();
         let mut clicked = None;
+        // Exactly the centre column wide, so its cells wrap there and not at the dialog's room.
         let output = egui::ScrollArea::vertical()
             .id_salt("symbolGridScroll")
-            .max_height(420.0)
+            .max_height(LISTS_HEIGHT)
+            .max_width(CENTRE_WIDTH)
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     for row in 0..self.model.row_count() {
@@ -1648,7 +1671,14 @@ impl SymbolLibraryDialog {
                         let selected = self.selected.contains(&caption);
                         let missing = self.model.is_missing(row) == Some(true);
                         let tip = self.model.tool_tip(row).unwrap_or_default();
-                        ui.vertical(|ui| {
+                        // A cell of its own size, so the wrapping row knows it before placing it
+                        // and wraps at the column's edge (a child of unknown size never wrapped,
+                        // and the row ran on past the dialog's).
+                        let cell = egui::vec2(side + 44.0, side + CAPTION_HEIGHT);
+                        ui.allocate_ui_with_layout(
+                            cell,
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
                             // Room for a two-line caption under the picture.
                             ui.set_width(side + 44.0);
                             let (rect, _) = ui
@@ -1677,7 +1707,8 @@ impl SymbolLibraryDialog {
                             {
                                 clicked = Some(row);
                             }
-                        });
+                            },
+                        );
                     }
                 });
             });
@@ -1780,7 +1811,12 @@ impl SymbolLibraryDialog {
         ui.horizontal_top(|ui| {
             // Left: the groups.
             ui.vertical(|ui| {
-                ui.set_width(190.0);
+                ui.set_width(GROUPS_WIDTH);
+                egui::ScrollArea::vertical()
+                    .id_salt("symbolGroupsScroll")
+                    .max_height(LISTS_HEIGHT + GRID_HEADER_HEIGHT)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
                 let cells: Vec<[String; 1]> = self
                     .groups
                     .iter()
@@ -1811,11 +1847,16 @@ impl SymbolLibraryDialog {
                 {
                     self.events.push(Event::Tree(row));
                 }
+                    });
             });
+            // A gap, not a rule: a rule between columns is as tall as the room it is given.
+            ui.add_space(layout::SECTION_GAP);
 
             // Centre: search, chips, the grid.
             ui.vertical(|ui| {
-                ui.set_width(560.0);
+                ui.set_width(CENTRE_WIDTH);
+                // The search field short enough for the chips beside it in the column.
+                ui.spacing_mut().text_edit_width = SEARCH_WIDTH;
                 let bar = ui.vertical(|ui| self.filter_bar.ui(ui));
                 custom(
                     ui,
@@ -1826,13 +1867,26 @@ impl SymbolLibraryDialog {
                     self.events.push(Event::Filter);
                 }
                 self.grid_ui(ui, document);
-                controls::label(ui, "symbolCount", &self.count_label);
+                controls::label_as(
+                    ui,
+                    "symbolCount",
+                    &self.count_label,
+                    egui::Label::new(
+                        RichText::new(self.count_label.as_str()).color(muted_colour()),
+                    ),
+                );
             });
+            // A gap, not a rule: a rule between columns is as tall as the room it is given.
+            ui.add_space(layout::SECTION_GAP);
 
             // Right: preview, details, actions.
             ui.vertical(|ui| {
+                ui.set_width(DETAILS_WIDTH);
+                // The Use section's fields share their rows with a label and a button.
+                ui.spacing_mut().text_edit_width = DETAILS_WIDTH / 2.0;
+                ui.spacing_mut().combo_width = DETAILS_WIDTH / 2.0;
                 self.preview
-                    .ui(ui, "symbolPreview", drawing, egui::vec2(240.0, 160.0));
+                    .ui(ui, "symbolPreview", drawing, egui::vec2(DETAILS_WIDTH, 160.0));
                 ui.horizontal(|ui| {
                     ui.label("Plot scale");
                     let scales: Vec<String> = StylePreview::PLOT_SCALES
@@ -1880,8 +1934,9 @@ impl SymbolLibraryDialog {
                     ControlRecord::new("symbolDetails", ControlKind::Other),
                 );
 
-                let actions = ui.group(|ui| {
-                    ui.label("Use");
+                ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+                let actions = ui.vertical(|ui| {
+                    ui.strong("Use");
                     ui.horizontal(|ui| {
                         ui.label("Size");
                         ui.add_enabled_ui(self.actions.size, |ui| {
@@ -1988,27 +2043,31 @@ impl SymbolLibraryDialog {
                 DefinitionEdit::Delete,
             ),
         ];
-        ui.horizontal(|ui| {
-            for (name, label, tip, what) in doors {
-                let enabled = if what == DefinitionEdit::NewSymbol {
-                    self.actions.new_definition
-                } else {
-                    self.actions.defined
-                };
-                ui.add_enabled_ui(enabled, |ui| {
-                    if controls::button(ui, name, label)
-                        .on_hover_text(tip)
-                        .clicked()
-                    {
-                        self.events.push(Event::Door(what));
-                    }
-                });
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if controls::button(ui, "closeButton", "Close").clicked() {
-                    self.events.push(Event::Close);
+        let actions = &self.actions;
+        let events = &mut self.events;
+        let (_, close) = layout::footer(
+            ui,
+            |ui| {
+                for (name, label, tip, what) in doors {
+                    let enabled = if what == DefinitionEdit::NewSymbol {
+                        actions.new_definition
+                    } else {
+                        actions.defined
+                    };
+                    ui.add_enabled_ui(enabled, |ui| {
+                        if controls::button(ui, name, label)
+                            .on_hover_text(tip)
+                            .clicked()
+                        {
+                            events.push(Event::Door(what));
+                        }
+                    });
                 }
-            });
-        });
+            },
+            |ui| layout::button(ui, "closeButton", "Close").clicked(),
+        );
+        if close {
+            self.events.push(Event::Close);
+        }
     }
 }

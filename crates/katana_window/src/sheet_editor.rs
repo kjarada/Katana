@@ -139,6 +139,10 @@ use crate::viewport_widget::{KeyModifiers, MouseButton};
 // ---- constants ---------------------------------------------------------------------------------
 
 /// Logical pixels a millimetre, at the least and the most.
+/// The properties dock's width (the look of 2026-11-16; it was 300): the side panels' width.
+const PROPERTIES_WIDTH: f32 = 260.0;
+/// The sheet list's width: a sheet's thumbnail and its number, name and paper beside it.
+const SHEET_LIST_WIDTH: f32 = 220.0;
 const MINIMUM_ZOOM: f64 = 0.3;
 const MAXIMUM_ZOOM: f64 = 60.0;
 const HANDLE_PIXELS: f64 = 7.0;
@@ -2280,7 +2284,7 @@ impl GenerateDialog {
         let line = self.build_line(plan_view);
         let (text, colour) = match &line {
             Ok(line) => (line.clone(), None),
-            Err(error) => (error.message.clone(), Some(egui::Color32::from_rgb(0xd0, 0x50, 0x50))),
+            Err(error) => (error.message.clone(), Some(crate::theme::error().to_egui())),
         };
         let mut rich = egui::RichText::new(text.as_str());
         if let Some(colour) = colour {
@@ -4230,7 +4234,7 @@ impl SheetEditor {
         for problem in &self.canvas.last_stats().problems {
             if let Some(rest) = problem.strip_prefix(&prefix) {
                 ui.colored_label(
-                    egui::Color32::from_rgb(0xd0, 0x50, 0x50),
+                    crate::theme::error().to_egui(),
                     rest.trim_start(),
                 );
             }
@@ -4403,7 +4407,7 @@ impl SheetEditor {
             edit(&mut self.queued, "SHEET_FIELD", Box::new(|s: &mut Sheet| s.fields.clear()));
         }
         for problem in &self.canvas.last_stats().problems {
-            ui.colored_label(egui::Color32::from_rgb(0xd0, 0x50, 0x50), problem.as_str());
+            ui.colored_label(crate::theme::error().to_egui(), problem.as_str());
         }
     }
 
@@ -5013,12 +5017,19 @@ impl SheetEditor {
                 if !self.checks.is_visible() {
                     return;
                 }
-                ui.horizontal(|ui| {
-                    ui.strong(self.checks.window_title());
-                    if ui.small_button("\u{d7}").clicked() {
-                        self.checks.close();
-                    }
-                });
+                // The dock's compact header: its title, and its close button at the right.
+                let title = String::from(self.checks.window_title());
+                egui::Sides::new().show(
+                    ui,
+                    |ui| {
+                        ui.strong(title.as_str());
+                    },
+                    |ui| {
+                        if ui.small_button("\u{d7}").clicked() {
+                            self.checks.close();
+                        }
+                    },
+                );
                 self.checks.ui(ui);
             });
         if let Some(finding) = self.checks.take_activated() {
@@ -5026,13 +5037,15 @@ impl SheetEditor {
         }
         egui::Panel::left("sheetListDock")
             .resizable(false)
-            .exact_size(180.0)
+            .exact_size(SHEET_LIST_WIDTH)
             .show(ui, |ui| {
             self.list_ui(ui, &*host);
         });
+        // About the window's side panels' width (the look of 2026-11-16; it was 300): a form's
+        // label and field.
         egui::Panel::right("sheetPropertiesDock")
             .resizable(false)
-            .exact_size(300.0)
+            .exact_size(PROPERTIES_WIDTH)
             .show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("sheetProperties").show(ui, |ui| {
                 self.properties_ui(ui, &*host);
