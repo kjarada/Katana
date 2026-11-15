@@ -1,0 +1,12 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "package",
+            "displayName": "Katana's packages, from the programs cargo built (KATANA_PROGRAMS)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/../build/package"
+        }
+    ]
+}

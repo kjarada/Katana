@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Producer of Katana's update assets: the manifest, the update zip and, with a key, the signature.
 
-Design: docs/update.md; the contract is include/katana/update/manifest.hpp, paths.hpp and
-signature.hpp. For one release and one target token (win64 win-arm64 linux-x86_64 linux-aarch64
+Design: docs/update.md; the contract is rust/crates/katana_update/src/manifest.rs, paths.rs and
+signature.rs. For one release and one target token (win64 win-arm64 linux-x86_64 linux-aarch64
 macos-arm64) it reads the unpacked install tree (the folder that holds bin/ and share/) and writes
 
     <out>/Katana-update-<token>.json            the manifest: UTF-8, LF, sorted keys, files sorted

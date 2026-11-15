@@ -4,12 +4,13 @@
 #
 # A Katana project - the directory the storage layer writes: project.db,
 # backups/, terrain/, pointcloud/, assets/, cache/ - as text, read with
-# Python's own sqlite3 module. It is neither the C++ storage layer nor its
-# Rust port, so that when step 3's round-trip gate compares a project the C++
-# saved with one the Rust saved (docs/rust.md, "The order of the work";
-# rust/crates/katana_app/tests/round_trip.rs), the judge is not one of the two
-# programs being judged: a reader shared by both would agree with a writer
-# shared by both, mistakes included.
+# Python's own sqlite3 module, and not the storage layer, so that two saves
+# compared through it are judged by a reader that is not the writer: a reader
+# shared with the writer would agree with it, mistakes included. It was made
+# for step 3's round-trip gate, which compared what the C++ and the Rust
+# programs saved (docs/rust.md, "The order of the work"); the gate went with
+# the C++ on 2026-11-15, and the dump stays as the way to compare two
+# projects by their content.
 #
 # What is dumped, in this order:
 #   * the directory: every folder and file under it, by path, with each

@@ -1,45 +1,45 @@
 # Makes an installed Linux or macOS tree self-contained: every library the
-# programs and Qt's plugins load that comes from the toolchain prefix
-# (tools/setup_linux_toolchain.py - conda-forge's GCC or clang, Qt, GDAL, PDAL,
-# PROJ), copied into lib/, and the data GDAL, PROJ and libcurl read at run time.
-# The Unix counterpart of KatanaDeploy.cmake.in, run by `cmake --install` (and
-# so by the `bundle` and `package` targets). Configured with @ONLY: every ${...}
-# is evaluated when the script RUNS and every @...@ at configure time.
+# programs load that comes from the toolchain prefix
+# (tools/setup_linux_toolchain.py - conda-forge's GDAL, PDAL, PROJ, SQLite,
+# libcurl and the C++ runtime the native shims link), copied into lib/, the
+# programs' run-time path pointed at it, and the data GDAL, PROJ and libcurl
+# read at run time. The Unix counterpart of KatanaDeploy.cmake.in, run by
+# `cmake --install` (and so by the `bundle` and `package` targets). Configured
+# by cmake/KatanaPackaging.cmake with @ONLY: every ${...} is evaluated when the
+# script RUNS and every @...@ at configure time.
 #
-# The tree MIRRORS the toolchain prefix, which is what makes it work with
-# nothing rewritten:
+# The tree MIRRORS the toolchain prefix, which is what makes it work:
 #
-#   bin/katana, katana_cli, katana_mcp   RPATH $ORIGIN/../lib (@loader_path on macOS);
-#       katana_updater (Linux only)      the same RPATH, from CMAKE_INSTALL_RPATH
-#   bin/qt.conf                          Qt's plugins, relative to bin/
+#   bin/katana, katana_cli, katana_mcp   run-time path $ORIGIN/../lib, set below
+#       katana_updater (Linux only)      (cargo links them with the prefix's lib/)
 #   lib/*.so* or *.dylib                 as in the prefix, where each library's
-#                                        own RPATH ($ORIGIN, @loader_path)
+#                                        own run-time path ($ORIGIN, @loader_path)
 #                                        already finds the others
-#   lib/qt6/plugins/<kind>/...           as in the prefix, where each plugin's
-#                                        RPATH $ORIGIN/../../.. is lib/
 #   share/proj, share/gdal               found beside libproj and libgdal
-#   ssl/cacert.pem                       found beside libcurl
-#                                        (core/library_data.hpp,
-#                                        gdal_adapter.cpp)
+#   ssl/cacert.pem                       found beside libcurl (katana_core's
+#                                        library_data)
 #
 # On macOS the tree is Katana.app, with the same relative layout under
 # Contents under Apple's names, because code signing seals a bundle only
 # when code and data are where it expects them:
 #
 #   Contents/Info.plist                  what Finder reads: the program, the icon
-#   Contents/MacOS/katana, ...           bin/, RPATH @loader_path/../Frameworks
-#   Contents/Frameworks/                 lib/, plugins in Frameworks/qt6/plugins
-#   Contents/Resources/qt.conf           where Qt looks in a bundle; relative
-#                                        paths in it are relative to Contents
+#   Contents/MacOS/katana, ...           bin/, run-time path @loader_path/../Frameworks
+#   Contents/Frameworks/                 lib/
 #   Contents/Resources/share, ssl        the data, found beside Frameworks
-#                                        (core::dataBesideLibraryFile)
 #   Contents/Resources/katana.icns       the icon, made here from katana.png
 #
-# Why not the distribution's libraries: Katana needs GCC 15 or later, CGAL 6
-# and PROJ 9.5, which no long-term-support distribution ships (docs/building.md,
-# "Linux"), so the libraries it is built against exist only in the toolchain
+# Why not the distribution's libraries: the libraries the crates are built
+# against - PROJ 9.5 or later among them, which no long-term-support
+# distribution ships (docs/building.md, "Linux") - exist only in the toolchain
 # prefix, and a tree that borrowed them from there would run only on the
 # machine that built it.
+#
+# Until 2026-11-15 this also copied Qt's plugins and wrote qt.conf, and the
+# programs' run-time path came from CMake's install(TARGETS). The window is
+# egui and wgpu now, which load only the system's graphics and windowing
+# libraries, and the programs are cargo's, installed as files: their run-time
+# path is rewritten here (step 4).
 
 if(POLICY CMP0207)
     cmake_policy(SET CMP0207 NEW)
@@ -52,27 +52,23 @@ if(_bundle)
     set(_contents "${_prefix}/${_bundle}/Contents")
     set(_lib "${_contents}/Frameworks")
     set(_data "${_contents}/Resources")
-    set(_qt_conf "${_contents}/Resources/qt.conf")
-    set(_qt_conf_text "[Paths]\nPlugins=Frameworks/qt6/plugins\n")
+    set(_runpath "@loader_path/../Frameworks")
 else()
     set(_lib "${_prefix}/lib")
     set(_data "${_prefix}")
-    # Read relative to the program's own directory.
-    set(_qt_conf "${_bin}/qt.conf")
-    set(_qt_conf_text "[Paths]\nPrefix=..\nPlugins=lib/qt6/plugins\n")
+    set(_runpath "$ORIGIN/../lib")
 endif()
 set(_toolchain "@KATANA_TOOLCHAIN_PREFIX@")
-set(_qt_plugins "@KATANA_QT_PLUGIN_DIR@")
+set(_programs "@KATANA_PROGRAMS@")
 set(_apple "@APPLE@")
 
 # Libraries that belong to the machine it RUNS on, never shipped, though the
 # toolchain prefix has copies: the C library (a copy of it cannot be loaded
 # beside the system's), the graphics driver's GL, EGL and Vulkan loaders, and
 # the X11 and font-configuration libraries, whose configuration files are
-# found by a path compiled in for the toolchain prefix - a shipped fontconfig
-# reads no fonts.conf and Qt draws no text. The set follows AppImage's
-# excludelist (github.com/AppImageCommunity/pkg2appimage, "excludelist"), for
-# the same reasons. Every Linux desktop has them.
+# found by a path compiled in for the toolchain prefix. The set follows
+# AppImage's excludelist (github.com/AppImageCommunity/pkg2appimage,
+# "excludelist"), for the same reasons. Every Linux desktop has them.
 set(_system_libraries
     "^ld-linux" "^libc\\.so" "^libm\\.so" "^libmvec\\.so" "^libdl\\.so" "^libpthread\\.so"
     "^librt\\.so" "^libutil\\.so" "^libresolv\\.so" "^libanl\\.so"
@@ -80,49 +76,24 @@ set(_system_libraries
     "^libGLESv2\\.so" "^libdrm\\.so" "^libgbm\\.so" "^libvulkan\\.so"
     "^libX11\\.so" "^libX11-xcb\\.so" "^libxcb\\.so" "^libfontconfig\\.so" "^libfreetype\\.so")
 
-# --- 1. Qt's plugins -------------------------------------------------------------
-# Loaded by name at start-up, so no scan of the executables finds them: without
-# platforms/ the window dies with "no Qt platform plugin could be initialized".
-# The offscreen platform is the headless one (`katana --screenshot`, `--plot`).
-set(_plugin_kinds platforms platformthemes platforminputcontexts imageformats iconengines
-                  xcbglintegrations egldeviceintegrations wayland-decoration-client
-                  wayland-graphics-integration-client wayland-shell-integration
-                  tls styles printsupport generic)
-set(_modules "")
-if(EXISTS "${_bin}/katana" AND IS_DIRECTORY "${_qt_plugins}")
-    foreach(_kind IN LISTS _plugin_kinds)
-        if(IS_DIRECTORY "${_qt_plugins}/${_kind}")
-            file(COPY "${_qt_plugins}/${_kind}" DESTINATION "${_lib}/qt6/plugins")
-            file(GLOB _found "${_qt_plugins}/${_kind}/*.so" "${_qt_plugins}/${_kind}/*.dylib")
-            list(APPEND _modules ${_found})
-        endif()
-    endforeach()
-    # Qt finds its plugins through qt.conf; without it Qt asks the prefix
-    # compiled into it, which is the toolchain's on the machine that built it.
-    file(WRITE "${_qt_conf}" "${_qt_conf_text}")
-endif()
-
-# --- 2. Every library they load ----------------------------------------------------
-# What is scanned is the BUILD tree's programs and the prefix's own plugins,
-# not the copies just installed: those still carry the RPATH naming the
-# prefix's lib/, so every dependency resolves the way the loader resolves it.
-# The installed copies' RPATH names the lib/ being filled now, and a scan of
-# them resolves everything through DIRECTORIES instead, with a warning for
-# each of a hundred libraries.
+# --- 1. Every library they load ----------------------------------------------------
+# What is scanned is cargo's programs in KATANA_PROGRAMS, not the copies just
+# installed: those still carry the run-time path naming the prefix's lib/, so
+# every dependency resolves the way the loader resolves it. katana_updater is
+# the fourth: installed on Linux only (macOS updating is check-and-notify,
+# cmake/KatanaPackaging.cmake), so on macOS the EXISTS test below skips it. A
+# program named nowhere in this list is installed with its libraries not
+# copied; tools/check_install_rules.cmake holds this one line to the programs
+# that are installed.
 set(_executables "")
-# katana_updater is the fourth: installed on Linux only (macOS updating is check-and-notify,
-# cmake/KatanaPackaging.cmake), so on macOS the EXISTS test below skips it. A program named
-# nowhere in this list is installed with its libraries not copied;
-# tools/check_install_rules.cmake holds this one line to the programs that are installed.
 foreach(_program katana katana_cli katana_mcp katana_updater)
-    if(EXISTS "${_bin}/${_program}" AND EXISTS "@CMAKE_BINARY_DIR@/bin/${_program}")
-        list(APPEND _executables "@CMAKE_BINARY_DIR@/bin/${_program}")
+    if(EXISTS "${_bin}/${_program}" AND EXISTS "${_programs}/${_program}")
+        list(APPEND _executables "${_programs}/${_program}")
     endif()
 endforeach()
 
 file(GET_RUNTIME_DEPENDENCIES
     EXECUTABLES ${_executables}
-    MODULES ${_modules}
     RESOLVED_DEPENDENCIES_VAR _resolved
     UNRESOLVED_DEPENDENCIES_VAR _unresolved
     CONFLICTING_DEPENDENCIES_PREFIX _conflict
@@ -161,8 +132,8 @@ endforeach()
 message(STATUS "Katana deploy: ${_copied} runtime libraries copied into ${_lib}")
 
 # Unresolved names that are the system's are expected (the scan does not look
-# in /usr/lib for a program whose RPATH does not name it); anything else is a
-# tree that starts here and fails elsewhere, so it is named now.
+# in /usr/lib for a program whose run-time path does not name it); anything
+# else is a tree that starts here and fails elsewhere, so it is named now.
 set(_missing "")
 foreach(_name IN LISTS _unresolved)
     set(_expected FALSE)
@@ -180,7 +151,7 @@ if(_missing)
     message(WARNING "Katana deploy: these dependencies were NOT found and are not bundled:\n  ${_text}")
 endif()
 
-# --- 3. Data read at run time -------------------------------------------------------
+# --- 2. Data read at run time -------------------------------------------------------
 foreach(_set proj gdal)
     if(IS_DIRECTORY "${_toolchain}/share/${_set}")
         file(COPY "${_toolchain}/share/${_set}" DESTINATION "${_data}/share")
@@ -205,7 +176,7 @@ else()
                     "no https:// request will be trusted")
 endif()
 
-# --- 4. macOS: what makes Katana.app an application ------------------------------------
+# --- 3. macOS: what makes Katana.app an application ------------------------------------
 if(_bundle AND EXISTS "${_bin}/katana")
     file(COPY_FILE "@CMAKE_BINARY_DIR@/Info.plist" "${_contents}/Info.plist")
     # The icon, from the same 256-pixel image the window uses: an icon set at
@@ -219,7 +190,7 @@ if(_bundle AND EXISTS "${_bin}/katana")
         string(REPLACE ":" ";" _icon "${_icon}")
         list(GET _icon 0 _name)
         list(GET _icon 1 _pixels)
-        execute_process(COMMAND sips -z ${_pixels} ${_pixels} "@PROJECT_SOURCE_DIR@/resources/katana.png"
+        execute_process(COMMAND sips -z ${_pixels} ${_pixels} "@KATANA_ROOT@/resources/katana.png"
                                 --out "${_iconset}/icon_${_name}.png"
             RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_VARIABLE _err)
         if(NOT _rc EQUAL 0)
@@ -233,16 +204,48 @@ if(_bundle AND EXISTS "${_bin}/katana")
     endif()
 endif()
 
+# --- 4. The installed programs' run-time path -------------------------------------------
+# cargo links each program with the prefix's lib/ as its run-time path
+# (-Wl,-rpath,<prefix>/lib, from tools/build_visible.sh and the release jobs),
+# which is what lets the tests and the scan above find GDAL without
+# LD_LIBRARY_PATH. An installed copy must find the lib/ beside it instead, and
+# must not name a folder of the machine that built it: an absolute run-time
+# path to a folder that does not exist on the user's machine is one that
+# anybody who can make that folder decides the libraries of. So the prefix's
+# entry is replaced by the relative one. On Linux in place, by CMake's own ELF
+# editor (file(RPATH_CHANGE), which install(TARGETS) uses; the new path is
+# shorter than the prefix's, as the editor needs); on macOS by
+# install_name_tool, whose change also invalidates the signature that step 5
+# makes again. An entry that is not there stops the package: the programs were
+# then built without the prefix's run-time path, and the scan above found
+# their libraries by its DIRECTORIES alone.
+foreach(_name katana katana_cli katana_mcp katana_updater)
+    if(NOT EXISTS "${_bin}/${_name}")
+        continue()
+    endif()
+    if(_apple)
+        execute_process(COMMAND install_name_tool -rpath "${_toolchain}/lib" "${_runpath}" "${_bin}/${_name}"
+            RESULT_VARIABLE _rc ERROR_VARIABLE _err)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "install_name_tool could not point ${_name} at ${_runpath} in place of "
+                                "${_toolchain}/lib (${_rc}): ${_err}")
+        endif()
+    else()
+        file(RPATH_CHANGE FILE "${_bin}/${_name}" OLD_RPATH "${_toolchain}/lib" NEW_RPATH "${_runpath}")
+    endif()
+endforeach()
+message(STATUS "Katana deploy: the programs' run-time path is ${_runpath}")
+
 # --- 5. macOS: a signature that matches ------------------------------------------------
 # Apple silicon refuses to run code whose signature does not match it, and
-# `cmake --install` has just rewritten the programs' load commands (their
-# RPATH) after the linker signed them. Ad hoc, as the linker did: a
-# distributable signature needs a Developer ID, which the build does not have
-# (cmake/KatanaSign.cmake applies one when packaging, if there is one).
+# step 4 has just rewritten the programs' load commands after the linker
+# signed them. Ad hoc, as the linker did: a distributable signature needs a
+# Developer ID, which the build does not have (cmake/KatanaSign.cmake applies
+# one when packaging, if there is one).
 #
 # In a bundle, every library is signed afresh too, and the bundle last: sealing
 # it records each nested library's signature and every resource's hash, and
-# refuses a library whose signature the copy or the install left stale.
+# refuses a library whose signature the copy left stale.
 function(_katana_sign_ad_hoc)
     execute_process(COMMAND codesign --force --sign - ${ARGN}
         RESULT_VARIABLE _rc ERROR_VARIABLE _err)

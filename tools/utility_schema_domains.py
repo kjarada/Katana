@@ -2,7 +2,7 @@
 # tools/utility_schema_domains.py <Utility-Schema-and-Specification.xlsx> <out.csv>
 #
 # Makes the delivery-schema file `UTILITY CHECK ... SCHEMA <file>` reads
-# (include/katana/survey/subsurface/delivery_schema.hpp) from YOUR copy of the
+# (rust/crates/katana_survey/src/subsurface/delivery_schema.rs) from YOUR copy of the
 # TfNSW Utility Schema and Specification workbook (DMS-FT-493).
 #
 # Why a tool and not a file in the repository: the workbook is TfNSW's, under

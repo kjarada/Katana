@@ -4,14 +4,16 @@
 # dependencies are the layers that table allows it, so the layering rule holds
 # by construction: a crate cannot name what it does not depend on.
 # tools/check_rust_layering.py (the `rust_layering` test) keeps the crates and
-# the table in step while both exist.
+# the table in step.
 [workspace]
 resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-# Not the product's version: the C++ build carries that (CMakeLists.txt) until a
-# Rust program ships, and nothing here is published.
+# Not the product's version, which is written once, in project(Katana VERSION ...)
+# of the root CMakeLists.txt: katana_update's build.rs reads it from there, as
+# the release workflow and the packaging do (docs/release.md). Nothing here is
+# published.
 version = "0.0.0"
 edition = "2024"
 # The older of the two compilers the port is built with: 1.98.1 from the

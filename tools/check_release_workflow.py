@@ -19,8 +19,13 @@ repository noticed if a later edit undid it. What it holds, each refusal naming 
   4. The environment `release` is named once, by the job `publish`; the secret UPDATE_SIGNING_KEY is
      read once, in that job, and no job inherits secrets.
   5. The Publish job waits for the Version job and both build jobs, and runs only for a tag.
-  6. Every configure step passes -DKATANA_REQUIRE_UPDATE_KEYS=ON (which keeps a release from being built
-     with keys nobody holds), -DKATANA_UPDATE_REPO and -DKATANA_UPDATE_SEQUENCE.
+  6. Every configure step - the packaging project's (packaging/CMakeLists.txt, configured with its preset),
+     one in each build job - passes -DKATANA_REQUIRE_UPDATE_KEYS=ON (which refuses programs built with keys
+     nobody holds), -DKATANA_UPDATE_REPO (which refuses programs built for another repository) and
+     -DKATANA_UPDATE_SEQUENCE. Until 2026-11-15 the configure was the C++ build's, which compiled them in;
+     the programs are cargo's now, and the packaging reads back what their build was given
+     (cmake/KatanaPackaging.cmake). The test runner's configure (`cmake -S . -B ...`) packages nothing
+     and is not one of them.
   7. No script is built from text a person typed when starting the run: a `run:` holds no
      ${{ inputs.* }}, ${{ github.event.* }} or ${{ github.head_ref }}; they go in through `env:`.
   8. What an update leaves alone (UPDATE_SEED, UPDATE_EXCLUDE, UPDATE_EXCLUDE_LINUX) is what
