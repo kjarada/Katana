@@ -13,7 +13,7 @@ mod view_chrome {
     use egui::{Color32, Rect};
     use katana_cad::view_set::ViewId;
     use katana_cad::viewport_layout::{LayoutKind, ViewKind};
-    use katana_window::dock_chrome::{BAR_HEIGHT, DockTitleBar, TITLE_GAP, TITLE_ROOM};
+    use katana_window::dock_chrome::{BAR_HEIGHT, BUTTON_SIZE, DockTitleBar, TITLE_GAP, TITLE_ROOM};
     use katana_window::drive::registry::ControlKind;
     use katana_window::view_workspace::dock_name;
 
@@ -74,13 +74,13 @@ mod view_chrome {
     /// What a plan view's bar should show of the three, worked from the rule DockTitleBar::add_tool
     /// states: Zoom to Selection (priority 2), then In and Out (1, a pair), each only while it fits
     /// beside the bar's least width with the title left the room to be read whole - its text's
-    /// width and TITLE_GAP, from the title's least (24) to TITLE_ROOM. Each tool is 22 and the
-    /// row's 1 of spacing.
+    /// width and TITLE_GAP, from the title's least (24) to TITLE_ROOM. Each tool is BUTTON_SIZE (20
+    /// since the design of 2026-11-16; the C++'s 22) and the row's 1 of spacing.
     fn zoom_tools_by_the_rule(bar: &DockTitleBar, width: f32, text: f32) -> Vec<String> {
         const TITLE_LEAST: f32 = 24.0;
         let title_room = (text + TITLE_GAP).clamp(TITLE_LEAST, TITLE_ROOM);
         let room = width - bar.minimum_width() - (title_room - TITLE_LEAST);
-        const TOOL: f32 = 22.0 + 1.0;
+        const TOOL: f32 = BUTTON_SIZE + 1.0;
         if room < TOOL {
             return Vec::new();
         }

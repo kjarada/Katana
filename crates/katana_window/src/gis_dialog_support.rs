@@ -3,7 +3,7 @@
 
 use egui::Ui;
 
-use crate::drive::button;
+use crate::drive::{button, primary};
 
 /// What the OK and Cancel row did this frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -26,12 +26,17 @@ pub fn ok_cancel_names(dialog: &str) -> (String, String) {
 /// for the dialog whose object name is `dialog`.
 pub fn ok_cancel(ui: &mut Ui, dialog: &str, ok_text: &str, ok_enabled: bool) -> OkCancel {
     let (run, cancel) = ok_cancel_names(dialog);
-    ui.horizontal(|ui| {
-        let accepted = ui
-            .add_enabled_ui(ok_enabled, |ui| button(ui, &run, ok_text).clicked())
-            .inner;
-        let rejected = button(ui, &cancel, "Cancel").clicked();
-        OkCancel { accepted, rejected }
-    })
-    .inner
+    // At the right: Cancel, then OK - the dialog's act - last, in the accent.
+    crate::shell::dialog::button_row(
+        ui,
+        |_| {},
+        |ui| {
+            let rejected = button(ui, &cancel, "Cancel").clicked();
+            let accepted = ui
+                .add_enabled_ui(ok_enabled, |ui| primary(ui, &run, ok_text).clicked())
+                .inner;
+            OkCancel { accepted, rejected }
+        },
+    )
+    .1
 }

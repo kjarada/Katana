@@ -43,6 +43,7 @@ use super::road_dialog_support::{
     word,
 };
 use crate::customisation::document_watcher::DocumentWatcher;
+use crate::dialog_layout as layout;
 use crate::drive::controls::check;
 use crate::host::Host;
 use crate::shell::dialog::DialogFrame;
@@ -326,11 +327,11 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, "corridorQuantitiesClose", "Close", "Close the dialog").clicked() {
-                self.close = true;
-            }
-        });
+        if layout::footer_buttons(ui, |ui| {
+            button(ui, "corridorQuantitiesClose", "Close", "Close the dialog").clicked()
+        }) {
+            self.close = true;
+        }
     }
 }
 

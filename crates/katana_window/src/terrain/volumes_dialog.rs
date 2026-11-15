@@ -62,14 +62,14 @@ use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{
     Choice, LineOptions, SpinRange, TextOptions, button, check, choice, label_as, line_with,
-    radio, spin, tabs, text_with,
+    primary, radio, spin, tabs, text_with,
 };
 use crate::geo::geo_dialog_support::line_word;
 use crate::geo::terrain_dialog_parts::{Framed, WordChoice, host_views, row, show_framed};
 use crate::host::{Host, VerbOutcome};
 use crate::icons::{IconMode, show_icon};
 use crate::ifc_dialogs::get_save_file_name;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::offstage;
 use crate::theme::palette;
 
@@ -1353,8 +1353,7 @@ impl VolumesDialog {
 
     /// The factors, applied in the reply only.
     fn factors(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Bulk (cut x):");
+        crate::shell::dialog::labelled(ui, "Bulk (cut x):", |ui| {
             spin(ui, "volumesBulk", &mut self.bulk, FACTOR).on_hover_text(
                 "Multiplies the cut in the reply (bank to loose, say); never the surfaces",
             );
@@ -1365,25 +1364,27 @@ impl VolumesDialog {
         });
     }
 
-    /// The line as it will run, and Measure.
+    /// The line as it will run, and Measure - the dialog's act, in the accent.
     fn command_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
         let made = self.line();
         let (mut shown, tip) = match &made {
             Ok(line) => (line.clone(), String::from("The line Measure runs")),
             Err(error) => (String::new(), error.message.clone()),
         };
-        ui.horizontal(|ui| {
+        dialog::labelled(ui, "Command:", |ui| {
+            let width = dialog::beside_a_button(ui, "Measure");
             line_with(
                 ui,
                 "volumesCommand",
                 &mut shown,
                 LineOptions {
                     read_only: true,
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
             .on_hover_text(tip);
-            if button(ui, "volumesRun", "Measure").clicked() {
+            if primary(ui, "volumesRun", "Measure").clicked() {
                 *asked = Some(Asked::Measure);
             }
         });
@@ -1404,7 +1405,8 @@ impl VolumesDialog {
     }
 
     fn file_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
-        ui.horizontal(|ui| {
+        dialog::labelled(ui, "Results:", |ui| {
+            let width = dialog::beside_buttons(ui, &["Copy", "Browse...", "Save CSV"]);
             if button(ui, "volumesCopy", "Copy")
                 .on_hover_text("The table on the clipboard, tab-separated with its header")
                 .clicked()
@@ -1417,6 +1419,7 @@ impl VolumesDialog {
                 &mut self.csv_path,
                 LineOptions {
                     placeholder: "file.csv",
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
@@ -1438,14 +1441,18 @@ impl VolumesDialog {
     }
 
     fn map_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
-        ui.horizontal(|ui| {
-            ui.label("Map name:");
+        dialog::labelled(ui, "Map name:", |ui| {
+            // The field leaves the button and its icon their room.
+            let width = dialog::beside_a_button(ui, "Make Cut/Fill Map")
+                - 16.0
+                - ui.spacing().item_spacing.x;
             line_with(
                 ui,
                 "volumesMapName",
                 &mut self.map_name,
                 LineOptions {
                     placeholder: "top-base",
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
@@ -1466,20 +1473,22 @@ impl VolumesDialog {
     }
 
     fn envelope_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
-        ui.horizontal(|ui| {
+        dialog::labelled(ui, "Envelope:", |ui| {
+            ui.spacing_mut().combo_width = ENVELOPE_SIDE_WIDTH;
             self.envelope_side
                 .ui(ui, "volumesEnvelopeSide")
                 .on_hover_text(
                     "Which of the two surfaces the envelope follows where they differ: the higher \
                      (the finished ground over an as-built, say) or the lower",
                 );
-            ui.label("Envelope name:");
+            let width = dialog::beside_a_button(ui, "Make Envelope");
             line_with(
                 ui,
                 "volumesEnvelopeName",
                 &mut self.envelope_name,
                 LineOptions {
                     placeholder: "base-top-max",
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
@@ -1497,6 +1506,9 @@ impl VolumesDialog {
     }
 }
 
+/// The width of the envelope's Higher / Lower choice, beside its name.
+const ENVELOPE_SIDE_WIDTH: f32 = 96.0;
+
 impl Framed for VolumesDialog {
     fn frame_mut(&mut self) -> &mut DialogFrame {
         &mut self.frame
@@ -1505,13 +1517,17 @@ impl Framed for VolumesDialog {
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let mut asked = None;
         self.pages(ui);
+        ui.add_space(dialog::GROUP_GAP);
         self.boundary_group(ui);
+        ui.add_space(dialog::GROUP_GAP);
         self.factors(ui);
         self.command_row(ui, &mut asked);
+        ui.add_space(dialog::GROUP_GAP);
         self.results(ui);
         self.file_row(ui, &mut asked);
         self.map_row(ui, &mut asked);
         self.envelope_row(ui, &mut asked);
+        ui.add_space(dialog::GROUP_GAP);
         let colour = if self.status_is_error {
             palette::error()
         } else {
@@ -1554,9 +1570,11 @@ impl Framed for VolumesDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        let close = ui
-            .horizontal(|ui| button(ui, "volumesClose", "Close").clicked())
-            .inner;
+        let ((), close) = dialog::button_row(
+            ui,
+            |_| {},
+            |ui| button(ui, "volumesClose", "Close").clicked(),
+        );
         if close {
             self.hide();
         }

@@ -508,7 +508,7 @@ impl ProjectCrsDialog {
             &mut self.search,
             LineOptions {
                 placeholder: "Search: mga 56, gda2020, utm 55s, 27700 ...",
-                width: Some(520.0),
+                width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
         )
@@ -520,15 +520,15 @@ impl ProjectCrsDialog {
         // A place to suggest systems for, as CRS SUGGEST lon,lat does: the one the dialog was
         // opened with, or else the drawing's centre when the project's system can say where that
         // is.
-        ui.horizontal(|ui| {
-            ui.label("Suggest for a place:");
+        crate::shell::dialog::labelled(ui, "Suggest for a place:", |ui| {
+            let width = crate::shell::dialog::beside_a_button(ui, "Suggest");
             let place = controls::line_with(
                 ui,
                 "projectCrsPlace",
                 &mut self.place_text,
                 LineOptions {
                     placeholder: "longitude, latitude - e.g. 151.21, -33.87",
-                    width: Some(260.0),
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             );
@@ -548,7 +548,7 @@ impl ProjectCrsDialog {
             "projectCrsText",
             &mut self.text,
             LineOptions {
-                width: Some(520.0),
+                width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
         )
@@ -666,23 +666,33 @@ impl ProjectCrsDialog {
 
     /// Set, Cancel and Local Coordinates: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
-            if controls::button(ui, "projectCrsApply", "Set").clicked() && self.apply(&mut *host) {
+        // Local Coordinates at the left; Cancel, then Set - the dialog's act, in the accent - at the
+        // right.
+        let (clear, (cancel, set)) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
+                controls::button(ui, "projectCrsClear", "Local Coordinates")
+                    .on_hover_text("No coordinate system: the drawing's own grid")
+                    .clicked()
+            },
+            |ui| {
+                let cancel = controls::button(ui, "projectCrsCancel", "Cancel").clicked();
+                let set = controls::primary(ui, "projectCrsApply", "Set").clicked();
+                (cancel, set)
+            },
+        );
+        if set && self.apply(&mut *host) {
+            self.accept();
+        }
+        if cancel {
+            self.reject();
+        }
+        if clear {
+            self.set_text("");
+            if self.apply(&mut *host) {
                 self.accept();
             }
-            if controls::button(ui, "projectCrsCancel", "Cancel").clicked() {
-                self.reject();
-            }
-            if controls::button(ui, "projectCrsClear", "Local Coordinates")
-                .on_hover_text("No coordinate system: the drawing's own grid")
-                .clicked()
-            {
-                self.set_text("");
-                if self.apply(&mut *host) {
-                    self.accept();
-                }
-            }
-        });
+        }
     }
 }
 

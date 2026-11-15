@@ -25,8 +25,9 @@ use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 
 use super::geo_workbench::started_job;
-use crate::drive::{LineOptions, TextOptions, button, label_as, line_with, text_with};
+use crate::drive::{LineOptions, TextOptions, button, label_as, line_with, primary, text_with};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
+use crate::shell::dialog;
 use crate::theme::palette;
 
 /// `text` as one word of a line, as the command line reads it: double-quoted when it holds a blank
@@ -285,8 +286,7 @@ impl GeoRunPanel {
         let mut finished = self.poll();
         let command_name = self.name("Command");
         let placeholder = self.placeholder.clone();
-        ui.horizontal(|ui| {
-            ui.label("Command:");
+        dialog::labelled(ui, "Command:", |ui| {
             line_with(
                 ui,
                 &command_name,
@@ -313,13 +313,17 @@ impl GeoRunPanel {
         };
         let ready = self.ready;
         let offers_preview = self.preview;
-        let (preview_clicked, run_clicked) = ui
-            .horizontal(|ui| {
+        // The status at the left, Preview and Run - the panel's act, in the accent - at the right.
+        let ((), (preview_clicked, run_clicked)) = dialog::button_row(
+            ui,
+            |ui| {
                 let mut text = RichText::new(status.as_str());
                 if let Some(colour) = colour {
                     text = text.color(colour);
                 }
                 label_as(ui, &status_name, &status, egui::Label::new(text).wrap());
+            },
+            |ui| {
                 ui.add_enabled_ui(ready, |ui| {
                     let preview = offers_preview
                         && button(ui, &preview_name, "Preview")
@@ -328,12 +332,12 @@ impl GeoRunPanel {
                                  GDAL, and nothing changed",
                             )
                             .clicked();
-                    let run = button(ui, &run_name, "Run").clicked();
+                    let run = primary(ui, &run_name, "Run").clicked();
                     (preview, run)
                 })
                 .inner
-            })
-            .inner;
+            },
+        );
         let reply_name = self.name("Reply");
         text_with(
             ui,

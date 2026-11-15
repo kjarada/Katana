@@ -155,10 +155,44 @@ pub fn button(ui: &mut Ui, name: &str, text: &str) -> Response {
     button_as(ui, name, text, egui::Button::new(text))
 }
 
+/// A dialog's primary action (Run, Import, Compute): `button` drawn in the accent with the text
+/// on the accent - one to a dialog, last in its row of buttons (shell::dialog::button_row).
+pub fn primary(ui: &mut Ui, name: &str, text: &str) -> Response {
+    let look = primary_look(text, ui.is_enabled());
+    button_as(ui, name, text, look)
+}
+
+/// The look of a primary button, for `button_as` and a caller's own `ui.add`.
+pub fn primary_button(text: &str) -> egui::Button<'static> {
+    primary_look(text, true)
+}
+
+/// The look of a primary button showing `text`: in the accent while `enabled`, else as any button
+/// is disabled - an accent fill on a button that does nothing would invite the click.
+pub fn primary_look(text: &str, enabled: bool) -> egui::Button<'static> {
+    if !enabled {
+        return egui::Button::new(String::from(text));
+    }
+    egui::Button::new(
+        egui::RichText::new(text).color(crate::theme::palette::accent_text().to_egui()),
+    )
+    .fill(crate::theme::palette::accent().to_egui())
+    .stroke(egui::Stroke::NONE)
+}
+
 /// A button drawn as `button` - an icon, a frame of its own - with `text` the name a screen reader
-/// gives it, which is what it reports.
+/// gives it, which is what it reports. In a dialog's footer or a row of its buttons it is
+/// shell::dialog::FOOTER_BUTTON_WIDTH wide at least, so the row's buttons share one width.
 pub fn button_as(ui: &mut Ui, name: &str, text: &str, button: egui::Button<'_>) -> Response {
     let taken = take(ui, name);
+    let button = if crate::shell::dialog::in_footer(ui) {
+        button.min_size(egui::vec2(
+            crate::shell::dialog::FOOTER_BUTTON_WIDTH,
+            0.0,
+        ))
+    } else {
+        button
+    };
     let mut response = ui.add(button);
     press_button(ui, taken.as_ref(), name, &mut response);
     scroll_if_asked(ui, taken.as_ref(), &response);
@@ -349,9 +383,12 @@ pub fn text_with(ui: &mut Ui, name: &str, value: &mut String, options: TextOptio
             Act::ScrollTo => {}
         }
     }
+    // A text box fills the width it is given: a reply or a field book is read across, and a box
+    // narrower than the fields above it left the rest of the dialog empty.
     let mut edit = egui::TextEdit::multiline(value)
         .id_salt(name)
         .desired_rows(options.rows)
+        .desired_width(f32::INFINITY)
         .interactive(!options.read_only);
     if options.monospace {
         edit = edit.code_editor();
@@ -475,8 +512,17 @@ pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) ->
         let index = chosen.index;
         let text = &mut chosen.text;
         ui.horizontal(|ui| {
-            let edit = ui.add(egui::TextEdit::singleline(text).id_salt(name));
+            // The field and the list's arrow beside it, the two as wide as a field alone.
+            let arrow = ui.spacing().interact_size.y;
+            let room = ui.available_width() - arrow - ui.spacing().item_spacing.x;
+            let width = ui.spacing().text_edit_width.min(room);
+            let edit = ui.add(
+                egui::TextEdit::singleline(text)
+                    .id_salt(name)
+                    .desired_width(width),
+            );
             let list = egui::ComboBox::from_id_salt((name, "items"))
+                .width(arrow)
                 .selected_text("")
                 .show_ui(ui, |ui| {
                     for (at, item) in items.iter().enumerate() {
@@ -731,6 +777,57 @@ pub fn rows(
     response
 }
 
+/// One tab of a strip: its title, the text colour and an accent bar under it when it is in front,
+/// the secondary text colour when it is not, the raised colour under the pointer. A tab is a
+/// title, not a button: the strip reads as one row of places, with the one in front marked.
+fn tab(ui: &mut Ui, title: &str, in_front: bool) -> Response {
+    use crate::theme::palette;
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(String::from(title), font, egui::Color32::PLACEHOLDER);
+    let padding = egui::vec2(8.0, 4.0);
+    let size = egui::vec2(
+        galley.size().x + 2.0 * padding.x,
+        ui.spacing().interact_size.y.max(galley.size().y + 2.0 * padding.y),
+    );
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, in_front, title)
+    });
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if response.hovered() && !in_front {
+            painter.rect_filled(
+                rect,
+                egui::CornerRadius::same(4),
+                palette::raised().to_egui(),
+            );
+        }
+        let ink = if in_front {
+            palette::text()
+        } else {
+            palette::text_muted()
+        };
+        let at = egui::pos2(
+            rect.left() + padding.x,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        painter.galley_with_override_text_color(at, galley, ink.to_egui());
+        if in_front {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), rect.bottom() - 2.0),
+                    rect.right_bottom(),
+                ),
+                egui::CornerRadius::ZERO,
+                palette::accent().to_egui(),
+            );
+        }
+    }
+    response
+}
+
 /// QTabWidget's tabs, `current` the one in front: a fill brings the tab whose title is the text
 /// given to the front, a title's '&' not counted (fillField).
 pub fn tabs(ui: &mut Ui, name: &str, titles: &[&str], current: &mut usize) -> Response {
@@ -759,18 +856,24 @@ pub fn tabs(ui: &mut Ui, name: &str, titles: &[&str], current: &mut usize) -> Re
     }
     let mut response = ui
         .push_id(name, |ui| {
-            ui.horizontal(|ui| {
+            let strip = ui.horizontal(|ui| {
                 for (at, title) in titles.iter().enumerate() {
-                    if ui
-                        .selectable_label(*current == at, title.replace('&', ""))
-                        .clicked()
-                        && *current != at
+                    if tab(ui, &title.replace('&', ""), *current == at).clicked() && *current != at
                     {
                         *current = at;
                         changed = true;
                     }
                 }
             });
+            // A rule under the strip, across what holds it, that the tab in front stands on.
+            let under = strip.response.rect.bottom();
+            let painter = ui.painter();
+            painter.hline(
+                ui.max_rect().x_range(),
+                painter.round_to_pixel_center(under),
+                egui::Stroke::new(1.0, crate::theme::palette::border().to_egui()),
+            );
+            ui.add_space(4.0);
         })
         .response;
     if changed {

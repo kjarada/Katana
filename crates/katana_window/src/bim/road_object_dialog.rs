@@ -74,15 +74,16 @@ use katana_geometry::{
 };
 use katana_math::cpp;
 
-use super::road_dialog_support::{Combo, PreviewRaster, button, field, preview, radio};
+use super::road_dialog_support::{Combo, PreviewRaster, button, field, preview, radio, shown_text};
 use crate::canvas::{
     Brush, Canvas, Color, FillRule, Pen, PenCap, PenJoin, PenStyle, PointF, RectF, RenderHint,
     TextFlags,
 };
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
+use crate::dialog_layout as layout;
 use crate::drive::controls::{
-    LineOptions, TextOptions, custom, label, label_as, line_with, tabs, text_with,
+    LineOptions, TextOptions, button_as, custom, label, label_as, line_with, tabs, text_with,
 };
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -1054,30 +1055,51 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
-            line_with(
-                ui,
-                "roadObjectLine",
-                &mut self.line,
-                LineOptions {
-                    read_only: true,
-                    width: Some(560.0),
-                    ..LineOptions::default()
-                },
-            );
-            let enabled = self.enabled.add;
-            ui.add_enabled_ui(enabled, |ui| {
-                if button(ui, "roadObjectPreviewRun", "&Preview", "").clicked() {
-                    self.run(host, true);
-                }
-                if button(ui, "roadObjectAdd", "A&dd", "").clicked() {
-                    self.run(host, false);
-                }
-            });
-            if button(ui, "roadObjectClose", "&Close", "").clicked() {
-                self.close = true;
-            }
-        });
+        line_with(
+            ui,
+            "roadObjectLine",
+            &mut self.line,
+            LineOptions {
+                read_only: true,
+                width: Some(560.0),
+                ..LineOptions::default()
+            },
+        );
+        let enabled = self.enabled.add;
+        // Preview at the left; Add, the primary, last at the right.
+        let (preview, (add, close)) = layout::footer(
+            ui,
+            |ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    button(ui, "roadObjectPreviewRun", "&Preview", "").clicked()
+                })
+                .inner
+            },
+            |ui| {
+                let add = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        button_as(
+                            ui,
+                            "roadObjectAdd",
+                            "A&dd",
+                            layout::primary_button(&shown_text("A&dd"), ui.is_enabled()),
+                        )
+                        .clicked()
+                    })
+                    .inner;
+                let close = button(ui, "roadObjectClose", "&Close", "").clicked();
+                (add, close)
+            },
+        );
+        if preview {
+            self.run(host, true);
+        }
+        if add {
+            self.run(host, false);
+        }
+        if close {
+            self.close = true;
+        }
         text_with(
             ui,
             "roadObjectReply",

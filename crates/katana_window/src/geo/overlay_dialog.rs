@@ -28,12 +28,13 @@ use katana_core::{ErrorCode, Result};
 
 use super::buffer_dialog::Words;
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_layer_target,
-    gis_scope, gis_word,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_file_field,
+    gis_layer_target, gis_scope, gis_word,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::{button, check, radio};
+use crate::drive::radio;
 use crate::host::Host;
+use crate::shell::dialog;
 use crate::ifc_dialogs::{get_open_file_name, to_native_separators};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,8 +253,7 @@ impl GisTool for GisOverlayDialog {
              the overlay (net developable area); union: all of both, in pieces; identity: the \
              subject split by the overlay",
         );
-        ui.horizontal(|ui| {
-            ui.label("Overlay with:");
+        dialog::labelled(ui, "Overlay with:", |ui| {
             if radio(
                 ui,
                 "gisOverlayWithSourceDrawing",
@@ -274,15 +274,14 @@ impl GisTool for GisOverlayDialog {
         });
         let mut browse = false;
         ui.add_enabled_ui(file, |ui| {
-            gis_field(
+            browse = gis_file_field(
                 ui,
-                "gisOverlayWithFile",
+                ("gisOverlayWithFile", "gisOverlayWithFileBrowse"),
                 "File:",
                 &mut self.file,
                 "a GeoPackage, shapefile, GeoJSON ...",
                 "FILE: overlay with this file's features, read through GDAL",
             );
-            browse = button(ui, "gisOverlayWithFileBrowse", "Browse...").clicked();
             gis_field(
                 ui,
                 "gisOverlayWithFileLayer",
@@ -333,7 +332,7 @@ impl GisTool for GisOverlayDialog {
             "csv=: the rows - each piece's area or length and properties - written to this file \
              too",
         );
-        check(
+        gis_check(
             ui,
             "gisOverlayOverwrite",
             "Replace the CSV file if it exists",

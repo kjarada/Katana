@@ -132,6 +132,7 @@ use super::linework_labels::linework_control_label;
 use crate::command_log::folded;
 use crate::command_word::command_word;
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
+use crate::dialog_layout as layout;
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::{Host, VerbOutcome};
 use crate::ifc_dialogs::{get_open_file_name, get_save_file_name};
@@ -826,13 +827,17 @@ fn value_label(ui: &mut Ui, name: &str, text: &str) -> egui::Response {
     )
 }
 
-/// A QGroupBox: its title over what it holds.
+/// A QGroupBox: its title over what it holds - drawn as a section (a heading, no box), so the page
+/// reads as one column rather than a stack of frames of different widths.
 fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
-    ui.group(|ui| {
-        ui.strong(title);
-        add(ui);
-    });
+    layout::section(ui, title, add);
 }
+
+/// The width of the page beside the list of pages.
+const PAGE_WIDTH: f32 = 560.0;
+
+/// The width of a path field: with its Browse button and one more button, the page's width.
+const PATH_WIDTH: f32 = 380.0;
 
 impl SettingsDialog {
     /// The dialog over `context`, filled from `host`'s drawing when the context reads one.
@@ -1601,7 +1606,7 @@ impl SettingsDialog {
         ui.horizontal_top(|ui| {
             // The list chooses the page.
             ui.vertical(|ui| {
-                ui.set_width(150.0);
+                ui.set_width(140.0);
                 let rows: Vec<Vec<String>> = PAGES
                     .iter()
                     .map(|(title, _)| vec![String::from(*title)])
@@ -1614,8 +1619,9 @@ impl SettingsDialog {
                     self.show_updates();
                 }
             });
+            ui.add_space(layout::SECTION_GAP);
             let stack = ui.vertical(|ui| {
-                ui.set_min_width(620.0);
+                ui.set_width(PAGE_WIDTH);
                 let front = self.page.unwrap_or(0);
                 for (at, (_, name)) in PAGES.iter().enumerate() {
                     let mut draw = |ui: &mut Ui| {
@@ -1651,31 +1657,21 @@ impl SettingsDialog {
     fn customisation_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // What is active.
         group(ui, "What is active", |ui| {
-            egui::Grid::new("settingsActiveForm")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    for (caption, name, text) in [
-                        ("Name:", "settingsActiveName", &self.name),
-                        ("Origin:", "settingsActiveOrigin", &self.origin),
-                        ("Built-in:", "settingsActiveBuiltIn", &self.active_built_in),
-                        (
-                            "Definitions:",
-                            "settingsActiveDefinitions",
-                            &self.definitions,
-                        ),
-                        (
-                            "Symbols among them:",
-                            "settingsActiveSymbols",
-                            &self.symbols,
-                        ),
-                        ("Survey code rules:", "settingsActiveRules", &self.rules),
-                        ("Kept:", "settingsActiveKept", &self.kept),
-                    ] {
-                        ui.label(caption);
-                        value_label(ui, name, text);
-                        ui.end_row();
-                    }
-                });
+            layout::form(ui, "settingsActiveForm", |ui| {
+                for (caption, name, text) in [
+                    ("Name", "settingsActiveName", &self.name),
+                    ("Origin", "settingsActiveOrigin", &self.origin),
+                    ("Built-in", "settingsActiveBuiltIn", &self.active_built_in),
+                    ("Definitions", "settingsActiveDefinitions", &self.definitions),
+                    ("Symbols among them", "settingsActiveSymbols", &self.symbols),
+                    ("Survey code rules", "settingsActiveRules", &self.rules),
+                    ("Kept", "settingsActiveKept", &self.kept),
+                ] {
+                    layout::form_label(ui, caption);
+                    value_label(ui, name, text);
+                    ui.end_row();
+                }
+            });
             // The next three are hidden until refresh finds something for them to show: a page
             // opened on no drawing has neither problems nor a notice.
             let problems = self.problems.clone();
@@ -1736,7 +1732,7 @@ impl SettingsDialog {
                         &mut self.import_path,
                         LineOptions {
                             placeholder: IMPORT_PLACEHOLDER,
-                            width: Some(420.0),
+                            width: Some(PATH_WIDTH),
                             ..LineOptions::default()
                         },
                     );
@@ -1778,7 +1774,7 @@ impl SettingsDialog {
                         &mut self.export_path,
                         LineOptions {
                             placeholder: EXPORT_PLACEHOLDER,
-                            width: Some(360.0),
+                            width: Some(PATH_WIDTH),
                             ..LineOptions::default()
                         },
                     );
@@ -1807,7 +1803,7 @@ impl SettingsDialog {
             let mut used = false;
             let mut draw_row = |ui: &mut Ui| {
                 let row = ui.horizontal(|ui| {
-                    ui.label("Built-in library:");
+                    layout::form_label(ui, "Built-in library");
                     ui.add_enabled_ui(self.enabled.built_in_choice, |ui| {
                         let tip = self
                             .built_in
@@ -1880,7 +1876,7 @@ impl SettingsDialog {
             });
         });
 
-        ui.horizontal_top(|ui| {
+        {
             // Automation. A box toggled, not clicked: one set by the headless driver's --fill has
             // been toggled as much as one a person clicked.
             group(ui, "When survey data comes in", |ui| {
@@ -1916,6 +1912,7 @@ impl SettingsDialog {
 
             // The editors.
             group(ui, "Editors", |ui| {
+                ui.horizontal(|ui| {
                 ui.add_enabled_ui(self.enabled.open_codes, |ui| {
                     if controls::button(ui, "settingsOpenCodes", "Survey Codes...")
                         .on_hover_text(OPEN_CODES_TIP)
@@ -1934,12 +1931,14 @@ impl SettingsDialog {
                         open(&mut *host);
                     }
                 });
+                });
             });
-        });
+        }
 
         // The linework control codes: shown here, edited in ONE place.
         group(ui, "Linework control codes", |ui| {
-            ui.horizontal(|ui| {
+            // The codes wrap above their button: the list is as long as the codes are many.
+            ui.vertical(|ui| {
                 value_label(ui, "settingsLinework", &self.linework).on_hover_text(LINEWORK_TIP);
                 ui.add_enabled_ui(self.enabled.edit_linework, |ui| {
                     if controls::button(ui, "settingsEditLinework", "Edit Linework Codes...")
@@ -2065,22 +2064,33 @@ impl SettingsDialog {
 
     fn footer(&mut self, ui: &mut Ui) {
         // Read, never typed into: what is drawn is a copy the frame throws away. A refusal is in
-        // the error colour.
+        // the error colour. As wide as the dialog, so the reply of a load is read without
+        // scrolling sideways.
         let mut status = self.status.clone();
+        ui.add_space(layout::INNER);
         ui.scope(|ui| {
             if self.status_error {
                 ui.visuals_mut().override_text_color = Some(theme::error().to_egui());
             }
+            if !ui.is_sizing_pass() {
+                ui.spacing_mut().text_edit_width = ui.available_width();
+            }
             controls::text_with(ui, "settingsStatus", &mut status, STATUS_BOX);
         });
-        if self.status.is_empty() {
-            ui.weak(STATUS_PLACEHOLDER);
+        let placeholder = if self.status.is_empty() {
+            STATUS_PLACEHOLDER
+        } else {
+            ""
+        };
+        let close = layout::footer(
+            ui,
+            |ui| ui.weak(placeholder),
+            |ui| layout::button(ui, "settingsClose", "Close").clicked(),
+        )
+        .1;
+        if close {
+            self.close();
         }
-        ui.horizontal(|ui| {
-            if controls::button(ui, "settingsClose", "Close").clicked() {
-                self.close();
-            }
-        });
     }
 }
 

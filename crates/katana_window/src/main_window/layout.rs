@@ -4,16 +4,20 @@
 //! `--check-menus` (menuGaps), `--check-toolbars` (menuSignClashes), `--check-toolbar-fit`
 //! (toolBarFit) and `--check-session-restore`.
 //!
-//! THE GEOMETRY is the C++'s, measured from its own headless screenshots (docs/rust.md, "The
-//! headless window has the C++'s geometry"): at 1360 x 860 the menu bar and three rows of
-//! toolbars take the top 159 points; Draw and Annotate run down the left in 45, Modify down the
-//! right in 45; the Drafting bar and the status bar take the bottom 73; the Layers dock is at
-//! 45,159 300 x 295 over Reference Data at 45,459 300 x 328; Properties at 1015,159 300 x 628; the
-//! command line at 350,637 660 x 150 under the views, which have 350,159 660 x 473. The panels
-//! keep their widths and the command line its height at every size, as Qt's resizeDocks left them,
-//! and the views take what is left; a panel hidden gives its room to the views. Rejected: egui_dock
-//! for the four panels, whose split shares would not hold these numbers as the window is sized, and
-//! whose tabs would draw a strip over every panel.
+//! THE GEOMETRY is the design of 2026-11-16 (the owner: "panels are oversized"), on the C++'s
+//! arrangement: at 1360 x 860 the menu bar (26) and three rows of toolbars (39 each) take the top
+//! 143 points; Draw and Annotate run down the left in 39, Modify down the right in 39; the
+//! Drafting bar (30) and the status bar (24) take the bottom 54; the Layers dock is at 39,143
+//! 240 x 312 over Reference Data at 39,459 240 x 347; Properties at 1081,143 240 x 663; the
+//! command line at 283,696 794 x 110 under the views, which have 283,143 794 x 549. The C++'s,
+//! measured from its own headless screenshots (docs/rust.md, "The headless window has the C++'s
+//! geometry"), were a 42 point menu bar, 45 point side columns, 300 point panels, a 150 point
+//! command line, a 73 point bottom and 5 point gaps: a drawing area of 660 x 473 in the same
+//! window, where this leaves 794 x 549 (41 % more). The panels keep their widths and the command
+//! line its height at every size, as Qt's resizeDocks left them, and the views take what is left;
+//! a panel hidden gives its room to the views. Rejected: egui_dock for the four panels, whose
+//! split shares would not hold these numbers as the window is sized, and whose tabs would draw a
+//! strip over every panel.
 //!
 //! THE SETTINGS FILE (decided here; the plan's section 4.11): the person's settings are the
 //! window's own JSON file (host::UserSettings), under the keys the C++ gave QSettings -
@@ -63,24 +67,30 @@ pub const LAYOUT_VERSION_BEFORE_THIRD_ROW: i64 = 1;
 
 // ---- the geometry ----------------------------------------------------------------------------
 
-/// The menu bar and the three rows of toolbars along the top.
-pub const TOP: f32 = 159.0;
+/// The menu bar: one row of menu titles, a control's height and a point either side.
+pub const MENU_BAR: f32 = crate::theme::style::CONTROL_HEIGHT + 2.0;
 /// One row of toolbars: a 20 px icon's button (33) and the bar's padding across it.
 pub const TOOL_BAR_ROW: f32 = 39.0;
-/// The menu bar: what the top leaves the three rows.
-pub const MENU_BAR: f32 = TOP - 3.0 * TOOL_BAR_ROW;
-/// Draw and Annotate down the left side, Modify down the right.
-pub const SIDE: f32 = 45.0;
+/// The menu bar and the three rows of toolbars along the top.
+pub const TOP: f32 = MENU_BAR + 3.0 * TOOL_BAR_ROW;
+/// Draw and Annotate down the left side, Modify down the right: a toolbar's breadth, nothing
+/// beside it (the C++'s 45 left 6 points of nothing between the bar and the panel).
+pub const SIDE: f32 = TOOL_BAR_ROW;
+/// The Drafting bar: its toggles are words, a control high, with the bar's padding across them.
+pub const DRAFTING_BAR: f32 = crate::theme::style::CONTROL_HEIGHT + 6.0;
+/// The status bar, under the Drafting bar: a line of secondary text and its padding.
+pub const STATUS_BAR: f32 = crate::theme::style::CONTROL_HEIGHT;
 /// The Drafting bar and the status bar along the bottom.
-pub const BOTTOM: f32 = 73.0;
-/// The status bar, under the Drafting bar.
-pub const STATUS_BAR: f32 = BOTTOM - TOOL_BAR_ROW;
-/// The side panels' width and the command line's height (resizeDocks).
-pub const PANEL_WIDTH: f32 = 300.0;
-pub const COMMAND_LINE_HEIGHT: f32 = 150.0;
-/// Between two docks, and between a dock and the views (QMainWindow's separator).
-pub const SEPARATOR: f32 = 5.0;
-/// Layers' share of the left column, measured: 295 of the 623 it shares with Reference Data.
+pub const BOTTOM: f32 = DRAFTING_BAR + STATUS_BAR;
+/// The side panels' width and the command line's height (resizeDocks): the design's 240 and 110,
+/// where the C++'s 300 and 150 took more of a laptop's screen than the drawing did.
+pub const PANEL_WIDTH: f32 = 240.0;
+pub const COMMAND_LINE_HEIGHT: f32 = 110.0;
+/// Between two docks, and between a dock and the views: the design's 4, the frame's colour
+/// showing between the panels' (QMainWindow's separator was 5).
+pub const SEPARATOR: f32 = 4.0;
+/// Layers' share of the left column, measured on the C++: 295 of the 623 it shares with Reference
+/// Data.
 const LAYERS_SHARE: f32 = 295.0 / 623.0;
 
 /// Which panels are shown, and which of the left column's lower tab group is in front.
@@ -213,7 +223,7 @@ pub fn geometry(screen: Rect, docks: &Docks, right_extra: bool) -> Geometry {
     );
     let bottom_bar = Rect::from_min_max(
         Pos2::new(left, middle_bottom),
-        Pos2::new(right, middle_bottom + TOOL_BAR_ROW),
+        Pos2::new(right, middle_bottom + DRAFTING_BAR),
     );
     let status_bar = Rect::from_min_max(Pos2::new(left, bottom - STATUS_BAR), Pos2::new(right, bottom));
     let mut inner_left = left + SIDE;

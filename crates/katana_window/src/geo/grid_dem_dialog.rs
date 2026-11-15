@@ -232,7 +232,8 @@ impl GridDemDialog {
             // The layers and properties follow the drawing.
             watcher: DocumentWatcher::new(host.document()),
             // Non-modal: kept open beside the drawing, which a run changes.
-            frame: DialogFrame::new("gridDemDialog", "Grid Points to DEM"),
+            frame: DialogFrame::new("gridDemDialog", "Grid Points to DEM")
+                .width(crate::shell::dialog::TWO_COLUMN_WIDTH),
             visible: false,
             scope,
             methods,
@@ -464,15 +465,14 @@ impl Framed for GridDemDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                self.scope.ui(ui);
-            });
-            let options = ui.group(|ui| {
+        // The scope and the options side by side, each half the body.
+        ui.columns(2, |columns| {
+            self.scope.ui(&mut columns[0]);
+            let options = columns[1].group(|ui| {
                 ui.vertical(|ui| self.options(ui));
             });
             custom(
-                ui,
+                &columns[1],
                 &options.response,
                 ControlRecord::new("gridOptions", ControlKind::Other),
             );

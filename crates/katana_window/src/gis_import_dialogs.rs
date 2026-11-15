@@ -120,8 +120,7 @@ impl CommandShown {
 
     /// The read-only line, under "Command:".
     fn ui(&mut self, ui: &mut Ui, name: &str) {
-        ui.horizontal(|ui| {
-            ui.label("Command:");
+        crate::shell::dialog::labelled(ui, "Command:", |ui| {
             line_with(
                 ui,
                 name,
@@ -189,8 +188,7 @@ impl DataChoice {
     }
 
     fn ui(&mut self, ui: &mut Ui, name: &str, label: &str, tip: &str) {
-        ui.horizontal(|ui| {
-            ui.label(label);
+        crate::shell::dialog::labelled(ui, label, |ui| {
             let response = choice(ui, name, &self.items, &mut self.chosen);
             if !tip.is_empty() {
                 response.on_hover_text(tip);
@@ -208,8 +206,7 @@ fn text_row(
     placeholder: &str,
     tip: &str,
 ) {
-    ui.horizontal(|ui| {
-        ui.label(label);
+    crate::shell::dialog::labelled(ui, label, |ui| {
         let response = line_with(
             ui,
             name,
@@ -717,8 +714,7 @@ impl VectorImportDialog {
                     "Put every imported entity on this layer (target=). Left empty, each source \
                      layer - or each DXF layer - becomes a Katana layer of its own.",
                 );
-                ui.horizontal(|ui| {
-                    ui.label("At most:");
+                crate::shell::dialog::labelled(ui, "At most:", |ui| {
                     // 0 is "every feature" (the box's special value).
                     whole(ui, "vectorImportMax", &mut self.max, 0..=SPIN_MAX)
                         .on_hover_text("At most this many features (max=); 0 is every feature");
@@ -945,8 +941,7 @@ impl RasterImportDialog {
         text_row(ui, "rasterImportName", "Name:", &mut self.name, "", "");
         self.resolution
             .ui(ui, "rasterImportMaxPixels", "Display resolution:", "");
-        ui.horizontal(|ui| {
-            ui.label("Band:");
+        crate::shell::dialog::labelled(ui, "Band:", |ui| {
             // 0 is "As the file's colours" (the box's special value).
             whole(ui, "rasterImportBand", &mut self.band, 0..=self.bands).on_hover_text(
                 "One band alone, as grey (band=): a multispectral image's near infrared, or one \
@@ -1117,8 +1112,7 @@ impl PointCloudImportDialog {
     fn body(&mut self, ui: &mut Ui, command: &mut CommandShown) {
         summary_label(ui, &self.summary);
         text_row(ui, "pointCloudImportName", "Name:", &mut self.name, "", "");
-        ui.horizontal(|ui| {
-            ui.label("Points to keep:");
+        crate::shell::dialog::labelled(ui, "Points to keep:", |ui| {
             whole(
                 ui,
                 "pointCloudImportBudget",

@@ -60,6 +60,7 @@ use katana_math::numerics::{DEG_TO_RAD, RAD_TO_DEG};
 use super::dialog_support::{Followed, LineCursor, TableShown, show_dialog, spin_value, table};
 use super::form_widgets::{button, check, combo, describe, edit, problem_line};
 use crate::command_word::{annotation_text_word, command_word, exact_number};
+use crate::dialog_layout as layout;
 use crate::drive::action::{Action, Menu, MenuItem, action_item};
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::drive::registry::{ControlKind, ControlRecord};
@@ -583,63 +584,74 @@ impl TextStyleManagerDialog {
                     }
                 });
             });
+            ui.add_space(layout::SECTION_GAP);
             ui.vertical(|ui| {
-                egui::Grid::new("textStyleForm")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("Font");
-                        edit(ui, "textStyleFont", &mut self.font, "the plain face");
-                        ui.end_row();
-                        let boxes = [
-                            (
-                                "Height on paper (0: the text's own)",
-                                "textStylePaperHeight",
-                                &mut self.paper,
-                                TEXT_PAPER,
-                            ),
-                            (
-                                "Width factor",
-                                "textStyleWidthFactor",
-                                &mut self.width,
-                                TEXT_WIDTH,
-                            ),
-                            (
-                                "Oblique",
-                                "textStyleOblique",
-                                &mut self.oblique,
-                                TEXT_OBLIQUE,
-                            ),
-                        ];
-                        for (title, name, value, range) in boxes {
-                            ui.label(title);
-                            controls::spin(ui, name, value, range);
-                            ui.end_row();
+                layout::form(ui, "textStyleForm", |ui| {
+                    layout::form_label(ui, "Font");
+                    edit(ui, "textStyleFont", &mut self.font, "the plain face");
+                    ui.end_row();
+                    let boxes = [
+                        (
+                            "Height on paper",
+                            "textStylePaperHeight",
+                            &mut self.paper,
+                            TEXT_PAPER,
+                        ),
+                        (
+                            "Width factor",
+                            "textStyleWidthFactor",
+                            &mut self.width,
+                            TEXT_WIDTH,
+                        ),
+                        (
+                            "Oblique",
+                            "textStyleOblique",
+                            &mut self.oblique,
+                            TEXT_OBLIQUE,
+                        ),
+                    ];
+                    for (title, name, value, range) in boxes {
+                        layout::form_label(ui, title);
+                        let shown = controls::spin(ui, name, value, range);
+                        if name == "textStylePaperHeight" {
+                            shown.on_hover_text("0: the text's own height");
                         }
+                        ui.end_row();
+                    }
+                    // The boxes in the field column, under the fields they go with.
+                    layout::form_label(ui, "Face");
+                    ui.horizontal(|ui| {
                         check(ui, "textStyleBold", "Bold", &mut self.bold);
                         check(ui, "textStyleItalic", "Italic", &mut self.italic);
-                        ui.end_row();
-                        ui.label("Colour");
-                        edit(
-                            ui,
-                            "textStyleColour",
-                            &mut self.colour,
-                            "ByLayer, or #RRGGBB",
-                        );
-                        ui.end_row();
+                    });
+                    ui.end_row();
+                    layout::form_label(ui, "Colour");
+                    edit(
+                        ui,
+                        "textStyleColour",
+                        &mut self.colour,
+                        "ByLayer, or #RRGGBB",
+                    );
+                    ui.end_row();
+                    layout::form_label(ui, "Mask");
+                    ui.horizontal(|ui| {
                         check(ui, "textStyleMask", "Background mask", &mut self.mask);
                         controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN);
-                        ui.end_row();
-                        check(
-                            ui,
-                            "textStyleReadable",
-                            "Keep readable (turn upside-down text)",
-                            &mut self.readable,
-                        );
-                        ui.end_row();
-                        ui.label("Line spacing");
-                        controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
-                        ui.end_row();
                     });
+                    ui.end_row();
+                    ui.label("");
+                    check(
+                        ui,
+                        "textStyleReadable",
+                        "Keep readable (turn upside-down text)",
+                        &mut self.readable,
+                    );
+                    ui.end_row();
+                    layout::form_label(ui, "Line spacing");
+                    controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
+                    ui.end_row();
+                });
+                ui.add_space(layout::GAP);
                 let mut sample = RichText::new("AaBb 123.456");
                 if self.bold {
                     sample = sample.strong();
@@ -659,14 +671,18 @@ impl TextStyleManagerDialog {
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         problem_line(ui, "textStyleProblem", &self.problem);
-        ui.horizontal(|ui| {
-            if button(ui, "textStyleDelete", "Delete").clicked() {
-                self.pressed = Some(TextPressed::Delete);
-            }
-            if button(ui, "textStyleApply", "Apply").clicked() {
-                self.pressed = Some(TextPressed::Apply);
-            }
-        });
+        // Delete at the left, away from Apply, the primary, at the right.
+        let (deleted, applied) = layout::footer(
+            ui,
+            |ui| button(ui, "textStyleDelete", "Delete").clicked(),
+            |ui| layout::primary(ui, "textStyleApply", "Apply").clicked(),
+        );
+        if deleted {
+            self.pressed = Some(TextPressed::Delete);
+        }
+        if applied {
+            self.pressed = Some(TextPressed::Apply);
+        }
     }
 }
 
@@ -686,6 +702,9 @@ enum LabelPressed {
     Run,
     Clear,
 }
+
+/// The label style manager's body width on both its tabs.
+const LABEL_BODY_WIDTH: f32 = 860.0;
 
 /// Format > Label Styles and Rules... (see the module comment).
 pub struct LabelStyleManagerDialog {
@@ -1519,6 +1538,8 @@ impl LabelStyleManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // One width on both tabs (the look of 2026-11-16): the list beside the form.
+        ui.set_width(LABEL_BODY_WIDTH);
         controls::tabs(
             ui,
             "labelStyleTabs",
@@ -1573,7 +1594,7 @@ impl LabelStyleManagerDialog {
                     if button(ui, "labelStyleDefaults", "Add Standard Set").clicked() {
                         self.pressed = Some(LabelPressed::Defaults);
                     }
-                    if button(ui, "labelStyleApply", "Apply").clicked() {
+                    if layout::primary(ui, "labelStyleApply", "Apply").clicked() {
                         self.pressed = Some(LabelPressed::Apply);
                     }
                 });
@@ -1586,14 +1607,14 @@ impl LabelStyleManagerDialog {
         egui::Grid::new("labelStyleForm")
             .num_columns(2)
             .show(ui, |ui| {
-                ui.label("Kind");
+                layout::form_label(ui, "Kind");
                 ui.add_enabled_ui(false, |ui| {
                     // Fixed once made; New asks for it.
                     combo(ui, "labelStyleKind", &KINDS, &mut self.kind);
                 });
                 ui.end_row();
 
-                ui.label("Template");
+                layout::form_label(ui, "Template");
                 ui.horizontal(|ui| {
                     if controls::line_with(
                         ui,
@@ -1651,7 +1672,7 @@ impl LabelStyleManagerDialog {
                 controls::label(ui, "labelStyleTemplateCheck", &self.template_check);
                 ui.end_row();
 
-                ui.label("Text style");
+                layout::form_label(ui, "Text style");
                 controls::choice(
                     ui,
                     "labelStyleTextStyle",
@@ -1660,13 +1681,13 @@ impl LabelStyleManagerDialog {
                 );
                 ui.end_row();
 
-                ui.label("Height on paper (0: the text style's)");
+                layout::form_label(ui, "Height on paper (0: the text style's)");
                 controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER);
                 ui.end_row();
-                ui.label("Placement");
+                layout::form_label(ui, "Placement");
                 combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
                 ui.end_row();
-                ui.label("Orientation");
+                layout::form_label(ui, "Orientation");
                 combo(
                     ui,
                     "labelStyleOrientation",
@@ -1674,7 +1695,7 @@ impl LabelStyleManagerDialog {
                     &mut self.orientation,
                 );
                 ui.end_row();
-                ui.label("Offset");
+                layout::form_label(ui, "Offset");
                 controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
                 ui.end_row();
                 check(
@@ -1690,7 +1711,7 @@ impl LabelStyleManagerDialog {
                     &mut self.displace,
                 );
                 ui.end_row();
-                ui.label("Priority");
+                layout::form_label(ui, "Priority");
                 controls::whole(
                     ui,
                     "labelStylePriority",
@@ -1698,7 +1719,7 @@ impl LabelStyleManagerDialog {
                     PRIORITY_LOWEST..=PRIORITY_HIGHEST,
                 );
                 ui.end_row();
-                ui.label("Marker");
+                layout::form_label(ui, "Marker");
                 combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
                 ui.end_row();
                 let boxes = [

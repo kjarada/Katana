@@ -314,14 +314,18 @@ impl SurveyJobsDialog {
         let shown = self
             .frame
             .show(&ctx, &mut self.form, Self::draw_body, |ui, form| {
-                ui.horizontal(|ui| {
-                    if drive::button(ui, "close", "Close")
-                        .on_hover_text("Close; the jobs stay with the drawing")
-                        .clicked()
-                    {
-                        form.pressed.push("close");
-                    }
-                });
+                let ((), close) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        drive::button(ui, "close", "Close")
+                            .on_hover_text("Close; the jobs stay with the drawing")
+                            .clicked()
+                    },
+                );
+                if close {
+                    form.pressed.push("close");
+                }
             });
         if shown.closed {
             self.open = false;

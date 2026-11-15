@@ -66,15 +66,14 @@ use katana_cad::purge::{PurgeOptions, plan_purge};
 use katana_cad::style_catalogue::{NameRole, free_style_name};
 use katana_cad::style_manager_rows::{
     LinetypeOrigin, LinetypeRow, LinetypeRowKind, StyleDiagnostic, StyleDiagnosticKind,
-    StyleFields, StyleFilter, StyleRow, UsageTable, apply_edit, common_fields,
-    edit_styles_command, entities_using, free_linetype_name, linetype_rows, matches_filter,
-    matches_search, style_diagnostics, style_rows,
+    StyleFields, StyleFilter, StyleRow, UsageTable, apply_edit, common_fields, edit_styles_command,
+    entities_using, free_linetype_name, linetype_rows, matches_filter, matches_search,
+    style_diagnostics, style_rows,
 };
 use katana_commands::{
     CommandPtr, TableItems, Transaction, create_linetype, create_style, delete_linetype,
     delete_style, duplicate_linetype, duplicate_style, merge_linetype, merge_style,
-    purge_table_items, rename_linetype, rename_style, set_entity_style,
-    update_linetype_if_changed,
+    purge_table_items, rename_linetype, rename_style, set_entity_style, update_linetype_if_changed,
 };
 use katana_core::text::{format_general, lowered};
 use katana_entity::display::is_by_layer;
@@ -91,20 +90,26 @@ use crate::customisation::hatch_patterns_tab::HatchPatternsTab;
 use crate::customisation::name_picker::NamePicker;
 use crate::customisation::style_painter::CanvasRasterBackend;
 use crate::customisation::style_preview::{PreviewGround, StylePreview};
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, SpinRange, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::format::qt_fixed;
 use crate::host::Host;
 use crate::kept_name_combo::{KeptChoice, KeptNameCombo, VARIES};
 use crate::shell::DialogFrame;
-use crate::survey::survey_dialogs::offstage;
+use crate::survey::survey_dialogs::{hidden, offstage};
 
 /// The dialog's object name.
 pub const STYLE_MANAGER: &str = "styleManager";
 const TITLE: &str = "Styles and Linetypes";
-/// The error colour of a refusal in the dialog's own status line and of an invalid pattern: the
-/// theme has no token for it, and the log panel's red is the main window's own.
-const ERROR_COLOUR: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x5A, 0x4E);
+/// The colour of a refusal in the dialog's own status line and of an invalid pattern: the theme's
+/// error token (it had a red of its own before the theme had one).
+fn error_colour() -> egui::Color32 {
+    crate::theme::error().to_egui()
+}
+/// The dialog's body width, the same on every page: the style table and the definition form side
+/// by side, with room for the preview.
+const BODY_WIDTH: f32 = 940.0;
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 3).with_suffix(" mm on paper");
 const SYMBOL_SIZE: SpinRange =
     SpinRange::new(0.0, 10000.0, 1.0, 4).with_suffix(" m wide (0 = its own size)");
@@ -439,9 +444,9 @@ impl StyleManagerDialog {
         let mut context = context.clone();
         if context.thumbnails.is_none() {
             // Used when the maker supplied no cache, so the pickers still have pictures.
-            context.thumbnails = Some(Rc::new(RefCell::new(DefinitionThumbnails::new(
-                Arc::new(CanvasRasterBackend),
-            ))));
+            context.thumbnails = Some(Rc::new(RefCell::new(DefinitionThumbnails::new(Arc::new(
+                CanvasRasterBackend,
+            )))));
         }
         let scale = StylePreview::PLOT_SCALES
             .iter()
@@ -974,7 +979,11 @@ impl StyleManagerDialog {
 
     fn update_counts(&mut self) {
         let total = self.style_rows.len();
-        let used = self.style_rows.iter().filter(|row| row.entities > 0).count();
+        let used = self
+            .style_rows
+            .iter()
+            .filter(|row| row.entities > 0)
+            .count();
         let missing = self.style_rows.iter().filter(|row| row.missing()).count();
         self.style_filter
             .set_chip_label(0, &format!("All ({total})"));
@@ -1077,11 +1086,7 @@ impl StyleManagerDialog {
         value: Option<&str>,
         placeholder: &str,
     ) {
-        picker.set_placeholder_text(if value.is_some() {
-            placeholder
-        } else {
-            VARIES
-        });
+        picker.set_placeholder_text(if value.is_some() { placeholder } else { VARIES });
         picker.set_current_name(document, value.unwrap_or(""));
     }
 
@@ -1275,11 +1280,7 @@ impl StyleManagerDialog {
         self.pattern_edited = false;
         self.description_edited = false;
         self.pattern_for.clear();
-        let rows: Vec<LinetypeRow> = self
-            .selected_linetype_rows()
-            .into_iter()
-            .cloned()
-            .collect();
+        let rows: Vec<LinetypeRow> = self.selected_linetype_rows().into_iter().cloned().collect();
         if rows.len() != 1 {
             self.no_linetype = if rows.is_empty() {
                 String::from("Select a linetype.")
@@ -1454,7 +1455,11 @@ impl StyleManagerDialog {
         };
         // Keep the size a person gave when only the kind changes; a dot becoming a dash or a gap
         // needs one, and half a metre is visible.
-        let size = if length.abs() > 0.0 { length.abs() } else { 0.5 };
+        let size = if length.abs() > 0.0 {
+            length.abs()
+        } else {
+            0.5
+        };
         *length = match element {
             Element::Dash => size,
             Element::Gap => -size,
@@ -1671,9 +1676,7 @@ impl StyleManagerDialog {
                 if self.run(
                     host,
                     Some(rename_style(from.clone(), answer.clone())),
-                    &format!(
-                        "Style {from} renamed to {answer}; every entity wearing it came too."
-                    ),
+                    &format!("Style {from} renamed to {answer}; every entity wearing it came too."),
                 ) {
                     self.select_styles_after_reload = Some(vec![answer]);
                 }
@@ -2004,7 +2007,10 @@ impl StyleManagerDialog {
         if names.is_empty() {
             return;
         }
-        let parts: Vec<CommandPtr> = names.iter().map(|name| delete_style(name.clone())).collect();
+        let parts: Vec<CommandPtr> = names
+            .iter()
+            .map(|name| delete_style(name.clone()))
+            .collect();
         let done = if names.len() == 1 {
             format!("Style {} deleted.", names[0])
         } else {
@@ -2055,7 +2061,11 @@ impl StyleManagerDialog {
         // Not a command: the current style is session state, as the current layer is (decision
         // D9).
         let clearing = host.document().current_style() == name;
-        let next = if clearing { String::new() } else { name.clone() };
+        let next = if clearing {
+            String::new()
+        } else {
+            name.clone()
+        };
         if let Err(error) = host.document_mut().set_current_style(&next) {
             self.log(host, &error.describe(), true);
             return;
@@ -2243,9 +2253,16 @@ impl StyleManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // One width for every page, so the dialog does not change size as its tabs are turned.
+        ui.set_width(BODY_WIDTH);
         ui.add_enabled_ui(!self.orphan, |ui| {
             let diagnostics = self.diagnostics_title.clone();
-            let titles = ["Styles", "Linetypes", "Hatch Patterns", diagnostics.as_str()];
+            let titles = [
+                "Styles",
+                "Linetypes",
+                "Hatch Patterns",
+                diagnostics.as_str(),
+            ];
             controls::tabs(ui, "managerTabs", &titles, &mut self.tab);
             ui.separator();
             // A page not in front is still there, as a QTabWidget's is: what it holds can be
@@ -2269,34 +2286,43 @@ impl StyleManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(self.buttons.undo && !self.orphan, |ui| {
-                if controls::button(ui, "undoButton", "Undo")
-                    .on_hover_text("Undo the last change to the drawing")
-                    .clicked()
-                {
-                    self.undo(host);
+        let (_, close) = layout::footer(
+            ui,
+            |ui| {
+                ui.add_enabled_ui(self.buttons.undo && !self.orphan, |ui| {
+                    if controls::button(ui, "undoButton", "Undo")
+                        .on_hover_text("Undo the last change to the drawing")
+                        .clicked()
+                    {
+                        self.undo(host);
+                    }
+                });
+                ui.add_enabled_ui(self.buttons.redo && !self.orphan, |ui| {
+                    if controls::button(ui, "redoButton", "Redo")
+                        .on_hover_text("Redo what was undone")
+                        .clicked()
+                    {
+                        self.redo(host);
+                    }
+                });
+                let mut said = egui::RichText::new(self.status.as_str());
+                if self.status_is_error {
+                    said = said.color(error_colour());
                 }
-            });
-            ui.add_enabled_ui(self.buttons.redo && !self.orphan, |ui| {
-                if controls::button(ui, "redoButton", "Redo")
-                    .on_hover_text("Redo what was undone")
-                    .clicked()
-                {
-                    self.redo(host);
-                }
-            });
-            let mut said = egui::RichText::new(self.status.as_str());
-            if self.status_is_error {
-                said = said.color(ERROR_COLOUR);
-            }
-            controls::label_as(ui, "statusLine", &self.status, egui::Label::new(said).wrap());
+                controls::label_as(
+                    ui,
+                    "statusLine",
+                    &self.status,
+                    egui::Label::new(said).wrap(),
+                );
+            },
             // Close alone is not held back by a Document that has gone: it is how a person
             // dismisses a dialog that has nothing left to edit.
-            if controls::button(ui, "closeButton", "Close").clicked() {
-                self.closing = true;
-            }
-        });
+            |ui| layout::button(ui, "closeButton", "Close").clicked(),
+        );
+        if close {
+            self.closing = true;
+        }
     }
 
     fn hatch_page(&mut self, ui: &mut Ui, host: &mut dyn Host, _front: bool) {
@@ -2306,7 +2332,9 @@ impl StyleManagerDialog {
     /// A button of a page: drawn enabled or not, with its tip; true when pressed.
     fn page_button(ui: &mut Ui, enabled: bool, name: &str, text: &str, tip: &str) -> bool {
         ui.add_enabled_ui(enabled, |ui| {
-            controls::button(ui, name, text).on_hover_text(tip).clicked()
+            controls::button(ui, name, text)
+                .on_hover_text(tip)
+                .clicked()
         })
         .inner
     }
@@ -2863,10 +2891,7 @@ impl StyleManagerDialog {
                             }
                             let shown = self.pattern_kinds[row];
                             let mut choice = Choice::at(
-                                ELEMENTS
-                                    .iter()
-                                    .position(|&kind| kind == shown)
-                                    .unwrap_or(0),
+                                ELEMENTS.iter().position(|&kind| kind == shown).unwrap_or(0),
                             );
                             if controls::choice(
                                 ui,
@@ -2928,9 +2953,24 @@ impl StyleManagerDialog {
                 }
                 ui.horizontal_wrapped(|ui| {
                     let adds = [
-                        ("patternAddDash", "+ Dash", "Add a dash after the selected element", 1.0),
-                        ("patternAddGap", "+ Gap", "Add a gap after the selected element", -0.5),
-                        ("patternAddDot", "+ Dot", "Add a dot after the selected element", 0.0),
+                        (
+                            "patternAddDash",
+                            "+ Dash",
+                            "Add a dash after the selected element",
+                            1.0,
+                        ),
+                        (
+                            "patternAddGap",
+                            "+ Gap",
+                            "Add a gap after the selected element",
+                            -0.5,
+                        ),
+                        (
+                            "patternAddDot",
+                            "+ Dot",
+                            "Add a dot after the selected element",
+                            0.0,
+                        ),
                     ];
                     for (name, text, tip, length) in adds {
                         if Self::page_button(ui, true, name, text, tip) && self.live() {
@@ -2972,7 +3012,7 @@ impl StyleManagerDialog {
             self.pattern_strip(ui);
             let mut said = egui::RichText::new(self.pattern_status.as_str());
             if self.pattern_status_is_error {
-                said = said.color(ERROR_COLOUR);
+                said = said.color(error_colour());
             }
             controls::label_as(
                 ui,
@@ -3054,10 +3094,7 @@ impl StyleManagerDialog {
             let length = self.working_pattern[placed % self.working_pattern.len()];
             if length > 0.0 {
                 let end = (x + length * scale).min(f64::from(right));
-                painter.line_segment(
-                    [egui::pos2(x as f32, y), egui::pos2(end as f32, y)],
-                    stroke,
-                );
+                painter.line_segment([egui::pos2(x as f32, y), egui::pos2(end as f32, y)], stroke);
             } else if length == 0.0 {
                 painter.circle_filled(egui::pos2(x as f32, y), 1.5, ink);
             }
@@ -3268,10 +3305,9 @@ impl StyleManagerDialog {
 
     fn prompt_row(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let open = self.prompt.is_some();
-        ui.scope(|ui| {
-            if !open {
-                ui.set_invisible();
-            }
+        // Hidden while closed: still there to be filled and refused as hidden, taking no room.
+        let mut draw = |ui: &mut Ui| {
+            ui.add_space(layout::GAP);
             let row = ui.horizontal(|ui| {
                 controls::label(ui, "promptLabel", &self.prompt_label);
                 let mut entered = false;
@@ -3294,11 +3330,11 @@ impl StyleManagerDialog {
                     controls::choice(ui, "promptChoice", &self.prompt_choices, &mut choice);
                     self.prompt_choice = choice.index;
                 });
-                if controls::button(ui, "promptOk", "OK").clicked() || entered {
-                    self.accept_prompt(host);
-                }
                 if controls::button(ui, "promptCancel", "Cancel").clicked() {
                     self.prompt = None;
+                }
+                if layout::primary(ui, "promptOk", "OK").clicked() || entered {
+                    self.accept_prompt(host);
                 }
             });
             custom(
@@ -3306,15 +3342,19 @@ impl StyleManagerDialog {
                 &row.response,
                 ControlRecord::new("promptPanel", ControlKind::Other),
             );
-        });
+        };
+        if open {
+            draw(ui);
+        } else {
+            hidden(ui, "promptPanel", draw);
+        }
     }
 
     fn purge_panel(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let open = self.purge_open;
-        ui.scope(|ui| {
-            if !open {
-                ui.set_invisible();
-            }
+        // Hidden while closed: still there to be filled and refused as hidden, taking no room.
+        let mut draw = |ui: &mut Ui| {
+            ui.add_space(layout::GAP);
             let panel = ui.vertical(|ui| {
                 ui.label(self.purge_label.as_str());
                 let list = ui.vertical(|ui| {
@@ -3330,14 +3370,14 @@ impl StyleManagerDialog {
                     .collect();
                 custom(ui, &list.response, record);
                 ui.horizontal(|ui| {
-                    if controls::button(ui, "purgeOk", "Purge Checked")
+                    if controls::button(ui, "purgeCancel", "Cancel").clicked() {
+                        self.purge_open = false;
+                    }
+                    if layout::primary(ui, "purgeOk", "Purge Checked")
                         .on_hover_text("Delete the checked items as one undo step")
                         .clicked()
                     {
                         self.accept_purge(host);
-                    }
-                    if controls::button(ui, "purgeCancel", "Cancel").clicked() {
-                        self.purge_open = false;
                     }
                 });
             });
@@ -3346,6 +3386,11 @@ impl StyleManagerDialog {
                 &panel.response,
                 ControlRecord::new("purgePanel", ControlKind::Other),
             );
-        });
+        };
+        if open {
+            draw(ui);
+        } else {
+            hidden(ui, "purgePanel", draw);
+        }
     }
 }

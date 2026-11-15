@@ -86,7 +86,7 @@ mod title_bar_buttons {
             view.set_title("Plan 1");
             view.set_leading(
                 TitleBarButton::new("ViewKindButton", "PlanView", "Plan", "What this view shows")
-                    .width(34.0)
+                    .width(32.0)
                     .with_menu(),
             );
             view.add_tool(
@@ -161,10 +161,12 @@ mod title_bar_buttons {
                         text(&icon),
                         text(&close_icon)
                     );
+                    // 3, 3: a 20 point button's border and padding, with the 14 point icon
+                    // filling what they leave (the C++'s 22 point buttons drew it at 4, 4).
                     if ratio == 1.0 {
                         assert_eq!(
                             icon,
-                            IntRect::new(4, 4, 14, 14),
+                            IntRect::new(3, 3, 14, 14),
                             "{place}: icon {}",
                             text(&icon)
                         );
@@ -221,7 +223,11 @@ mod title_bar_buttons {
     fn a_views_kind_switcher_draws_its_arrow_beside_its_icon_not_on_it() {
         // The first button of every view's title bar opens a menu (Plan, 3D, section, elevation),
         // and its arrow sat on its icon's frame: 2 px over at 100% and 3 at 125%, the owner's
-        // display. By hand at a ratio of 1, from Qt 6.11's qstylesheetstyle.cpp and
+        // display. The design of 2026-11-16 made the bar's buttons 20 points and the switcher 32
+        // (20 and the arrow's 12, as the C++'s 34 was 22 and 12): its padding box is 1..30 across
+        // and 1..18 down, the 14 px icon fills the contents at 3..16 both ways, and Fusion's 8 px
+        // arrow is 32 - 11.5 = 20.5..28.5, over columns 20..28 - three pixels clear of the icon.
+        // The C++'s working, by hand at a ratio of 1, from Qt 6.11's qstylesheetstyle.cpp and
         // qfusionstyle.cpp: the button is 34 x 22 (makeTitleBarButton's 22, widened to 34 by the
         // workspace) with a 1 px border, so its padding box is 1..32 across and 1..20 down. The
         // arrow's box is a ::menu-indicator's default, 13 x 13 (defaultSize), set right and
@@ -257,7 +263,7 @@ mod title_bar_buttons {
                 .unwrap_or_else(|| panic!("no view kind switcher at {ratio}"));
             assert_eq!(
                 (kind.rect.width(), kind.rect.height()),
-                (34.0, 22.0),
+                (32.0, 20.0),
                 "at {ratio}"
             );
             let whole = headless.render();
@@ -278,10 +284,10 @@ mod title_bar_buttons {
             let sign =
                 sign_box(&picture, ground).unwrap_or_else(|| panic!("no arrow drawn at {ratio}"));
             if ratio == 1.0 {
-                assert_eq!(icon, IntRect::new(4, 4, 14, 14), "icon {}", text(&icon));
+                assert_eq!(icon, IntRect::new(3, 3, 14, 14), "icon {}", text(&icon));
                 // The Rust arrow is always Fusion's 8 px (dock_chrome's title_bar_button).
-                assert_eq!(sign.x, 22, "arrow {}", text(&sign));
-                assert_eq!(sign.right(), 30, "arrow {}", text(&sign));
+                assert_eq!(sign.x, 20, "arrow {}", text(&sign));
+                assert_eq!(sign.right(), 28, "arrow {}", text(&sign));
             }
             assert!(
                 !intersect(&sign, &icon),
@@ -289,8 +295,8 @@ mod title_bar_buttons {
                 text(&sign),
                 text(&icon)
             );
-            // Apart, not merely not over: 4 px at a ratio of 1, and at any ratio at least 3 px
-            // times it, taken down.
+            // Apart, not merely not over: 3 px at a ratio of 1 (the C++'s 4, with its 2 more
+            // points of switcher), and at any ratio at least 3 px times it, taken down.
             // The pixels between two inclusive edges, as the C++ counts them.
             let gap = sign.x - icon.right() - 1;
             assert!(

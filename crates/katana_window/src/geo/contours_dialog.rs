@@ -44,7 +44,7 @@ use super::terrain_dialog_support::{
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
 use crate::drive::{check, whole};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 
 /// The fields of the dialog, as the line is written from them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -292,28 +292,32 @@ impl Framed for ContoursDialog {
                 );
             });
         });
-        check(
-            ui,
-            "contourClip",
-            "Keep inside closed shapes of the drawing",
-            &mut self.clip,
-        );
+        row(ui, "", |ui| {
+            check(
+                ui,
+                "contourClip",
+                "Keep inside closed shapes of the drawing",
+                &mut self.clip,
+            )
+        });
+        ui.add_space(dialog::GROUP_GAP);
         let clip = self.clip;
         ui.add_enabled_ui(clip, |ui| {
             self.scope.ui(ui);
         });
+        ui.add_space(dialog::GROUP_GAP);
         command_field(ui, "contourCommand", &self.command());
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
+        terrain_reply_field(ui, "contourReply", self.runner.reply_mut());
         let (preview, run) = run_buttons(
             ui,
             Some(("contourPreview", ready)),
             ("contourRun", "Draw Contours", ready),
         );
-        terrain_reply_field(ui, "contourReply", self.runner.reply_mut());
         if preview {
             self.run(host, true);
         }

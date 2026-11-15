@@ -22,6 +22,7 @@ use katana_core::text::parse_finite_double;
 
 use crate::canvas::{Canvas, Image};
 use crate::command_word::command_word;
+use crate::dialog_layout::{TABLE_COLUMN_GAP, TABLE_ROW_GAP, table_row_colour};
 use crate::drive::controls::{
     Choice, LineOptions, accept_fill, accept_press, button_as, choice, custom, label_as, line_with,
 };
@@ -628,29 +629,37 @@ impl Table {
             }
         }
         let mut clicked = None;
+        // As wide as its columns, not as the dialog's room: a table that took the room made every
+        // road dialog as wide as the screen (the look of 2026-11-16).
         let mut area = egui::ScrollArea::both().id_salt((name.as_str(), "scroll"));
         area = match (self.fixed_height, self.max_height) {
             (Some(height), _) => area
                 .min_scrolled_height(height)
                 .max_height(height)
-                .auto_shrink([false, false]),
-            (None, Some(height)) => area.max_height(height).auto_shrink([false, true]),
-            (None, None) => area.auto_shrink([false, true]),
+                .auto_shrink([true, false]),
+            (None, Some(height)) => area.max_height(height).auto_shrink([true, true]),
+            (None, None) => area.auto_shrink([true, true]),
         };
         let editing = self.editing;
         let headers = &self.headers;
         let rows = &mut self.rows;
         let selected = &self.selected;
+        let chosen_rows: Vec<bool> = (0..rows.len()).map(|row| selected.contains(&row)).collect();
         let output = area.show(ui, |ui| {
             egui::Grid::new((name.as_str(), "grid"))
-                .striped(true)
+                .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
+                .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+                .with_row_color(move |row, style| table_row_colour(row, &chosen_rows, style))
                 .show(ui, |ui| {
                     for header in headers {
-                        ui.strong(header.as_str());
+                        ui.label(
+                            RichText::new(header.as_str())
+                                .strong()
+                                .color(palette::text_muted().to_egui()),
+                        );
                     }
                     ui.end_row();
                     for (row, cells) in rows.iter_mut().enumerate() {
-                        let chosen = selected.contains(&row);
                         for (column, cell) in cells.iter_mut().enumerate() {
                             if editing && cell.editable {
                                 let response = ui.add(
@@ -664,7 +673,14 @@ impl Table {
                                 if response.gained_focus() {
                                     clicked = Some(row);
                                 }
-                            } else if ui.selectable_label(chosen, cell.text.as_str()).clicked() {
+                            } else if ui
+                                .add(
+                                    Label::new(cell.text.as_str())
+                                        .sense(egui::Sense::click())
+                                        .selectable(false),
+                                )
+                                .clicked()
+                            {
                                 clicked = Some(row);
                             }
                         }

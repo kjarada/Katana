@@ -23,11 +23,12 @@ use katana_core::text::parse_finite_double;
 use katana_core::{Error, ErrorCode, Result};
 
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_layer_target,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target,
     gis_scope, gis_word,
 };
-use crate::drive::{Choice, check, choice};
+use crate::drive::{Choice, choice};
 use crate::host::Host;
+use crate::shell::dialog;
 
 /// What the Buffer dialog's fields hold, as typed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -160,8 +161,7 @@ impl Words {
 
     /// The choice under `label`, named `name`, with `tip`.
     pub(crate) fn ui(&mut self, ui: &mut Ui, name: &str, label: &str, tip: &str) {
-        ui.horizontal(|ui| {
-            ui.label(label);
+        dialog::labelled(ui, label, |ui| {
             choice(ui, name, &self.items, &mut self.chosen).on_hover_text(tip);
         });
     }
@@ -266,7 +266,7 @@ impl GisTool for GisBufferDialog {
             "Corners:",
             "joins=: how corners are finished; mitre keeps a lot's corners square",
         );
-        check(
+        gis_check(
             ui,
             "gisBufferDissolve",
             "Merge the results",

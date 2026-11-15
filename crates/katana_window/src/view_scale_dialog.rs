@@ -25,7 +25,7 @@ use katana_core::{Error, ErrorCode, Result};
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::theme;
 
 /// The sizing modes, in the order of the choice: Auto keeps the marks' screen size.
@@ -223,52 +223,69 @@ impl ViewScaleDialog {
             ui,
             "viewScaleExplanation",
             explanation,
-            egui::Label::new(explanation).wrap(),
+            egui::Label::new(RichText::new(explanation).color(theme::text_muted().to_egui()))
+                .wrap(),
         );
-        egui::Grid::new("viewScaleForm")
-            .num_columns(2)
-            .show(ui, |ui| {
-                caption(ui, "viewScaleViewLabel", "&Plan view:");
-                let items: Vec<String> = self
-                    .view_items
-                    .iter()
-                    .map(|(_, shown)| shown.clone())
-                    .collect();
-                if controls::choice(ui, "viewScaleView", &items, &mut self.view).changed() {
-                    self.read_view();
-                }
-                ui.end_row();
-                caption(ui, "viewScaleModeLabel", "&Sizing:");
-                let modes: Vec<String> = MODES.iter().map(|mode| String::from(*mode)).collect();
-                controls::choice(ui, "viewScaleMode", &modes, &mut self.mode);
-                ui.end_row();
-                caption(ui, "viewScaleDenominatorLabel", "&Denominator N:");
-                ui.add_enabled_ui(self.mode.index == Some(1), |ui| {
-                    controls::line_with(
+        ui.add_space(dialog::GROUP_GAP);
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            let items: Vec<String> = self
+                .view_items
+                .iter()
+                .map(|(_, shown)| shown.clone())
+                .collect();
+            let changed = dialog::row_with(
+                ui,
+                |ui| caption(ui, "viewScaleViewLabel", "&Plan view:"),
+                |ui| controls::choice(ui, "viewScaleView", &items, &mut self.view).changed(),
+            );
+            if changed {
+                self.read_view();
+            }
+            let modes: Vec<String> = MODES.iter().map(|mode| String::from(*mode)).collect();
+            dialog::row_with(
+                ui,
+                |ui| caption(ui, "viewScaleModeLabel", "&Sizing:"),
+                |ui| controls::choice(ui, "viewScaleMode", &modes, &mut self.mode),
+            );
+            let fixed = self.mode.index == Some(1);
+            dialog::row_with(
+                ui,
+                |ui| caption(ui, "viewScaleDenominatorLabel", "&Denominator N:"),
+                |ui| {
+                    ui.add_enabled_ui(fixed, |ui| {
+                        controls::line_with(
+                            ui,
+                            "viewScaleDenominator",
+                            &mut self.denominator,
+                            LineOptions {
+                                placeholder: "For example, 500 or 1:500",
+                                ..LineOptions::default()
+                            },
+                        )
+                        .on_hover_text("Positive finite N in 1:N; this is not the camera zoom");
+                    });
+                },
+            );
+            let line = match self.line() {
+                Ok(line) => line,
+                Err(error) => error.message,
+            };
+            dialog::row_with(
+                ui,
+                |ui| caption(ui, "viewScaleLineLabel", "Command:"),
+                |ui| {
+                    controls::label_as(
                         ui,
-                        "viewScaleDenominator",
-                        &mut self.denominator,
-                        LineOptions {
-                            placeholder: "For example, 500 or 1:500",
-                            ..LineOptions::default()
-                        },
-                    )
-                    .on_hover_text("Positive finite N in 1:N; this is not the camera zoom");
-                });
-                ui.end_row();
-                caption(ui, "viewScaleLineLabel", "Command:");
-                let line = match self.line() {
-                    Ok(line) => line,
-                    Err(error) => error.message,
-                };
-                controls::label_as(
-                    ui,
-                    "viewScaleLine",
-                    &line,
-                    egui::Label::new(line.as_str()).wrap().selectable(true),
-                );
-                ui.end_row();
-            });
+                        "viewScaleLine",
+                        &line,
+                        egui::Label::new(RichText::new(line.as_str()).monospace())
+                            .wrap()
+                            .selectable(true),
+                    );
+                },
+            );
+        });
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -286,17 +303,33 @@ impl ViewScaleDialog {
                 .wrap()
                 .selectable(true),
         );
-        let buttons = ui.horizontal(|ui| {
-            if controls::button_as(ui, "viewScaleApply", "&Apply", egui::Button::new("Apply"))
-                .clicked()
-            {
-                self.apply(&mut *host);
-                ui.ctx().request_repaint();
-            }
-            if controls::button(ui, "viewScaleClose", "Close").clicked() {
-                self.close();
-            }
+        // Close, then Apply - the dialog's act - last, in the accent.
+        let buttons = ui.scope(|ui| {
+            crate::shell::dialog::button_row(
+                ui,
+                |_| {},
+                |ui| {
+                    let close = controls::button(ui, "viewScaleClose", "Close").clicked();
+                    let apply = controls::button_as(
+                        ui,
+                        "viewScaleApply",
+                        "&Apply",
+                        controls::primary_button("Apply"),
+                    )
+                    .clicked();
+                    (close, apply)
+                },
+            )
+            .1
         });
+        let (close, apply) = buttons.inner;
+        if apply {
+            self.apply(&mut *host);
+            ui.ctx().request_repaint();
+        }
+        if close {
+            self.close();
+        }
         controls::custom(
             ui,
             &buttons.response,
@@ -309,5 +342,10 @@ impl ViewScaleDialog {
 /// by) and shown without the '&'.
 fn caption(ui: &mut Ui, name: &str, text: &str) {
     let shown = text.replace('&', "");
-    controls::label_as(ui, name, text, egui::Label::new(shown));
+    controls::label_as(
+        ui,
+        name,
+        text,
+        egui::Label::new(RichText::new(shown).color(theme::text_muted().to_egui())),
+    );
 }
