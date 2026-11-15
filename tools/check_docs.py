@@ -96,10 +96,7 @@ import sys
 # Documents still being brought up to the standard this checks. Each name is
 # removed from here in the commit that makes its document pass; the list only
 # shrinks.
-NOT_YET_CHECKED = {
-    'terrain.md',
-    'plotting.md',
-}
+NOT_YET_CHECKED = set()
 
 # Documents docs/index.md may name before they exist (none, since all four
 # that were being written landed).
