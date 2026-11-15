@@ -3157,7 +3157,7 @@ if(KATANA_TEST_WINDOW)
         set(_undo_sign "sign x 32[.][.]39 y 14[.][.]18")
         set(_undo_sign_large "sign x 40[.][.]47 y 18[.][.]22")
         set(_kind_sign "sign x 22[.][.]30 y 9[.][.]13")
-        set(_kind_sign_125 "sign x 28[.][.]38 y 11[.][.]17")
+        set(_kind_sign_125 "sign x 28[.][.]38 y 11[.][.]16")
     endif()
     add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
         COMMAND ${CMAKE_COMMAND}
@@ -3202,9 +3202,11 @@ if(KATANA_TEST_WINDOW)
     #  - the kind switcher's 14 px icon at 4 spans 5 to 22.5, drawn over
     #    5..22; its arrow's box, 20..32 x 5..17, is device 25..41.25 x
     #    6.25..22.5, and Fusion's arrow, 22.5..30.5 x 9.5..13.5, is
-    #    28.125..38.125 x 11.875..16.875 - columns 28..38, and rows 11..17,
-    #    the cached arrow set at the box's quarter pixel spreading into one
-    #    more row.
+    #    28.125..38.125 x 11.875..16.875 - columns 28..38, and rows 11..16.
+    #    (The C++ window inked rows 11..17: Fusion drew the arrow into a
+    #    cached pixmap and scaled it, spreading it into one more row. The
+    #    Rust window draws the shape at the device's scale, whose exact edges
+    #    ink 11..16 - the owner's choice, 2026-11-16, over imitating the blur.)
     # Until 2026-09-30 the check took each box back to the widget's pixels,
     # rounded outwards; both reached pixel 26, and the run failed with all
     # four families "drawn over" icons nothing was drawn over.

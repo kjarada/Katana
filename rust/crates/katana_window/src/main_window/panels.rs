@@ -1646,6 +1646,10 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
             .id_salt("katanaCommandLog")
             .stick_to_bottom(true)
             .show(ui, |ui| {
+                // The log is as wide as its panel, as the C++'s QPlainTextEdit filled its dock:
+                // egui's text box takes its width from text_edit_width, 280 points by default, and
+                // the log wrapped there with the rest of the panel empty.
+                ui.spacing_mut().text_edit_width = ui.available_width();
                 let _ = controls::text_with(
                     ui,
                     "commandLog",

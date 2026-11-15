@@ -72,7 +72,9 @@ fn compile(files: &[PathBuf], cpp: bool, prefix: Option<&str>, library: &str) {
     }
     if let Some(prefix) = prefix {
         let prefix = Path::new(prefix);
-        build.include(prefix.join("include"));
+        // As system headers (-isystem), as katana_pointcloud's build script says why: a
+        // library's header is no warning of the shim's.
+        build.flag("-isystem").flag(prefix.join("include").display().to_string());
         if let Some(tools) = toolchain_tools(prefix) {
             let variable = if cpp { "CXX" } else { "CC" };
             if !is_set(variable) {

@@ -2191,14 +2191,12 @@ pin classifies every algorithm GDAL lists.
   window (seen on the owner's screen and in a headless screenshot of
   samples/site_plan, 2026-11-15): its text wraps at about 280 points with
   the rest of the panel empty. No gate test measures it.
-- **The window gate's last two differences are Qt's own pixel metrics**:
-  at 125 % the 3D view's kind switcher's arrow inks rows 11 to 16 where
-  the C++ test expects 11 to 17 (its comment: Fusion draws the arrow into
-  a cached pixmap and scales it, which spreads it into one more row; the
-  Rust draws the shape at the device's scale, whose exact edges, 11.875 to
-  16.875, cover 11 to 16), and Undo's and Redo's arrows 40..49 where
-  Fusion's are 39..50; and the toolbars' natural widths along the top are
-  2 to 22 points off the C++'s. Matching them is drawing as Qt draws
-  (its pixmap scaling, its toolbar handle, spacing and size hints), not a
-  defect of either program; until then the 125 % test fails and the
-  toolbar-fit test passes with other numbers.
+- **The toolbars' natural widths along the top are 2 to 22 points off the
+  C++'s** (`--check-toolbar-fit`; the test passes, its rows still fit).
+  Matching them is laying out as Qt did (its toolbar handle, spacing and
+  size hints). The 125 % menu arrows, the other pixel difference the
+  window gate showed, were settled by the owner on 2026-11-16: the Rust
+  draws the arrow's exact shape at the device's scale, rows 11 to 16 by the
+  test's own hand working (11.875 to 16.875), where Fusion scaled a cached
+  pixmap and inked one more row; the test now expects the exact rows, the
+  reason beside it.

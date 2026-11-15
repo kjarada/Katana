@@ -30,6 +30,7 @@
 #[path = "../support/window_support.rs"]
 pub mod window_support;
 
+mod command_line;
 mod geo_menus;
 mod screen_fit_dialogs;
 mod surfaces_panel;

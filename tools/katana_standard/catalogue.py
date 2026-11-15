@@ -441,8 +441,8 @@ def catalogue(data, root):
       "layer paths, colours and the colour table, pen weights, attribute names, text styles, legend labels, and "
       "every sentence of every meaning and of this document. `tools/katana_standard/originality.py` scans the "
       "two files for what a person could copy; `katana_standard_originality` runs it on them with the other "
-      "tests, and `KatanaStandard.NothingButTheKeysIsSharedWithTheNswFileTrackedBesideIt` holds the names and "
-      "the colours once more in C++. No definition name, group path, layer path, legend label, colour name, "
+      "tests, and `katana_standard::nothing_but_the_keys_is_shared_with_the_nsw_file_tracked_beside_it` holds the names and "
+      "the colours once more in Rust. No definition name, group path, layer path, legend label, colour name, "
       "attribute name or text style is the same in both. Nor does a definition here draw the shape of one "
       "there, beyond what five strokes or fewer draw (a dash, a dash and a letter, a plus, a square, a ring), "
       "which any library draws: %d of the %d definitions are that plain and are left out. Every other is "
@@ -459,7 +459,7 @@ def catalogue(data, root):
       "since a symbol named after the other library's label would be its name for the thing all the same. "
       "None is. Of colour values one is in both: pure white, `#FFFFFF`, which AS 5488 names for "
       "communications and which every drawing system has. The script and the tests excuse that one white, the "
-      "communications colour of `utilityTypeColour`, and no other value: a second white would fail them."
+      "communications colour of `utility_type_colour`, and no other value: a second white would fail them."
       % (n_left_out, n_ls + n_sy))
     w("")
     w("**What two libraries cannot help sharing** is the trade's own names for real things, and the sizes "
@@ -551,7 +551,7 @@ def catalogue(data, root):
       "library follows AS 5488.")
     w("")
     w("**The two utility conventions agree.** `UTILITY DRAW` draws its layers in these same values "
-      "(`utilityTypeColour`), and `KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` holds the "
+      "(`utility_type_colour`), and `katana_standard::every_service_colour_is_the_colour_utility_draw_uses` holds the "
       "library and that table equal, service by service, and holds every utility code to its service's colour. "
       "A drawing that mixes coded survey strings and `UTILITY DRAW` output has one convention in it. Hazard is "
       "the one other colour that moved: AS 5488's electricity orange left the old hazard orange 0.043 away, "

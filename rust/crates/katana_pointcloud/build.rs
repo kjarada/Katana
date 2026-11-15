@@ -57,8 +57,12 @@ fn main() {
                 build.archiver(archiver);
             }
         }
+        // The prefix's headers as system headers (-isystem, not -I), as a compiler's own include
+        // directory is: PDAL's are full of unused parameters (Kernel.hpp, Stage.hpp, PointTable.hpp,
+        // ProgramArgs.hpp), and GCC's -Wextra reported all of them at every build, 93 lines that
+        // hid any the shim itself might earn. The shim's own code keeps every warning.
         if let Some(prefix) = &prefix {
-            build.include(format!("{prefix}/include"));
+            build.flag("-isystem").flag(format!("{prefix}/include"));
         }
     };
 
