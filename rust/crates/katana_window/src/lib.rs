@@ -330,7 +330,10 @@ pub mod geo {
     pub mod terrain_shading_dialog;
     pub mod viewshed_dialog;
     pub mod zonal_stats_dialog;
-    // K:  pub mod menu_table;
+    // K
+    pub mod menu_table;
+
+    pub use menu_table::{GeoMenuDialogs, build_geo_menus};
 }
 
 pub mod plotting {
@@ -390,7 +393,8 @@ pub mod terrain {
     pub mod surfaces_panel;
     pub mod surface_style_manager;
     pub mod volumes_dialog;
-    // K:  pub mod main_window_surface_display;
+    // K
+    pub mod main_window_surface_display;
 }
 
 pub mod tools {
@@ -500,8 +504,19 @@ pub mod start_dialog;
 pub mod view_layers_popup;
 pub mod view_workspace;
 // SH2: pub mod sheet_editor;
-// K:   pub mod main_window;
-//      pub mod main_window_ifc;
+// K: the main window - its executor (the dispatcher) and its UI state, its rows, its frame and
+// layout - and its IFC lines.
+pub mod main_window {
+    pub mod actions;
+    pub mod executor;
+    pub mod layout;
+    pub mod panels;
+    pub mod window;
+
+    pub use executor::{Executor, LineSource, SceneStore, WindowRequest};
+    pub use window::MainWindow;
+}
+pub mod main_window_ifc;
 
 // ---- root re-exports, by agent ------------------------------------------------------------------
 
@@ -545,3 +560,5 @@ pub use sheet_editor::{SheetCanvas, SheetEditor, SheetKey, SourceProvider, sheet
 pub use view_layers_popup::{ViewLayersPopup, view_layers_line, view_references_line};
 pub use start_dialog::{StartChoices, StartDialog};
 pub use view_workspace::{Scenery, ViewWorkspace, WorkspaceEvent, WorkspaceLines};
+// K
+pub use main_window::MainWindow;
