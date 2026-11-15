@@ -176,7 +176,9 @@ impl PlotDialog {
                     "plotDialog"
                 },
                 if page_setup { "Page Setup" } else { "Plot Sheets" },
-            ),
+            )
+            // Modal in both modes, as the C++'s open() (Page Setup) and exec() (Plot) make it.
+            .modal(true),
             set: set.clone(),
             current,
             mode,

@@ -10,10 +10,12 @@
 //! they follow a wheel.
 //!
 //! Object names: zoomToDialog; the scope and filter controls with the prefix zoomTo
-//! (zoomToScopeSelection, zoomToScopeDrawing, zoomToFilterLayer ...); zoomToView (the active view,
-//! then every open view that frames a scope - plan, 3D and elevation, view_verbs::zoom_takes - by
-//! its title and id); zoomToLine (the line the controls say, updated as they change); zoomToRun;
-//! zoomToStatus (what ZOOM answered, as a sentence; a refusal in the error colour); zoomToClose.
+//! (zoomToScopeSelection, zoomToScopeDrawing, zoomToFilterLayer ...), the scope's view list
+//! zoomToScopeViewList (the C++'s zoomToView too, which no driver could reach); zoomToView (the
+//! active view, then every open view that frames a scope - plan, 3D and elevation,
+//! view_verbs::zoom_takes - by its title and id); zoomToLine (the line the controls say, updated
+//! as they change); zoomToRun; zoomToStatus (what ZOOM answered, as a sentence; a refusal in the
+//! error colour); zoomToClose.
 //!
 //! The views are the workspace's, reached through the host's ViewAccess as the window keeps them;
 //! the C++'s "nothing runs it" has no counterpart, since the host always runs a line.
@@ -103,6 +105,10 @@ struct Lent<'a, 'h> {
 impl ZoomToDialog {
     pub fn new(context: ZoomToContext, host: &dyn Host) -> Self {
         let mut scope = ScopeFilterWidget::new("zoomTo");
+        // The C++ named the scope's view list zoomToView too, beside the chooser below; its
+        // findChild reached the chooser, a direct child of the dialog, and never the list. The
+        // list takes a name of its own, so each is drawn once and the chooser keeps the C++'s.
+        scope.name_view_list("zoomToScopeViewList");
         if let Some(open) = &context.views {
             let open = Rc::clone(open);
             scope.views = Some(Box::new(move || scope_filter_views(&open.borrow())));

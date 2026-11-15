@@ -56,6 +56,10 @@ pub struct Panels {
     pub placeholder: String,
     pub layer_selected: Option<String>,
     pub reference_selected: Option<u64>,
+    /// The Reference Data panel's referenceOpacity and referenceColour: the selected layer's,
+    /// or the last shown while none of its kind is selected.
+    pub reference_opacity: Choice,
+    pub reference_colour: Choice,
     pub current_style: Choice,
     pub property_style: Choice,
     /// The status bar's message: a running tool's prompt, a view's status, an error.
@@ -85,6 +89,8 @@ impl Default for Panels {
             placeholder: String::from(super::executor::COMMAND_PLACEHOLDER),
             layer_selected: None,
             reference_selected: None,
+            reference_opacity: Choice::at(0),
+            reference_colour: Choice::at(0),
             current_style: Choice::at(0),
             property_style: Choice::editable(""),
             status: String::new(),
@@ -1385,6 +1391,7 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
     if response.double_clicked() {
         asked = Some("ReferenceZoomButton");
     }
+    reference_display_ui(window, ui);
     match asked {
         Some("ReferenceImportButton") => window.import_file(),
         Some("ReferenceZoomButton") => zoom_to_selected_reference(window),
@@ -1429,6 +1436,108 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
             }
         }
         _ => {}
+    }
+}
+
+/// The opacities referenceOpacity offers and the REFS OPACITY value each runs (buildReferenceDock).
+const REFERENCE_OPACITIES: [(&str, &str); 4] =
+    [("100%", "1"), ("75%", "0.75"), ("50%", "0.5"), ("25%", "0.25")];
+
+/// The colourings referenceColour offers, in the C++'s order: each shows its name and runs its
+/// word (toString, toWord).
+const REFERENCE_COLOURS: [katana_interop::PointColorMode; 5] = [
+    katana_interop::PointColorMode::Elevation,
+    katana_interop::PointColorMode::Intensity,
+    katana_interop::PointColorMode::Classification,
+    katana_interop::PointColorMode::SourceColor,
+    katana_interop::PointColorMode::Flat,
+];
+
+/// How the selected layer is drawn (buildReferenceDock's display row and
+/// showSelectedReferenceDisplay): referenceOpacity for a raster, referenceColour for a point
+/// cloud, each enabled only for its kind and showing the selected layer's value. A change by a
+/// person or a driver runs REFS OPACITY or REFS COLOR; the value read from the layer runs nothing,
+/// as the C++'s refreshingReferences_ guard has it.
+fn reference_display_ui(window: &mut MainWindow, ui: &mut Ui) {
+    let selected = window.ui.panels.reference_selected;
+    let raster_opacity = selected
+        .and_then(|id| window.exec.reference.find_raster(id))
+        .map(|raster| raster.opacity);
+    let cloud_colour = selected
+        .and_then(|id| window.exec.reference.find_point_cloud(id))
+        .map(|cloud| cloud.color_mode);
+    // The C++ keeps a choice's last index while no layer of its kind is selected.
+    if let Some(opacity) = raster_opacity {
+        let at = if opacity > 0.875 {
+            0
+        } else if opacity > 0.625 {
+            1
+        } else if opacity > 0.375 {
+            2
+        } else {
+            3
+        };
+        window.ui.panels.reference_opacity = Choice::at(at);
+    }
+    if let Some(mode) = cloud_colour
+        && let Some(at) = REFERENCE_COLOURS.iter().position(|each| *each == mode)
+    {
+        window.ui.panels.reference_colour = Choice::at(at);
+    }
+    let opacities: Vec<String> = REFERENCE_OPACITIES
+        .iter()
+        .map(|(shown, _)| String::from(*shown))
+        .collect();
+    let colours: Vec<String> = REFERENCE_COLOURS
+        .iter()
+        .map(|mode| String::from(mode.name()))
+        .collect();
+    let mut opacity_changed = false;
+    let mut colour_changed = false;
+    ui.horizontal(|ui| {
+        ui.label("Opacity");
+        ui.add_enabled_ui(raster_opacity.is_some(), |ui| {
+            opacity_changed = controls::choice(
+                ui,
+                "referenceOpacity",
+                &opacities,
+                &mut window.ui.panels.reference_opacity,
+            )
+            .on_hover_text("How much of the selected raster shows (REFS OPACITY)")
+            .changed();
+        });
+        ui.label("Colour");
+        ui.add_enabled_ui(cloud_colour.is_some(), |ui| {
+            colour_changed = controls::choice(
+                ui,
+                "referenceColour",
+                &colours,
+                &mut window.ui.panels.reference_colour,
+            )
+            .on_hover_text("How the selected point cloud is coloured (REFS COLOR)")
+            .changed();
+        });
+    });
+    if opacity_changed
+        && let Some(&(_, value)) = window
+            .ui
+            .panels
+            .reference_opacity
+            .index
+            .and_then(|at| REFERENCE_OPACITIES.get(at))
+    {
+        let _ = run_reference_line(window, "OPACITY", value);
+    }
+    if colour_changed
+        && let Some(&mode) = window
+            .ui
+            .panels
+            .reference_colour
+            .index
+            .and_then(|at| REFERENCE_COLOURS.get(at))
+    {
+        let word = katana_interop::reference_data::to_word(mode);
+        let _ = run_reference_line(window, "COLOR", word);
     }
 }
 

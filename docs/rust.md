@@ -1973,6 +1973,33 @@ pin classifies every algorithm GDAL lists.
   it hold a mutex; the sheet editor's source provider is given only the
   Document (reference data, meshes, surfaces and the logo must reach it
   another way, in wave 4).
+- **Found in the window gate's fix-up round (dialogs and managers):**
+  - *A C++ defect, worked round:* Zoom To names two controls `zoomToView`,
+    its view chooser and its scope widget's view list. Qt's `findChild`
+    visits a widget's own children before their children, so a driver
+    reached the chooser, a direct child of the dialog, and never the list.
+    The Rust names the list `zoomToScopeViewList`
+    (`ScopeFilterWidget::name_view_list`), so each name is drawn once and
+    the chooser keeps the C++'s. Rejected: letting the first of two
+    controls drawn take the act, which the foundation refuses so that a
+    driver never has to guess (and the list, drawn first, would have taken
+    it).
+  - *A control hidden AND disabled is drawn `withdrawn`*
+    (`drive::controls::withdrawn`), and a press or a fill of it is refused
+    as disabled, as `--press` and `--fill` ask `isEnabled` before
+    `isHidden` (the definition editor's Delete Anyway before Delete was
+    refused). An invisible egui `Ui` is always disabled, so only the tag
+    tells the two apart. Rejected: asking disabled first for every
+    invisible control, which would refuse every merely hidden button as
+    disabled.
+  - The Alignment Manager draws its pages not in front offstage, as the
+    other tabbed dialogs do, so the setting-out interval is filled from the
+    first tab; the Reference Data panel gained its opacity and colour
+    choices (`referenceOpacity`, `referenceColour`), which run REFS OPACITY
+    and REFS COLOR; the code manager's `explainHeading` is reported as the
+    plain text a person reads, as `--report` reads a rich QLabel; Generate
+    Sheets, Page Setup and Plot are modal, as `QDialog::open` and `exec`
+    make them.
 - **The corpus round trip failed once under the whole suite's load**
   (`every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust`,
   wave 4's run) and passed on its own: the schema-9 project's backups

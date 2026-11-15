@@ -94,6 +94,7 @@ use crate::drive::registry::simplified;
 use crate::format::qt_fixed;
 use crate::host::Host;
 use crate::shell::dialog::DialogFrame;
+use crate::survey::survey_dialogs::offstage;
 use crate::theme::palette;
 
 /// The PI grid's columns.
@@ -1257,10 +1258,21 @@ impl Body {
             ui.vertical(|ui| self.list_ui(ui, host));
             ui.vertical(|ui| {
                 tabs(ui, "alignmentTabs", &TABS, &mut self.tab);
-                match self.tab {
-                    0 => self.horizontal_ui(ui, host),
-                    1 => self.vertical_ui(ui, host),
-                    _ => self.setting_out_ui(ui, host),
+                // The pages not in front are still there, as a QTabWidget's are: what they hold
+                // can be filled, pressed and read (the setting-out interval, filled from the
+                // first tab, reloads the stations as the C++'s textChanged does).
+                let current = self.tab.min(2);
+                for page in 0..3 {
+                    let mut draw = |ui: &mut Ui| match page {
+                        0 => self.horizontal_ui(ui, host),
+                        1 => self.vertical_ui(ui, host),
+                        _ => self.setting_out_ui(ui, host),
+                    };
+                    if page == current {
+                        draw(ui);
+                    } else {
+                        offstage(ui, &format!("alignmentPage{page}"), draw);
+                    }
                 }
             });
         });

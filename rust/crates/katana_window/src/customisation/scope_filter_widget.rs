@@ -36,7 +36,10 @@
 //! ```
 //!
 //! and the widget itself is <prefix>Scope. Global Modify passes "globalModify"; the utilities
-//! dialog passes "utility".
+//! dialog passes "utility". A dialog whose own control already holds <prefix>View names the view
+//! list otherwise (`name_view_list`): Zoom To, whose C++ named both its view chooser and this list
+//! zoomToView, a driver reaching only the chooser (a direct child of the dialog, which Qt's
+//! findChild visits first).
 //!
 //! An edit is reported (`ui` answers true) for every control a person or a driver changed, and for
 //! every setter called since the last frame - as the C++'s signals fire for both - but not for a
@@ -137,6 +140,8 @@ pub struct ScopeFilterWidget {
     /// The view list: each view's id and the text it shows.
     listed_views: Vec<(ViewId, String)>,
     view: Choice,
+    /// The view list's object name when it is not <prefix>View (`name_view_list`).
+    view_list_name: Option<String>,
     on_screen: bool,
     /// The layer list: each layer's name and whether it is ticked.
     layers: Vec<(String, bool)>,
@@ -183,6 +188,7 @@ impl ScopeFilterWidget {
             choice: ScopeChoice::Selection,
             listed_views: Vec::new(),
             view: Choice::default(),
+            view_list_name: None,
             on_screen: false,
             layers: Vec::new(),
             sublayers: true,
@@ -243,6 +249,19 @@ impl ScopeFilterWidget {
             names.push(self.named(part));
         }
         names
+    }
+
+    /// Names the view list `name` instead of <prefix>View, for a dialog whose own control holds
+    /// that name (see the module comment): one name drawn twice in a target is refused.
+    pub fn name_view_list(&mut self, name: &str) {
+        self.view_list_name = Some(String::from(name));
+    }
+
+    /// The view list's object name.
+    pub fn view_list_name(&self) -> String {
+        self.view_list_name
+            .clone()
+            .unwrap_or_else(|| self.named("View"))
     }
 
     /// The widget's own object name: the prefix and "Scope".
@@ -635,7 +654,7 @@ impl ScopeFilterWidget {
                             ScopeChoice::View => {
                                 ui.add_enabled_ui(self.choice == ScopeChoice::View, |ui| {
                                     let items = self.view_items();
-                                    let name = self.named("View");
+                                    let name = self.view_list_name();
                                     if choice(ui, &name, &items, &mut self.view).changed() {
                                         changed = true;
                                     }

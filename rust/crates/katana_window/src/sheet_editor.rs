@@ -1729,7 +1729,9 @@ impl GenerateDialog {
         names.extend(alignments);
         let round = |value: f64| (value * 1000.0).round() / 1000.0;
         Self {
-            frame: crate::shell::DialogFrame::new("sheetGenerateDialog", "Generate Sheets"),
+            // Modal, as the C++'s open() and exec() make it (window modal).
+            frame: crate::shell::DialogFrame::new("sheetGenerateDialog", "Generate Sheets")
+                .modal(true),
             layout: Choice::at(0),
             paper: Choice::at(3),
             orientation: Choice::at(0),
