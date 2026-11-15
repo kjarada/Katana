@@ -12,14 +12,14 @@ You contribute under it and keep your copyright.
 ## Your first hour
 
 1. **Build once.** [README, Quick start](README.md#quick-start) has the
-   packages and the commands. The first build is the slow part (about 19
-   minutes on a 24-thread machine, measured on 2026-09-29), so to build only
-   the modules you will touch, add a `KATANA_MODULE_FILTER` to the configure
-   line; the README shows the exact option and what it costs
-   (`docs/building.md`, "Options").
+   toolchain and the commands: Katana is one Cargo workspace (`rust/`), built
+   with `cargo build --release` in WSL or on Linux until the owner has it
+   built on Windows. To work on one crate, `cargo build -p <crate>` and
+   `cargo test -p <crate>` build and test only it and what it stands on.
 2. **Run something.** [README, Try it](README.md#try-it) runs a command line, a
-   screenshot and the tests. `ctest --test-dir build/release -R <name>` runs the
-   tests whose names match.
+   screenshot and the tests. `cargo test -p <crate> <name>` runs the crate's
+   tests whose names match; `bash tools/build_visible.sh wsl test -R <name>` the
+   test runner's.
 3. **Pick a task.** [README, Where to start](README.md#where-to-start) lists
    five that were real on 2026-10-08, from one line of code to a large gap. To
    find more, read the "Not done" list at the end of the document for the area
@@ -51,12 +51,12 @@ not.
       and open the pull request from there (agents push only when the owner
       asks, see "Commits").
 - [ ] `git status` should list only what you changed. Everything local is
-      ignored: `build/`, `.vscode/`, `.claude/settings.local.json`,
-      `.claude/worktrees/`, `third_party/_cache`, and the third-party
+      ignored: `build/`, `rust/target/`, `.vscode/`,
+      `.claude/settings.local.json`, `.claude/worktrees/`, and the third-party
       reference folders under `docs/`, which must never be added.
 - [ ] A second line of work at the same time gets a worktree, not a second
       clone: `git worktree add -b <branch> ../Katana-wt/<name> main`. It
-      shares the history, has its own `build/`, and is removed with
+      shares the history, has its own build folders, and is removed with
       `git worktree remove ../Katana-wt/<name>` once merged, then
       `git branch -d <branch>`. A worktree is a folder beside the checkout,
       never inside it.
@@ -79,34 +79,36 @@ not.
 
 ## Build
 
-- [ ] The packages you need are in the README's
-      [Quick start](README.md#quick-start). Toolchains, presets and options:
-      `docs/building.md`. In short:
+- [ ] The toolchain is in the README's [Quick start](README.md#quick-start)
+      (`python3 tools/setup_linux_toolchain.py`); the build and the test
+      runner are `docs/building.md`. In short, from `rust/`:
 
   ```sh
-  cmake --preset release                       # build/release
-  cmake --build build/release --parallel
+  cargo clippy --release --all-targets -- -D warnings
+  cargo build --release
   ```
 
-  Linux and macOS use `linux-release` and `macos-release`; their toolchain
-  comes from `python3 tools/setup_linux_toolchain.py`.
-- [ ] Always build with `--parallel`.
-- [ ] Judge a build by its exit code, never by filtering its output. `-Werror`
-      and `-Wshadow` are on, so a warning is a failure.
-- [ ] After editing a CMake file, run `cmake --preset release` on its own first.
-- [ ] Never run two builds in one build directory at once.
+  The maintainer runs both, and the tests, through `tools/build_visible.sh`
+  (`bash tools/build_visible.sh wsl`), in a window of its own.
+- [ ] Judge a build by its exit code, never by filtering its output. Clippy
+      runs with `-D warnings`, so a warning is a failure.
+- [ ] Never run two builds in one target folder at once.
 
 ## Test
 
 - [ ] Write the test first where the behaviour can be checked. Name a test as a
       sentence that states the property.
-- [ ] Run the whole suite before you commit, not only your module:
+- [ ] Run the whole suite before you commit, not only your crate: every
+      crate's tests and the test runner's process-level tests.
 
   ```sh
-  QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 8 --output-on-failure
+  cargo test --release                         # from rust/
+  bash tools/build_visible.sh wsl              # all of it, the maintainer's way
   ```
 
-  `docs/testing.md` explains each kind of test and how to register one.
+  `docs/testing.md` explains each kind of test and how to register one: a
+  `#[test]` in the crate, or an `add_test` of the CMake test runner for a
+  program run as a process (`tests/cli/`, `tests/CMakeLists.txt`).
 - [ ] Never change an expected value to match what the program produced. When a
       test fails, either the code is wrong (fix it), or the expectation is
       wrong (fix it, justified from a source outside the program: a standard, a
@@ -117,48 +119,50 @@ not.
       fail, put the fix back.
 - [ ] New public behaviour needs the happy path, every documented failure, and
       the degenerate inputs: empty, zero, coincident, non-finite, enormous.
-- [ ] Qt tests run offscreen. Fonts differ between platforms, so assert ink
-      against a baseline, never an absolute pixel count.
+- [ ] The window's tests run headless, with no display. Fonts differ between
+      platforms, so assert ink against a baseline, never an absolute pixel
+      count.
 - [ ] Tests that reach the network run only with `KATANA_ONLINE_TESTS=1`.
 - [ ] Before you change anything for speed, measure in Release. Put the before
-      and after numbers in the commit message and the docs, and keep the
-      measurement in `benchmarks/` so it can be repeated.
+      and after numbers in the commit message and the docs, and commit the
+      benchmark beside the code so it can be repeated.
 
 ## The contract
 
 - [ ] A feature ships in the same change on all three surfaces, or you say
       plainly which one is missing:
-  - the window: a menu item, and a dialog with a stable `objectName` on every
-    widget that builds the verb line and hands it to the window's command
+  - the window: a menu item, and a dialog with a stable name on every
+    control that builds the verb line and hands it to the window's command
     executor, as if it had been typed;
   - `katana_cli`: a verb in the shared `CommandInterpreter`, with `cli.*` tests;
   - `katana_mcp`: it runs session lines, so a verb reaches it; add a tool in
-    `src/katana_app/mcp_server.cpp` and `docs/mcp.md` when an agent needs
+    `rust/crates/katana_app/src/mcp/` and `docs/mcp.md` when an agent needs
     structured data.
 - [ ] Any tool that reads or changes drawing data takes the shared scope
       (selection, view, layers, drawing, area) and filter. Do not write a second
-      scope parser; extend `cad::matchEntities`. This is the rule: `MODIFY`,
+      scope parser; extend `katana_cad::global_modify::match_entities`. This is the rule: `MODIFY`,
       `CODE`, `LINEWORK` and the `UTILITY` verbs take it today, and older verbs
       such as `ERASE` and `SELECT` do not yet (`docs/cad.md`, "Scope and
       filter").
 - [ ] Edits go through one door: an undoable command, never code in a widget.
       One user edit is one undo step.
 - [ ] Replies are `key=value` records, one per line. Failures are
-      `core::Status` or `core::Result` with a specific message.
+      `katana_core::Status` or `katana_core::Result` with a specific message.
 - [ ] No hidden modality: every dialog has a non-interactive path, and a
       headless run never waits on a question.
-- [ ] Respect the layering (`tools/check_layering.cmake`, the `layering` test)
-      and keep third-party types out of public headers.
+- [ ] Respect the layering (`tools/check_layering.cmake`, held by
+      `tools/check_rust_layering.py`) and keep third-party types out of a
+      crate's public interface.
 
 ## Style
 
 - [ ] Follow the file you are editing: its comment density, naming and idiom.
 - [ ] Comments say why. The code already says what.
 - [ ] British spelling in prose; in identifiers, the surrounding code's spelling.
-- [ ] A real becomes text through `core::formatExactReal`, never
-      `std::to_string`. File text is read through `core/text.hpp`, never
-      `std::isspace` or `strtod`.
-- [ ] A missing value is `std::optional`, never a placeholder number.
+- [ ] A real becomes text through `katana_core::text::format_exact_real`, never
+      `to_string` (`rust/clippy.toml` refuses it). File text is read through
+      `katana_core::text`, which takes no locale.
+- [ ] A missing value is an `Option`, never a placeholder number.
 
 ## Docs
 
@@ -207,7 +211,7 @@ not.
       reported (`docs/audit/2026-09-23-defects.md`).
 - [ ] Working in parallel? Give each agent a disjoint, named set of files and
       its own git worktree in a folder beside the checkout, never under
-      `.claude/`. Each worktree builds in its own `build/release`. Merge, then
+      `.claude/`. Each worktree builds in its own folders. Merge, then
       run the whole suite on the merged result yourself.
 - [ ] Report honestly. If a test fails or part of the work was skipped, say so
       and show the output.

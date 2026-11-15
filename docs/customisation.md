@@ -61,13 +61,14 @@ The same through a command line: `CUSTOMISE "<file>"`, `CODE` and `LINEWORK`
 A customisation used to be three files in another program's formats: a survey
 code file (`.mapfile`, XML) and two style libraries (`.4d`). The Katana
 customisation format replaces them with ONE file of Katana's own, in JSON,
-holding one value: `entity::Customisation`
-(`include/katana/entity/customisation.hpp`, `src/katana_entity/customisation.cpp`;
-tests in `tests/entity/customisation/`).
+holding one value: `katana_entity::Customisation`
+(`rust/crates/katana_entity/src/customisation.rs`;
+tests in `rust/crates/katana_entity/tests/customisation_format.rs` and its
+neighbours).
 
-```
-core::Result<Customisation> customisationFromJson(std::string_view text);
-core::Result<std::string>   customisationToJson(const Customisation&, const CustomisationWriteOptions& = {});
+```rust
+pub fn customisation_from_json(text: &[u8]) -> Result<Customisation>;
+pub fn customisation_to_json(customisation: &Customisation, options: &CustomisationWriteOptions) -> Result<String>;
 ```
 
 Three properties decide almost everything below:
@@ -82,11 +83,11 @@ Three properties decide almost everything below:
   text.
 
 **It lives in the entity layer** because two layers that may not see each
-other must both reach it (`tools/check_layering.cmake`): `cad`, which loads,
+other must both reach it (the crates' dependencies): `cad`, which loads,
 merges and edits a customisation, and the archive module, where the readers
-of the older files and their converter are. The JSON library is named only in
-the `.cpp`; the header is text and `core::Result`, as
-`include/katana/entity/serialization.hpp` is.
+of the older files and their converter were in the C++ build. Its interface
+is text and `katana_core::error::Result`, as
+`rust/crates/katana_entity/src/serialization.rs`'s is.
 
 ### A worked example
 
@@ -124,7 +125,7 @@ and an attribute every code gets:
 ```
 
 That is exactly what the writer produces for this customisation, byte for
-byte (`TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted`). The test holds
+byte (`customisation_format::the_worked_example_of_the_document_is_written_as_it_is_printed`). The test holds
 its own copy of the text, and the `docs` test (`tools/check_docs.py`) fails
 when the block above and that copy differ by a character, so neither can be
 changed without the other.
@@ -168,7 +169,7 @@ names here, which is what a project's record of what it was drawn with is
 made from.
 
 **`basedOn`**: `name` and `digest`, both **required** when it is there. The
-digest is `customisationDigest` of the bytes of the file the copy started
+digest is `customisation_digest` of the bytes of the file the copy started
 from: FNV-1a, 64-bit, as 16 hexadecimal digits in lower case. It tells two
 editions of one name apart and guards against nothing deliberate.
 
@@ -266,7 +267,7 @@ in the order the members are WRITTEN in ("Layout", rule 6).
 **What the numbers may be.** Any number a double holds, except that a
 `length`, a text stroke's `height` and the `size` of a symbol or of a text
 are not negative and a `factor` is above 0 - each refused by
-`entity::validate`, in its own words - and that `stretchMode` and `cycleMode`
+`katana_entity::validate`, in its own words - and that `stretchMode` and `cycleMode`
 are whole numbers a 32-bit integer holds. A number being *finite* is not a
 rule of the file at all - JSON has no way to write one that is not - but see
 "Numbers a double cannot hold" below.
@@ -344,8 +345,8 @@ read badly:
   line`, so the phrase is not said twice;
 - the rule form's `Goes into a TIN` is `Goes into a surface`.
 
-**One table for the nine section words**: `entity::kSurveySectionWords`
-(`include/katana/entity/survey_map.hpp`). `entity::toString(SurveySection)`
+**One table for the nine section words**: `katana_entity::survey_map::SURVEY_SECTION_WORDS`
+(`rust/crates/katana_entity/src/survey_map.rs`). `katana_entity::to_string()`
 reads it for every reply and label, and this format's reader and writer read
 it for `sets`, so the two cannot come to differ; a word changed in it is a new
 version of the format ("What may never change without a new version"). The
@@ -357,23 +358,24 @@ would go on showing the old word after the table changed.
 thing is then not what a person may type.
 
 **The older files keep their own words, with their own code.** A survey code
-file is still read and written with `<map_data>` and a style library with
-`worldstyle`; those words are in a table beside that reader and writer
-(`src/katana_archive12d/legacy/customisation_words.hpp`), in both directions. The
+file was read and written with `<map_data>` and a style library with
+`worldstyle`; those words were in a table beside that reader and writer, in
+both directions (C++ alone: the readers were not ported, "Converting a
+customisation from the legacy formats"). The
 three functions that held them in the entity layer for the files' sake - the
 parse of a section's element, and a definition's kind word both ways - are
 gone from it: their only callers were those readers and writers.
 
-**What did not change**: C++ names (`SurveyRule::model`,
-`SurveySection::Map`, `LintKind::NoModel`), property keys, and the objectNames
-tests and headless scripts find widgets by - `ruleModel`, `ruleTinable`, and
+**What did not change**: the code's names (`SurveyRule::model`,
+`SurveySection::Map`, `LintKind::NoModel`), property keys, and the control
+names tests and headless scripts find controls by - `ruleModel`, `ruleTinable`, and
 the chips `filterMap`, `filterTinable` and `filterVertexmode`, which keep the
 name their first label gave them while showing the new one
-(`FilterBar::setChipLabel`).
+(`FilterBar::set_chip_label`).
 
 ### The reader is strict
 
-`customisationFromJson` refuses, and says which entry and which member:
+`customisation_from_json` refuses, and says which entry and which member:
 
 | What | Error | Example of the message |
 |---|---|---|
@@ -390,7 +392,7 @@ name their first label gave them while showing the new one
 | a name a project could not record, or one that could not be told from another | `InvalidArgument` | `top level: "name": a customisation name cannot hold ...` |
 | two definitions of one name | `InvalidArgument` | `symbols[1] "A": the file holds two definitions of this name; ...` |
 | two colour names with one fold, or one that is a standard name | `InvalidArgument` | `colours "Red": a standard colour name cannot be given another colour ...` |
-| whatever `entity::validate` refuses of a definition, a rule or the linework codes | `InvalidArgument` | `codes[1] "W*M": a survey code key may only use ...` |
+| whatever `katana_entity::validate` refuses of a definition, a rule or the linework codes | `InvalidArgument` | `codes[1] "W*M": a survey code key may only use ...` |
 
 `ParseFailure` is for text that is not in the format's shape, `InvalidArgument`
 for text that is and still does not describe a customisation.
@@ -482,7 +484,7 @@ top-level ones before the lists are gone through. A number too large to hold
 is the one refusal that comes before the whole text has been read, as said
 above.
 
-**Encoding.** The bytes are decoded by `core::decodeText` first, so a UTF-8
+**Encoding.** The bytes are decoded by `katana_core::text_encoding::decode_text` first, so a UTF-8
 byte order mark and UTF-16, which an editor on Windows saves readily, are
 read. Bytes that are neither are NOT decoded as Windows-1252, as that function
 does for the formats that never said what they are: this format does say - it
@@ -504,7 +506,7 @@ characters, after any blanks and a byte order mark, and holds no other mark of
 those formats: their readers are the converter's ("Converting a customisation
 from the legacy formats", below). Text that begins otherwise and is not JSON
 gets the plain `not a Katana customisation file` with the parser's line and
-column beside it. A definition read on its own (`definitionFromJson`) is not a
+column beside it. A definition read on its own (`definition_from_json`) is not a
 file of another program and is not sent to the converter.
 
 ### The reader is bounded
@@ -516,7 +518,7 @@ chords is an undefined cast), a coordinate of 1e29 reached the dash arithmetic,
 and a 50 MB name or three million strokes loaded without complaint. So the
 reader refuses a file past these, naming the entry and the member as it names
 every other refusal, and the writer refuses what the reader would
-(`kCustomisationMost*`, `include/katana/entity/customisation.hpp`):
+(`kCustomisationMost*`, `rust/crates/katana_entity/src/customisation.rs`):
 
 | Bound | Is | Refusal says |
 |---|---|---|
@@ -533,15 +535,15 @@ sweep; the others are far above any definition, name or file the built-in or a
 person's customisation holds (the NSW built-in is read by this reader, so it
 is within every one, with room to spare; its census, 792 definitions and 1,624
 rules, is pinned by `BuiltInCensus` and would fail if it were not). Each is tried at the bound (accepted) and one
-past it (refused), in `tests/entity/customisation/test_customisation_bounds.cpp`.
+past it (refused), in `rust/crates/katana_entity/tests/customisation_bounds.rs`.
 
 - **The check is where the value is read.** A text over the bound is refused
   by the member that holds it, a number by the member or the stroke, so the
   refusal can say where. The count of rules is kept as the text is parsed and
   STOPS the parse at the rule past the bound, so a file of millions holds the
   bound's worth in memory and no more. A name in a refusal is cut at 240 bytes
-  (`inQuotes`), since the entry's name is in every refusal about it.
-- **`cad::addArc` clamps as well** (`src/katana_cad/style_drawing.cpp`): a
+  (`in_quotes`), since the entry's name is in every refusal about it.
+- **`katana_cad::style_drawing::add_arc` clamps as well** (`rust/crates/katana_cad/src/style_drawing.rs`): a
   definition made in code is not held to the file's bounds, and the arc it
   draws is cut to the same two turns, and drawn as nothing when a sweep is not
   a number.
@@ -553,7 +555,7 @@ past it (refused), in `tests/entity/customisation/test_customisation_bounds.cpp`
 **Strokes are read as the text is parsed**, not from a tree of it. The reader
 takes the JSON library's parse events (its SAX interface) and builds a tree
 for everything except a definition's `strokes`, which it turns into
-`entity::Stroke` values as they go by. A library is 35,000 strokes, and a tree
+`katana_entity::Stroke` values as they go by. A library is 35,000 strokes, and a tree
 holds each as a list of its own with its word as text of its own - most of
 what a tree of the whole file weighs, built to be read once and thrown away.
 On a generated customisation of the reference one's size this took the reader
@@ -564,7 +566,7 @@ when its definition is read.
 
 ### What the writer writes
 
-`customisationToJson` is a hand-written emitter, not the JSON library's
+`customisation_to_json` is a hand-written emitter, not the JSON library's
 `dump()`. That function gives either one line for the whole file or one line
 for every number; a library of 35,000 strokes is read, compared and merged by
 people as text, and one stroke a line is the unit a diff shows.
@@ -602,7 +604,7 @@ people as text, and one stroke a line is the unit a diff shows.
    precedence. Colours are in the order of their FOLDED names (`site_grey`
    before `Site Orange`).
 9. **Numbers** are the shortest text that reads back as the same double
-   (`core::formatExactReal`): `0`, `2.5`, `-0.25`, `0.3333333333333333`, and
+   (`katana_core::text::format_exact_real`): `0`, `2.5`, `-0.25`, `0.3333333333333333`, and
    for some the form with an exponent, `1e-05`, `1e+21`. Negative zero is
    written `-0.0`: its shortest text is `-0`, which a JSON reader takes for
    the INTEGER 0, losing the sign. Whole-number members are written as
@@ -622,7 +624,7 @@ people as text, and one stroke a line is the unit a diff shows.
 "At its default" is decided bit for bit for a number, so `"length": -0.0` is
 written although `-0.0 == 0.0`.
 
-`CustomisationFormat.ASmallCustomisationIsWrittenByteForByteAsTheLayoutSays`
+`customisation_format::a_small_customisation_is_written_byte_for_byte_as_the_layout_says`
 holds a file written out by hand from these eleven rules.
 
 #### What it refuses
@@ -630,11 +632,11 @@ holds a file written out by hand from these eleven rules.
 `InvalidArgument`, naming the entry as the reader does, for anything that
 would not read back as itself:
 
-- a number that is not finite - JSON has no form for one (`entity::validate`
+- a number that is not finite - JSON has no form for one (`katana_entity::validate`
   does not look at a text's three `extra` numbers, so a library can hold one);
 - text that is not valid UTF-8 (a rule's text and pipe members, a
   description, a notice and a definition's source are not checked by
-  `entity::validate` either);
+  `katana_entity::validate` either);
 - a stroke carrying a member its kind does not use. The model has ONE flat
   stroke for all seven kinds and lets any member be set on any of them; a file
   has a place only for the members the kind uses, so a `move` with a radius
@@ -649,7 +651,7 @@ would not read back as itself:
   definition of more than 100,000 strokes, and a text of more than 1,000 bytes:
   the bounds of the reader ("The reader is bounded", above);
 - and everything the READER would refuse: a bad name, a bad digest, linework
-  codes that `entity::validate` refuses. The reader and the writer call one
+  codes that `katana_entity::validate` refuses. The reader and the writer call one
   function for these, so the writer cannot write a file the reader will not
   open - which matters most for the copy the program keeps for a user.
 
@@ -671,9 +673,9 @@ symbols for a colleague should not carry the session's control codes.
 
 For an editor, one definition goes to and from the format's text alone:
 
-```
-core::Result<std::string> definitionToJson(const LineStyle&, std::string_view customisation = {});
-core::Result<LineStyle>   definitionFromJson(std::string_view text, bool symbol, std::string_view customisation = {});
+```rust
+pub fn definition_to_json(definition: &LineStyle, customisation: &str) -> Result<String>;
+pub fn definition_from_json(text: &[u8], symbol: bool, customisation: &str) -> Result<LineStyle>;
 ```
 
 The text is the very object a file holds, written by the same code with the
@@ -681,14 +683,14 @@ file's indent taken off, and no line feed after it. What a file says of a
 definition from outside it is given as arguments: `symbol` is the list it
 would sit in, and `customisation` the name it would sit under - `from` is
 written only when the source differs from it, and a text with no `from` reads
-as it. Reading runs `entity::validate`, since no library is there to. The
+as it. Reading runs `katana_entity::validate`, since no library is there to. The
 entry is named `definition "<name>"`.
 
 ### Editing a definition
 
 In the window one definition is made, changed, copied or deleted in the
 definition editor (`docs/desktop.md`, "The definition editor";
-`src/katana_qt/customisation/definition_editor.hpp`), reached from the Symbol
+`rust/crates/katana_window/src/customisation/definition_editor.rs`), reached from the Symbol
 Library and from the Linetypes tab of Styles and Linetypes. What it shows of
 a definition is this format and nothing beside it:
 
@@ -698,7 +700,7 @@ a definition is this format and nothing beside it:
   A number is the text the writer would write for it (rule 9 of "Layout"),
   and an empty one is the member left out;
 - **the `strokes` as the lines a file holds**, one stroke a line, read by
-  `definitionFromJson` as they are typed. The table of strokes under "The
+  `definition_from_json` as they are typed. The table of strokes under "The
   members" is therefore the editor's reference as much as the file's, and a
   line can be carried from one to the other unchanged.
 
@@ -711,13 +713,13 @@ a definition is one object - is refused: members are set in the fields.
 What the format decides, the editor does not decide again:
 
 - **What a definition may be** is the reader's answer. The message under the
-  form is its refusal, or `entity::validate`'s, in the words under "The
+  form is its refusal, or `katana_entity::validate`'s, in the words under "The
   reader is strict", with the line of the box in front: `Line 3: definition
   "TEST Valve" strokes[2]: "drow" is not a kind of stroke ...`. The line is
   found by reading each line alone, since the reader names a stroke by its
   place and not by a line; and the line and column the reader ends some
   refusals with are left off, being of the joined text and not of the box
-  (`cad::readStrokeText`, `include/katana/cad/definition_edit.hpp`).
+  (`katana_cad::definition_edit::read_stroke_text`, `rust/crates/katana_cad/src/definition_edit.rs`).
 - **A name is fixed once the definition exists.** A name is a definition's
   identity - "once across BOTH lists" - and what a rule's `linestyle`, a
   rule's `symbol` and the drawing's styles and layers hold of it. Nothing
@@ -725,7 +727,7 @@ What the format decides, the editor does not decide again:
   a definition under a new name. The format takes any name; the editor does
   not MAKE one that no command line could name the definition by - a double
   quote in it, or the words `CODE` and `FORCE` alone - since such a
-  definition could not be removed again (`cad::removeDefinitionLine`).
+  definition could not be removed again (`katana_cad::definition_edit::remove_definition_line`).
 - **Which list holds it is a field**, Kind, and is what sets
   `LineStyle::symbol` - as the list does in a file.
 - **Where it came from is kept.** `from` is not edited: a definition changed
@@ -733,8 +735,8 @@ What the format decides, the editor does not decide again:
   it did too. One made in the editor has none ("Made in this session"), which
   a file writes as `"from": ""` under a named customisation.
 
-**Removing a definition asks who names it.** `cad::definitionUsers`
-(`include/katana/cad/definition_users.hpp`) lists the rules that name it as
+**Removing a definition asks who names it.** `katana_cad::definition_users::definition_users`
+(`rust/crates/katana_cad/src/definition_users.rs`) lists the rules that name it as
 their `linestyle` or as their `symbol` - each by its index, its key and its
 `sets` word, `rule #1 AC* (symbol)`, since a rule has no identity but its
 place - and the styles and layers of the drawing that name it. Any rule is
@@ -756,27 +758,26 @@ loaded.
 
 ### Colour names
 
-`include/katana/entity/colour_names.hpp`. A rule, a symbol and a pen NAME
+`rust/crates/katana_entity/src/colour_names.rs`. A rule, a symbol and a pen NAME
 their colour; two things turn a name into a colour.
 
 **The standard names**: 27 of them - 14 plain, 7 dark, 6 light - at the RGB
 the same names have in the CSS list, with two departures stated beside the
 table (`green` is the primary, and the greys sit either side of `grey`).
-`entity::standardColour`, `entity::standardColourNames` and
-`entity::nearestStandardColour` are that table; it was private to the archive
+`katana_entity::colour_names::standard_colour`, `katana_entity::colour_names::standard_colour_names` and
+`katana_entity::colour_names::nearest_standard_colour` are that table; it was private to the archive
 module, and moved because `cad` resolves a customisation's colours and may
 not see that module. The archive module's three names for them
-(`include/katana/archive12d/domain.hpp`) are using-declarations: the entity
+(`rust/crates/katana_archive12d/src/domain.rs`) are re-exports (`use`): the entity
 functions themselves, not three that forward. *Rejected: forwarding
-functions.* `nearestStandardColour` takes an `entity::Color`, so a plain call
-inside the archive namespace finds the entity function through its argument
-as well as the archive's own, and two functions of one signature make that
-call ambiguous in any file that sees both headers; one function found twice
-does not.
+functions* (in the C++, a plain call inside the archive namespace found the
+entity function through its argument as well as the archive's own, and two
+functions of one signature made the call ambiguous; one function found twice
+did not; the port keeps the one function).
 
 **A customisation's own table**, `colours`: `"sui test power": "#FF7F00"`. A
 colour is `#RRGGBB`, or `#RRGGBBAA` with an opacity, in either case of digit;
-it is written in upper case. `entity::ColourTable` refuses
+it is written in upper case. `katana_entity::ColourTable` refuses
 
 - a name that is empty, or nothing but blanks and separators, or not UTF-8;
 - two names with one fold: a lookup could not say which was meant;
@@ -784,7 +785,7 @@ it is written in upper case. `entity::ColourTable` refuses
   with or without a customisation, including a headless archive import with
   an empty palette.
 
-**One fold.** A colour name is compared after `entity::foldColourName` and in
+**One fold.** A colour name is compared after `katana_entity::colour_names::fold_colour_name` and in
 no other way. In this order: ASCII letters to lower case; `_` and `-` read as
 a blank; blanks at the ends removed; and `gray` read as `grey` where it is
 the whole name or its last word (`Dark_Gray` is `dark grey`). Blanks inside a
@@ -797,11 +798,11 @@ form to compare names in: a table could hold `red_` beside the standard `red`
 it is another spelling of, and `sui test gas_` beside `sui test gas`. Since 2026-10-06
 the separators become blanks before the ends are trimmed, so a separator at
 an end goes as a blank there does, and folding a folded name changes nothing
-(`FoldingAFoldedNameChangesNothing`). The one thing this changes for what
+(`colour_names::folding_a_folded_name_changes_nothing`). The one thing this changes for what
 existed before: an archive whose colour is named `red_` is now drawn red,
 where that name used to match no standard colour and leave the colour alone.
 
-**One resolver.** `entity::resolveColour` asks the table and then the standard
+**One resolver.** `katana_entity::colour_names::resolve_colour` asks the table and then the standard
 names, and gives nothing for a name neither knows - which leaves a colour
 alone rather than guessing (`pen 901` is such a name, and a pen that does not
 resolve draws in the entity's own colour).
@@ -823,22 +824,22 @@ original palette to remain loaded.
 
 ### Linework codes
 
-`include/katana/entity/linework_codes.hpp`. The spellings of the seven
+`rust/crates/katana_entity/src/linework_codes.rs`. The spellings of the seven
 linework controls are part of a customisation - a team writes `ST` or `S` as
 its field book does - so `LineworkCodes` and its `validate` moved from `cad`
-to this layer, where the file is read. `cad::LineworkCodes` is now an alias
-and `cad::validate` a using-declaration of `entity::validate`, so nothing
-that named them changed - `cad::validate(codes)` from outside, and a plain
-`validate(codes)` inside the `cad` namespace. *Rejected: a `cad::validate`
+to this layer, where the file is read. `katana_entity::linework_codes::LineworkCodes` is now an alias
+and `katana_cad::validate` a using-declaration of `katana_entity::validate`, so nothing
+that named them changed - `katana_cad::validate()` from outside, and a plain
+`validate(codes)` inside the `cad` namespace. *Rejected: a `katana_cad::validate`
 that forwards*, which is what it first was. The codes are an entity type, so
-the plain call finds `entity::validate` through its argument as well, and
+the plain call finds `katana_entity::validate` through its argument as well, and
 beside a second function of the same signature it does not compile
-(`tests/cad/customisation/test_linework_code_names.cpp` holds both spellings
+(`rust/crates/katana_cad/tests/styles/linework_code_names.rs` holds both spellings
 of the call to compiling). It is the trap `docs/geometry.md` records for the
 chording functions, where the `cad` names were deleted; here the names are
 wanted, so they are made to name the one function.
 
-`entity::lineworkCodeMembers` lists the seven by the names the file, a refusal
+`katana_entity::linework_codes::linework_code_members` lists the seven by the names the file, a refusal
 and a command use, so that the three cannot come to disagree about one. It is
 the only list of those words: `cad` had the same seven in a function from its
 control enumeration to text, whose last caller was the `validate` that moved,
@@ -846,7 +847,7 @@ and that function went with it.
 
 ### The name
 
-`validateCustomisationName`: not empty, valid UTF-8, with no line break, `/`
+`validate_customisation_name`: not empty, valid UTF-8, with no line break, `/`
 or `\`, no control character (U+0000 to U+001F and U+007F) and no blank at
 either end.
 
@@ -861,7 +862,7 @@ matched to its customisation by it, and a list shows it: `NSW ` and `NSW`
 would be two customisations that look like one, and a tab, an escape or a NUL
 cannot be seen where the name is shown (an escape sequence in a name would
 also be acted on by a terminal a reply is printed to). It is the rule a
-layer's name is held to (`validateLayerPath`), and it is in version 1 from
+layer's name is held to (`validate_layer_path`), and it is in version 1 from
 the start because a rule added later would refuse files that exist by then,
 where one relaxed later refuses nothing. A blank INSIDE a name is part of it,
 and only the plain blank is looked for at the ends: a no-break space there is
@@ -949,7 +950,7 @@ is a field of the definition (`LineStyle::symbol`) set by the list it sits
 in, and is not worked out from `source` as it used to be (a file name holding
 "symbol"): one customisation holds both kinds under one name. The style
 library reader, which still reads one kind a file, sets the flag by that
-file-name rule. The symbol catalogue (`cad::symbolLibrary`) and the lint read
+file-name rule. The symbol catalogue (`katana_cad::symbol_assign::symbol_library`) and the lint read
 the flag, so a definition listed as a symbol is one wherever symbols are
 shown, whether or not it is drawn at vertices or anything names it yet.
 
@@ -981,14 +982,14 @@ survives being read and written.
   for `text`, `vertex pipe` and `segment pipe` for `vertexPipe` and
   `segmentPipe`, and call an entry of `attributes`, `vertexAttributes` or
   `segmentAttributes` a `string`, `vertex` or `segment` attribute
-  (`fieldSpecs` and `attributeScopes` in
-  `src/katana_cad/customisation/code_table.cpp`). They were not among the
+  (`field_specs` and `attributeScopes` in
+  `rust/crates/katana_cad/src/code_table.rs`). They were not among the
   words that changed ("The words a rule is shown by"), so for these a person
   writing a file from an explanation needs the table of members above.
 - **One refusal still says `model`.** Linework that meets a rule whose layer
   is not a layer name answers "the survey map gives a code a model that is
   not a valid layer name", with `model=` beside it
-  (`src/katana_cad/customisation/linework.cpp`). No map can hold such a rule
+  (`rust/crates/katana_cad/src/linework.rs`). No map can hold such a rule
   (`SurveyMap::add` refuses it), so nobody is shown it; it was left because
   that file was being rewritten by other work when the words changed.
 - **Explicit zero against "not said"** is not kept for a rule's symbol and
@@ -1003,17 +1004,17 @@ survives being read and written.
   told which member holds it. Reading on would take a JSON reader of this
   format's own.
 - **The style manager keeps a second table of standard colours.** The colour
-  menu of Styles and Linetypes (`src/katana_qt/style_manager.cpp`,
-  `kStandardColours` there) lists twelve colours "by the standard colour
+  menu of Styles and Linetypes (`rust/crates/katana_window/src/style_manager.rs`,
+  `STANDARD_COLOURS` there) lists twelve colours "by the standard colour
   names" from a table of its own, and two of them are not the standard
   colour: its `orange` is 255, 128, 0 where the standard one is 255, 165, 0,
   and its `brown` 150, 75, 0 where the standard one is 165, 42, 42. A style
   given "orange" from that menu is therefore not the orange a rule's
   `"colour": "orange"` draws. It should be filled from
-  `entity::standardColourNames`; left because the window's behaviour belongs
+  `katana_entity::colour_names::standard_colour_names`; left because the window's behaviour belongs
   to the work that gives it Settings.
 - **The reader is slower than the readers it replaces.** The measurement
-  that can be repeated is `benchmarks/bench_customisation.cpp`, and its
+  that can be repeated is the C++ build's `bench_customisation` benchmark, and its
   figures are under "What reading and writing cost" at the end of this
   document. What follows is the first measurement, kept for what it found:
   made once, on 2026-10-06, with a throwaway program (Release, GCC 16, best
@@ -1053,22 +1054,22 @@ survives being read and written.
 
 Two verbs of the shared `CommandInterpreter` work on a session's
 customisation: `CUSTOMISE`, which loads, writes, keeps and edits it
-(`include/katana/cad/customisation_verbs.hpp`), and `CODE`, which applies its
+(`rust/crates/katana_cad/src/customisation_verbs.rs`), and `CODE`, which applies its
 survey codes to a drawing and answers questions about them
-(`include/katana/cad/survey_code_verbs.hpp`). Being the interpreter's, each is
+(`rust/crates/katana_cad/src/survey_code_verbs.rs`). Being the interpreter's, each is
 ONE implementation for the window's command line, `katana_cli`, `katana_mcp`
 and an agent. `HELP` lists both in brief and `HELP CUSTOMISE` prints the
-family's whole reference (`cad::customisationVerbHelp`).
+family's whole reference (`katana_cad::customisation_verbs::customisation_verb_help`).
 
 **Where this stands.** The family is in the interpreter and is tested there
-(`tests/cad/customisation/test_customisation_verbs.cpp`,
-`tests/cad/customisation/test_survey_code_verbs.cpp`). `CODE` reaches every
+(`rust/crates/katana_cad/tests/customisation_verbs/customisation_verbs.rs`,
+`rust/crates/katana_cad/tests/customisation_verbs/survey_code_verbs.rs`). `CODE` reaches every
 front end, and since 2026-10-07 so does `CUSTOMISE`: no front end takes the
 line itself any more, and each hands the interpreter a host and starts
 through `startCustomisation`. The session of `katana_cli` and `katana_mcp`
-does it in `src/katana_app/session.cpp` ("What katana_cli and katana_mcp
+does it in `rust/crates/katana_app/src/session.rs` ("What katana_cli and katana_mcp
 start with", below; the `cli.customise_*` tests); the desktop window in
-`MainWindow::loadDefaultCustomisation` (`docs/desktop.md`, "How the window
+`MainWindow::load_default_customisation` (`docs/desktop.md`, "How the window
 starts" and "The Format menu";
 `qt_customisation_merges_and_keeps_the_map_headless` and the headless tests
 beside it). The two programs' tokenizers and loaders for the line, which
@@ -1079,7 +1080,7 @@ had come to differ, are gone, and the older files they read no longer load.
 | Line | What it does |
 |---|---|
 | `CUSTOMISE` | what is loaded: two count lines, then records, then what this drawing uses of it, then (in a session with a host) a sentence saying whether a kept file exists and where |
-| `CUSTOMISE JSON` | the same as one JSON object (`cad::customisationJson`) |
+| `CUSTOMISE JSON` | the same as one JSON object (`katana_cad::customisation_report::customisation_json`) |
 | `CUSTOMISE <file>...` | merges Katana customisation files into the session |
 | `CUSTOMISE REPLACE <file>...` | loads them in the place of each KIND they bring |
 | `CUSTOMISE DEFINITIONS <file>...` | merges only the files' definitions and colours: what the Symbol Library's Import Definitions runs |
@@ -1111,16 +1112,16 @@ included, and hands the family the words after it. A file that is literally
 called as a keyword is given with its directory, `./json`, as a file called
 as a scope word is.
 
-**A load** reads every file with `entity::customisationFromJson`, merges them
-with `cad::mergeCustomisation` and installs the result with
-`Document::installCustomisation`. It is all or nothing: when one file does
+**A load** reads every file with `katana_entity::customisation::customisation_from_json`, merges them
+with `katana_cad::customisation_merge::merge_customisation` and installs the result with
+`Document::install_customisation`. It is all or nothing: when one file does
 not read, or the merge or the install refuses one thing, nothing is loaded
 and every reason is listed. One file that does not read is refused in the
 reader's own words, the file beside them - a survey code file or a style
 library of another program is `not a Katana customisation file`. A file
 named twice is read once, and the reply says so. What Merge and Replace each
 do to definitions, rules, colours, the settings and the sources is the
-merge's to say (`include/katana/cad/customisation_merge.hpp`).
+merge's to say (`rust/crates/katana_cad/src/customisation_merge.rs`).
 
 **`DEFINITIONS` is a merge that takes the definitions and the colours of the
 files and nothing else.** The files' survey code rules, linework codes and
@@ -1130,11 +1131,11 @@ a file lists come in as the session's only when they brought it definitions
 (each as a source of definitions alone), or, brought neither kind, when the
 file has colours: one that brought rules alone is dropped with its notice,
 because a source a load lists is taken off what the open project is missing
-(`Document::installCustomisation`), and one left in with its rules flag
+(`Document::install_customisation`), and one left in with its rules flag
 cleared would pass for loaded with none of its rules here. A file that holds
 neither a definition nor a colour is refused (`NotFound`, saying where its
 rules are loaded), and nothing is loaded. What it takes of a file is
-`cad::definitionsOfFile` (`include/katana/cad/customisation_part.hpp`).
+`katana_cad::customisation_part::definitions_of_file` (`rust/crates/katana_cad/src/customisation_part.rs`).
 *Rejected: the Symbol Library running `CUSTOMISE <file>` and taking the rules
 too*, which is what the button did when a file held one kind: rules loaded from
 a symbol browser would go round the Survey Code Manager's buffer, where a
@@ -1171,7 +1172,7 @@ installed - is refused until `NAME` gives one.
 
 **A part** - anything a kind word or `ONLY` chose - is a fragment for
 someone else's session, or for this one later. What it holds is ONE rule,
-`cad::customisationPart` (`include/katana/cad/customisation_part.hpp`), which
+`katana_cad::customisation_part::customisation_part` (`rust/crates/katana_cad/src/customisation_part.rs`), which
 the window's two export buttons run as lines - the Survey Code Manager's
 Export Codes is `CUSTOMISE EXPORT <file> CODES` (of the drawing's rules: with
 edits not yet applied it is refused, since no line can name the manager's
@@ -1188,7 +1189,7 @@ there):
   another name: it is a part of that customisation.
 - **It carries the colours that what is written NAMES**, and no others: a
   rule's colour, its symbol's and its text's; a pen stroke of a definition.
-  Names are compared as colour names are (`entity::foldColourName`).
+  Names are compared as colour names are (`katana_entity::colour_names::fold_colour_name`).
 - **It lists a source only for what it holds of it**: with `definitions`
   when one of the definitions written came from that source
   (`LineStyle::source`), with `rules` when the rules are written and that
@@ -1204,7 +1205,7 @@ write everything as it is.
 
 Where a file is loaded its sources are taken at their word: each becomes a
 source of that session by name, and a project's record of what it was drawn
-with is by name too (`cad::customisationRecord`: a source said to have
+with is by name too (`katana_cad::customisation_record::customisation_record`: a source said to have
 brought rules is recorded for good). A part written with the session's list
 as it stood said of one exported symbol that it was the whole customisation,
 rules included.
@@ -1214,7 +1215,7 @@ nothing, when one of them is still named - by a survey code rule as its
 linestyle or its symbol, by a style of the drawing as its linetype or its
 symbol, or by a layer of the drawing as its linetype - listing every rule,
 style and layer that names it. Who names it is asked of
-`cad::definitionUsers`, the function the window's definition editor lists a
+`katana_cad::definition_users::definition_users`, the function the window's definition editor lists a
 definition's users with, so a name counts as it is DRAWN: the name itself,
 and the earlier name of a definition since renamed where the library has no
 definition of that earlier name. `FORCE` removes it all the same, and what
@@ -1222,19 +1223,19 @@ names it then draws plain. `REMOVE CODE` removes every rule of each key, in
 every section; a key is matched as it is written.
 
 **`SET`** changes the two switches and the seven control codes. Every item is
-read before any is set, and the codes are judged by `entity::validate`, so
+read before any is set, and the codes are judged by `katana_entity::validate`, so
 one refused item sets none of them. A key is given once in a line: given
 twice it is refused, where the later value once won and the reply said both.
 
 **Two window paths are not lines, and say so.** The Survey Code Manager's
 Apply and the definition editor's Save put an edited BUFFER on the session
-(`Document::setSurveyMap`, `Document::installCustomisation`). A line for
+(`Document::set_survey_map`, `Document::install_customisation`). A line for
 either would be a larger design than the verb family has: the family's one
 door for an edit is a fragment merged by name (`CUSTOMISE <file>`), so a line
 for Apply would write the buffer to a temporary file in order to read it
 back, and a line for Save would need a grammar for the nineteen members of a
 rule and the strokes of a definition. Both therefore go through the commit
-hook (`CustomisationContext::beginCommit`), which keeps a kept session kept,
+hook (`CustomisationContext::begin_commit`), which keeps a kept session kept,
 and are NOT in the command history. Nor are they undone: the style library,
 the survey map and the rest of the customisation are session data, which
 `UNDO` does not touch (`docs/cad.md`, D1). What takes an edit back is Revert
@@ -1246,7 +1247,7 @@ Survey Code Manager's Import Codes merges into the buffer, for review.
 ### The replies
 
 Every reply is records, one a line: a leading word, then `key=value` fields
-(`cad::recordValue` quotes a value that needs it; `core::readReplyRecord`
+(`katana_cad::record_value` quotes a value that needs it; `katana_core::text::read_reply_record`
 reads a line back). A file's path is written with `/` on every platform - a
 backslash in a record is an escape. No reply to a line that succeeded holds
 the word `error`: a script, and dozens of the command line's own tests, take
@@ -1302,11 +1303,11 @@ The bare report had a second, older text (a summary function and a report over
 it), which named a source by the kind of
 file it once was ("a style library"). `katana_cli`'s own `CUSTOMISE`, the
 window's and File > Drawing Summary each printed it until they moved to the
-verb's text, `cad::formatCustomisationReply`; with the last of them gone the
+verb's text, `katana_cad::customisation_report::format_customisation_reply`; with the last of them gone the
 two functions and their four tests were deleted (2026-10-07). The reply is
 made from a `CustomisationSummary`, as that text was.
 
-`CUSTOMISE JSON` is `cad::customisationJson`: one object, keys in
+`CUSTOMISE JSON` is `katana_cad::customisation_report::customisation_json`: one object, keys in
 alphabetical order, two blanks a level, with `name`, `origin`, `kept`,
 `description`, `notice`, `basedOn`, `builtIn`, `builtIns` (each built-in the
 program has: `name`, `description`, `source`, `default`, `active`,
@@ -1321,11 +1322,11 @@ so that a front end can hand a client the object without a line passing
 through the command history.
 
 `start` is `{problems: [sentence], keptFromAnotherBuiltIn}`: what
-`cad::startCustomisation` found when the session started - a kept file or a
+`katana_cad::customisation_host::start_customisation` found when the session started - a kept file or a
 built-in that did not read, and a kept customisation made from another
 built-in than the program has. `startCustomisation` leaves both on the
-Document (`CustomisationState::startProblems`, `keptFromAnotherBuiltIn`;
-`Document::setCustomisationStart`) as well as handing them to the front end,
+Document (`CustomisationState::start_problems`, `keptFromAnotherBuiltIn`;
+`Document::set_customisation_start`) as well as handing them to the front end,
 because a front end says them once, at the start, where its errors go - and
 whoever asks what the session holds later is otherwise told `origin: builtIn`
 and not that the customisation it kept was refused. It is always written, `[]`
@@ -1337,8 +1338,8 @@ the front end and adding it to what `katana_mcp` hands out.* The tool, the
 resource and this verb would then disagree about one report, and the window
 would need the same code again. The bare `CUSTOMISE` text does not repeat it
 ("The verbs: not done").
-`CustomisationStart.WhatAStartFoundStaysOnTheDocumentAndIsInItsJsonReport`
-and `CustomisationStart.RecordingWhatAStartFoundIsNoEditOfTheSessionAndIsReportedOnce`
+`customisation_start::what_a_start_found_stays_on_the_document_and_is_in_its_json_report`
+and `customisation_start::recording_what_a_start_found_is_no_edit_of_the_session_and_is_reported_once`
 hold it.
 
 ### The host: RESET, KEEP and REVERT
@@ -1346,7 +1347,7 @@ hold it.
 Three of the words need what the Document does not hold: the program's
 built-in customisation and the path of the file the user's own is kept in. A
 front end hands both to the interpreter as a host
-(`CommandInterpreter::setCustomisationHost`, `cad::CustomisationHost`), as it
+(`CommandInterpreter::set_customisation_host`, `katana_cad::customisation_host::CustomisationHost`), as it
 hands over its views. A session given none - a test's bare Document, a tool -
 has every other word, and these three refused by name; so is `RESET` in a
 build with no built-in, and `KEEP` and `REVERT` where the front end keeps no
@@ -1354,25 +1355,25 @@ file.
 
 `RESET` installs the built-in whole, the control codes and the switches
 included, through the one function a start with no kept file uses
-(`cad::installBuiltInCustomisation`). It writes nothing.
+(`katana_cad::customisation_host::install_built_in_customisation`). It writes nothing.
 
 `BUILTIN <name>` is `RESET` for any other built-in the host offers. The two
-share one function in `customisation_verbs.cpp` (`installChosen`; *rejected: a
+share one function in `customisation_verbs.rs` (`install_chosen`; *rejected: a
 second install path for the named one*), so they cannot differ in what they
 leave: the same install (origin `builtIn`, based on itself), nothing written,
 nothing to undo - a customisation is session data, not an undo step - and the
 same `kept` rule. `kept=yes` is for the built-in OF THE RUN with no kept file
 there to be read in its place; any other built-in is `kept=no`, because the next
 start gives the run's own until a `KEEP` says otherwise. What the host offers is
-`CustomisationHost::builtIns`, which a front end leaves unset, so that it is those
-compiled into the program (`cad::builtIns()`); a test sets it to stand in for the
+`CustomisationHost::built_ins`, which a front end leaves unset, so that it is those
+compiled into the program (`katana_cad::built_ins()`); a test sets it to stand in for the
 build. The name is all the words after `BUILTIN`, joined by a blank, in any letter
 case, so `CUSTOMISE BUILTIN Katana Standard` and `CUSTOMISE BUILTIN "katana
 standard"` are one line; a name the program does not have is `NotFound` and lists
 the names it has. A built-in that is listed and did not read is refused by its
 reason. `RESET` and `BUILTIN` need a host, and the first needs a built-in of its own.
 
-`KEEP` writes the session, as `entity::customisationToJson` writes it, to a
+`KEEP` writes the session, as `katana_entity::customisation::customisation_to_json` writes it, to a
 file beside the kept one and renames that into its place; the file that was
 there stays beside it as `.bak`. The file beside is named for the process
 (`<kept file>.<process id>-<count>.tmp`), so that two Katanas keeping into one
@@ -1434,7 +1435,7 @@ session: it writes it, and the file says what it is based on, that built-in's na
 and the digest of its bytes. No new file and no new state: the choice is the
 file. At the next start the kept file's `basedOn` is judged against the run's
 built-in first, as ever, and then, when the name is another, against the other
-built-ins the program offers (`CustomisationStart::keptFromAnotherBuiltIn`). A
+built-ins the program offers (`CustomisationStart::kept_from_another_built_in`). A
 built-in of that name in the edition the program has is not "another": the session
 comes up as it, kept, and says nothing. "Another" is a built-in the program no
 longer offers, or offers in another edition. So the choice survives a rebuild that
@@ -1449,9 +1450,9 @@ states of its own beside `.bak` and `.bad`, and a thing for `REVERT`, Settings a
 the tips to know about. *Rejected: a new member in the format* for what `basedOn`
 already says; it would be a format change. *Rejected: retiring the kept file for ANY
 built-in the program has*: NSW could not then survive a restart.
-`AnAlternateBuiltInChosenAndKeptIsWhatTheNextStartGivesAndNothingIsWarnedOf`,
+`customisation_verbs::an_alternate_built_in_chosen_and_kept_is_what_the_next_start_gives_and_nothing_is_warned_of`,
 `AResetAndAKeepAfterAKeptAlternateRetireTheFileAndTheDefaultComesBack`,
-`ChoosingTheDefaultByNameAfterAKeptAlternateRetiresTheFileLikeAReset`,
+`customisation_verbs::choosing_the_default_by_name_after_a_kept_alternate_retires_the_file_like_a_reset`,
 `AKeptCopyOfAnAlternateTheProgramOffersIsNotFromAnotherBuiltIn`,
 `AKeptCopyOfAnAlternateIsFromAnotherBuiltInWhenTheProgramLacksItOrHasAnotherEdition`
 and `AKeptCopyOfTheEarlierDefaultSurvivesARebuildThatChangesTheDefault` follow
@@ -1462,11 +1463,11 @@ the three ways a kept copy is, or is not, from another built-in.
 
 ### What katana_cli and katana_mcp start with
 
-The session those two programs share (`src/katana_app/session.cpp`) builds its
+The session those two programs share (`rust/crates/katana_app/src/session.rs`) builds its
 host when it starts, hands it to the interpreter and then calls
-`cad::startCustomisation`:
+`katana_cad::customisation_host::start_customisation`:
 
-- **The built-in** is `cad::builtInCustomisation()`: the default customisation
+- **The built-in** is `katana_cad::built_in_customisation()`: the default customisation
   compiled into the program, Katana Standard, or what the environment variable
   `KATANA_BUILTIN_CUSTOMISATION` says in its place for one run - the name of
   another compiled-in built-in (`NSW`), a Katana customisation file, or `none`
@@ -1481,20 +1482,20 @@ host when it starts, hands it to the interpreter and then calls
   variable unset, `KEEP` and `REVERT` are refused, naming it.
 
 Both variables name a file, and both are read through
-`core::environmentVariable` (`include/katana/core/path_text.hpp`), never
+`katana_core::path_text::environment_variable` (`rust/crates/katana_core/src/path_text.rs`), never
 `getenv`. On Windows `getenv` gives the bytes of the ANSI code page, in which
 a character the code page lacks is already a `?`: a kept file under a folder
 named in Japanese, on a machine set up for English, was a file under `??` -
 not there, which is the ordinary case of nothing kept, so the built-in started
 in its place with nothing said, and `CUSTOMISE KEEP` then failed to write it
 (found in review, 2026-10-07). The helper reads the value wide there and
-hands it back as UTF-8, which `core::pathFromUtf8` turns into the path;
+hands it back as UTF-8, which `katana_core::path_text::path_from_utf8` turns into the path;
 elsewhere the bytes are the variable's own.
-`PathText.AnEnvironmentVariableIsReadAsTheTextItHoldsWhateverTheCodePage` and
-`PathText.AFileAnEnvironmentVariableNamesOutsideTheCodePageIsTheFileRead`
+`path_text::an_environment_variable_is_read_as_the_text_it_holds_whatever_the_code_page` and
+`path_text::a_file_an_environment_variable_names_outside_the_code_page_is_the_file_read`
 hold the helper, and
-`Session.AKeptFileUnderAFolderNoCodePageSpellsStartsTheSessionAndIsWhereKeepWrites`
-and `Session.ABuiltInTheSeamNamesUnderSuchAFolderStartsTheSession` the two
+`session::a_kept_file_under_a_folder_no_code_page_spells_starts_the_session_and_is_where_keep_writes`
+and `session::a_built_in_the_seam_names_under_such_a_folder_starts_the_session` the two
 variables, under a folder named in two scripts no one code page holds.
 
 What was installed is said in one line on standard output - in `katana_mcp`
@@ -1515,16 +1516,16 @@ Each noun goes by its count, as the window's start-up line does (`1 definition
 (1 symbol) and 1 survey code rule`): the line gave every count the plural
 until 2026-10-07, so a customisation of one definition had "1 linestyles and
 symbols". One definition is a linestyle OR a symbol, and the line does not say
-which (`Session.TheStartUpLineCountsOneDefinitionAndOneRuleInTheSingular`).
+which (`session::the_start_up_line_counts_one_definition_and_one_rule_in_the_singular`).
 The two front ends still word the line differently, each in its own
-(`cad::CustomisationStart` is "for the front end to say in its own words").
+(`katana_cad::customisation_host::CustomisationStart` is "for the front end to say in its own words").
 
 Nothing is printed when nothing was installed. What went wrong goes to
 standard error, a line each as `error: <what>` - a built-in that does not
 read, a kept file that does not read ("... so the built-in customisation is
 used") - and the session starts all the same, as it did when the built-in was
 a set of files of which one could fail. A kept customisation made from another
-built-in than the program has (`CustomisationStart::keptFromAnotherBuiltIn`)
+built-in than the program has (`CustomisationStart::kept_from_another_built_in`)
 starts, being the user's, with a `warning:` line that says so. The start-up
 line never holds the word `error`: dozens of the command line's tests fail on
 that word anywhere in what a run prints.
@@ -1540,7 +1541,7 @@ A session constructed for no program - `Session(nullptr)`, which every test
 that drives one in-process uses - is handed NO host and reads neither
 variable: it starts empty on every machine, whatever the build compiled in,
 and `RESET`, `KEEP` and `REVERT` are refused there by name
-(`Session.ASessionOfNoProgramStartsEmptyWhateverTheEnvironmentNames`).
+(`session::a_session_of_no_program_starts_empty_whatever_the_environment_names`).
 
 *Removed: the search beside the program.* A build with no built-in used to
 look for customisation files beside the program, from the path it was
@@ -1549,8 +1550,8 @@ a session could start, decided at run time by what lay in a folder, with a
 start-up line and a failure of its own; and what it found were the older
 files. A start is now the kept file, the built-in or nothing.
 
-Tests: `Session.*` in `tests/app/test_session.cpp` (the line, the streams,
-the refusals), and in `src/katana_app/CMakeLists.txt`
+Tests: `session` in `rust/crates/katana_app/tests/session/session.rs` (the line, the streams,
+the refusals), and in `tests/cli/CMakeLists.txt`
 `cli.customise_reset_gives_the_built_in_customisation_the_seam_names`,
 `cli.a_session_told_there_is_no_built_in_customisation_starts_empty`,
 `cli.customise_keep_writes_the_session_to_the_file_the_variable_names` with
@@ -1580,7 +1581,7 @@ it is taken, wherever it stands, and the reply is the census.
 
 The scope and filter are the one grammar every verb on drawing data takes
 (`docs/cad.md`, "Scope and filter"), read by the one parser, and the reply
-begins with what the scope took (`cad::scopeRecord`): `scope=layers
+begins with what the scope took (`katana_cad::scope_verbs::scope_record`): `scope=layers
 layers=survey sublayers=yes matched=212`. A scope that takes nothing is
 reported, and codes nothing.
 
@@ -1611,10 +1612,10 @@ the survey code file of another program. That file no longer loads; the verb
 went with it and is an unknown command now. Their replies are unchanged.
 
 **Colours.** The verbs resolve a colour name through the Document
-(`cad::resolveColour`: the customisation's own table, then the standard
+(`katana_cad::colour_lookup::resolve_colour`: the customisation's own table, then the standard
 names) and through nothing else. A front end once passed more names with a
 colour-lookup setter on the interpreter; none does, and the setter is gone
-(2026-10-07) - and with it the parameter `runSurveyCodeVerb` took for those
+(2026-10-07) - and with it the parameter `run_survey_code_verb` took for those
 names, which only two tests still reached.
 
 ### The verbs: decisions, and what was rejected
@@ -1660,7 +1661,7 @@ back, each with what it brought.
 *Rejected: dropping the notice of a source that is left out.* A part carries
 colours, and nothing says whose they are.
 
-**One rule for a part, whoever writes it** (`cad::customisationPart`). The
+**One rule for a part, whoever writes it** (`katana_cad::customisation_part::customisation_part`). The
 verb and the window's two export buttons were written side by side and cut a
 session down by two rules, so two symbols exported from the Symbol Library
 and by `EXPORT ... ONLY` were two different files. Each rule had half of it
@@ -1677,7 +1678,7 @@ right, and the one rule is the two halves:
   in the file; listed, it passes for loaded wherever the file goes. The
   verb's rule is kept: the sources of what is WRITTEN. The managers' reason
   for the wider list was that the session's own entry is the one a later
-  load gives the file's notice to (`customisation_merge.hpp`); narrowed, a
+  load gives the file's notice to (`customisation_merge.rs`); narrowed, a
   file whose name is none of its sources' has its notice given to each
   source it lists. That is a notice shown more widely than its author meant,
   which is the safe side of the two.
@@ -1690,7 +1691,7 @@ right, and the one rule is the two halves:
   (`docs/survey_coding.md`, "What a session starts with").
 
 What is NOT this rule's: which of a FILE's sources `CUSTOMISE DEFINITIONS`
-takes (`cad::definitionsOfFile`, in the same header). It goes by what the
+takes (`katana_cad::customisation_part::definitions_of_file`, in the same header). It goes by what the
 file says each source brought, and takes every colour the file has.
 
 **`PREVIEW` is a word of a census too, and does nothing there.** *Rejected:
@@ -1739,7 +1740,7 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   kept clear of it: the scan in `tests/CMakeLists.txt` unsets
   `KATANA_CUSTOMISATION` on every program test (`cli.*`, `*_headless`) that
   does not set it itself, and the in-process tests that pin a start-up clear
-  or set it themselves (`tests/app/start_environment.hpp`). A program test
+  or set it themselves (`rust/crates/katana_app/tests/support/start_environment.rs`). A program test
   under another name is not reached by the scan, and the check that names
   such a test asks only about the built-in's variable.
 - **A start-up problem does not change the exit status.** `katana_cli` says
@@ -1751,9 +1752,9 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   bare reply have no line for it.
 - **Other variables that name a file are still read with `getenv`**:
   `KATANA_ONLINE_CATALOGUE` and `KATANA_ONLINE_CACHE` in
-  `src/katana_qt/gis_online.cpp`, which on Windows cannot name a file outside
+  `rust/crates/katana_window/src/gis_online.rs`, which on Windows cannot name a file outside
   the ANSI code page. (`KATANA_CUSTOMISATION` is read through
-  `core::environmentVariable` by the window as by the session.)
+  `katana_core::path_text::environment_variable` by the window as by the session.)
 - **An unnamed session has no verb that names it.** `EXPORT ... NAME <name>`
   writes it under one, and loading that file with `REPLACE` gives the session
   the name; `KEEP` refuses it until then, and says so.
@@ -1765,13 +1766,13 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 - **`FORCE` is read as the last word and `CODE` as the first** of a `REMOVE`.
   A definition called `FORCE` is removed by `REMOVE FORCE FORCE`, and one
   called `CODE` by listing it after another name. The window's definition
-  editor builds no line for either name (`cad::removeDefinitionLine`), and
+  editor builds no line for either name (`katana_cad::definition_edit::remove_definition_line`), and
   those two are the only words it refuses: every other word of the family
   is a keyword only as `CUSTOMISE`'s first word
-  (`TheLineAnEditorBuildsToRemoveADefinitionIsReadAsThatDefinitionAlone`).
+  (`customisation_verbs::the_line_an_editor_builds_to_remove_a_definition_is_read_as_that_definition_alone`).
 - **`REMOVE` and the window's definition editor ask one function who uses a
-  definition** (`cad::definitionUsers`,
-  `include/katana/cad/definition_users.hpp`), and still WORD the answer two
+  definition** (`katana_cad::definition_users::definition_users`,
+  `rust/crates/katana_cad/src/definition_users.rs`), and still WORD the answer two
   ways. The verb's refusal says `rule #7 AC* (symbol) names it` and `the
   drawing's style "Marks" names it` (`DefinitionUsers::cited`); the editor's
   own list, beside a definition nobody is deleting, says `rule #7 AC*
@@ -1785,7 +1786,7 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   That is untrue of a name the drawing's own Linetype table also holds (a
   line naming it is then dashed by that linetype) and of a name that is a
   built-in symbol shape (a point naming it is drawn as that shape).
-  `cad::definitionUsers` answers both (`drawingLinetype`, `builtInShape`)
+  `katana_cad::definition_users::definition_users` answers both (`drawing_linetype`, `built_in_shape`)
   and the editor says them; the verb's sentence does not read them yet.
 - **A style that names a definition as its linetype AND its symbol** is one
   user to the verb - cited once, counted once in `styles=` - and two lines
@@ -1797,7 +1798,7 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
   had under its old name, kept word for word, and `UTILITY CHECK` counts the
   same way ("0 errors, 0 warnings"); so a test of the command line that runs
   either cannot fail on the word `error`, as the others do. Rewording it is
-  one line of `cad::formatLint` and every pin of that count.
+  one line of `katana_cad::code_table::format_lint` and every pin of that count.
 - **A property of several words that begins with a scope word** is read as
   that scope ("CODE", above): it is named `PROPERTY "Area m2"`.
 - **The refusal "nothing was loaded, for N reasons"** lists what the merge
@@ -1814,29 +1815,29 @@ file's words (`model`, `tinable`) where every other reply says `layer` and
 A session's customisation lasts the session. What makes it the one the next
 start gives is the KEPT FILE: a Katana customisation file, written by
 `CUSTOMISE KEEP` and read at start-up in the place of the built-in
-(`cad::startCustomisation`; "The host: RESET, KEEP and REVERT", above). The
+(`katana_cad::customisation_host::start_customisation`; "The host: RESET, KEEP and REVERT", above). The
 Document says whether the session is that one
 (`CustomisationState::kept`): true for what start-up installed and for what
 was last kept, false from the first change after either - an editor's
 commit, a `SET`, a load.
 
 **Where the file is** belongs to the front end, which hands its path to the
-interpreter in the host (`cad::CustomisationHost`):
+interpreter in the host (`katana_cad::customisation_host::CustomisationHost`):
 
 | Session | Its kept file |
 |---|---|
 | any, with the environment variable `KATANA_CUSTOMISATION` set | the file the variable names |
-| the window, interactive, the variable unset | `customisation.json` in the per-user place Qt gives the application (`QStandardPaths::AppConfigLocation`) |
+| the window, interactive, the variable unset | `customisation.json` in the per-user configuration folder (`%APPDATA%\Katana` on Windows, `$XDG_CONFIG_HOME/katana` or `~/.config/katana` elsewhere; `rust/crates/katana_window/src/host/user_settings.rs`) |
 | the window headless, `katana_cli` and `katana_mcp`, the variable unset | none |
 
-The window's rule is `MainWindow::loadDefaultCustomisation`
+The window's rule is `MainWindow::load_default_customisation`
 (`docs/desktop.md`, "How the window starts"); the session's is in "What
 katana_cli and katana_mcp start with", above. A run that must be the same on
 every machine reads no per-user place, which is why only the interactive
 window has one. A front end that keeps none - every test's, and a headless
 run that names none - has `KEEP` and `REVERT` refused by name, and the
-refusal names the variable (`cad::kKeptCustomisationVariable`). File >
-Settings shows the path (`SettingsContext::keptFile`), or says that the
+refusal names the variable (`katana_cad::customisation_host::KEPT_CUSTOMISATION_VARIABLE`). File >
+Settings shows the path (`SettingsContext::kept_file`), or says that the
 session keeps none.
 
 **When it is written.** By `CUSTOMISE KEEP` and by nothing else: not at
@@ -1850,12 +1851,12 @@ folder is made by the first write. `KEEP` is run
 - by an editor's own commit on such a session - the Survey Code Manager's
   Apply, the Symbol Library's Import Definitions, the definition editor's
   Save and Delete - through the hook the window's workbench answers
-  (`CustomisationContext::beginCommit`: asked before the commit, because the
+  (`CustomisationContext::begin_commit`: asked before the commit, because the
   commit is what makes the session "not kept", and run after it). With no
   kept file, or on a session that was not the kept one, nothing is run
-  (`AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept`,
+  (`customisation_workbench::an_editors_commit_of_a_kept_session_runs_the_keep_line_once_and_it_stays_kept`,
   `ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit`,
-  `WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal`).
+  `customisation_workbench::with_no_kept_file_an_editors_commit_runs_no_line_and_logs_no_refusal`).
 
 **How to reset.** Reset to Built-in in Settings: `CUSTOMISE RESET`, kept as
 every edit made there is, which sets the kept file aside as
@@ -1865,7 +1866,7 @@ way back). Typed, `CUSTOMISE RESET` then `CUSTOMISE KEEP` do the same; a
 renaming the kept file is a reset too: a start that finds no kept file gives
 the built-in.
 
-**Settings** (`src/katana_qt/customisation/settings_dialog.hpp`;
+**Settings** (`rust/crates/katana_window/src/customisation/settings_dialog.rs`;
 `docs/desktop.md`, "Settings") is where a person sees all of this and does
 the whole-customisation things, each a line of the family. "What is active"
 names the built-in the session is (`settingsActiveBuiltIn`): `Katana Standard
@@ -1972,15 +1973,15 @@ Not done:
 ## The built-in
 
 The customisations a program offers are COMPILED INTO it: Katana customisation
-files, embedded in `katana_cad` with `#embed` into one generated table
-(`src/katana_cad/customisation/builtin_table.hpp`, written by
-`src/katana_cad/CMakeLists.txt`), as the plot frame is. ONE of them is THE
+files, embedded in `katana_cad` with `include_bytes!` into one generated table
+(`builtin_table.rs` in cargo's output, written by
+`rust/crates/katana_cad/build.rs`), as the plot frame is. ONE of them is THE
 built-in, the DEFAULT - Katana Standard, a library made for Katana with the NSW customisation's survey code keys
 and with what each key stands for and does -
 which a program starts with and which `CUSTOMISE RESET` gives; it is parsed
-once at first use by `cad::compiledInCustomisation()`, and alone, so a start
+once at first use by `katana_cad::compiled_in_customisation()`, and alone, so a start
 reads its bytes only. The others are ALTERNATES - the NSW customisation - and
-`cad::builtIns()` lists them all, the default first, each with its name,
+`katana_cad::built_ins()` lists them all, the default first, each with its name,
 description and the file it came from; a person picks one in Settings
 (Built-in library, then Use) and a script with `CUSTOMISE BUILTIN <name>`
 ("The verbs"). Nothing is found, loaded or configured at run time, nothing is
@@ -1992,25 +1993,28 @@ a customisation of their own ("What katana_cli and katana_mcp start with";
 
 ### Where it comes from
 
-Four CMake variables and one environment variable say what they are:
+The build script's two defaults, two variables of the build's environment
+and one of the run's say what they are (in the C++ build the first four were
+CMake cache variables):
 
 | | What it is | Default |
 |---|---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` (CMake, FILEPATH) | the Katana customisation file compiled in as THE built-in, the default. Present at configure time it is embedded; absent, the program has NO built-in of its own - a state it runs in, not a fault (the alternates, if any, are then offered by name only). Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it; a `CONFIGURE_DEPENDS` glob over the path remains, so a file put there after the configure is found by the next build | `resources/customisation/katana-standard.customisation.json`, tracked |
-| `KATANA_ALTERNATE_CUSTOMISATIONS` (CMake, STRING) | a `;`-separated list of further Katana customisation files compiled in, offered by name. A path that is no file is not offered (a status line says so at the configure), and a file already offered is offered once; with the list empty, or every file absent, the build has the default alone and still configures | `resources/customisation/nsw.customisation.json`, tracked |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (CMake, option) | the absence of the DEFAULT is a configure error. The file is tracked, so the default build always has it; the option is for a release job, where the tracked file having been deleted or a path given wrongly would otherwise ship a program that draws plain lines | `OFF` |
-| `KATANA_REFERENCE_CUSTOMISATION_DIR` (CMake, PATH) | where the reference customisation is kept in the legacy formats. It is NOT what is compiled in: the converter reads it and the legacy readers' own tests do, and the program never does | the git-ignored reference folder under `docs/` |
+| the build script's `DEFAULT` | the Katana customisation file compiled in as THE built-in, the default (a build-time `KATANA_BUILTIN_CUSTOMISATION` is not read: that name is the run's seam). Present at build time it is embedded; absent, the program has NO built-in of its own - a state it runs in, not a fault (the alternates, if any, are then offered by name only). Whether it is there is asked of the file, not of a glob, so a checkout under a directory with `[` in its name still has it | `resources/customisation/katana-standard.customisation.json`, tracked |
+| `KATANA_ALTERNATE_CUSTOMISATIONS` (the build's environment; the build script's `ALTERNATES` when unset) | a `;`-separated list of further Katana customisation files compiled in, offered by name. A path that is no file is not offered, and a file already offered is offered once; with the list empty, or every file absent, the build has the default alone and still builds | `resources/customisation/nsw.customisation.json`, tracked |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION` (the build's environment) | the absence of the DEFAULT is a build error. The file is tracked, so the default build always has it; the option is for a release job, where the tracked file having been deleted or a path given wrongly would otherwise ship a program that draws plain lines | unset |
+| `KATANA_REFERENCE_CUSTOMISATION_DIR` (the C++ build's, gone with it) | where the reference customisation was kept in the legacy formats, for the converter and the legacy readers' own tests; the program never read it | the git-ignored reference folder under `docs/` |
 
-The built-in is a tracked file. The owner made it, on the machine that has the
-reference files, with `katana_customisation_convert` ("The reference
-customisation", below, has the command), and a new edition is made the same
-way and committed over it. `.gitattributes` marks it `-text`, so its bytes are
+The built-in is a tracked file. The owner made it, on the machine that had the
+reference files, with the C++ build's `katana_customisation_convert` ("The
+reference customisation", below, has the command); the converter was not
+ported, so a new edition is now edited as the JSON it is and committed over
+it. `.gitattributes` marks it `-text`, so its bytes are
 the same in every checkout whatever `core.autocrlf` says: they are embedded,
 and the digest of them is what tells one edition from another. The reference
 folder is git-ignored; `docs/building.md`, "The built-in customisation and the
 reference folder", has how a build is pointed at another file.
-There is no script: the build needs nothing but the compiler, where the
-embedding this replaced ran Python over a folder of four files on every build.
+There is no script: the build needs nothing but cargo, where the embedding
+this replaced ran Python over a folder of four files on every build.
 
 Katana Standard, `resources/customisation/katana-standard.customisation.json`,
 is the default (the owner's ruling, 2026-10-08): a library of 98
@@ -2022,31 +2026,27 @@ either library; everything it names, draws and words is Katana's own
 is compiled in beside it as an alternate and stays selectable. Either also loads
 like any file, with `CUSTOMISE REPLACE` or Settings > Import with Replace ticked.
 
-*A build directory keeps what it was given.* A cache variable that was set keeps
-its value, so a build directory configured before Katana Standard became the
-default still had `KATANA_BUILTIN_CUSTOMISATION` set to the NSW file, and would
-offer NSW as the default and Katana Standard nowhere (the NSW file named twice is
-offered once) while the tests of the new default skipped. The first configure
-that sees that value moves it to the new default, once, and says so; a value
-given with `-D` is a choice and is never moved (`docs/building.md`,
-`cmake/KatanaBuiltInDefault.cmake`).
+*A build directory kept what it was given* (the C++ build). A CMake cache
+variable that was set kept its value, so a build directory configured before
+Katana Standard became the default still had `KATANA_BUILTIN_CUSTOMISATION` set
+to the NSW file, and offered NSW as the default; the first configure that saw
+that value moved it to the new default, once. The Rust build has no cache: the
+default is the build script's constant.
 
-*How a build compiles several in.* One generated translation unit in the build
-tree (`builtin_customisation_table.cpp`) holds an `#embed` of each file, by its
+*How a build compiles several in.* One generated source in cargo's output
+(`builtin_table.rs`) holds an `include_bytes!` of each file, by its
 absolute path, so that the number of built-ins is no limit of the source, two
 files of one name in two folders cannot collide (a `--embed-dir` would), and a
-file is embedded once. It is rewritten only when its text changes, and the
-compiler's dependency file names every file, so editing one rebuilds the table
-alone. Measured on GCC 16.2 (2026-10-08), with a six-way build running beside it: the
-table of both files, 1.7 MB of data, compiles in 1.5 s to an object of 1.7 MB.
-*Rejected: a fixed number of slots in a hand-written file* (a limit, and
-a macro for each); *one object library a file* (more CMake for nothing a table does
-not do).
+file is embedded once. The build script names every file to cargo (`rerun-if-changed`), so editing one
+rebuilds the table. In the C++ build (`#embed`, GCC 16.2, 2026-10-08) the table
+of both files, 1.7 MB of data, compiled in 1.5 s. *Rejected: a fixed number of
+slots in a hand-written file* (a limit, and a macro for each); *one library a
+file* (more build for nothing a table does not do).
 
 ### The seam
 
-The environment variable `KATANA_BUILTIN_CUSTOMISATION` (the same name, read by
-the program and not by CMake) says what "the built-in" is for ONE run, whatever
+The environment variable `KATANA_BUILTIN_CUSTOMISATION`, read by the program
+when it runs, says what "the built-in" is for ONE run, whatever
 was compiled in. Tried in this order:
 
 1. unset or empty: the default compiled-in one;
@@ -2059,8 +2059,8 @@ was compiled in. Tried in this order:
    the working folder that is called like a built-in is given as `./name`, the
    family's own rule for a file called like a keyword.
 
-It is read in one place, `cad::builtInCustomisation()`, which is what a front end
-asks for its host - never `compiledInCustomisation()`, which ignores it. The
+It is read in one place, `katana_cad::built_in_customisation()`, which is what a front end
+asks for its host - never `compiled_in_customisation()`, which ignores it. The
 alternates are parsed only for a value that might be a name. A file the seam
 names that does not read gives NO built-in and the reason (for a word that is no
 name, the reason also lists the names the program has, because a mistyped name is
@@ -2120,9 +2120,9 @@ release job against the tracked default having been deleted or a path being wron
 
 ### What holds the product to it
 
-- `BuiltInCensus.*` (`tests/cad/customisation/test_builtin_census.cpp`): when
+- `built_in_census` (`rust/crates/katana_cad/tests/customisation/builtin_census.rs`): when
   the build offers a built-in named "NSW" (found by name among
-  `cad::builtIns()`, not as the default), it holds the census figures -
+  `katana_cad::built_ins()`, not as the default), it holds the census figures -
   792 definitions (471 symbols and 321 linestyles), 155 at vertices, 71 groups,
   35,692 strokes, 1,624 rules in 632 distinct keys, 7 colours, 5 names no
   library defines - counted by `tools/customisation_census.py` over the file
@@ -2131,23 +2131,23 @@ release job against the tracked default having been deleted or a path being wron
   converted file holds them, being the data). The file is tracked, so these run
   in every build from a clean checkout and skip only in one whose build has no
   built-in.
-- `BuiltInRenames.*` (`test_builtin_renames.cpp`): the names a project saved
+- `built_in_renames` (`builtin_renames.rs`): the names a project saved
   before the built-in was one customisation recorded are answered by its name,
   against a committed fixture and against the compiled-in default; the 29
   renamed definitions are looked up in the NSW alternate's library, which is
   where they are.
-- `BuiltInLibrary.*` (`tests/cad/customisation/test_builtin_library.cpp`): the
+- `built_in_library` (`rust/crates/katana_cad/tests/customisation/builtin_library.rs`): the
   list (default first, one entry a name, found by name in any letter case), the
-  seam's name form and its precedence, `builtInChoices`, and what this build
+  seam's name form and its precedence, `built_in_choices`, and what this build
   compiled in - Katana Standard's census (221 definitions, 1,103 rules over 632
   codes, 28 colours; `tools/katana_standard/census.py`) and the NSW alternate's.
   The first half is written against stand-ins and is the same test on every
   build; the second skips what the build did not compile in.
-- No program holds the readers of the older formats: the test
-  `the_programs_link_none_of_the_legacy_customisation_readers` walks the link
-  closure of `katana`, `katana_cli` and `katana_mcp`, and the install check
-  allows those three programs and no other (`docs/testing.md`, "What the
-  programs hold"). Each is proved on a fixture.
+- No program holds the readers of the older formats: they were C++ alone,
+  never ported, and went with the C++ tree (in the C++ build a configure-time
+  test walked the three programs' link closure to prove it). The install
+  check allows `katana`, `katana_cli`, `katana_mcp` and `katana_updater` and
+  no other (`docs/testing.md`, "What the programs hold").
 
 ### Several built-ins: decisions, and what was rejected
 
@@ -2163,12 +2163,12 @@ release job against the tracked default having been deleted or a path being wron
   program started with the default has the meaning the owner asked for - `RESET`
   gives the default. *Rejected: a second reset that always gives the compiled-in
   default*; the seam's job is to say what the run's is.
-- **One list, three readers.** `cad::builtInChoices` is the answer that
+- **One list, three readers.** `katana_cad::customisation_host::built_in_choices` is the answer that
   `CUSTOMISE BUILTIN`, the JSON report (`builtIns`, so `katana_customisation`'s
   `summary` and the `katana://customisation` resource) and Settings' chooser all
   read.
-- **The earlier file names of a project** (`builtinRenames`) are answered by NSW and
-  by no other built-in (`kEarlierFileNamesBelongTo`, in `customisation_record.hpp`):
+- **The earlier file names of a project** (`builtin_renames`) are answered by NSW and
+  by no other built-in (`EARLIER_FILE_NAMES_BELONG_TO`, in `customisation_record.rs`):
   they were the four files NSW was first shipped as. They were answered with the
   run's built-in's name while NSW was the only one; under Katana Standard that said a
   project drawn with NSW's linestyles had its customisation loaded, which it had not.
@@ -2183,8 +2183,8 @@ release job against the tracked default having been deleted or a path being wron
   the session` (`cad::builtInAdviceFor`, one clause for each name that is a built-in
   the program offers and that read). An agent has the same from `katana_customisation`:
   `missing` and `builtIns` side by side.
-- **The list is built from files by one function** (`cad::builtInsFrom`), of which
-  `builtIns()` is the compiled-in case, so that its two rules - a later file of an
+- **The list is built from files by one function** (`katana_cad::customisation_host::built_ins_from`), of which
+  `built_ins()` is the compiled-in case, so that its two rules - a later file of an
   earlier one's name, in any letter case, is not offered; a file that is no
   customisation is listed under its file name with the reason - are tested over
   files a test writes out, whatever the build compiled in.
@@ -2193,23 +2193,32 @@ release job against the tracked default having been deleted or a path being wron
 
 - **A seam that names a FILE is no entry of the list.** `RESET` gives it; the
   list, `BUILTIN <name>` and the JSON report offer what the program compiled in
-  (a test's host may give its own list, `CustomisationHost::builtIns`). The
+  (a test's host may give its own list, `CustomisationHost::built_ins`). The
   file is a test and development seam.
 - **The start-up lines** of the window and of `katana_cli` say which built-in
   started and, for a kept copy made from another built-in, that "CUSTOMISE RESET
   gives this program's and CUSTOMISE BUILTIN lists the built-in customisations it
   has". Settings' sentence, beside its own Built-in library, says "Reset to Built-in
   gives this program's".
-- **`benchmarks/bench_customisation.cpp`** measures the file `KATANA_BUILTIN_CUSTOMISATION`
+- **the C++ build's `bench_customisation` benchmark** measures the file `KATANA_BUILTIN_CUSTOMISATION`
   names, which is Katana Standard now: 319,020 bytes, about a fifth of the 1,540,630
   of the NSW file it once measured.
 - **A project that records the earlier file names** is told that they are not
   loaded, under the default, without the `CUSTOMISE BUILTIN NSW` words: the missing
   names are those file names and not "NSW", and only a name that is a built-in's is
-  matched (`cad::builtInAdviceFor`). Narrow: they were recorded in the first days of
+  matched (`katana_cad::customisation_host::built_in_advice_for`). Narrow: they were recorded in the first days of
   the built-in.
 
 ## Converting a customisation from the legacy formats
+
+**This chapter is the record of a tool that no longer exists.** The
+converter, `katana_customisation_convert`, and the readers and writers of the
+older formats were C++ alone: the owner left them unported (the built-in is
+the committed JSON file, and on 2026-11-03 the legacy files were declared no
+longer needed; `docs/rust.md`), and they went with the C++ tree on
+2026-11-15. What follows says how the NSW built-in was made and what was
+measured and decided on the way; nothing in it runs now, and its file and
+test names are the C++ build's.
 
 The Katana customisation format is the ONE format a customisation is read
 in. No front end reads the older ones: `CUSTOMISE` refuses a survey code file
@@ -2227,29 +2236,24 @@ katana_customisation_convert --name <name> [--description <text>]
     [-o <output>] <style library or survey code file>...
 ```
 
-It is a tool of the build tree and not of the product. It is built with
-everything else, so that it cannot rot unseen, but it is never installed
-(`cmake/KatanaPackaging.cmake` installs three programs by name) and none of
-`katana`, `katana_cli` and `katana_mcp` links it: what it does is a static
-library of its own, `katana_legacy_customisation`
-(`src/katana_archive12d/legacy/convert.hpp`, `convert.cpp`, and the readers and
-writers of the older formats beside them), which only the program
-(`convert_main.cpp`) and the archive module's tests link. The library publishes
-that one directory, so the tests include `convert.hpp`, `style_library.hpp`
-and the others by their bare names, and the archive module's own private
-headers (its lexer and text utilities, which the readers share) stay private. The program reads
-its command line and nothing more, so everything below is tested as functions
-(`tests/archive12d/customisation/test_convert.cpp`):
+It was a tool of the build tree and not of the product. It was built with
+everything else, so that it could not rot unseen, but it was never installed
+and none of `katana`, `katana_cli` and `katana_mcp` linked it: what it did was
+a static library of its own, `katana_legacy_customisation` (convert.hpp,
+convert.cpp, and the readers and writers of the older formats beside them),
+which only the program (convert_main.cpp) and the archive module's tests
+linked. The program read its command line and nothing more, so everything
+below was tested as functions (the archive module's test_convert.cpp):
 
-```
+```cpp
 core::Result<Conversion> convertLegacyCustomisation(const std::vector<LegacyFile>& files, const ConvertOptions& options);
 core::Result<Conversion> convertLegacyFiles(const ConvertRequest& request);
 std::string              toText(const ConvertReport& report);
 ```
 
 The first takes files as bytes, the second by path - it reads them, converts
-and writes `-o` - and a `Conversion` is the `entity::Customisation`, its text
-as `entity::customisationToJson` writes it, and a report. The readers of the
+and writes `-o` - and a `Conversion` is the `katana_entity::Customisation`, its text
+as `katana_entity::customisation::customisation_to_json` writes it, and a report. The readers of the
 older formats are in that directory and library; one of them
 gained one thing to say for the converter: `StyleLibraryRead::
 replacedDefinitions`, each definition a library replaced AS IT WAS, where the
@@ -2293,7 +2297,7 @@ reading of the same text would be a second opinion of what a file means.
 - **`--colours <table>`** gives a colour to every name a rule uses - its own,
   its symbol's, its text's - that the standard names lack. The table is text,
   a colour a line: `R G B <index> "name"`, whatever follows the name ignored.
-  A name is matched by `entity::foldColourName`, so `sui_test_gas` in the table is
+  A name is matched by `katana_entity::colour_names::fold_colour_name`, so `sui_test_gas` in the table is
   the `sui test gas` of a rule, and is written into `colours` as the rules first
   spell it. A name the table gives two colours is refused, but only when a
   rule uses it: a table of nine hundred colours need not be sound where
@@ -2302,7 +2306,7 @@ reading of the same text would be a second opinion of what a file means.
   most one letter (`pen 901`, `pen 90a`), though the table has one. Such a
   name is a pen of the plotter the files were written for, not a colour of
   the drawing. Unresolved, it leaves the entity's own colour alone
-  (`entity::resolveColour`), which is how these codes have always been drawn;
+  (`katana_entity::colour_names::resolve_colour`), which is how these codes have always been drawn;
   resolved, every one of them would change colour on the day of the
   conversion.
 - **`--strip-leading-word <word>`** (repeatable) takes a word, with the
@@ -2339,7 +2343,7 @@ warned of: no order of the files would keep anything else.
   colour, the name is reported with both (`colour_kept_standard`): it is a
   colour the table's author meant and the drawing will not have.
 - *Characters read by a guess.* A file that is neither UTF-8 nor marked as
-  UTF-16 is read as Windows-1252 (`core::decodeText`), and its characters
+  UTF-16 is read as Windows-1252 (`katana_core::text_encoding::decode_text`), and its characters
   outside ASCII - a diameter sign in a definition's name - are what that
   guess makes of them: a wrong one is a wrong character in the customisation
   and an error nowhere. A warning names the file, the encoding and how many
@@ -2371,7 +2375,7 @@ both are refused, naming them, rather than settled by a rule nobody chose:
 ### The report
 
 On success the program prints what it did as `key=value` lines, a text value
-quoted as every reply's is (`core::replyQuoted`), and exits 0; on any failure
+quoted as every reply's is (`katana_core::text::reply_quoted`), and exits 0; on any failure
 it prints the reason on standard error, writes nothing and exits 1 - an
 exception included, which `main` catches so that the exit code is never
 anything else. A list is its count and then a line an entry, and an entry of
@@ -2441,10 +2445,10 @@ the converter was first run on them. That is the point of them: a converter
 tested against its own output agrees with itself. Each legacy fixture,
 converted under its twin's name, must equal the twin - the value whole, and
 the text byte for byte, since the twins are written in the writer's layout
-(`EachLegacyFixtureConvertsToItsHandWrittenTwin`,
-`TheTwinsAreInTheWritersLayoutByteForByte`). They must never be replaced by
+(EachLegacyFixtureConvertsToItsHandWrittenTwin,
+TheTwinsAreInTheWritersLayoutByteForByte). They must never be replaced by
 what the converter writes. And because a file cannot show how it was made,
-`TheTwinsHoldWhatTheLegacyFixturesSay` states what each twin holds, value by
+TheTwinsHoldWhatTheLegacyFixturesSay stated what each twin holds, value by
 value, from the legacy fixtures' text - anchors, modes, a text's every
 member, a weight, a `hide` that is said and one that is not: a twin
 regenerated from a converter that had lost a field would agree with that
@@ -2463,7 +2467,7 @@ a Windows working tree with CRLF line ends. The reader takes either, but a
 comparison of bytes does not, so the tests take the carriage returns off a
 twin's text before comparing it. *Not done*: a `.gitattributes` rule keeping
 these files' line feeds, which would also keep a digest of one
-(`customisationDigest`) the same on every platform. No test pins such a digest
+(`customisation_digest`) the same on every platform. No test pins such a digest
 or a byte count of one of these files (the digests the tests compare are
 computed in the test, over text the test wrote itself), so none needs it; a
 test that does will. The built-in is different: it is embedded, and the
@@ -2471,8 +2475,8 @@ digest of its bytes is recorded in kept customisations, so
 `resources/customisation/*.json` is `-text` in `.gitattributes`.
 
 The other small inputs are written in the test, and what each becomes is
-worked out beside it. The program itself has four tests, the cases of
-`tests/archive12d/check_convert_program.cmake` (`customisation_convert.*`),
+worked out beside it. The program itself had four tests, the cases of
+its check_convert_program.cmake (`customisation_convert.*`),
 because the functions' tests pass with an option wired to the wrong member or
 to none: a fixture converted to its twin with the exit code, the report and
 the line ends checked, and a missing `--name` refused with exit code 1; every
@@ -2520,7 +2524,7 @@ therefore this command's and no other's: the size in the table below; the
 check that the compiled-in file is byte for byte a fresh conversion
 (`docs/survey_coding.md`, "The built-in, and the seam"); and the digest of
 those bytes, by which a customisation a user kept is told from another
-edition of the built-in (`CustomisationStart::keptFromAnotherBuiltIn`).
+edition of the built-in (`CustomisationStart::kept_from_another_built_in`).
 Converted with another sentence the file is another edition, and every copy
 kept from this one is reported as made from another. They are Katana's own
 words and no part of the reference files, so a committed test or document may
@@ -2554,7 +2558,7 @@ loader reads the four files in, which is why `docs/survey_coding.md` counts
 
 *Not done: both definitions of such a name.* The symbol library's three are
 not in the converted file, so a person cannot place them by hand either. A
-style library is ONE table by name (`entity::StyleLibrary`); a rule and a
+style library is ONE table by name (`katana_entity::StyleLibrary`); a rule and a
 style name a definition by that name and nothing else; and the format lists
 a name under `linestyles` or under `symbols`, a name given twice being
 refused. Keeping both would take a name that means two definitions by who
@@ -2565,7 +2569,7 @@ The two words are the publisher's, which begins most group paths, and the
 vendor's, which begins a few; they are arguments so that no committed test,
 document or source spells them (the notice the converter copies in does, being
 the authors' own words; the committed file has had it removed;
-`tests/archive12d/customisation/test_convert.cpp` finds them in the data, as
+the converter's tests found them in the data, as
 what stands before a group path's first blank and is no part of the path).
 The output is tracked, and is where the build looks for the customisation to
 compile in: converting again changes the committed file, a new edition with a
@@ -2642,7 +2646,7 @@ checked.
 
 ### What reading and writing cost
 
-`benchmarks/bench_customisation.cpp`, Release, GCC 16.2, late on 2026-10-06
+the C++ build's `bench_customisation` benchmark, Release, GCC 16.2, late on 2026-10-06
 with no other build seen running; the median of five repetitions, in
 milliseconds, the coefficient of variation of the five between 1 and 5 % in
 every row. The generated customisation is made in code to the reference

@@ -6,10 +6,53 @@ their reasons, the workspace and its two toolchains, the rules every port
 follows, what is ported, the measurements and what is not done. It is updated
 in the commit that changes any of them.
 
-The C++ program stays the product while the port is made, and it is the
-oracle the port is checked against. The rewrite runs beside it, bottom-up by
-layer, and the programs are cut over one at a time: no C++ is deleted until
-the Rust that replaces it has passed its gate and shipped.
+The C++ program was the product while the port was made, and the oracle the
+port was checked against. The rewrite ran beside it, bottom-up by layer. The
+plan was that no C++ would be deleted until the Rust that replaced it had
+passed its gate and shipped; on 2026-11-15 the owner had it removed once
+every layer had passed its gate ("The C++ is removed", next).
+
+## The C++ is removed (2026-11-15)
+
+On 2026-11-15 the owner had the C++ removed: "if we migrated all files to
+rust, remove c++ i dont want to see it". Every C++ layer and program had its
+Rust crate, every C++ test case had its Rust twin or a recorded exemption,
+the cli gate passed 379 of 379 and the window gate 266 of 267 against the Rust
+programs. The branch is Rust-only from then on; steps 8 and 9 below are
+changed by it - the C++ was removed before step 8, not after a release on the
+Rust - and the owner's word is the reason.
+
+- **Gone:** src/, include/ and benchmarks/ whole, every `.cpp` and `.hpp`
+  of `tests/`, and the tools whose subject was the C++ or the comparison with
+  it: the parity check (`check_rust_parity.py` and its `parity.toml`), the two
+  gates (`rust_cli_gate.py`, `rust_window_gate.py`) with `window_streams.py`,
+  `window_geometry.py` and `ctest_tree.py`, the SIMD kernel checks, the C++
+  half of the number-to-text check (`check_float_to_string.py`; the Rust
+  guard is `rust/clippy.toml`'s disallowed methods), `compare_benchmarks.py`
+  and `find_narrow_paths.py`. Two Rust tests whose subject was the C++ went
+  too: the corpus round trip that ran the C++ `katana_cli` against the Rust
+  (`round_trip.rs` of `katana_app`) and the number formats compared with the
+  C++ oracle (`number_oracle.rs` of `katana_core`); with the C++ gone they
+  compare nothing.
+- **Kept:** CMake, as a test runner only (`CMakeLists.txt`: it compiles
+  nothing, and registers the process-level tests - the `cli.` tests now in
+  `tests/cli/`, the headless window tests, the update and repository checks -
+  against the programs cargo built, `docs/testing.md`); the layering table
+  `tools/check_layering.cmake` and its check `tools/check_rust_layering.py`;
+  and three C++ files inside the crates, which the Rust build compiles because
+  the libraries they reach have only C++ APIs:
+  `rust/crates/katana_gis/native/algorithm_shim.cpp` (GDAL's algorithm
+  framework), `rust/crates/katana_gis/native/http_shim.cpp` (GDAL's HTTP) and
+  `rust/crates/katana_pointcloud/native/pdal_shim.cpp` (PDAL has no C API).
+- **What this record keeps.** The sections below are the port's history, and
+  what the C++ was is part of it: where they name a C++ file, class or test,
+  they name it in words, since none of it is in the tree to cite. "The oracle"
+  below is the C++ build, as it was until 2026-11-15.
+- **Not done, because of the removal:** a Rust-only corpus round trip (read,
+  write, read again, over the test data) would be a new test, not a reduction
+  of the deleted one; Rust benchmarks for the C++'s measurements
+  (`docs/performance.md`); and registering the layering check with the test
+  runner again (`docs/architecture.md`, "Layering").
 
 ## The owner's decisions (2026-11-05)
 
@@ -42,14 +85,14 @@ answers as the C++ does.
 | 3 | storage, archive12d, dxf, ifc, surveyio | 1,124 | every file of the test data and samples read and written by both, each reading the other's |
 | 4 | cad | 3,011 | the cases twinned; every verb and alias accepted |
 | 5 | gis, pointcloud, interop | 370 (io 43, interop 174, geo 153) | the cases twinned, the online tests too |
-| 6 | app, with the geo verbs of `src/katana_app/geo` | 616 (app 242, geo 374) | the 375 cli tests pass against the Rust katana_cli; the replies and saved projects of both programs compared |
+| 6 | app, with the geo verbs of src/katana_app/geo | 616 (app 242, geo 374) | the 375 cli tests pass against the Rust katana_cli; the replies and saved projects of both programs compared |
 | 7 | window, gpu | 1,609 | every headless window test the build registers passes against the Rust window (267 in WSL on 2026-11-11) |
 | 8 | Windows | - | the whole of the above on Windows, natively; the updater applies, rolls back and recovers a real update there |
 | 9 | - | - | a release on the Rust programs, one release cycle, then the C++ is removed |
 
 Nothing ships before step 8: the owner's ruling keeps the port off Windows
 until it works, and Windows is where Katana ships first. The case counts are
-what `tools/check_rust_parity.py --list` printed on 2026-11-05 (9,236 in all);
+what tools/check_rust_parity.py --list printed on 2026-11-05 (9,236 in all);
 the step's own run is the evidence, not this table.
 
 ## Where it stands
@@ -60,11 +103,11 @@ the step's own run is the evidence, not this table.
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
 | 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
-| 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
+| 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), tests/cad held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
 | 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 266 of 267 after its fix-up round, 265 with the C++'s streams (the two left are Qt's own pixel metrics, under Not done) |
-| 8-9 | not started |
+| 8-9 | not started; the C++ removed before them, on the owner's word of 2026-11-15 ("The C++ is removed", above) |
 
 ### Step 1: the foundation crates
 
@@ -76,7 +119,7 @@ calculation, not chained two-argument hypot calls, because the rounding order
 is observable. The existing AVX2 and NEON text, point and splat kernels have
 Rust implementations with runtime dispatch and the scalar comparison tests.
 
-`rust/parity.toml` now holds `core`, `math` and `geometry` to their 126, 55 and
+rust/parity.toml now holds `core`, `math` and `geometry` to their 126, 55 and
 217 cases respectively. The 11 task-pool cases remain owned by the C++ render
 test directory but have their Rust twins in core, where the pool lives. No
 whole case is exempted. Test values and tolerances come from the C++ tests;
@@ -90,9 +133,9 @@ redraw a fraction rounded to one, rather than clamping it. A forced
 maximum-integer sample proves that branch is reached and rejects the old
 clamp.
 
-The number-format gate is `rust/crates/katana_core/tests/number_oracle.rs`,
+The number-format gate is rust/crates/katana_core/tests/number_oracle.rs,
 against the test-only C++ executable built from
-`tests/core/number_format_oracle.cpp`. Its 28,942 bit patterns cover both
+tests/core/number_format_oracle.cpp. Its 28,942 bit patterns cover both
 signs of every binary exponent, boundary mantissas, half-integer rounding,
 signed zero, infinities, NaNs and 16,384 deterministic random samples. The
 random sequence is the xorshift sequence and seed already used by the C++
@@ -196,7 +239,7 @@ symbolically perturbed in-circle test, so its result for a given set of
 vertices and constraints is unique and independent of insertion order - the
 spatial sort before insertion only makes it faster. The Rust
 (`katana_terrain`'s `cdt_backend.rs`) splits crossing constraints as
-`Constrained_triangulation_plus_2::insert_subconstraint` does, with CGAL's
+Constrained_triangulation_plus_2::insert_subconstraint does, with CGAL's
 own construction of the crossing point and its four-ulp snap; triangulates
 with spade; and flips with CGAL's perturbed predicate, ported line for line,
 to CGAL's unique triangulation. Not reproduced: CGAL's check that a crossing
@@ -209,7 +252,7 @@ further.
 by the rule "bytes up to the decoder": a C++ case that stores non-UTF-8 text
 in the model and refuses it later keeps its UTF-8 half as its twin, and the
 readers of stored bytes - the geometry blob - still refuse such bytes. Two
-cases whose only subject is that refusal are exempt (`rust/parity.toml`), as
+cases whose only subject is that refusal are exempt (rust/parity.toml), as
 are a moved-from transformer and a change of the floating-point rounding
 mode, which Rust cannot express.
 
@@ -239,7 +282,7 @@ customisation parser). Its decisions:
   of its Grisu2 - moves into `katana_core::text` when a second crate writes
   a real number as nlohmann does; the update layer's records hold none (their
   integers, strings and flags give serde_json's two-space text, with the keys
-  sorted as `nlohmann::json` holds them). Superseded before cad began: one
+  sorted as nlohmann::json holds them). Superseded before cad began: one
   home, `katana_core::json` (below, "Step 4").
 - **The update layer's build configuration** - the pinned keys and the feed's
   repository and address - is read by its `build.rs` from the same CMake
@@ -322,7 +365,7 @@ claimed: the update layer's Windows code is written and not compiled.
 
 ### Step 3's round-trip gate
 
-The gate is a Rust test, `rust/crates/katana_app/tests/round_trip.rs`, that
+The gate is a Rust test, rust/crates/katana_app/tests/round_trip.rs, that
 runs both programs on every file of the test data and the samples of the
 formats step 3 ported, and compares what they make:
 
@@ -448,7 +491,7 @@ that caught a mistaken fix, and passed on their first run. Decisions:
   from outside. The state link does not nest, so a step that styles lines
   must not be run from inside another step's use of it.
 - **The sheet set's storage case holds its non-finite half**:
-  `SheetStorage.TextThatIsNotUtf8OrANumberThatIsNotFiniteCannotBeStored`'s
+  `sheet_storage::text_that_is_not_utf8_or_a_number_that_is_not_finite_cannot_be_stored`'s
   twin asserts the non-finite number's refusal, by step 2's rule for text
   that is not UTF-8, as wave F's four surface-style cases do.
 
@@ -498,7 +541,7 @@ interpreter are ported whole, so that wave J writes tests only. Decisions:
   snapshot of the colour table at the call, where the C++ asks the document
   each time.
 - **The built-in customisations are embedded by a build script**, which reads
-  the default and the alternates from `src/katana_cad/CMakeLists.txt` as the
+  the default and the alternates from src/katana_cad/CMakeLists.txt as the
   update layer's reads its own; the cases that set the customisation's
   environment variables are a test binary of their own behind one lock,
   since `set_var` is unsafe in edition 2024 and races parallel tests.
@@ -535,7 +578,7 @@ Decisions:
 - **A tool's text prompt takes text**, so the C++'s refusals of input that is
   not UTF-8 (Text, a dimension's text, a leader's note, a balloon's number, a
   label's text) cannot be reached.
-  `AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt`, whose
+  AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt, whose
   only subject is that refusal, has no twin, and is an exemption to make when
   cad is held as ported.
 
@@ -548,8 +591,8 @@ libstdc++'s `exists` answers false, so a kept file whose folder could not be
 made was taken to be there and refused as unreadable (InvalidState) where
 the C++ refuses the write (FileExportFailure). `katana_core::path_text::path_exists`
 now answers as libstdc++ does, the one home for that rule in cad. The other
-two cases are exempt (`rust/parity.toml`), as are
-`AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt` from
+two cases are exempt (rust/parity.toml), as are
+AnnotateAlignedDimension.TextThatIsNotUtf8IsRefusedAtTheTextPrompt from
 wave I: each one's only subject is a byte that is not UTF-8 in text a
 `String` holds - a tool's typed text, a leader report's names, the status's
 layer name. Where such a case has a UTF-8 half, the half is twinned.
@@ -563,7 +606,7 @@ pass.
 Evidence, 2026-11-10, `tools/build_visible.sh wsl` after wave J: exit 0; the
 Release C++ build, Clippy and the float-to-text guard clean; CTest 9,915
 entries, 9,875 passed, 40 skipped, none failed - `rust_parity` among them
-with `tests/cad` held as ported, 3,011 of 3,011; cargo test 6,488 passed,
+with tests/cad held as ported, 3,011 of 3,011; cargo test 6,488 passed,
 none failed, none ignored (wave I's run gave 5,472, H's 4,975, G's 4,433,
 F's 3,724), the round-trip gate among them over 73 files of the corpus.
 The parity tool: 6,538 of the C++ suite's 9,236 cases twinned or exempt.
@@ -573,7 +616,7 @@ The parity tool: 6,538 of the C++ suite's 9,236 cases twinned or exempt.
 A planning pass split step 5 by dependency into three waves: K, the GDAL
 core and the point clouds; L, the geoprocessing bridge and web access; M,
 interop's core and online fetch. It also split the geo suite by case:
-374 of its 527 cases drive the app layer - `src/katana_app/geo`, its
+374 of its 527 cases drive the app layer - src/katana_app/geo, its
 executor, verbs, records and MCP tools - and are twinned with that layer in
 step 6, so step 5 twins tests/io (43), tests/interop (174) and the 153 geo
 cases of the bridge, the bindings and what they stand on. Rejected: leaving
@@ -676,12 +719,12 @@ Evidence, 2026-11-11, `tools/build_visible.sh wsl` after wave M, merged onto
 step 6's wave 1: exit 0; the Release C++ build, Clippy and the
 float-to-text guard clean; CTest 9,919 entries, 9,879 passed,
 40 skipped, none failed; cargo test 7,016 passed, none failed,
-none ignored; `rust/parity.toml` holds io and interop as ported.
+none ignored; rust/parity.toml holds io and interop as ported.
 
 ### Step 6: the app layer
 
 Step 6 ports the headless session that katana_cli and katana_mcp share,
-with the geo verbs of `src/katana_app/geo` - 374 geo cases whose verbs are
+with the geo verbs of src/katana_app/geo - 374 geo cases whose verbs are
 the app's (step 5) - for 616 cases in all. It began beside step 5's last
 wave, so its wave 1 stands only on built code: where the C++ calls interop's
 reference data, which that wave was writing, the geo frame calls one module
@@ -713,7 +756,7 @@ agents needed it, is the console and the import records. Decisions:
   program's credential stores are made once per thread, where the C++'s are
   process-wide statics, because they are not `Sync`.
 - **The cli gate reruns the C++ build's own cli tests against the Rust
-  programs** (`tools/rust_cli_gate.py`, the `wsl gate` phase): it reads the
+  programs** (tools/rust_cli_gate.py, the `wsl gate` phase): it reads the
   build tree's CTest files, puts the Rust katana_cli and katana_mcp in place
   of the C++ ones, reruns the C++ ones beside them, and compares the two
   runs' replies, normalising only the programs' paths, a run's seconds and
@@ -776,12 +819,12 @@ Release C++ build, Clippy and the float-to-text guard clean; CTest
 9,919 entries, 9,879 passed, 40 skipped, none failed; cargo
 test 7,456 passed, none failed, none ignored, the round-trip gate's
 104 compared files among them; the cli gate: 376 cli tests, none
-failed, every reply the same as the C++'s. `rust/parity.toml` holds app and
+failed, every reply the same as the C++'s. rust/parity.toml holds app and
 geo as ported.
 
 ### Step 7: the window
 
-Step 7 ports the desktop window, `src/katana_qt` (121,563 lines of C++ and
+Step 7 ports the desktop window, src/katana_qt (121,563 lines of C++ and
 516 of GLSL), and its GPU layer to `katana_window` and `katana_gpu`, in egui
 and wgpu: 1,609 cases (tests/qt_widgets 1,548, tests/gpu 61). A planning
 pass split it into a foundation and four waves, because one chain cannot be
@@ -837,18 +880,18 @@ file's first table could not be reproduced (the commit that wrote it had
   not there: in WSL the Hardware cases skip and every Software case runs on
   lavapipe, with no X server needed. The default backend on Windows is
   Direct3D 12, where the C++ used Direct3D 11.
-- **The window gate** (`tools/rust_window_gate.py`, the `wsl wgate`
+- **The window gate** (tools/rust_window_gate.py, the `wsl wgate`
   phase) runs every headless window test against the Rust `katana` beside
   a rerun of the C++ window. It compares both programs' streams after
   listed normalisations, and their exit codes, since a test that passes on
   any failure would not tell an exit 1 from an exit 2. It keeps both
   screenshots side by side for a person to look at and never compares their
-  pixels. It shares one CTest reader (`tools/ctest_tree.py`) with the cli
+  pixels. It shares one CTest reader (tools/ctest_tree.py) with the cli
   gate, whose output did not change. It joins the whole run when the Rust
   `katana` exists, at the last wave.
 - **The headless window has the C++'s geometry.** Tests pin pointer
   coordinates and toolbar device pixels, so the Rust window's headless runs
-  must lay out as the C++'s do. The probe (`tools/window_geometry.py`) ran
+  must lay out as the C++'s do. The probe (tools/window_geometry.py) ran
   the C++ window headless on nine variants and measured it from its own
   screenshots: at scale 1 the window is 1360 x 860, the Layers dock
   45,159 300 x 295, Reference Data 45,459 300 x 328, Properties 1015,159
@@ -901,7 +944,7 @@ dialogs. Decisions:
   C++ asks for Arial, and where Arial is missing Qt takes fontconfig's
   substitute (DejaVu Sans in WSL), about as wide; the Rust took egui's thinner
   UI face, so text set for Arial wrapped into fewer, tighter lines and
-  `NotesAndALegendDrawTheirText` found two lines of notes where it asks for
+  `sheet_painter::notes_and_a_legend_draw_their_text` found two lines of notes where it asks for
   three. Where Arial is installed (Windows) it is still Arial. Rejected: the
   machine's own substitute, as Qt does (text would differ from machine to
   machine, which the rule above avoids), and keeping egui's face (text
@@ -931,7 +974,7 @@ dialogs. Decisions:
   reads `/Subtype /Image` as in QPdfWriter's files (krilla writes
   `/Subtype/Image` unless asked).
 - **A C++ test's probe was half a pixel out, fixed in both languages.** In
-  `EntersPlaceIsAnOutlinedRingNotTheNewVertexsFilledDisc`, `inkNear` names a
+  `feedback_painter::enters_place_is_an_outlined_ring_not_the_new_vertexs_filled_disc`, `inkNear` names a
   pixel by its top-left corner, so the probe at 2.5 px out on each axis
   took a pixel 45.3 % covered by the ring's pen: the area of the pixel
   [3,4] x [3,4] outside radius 5 is 1 - (integral from 3 to 4 of
@@ -1005,7 +1048,7 @@ panel now asks a frame later, so the repaint is never early.
 
 Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 2: in the
 commit that merged it; the window's twins 1,124 of 1,609 (`tests/qt_widgets`
-1,075 of 1,548, `tests/gpu` 49 of 61).
+1,075 of 1,548, tests/gpu 49 of 61).
 
 **Wave 3** ported, in four agents run at most two at a time, what stands on
 wave 2: the update and settings dialogs; the 3D and elevation views, the GPU
@@ -1021,7 +1064,7 @@ name picker and style preview in place of wave 2's seams. Decisions:
   `VIEWS OPEN plan` then `ZOOM IN` framed the view at a width the layout
   then changed, and the C++ workspace does the queued layout before it
   zooms; here the case cannot arise, and the twin of
-  `ViewLinks.AZoomStraightAfterAViewOpensIsFramedAtTheWidthTheViewIsSeenAt`
+  `view_links::a_zoom_straight_after_a_view_opens_is_framed_at_the_width_the_view_is_seen_at`
   asserts that no view's width changed after it opened, where the C++
   asserts that its sweep reached one that did. A 3D view that has framed
   nothing yet takes its size from that layout too (`take_layout_size`), so
@@ -1038,7 +1081,7 @@ name picker and style preview in place of wave 2's seams. Decisions:
   names; a wheel notch is 50 points.
 - **A number box has Qt's special value text**
   (`SpinRange::with_special_text`): the plan grid's spacing reads "Auto" at
-  0, and its record carries what `QAbstractSpinBox::text()` would. A fill of
+  0, and its record carries what QAbstractSpinBox::text() would. A fill of
   "Auto" is refused, as `--fill` reads a number.
 - **A hidden button is pressed through its dialog** (the update dialog's
   `click`), as egui draws a hidden control disabled and the harness refuses
@@ -1057,7 +1100,7 @@ sprite, where the C++ painter always reaches Qt's. Six sheet editor twins
 wrote their pictures into the crate when `KATANA_SHEET_PNG` was set empty;
 they now write only to a folder named.
 
-Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 3: in the commit that merged it, the C++ suite 9,923 of 9,923 with this record in place (9,922 before it, the one failure the docs check finding wave 2's note on the code manager's seams after the seams had gone), cargo test 9,144 passed and 0 failed, the cli gate 379 of 379; the window's twins 1,563 of 1,609 (`tests/qt_widgets` 1,506 of 1,548, `tests/gpu` 57 of 61).
+Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 3: in the commit that merged it, the C++ suite 9,923 of 9,923 with this record in place (9,922 before it, the one failure the docs check finding wave 2's note on the code manager's seams after the seams had gone), cargo test 9,144 passed and 0 failed, the cli gate 379 of 379; the window's twins 1,563 of 1,609 (`tests/qt_widgets` 1,506 of 1,548, tests/gpu 57 of 61).
 
 **Wave 4** ported the main window and the `katana` program in one agent
 (K), beside one (S) that twinned the 18 window cases the earlier waves
@@ -1088,7 +1131,7 @@ that names eframe and hands the window to wave 1's program driver. Decisions:
   opens it at every frame's start; the window beginning it to give it its
   title takes that record. The gate's first run failed 244 of 267 tests on
   "the target  is drawn twice in one frame"; a foundation test now holds it.
-- **`tests/qt_widgets` and `tests/gpu` are held to parity**, every case
+- **`tests/qt_widgets` and tests/gpu are held to parity**, every case
   twinned or exempt: 1,548 and 61. Four exemptions were added: the three
   GeneralTexts cases, which read the Qt file dialogs a manager opens (the
   Rust opens the system's own, which no test may open), and
@@ -1169,7 +1212,7 @@ The integration found three more:
   cursor past its child: a zero-sized child at the bar's corner put the
   dock's contents under the corner, and a 3D view took 598 points where
   the bar leaves 574. They are drawn in a `new_child`, which allocates
-  nothing (the twin of `ViewLinks.AThreeDViewNotYetPaintedFramesTheSceneBeforeItZooms`
+  nothing (the twin of `view_links::a_three_d_view_not_yet_painted_frames_the_scene_before_it_zooms`
   found it).
 - **The sheet editor is drawn as a window of its own** while it is shown,
   over the screen in an area of its own: it was drawn in the room the main
@@ -1187,7 +1230,7 @@ streams - left, the two pixel metrics under Not done.
 
 **Docks are taken out one at a time, never with egui_dock's
 `retain_tabs`.** The twin of
-`ViewChrome.AMaximisedViewFillsTheWorkspaceAndRestoreGivesEveryViewBackItsPlace`
+`view_chrome::a_maximised_view_fills_the_workspace_and_restore_gives_every_view_back_its_place`
 failed about one run in three, and its message, made to say the view's
 state, showed the view maximised but out of the dock. egui_dock 0.21.1's
 `retain_tabs` (and `filter_map_tabs`) balance the tree after them by
@@ -1214,7 +1257,7 @@ script asserted the old text.
 `tools/check_layering.cmake` in `rust/crates/`, named `katana_<layer>`. Two
 names differ: the qt layer's crate is `katana_window` (the window is not Qt
 in the port), and the helper program `katana_updater` is a crate of the update
-layer, as `src/katana_updater` is.
+layer, as src/katana_updater is.
 
 A crate's `katana_*` dependencies are exactly the layers the table allows it,
 all of them, declared now. A crate cannot name a crate it does not depend on,
@@ -1355,8 +1398,8 @@ Rust test function `case_name` in a module `suite` - the names in snake case,
 the module usually a `mod` block in a file under the crate's `tests/`. Test
 data stays where the C++ reads it, under `tests/`, and is read from there.
 
-`tools/check_rust_parity.py` (the `rust_parity` test) holds this. A test
-directory listed as ported in `rust/parity.toml` must have a twin for every
+tools/check_rust_parity.py (the `rust_parity` test) holds this. A test
+directory listed as ported in rust/parity.toml must have a twin for every
 case, a case added later by a fix in C++ included, unless the file exempts the
 case with its reason (a misuse that the types now refuse to compile, a reader
 the owner chose not to port); an exemption naming a case that does not exist
@@ -1385,14 +1428,14 @@ literal not stepped over.
   native result API rather than a second result wrapper or a case exemption.
 - **Text and numbers.** Bytes up to the decoder, validated UTF-8 after it.
   Each of the reply's number formats must give the C++'s text exactly:
-  `core::formatExactReal` (the shortest round-trip text, as `std::to_chars`
-  writes it - `1e+20`, exact digits for large integers), `core::formatFixed`
+  core::formatExactReal (the shortest round-trip text, as `std::to_chars`
+  writes it - `1e+20`, exact digits for large integers), core::formatFixed
   and the twelve significant digits of LIST and INFO. `parseFiniteDouble`
   refuses an underflow such as `1e-999`, where Rust's parse returns zero.
 - **Numerics.** Rust never fuses a multiply and an add, as
   `-ffp-contract=off` keeps the C++ from doing; three-argument `hypot` is
   ported as libstdc++'s (scaled by the largest component); output never
-  depends on a hash map's order; `math::tolerance` stays the one source of
+  depends on a hash map's order; math::tolerance stays the one source of
   tolerances.
 - **Parallelism.** The task pool is ported with its contract - nested calls
   run inline, the first panic is rethrown, the result is the serial run's -
@@ -1401,7 +1444,7 @@ literal not stepped over.
 - **SIMD.** The 23 kernel entries are ported with their layers, bit-identical
   to their scalar references, with `KATANA_SIMD` kept. `#[target_feature]`
   confines the AVX2 code to the kernel itself, so the object check the C++
-  needs (`tools/check_simd_kernels.cmake`) has no twin.
+  needs (tools/check_simd_kernels.cmake) has no twin.
 - **Names.** The naming rule holds in the port: comments, identifiers and
   messages say "the archive format", "survey code file", "style library";
   the kept tokens keep their spelling (`.12da`, the `katana_archive12d`
@@ -1468,7 +1511,7 @@ in porting:
 - **Eigen's QR**: nalgebra's `ColPivQR` pivots on the column holding the
   largest entry, not the largest norm, and has no rank or threshold, so a
   rank-deficient network would be found so elsewhere than Eigen finds it.
-  The port implements `ColPivHouseholderQR` as Eigen 3.4 does it (`lsq_core.rs`):
+  The port implements ColPivHouseholderQR as Eigen 3.4 does it (`lsq_core.rs`):
   norms and the first-largest pivot, the LAWN 176 norm downdate, the rank
   against the prescribed threshold, the solve. Its sums are added in the
   order the C++ build's Eigen 3.4.0 adds them (SSE2, no fused
@@ -1489,7 +1532,7 @@ in porting:
   could not expose serde_json's types, as no third-party type may cross a
   crate's interface. So
   `katana_core::json` translates nlohmann itself, beside core's XML reader:
-  its value with both object orders (`Json` sorted as `nlohmann::json`,
+  its value with both object orders (`Json` sorted as nlohmann::json,
   `OrderedJson` as `ordered_json`), its lexer and event parser, its
   serializer and Grisu2, its accessors and their error texts. The
   translation keeps nlohmann's copyright and MIT notice
@@ -1498,7 +1541,7 @@ in porting:
 ## The GDAL algorithm spike
 
 The C++ runs GDAL's algorithm framework through its C++ API
-(`src/katana_io/geo/processing.cpp`), which no Rust binding wraps; it was
+(src/katana_io/geo/processing.cpp), which no Rust binding wraps; it was
 the one part of the port with no known route. GDAL 3.13 exposes the same
 framework in C (`gdalalgorithm_c.h`). A test of the gis crate ran `gdal
 raster info` on the geo suite's `tests/geo/data/plane.asc` through that
@@ -1553,7 +1596,7 @@ pin classifies every algorithm GDAL lists.
   - render: the clipper's fixed 3+5-vertex buffers assume each plane adds at
     most one vertex, which a near-degenerate polygon rounded to float may not
     keep (an out-of-bounds write in C++, a panic in Rust; not shown to
-    happen); `DrawLine::depthBias`'s comment says NDC units where the
+    happen); DrawLine::depthBias's comment says NDC units where the
     rasteriser applies pixel footprints of view distance.
   - entity: `rewriteLayerPrefix` with an empty `from` drops the name's first
     byte; `labelPiecesFor` and `labelAnchor` on an open polyline with no
@@ -1613,7 +1656,7 @@ pin classifies every algorithm GDAL lists.
     no counterpart.
 - **Decisions waiting on the owner** (step 3):
   - archive12d's legacy customisation readers and writers
-    (`src/katana_archive12d/legacy/`, the retired style library and survey
+    (src/katana_archive12d/legacy/, the retired style library and survey
     code file formats, and `katana_customisation_convert`): ported, or
     exempt? Their 103 cases are neither twinned nor exempt, so
     `tests/archive12d` is not yet held as ported.
@@ -1677,7 +1720,7 @@ pin classifies every algorithm GDAL lists.
   - storage: a stray file in `backups/` whose number overflows `std::stol`
     ends the program; a backup taken in the same millisecond after pruning
     can reuse a freed name and be pruned at once.
-  - dxf: `Sink::blockPath` is never set; MTEXT's `\M` can cut a UTF-8
+  - dxf: Sink::blockPath is never set; MTEXT's `\M` can cut a UTF-8
     character, and the rest of that line is then refused; `writeLeader`
     reads `v[size-2]` of a drawn leader that may have fewer than two
     vertices; `std::abs(INT_MIN)` on a colour; text widths count bytes, not
@@ -1764,7 +1807,7 @@ pin classifies every algorithm GDAL lists.
     `aligned ? ... : ...` pick one justification; `SelectionStep::all`
     ignores the view (noted in the C++).
   - the sheet verbs: their `number()` strips one `+` and reads the rest, so
-    "+-1" is -1, where `core::parseFiniteDouble` refuses it - two number
+    "+-1" is -1, where core::parseFiniteDouble refuses it - two number
     readers that disagree; `drawnOutline`'s arc step count is undefined for a
     NaN or huge sweep; a NaN line weight or symbol size breaks the legend's
     map order (never observed: only "most entities, then first met" is
@@ -2008,13 +2051,13 @@ pin classifies every algorithm GDAL lists.
   until it fits, the same text wherever the C++ is defined.
 - **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
   reach the Rust yet.** Its `build.rs` reads the defaults from
-  `src/katana_update/CMakeLists.txt` and would take environment variables of
+  src/katana_update/CMakeLists.txt and would take environment variables of
   the same names, but nothing sets them; the cargo stage of
   `tools/build_visible.sh` and the release jobs must pass them when a build
   that is not the default is made.
 - **A non-default built-in customisation does not reach the Rust yet.**
   cad's `build.rs` reads the default and the alternates from
-  `src/katana_cad/CMakeLists.txt`; the alternates could come from a
+  src/katana_cad/CMakeLists.txt; the alternates could come from a
   `KATANA_ALTERNATE_CUSTOMISATIONS` that the cargo stage and the release jobs
   pass, but the default cannot come in under its CMake name, which is also
   the run-time setting that chooses a built-in. It wants a build-time
@@ -2035,9 +2078,9 @@ pin classifies every algorithm GDAL lists.
   "Select users" writes the selection directly; a driver's fill of a name
   picker can choose a section header; the vector import and the DEM tools
   each give two controls one name (above); the vector export's Browse has
-  no headless guard; `OnlineDataWorkbench::areaOf` does not check for a
+  no headless guard; OnlineDataWorkbench::areaOf does not check for a
   missing view; the code manager's Linework status and Use These Codes
-  are set only as a field is typed in; `ArgumentForm::setValue` takes "2.0"
+  are set only as a field is typed in; ArgumentForm::setValue takes "2.0"
   as a whole number and sets 0; the pipeline builder's Add with "write"
   selected leaves the step form hidden; the binding list's Remove reports a
   change with no row current; the volumes dialog measures a surface against
@@ -2096,7 +2139,7 @@ pin classifies every algorithm GDAL lists.
     choices (`referenceOpacity`, `referenceColour`), which run REFS OPACITY
     and REFS COLOR; the code manager's `explainHeading` is reported as the
     plain text a person reads, as `--report` reads a rich QLabel; Generate
-    Sheets, Page Setup and Plot are modal, as `QDialog::open` and `exec`
+    Sheets, Page Setup and Plot are modal, as QDialog::open and `exec`
     make them.
 - **Found in the window gate's fix-up round (the main window and the
   driver):**
@@ -2116,7 +2159,7 @@ pin classifies every algorithm GDAL lists.
   - *A target that closed* is said to have closed ("NAME has closed: the
     window is grabbed", "--fill ...: NAME has closed") only when the dialog
     went with it: the C++'s target is a `QPointer`, null only for a widget
-    deleted (`Qt::WA_DeleteOnClose`: the sheet editor's Page Setup,
+    deleted (Qt::WA_DeleteOnClose: the sheet editor's Page Setup,
     Generate Sheets, Hidden Layers and Suggest Paper dialogs, the view
     Layers popup and the paper scale dialog), where a dialog the window
     keeps is hidden and stays the target. `DialogFrame::deletes_on_close`
@@ -2138,7 +2181,7 @@ pin classifies every algorithm GDAL lists.
     `StyleManagerDialog::set_object_name`); a manager made on its own keeps
     `layerManager` and `styleManager`, which its twins drive it by.
 - **The corpus round trip failed once under the whole suite's load**
-  (`every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust`,
+  (every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust,
   wave 4's run) and passed on its own: the schema-9 project's backups
   differed, the Rust side's backup of the migrated file named 6 s before its
   backup of the schema-9 file, so the dump's name order put them the other

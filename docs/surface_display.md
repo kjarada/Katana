@@ -11,32 +11,32 @@ record of how a surface is now drawn in its display style: in the plan view
 The style itself - the named `SurfaceDisplayStyle`, the set the drawing keeps,
 which surface is drawn in which, the `SURFACESTYLE` and `SURFACE STYLE` verbs
 that edit them, and how they are saved - is the drawing's surfaces' own
-(`include/katana/cad/terrain/surface_style.hpp`, `docs/terrain.md`). This
+(`rust/crates/katana_cad/src/terrain/surface_style.rs`, `docs/terrain.md`). This
 document is what is DONE with a style.
 
 ## The pieces
 
 | Where | What |
 |---|---|
-| `include/katana/terrain/colour_ramps.hpp` | THE ramp table, plain data with the source of each ramp's colours: `colourRamps`, `colourRampNames`, `findColourRamp` ("The ramps") |
-| `src/katana_cad/terrain/surface_ramps.cpp` | the surface styles' view of it, in the drawing's colours: `surfaceRampNames`, `surfaceRampStops`, and the lookup arithmetic the 3D kernels are held to (`surfaceRampColour`) |
-| `include/katana/cad/terrain/surface_colouring.hpp` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
-| `include/katana/cad/terrain/surface_plan.hpp` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surfacePlan`, `SurfacePlanCache`) |
-| `include/katana/cad/terrain/surface_display_verbs.hpp` | `SURFACE LEGEND` and `SURFACE PLAN` |
-| `include/katana/cad/scene.hpp` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `applySurfaceDisplay`, `SceneLayers::legends`) |
-| `src/katana_qt/terrain/surface_plan_painter.hpp` | the plan painter's surface layer, and the legend panel and the stack of them (`paintSurfaceLegendStack`) both views draw |
-| `src/katana_qt/plan_painter.hpp` | `PlanSource::surfaces`, `PlanPaintOptions::surfaces`, the statistics |
-| `src/katana_qt/terrain/surface_style_manager.hpp` | Terrain > Surface Styles... |
-| `src/katana_qt/terrain/main_window_surface_display.cpp` | the window's wiring: the action, the dialog, the 3D views restyled |
+| `rust/crates/katana_terrain/src/colour_ramps.rs` | THE ramp table, plain data with the source of each ramp's colours: `colour_ramps`, `colour_ramp_names`, `find_colour_ramp` ("The ramps") |
+| `rust/crates/katana_cad/src/terrain/surface_style.rs`, `rust/crates/katana_cad/src/terrain/surface_colouring.rs` | the surface styles' view of it, in the drawing's colours: `surface_ramp_names`, `surface_ramp_stops`, and the lookup arithmetic the 3D kernels are held to (`surface_ramp_colour`) |
+| `rust/crates/katana_cad/src/terrain/surface_colouring.rs` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
+| `rust/crates/katana_cad/src/terrain/surface_plan.rs` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surface_plan`, `SurfacePlanCache`) |
+| `rust/crates/katana_cad/src/terrain/surface_display_verbs.rs` | `SURFACE LEGEND` and `SURFACE PLAN` |
+| `rust/crates/katana_cad/src/scene.rs` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `apply_surface_display`, `SceneLayers::legends`) |
+| `rust/crates/katana_window/src/terrain/surface_plan_painter.rs` | the plan painter's surface layer, and the legend panel and the stack of them (`paint_surface_legend_stack`) both views draw |
+| `rust/crates/katana_window/src/plan_painter.rs` | `PlanSource::surfaces`, `PlanPaintOptions::surfaces`, the statistics |
+| `rust/crates/katana_window/src/terrain/surface_style_manager.rs` | Terrain > Surface Styles... |
+| `rust/crates/katana_window/src/terrain/main_window_surface_display.rs` | the window's wiring: the action, the dialog, the 3D views restyled |
 
 ## The ramps
 
 Every ramp is five colours evenly spaced over 0 to 1 and blended linearly
 between them. Five, because that is the form the 3D scene's vector kernels
-read (`src/katana_cad/simd/scene_kernels.hpp`: four segments a channel): a
+read (`rust/crates/katana_cad/src/simd/scene_kernels.rs`: four segments a channel): a
 surface coloured smoothly by ANY ramp takes the kernel path, and the kernels'
 parameters are filled from the ramp the style names
-(`SceneKernels.ASurfaceInADisplayStyleOnEveryRampBuildsTheSameAtEveryLevel`).
+(`scene_kernels::a_surface_in_a_display_style_on_every_ramp_builds_the_same_at_every_level`).
 
 | Ramp | Stops | Source |
 |---|---|---|
@@ -47,25 +47,25 @@ parameters are filled from the ramp the style names
 | grey | 32, 80, 128, 176, 224 | chosen here: equal steps, so order survives a monochrome plot |
 | spectral | #2b83ba #abdda4 #ffffbf #fdae61 #d7191c | ColorBrewer Spectral, five classes, reversed |
 
-**One table.** The ramps are rows of `katana::terrain::colourRamps()`
-(`include/katana/terrain/colour_ramps.hpp`, `src/katana_terrain/colour_ramps.cpp`):
+**One table.** The ramps are rows of `katana_terrain::colour_ramps()`
+(`rust/crates/katana_terrain/src/colour_ramps.rs`):
 plain data, three bytes a colour, each row with the source of its colours (the
 Source column above is that field). It sits in the `terrain` layer because that
-is the lowest layer both users may see (`tools/check_layering.cmake`: `cad` may
+is the lowest layer both users may see (the crates' dependencies: `cad` may
 not see `interop`, and `interop` may not see `render` or `cad`; `core` could
 hold it, but a colour ramp is no concern of `core`). The surface styles read it through
-`cad::surfaceRampStops` (the drawing's `Color`, alpha 255) and `RASTER SHADE` /
-`RASTER SLOPE` through `interop::geo::builtInRamp` (which gives each stop its
+`katana_cad::terrain::surface_colouring::surface_ramp_stops` (the drawing's `Color`, alpha 255) and `RASTER SHADE` /
+`RASTER SLOPE` through `katana_interop::geo::colour_ramps::built_in_ramp` (which gives each stop its
 place along the range, 0, 1/4, 1/2, 3/4 and 1, the form GDAL's colour map
-reads); both find a ramp by name through the one lookup, `terrain::findColourRamp`
+reads); both find a ramp by name through the one lookup, `katana_terrain::colour_ramps::find_colour_ramp`
 (any case), and the style form, the shading dialog and the shading verb's
 refusals list the table's names, so a ramp added to the table is offered
 everywhere without a second edit
-(`ColourRamps.TheShadingsRampsAreTheSurfaceStylesRampsStopForStop`,
-`SurfaceRamps.EveryStyleRampIsTheOneTablesRampAtFullAlphaAndItsNamesAreTheTables`).
+(`colour_ramps::the_shadings_ramps_are_the_surface_styles_ramps_stop_for_stop`,
+`surface_ramps::every_style_ramp_is_the_one_tables_ramp_at_full_alpha_and_its_names_are_the_tables`).
 
 Until 2026-10-15 `RASTER SHADE` and `RASTER SLOPE` had a table of their own
-(`src/katana_interop/geo/colour_ramps.cpp`) with four of the same names -
+(`rust/crates/katana_interop/src/geo/colour_ramps.rs`) with four of the same names -
 terrain, diverging, slope and grey - and different colours, so `ramp=terrain`
 was two maps, and an earlier version of this file called the styles' table
 "THE ramp table" while the other existed. Its terrain was the hypsometric green
@@ -77,7 +77,7 @@ in two stops; and it refused `ramp=spectral` and `earth`.
 doing it, and is the one to reverse if the shading's look is wanted):** the
 surface styles' colours are the table. They are what the person sees in the
 window and in 3D, and the scene's terrain ramp is held to the bit by its
-kernels (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`).
+kernels (`surface_ramps::the_terrain_ramp_is_the_scenes_old_elevation_ramp_to_the_bit`).
 `RASTER SHADE` and `RASTER SLOPE` adopt them. The old names stay accepted: the
 four names the shading had are in the table, so `ramp=terrain`, `diverging`,
 `slope` and `grey` still work and mean the table's ramps; there is no alias to
@@ -101,18 +101,18 @@ saturation where it was RdYlGn's softer greens and reds, so a class of
 and grey runs 32 to 224 in five steps, so the darkest cell of a `style=plain`
 picture is a dark grey and not black. Nothing is migrated: a line run again
 restyles. The blending between stops is still each consumer's own: the scene's
-kernels' (`cad::surfaceRampColour`, to the bit) and GDAL's colour map (which
+kernels' (`katana_cad::terrain::surface_colouring::surface_ramp_colour`, to the bit) and GDAL's colour map (which
 rounds as GDAL does), so between two stops the two may differ by a level of 255;
 the stops, and the legends that list them, are the same.
 
-The scene's `elevationRampColor` is now the table's terrain ramp, operation
-for operation (`SurfaceRamps.TheTerrainRampIsTheScenesOldElevationRampToTheBit`
+The scene's `elevation_ramp_color` is now the table's terrain ramp, operation
+for operation (`surface_ramps::the_terrain_ramp_is_the_scenes_old_elevation_ramp_to_the_bit`
 holds it at a thousand points), so every existing scene and kernel test holds.
 The old slope colour was a line, red 2t and green 2 - 2t; as a five-stop ramp
 its quarter stops are that line rounded (128), and between stops a colour may
 now differ from the old by one level of 255. No test held the old values
 between stops; the stops are held
-(`SurfaceRamps.TheSlopeRampKeepsTheScenesOldSlopeColoursAtItsStops`).
+(`surface_ramps::the_slope_ramp_keeps_the_scenes_old_slope_colours_at_its_stops`).
 
 ## How faces are coloured
 
@@ -120,10 +120,10 @@ A face is coloured by its ELEVATION (drawing units), its SLOPE IN PERCENT
 (rise over run times 100: 100 is 45 degrees), or its ASPECT - in eight
 sectors of 45 degrees centred on north, north-east ... north-west, coloured
 round a hue wheel from red at north - or by one FLAT colour.
-`cad::surfaceColouring` resolves a style's rule against the values a surface
+`katana_cad::terrain::surface_colouring::surface_colouring` resolves a style's rule against the values a surface
 spans:
 
-* **The range.** Each end the style gives (`rangeMin`, `rangeMax`), else the
+* **The range.** Each end the style gives (`range_min`, `range_max`), else the
   surface's own: its lowest and highest vertex for elevation, 0 to its
   steepest face for slope. In 3D an open end of an elevation range is the
   one range of every visible surface ("In 3D", below).
@@ -131,7 +131,7 @@ spans:
 * **Banded ramp.** `bands` bands of equal width over the range; below it is
   the first band and above it the last. Band k is the ramp at k / (bands - 1),
   so the first and last bands are the ramp's two ends. **At most 100 bands**
-  (`kMaximumSurfaceBands`, refused by `checkSurfaceStyle`, so the verb, the
+  (`MAXIMUM_SURFACE_BANDS`, refused by `check_surface_style`, so the verb, the
   form and a project file hold to it alike). The 3D view cuts each triangle
   at every band edge it crosses, so its geometry grew by about 643 triangles
   a band on the 21 182-triangle sample terrain (28 078 triangles at 10 bands,
@@ -139,7 +139,7 @@ spans:
   extrapolates to some 640 million triangles), and a legend has 16 rows however many bands there are. 100 is the
   form's own box and a 0.14 m band on that terrain's 13.9 m of relief; at
   most that many pieces a triangle
-  (`SurfaceBandPieces.ATriangleAcrossTheMaximumNumberOfBandsIsAtMostThatManyPieces`).
+  (`surface_band_pieces::a_triangle_across_the_maximum_number_of_bands_is_at_most_that_many_pieces`).
   Rejected: a piece budget in the 3D build that falls back to colouring the
   vertices - a style that looks different on a big surface and on a small
   one - and caching the legend, which a count of 100 makes cheap.
@@ -151,9 +151,9 @@ spans:
   for slope, the start, because the point is a face with no steepness (a level
   pad is green, as the 3D view drew it before styles, not the yellow middle).
   The one middle for every value drew a terrain wholly below the minimum in
-  its middle band (`SurfaceColouring.ACollapsedRangeIsAPointAndAValueKeepsTheSideOfItItIsOn`,
-  `SurfacePlanFaces.ARangeAboveTheWholeSurfaceColoursEveryFaceTheFirstBandNotTheMiddleOne`,
-  `SurfacePlanFaces.ALevelSurfaceColouredBySlopeIsTheRampsStartNotItsMiddle`).
+  its middle band (`surface_colouring::a_collapsed_range_is_a_point_and_a_value_keeps_the_side_of_it_it_is_on`,
+  `surface_plan_faces::a_range_above_the_whole_surface_colours_every_face_the_first_band_not_the_middle_one`,
+  `surface_plan_faces::a_level_surface_coloured_by_slope_is_the_ramps_start_not_its_middle`).
 * **Stops.** They override the ramp and are absolute values; at most 100 of
   them, since banded a stop is a band. Smooth, a value is blended between the
   two stops either side; banded, each stop is the lower edge of a band in its
@@ -162,19 +162,19 @@ spans:
 * **Not finite** (a face vertical in plan has no slope): the flat colour, as
   is a level face coloured by aspect.
 
-The legend (`cad::surfaceLegend`) says the same: one swatch a band or stop
+The legend (`katana_cad::terrain::surface_colouring::surface_legend`) says the same: one swatch a band or stop
 labelled by its edges ("24.892 - 26.285", "< 2", "33 +"), the eight sectors
 and "level" for aspect, or for a smooth ramp or smooth stops a gradient
 labelled at its ends. A label has the fewest decimals, at most three, that
-write every edge to a millionth of a unit (`cad::legendDecimals`).
+write every edge to a millionth of a unit (`katana_cad::terrain::surface_colouring::legend_decimals`).
 
 * **An end band the data runs past is open.** With `min=30 max=35` over
   ground of 24.9 to 38.8, the first band is drawn on everything below 31 and
   the last on everything above 34, so they read "< 31" and "34 +" and
   `SURFACE LEGEND` leaves `from=` / `to=` out there, as a stop's open ends do;
   they read closed ("24.892 - 26.285") only while the range is the data's own
-  or holds it (`SurfaceColouring::openBelow` and `openAbove`, set by
-  `surfaceColouring` where a given `min` is above the lowest value or a given
+  or holds it (`SurfaceColouring::open_below` and `open_above`, set by
+  `surface_colouring` where a given `min` is above the lowest value or a given
   `max` below the highest). Closed, they said a colour covered 30 to 31 that
   covered everything under it. The picture is not changed by what the legend
   says.
@@ -189,23 +189,23 @@ write every edge to a millionth of a unit (`cad::legendDecimals`).
   1 m fill read as 1.33 m. Every labelled stop is written beside its place
   where it clears the label above by a line, the two ends always. A ramp's
   nine samples are evenly spaced, so they look as they did
-  (`SurfacePlanPainter.ASmoothLegendPlacesEachStopAtItsValueNotAtItsPlaceInTheList`).
+  (`surface_plan_painter::a_smooth_legend_places_each_stop_at_its_value_not_at_its_place_in_the_list`).
 
 ## In plan
 
-`paintPlan` draws every visible surface of the drawing - `PlanSource::surfaces`
-and `PlanSource::surfaceStyles`, which `planSourceOf` fills from the document -
+`paint_plan` draws every visible surface of the drawing - `PlanSource::surfaces`
+and `PlanSource::surface_styles`, which `plan_source_of` fills from the document -
 in its style, in the order the surfaces were added, **beneath the entities**:
 over the imagery, the point clouds and the mesh footprints, under every line
 of the drawing. So the plan view, File > Plot to PDF and every sheet viewport
 draw a surface alike, through one painter. A hidden surface
 (`NamedSurface::visible`) is not drawn and does not count in what Zoom
-Extents frames (`planDrawnBounds`); a visible one does, so a drawing of
+Extents frames (`plan_drawn_bounds`); a visible one does, so a drawing of
 nothing but a surface frames it.
 
-What is drawn is decided in `katana_cad` by `cad::surfacePlan`, for one
+What is drawn is decided in `katana_cad` by `katana_cad::terrain::surface_plan::surface_plan`, for one
 surface through one view, and drawn by
-`src/katana_qt/terrain/surface_plan_painter.cpp`; in order:
+`rust/crates/katana_window/src/terrain/surface_plan_painter.rs`; in order:
 
 1. **Faces** - an image of the part of the surface in view, each pixel the
    colour of the surface under its centre, at the style's opacity.
@@ -221,10 +221,10 @@ surface through one view, and drawn by
 
 Zoomed out, a dense TIN has many triangles to a pixel, and a polygon each is
 most of a frame for colour nobody can see. The faces are rasterised in
-`katana_cad` into a premultiplied ARGB image (the layout of
-`QImage::Format_ARGB32_Premultiplied`, wrapped without a copy), one image
+`katana_cad` into a premultiplied RGBA image (the layout the window's canvas
+paints and egui's textures take, `rust/crates/katana_window/src/canvas/image.rs`), one image
 pixel a device pixel on screen, on a grid lined up with the view's first
-pixel (`cad::planImageGrid`), and laid down through the frame like a raster.
+pixel (`katana_cad::terrain::surface_plan::plan_image_grid`), and laid down through the frame like a raster.
 Its cost is the pixels it covers and the triangles in view, whatever the zoom.
 
 * **Exact to the pixel.** Elevation is interpolated at each pixel's centre,
@@ -244,7 +244,7 @@ Its cost is the pixels it covers and the triangles in view, whatever the zoom.
   On an eighth-of-a-unit grid 80 centres lie exactly on the square's shared
   diagonal; the image covers 6 400 pixels, and the test fails with 6 480 when
   a tie goes to both and 6 320 when to neither
-  (`SurfacePlanFaces.EveryPixelOfTheSurfaceIsCoveredOnceEvenOnTheSharedDiagonal`,
+  (`surface_plan_faces::every_pixel_of_the_surface_is_covered_once_even_on_the_shared_diagonal`,
   both mutations run). Rejected: deciding a tie by vertex numbers, as the
   first version did - it settled an edge but a vertex only for a fan whose
   centre was numbered between its neighbours: numbered below all of them, or
@@ -253,42 +253,42 @@ Its cost is the pixels it covers and the triangles in view, whatever the zoom.
   triangle had the pixel, a pinhole, and with neighbours alternating above
   and below two had it. A fan of four, its centre exactly on a pixel centre,
   covers 49 for every numbering where the old rule gave 48, 48, 50 and 49
-  (`SurfacePlanFaces.AVertexOnAPixelCentreIsOneTrianglesWhateverTheVertexNumbersAre`).
+  (`surface_plan_faces::a_vertex_on_a_pixel_centre_is_one_triangles_whatever_the_vertex_numbers_are`).
 * **The same at any thread count.** Rows are painted in bands of 32 across the
   task pool, each band writing only its rows and taking its triangles in
-  ascending order (`SurfacePlanFaces.TheImageIsTheSameAtAnyThreadCount`).
+  ascending order (`surface_plan_faces::the_image_is_the_same_at_any_thread_count`).
 * **On paper** the image is made at the imagery cap, as a raster's crop is
-  (`PlanPaintOptions::rasterDpiCap`, 200 dpi, and the 16-megapixel cap), and
-  a greyscale or monochrome plot prints it through `plotImage`.
+  (`PlanPaintOptions::raster_dpi_cap`, 200 dpi, and the 16-megapixel cap), and
+  a greyscale or monochrome plot prints it through `plot_image`.
 
-Rejected: a `QPainter` polygon a triangle (a frame of 400 000 polygons), and
+Rejected: a painter's polygon a triangle (a frame of 400 000 polygons), and
 pieces of triangles cut at band edges drawn as polygons (exact, but more
-polygons still, and smooth colouring needs a gradient a triangle, which
-QPainter cannot draw). The 3D view does cut triangles at band edges
-(`cad::bandPieces`), because a GPU draws triangles and not pixels.
+polygons still, and smooth colouring needs a gradient a triangle, which a 2D
+painter cannot draw). The 3D view does cut triangles at band edges
+(`katana_cad::terrain::surface_colouring::band_pieces`), because a GPU draws triangles and not pixels.
 
 ### Level of detail
 
 All in pixels of the view (a logical pixel on screen; on paper a 96th of an
-inch of the page, `kPlanPaperPixelMillimetres`, so a plot keeps the detail
+inch of the page, `PLAN_PAPER_PIXEL_MILLIMETRES`, so a plot keeps the detail
 the screen showed at its scale):
 
-* **Triangles under four pixels are not stroked** (`kPlanEdgePixels`), as the
-  3D view's edges are gone below 4 px (`SceneBuilder::fadeEdges`): a mesh of
+* **Triangles under four pixels are not stroked** (`PLAN_EDGE_PIXELS`), as the
+  3D view's edges are gone below 4 px (`SceneBuilder::fade_edges`): a mesh of
   one-pixel lines that close is a sheet, not triangles. A triangle whose every
   edge is shorter is tinted into the image in the triangle colour at 35 %
-  (`kPlanDenseTriangleAlpha`), so a dense surface reads as a tint rather than
+  (`PLAN_DENSE_TRIANGLE_ALPHA`), so a dense surface reads as a tint rather than
   disappearing. Each edge is stroked once - from the lower-numbered of its
   two triangles unless the other is out of view.
 * **Points closer than four pixels apart** on average (the square root of
   the plan area a vertex) are single pixels in the image, not marks.
 * **Contours closer than three pixels** apart at the surface's mean slope
   (interval over the area-weighted mean slope, in pixels) are left out: the
-  minors first, then the majors (`kPlanContourPixels`). A contour whose box
+  minors first, then the majors (`PLAN_CONTOUR_PIXELS`). A contour whose box
   is under a pixel is a speck and is left out.
 * **Lines are thinned** to half a pixel (radial distance: a vertex is kept
   when it is half a pixel or more from the last kept; the ends always) and
-  clipped to the view by whole segments (`geometry::clipPolyline`), so a long
+  clipped to the view by whole segments (`katana_geometry::polygon::clip_polyline`), so a long
   contour seen in part costs its visible part.
 * **Labels** go one every 360 px along each major contour, measured along
   the WHOLE contour from its own start - so a pan does not slide them along
@@ -302,15 +302,15 @@ the screen showed at its scale):
 The triangles in view are found through a grid of the surface's triangles
 (about four a cell, at most 1024 cells a side), each candidate tested against
 the view by its box - exactly the triangles a test of every one finds
-(`SurfacePlanCull.TheGridFindsExactlyTheTrianglesTestingEveryOneFinds`: 304
+(`surface_plan_cull::the_grid_finds_exactly_the_triangles_testing_every_one_finds`: 304
 boxes inside, across, outside, thin and empty; a grid that drops its last row
 of cells fails 129 of them). A view wholly holding the surface takes every
 triangle without the grid.
 
-`cad::SurfacePlanCache`, one per view inside the plan painter's cache
-(`PlanPaintCache::surfaceCache`), keeps per surface its grid, its mean and
+`katana_cad::terrain::surface_plan::SurfacePlanCache`, one per view inside the plan painter's cache
+(`PlanPaintCache::surface_cache`), keeps per surface its grid, its mean and
 steepest slopes, its rim and breaklines joined into lines, and its contours
-for the settings last drawn - traced once by `terrain::contours` and again
+for the settings last drawn - traced once by `katana_terrain::contours` and again
 only when the interval, base or major spacing change. It is keyed on the
 surface itself, which is shared and immutable (an edited surface is a new
 one), keeps it alive while kept, and lets a surface go at the first paint
@@ -321,23 +321,23 @@ least recently used, was wrong for a paint, which asks for every visible
 surface in the same order each time: the 33rd evicted the very surface the
 next paint wanted first, and every repaint rebuilt every grid and traced every
 contour again - 61-69 ms a repaint with 33 surfaces against 3-7 ms with 32
-(`SurfacePlanCache.MoreSurfacesInViewThanAnyCapAreKeptNotRebuiltOnEveryPaint`).
+(`surface_plan_cache::more_surfaces_in_view_than_any_cap_are_kept_not_rebuilt_on_every_paint`).
 Rejected: evicting only entries an earlier paint used (a paint generation) -
 a cache that still grows past its cap in the case it was for.
 
 Contours whose tracing would make more than four million points
-(`kPlanMaximumContourPoints`, estimated from the levels crossing each
+(`PLAN_MAXIMUM_CONTOUR_POINTS`, estimated from the levels crossing each
 triangle) are refused for the plan, saying why (`SurfacePlan::problem`): an
 interval a hundredth of what the relief wants would fill memory and the view
-with ink. The refusal is one function, `cad::contourRefusal`, which the paint
+with ink. The refusal is one function, `katana_cad::terrain::surface_plan::contour_refusal`, which the paint
 and the preflight check below both ask, so they cannot disagree. A paint
-reports it as a `cad::SurfaceProblem` - the surface, its style and the reason -
-in `PlanPaintStats::surfaceProblems`, and the reason reaches a person or an
+reports it as a `katana_cad::terrain::surface_plan::SurfaceProblem` - the surface, its style and the reason -
+in `PlanPaintStats::surface_problems`, and the reason reaches a person or an
 agent in every place a surface is drawn from:
 
 * `SURFACE PLAN` prints `problem=`;
 * the plan view tells its error hook - the command log - once, and again if
-  it goes and returns (`ViewportWidget::reportSurfaceProblems`), and its
+  it goes and returns (`viewport_widget::report_surface_problems`), and its
   headless report ends with ` problem="ground (style Fine): contours: an
   interval of ... not drawn - set a larger interval"` for each;
 * a sheet viewport adds the same line, `vp1: ground (style Fine): contours:
@@ -351,7 +351,7 @@ agent in every place a surface is drawn from:
   and its `file=` record, and the dialog shows them (`plotDrawingWarnings`);
 * and before any paint the preflight finds it: `plan.surface-style` of
   `SHEETS CHECK` (the editor's Checks dock and the check before Plot Sheet),
-  fed by `cad::surfaceStyleProblems`, which needs no painter - so
+  fed by `katana_cad::terrain::surface_plan::surface_style_problems`, which needs no painter - so
   `katana_cli` and `katana_mcp`, which cannot plot, have the warning with the
   surface as `subject=` (`docs/plotting.md`, "Preflight checks").
 
@@ -367,20 +367,20 @@ not already save.
 
 On screen, over everything in the view's top-right corner, the legend of each
 drawn surface whose style colours its faces - at most three, stacked
-(`PlanPaintOptions::surfaceLegends`). Each is measured before it is drawn
-(`measureSurfaceLegend`, the one layout `paintSurfaceLegend` draws, and
-`paintSurfaceLegendStack`, the stack the 3D view's legends go through too):
+(`PlanPaintOptions::surface_legends`). Each is measured before it is drawn
+(`measure_surface_legend`, the one layout `paint_surface_legend` draws, and
+`paint_surface_legend_stack`, the stack the 3D view's legends go through too):
 the first is drawn whatever its height, and a later one that would not fit above the
 view's foot is left out and not counted - a key with its lowest rows cut off
-by the edge reads as a key that ends there (`SurfacePlanPainter.ALegendTooTallForTheViewBelowTheOnesAlreadyDrawnIsLeftOutNotCutOff`;
+by the edge reads as a key that ends there (`surface_plan_painter::a_legend_too_tall_for_the_view_below_the_ones_already_drawn_is_left_out_not_cut_off`;
 three 10-band legends are about 500 px). It is drawn into the kept drawing,
 so a mouse move costs nothing more. A plot carries none: a sheet's legend
 belongs with its title block.
 
 A drawing that holds only surfaces is not empty: the "Nothing drawn yet"
-hint is not laid over it (`ViewportWidget::drawingIsEmpty` counts the
+hint is not laid over it (`viewport_widget::drawing_is_empty` counts the
 document's surfaces, hidden or not, as the 3D view's does;
-`PlanView.ADrawingOfNothingButASurfaceIsNotSaidToBeEmpty`).
+`plan_view::a_drawing_of_nothing_but_a_surface_is_not_said_to_be_empty`).
 
 The plan view's headless report says what it drew of the surfaces, after the
 entities, ghosts and grips, when it drew any - `PlanView1: drawn=N ghosts=N
@@ -393,7 +393,7 @@ it drew none (`docs/headless.md`).
 
 `SceneSurface::display` carries a COPY of the surface's style (the drawing's
 set is replaced by an edit, so a pointer into it would dangle);
-`cad::applySurfaceDisplay` sets it with the shading (`SurfaceDisplayStyle::shading`,
+`katana_cad::scene::apply_surface_display` sets it with the shading (`SurfaceDisplayStyle::shading`,
 the 3D view's `SurfaceStyle`). A surface with no style is drawn as before
 styles, by `SceneSurface::coloring`. With one, its `faces3d`:
 
@@ -402,10 +402,10 @@ styles, by `SceneSurface::coloring`. With one, its `faces3d`:
   open, the end is the one range over every visible surface coloured so,
   which keeps the scene's rule that a height is one colour on every surface
   (`docs/render.md`, "Surfaces"); a surface with both ends of its own does not
-  stretch it (`SceneSurfaceStyle.ASurfaceWithARangeOfItsOwnDoesNotStretchTheOneRamp`).
+  stretch it (`scene_surface_style::a_surface_with_a_range_of_its_own_does_not_stretch_the_one_ramp`).
 * **Elevation by stops** - each vertex its colour, on the scalar loop.
 * **Elevation banded** - each triangle cut where a band edge crosses it
-  (`cad::bandPieces`: convex pieces of three to five corners, a corner on a
+  (`katana_cad::terrain::surface_colouring::band_pieces`: convex pieces of three to five corners, a corner on a
   band edge at the edge's level exactly, covering the triangle), each piece
   its band's colour lit by the triangle's normal: a band stops at its contour.
 * **Slope, Aspect** - a colour a face on copies of its own, lit by the face's
@@ -415,7 +415,7 @@ styles, by `SceneSurface::coloring`. With one, its `faces3d`:
 A range that is a point (above) is coloured by the colouring, on the scalar
 loop, not by the kernels: their ramp has only a middle for a range that
 narrow, where a height below the point is the ramp's start
-(`SceneSurfaceStyle.ARangeAboveTheWholeSurfaceColoursItsVerticesTheRampsStartNotItsMiddle`).
+(`scene_surface_style::a_range_above_the_whole_surface_colours_its_vertices_the_ramps_start_not_its_middle`).
 
 **A wireframe colours nothing.** Its lines are one grey whatever its style
 says of `faces3d`, so it takes no part in the one range that open ends are
@@ -424,36 +424,36 @@ stretched over, brings up no legend bar when it is the only surface, and
 shaded surface above a mesh (the design as the built-in Outline, the ground
 shaded) is coloured over its own heights, not over the two surfaces' - the
 mesh stretched the ramp to 200 and the ground's top sat a twentieth of the way
-along it (`SceneSurfaceStyle.AWireframeColoursNothingSoItsHeightsStretchNoRampAndAloneItBringsNoBar`).
+along it (`scene_surface_style::a_wireframe_colours_nothing_so_its_heights_stretch_no_ramp_and_alone_it_brings_no_bar`).
 
 A style on the terrain ramp draws exactly what the scene drew before
-(`SceneSurfaceStyle.AStyleOnTheTerrainRampColoursASurfaceAsTheSceneAlwaysDid`).
+(`scene_surface_style::a_style_on_the_terrain_ramp_colours_a_surface_as_the_scene_always_did`).
 `SceneLayers::legends` are the legends of the drawable surfaces whose styles
 colour their faces by value or aspect, in drawing order, each as drawn
 (`SurfaceLegendCard`: the surface, its style, the legend). A hidden surface, a
-wireframe and a surface with no style have none. `RenderViewWidget` stacks
+wireframe and a surface with no style have none. `RenderView` stacks
 them down the top-right corner with the plan view's own stack
-(`paintSurfaceLegendStack`, one function for both views, so they measure, fit
+(`paint_surface_legend_stack`, one function for both views, so they measure, fit
 and leave out alike), each captioned "surface - style"; with none, the old
 elevation bar is drawn for surfaces with no style. It used to draw the first
 styled surface's legend only, so a second styled surface's colours could not
 be read. The plan view keeps its three, over the drawing a person is editing;
 the 3D view is limited by room alone: a later legend that would not fit above
 the foot of the view is left out whole and ends the stack
-(`SurfaceLegend3D.MoreLegendsThanTheViewHoldsAreLeftOutWholeNotCutOffOrOverlapped`),
+(`surface_legend3_d::more_legends_than_the_view_holds_are_left_out_whole_not_cut_off_or_overlapped`),
 and the scene keeps them all (`SceneLayers::legends`). Rejected: the plan
 view's cap of three here too, which would leave a fourth styled surface
 unreadable in a view with the room for it. The headless report of a 3D view
 says what it stacked, after its camera: `legends=2 legend="ground - Elevation
 Bands" legend="second - Slope Bands"`, nothing when it drew none
-(`RenderViewWidget::drawnLegends`,
+(`render_view_widget::drawn_legends`,
 `qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless`).
 
 The window styles its 3D surfaces from the drawing's styles
-(`MainWindow::styleSceneSurfaces`) when it rebuilds them
-(`MainWindow::syncSceneSurfaces`), and again, queued and once for a burst, when
+(`main_window::style_scene_surfaces`) when it rebuilds them
+(`main_window::sync_scene_surfaces`), and again, queued and once for a burst, when
 the styles are edited or another drawing is opened
-(`MainWindow::restyleSceneSurfaces`).
+(`main_window::restyle_scene_surfaces`).
 
 ## In the window
 
@@ -475,11 +475,11 @@ a person would type and hands it to the window's executor (`docs/desktop.md`,
 | Rename | `SURFACESTYLE RENAME "chosen" "name"` |
 | Delete | `SURFACESTYLE DELETE "chosen"` |
 | Set Default | `SURFACESTYLE DEFAULT "chosen"` |
-| Apply | `SURFACESTYLE SET "chosen" key=value ...` - only the fields the form changed, in the verb's key order (`qt::surfaceStyleSetWords`) |
+| Apply | `SURFACESTYLE SET "chosen" key=value ...` - only the fields the form changed, in the verb's key order (`katana_window::terrain::surface_style_manager::surface_style_set_words`) |
 | In This Style | `SURFACE STYLE "surface" "chosen"` |
 
 The form is a buffer, previewed as it is; a colour field takes `#RRGGBB` or
-a colour name the drawing knows (`cad::resolveColour`), and the line always
+a colour name the drawing knows (`katana_cad::colour_lookup::resolve_colour`), and the line always
 carries `#RRGGBB`. A field that does not read (an interval that is no number,
 a colour that is neither) stops Apply and the line label says why. A reload - a `SURFACESTYLE` typed, an undo - keeps
 the form's unapplied edits while the style they were made to is unchanged.
@@ -488,13 +488,13 @@ The form changes nothing it was not asked to: a field a box cannot show
 `faces3d=none`, which the list shows as flat) keeps the style's own value
 until the box is moved, as the opacity already did, so the line names "only
 the fields the form changed" truly
-(`SurfaceStyleManager.AStyleHoldingMoreThanTheFormsBoxesShowIsLeftAloneUntilTheBoxIsMoved`).
-The bands box is 2 to `kMaximumSurfaceBands`, the same number the check holds.
+(`surface_style_manager::a_style_holding_more_than_the_forms_boxes_show_is_left_alone_until_the_box_is_moved`).
+The bands box is 2 to `MAXIMUM_SURFACE_BANDS`, the same number the check holds.
 A refused New, Copy or Rename (a name that is taken) leaves the style being
 edited chosen with its unapplied edits: the row a line names is chosen only if
 the line is accepted (`ARefusedNameLeavesTheStyleBeingEditedChosenWithItsUnappliedEdits`);
 it used to jump to the style that holds the name and replace the form with it.
-Every widget's object name is in the dialog's header; the Surfaces panel's
+Every control's name is in the dialog's module documentation; the Surfaces panel's
 Edit Styles... button triggers the same action.
 
 ## On the command line
@@ -508,7 +508,7 @@ SURFACE PLAN <name> [AREA x0,y0,x1,y1 | VIEW [<id>]] [pixels=W,H]
 ```
 
 `SURFACE LEGEND` is the legend of its faces in its style: in plan
-(`planFaces`) or in 3D (`faces3d`, over the surface's own heights - a 3D view
+(`plan_faces`) or in 3D (`faces3d`, over the surface's own heights - a 3D view
 stretches an open range over every visible surface, which a verb has no view
 to know). A head record, then one a band, stop or sector:
 
@@ -517,7 +517,7 @@ legend surface="ground" style="Elevation Bands" view=plan faces=elevation kind=b
 entry index=1 colour=#28468C from=24.892000198364258 to=26.284700202941895 label="24.892 - 26.285"
 ```
 
-`from=` and `to=` are the edges exactly (`formatExactReal`): the sample terrain's
+`from=` and `to=` are the edges exactly (`format_exact_real`): the sample terrain's
 heights are Float32 (GDAL reads the text grid so), so the edges show their
 stored values, 24.892000198364258 and not 24.892, and the label carries the
 rounded form. Rejected: rounding the edges as `SURFACE`'s own record does
@@ -547,24 +547,24 @@ entities"), a scope other than AREA or VIEW, a bad AREA (not four numbers,
 or one with no width and no height: a point has no frame, and the reply of a
 plan that was never worked out - every count 0 - would read as a point the
 surface does not cover) or pixels=
-(`SurfaceDisplayVerbs.PlanOfTheViewIsWhatTheViewDrawsAtItsOwnSizeAndScale`,
-`PlanOfAnAreaThatIsAPointIsRefusedNotAnsweredWithZeroCounts`).
+(`surface_display_verbs::plan_of_the_view_is_what_the_view_draws_at_its_own_size_and_scale`,
+`surface_display_verbs::plan_of_an_area_that_is_a_point_is_refused_not_answered_with_zero_counts`).
 
 No MCP tool of its own: the legend as JSON (`SURFACE LEGEND name JSON`) is the
 structured form an agent wants, and it comes back through
-`katana_run_commands` already. The JSON is written with nlohmann's `replace`
-handler, as the other JSON replies are, so a surface or style name with a byte
-that is not UTF-8 is U+FFFD in the reply and not an exception that ends
-katana_cli (`SurfaceStore::checkName` and `checkSurfaceStyle` refuse such a
+`katana_run_commands` already. The JSON is written as the other JSON replies are, with a byte that is not
+UTF-8 replaced (nlohmann's `replace` handler in the C++ build), so a surface
+or style name with such a byte is U+FFFD in the reply and not a failure that
+ends katana_cli (`SurfaceStore::check_name` and `check_surface_style` refuse such a
 name where it enters; this is for one that got past; `docs/headless.md`, "Text
 and names"). The guard is reached through a seam: the reply is made of a
-plain-data `SurfaceLegendReply` and written by `cad::surfaceLegendJson`, so a
+plain-data `SurfaceLegendReply` and written by `katana_cad::terrain::surface_display_verbs::surface_legend_json`, so a
 test hands it the name the store would refuse and reads back U+FFFD and no
-exception (`SurfaceDisplayVerbs.LegendJsonWritesABadByteOfANameOrLabelAsU_FFFDAndDoesNotThrow`).
-A mutation check of 2026-10-15 had put the strict `dump` back and every test
-of the verb still passed, because no API puts such a name into a Document; the
-strict `dump` throws on these bytes (nlohmann's type_error 316), which the
-test's `EXPECT_NO_THROW` would report.
+exception (`surface_display_verbs::legend_json_writes_a_bad_byte_of_a_name_or_label_as_u_fffd_and_does_not_throw`).
+A mutation check of 2026-10-15, in the C++ build, had put the strict `dump`
+back and every test of the verb still passed, because no API puts such a name
+into a Document; the strict `dump` threw on these bytes (nlohmann's
+type_error 316), which the test would then report.
 
 ## Speed
 
@@ -577,7 +577,7 @@ another binary, so read the times as sizes. Three repetitions of at least
 kilometre at map-grid coordinates; the view 1600 x 1000 at extents (the
 kilometre over 950 px), and zoomed in five and twenty-five times.
 
-`BM_SurfacePlan` (`benchmarks/bench_surface_plan.cpp`), `cad::surfacePlan`
+`BM_SurfacePlan` (the C++ build's `bench_surface_plan` benchmark, removed with the C++ tree), `katana_cad::terrain::surface_plan::surface_plan`
 alone with the cache warm, milliseconds:
 
 | Style | extents | x5 | x25 |
@@ -594,8 +594,8 @@ The first paint of a surface (`BM_SurfacePlanFirst`) also builds the cull
 grid and traces the contours: 34 ms for the boundary alone, 42 ms with
 contours, 62 ms for everything - once per surface per view.
 
-`BM_PlanPaintSurface` (`benchmarks/qt/bench_plan_surface.cpp`), a whole frame
-through `paintPlan` onto a 1600 x 1000 image, the view panned a pixel each
+`BM_PlanPaintSurface` (the C++ build's `bench_plan_surface` benchmark), a whole frame
+through `paint_plan` onto a 1600 x 1000 image, the view panned a pixel each
 frame, milliseconds:
 
 | Style | extents | x5 | x25 |
@@ -612,7 +612,7 @@ costs nothing (the kept drawing). The face image is most of a banded frame
 (its pixels); stroking is most of a contour frame (73 545 vertices at
 extents) and of the triangles zoomed in (49 003 edges).
 
-The 3D terrain built in a style (`BM_SurfaceSceneStyled`, `SceneBuilder::buildTerrain`
+The 3D terrain built in a style (`BM_SurfaceSceneStyled`, `SceneBuilder::build_terrain`
 of the same surface): smooth elevation on the kernels 4.2 ms; elevation bands,
 cut at their contours into 455 732 triangles, 27.0 ms; slope bands, a colour a
 face, 50.0 ms (70.2 ms while the legend worked the surface's steepest face out
@@ -620,66 +620,65 @@ a second time; each surface's colouring is now worked out once a build) -
 paid when the terrain is rebuilt (a style or surface edit, a change of
 exaggeration), not each frame.
 
-To measure again: `katana_benchmarks --benchmark_filter=Surface` and
-`katana_qt_benchmarks --benchmark_filter=PlanPaintSurface`, alternated against
-another build with `tools/compare_benchmarks.py --alternate`.
+To measure again: the benchmarks went with the C++ tree and have no Rust
+twins yet (`docs/performance.md`); these figures are the C++ build's.
 
 ## Tests
 
-* `tests/cad/terrain/test_surface_colouring.cpp` - the ramps' published stops
+* `rust/crates/katana_cad/tests/scene/surface_colouring.rs` - the ramps' published stops
   and the scene's old constants, the table's names and fallback, aspect
   sectors either side of each edge, bands and stops by value, smooth stops,
   the range, slope in percent, band pieces covering a triangle exactly, the
   legends and their decimals.
-* `tests/cad/terrain/test_surface_plan.cpp` - the cull grid against testing
+* `rust/crates/katana_cad/tests/scene/surface_plan.rs` - the cull grid against testing
   every triangle, the four-pixel edge rule and its tint, the colour of a known
   face in a known band either side of a band edge, coverage on the shared
   diagonal, opacity, slope and aspect faces, the image at any thread count, a
   contour at its level and its label, minors hidden, contours traced once and
   the refusal of a too-fine interval, the rim and a breakline joined, points
   as marks and as pixels, nothing out of view, the image grid and its cap.
-* `tests/cad/terrain/test_scene_surface_style.cpp` and
-  `SceneKernels.ASurfaceInADisplayStyleOnEveryRampBuildsTheSameAtEveryLevel` -
+* `rust/crates/katana_cad/tests/scene/scene_surface_style.rs` and
+  `scene_kernels::a_surface_in_a_display_style_on_every_ramp_builds_the_same_at_every_level` -
   the 3D colouring by style (above).
-* `tests/cad/terrain/test_surface_display_verbs.cpp` - both verbs' replies,
+* `rust/crates/katana_cad/tests/terrain_utility_verbs/surface_display_verbs.rs` - both verbs' replies,
   worked out on a 10 x 10 square, and every refusal.
-* `tests/qt_widgets/terrain/test_surface_plan_painter.cpp` - a surface inking
+* `rust/crates/katana_window/tests/plan_painting/surface_plan_painter.rs` - a surface inking
   exactly its own 80 x 80 pixels where nothing was, a known face its band's
   colour, each built style inking its own way against the same paint without
   the surface, hidden drawing nothing, the legend on screen and never plotted,
   contours traced once through the painter's cache.
-* `tests/qt_widgets/terrain/test_surface_style_manager.cpp` - each button's
+* `rust/crates/katana_window/tests/surfaces/surface_style_manager.rs` - each button's
   line word for word, Apply naming only what changed, a bad field stopping
   Apply, the preview drawing the form's style, and the lines changing the
   drawing through the interpreter, undone as one step, the dialog following.
 * Added with the review of 2026-10-15 (what each proves is named where it is
-  described above): the band maximum in `test_surface_style.cpp` and
+  described above): the band maximum in `surface_style.rs` and
   `cli.surfacestyle_with_more_bands_than_the_maximum_is_refused_naming_bands`;
   the collapsed range, open end bands and one stop in
-  `test_surface_colouring.cpp`; vertex ownership and the uncapped cache in
-  `test_surface_plan.cpp`; VIEW at its own frame, a point AREA and a wireframe's
-  legend in `test_surface_display_verbs.cpp`
+  `surface_colouring.rs`; vertex ownership and the uncapped cache in
+  `surface_plan.rs`; VIEW at its own frame, a point AREA and a wireframe's
+  legend in `surface_display_verbs.rs`
   (`cli.surface_plan_of_an_area_that_is_a_point_is_refused_not_answered_with_zeros`);
   the 3D wireframe, collapsed and level-slope colours in
-  `test_scene_surface_style.cpp`; the gradient legend by value, the stacking
-  and the surfaced problem in `test_surface_plan_painter.cpp`; the form's
-  boxes and a refused name in `test_surface_style_manager.cpp`; the empty hint
-  and the reported problem in `test_plan_view.cpp`.
+  `scene_surface_style.rs`; the gradient legend by value, the stacking
+  and the surfaced problem in `surface_plan_painter.rs`; the form's
+  boxes and a refused name in `surface_style_manager.rs`; the empty hint
+  and the reported problem in `plan_view.rs`.
 * Added with the follow-up of the same day (what each proves is named where it
-  is described above): `SurfaceProblems.*` in `test_surface_plan.cpp` (the
+  is described above): `surface_problems` in `surface_plan.rs` (the
   refusal at either side of the limit, an interval that is no number, a level
   surface, the plan's and the check's one answer, the line and the record, the
-  styles of a drawing's surfaces without painting); `SheetPainter.*` problems,
+  styles of a drawing's surfaces without painting); `sheet_painter` problems,
   `PlanPainter.ASinglePagePlotHandsBack...` and `PlotDrawingDialog.TheWarningRecords...`
-  in the widget tests; `plan.surface-style` in `test_preflight.cpp` and
-  `test_sheet_agent_verbs.cpp`; `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`,
+  in the widget tests; `plan.surface-style` in `preflight.rs` and
+  `sheet_agent_verbs.rs`; `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`,
   `qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`; the 3D
-  legends: `SceneSurfaceStyle.EveryVisibleSurfaceInAColouringStyleHasALegendInDrawingOrderAndNoOtherHasOne`
-  (two styled, one hidden, one unstyled, one wireframe), `SurfaceLegend3D.*`
+  legends: `scene_surface_style::every_visible_surface_in_a_colouring_style_has_a_legend_in_drawing_order_and_no_other_has_one`
+  (two styled, one hidden, one unstyled, one wireframe), `surface_legend3_d`
   (stacked in order and not overlapping; none styled keeps the bar; more than fit
   are left out whole) and the headless report; the one ramp table:
-  `ColourRamps.*` in `tests/terrain/test_colour_ramps.cpp`,
-  `ColourRamps.TheShadingsRampsAreTheSurfaceStylesRampsStopForStop` and the
+  `colour_ramps` in `rust/crates/katana_terrain/tests/colour_ramps.rs`,
+  `colour_ramps::the_shadings_ramps_are_the_surface_styles_ramps_stop_for_stop` and the
   `ShadeVerb` tests that read the table's colours.
 * `qt_a_surface_is_drawn_in_plan_in_its_style_headless` - the sample terrain
   in the real window in Standard, Triangles and Elevation Bands, each paint's
@@ -690,8 +689,9 @@ another build with `tools/compare_benchmarks.py --alternate`.
 
 ## Decisions
 
-* **Faces as an image in `katana_cad`, not QPainter polygons** - above. The
-  rasteriser is a few dozen lines with an exact tie rule, testable without Qt.
+* **Faces as an image in `katana_cad`, not painter polygons** - above. The
+  rasteriser is a few dozen lines with an exact tie rule, testable without a
+  window.
 * **One colouring rule for plan, 3D, legend and verb** (`SurfaceColouring`) -
   four places that each worked out a band would be four places to disagree.
 * **The 3D scene keeps its old path for a surface with no style.** Every
@@ -709,13 +709,13 @@ another build with `tools/compare_benchmarks.py --alternate`.
   the view itself can say where the surface is.
 * **No new MCP tool** - the verbs' JSON reaches an agent already.
 * **A style has at most 100 bands and 100 stops**, checked where every style
-  passes (`checkSurfaceStyle`) rather than limited in the 3D build: one number
+  passes (`check_surface_style`) rather than limited in the 3D build: one number
   for the line, the form and a project file, and a style that draws the same
   on a big surface as on a small one. Rejected: a piece budget with a
   fallback to vertex colours. A project saved with more (the verb took a
   million) opens with the built-in styles and the refusal as the styles'
   status, its saved set kept to be written back as it was
-  (`surface_document.cpp`: a set that is refused is not repaired by guessing).
+  (`surface_document.rs`: a set that is refused is not repaired by guessing).
 * **The plan cache has no cap** - the caller's `retain` bounds it. Rejected: a
   count cap with least-recently-used eviction (a paint's cyclic access misses
   every time one over the cap), and a paint generation protecting this
@@ -731,9 +731,9 @@ another build with `tools/compare_benchmarks.py --alternate`.
 
 * A legend on a plot or sheet (a sheet's title-block legend), and a View
   menu switch to hide the screen legend (today: a style without faces has
-  none). The pieces exist - `cad::SurfaceLegendCard` is plain data, and
-  `paintSurfaceLegendStack` takes any painter - but where a sheet keeps one is
-  undecided: a line of the smart legend (`computeLegend`), an option of the
+  none). The pieces exist - `katana_cad::terrain::surface_colouring::SurfaceLegendCard` is plain data, and
+  `paint_surface_legend_stack` takes any painter - but where a sheet keeps one is
+  undecided: a line of the smart legend (`compute_legend`), an option of the
   plan viewport (a change to the sheet set's schema, on every surface at once),
   or a block of the title block; a plot made by `PLOT` has no sheet to hold it.
 * The plan view's faces are not shaded (no hillshade in plan); a hillshade
@@ -746,8 +746,8 @@ another build with `tools/compare_benchmarks.py --alternate`.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
   batters and flat pads they go from the flats when the batters crowd them.
 * `RASTER ASPECT` colours the eight compass directions with a constant of its
-  own (`src/katana_app/geo/slope_verbs.cpp`), which is neither the aspect wheel
-  a surface style uses (`aspectSectorColour`) nor a row of the ramp table: two
+  own (`rust/crates/katana_app/src/geo/slope_verbs.rs`), which is neither the aspect wheel
+  a surface style uses (`aspect_sector_colour`) nor a row of the ramp table: two
   palettes for aspect.
 * `PLOTSHEETS` reports a surface style it could not draw as one of the
   sheets' problem lines (`vp1: ground (style Fine): ...`), as every problem

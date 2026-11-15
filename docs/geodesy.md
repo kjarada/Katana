@@ -1,6 +1,6 @@
 # Geodesy: coordinate systems, transformations, units and site calibration
 
-`katana_geodesy` (`include/katana/geodesy/`, `src/katana_geodesy/`): the
+`katana_geodesy` (`rust/crates/katana_geodesy/src/`): the
 coordinate reference systems a project's data is in, the one route by which a
 coordinate moves between two of them, the grid and ground factors a surveyor
 reduces distances with, geodesics on the ellipsoid, the unit catalogue, and
@@ -9,31 +9,32 @@ the four-parameter site calibration that ties a local grid to a projected one.
 ## Where it sits
 
 Beside geometry: it sees `core` and `math` and nothing else, and `cad` sees it
-(`docs/architecture.md`, "Layering"). PROJ is a PRIVATE dependency, confined to
-`src/katana_geodesy/` behind Katana's own types (Rule 4): no PROJ type or
-header appears under `include/katana/geodesy`, and the `layering` test checks
-it. `entity` cannot see geodesy, which is why the unit ratios every layer
-needs live one layer down in `math/unit_ratio.hpp` and `geodesy/units.hpp` is
+(`docs/architecture.md`, "Layering"). PROJ is a private dependency, confined to
+the crate's FFI modules (`rust/crates/katana_geodesy/src/ffi.rs`,
+`rust/crates/katana_geodesy/src/proj_internal.rs`) behind Katana's own types
+(Rule 4): no PROJ type appears in the crate's public interface, and no other
+crate links PROJ for it. `entity` cannot see geodesy, which is why the unit ratios every layer
+needs live one layer down in `rust/crates/katana_math/src/unit_ratio.rs` and `rust/crates/katana_geodesy/src/units.rs` is
 the catalogue built on them - one definition of a foot, not two.
 
-Users today: the Survey menu's coordinate converter (`cad::convertCoordinates`,
-`include/katana/cad/survey_tools.hpp`), which reads source and target systems
+Users today: the Survey menu's coordinate converter (`katana_cad::survey_tools::convert_coordinates`,
+`rust/crates/katana_cad/src/survey_tools.rs`), which reads source and target systems
 as EPSG codes or anything PROJ accepts and reports the operation PROJ applied,
 its declared accuracy, and the grid factors at each point on each projected
-side; and the survey points' coordinate system (`declaredSystemFromEpsg`, and
-`transformSurveyProject`, which moves a surveyed job between two EPSG systems;
-`src/katana_cad/customisation/survey_points.cpp`).
+side; and the survey points' coordinate system (`declared_system_from_epsg`, and
+`transform_survey_project`, which moves a surveyed job between two EPSG systems;
+`rust/crates/katana_cad/src/survey_points.rs`).
 
 | Header | What it holds |
 |---|---|
-| `coordinate.hpp` | the coordinate value types and the axis-order convention |
-| `coordinate_reference_system.hpp` | `CoordinateReferenceSystem`, an immutable value; `projRuntimeInfo` |
-| `coordinate_transformer.hpp` | `CoordinateTransformer`, the single entry point for transformations |
-| `grid_factors.hpp` | `GridFactorCalculator`: point scale factor and grid convergence |
-| `geodesic.hpp` | `geodesicInverse`, `geodesicDirect`, `gaussianMeanRadius`, `elevationFactor` |
-| `ellipsoid.hpp` | `Ellipsoid` with the WGS 84 and GRS 80 defining constants |
-| `units.hpp` | `LengthUnit`, `AngleUnit`, exact conversions and name parsing |
-| `similarity_transform2d.hpp` | `SimilarityTransform2D` and `fitSimilarity2D`, the site calibration |
+| `coordinate.rs` | the coordinate value types and the axis-order convention |
+| `coordinate_reference_system.rs` | `CoordinateReferenceSystem`, an immutable value; `proj_runtime_info` |
+| `coordinate_transformer.rs` | `CoordinateTransformer`, the single entry point for transformations |
+| `grid_factors.rs` | `GridFactorCalculator`: point scale factor and grid convergence |
+| `geodesic.rs` | `geodesic_inverse`, `geodesic_direct`, `gaussian_mean_radius`, `elevation_factor` |
+| `ellipsoid.rs` | `Ellipsoid` with the WGS 84 and GRS 80 defining constants |
+| `units.rs` | `LengthUnit`, `AngleUnit`, exact conversions and name parsing |
+| `similarity_transform2d.rs` | `SimilarityTransform2D` and `fitSimilarity2D`, the site calibration |
 
 ## Conventions
 
@@ -50,11 +51,11 @@ easting, y is latitude or northing - whatever order the authority declares
 direction, so a westing/southing system keeps x as the westing. A named type
 handed to a transformer whose CRS is of the other kind is `InvalidArgument`.
 
-Other modules have their own orders: `survey::Coordinate2` is (northing,
+Other modules have their own orders: `katana_survey::coordinate::Coordinate2` is (northing,
 easting), while the drawing's `Point2` and `SimilarityTransform2D`'s `Vec2`
 are (x = easting, y = northing). The drawing and the survey model meet in two
-places, the survey import (`src/katana_cad/survey_import.cpp`) and the parcel
-report (`src/katana_cad/parcel.cpp`), and the swap is made there and nowhere
+places, the survey import (`rust/crates/katana_cad/src/survey_import.rs`) and the parcel
+report (`rust/crates/katana_cad/src/parcel.rs`), and the swap is made there and nowhere
 else.
 
 **Angles.** Geodesic azimuths and `GridFactors` are DEGREES CLOCKWISE FROM
@@ -71,7 +72,7 @@ systems they pass through unchanged. The coordinate converter does not convert
 heights.
 
 **Epochs.** `Coordinate::t` is the coordinate epoch in decimal years;
-`kUnspecifiedEpoch` (infinity, which PROJ reads as "none") means no epoch. A
+`UNSPECIFIED_EPOCH` (infinity, which PROJ reads as "none") means no epoch. A
 literal 0 would be the year 0 and would drift a plate-motion transformation by
 two millennia.
 
@@ -80,13 +81,13 @@ two millennia.
 exactly representable integers: at most two correctly rounded operations.
 Angle units other than the radian are exact fractions of a turn (360 degrees =
 400 gon = 1 296 000 arc-seconds), so converting between them never touches pi,
-and the degree-radian factors are bit-identical to `math::kDegToRad` and
-`kRadToDeg`. There is NO default unit: an unknown name is `ParseFailure`,
+and the degree-radian factors are bit-identical to `katana_math::numerics::DEG_TO_RAD` and
+`RAD_TO_DEG`. There is NO default unit: an unknown name is `ParseFailure`,
 never a silent factor of 1. "foot" and "ft" always mean the international
 foot, as EPSG (9002) and PROJ do; the US survey foot must be named ("ftUS",
 "US survey foot"). They differ by 2 ppm - 4 ft at a state-plane coordinate of
-2 000 000 ft - and `lengthUnitFromMetresPerUnit` compares with
-`math::tolerance::kRelative`, 600 times finer than that, so the two are never
+2 000 000 ft - and `length_unit_from_metres_per_unit` compares with
+`tolerance::RELATIVE`, 600 times finer than that, so the two are never
 confused.
 
 ## Coordinate reference systems
@@ -96,18 +97,18 @@ to PROJ plus what PROJ reported about it when it was made - name, kind,
 authority and code, axes in the authority's order, horizontal unit, ellipsoid,
 area of use, and the canonical WKT2:2019 text. It holds no PROJ handle, so it
 is cheap to copy and safe to share between threads. The factories are
-`fromEpsg`, `fromWkt` (WKT1 in either flavour, or WKT2), `fromProjString`
+`from_epsg`, `from_wkt` (WKT1 in either flavour, or WKT2), `from_proj_string`
 (which appends `+type=crs` so the text is read as a system, not a bare
-operation), `fromUserInput` (anything PROJ accepts, `"EPSG:4326+3855"`
-included) and `localEngineering(name, unit)`, a site grid with no datum that
+operation), `from_user_input` (anything PROJ accepts, `"EPSG:4326+3855"`
+included) and `local_engineering(name, unit)`, a site grid with no datum that
 needs no database and that PROJ cannot relate to anything - a site calibration
 does that. Each factory validates with PROJ and fails with `InvalidCRS`,
 carrying PROJ's message in the context; there is no "unknown CRS" state.
 
 Two notions of sameness: `operator==` compares the definition text (exact and
 cheap, so `"EPSG:32630"` and the equivalent PROJ string differ), and
-`isEquivalentTo` asks PROJ whether datum, projection and axes agree, names
-aside, optionally ignoring axis order. `areaOfUse()` matters because PROJ
+`is_equivalent_to` asks PROJ whether datum, projection and axes agree, names
+aside, optionally ignoring axis order. `area_of_use()` matters because PROJ
 evaluates a projection wherever its formulas are defined, far outside the zone
 it was designed for; `GeographicExtent::contains` is the test a caller that
 must reject such input uses.
@@ -119,13 +120,13 @@ candidate operation between the two systems, ranked by area of use, accuracy
 and grid availability, and PINS the first that can run on this installation:
 every point is transformed by the same operation, which `operation()`
 describes (name, pipeline, declared accuracy, grids). `candidates()` lists all
-of them, and `missingGrids()` names the grid files that would unlock a more
+of them, and `missing_grids()` names the grid files that would unlock a more
 accurate one.
 
 - **Ballpark operations are refused.** Where PROJ knows no datum
   transformation it can fall back to one that applies NO datum shift, wrong by
   up to hundreds of metres. Surveying cannot take that silently, so `create`
-  fails with `Unsupported` unless `TransformerOptions::allowBallpark` is set.
+  fails with `Unsupported` unless `TransformerOptions::allow_ballpark` is set.
 - **An area of interest** lets PROJ rank first the operation valid where the
   data is, rather than the one with the widest coverage.
 - **A required accuracy** rejects candidates declared worse than it.
@@ -155,7 +156,7 @@ angular distortion and the grid convergence, from PROJ's `proj_factors`, which
 differentiates the projection numerically. For the conformal projections every
 survey grid uses (Transverse Mercator, Lambert Conformal Conic, stereographic,
 oblique Mercator) the point scale factor is the same in every direction;
-`pointScaleFactor()` returns the meridional scale h rather than the parallel
+`point_scale_factor()` returns the meridional scale h rather than the parallel
 scale k, because k divides by cos(latitude) and degrades towards the poles.
 Convergence is documented as the azimuth of grid north, positive east of the
 central meridian in the northern hemisphere, about (lon - lon0) sin(lat).
@@ -164,18 +165,18 @@ The Gaussian mean radius is `a sqrt(1 - e^2) / w^2` with
 `w^2 = 1 - e^2 sin^2(phi)`, which is `sqrt(M N)` with the meridional radius
 `M = a (1 - e^2) / w^3` and the prime-vertical radius `N = a / w`.
 
-**What is not established.** The header's figure for `proj_factors`, "relative
+**What is not established.** The documented figure for `proj_factors`, "relative
 accuracy around 1e-9", has no measurement behind it, and the convergence SIGN
 has never been checked: if PROJ's convention differed from the documented
 one, every grid bearing would be rotated by twice the convergence - about
 2 x 1.4 degrees at 3 degrees from a UTM central meridian at latitude 30. The
-oracles to check both exist in `tests/geodesy/geodesy_test_support.hpp`
-(`krugerFactors`, from the Krueger series differentiated along the meridian)
+oracles to check both exist in `rust/crates/katana_geodesy/tests/support/mod.rs`
+(`kruger_factors`, from the Krueger series differentiated along the meridian)
 and nothing calls them (audit SUR-01, OPEN).
 
 ## Geodesics
 
-`geodesicInverse` and `geodesicDirect` use the geodesic routines that ship
+`geodesic_inverse` and `geodesic_direct` use the geodesic routines that ship
 with PROJ (C. F. F. Karney, "Algorithms for geodesics", J. Geodesy 87, 2013):
 accurate to about 15 nanometres and convergent for every pair of points,
 including the nearly antipodal ones where Vincenty's iteration fails. Heights
@@ -183,7 +184,7 @@ are ignored - a geodesic lies ON the ellipsoid - and azimuths are wrapped from
 the library's (-180, 180] into [0, 360), a tiny negative value that would round
 up to 360 becoming 0. For coincident points the distance is 0 and the azimuths
 carry no information. The functions are stateless and thread-safe. They are
-untested (SUR-01): `quarterMeridian` in the test support is the oracle for the
+untested (SUR-01): `quarter_meridian` in the test support is the oracle for the
 equator-to-pole distance, unused.
 
 ## Site calibration: the 2D similarity
@@ -224,7 +225,7 @@ and rotates the small site-sized vector and adds the target origin, so the
 result is accurate to about one unit in the last place of the target
 coordinate. Multiplying the full coordinate by M and adding (tx, ty) would
 lose that; `translation()` is offered for display and export and absorbs the
-rounding of `M * sourceOrigin`. `fromCoefficients` rebuilds a stored
+rounding of `M * sourceOrigin`. `from_coefficients` rebuilds a stored
 transformation exactly from a, b and the two origins, since storing scale,
 rotation and translation instead would not round-trip bit for bit. The
 centroids themselves are accumulated relative to the first point, so the sums
@@ -238,7 +239,7 @@ coordinate `sqrt(sum |v|^2 / (2n - 4))`: 2n observations, 4 parameters. Two
 pairs fit exactly and leave nothing to judge the control by, so that figure is
 absent rather than zero. Refused, as `InvalidArgument`: fewer than two pairs;
 a non-finite coordinate; source or target points that all coincide within
-`math::tolerance::kCoordinate`, which leaves scale and rotation undetermined;
+`tolerance::COORDINATE`, which leaves scale and rotation undetermined;
 and control whose best scale collapses to zero, typically a mirrored set.
 
 The fit and the transformation are untested (SUR-01): the suggested tests are
@@ -258,25 +259,25 @@ pairs giving no standard deviation, and a mirrored set refused.
   objects never share state. `OneTransformerPerThread` runs four clones on the
   same points at once and requires the reference result bit for bit.
 - The geodesic functions are stateless and thread-safe.
-- Every CRS factory, `toWkt` for a flavour other than the cached WKT2, and
-  `isEquivalentTo` create a fresh PROJ context and open `proj.db`: correct
+- Every CRS factory, `to_wkt` for a flavour other than the cached WKT2, and
+  `is_equivalent_to` create a fresh PROJ context and open `proj.db`: correct
   from any thread, and too slow for an inner loop. Make the systems once.
 
 ## The PROJ installation
 
 PROJ reads its database, `proj.db`, and any grid files from its data
 directory. The build and the bundle put it at `<its DLL>/../share/proj`, where
-PROJ finds it by itself (`docs/building.md`). `projRuntimeInfo()` reports the
+PROJ finds it by itself (`docs/building.md`). `proj_runtime_info()` reports the
 PROJ version, the database it resolved and its search paths, and fails with
 `NotFound` when the database cannot be opened - as does every CRS factory
-except `localEngineering`, and every transformer.
+except `local_engineering`, and every transformer.
 
 `PROJ_DATA` or `PROJ_LIB` in the environment replaces that search, and another
 GIS package (PostGIS, QGIS, OSGeo4W) leaves one machine-wide naming data of
 its own, often a database of an older PROJ's layout that this PROJ rejects.
 `ProjContext::create` keeps an explicit choice that opens, and when it does
 not retries on a fresh context with the data Katana carries beside its
-`libproj` (`core::bundledProjDataDirectory`); `projRuntimeInfo().databasePath`
+`libproj` (`katana_core::library_data::bundled_proj_data_directory`); `projRuntimeInfo().databasePath`
 says which was used. The fallback is for the package: a distribution's PROJ,
 with no data beside its library, has nothing to fall back on, and then the
 error says what is wrong in the words that fit - "`PROJ_LIB` names X, which
@@ -289,10 +290,10 @@ instead of calling a valid code "not a coordinate system".
 
 ## Tests
 
-`tests/geodesy/` (`katana_geodesy_tests`): the CRS values, the transformer
-and the units. Every assertion on a coordinate is tagged with where its
+`rust/crates/katana_geodesy/tests/` (`cargo test -p katana_geodesy`): the CRS
+values, the transformer and the units. Every assertion on a coordinate is tagged with where its
 expected value comes from: `[identity]` (an exact property of the CRS
-definition), `[oracle]` (a formula coded in `geodesy_test_support.hpp`, which
+definition), `[oracle]` (a formula coded in the tests' `support/mod.rs`, which
 never calls PROJ for a number it then asserts), `[published]` (an authority's
 worked example, quoted to its printed precision) or `[self]` (PROJ's
 self-consistency only, which says nothing about absolute truth). The
@@ -301,7 +302,7 @@ IOGP Guidance Note 7-2's Lambert Conic Conformal (one and two parallels, in US
 survey feet), Oblique Stereographic and geographic-to-geocentric examples;
 the oracle is Transverse Mercator by the Krueger series to sixth order
 (Karney 2011), checked across a UTM zone. Tolerances are built from
-`math::tolerance::kCoordinate` expressed as an angle with the longest degree
+`tolerance::COORDINATE` expressed as an angle with the longest degree
 on the ellipsoid, so a bound never understates a ground distance.
 
 Not tested: grid factors, geodesics and the site calibration (SUR-01, above).
@@ -311,7 +312,7 @@ Not tested: grid factors, geodesics and the site calibration (SUR-01, above).
 | Condition | Behaviour |
 |---|---|
 | Text that is not a CRS | `InvalidCRS` with PROJ's message |
-| `proj.db` not found, or not usable (a `PROJ_DATA` / `PROJ_LIB` naming a folder without one) and nothing beside `libproj` to fall back on | `NotFound` from `projRuntimeInfo`, every factory but `localEngineering`, and `create`; names the variable when one is set |
+| `proj.db` not found, or not usable (a `PROJ_DATA` / `PROJ_LIB` naming a folder without one) and nothing beside `libproj` to fall back on | `NotFound` from `proj_runtime_info`, every factory but `local_engineering`, and `create`; names the variable when one is set |
 | No operation, only a ballpark one, or only ones needing missing grids | `Unsupported`, the grids named in the context |
 | A local engineering system in a transformation | `Unsupported`: relate it with a site calibration |
 | A time-dependent operation and a coordinate without an epoch | refused |

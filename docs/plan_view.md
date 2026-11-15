@@ -4,14 +4,14 @@ The plan drawing - imagery, point clouds, mesh footprints, the drawing's
 surfaces in their display styles, every entity through its layer and style,
 library linestyles and symbols, hatches, dimensions, text and the alignment
 overlay - is painted by ONE function,
-`katana::qt::paintPlan` (`src/katana_qt/plan_painter.hpp`). The plan view
-(`ViewportWidget`) paints through it, its tool previews go through
-`paintPlanGeometry`, and a plot goes through `plotPlanToPdf`, which needs no
+`katana_window::plan_painter::paint_plan` (`rust/crates/katana_window/src/plan_painter.rs`). The plan view
+(`PlanView`) paints through it, its tool previews go through
+`paint_plan_geometry`, and a plot goes through `plot_plan_to_pdf`, which needs no
 widget at all. A sheet with many viewports - plan viewports turned to an
-alignment, each with its own scale and hidden layers - is `paintPlan` called
+alignment, each with its own scale and hidden layers - is `paint_plan` called
 once per viewport into one page.
 
-Until 2026-09-24 this code was `ViewportWidget`'s own members. A plot
+Until 2026-09-24 this code was `PlanView`'s own members. A plot
 borrowed the live widget: it swapped the view's transform for the sheet's,
 set a paper flag on the widget, painted, and put everything back. That tied
 every plot to one widget on the GUI thread, gave a sheet one unrotated
@@ -19,17 +19,24 @@ transform, and left the caches as widget members nobody else could own.
 
 ## The painter
 
-```cpp
-PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source,
-                         const PlanFrame& frame, const PlanPaintOptions& options,
-                         PlanPaintCache& cache);
+```rust
+pub fn paint_plan(
+    canvas: &mut dyn Canvas,
+    source: &PlanSource<'_>,
+    frame: &PlanFrame<'_>,
+    options: &PlanPaintOptions<'_>,
+    cache: &mut PlanPaintCache,
+) -> PlanPaintStats
 ```
+
+The `Canvas` is the window's painter over a raster image or a PDF page
+(`rust/crates/katana_window/src/canvas/`).
 
 | Argument | What it is |
 |---|---|
-| `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the drawing's surfaces and their display styles, the window's reference data and meshes. `planSourceOf(document)` fills the document's part. Every pointer but the model may be null; each null leaves out only what it provides. |
+| `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the drawing's surfaces and their display styles, the window's reference data and meshes. `plan_source_of(document)` fills the document's part. Every part but the model is optional; each one absent leaves out only what it provides. |
 | `PlanFrame` | How it is looked at: the `ViewTransform` sized to the viewport, a `rotation` (counter-clockwise, radians, about the viewport's centre), the viewport's `origin` on the device, whether to `clip` to it, and the view's hidden layers (`LayerOverrides`) and hidden reference layers. |
-| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; the screen's optional paper-style denominator (`paperStyleScale`); what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`rasterDpiCap`, `rasterPixelCap`); and the screen-only speed switches (`thinLines`, `symbolSprites`, `clipLines`). |
+| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; the screen's optional paper-style denominator (`paper_style_scale`); what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`raster_dpi_cap`, `raster_pixel_cap`); and the screen-only speed switches (`thin_lines`, `symbol_sprites`, `clip_lines`). |
 | `PlanPaintCache` | What is kept between paints, owned by the CALLER (below). |
 
 It returns `PlanPaintStats`: entities drawn, symbol stamps and how many came
@@ -39,20 +46,20 @@ them and for the clouds, and how many raster crops were resampled rather
 than taken from the cache - for a view's statistics and for the tests that
 cannot look at pixels.
 
-Other entry points in the same header:
+Other entry points in the same module:
 
-* `visibleBox(frame)` - the model box a frame shows; for a turned frame, the
+* `visible_box(frame)` - the model box a frame shows; for a turned frame, the
   box around the turned rectangle.
-* `planDrawnBounds(source, layers, hiddenReferences)` - everything a view
+* `plan_drawn_bounds(source, layers, hidden_references)` - everything a view
   with those hidden layers draws: its entities, its visible reference layers,
   the shown meshes and the alignments. Zoom Extents frames it, and a plot's
   Fit fits it.
-* `sheetFrame(settings)` - the frame a plot draws through: the printable area
+* `sheet_frame(settings)` - the frame a plot draws through: the printable area
   (paper less margins) at the sheet's scale, clipped.
-* `pdfResolutionFor(dpi)` - the whole-number resolution a `QPdfWriter` is
+* `pdf_resolution_for(dpi)` - the whole-number resolution a PDF page is
   given and the painter scale that makes the sheet's exact dpi land on it.
-* `plotPlanToPdf(path, settings, source, layers, hiddenReferences, cache,
-  title)` - one page, titled, `Katana` as its creator.
+* `plot_plan_to_pdf(path, settings, source, layers, hidden_references, cache,
+  title, problems, writer)` - one page, titled, `Katana` as its creator.
 
 ### Paper style scale: see the marks without moving the camera
 
@@ -78,10 +85,10 @@ view nor the drawing itself.
 
 Only paper-sized marks change: library definitions in paper units, and
 (since 2026-11-03) a built-in symbol shape whose style gives it no size,
-which a plot draws `kPointMarkerPaperMillimetres` (1 mm) either side, so a
+which a plot draws `POINT_MARKER_PAPER_MILLIMETRES` (1 mm) either side, so a
 fixed scale draws it N/1000 m either side as the plot at 1:N does. Until then
 it kept its 4 screen pixels, the one paper mark the scale left alone
-(`PlanPainter::symbolFallbackHalfWidth`). Ground-sized definitions and
+(`PlanPainter::symbol_fallback_half_width`). Ground-sized definitions and
 symbols with an explicit model-unit size keep their model size, and the
 plain point cross of a point with no symbol, the screen's own marker, keeps
 its pixels. Entity coordinates, selection, camera centre and zoom, linked
@@ -92,7 +99,7 @@ change.
 on 2026-11-03 that the scale "only works for linestyles". That is the data,
 not the scale. A symbol follows the scale only when its definition is in
 paper units AND its style gives it no size; a style's size is a width in
-metres on the ground (`Style::symbolSize`, `docs/cad.md`, "Point symbols"),
+metres on the ground (`Style::symbol_size`, `docs/cad.md`, "Point symbols"),
 and it overrides the definition's own units. Counted on 2026-11-03:
 
 | Where the symbols come from | Definitions | Sizes the styles give | Follows the scale |
@@ -140,7 +147,7 @@ then `views=N`; an empty list is `views=0`. A fixed scale also appears as
 `paper_scale=N` in the ordinary `VIEWS` record. Its absence there means Auto.
 Zero, negative, non-finite and underflowing denominators are refused, as are
 values above 10,000,000,000: a millimetre there reaches the same 10,000,000 m
-envelope as a pixel at `ViewTransform::kMinimumScale`. Unknown ids,
+envelope as a pixel at `ViewTransform::MINIMUM_SCALE`. Unknown ids,
 non-plan views and extra arguments are refused without an edit.
 
 One changed scale is one normal document undo step, including the first
@@ -180,13 +187,13 @@ reaches it. It uses the standard title-bar icon-button dimensions,
 not a wider text button, so showing it never raises the dock's minimum width.
 The action is disabled for an active non-plan view.
 
-The kept plan image includes `ViewState::paperStyleScale` in its key;
+The kept plan image includes `ViewState::paper_style_scale` in its key;
 symbol sprites already key on the effective paper-to-model scale.
-`tests/qt_widgets/test_view_scale.cpp` checks independent marker and tick
+`rust/crates/katana_window/tests/workspace/view_scale.rs` checks independent marker and tick
 sizes, zoom versus Auto, unchanged ground marks and plots, both caches,
-and the dialog-to-command path. `tests/cad/test_view_set.cpp` and
-`tests/cad/test_view_verbs.cpp` cover validation, versioned persistence,
-project reopen, undo and saved headless ids. `tests/app/test_view_scale.cpp`
+and the dialog-to-command path. `rust/crates/katana_cad/tests/styles/view_set.rs` and
+`rust/crates/katana_cad/tests/top_verbs/view_verbs.rs` cover validation, versioned persistence,
+project reopen, undo and saved headless ids. `rust/crates/katana_app/tests/session/view_scale.rs`
 exercises the shared CLI session and the MCP command tool. The headless
 window tests drive the menu, read the exact command, save and reopen, then
 the `cli.a_saved_plan_views_paper_scale_is_editable_and_undoable` test reads
@@ -196,32 +203,32 @@ that project in another process.
 
 Paper-sized annotation - styled or multi-line text, labels, leaders and the
 dimensions of a paper-sized style (`docs/annotation.md`) - is drawn at its
-size on paper for ONE scale, `PlanPaintOptions::annotationScale`: the plan
-view passes the document's (`Document::annotationScale`, the Format
+size on paper for ONE scale, `PlanPaintOptions::annotation_scale`: the plan
+view passes the document's (`Document::annotation_scale`, the Format
 toolbar's box and `ANNOSCALE`), a plot of the drawing its own scale, and a
 sheet viewport its viewport's. The painter never reads it from a widget.
-Such text is laid out by `katana_cad` (`cad/annotation/text_layout.hpp`,
-`leader_draw.hpp`) into a `Drawing` of strokes, fills, masks and text runs,
-which `src/katana_qt/annotation/annotation_painter.*` paints; plain
+Such text is laid out by `katana_cad` (`rust/crates/katana_cad/src/annotation/text_layout.rs`,
+`leader_draw.rs`) into a `Drawing` of strokes, fills, masks and text runs,
+which `rust/crates/katana_window/src/annotation/annotation_painter.rs` paints; plain
 bottom-left text with no style or paper height is drawn exactly as before.
 
-Labels are drawn LAST, together (`drawLabels`): the placer
-(`cad/annotation/label_layout.hpp`) lays out every label whose anchor is in
+Labels are drawn LAST, together (`draw_labels`): the placer
+(`rust/crates/katana_cad/src/annotation/label_layout.rs`) lays out every label whose anchor is in
 view for the annotation scale, keeping each off the labels placed before it
 and off the lines and the notes', leaders' and dimensions' text drawn this
 paint (gathered as they are drawn, at most 200 000 segments), unless
-`avoidLabelCollisions` is off. `labels` off leaves them out.
-`PlanPaintStats` counts what the placer did: `labelsPlaced`,
-`labelsDisplaced` and `labelsSuppressed`. A mask is painted in the paper on
-paper and in `screenBackground` on screen, so "white prints black" still
+`avoid_label_collisions` is off. `labels` off leaves them out.
+`PlanPaintStats` counts what the placer did: `labels_placed`,
+`labels_displaced` and `labels_suppressed`. A mask is painted in the paper on
+paper and in `screen_background` on screen, so "white prints black" still
 holds for everything drawn over one. How long placement takes is measured in
 `docs/annotation.md`.
 
 ### Reentrant, and off the GUI thread
 
-`paintPlan` reads its arguments and writes nothing but the painter and the
+`paint_plan` reads its arguments and writes nothing but the painter and the
 cache. Two threads, each with its own `PlanPaintCache`, may paint the same
-drawing at once onto a `QImage` and a `QPdfWriter`; that is what plotting a
+drawing at once onto a raster canvas and a PDF canvas; that is what plotting a
 sheet set in the background needs. The model must stand still while it is
 painted - the GUI thread paints between commands, and a background plot must
 work on a snapshot or hold edits off.
@@ -233,16 +240,16 @@ work on a snapshot or hold edits off.
 | Kept | Keyed on | Why |
 |---|---|---|
 | Flattened library definitions | the library generation | thousands of coded points would otherwise flatten their symbol every frame |
-| Fonts | on screen one per whole pixel size; on paper one font, scaled | making a `QFont` by family name per label was a measurable part of a frame |
+| Fonts | on screen one per whole pixel size; on paper one font, scaled | making a font by family name per label was a measurable part of a frame (C++ build) |
 | Raster images, point-cloud colours | the reference layer's id (and colour mode) | converting tens of megabytes of RGBA per repaint |
 | Raster crops on paper | the layer's id, the part of the image cropped and the size it was resampled to; the eight most recently used, and no more than 32 megapixels between them | the sheet editor paints paper, and a pan of the editor or a second viewport over the same photo asks for the same crop again (below) |
 | Symbol sprites | symbol, pen, size, quarter-pixel phase; all dropped when the scale, paper scale, device ratio or library generation changes | see below |
-| A surface's cull grid, rim and breaklines joined, and contours (`cad::SurfacePlanCache`) | the surface itself (shared, immutable), and the contour settings; let go at the first paint after the drawing has lost the surface | a 400 000-triangle surface's grid is 34 ms and its contours more; a pan must not pay them (`docs/surface_display.md`) |
+| A surface's cull grid, rim and breaklines joined, and contours (`katana_cad::terrain::surface_plan::SurfacePlanCache`) | the surface itself (shared, immutable), and the contour settings; let go at the first paint after the drawing has lost the surface | a 400 000-triangle surface's grid is 34 ms and its contours more; a pan must not pay them (`docs/surface_display.md`) |
 
 Per paint, not kept (the tables they read can change between paints):
 
 * **Display resolution.** Everything an entity's look depends on besides its
-  geometry - the layer walk, `resolveDisplay`'s table lookups and string
+  geometry - the layer walk, `resolve_display`'s table lookups and string
   copies, the linetype and hatch resolution, the pens, the flattened
   linestyle - is worked out once per distinct layer, style and own colour,
   and reused by every entity that shares it. The generated survey drawing
@@ -250,7 +257,7 @@ Per paint, not kept (the tables they read can change between paints):
 * **Dash patterns.** A model linetype's pixel pattern, per linetype and pen
   width. It is the linetype's contents at this scale, and those can change
   between two paints with nothing a cache could key on: the Style Manager's
-  `updateLinetype`, its undo, a delete and re-create under the same name.
+  `update_linetype`, its undo, a delete and re-create under the same name.
   Kept across paints by name, they drew the old dashes until the view was
   zoomed, and a second plot at the same scale printed them. They are worked
   out at display resolution, once per distinct display a paint, so keeping
@@ -265,7 +272,7 @@ image the size of the widget in device pixels. A paint whose view, drawing,
 layers, library, selection, reference layers and meshes are all as they were
 only lays that image down and draws the view's own furniture over it - tool
 previews, the snap marker, the selection box, the prompt. The key
-(`ViewportWidget::DrawingKey`) holds the transform and device ratio, the
+(`viewport_widget::DrawingKey`) holds the transform and device ratio, the
 number of document notifications (every command, undo, selection, library
 and current-layer change), the model revision, the library generation, a
 fingerprint of the selection's ids (a caller that changes the selection and
@@ -283,7 +290,7 @@ its faces as an image, its triangles to a level of detail, its contours and
 their labels, breaklines, boundary and points; on screen with a legend in
 the view's corner. What is drawn is decided in `katana_cad` and only drawn
 here; the record, the level of detail and the measurements are
-`docs/surface_display.md`. A visible surface counts in `planDrawnBounds`, so
+`docs/surface_display.md`. A visible surface counts in `plan_drawn_bounds`, so
 Zoom Extents and a plot's Fit take it in.
 
 ## Screen and paper
@@ -294,7 +301,7 @@ place, the painter:
 | | Screen | Paper |
 |---|---|---|
 | Line width | a hairline: 1.5 px, or 1 px with Thin screen lines | the line weight in millimetres |
-| White pens | white | black (decision D7, `cad::paperColour`) |
+| White pens | white | black (decision D7, `katana_cad::plot::paper_colour`) |
 | Selection, locked-layer fading | shown | not printed (audit QT-26) |
 | Ghosts of the selection | drawn when the view asks (below) | never |
 | Plain point cross | 4 px either side | 1 mm either side |
@@ -316,7 +323,7 @@ the page followed the resolution: the point cross was 0.68 mm at 300 dpi and
 ### Rotated viewports
 
 `PlanFrame::rotation` turns the drawing about the viewport's centre through
-the painter. Culling uses `visibleBox`, the box around the turned rectangle
+the painter. Culling uses `visible_box`, the box around the turned rectangle
 (for a 200 x 100 frame at 30 degrees, +-111.6 x +-93.3 where the unturned
 frame shows +-100 x +-50), grown by the furthest symbol reach, so an entity
 in a corner of a twisted viewport is drawn. Symbol sprites are not used under
@@ -327,7 +334,7 @@ cropped to the turned rectangle's own corners.
 
 ## The plot
 
-`plotPlanToPdf` and the headless `--plot`:
+`plot_plan_to_pdf` and the headless `--plot`:
 
 * **Clipped to the printable area.** The frame is the paper less its margins,
   clipped; at a fixed scale the drawing stops at the margin instead of running
@@ -335,13 +342,13 @@ cropped to the turned rectangle's own corners.
 * **The dpi is a double** (audit QT-27): the writer gets the nearest whole
   resolution and the painter the scale to the exact one, so a sheet at
   300.9 dpi is drawn at 1 : 1000 and not 1 : 1003.
-* **Fit fits what the view draws** (`ViewportWidget::fittedPlot`, over the
-  same `planDrawnBounds` Zoom Extents frames): its layers, reference layers,
+* **Fit fits what the view draws** (`viewport_widget::fitted_plot`, over the
+  same `plan_drawn_bounds` Zoom Extents frames): its layers, reference layers,
   meshes and alignments - not the spatial index's bounds, which never shrink,
   count every arc's whole circle and hidden layers, and miss alignments (audit
   QT-12, GEO-01). The site-plan sample's A3 plot is now centred with its
   alignment on the sheet.
-* **`fitScale` takes a line with no height** (audit CAD-15): the zero
+* **`fit_scale` takes a line with no height** (audit CAD-15): the zero
   dimension asks nothing of the sheet. A single point still has no scale.
 * **Title and creator** are set: the project's name and Katana.
 
@@ -361,7 +368,7 @@ corner of it, whole and at its own resolution: every pixel of a
 reading distance nobody sees past 200 dpi. On paper the painter now embeds
 only what a viewport shows, only as finely as it can be seen.
 
-**A raster** (`PlanPainter::drawRasterOnPaper`):
+**A raster** (`PlanPainter::draw_raster_on_paper`):
 
 1. The viewport's four corners - the turned rectangle's own, not the box
    around them - go through the inverse of the raster's geotransform (the
@@ -370,19 +377,19 @@ only what a viewport shows, only as finely as it can be seen.
 2. A step along an image row moves (g1, g4) in the model and one down a
    column (g2, g5), so an image pixel reaches |(g1, g4)| s and |(g2, g5)| s
    device pixels at view scale s. The capped resolution is
-   min(pixelsPerMillimetre, `rasterDpiCap` / 25.4) px/mm, 200 dpi by
+   min(pixelsPerMillimetre, `raster_dpi_cap` / 25.4) px/mm, 200 dpi by
    default; where an image pixel is finer than a capped pixel the crop is
    averaged down until it is not, and where it is coarser it is kept -
    never enlarged, since a PDF viewer magnifies an embedded image itself.
-   Then, if the result is over `rasterPixelCap` (16 megapixels: A1 at
+   Then, if the result is over `raster_pixel_cap` (16 megapixels: A1 at
    140 dpi, A0 at 100), both sides shrink evenly to fit.
-3. The crop is averaged down by a box filter (`areaResample` in
-   `src/katana_qt/plan_painter.cpp`): each output pixel the mean of the
+3. The crop is averaged down by a box filter (`area_resample` in
+   `rust/crates/katana_window/src/plan_painter.rs`): each output pixel the mean of the
    source area it covers, a pixel its edge cuts counted by the part inside,
    premultiplied first so a transparent pixel's colour does not bleed. It
    reads the raster's own bytes in place, a row at a time, across the task
-   pool - `QImage::scaled` would first convert the crop to premultiplied
-   ARGB, a second 1.6 GB for the whole of that orthophoto. A one-pixel
+   pool - a general image scaler (the C++ build's QImage::scaled) would first
+   convert the crop to premultiplied ARGB, a second 1.6 GB for the whole of that orthophoto. A one-pixel
    checkerboard averaged four to one prints mid grey, not a moire.
 4. It is drawn through the whole image's transform with the crop's offset
    and the resampling folded in, smoothed, at the raster's opacity, beneath
@@ -393,7 +400,7 @@ only what a viewport shows, only as finely as it can be seen.
    two and not averaged at all.
 5. The crop is kept in the `PlanPaintCache`, keyed on the layer's id, the
    rectangle and the size, so the sheet editor does not resample on every
-   repaint; `invalidateReferences` drops it with the rest of the imagery.
+   repaint; `invalidate_references` drops it with the rest of the imagery.
 
 A raster hidden in the Reference Data panel or in the view prints nothing;
 one outside the viewport embeds nothing.
@@ -403,25 +410,30 @@ as the screen's, into an image of the part of the viewport the cloud covers
 (the box around a turned viewport, so its corners are filled) at the capped
 resolution, under the same pixel cap, and laid on the page over the rasters
 and under the linework. An image pixel is also never finer than
-`kCloudPointPaperMillimetres`, 0.25 mm: the splat draws a point as whole
+`CLOUD_POINT_PAPER_MILLIMETRES`, 0.25 mm: the splat draws a point as whole
 pixels, so a size-1 point was 0.13 mm at the 200 dpi cap (0.04 mm on an
 uncapped 600 dpi plot), and a cloud that reads as a surface on screen printed
 as a faint stipple. At 0.25 mm a size-1 point is a screen pixel's size at
 every resolution.
 
 **A mesh footprint** is outlined with a 0.13 mm pen dashed 2 mm on and 1 mm
-off (`kMeshOutlinePaperMillimetres`, `kMeshDashPaperMillimetres`,
-`kMeshGapPaperMillimetres`) - Qt counts a dash in pen widths, so the screen's
-`DashLine` at 0.13 mm would be dots - and a white mesh prints black.
+off (`MESH_OUTLINE_PAPER_MILLIMETRES`, `MESH_DASH_PAPER_MILLIMETRES`,
+`MESH_GAP_PAPER_MILLIMETRES`) - a dash is counted in pen widths, as Qt counted
+it, so the screen's dashed pen at 0.13 mm would be dots - and a white mesh prints black.
 
-The sheet painter passes its own `SheetPaintOptions::rasterDpiCap` through,
+The sheet painter passes its own `SheetPaintOptions::raster_dpi_cap` through,
 the cap its 3D snapshot has: 200 dpi in a PDF, 110 in the sheet editor. In
 `ASheetPdfOverALargePhotoEmbedsOnlyTheViewportAtTheCappedResolution` a
 40 mm viewport filled by a 2000 x 2000 photo of noise plotted at 600 dpi is
 a 1 443 523-byte PDF with the cap lifted to the plot's resolution and
-123 573 bytes at 200 dpi (123 616 through `plotSheetsToPdf`).
+123 573 bytes at 200 dpi (123 616 through `plot_sheets_to_pdf`).
 
 ## Speed
+
+What follows was measured in the C++ window, which painted with Qt's
+QPainter; the Rust canvas reproduces Qt's raster coverage
+(`rust/crates/katana_window/src/canvas/coverage.rs`) and keeps every measure
+below, and the benchmark went with the C++ tree and is not yet ported.
 
 The plan view repainted the whole drawing on every mouse move, and a frame of
 a 28 000-entity survey drawing at zoom extents cost 270-900 ms. Measured
@@ -432,10 +444,9 @@ to QPainter whole when a sliver of them showed.
 
 ### The benchmark
 
-`katana_qt_benchmarks` (`benchmarks/qt/`, built with `KATANA_BUILD_BENCHMARKS`
-where the application is built) links the application's objects
-(`katana_qt_ui`, the plan view among them) and paints a
-generated survey drawing (`benchmarks/qt/survey_drawing.*`): 27 600 entities
+The C++ build's `katana_qt_benchmarks` (built with `KATANA_BUILD_BENCHMARKS`
+where the application was built) linked the application's objects (the plan
+view among them) and painted a generated survey drawing: 27 600 entities
 in the make-up of the owner's 28k-entity archive - 16 000 coded points in
 library symbols, 10 000 strings in library linestyles, 250 long contours,
 labels, arcs, hatched lots and dimensions - at map-grid coordinates,
@@ -455,7 +466,7 @@ index is an opened project's. At 1600 x 1000:
 
 ### Measured
 
-Release, `tools/compare_benchmarks.py --alternate 3` (three rounds, order
+Release, the C++ build's `compare_benchmarks.py --alternate 3` (three rounds, order
 reversed each round, three repetitions each: nine samples a cell), the build
 before the painter (`main` plus the benchmark) run twice as an A/A control.
 The laptop was on battery and shared with other agents' builds, so the ratios
@@ -527,7 +538,7 @@ Two measures are exact only to within antialiasing, and say so in their
 tests:
 
 * **Clipping** keeps each segment that reaches the view WHOLE
-  (`geometry::clipPolyline` with `PolylineClip::WholeSegments`) and drops
+  (`katana_geometry::polygon::clip_polyline` with `PolylineClip::WholeSegments`) and drops
   only those that miss the view grown by the pen's reach and a pixel. A
   segment cut at the view's edge is the same line in exact arithmetic but
   not in Qt's fixed-point rasteriser. Kept whole, a zig-zag leaving and
@@ -543,7 +554,7 @@ tests:
 
 View > **Thin screen lines (faster)**, on by default: every plan-view line a
 cosmetic one-pixel pen. Off, the 1.5 px hairline the plan view drew before -
-one click away. A process-wide choice (`ViewportWidget::setThinScreenLines`)
+one click away. A process-wide choice (`viewport_widget::set_thin_screen_lines`)
 that every plan view reads at its next paint. Plots keep their
 paper-millimetre weights either way. The headless `--trigger
 ThinScreenLinesAction` turns it off for a screenshot.
@@ -551,38 +562,38 @@ ThinScreenLinesAction` turns it off for a screenshot.
 ### Ghosts of the selection
 
 A selected entity the document draws and the frame's layers hide
-(`PlanFrame::layers`; `cad::isGhost`, the one rule every view asks) is drawn
-as a GHOST when `PlanPaintOptions::selectionGhosts`
-is on - the plan view sets it from its view's switch, `ViewState::selectionGhosts`;
+(`PlanFrame::layers`; `katana_cad::selection::is_ghost`, the one rule every view asks) is drawn
+as a GHOST when `PlanPaintOptions::selection_ghosts`
+is on - the plan view sets it from its view's switch, `ViewState::selection_ghosts`;
 every other caller leaves it off and draws what it always drew, and a plot
 never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
 153), 2 px square, one every 6 px from the line's start, each on whole device
-pixels (below; `cad/selection_style.hpp`), with no fill, hatch, linestyle or
+pixels (below; `rust/crates/katana_cad/src/selection_style.rs`), with no fill, hatch, linestyle or
 symbol, so it
 never reads as the entity drawn; a point is a ring of dots 6 px about it, a
 text, note, leader or dimension the outline of the box it draws, and a label
 is not ghosted. The pass runs after the entity loop and before the labels,
 over the selection's ids alone: O(selection), nothing with no selection,
 and no test added to the loop every entity passes. It is drawn into the
-kept drawing. `PlanPaintStats::ghostsDrawn` counts them apart from
-`entitiesDrawn`, which the tests use to prove a hidden layer is gone
-(`PlanPainter.ASelectedEntityOnALayerThisViewHidesIsDrawnAsAGhost` - an
+kept drawing. `PlanPaintStats::ghosts_drawn` counts them apart from
+`entities_drawn`, which the tests use to prove a hidden layer is gone
+(`plan_painter::a_selected_entity_on_a_layer_this_view_hides_is_drawn_as_a_ghost` - an
 80 px run, fourteen dots, 28 pixels of ink on row 50 against the same frame
 painted with nothing selected, each the ghost's colour, worked from
-`dotPath` - and none where the document hides the layer or the entity, on
+`dot_path` - and none where the document hides the layer or the entity, on
 paper, or with the switch off). Each kind of geometry has its branch and its
 test, each shown failing with its branch taken out: a polyline, an arc or a
-circle goes through `drawGeometry`'s own `strokePolyline`, dotted only
+circle goes through `draw_geometry`'s own `stroke_polyline`, dotted only
 because the ghost pass asks it to be - without that, a ghosted polyline was a
 solid faint line and no test failed
-(`PlanPainter.AGhostedPolylineIsDottedAlongEachLegWithItsStepCarriedRoundTheCorner`,
+(`plan_painter::a_ghosted_polyline_is_dotted_along_each_leg_with_its_step_carried_round_the_corner`,
 its ten dots worked by hand with the step carried round the corner;
-`PlanPainter.AGhostedCircleIsARowOfSeparateDotsOnItsCurve`); a point is its
-ring (`PlanPainter.AGhostedPointIsADottedRingAroundItNotAMarkOnIt`); a text
+`plan_painter::a_ghosted_circle_is_a_row_of_separate_dots_on_its_curve`); a point is its
+ring (`plan_painter::a_ghosted_point_is_a_dotted_ring_around_it_not_a_mark_on_it`); a text
 or a dimension the dotted outline of its box, nothing inside
-(`PlanPainter.AGhostedTextIsTheDottedOutlineOfItsBoxNotItsLetters`,
-`PlanPainter.AGhostedDimensionIsTheDottedOutlineOfWhatItDraws`); and a label
-nothing (`PlanPainter.ALabelIsNeverGhosted`). Why and how every view shows
+(`plan_painter::a_ghosted_text_is_the_dotted_outline_of_its_box_not_its_letters`,
+`plan_painter::a_ghosted_dimension_is_the_dotted_outline_of_what_it_draws`); and a label
+nothing (`plan_painter::a_label_is_never_ghosted`). Why and how every view shows
 the selection: `docs/desktop.md`, "The selection in every view".
 
 **A dot is whole device pixels.** Without antialiasing a dot falls on the
@@ -592,8 +603,8 @@ beaded 3, 2, 3 pixels wide, and a slanted one mixed four shapes of dot. Where
 the painter only shifts the drawing, the pen's width and the pitch are
 rounded to whole device pixels - 2 every 6 at 100 %, 3 every 8 at 125 % - and
 each dot is put on whole pixels, an odd width about a pixel's centre and an
-even one about a corner (`PlanPainter::dotPath`,
-`PlanPainter.AtAFractionalScaleEveryGhostDotIsTheSameSquareOfWholePixels`:
+even one about a corner (`PlanPainter::dot_path`,
+`plan_painter::at_a_fractional_scale_every_ghost_dot_is_the_same_square_of_whole_pixels`:
 thirteen 3 x 3 dots 8 px apart, worked by hand). Under a turned frame no
 pixel lines up with the drawing, and the dots are laid as they fall. The
 section's 1 px ghost crossings are antialiased and were left as they are.
@@ -604,12 +615,12 @@ dimension of the site plan is a long dotted rectangle under the parcel - and
 a small circle seen from afar gets four dots of its ring and reads as a
 plus. A look that says what was selected is polish for later.
 
-The dots are laid down by the painter (`dotPath`), not by Qt's dotted pen.
-The first version stroked each ghost with `Qt::DotLine`: antialiased, every
+The dots are laid down by the painter (`dot_path`), not by Qt's dotted pen.
+The first version (C++) stroked each ghost with Qt's dotted pen: antialiased, every
 dot of a long line seen in part was made and thrown away (a dash pattern
 cannot be clipped without moving its dashes), and every selected note in the
 drawing was laid out before the cull; without antialiasing Qt drew crosses
-and Ts for dots along a diagonal. `dotPath` puts a square dot every pitch,
+and Ts for dots along a diagonal. `dot_path` puts a square dot every pitch,
 carrying the phase from segment to segment and through the segments that
 miss the view - so a pan moves no dot along the line - and keeps only the
 dots in the view; a note is laid out only when its own box is near the view.
@@ -629,7 +640,7 @@ by a third between runs:
 
 A segment is walked only where it crosses the view (Liang-Barsky on the
 screen): zoomed in, one segment of a long string can be millions of pixels
-long (`PlanPainter.AGhostLongerThanTheViewIsDottedAcrossItFromItsOwnStart`,
+long (`plan_painter::a_ghost_longer_than_the_view_is_dotted_across_it_from_its_own_start`,
 which also pins the phase to the line's own start). What is left zoomed in
 is mostly the walk of the 27 600 selected ids; a selection of the usual size
 costs nothing that can be measured.
@@ -639,8 +650,8 @@ costs nothing that can be measured.
 The plan view reports each paint in the status bar, as the 3D view does:
 `Plan  27886 drawn  192.9 ms` when the drawing was painted, and
 `Plan  27886 drawn  192.9 ms (kept, 0.4 ms)` when a frame only laid the kept
-drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
-`drawingPaintCount` give the same to a test.
+drawing down. `last_frame_milliseconds`, `last_drawing_milliseconds` and
+`drawing_paint_count` give the same to a test.
 
 ### Linked views
 
@@ -665,7 +676,7 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
 
 ## Tests
 
-* `tests/qt_widgets/test_plan_painter.cpp` - turned frames (culling box,
+* `rust/crates/katana_window/tests/plan_painting/plan_painter.rs` - turned frames (culling box,
   entities in turned corners), the plot's frame and margin clip, the paper
   marks in millimetres at two resolutions each (the point cross, the hatch
   lines' 0.13 mm, and the alignment overlay's tick and its ink as a whole),
@@ -683,13 +694,13 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
   the same image at two resolutions, and the pixel cap; a mesh outline's
   ink at two resolutions; and File > Plot to PDF embedding the image, and
   not a hidden one.
-* `tests/qt_widgets/test_sheet_painter.cpp` - a photo filling a plan
+* `rust/crates/katana_window/tests/sheets/sheet_painter.rs` - a photo filling a plan
   viewport and nowhere else, hidden and not; a turned photo with
   transparent pixels in a turned viewport, where its geotransform puts it;
   and a sheet PDF over a large photo, with the cap and without.
-* `tests/geometry/test_polygon.cpp` `PolygonClipPolyline.*` - the clipper, in
+* `rust/crates/katana_geometry/tests/cases/polygon.rs` `polygon_clip_polyline` - the clipper, in
   both modes, by hand and as a property over random lines.
-* `tests/cad/test_plot.cpp` `Plot.ALineWithNoHeightFitsOnItsLengthAlone`.
+* `rust/crates/katana_cad/tests/leaf/plot.rs` `plot::a_line_with_no_height_fits_on_its_length_alone`.
 * `qt_plot_headless` - above.
 
 ## Still open
@@ -705,17 +716,17 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
   rows but not in the background; a whole 400-megapixel orthophoto in view
   is read once per new crop. A pyramid of reduced copies, built once per
   layer, would make an overview sheet's crop cost what its output costs.
-* Sheets: several viewports on one page (`paintPlan` per viewport with its
+* Sheets: several viewports on one page (`paint_plan` per viewport with its
   own `origin`, `clip` and `rotation`), a frame and title block, multi-page
   output, plotting on a worker thread with its own cache.
-* A GPU linework layer under the QPainter overlay, for drawings where even
+* A GPU linework layer under the painted overlay, for drawings where even
   the thin pen is too slow.
 
 ## Grips and the drafting aids
 
 With a selection and no tool running the view draws the selection's grips
 and forwards its mouse and keys to `drawing::GripController`
-(`src/katana_qt/drawing/grip_controller.hpp`) before its own selection
+(`rust/crates/katana_window/src/drawing/grip_controller.rs`) before its own selection
 handling; a grip drag snaps from the grip's old position and, with no
 object snap, is constrained by the document's drafting settings (ortho,
 polar, locks), whose label is drawn beside the cursor. The gesture and the
@@ -723,24 +734,24 @@ rules are `docs/drawing.md` ("Grips", "Precision input").
 
 ## A tool's preview, by role
 
-A running tool's preview (`cad::ToolFeedback`, `include/katana/cad/tool_feedback.hpp`)
-is drawn by ONE function, `drawing::paintFeedback`
-(`src/katana_qt/drawing/feedback_painter.hpp`), over the kept drawing image
+A running tool's preview (`katana_cad::tool_feedback::ToolFeedback`, `rust/crates/katana_cad/src/tool_feedback.rs`)
+is drawn by ONE function, `katana_window::drawing::feedback_painter::paint_feedback`
+(`rust/crates/katana_window/src/drawing/feedback_painter.rs`), over the kept drawing image
 like every other piece of furniture: a hover repaints the marks and never
-the drawing (`drawingPaintCount`, asserted in
-`tests/qt_widgets/tools/test_vertex_tool_hover.cpp`). The overlay's colours
+the drawing (`drawing_paint_count`, asserted in
+`rust/crates/katana_window/tests/plan_view/vertex_tool_hover.rs`). The overlay's colours
 have their one home there too, `drawing::overlay` - the preview cyan, the
 target green, the removed red, the grips' blue, green and red, the band's
 ground, a selection box's two fills - where they were literals in the view
 and the grip controller (the cyan was written out three times). They are not
-in `theme.hpp`: its tokens are the chrome's, and it says the views keep
+in `theme.rs`: its tokens are the chrome's, and it says the views keep
 their drawing colours. The prompt band, the tool's and a picked-up grip's,
-is one `paintBand`, in `theme::overlayFont`; two labels named "Segoe UI"
+is one `paint_band`, in `theme::overlay_font`; two labels named "Segoe UI"
 directly, a font Linux does not have.
 
 The order, so what matters is on top: the vertices of the polyline in play
 (thinned so no two are nearer than 10 px), removed pieces, target pieces,
-the ghost, the base points, the snap marker (`FeedbackFrame::beneathGlyphs`),
+the ghost, the base points, the snap marker (`FeedbackFrame::beneath_glyphs`),
 what Enter would act on, target vertices, removed vertices (thinned as the
 squares are, and never over a target's ring), the refused marks (a ring
 struck through), added vertices, labels (DemiBold), the caption - at the
@@ -759,7 +770,7 @@ that goes (a fillet a few pixels across) is left out, so the X still reads,
 and is not counted; a vertex label is not doubled by the polyline's own
 "0".
 
-What it costs, measured as above (`tools/compare_benchmarks.py --alternate
+What it costs, measured as above (the C++ build's `compare_benchmarks.py --alternate
 3`, nine samples a cell, `main` at f971317 against this change, the machine
 shared with three other worktrees' builds; microseconds, minimum / median):
 
@@ -773,14 +784,14 @@ The Insert Vertex runs hover along the survey drawing's 400-vertex string,
 framed on its first 25 vertices so that most hovers make an insert
 (`previewedInserts`); framed on the whole string its vertices lie closer
 than the pick aperture and every hover is refused, which measured nothing of
-the insert. The string's vertex squares go to QPainter in one `drawRects`.
+the insert. The string's vertex squares go to the canvas in one `draw_rects`.
 A run with the machine's CPU at 100% (the other builds) read 0.9 ms for a
 plain move and 2.7 ms for the insert: under that load the ratio says more
 about the machine than about the preview, so the table is the quieter run.
 
 After the review's fixes (2026-09-30: Insert asks of each snap candidate
 that would win whether it lands ON the line and would be taken, planning
-the insert there - `InteractiveTool::takesSnap`), nine repetitions in one
+the insert there - `InteractiveTool::takes_snap`), nine repetitions in one
 run, the plain move its baseline under the same load (a build of another
 worktree was running), microseconds, minimum / median: a plain move
 432.6 / 465.7; Insert with snaps off 706.2 / 784.2 (1.63x / 1.68x a plain
