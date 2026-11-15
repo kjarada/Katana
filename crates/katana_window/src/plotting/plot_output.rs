@@ -33,8 +33,7 @@
 //! is not written yet: it answers Unsupported with a sentence, headless and not. The printers the
 //! system has are asked of a Printers; the port lists none yet (NoPrinters).
 //!
-//! WHAT DIFFERS FROM THE C++, and why. A PDF's title and creator are not written (the canvas's
-//! PDF document has no place for them yet). A PNG's resolution is put into the bytes the canvas's
+//! WHAT DIFFERS FROM THE C++, and why. A PNG's resolution is put into the bytes the canvas's
 //! encoder made, as a pHYs chunk: the encoder takes no resolution.
 
 #![allow(
@@ -408,7 +407,7 @@ impl Progress<'_> {
 /// leaves no half a set behind, and an earlier file of that name as it was.
 #[allow(
     clippy::too_many_arguments,
-    reason = "The C++ writePdf's arguments, less the title the canvas's PDF does not write."
+    reason = "The C++ writePdf's arguments, its title in the request."
 )]
 fn write_pdf<'s>(
     path: &str,
@@ -442,11 +441,15 @@ fn write_pdf<'s>(
                     path,
                 )
             })?;
-            let document = if request.readable_pdf {
+            let mut document = if request.readable_pdf {
                 PdfDocument::uncompressed()
             } else {
                 PdfDocument::new()
             };
+            document.set_info(
+                &crate::canvas::title_or_file_name(&request.title, &target),
+                crate::canvas::pdf::CREATOR,
+            );
             open = Some((file, document));
         }
         let mut canvas = pdf_page_for(sheet, resolution.resolution);
@@ -969,11 +972,21 @@ pub fn print_sheets<'s>(
                     report.printer.clone(),
                 ));
             }
-            document = Some(if printer.readable {
+            let mut printed = if printer.readable {
                 PdfDocument::uncompressed()
             } else {
                 PdfDocument::new()
-            });
+            };
+            // QPrinter's setDocName: the job's name in the print queue.
+            printed.set_info(
+                if request.title.is_empty() {
+                    "Katana sheets"
+                } else {
+                    &request.title
+                },
+                crate::canvas::pdf::CREATOR,
+            );
+            document = Some(printed);
         }
         // What the printer gave: its whole page, in its device pixels. A sheet bigger than that
         // is scaled down to fit and centred; a smaller one is printed at its size in the top-left

@@ -407,10 +407,13 @@ mod program {
             console.err,
             "--customise /fixtures/BAD.customisation.json was refused\n"
         );
-        assert!(logged(
-            &log,
-            "run CUSTOMISE /fixtures/BAD.customisation.json"
-        ));
+        // The file made absolute, in the generic form (QFileInfo::absoluteFilePath): on Windows a
+        // path from the root has no drive, and absolute is the current drive's.
+        let absolute = std::path::absolute("/fixtures/BAD.customisation.json")
+            .expect("an absolute form")
+            .to_string_lossy()
+            .replace('\\', "/");
+        assert!(logged(&log, &format!("run CUSTOMISE {absolute}")));
         assert!(!logged(&log, "run SCRIPT ok.kcs"));
         let scratch = Scratch::new("drive-program-customise");
         let shot = path_text(&scratch.path("customise.png"));

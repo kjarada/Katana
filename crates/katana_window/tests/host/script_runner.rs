@@ -21,11 +21,13 @@ use katana_window::script_runner::{
 use crate::window_support::{Scratch, qt_widgets_data};
 
 /// tests/qt_widgets/data/scripts, as the text a path is typed as.
+/// In the generic form Qt wrote a path in ('/' between the names, on Windows too), as the
+/// dialog writes its SCRIPT line.
 fn scripts() -> String {
     qt_widgets_data()
         .join("scripts")
         .to_string_lossy()
-        .into_owned()
+        .replace('\\', "/")
 }
 
 /// Records each line it is given, and refuses those in `refused`.

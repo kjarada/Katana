@@ -43,7 +43,7 @@ pub mod canvas {
     pub mod text;
 
     pub use image_files::{decode_image, read_image};
-    pub use pdf::{PdfCanvas, PdfDocument};
+    pub use pdf::{PdfCanvas, PdfDocument, title_or_file_name};
     pub use raster::RasterCanvas;
     pub use text::{SCREEN_DPI, TextMetrics, font_pixels, resolved_family, text_path};
 }

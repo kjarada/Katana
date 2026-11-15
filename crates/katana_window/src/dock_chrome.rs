@@ -764,7 +764,7 @@ impl DockTitleBar {
                 "Float",
                 "Float",
                 &format!(
-                    "Take this {what} out into a window of its own, which can go on another screen. Double-clicking the title bar does the same; drag the title bar back over the window to dock it anywhere."
+                    "Take this {what} out into a window of its own, inside the main window. Double-clicking the title bar does the same; drag the title bar back over the window to dock it anywhere."
                 ),
             ),
             WindowButton::Maximise if facts.maximised => TitleBarButton::new(

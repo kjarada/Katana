@@ -32,8 +32,10 @@ if(NOT _entries)
     message(FATAL_ERROR "No imported DLL was found in the listing: the check would pass with nothing to check")
 endif()
 
+# bcryptprimitives is Windows' own (System32, Windows 10 on): Rust's standard library imports
+# ProcessPrng from it, its source of random numbers, since Rust 1.78.
 set(_allowed
-    "^(kernel32|kernelbase|advapi32|user32|shell32|ole32|oleaut32|ws2_32|crypt32|bcrypt|ncrypt|ntdll|rpcrt4|secur32|userenv|version|shlwapi|iphlpapi|wintrust|psapi|cfgmgr32|sechost|msvcrt|ucrtbase|api-ms-win-[a-z0-9-]+)[.]dll$")
+    "^(kernel32|kernelbase|advapi32|user32|shell32|ole32|oleaut32|ws2_32|crypt32|bcrypt|bcryptprimitives|ncrypt|ntdll|rpcrt4|secur32|userenv|version|shlwapi|iphlpapi|wintrust|psapi|cfgmgr32|sechost|msvcrt|ucrtbase|api-ms-win-[a-z0-9-]+)[.]dll$")
 set(_foreign "")
 set(_count 0)
 foreach(_entry IN LISTS _entries)

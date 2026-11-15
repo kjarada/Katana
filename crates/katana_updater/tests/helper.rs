@@ -897,7 +897,8 @@ struct World {
     v1_hash: String,
     v2_hash: String,
     v1_snapshot: BTreeMap<String, String>,
-    scratch: Scratch,
+    // Held for its Drop: the folder goes last, after everything in it.
+    _scratch: Scratch,
 }
 
 impl World {
@@ -959,7 +960,7 @@ impl World {
             v1_hash,
             v2_hash,
             v1_snapshot,
-            scratch,
+            _scratch: scratch,
         };
         world.install_helper(TRANSACTION);
         world
@@ -2541,7 +2542,9 @@ fn imported_libraries(executable: &Path) -> Vec<String> {
 // Which DLLs are Windows' is decided there; what this file adds is a second READING of the import
 // table, by other code than objdump's.
 fn is_operating_system_library(name: &str) -> bool {
-    const SYSTEM: [&str; 24] = [
+    // bcryptprimitives: Windows' own (System32, Windows 10 on), which Rust's standard library
+    // imports for ProcessPrng, its source of random numbers, since Rust 1.78.
+    const SYSTEM: [&str; 25] = [
         "kernel32",
         "kernelbase",
         "advapi32",
@@ -2552,6 +2555,7 @@ fn is_operating_system_library(name: &str) -> bool {
         "ws2_32",
         "crypt32",
         "bcrypt",
+        "bcryptprimitives",
         "ncrypt",
         "ntdll",
         "rpcrt4",
@@ -2617,18 +2621,28 @@ mod helper_imports {
     #[test]
     fn the_check_sees_a_dynamically_linked_program_for_what_it_is() {
         let _serial = serial();
-        // The control: a program that is NOT static must be reported as importing a DLL of the
-        // toolchain, or the case above would pass on a reader that cannot see it. The test program
-        // itself is the C++'s control, which links libstdc++ as a DLL.
-        let own = std::env::current_exe().expect("this test program's path");
-        let imported = imported_libraries(&own);
+        // The control: a file that is NOT static must be reported as importing a DLL of the
+        // toolchain, or the case above would pass on a reader that cannot see it. The C++'s
+        // control was its own test program, which linked libstdc++ as a DLL; a Rust test program
+        // links its standard library statically and imports only Windows' DLLs, so the control
+        // is the toolchain's own libstdc++-6.dll, on PATH as the build has MSYS2 UCRT64's bin,
+        // which imports the toolchain's libgcc and winpthread.
+        let control = std::env::var_os("PATH")
+            .and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|folder| folder.join("libstdc++-6.dll"))
+                    .find(|file| file.is_file())
+            })
+            .expect("the toolchain's libstdc++-6.dll on PATH (MSYS2 UCRT64's bin, as the build has it)");
+        let imported = imported_libraries(&control);
         assert!(!imported.is_empty());
         let foreign = imported
             .iter()
             .any(|name| !is_operating_system_library(name));
         assert!(
             foreign,
-            "the test program imports only system DLLs, so it is no control for the reader: {}",
+            "{} imports only system DLLs, so it is no control for the reader: {}",
+            control.display(),
             imported.join(", ")
         );
         assert!(!is_operating_system_library("libstdc++-6.dll"));

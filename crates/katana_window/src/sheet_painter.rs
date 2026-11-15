@@ -2567,8 +2567,7 @@ pub(crate) fn path_text(path: &FilePath) -> String {
 /// with the sheet's name. FileExportFailure when the file cannot be written; InvalidArgument for
 /// an index past the end or a set with nothing to plot.
 ///
-/// `title` is the PDF's title in the C++ (the file's own name when empty) with Katana its creator;
-/// the canvas's PDF document writes neither yet, so it is taken and not written.
+/// `title` is the PDF's title (the file's own name when empty), with Katana its creator.
 #[allow(
     clippy::too_many_arguments,
     reason = "The C++ plotSheetsToPdf's arguments."
@@ -2620,7 +2619,7 @@ fn write_sheets_pdf(
     source: &SheetSource<'_>,
     dpi: f64,
     cache: &mut SheetPaintCache,
-    _title: &str,
+    title: &str,
     mut problems: Option<&mut Vec<String>>,
     readable: bool,
 ) -> Status {
@@ -2664,6 +2663,10 @@ fn write_sheets_pdf(
     } else {
         PdfDocument::new()
     };
+    document.set_info(
+        &crate::canvas::title_or_file_name(title, path),
+        crate::canvas::pdf::CREATOR,
+    );
     let mut options = SheetPaintOptions {
         medium: PlanMedium::Paper,
         pixels_per_millimetre: millimetres_to_pixels(1.0, dpi),
