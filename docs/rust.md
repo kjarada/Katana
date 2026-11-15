@@ -2191,6 +2191,17 @@ pin classifies every algorithm GDAL lists.
   window (seen on the owner's screen and in a headless screenshot of
   samples/site_plan, 2026-11-15): its text wraps at about 280 points with
   the rest of the panel empty. No gate test measures it.
+- **Removing `unsafe` is decided but not done.** The owner asked for it on
+  2026-11-16 and settled how: GDAL's algorithm framework and PDAL keep one
+  small boundary each (their shims have no safe binding); safe crates
+  replace our own bindings wherever one exists (`rusqlite`, `proj`, `gdal`,
+  `curl`, and `winreg`, `keyring` or `sysinfo` for the updater's operating
+  system calls); the hand-written SIMD kernels go and their scalar versions,
+  which give identical results, stay, with the speed measured before and
+  after. Then every other crate carries `#![forbid(unsafe_code)]`. It was
+  stopped at the owner's word as too big for then: about 1,050 uses, most
+  in katana_gis (about 480), katana_update (about 175), katana_core (about
+  95) and katana_geodesy (about 70).
 - **The toolbars' natural widths along the top are 2 to 22 points off the
   C++'s** (`--check-toolbar-fit`; the test passes, its rows still fit).
   Matching them is laying out as Qt did (its toolbar handle, spacing and
