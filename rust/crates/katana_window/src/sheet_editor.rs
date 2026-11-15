@@ -1729,9 +1729,10 @@ impl GenerateDialog {
         names.extend(alignments);
         let round = |value: f64| (value * 1000.0).round() / 1000.0;
         Self {
-            // Modal, as the C++'s open() and exec() make it (window modal).
+            // Opened with QDialog::open (or exec), and deleted on close.
             frame: crate::shell::DialogFrame::new("sheetGenerateDialog", "Generate Sheets")
-                .modal(true),
+                .modal(true)
+                .deletes_on_close(true),
             layout: Choice::at(0),
             paper: Choice::at(3),
             orientation: Choice::at(0),
@@ -3477,7 +3478,8 @@ impl SheetEditor {
             frame: crate::shell::DialogFrame::new(
                 "sheetHiddenLayersDialog",
                 "Layers Shown in This View",
-            ),
+            )
+            .deletes_on_close(true),
             id: String::from(id),
             layers,
         });
@@ -4958,7 +4960,13 @@ impl SheetEditor {
                     menu_ui(ui, menu, &mut chosen);
                 }
             });
+            // The toolbar is a target of its own (QToolBar sheetToolBar): `--panel sheetToolBar`
+            // grabs it once a dialog of the editor has closed.
             ui.horizontal(|ui| {
+                begin_target(
+                    ui,
+                    TargetSpec::new(&tool_bar.name, TargetKind::ToolBar, &tool_bar.title),
+                );
                 for item in &tool_bar.items {
                     match item {
                         ToolBarItem::Action(action) => {
@@ -4979,6 +4987,7 @@ impl SheetEditor {
                         }
                     }
                 }
+                end_target(ui, ui.min_rect());
             });
         });
         egui::Panel::bottom("sheetEditorStatus").show(ui, |ui| {

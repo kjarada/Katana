@@ -229,6 +229,22 @@ mod step_engine {
         assert_eq!(bench.said(), "openTest has closed: the window is grabbed\n");
     }
 
+    /// The C++ said a target had closed only when the dialog went with it (its QPointer null): a
+    /// dialog the window keeps was hidden, still the target, and the run's end said nothing of it
+    /// (vector_import_dialog_imports_what_its_filter_takes, survey_import_uncertain).
+    #[test]
+    fn a_dialog_the_window_keeps_closes_without_saying_the_window_is_grabbed() {
+        let mut bench = Bench::new();
+        bench.window.frame = katana_window::shell::DialogFrame::new("testDialog", "Test Dialog");
+        assert!(bench.step("@openTest"));
+        assert!(bench.step("!testClose"));
+        assert!(bench.step(">LIST"));
+        bench.said();
+        let frame = bench.headless.snapshot();
+        assert_eq!(bench.engine.finish(&frame, &mut bench.console), WINDOW);
+        assert_eq!(bench.said(), "");
+    }
+
     #[test]
     fn steps_that_made_no_target_leave_the_window_grabbed_and_say_nothing() {
         let mut bench = Bench::new();

@@ -286,6 +286,10 @@ pub fn quit_action() -> Action {
 
 // ---- Edit -----------------------------------------------------------------------------------
 
+/// What the window names Format > Layers' manager (main_window.cpp: the action's name plus
+/// "Dialog"), where a manager made on its own names itself layerManager.
+pub const FORMAT_LAYERS_DIALOG: &str = "formatLayersDialog";
+
 pub fn layers_action() -> Action {
     act(
         "formatLayers",
@@ -294,9 +298,8 @@ pub fn layers_action() -> Action {
         "The drawing's layers: colour, linetype, weight, what is on each",
     )
     .shortcut(ctrl(Key::L))
-    // The manager names itself layerManager (CU1), where the C++ renamed the menu's one
-    // formatLayersDialog: --dialog formatLayers finds it by this.
-    .opens(crate::layer_manager::LAYER_MANAGER)
+    // --dialog formatLayers finds it by this.
+    .opens(FORMAT_LAYERS_DIALOG)
 }
 
 // ---- Terrain --------------------------------------------------------------------------------

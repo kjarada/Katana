@@ -205,6 +205,11 @@ pub struct TargetSpec {
     pub title: String,
     /// Whether it blocks the rest of the window while it is open (QDialog::isModal).
     pub modal: bool,
+    /// Whether closing it is the end of it (Qt::WA_DeleteOnClose): the C++ step's target, a
+    /// QPointer, went null, and the steps after it said the target had closed. A dialog the window
+    /// keeps is only hidden when it closes, and the C++ steps went on naming it (drive::steps,
+    /// StepEngine::target_deletes).
+    pub deletes_on_close: bool,
 }
 
 impl TargetSpec {
@@ -214,11 +219,17 @@ impl TargetSpec {
             kind,
             title: String::from(title),
             modal: false,
+            deletes_on_close: false,
         }
     }
 
     pub fn modal(mut self, modal: bool) -> Self {
         self.modal = modal;
+        self
+    }
+
+    pub fn deletes_on_close(mut self, deletes: bool) -> Self {
+        self.deletes_on_close = deletes;
         self
     }
 }
@@ -256,6 +267,8 @@ pub struct TargetRecord {
     pub kind: TargetKind,
     pub title: String,
     pub modal: bool,
+    /// TargetSpec::deletes_on_close.
+    pub deletes_on_close: bool,
     /// The whole of it, its frame and title bar included, in points: what the screenshot crops
     /// to.
     pub rect: Rect,
@@ -360,6 +373,7 @@ impl egui::Plugin for Drive {
             kind: TargetKind::Window,
             title: String::new(),
             modal: false,
+            deletes_on_close: false,
             rect: screen,
             settled: true,
             scroll: None,
@@ -442,6 +456,7 @@ pub fn begin_target(ui: &Ui, spec: TargetSpec) {
             kind: spec.kind,
             title: spec.title,
             modal: spec.modal,
+            deletes_on_close: spec.deletes_on_close,
             rect: Rect::NOTHING,
             settled,
             scroll: None,

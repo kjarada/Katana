@@ -92,7 +92,8 @@ use crate::view_focus::{FocusPrevious, FocusReason};
 use crate::view_layers_popup::{ViewLayersPopup, view_layers_line, view_references_line};
 use crate::view_scale_dialog::ViewScaleDialog;
 use crate::viewport_widget::{
-    KeyModifiers, PlanView, PlanViewEvent, PlanViewHooks, PlanViewHost, Tool, ViewKey,
+    INITIAL_SCALE, KeyModifiers, PlanView, PlanViewEvent, PlanViewHooks, PlanViewHost, Tool,
+    ViewKey,
 };
 
 /// The gap between two docked views, in points: the C++ window's, measured from its headless
@@ -1126,6 +1127,36 @@ impl Inner {
             .and_then(|beside| self.path_of(beside))
             .filter(|path| path.surface.is_main());
         let placed = self.placements();
+        // What the C++ reports of a plan view a verb opened (VIEWS OPEN's record) is the view as
+        // its widget was made: ViewportWidget's constructor sets the initial zoom, and the dock's
+        // show() after splitDockWidget sends the widget the size Qt's split gave it before
+        // resizeDocks evened the halves - half the active view's side, 330 of its 660 points where
+        // the layout then leaves it 328 (docs/rust.md, step 7, "A view a verb opens"). The widget
+        // here is made only when the drawing is next lent, so the state starts where the C++'s did.
+        if cx.is_none() && kind == ViewKind::Plan {
+            let split = beside
+                .filter(|_| beside_path.is_some())
+                .and_then(|beside| placed.get(&beside))
+                .map(|at| {
+                    let (width, height) = (at.rect.width(), at.rect.height());
+                    if height > width {
+                        (width, height / 2.0 - BAR_HEIGHT)
+                    } else {
+                        ((width / 2.0).floor(), height - BAR_HEIGHT)
+                    }
+                });
+            let mut set = views.borrow_mut();
+            if let Some(state) = set.find_mut(id) {
+                if !state.plan_framed {
+                    state.plan.scale = INITIAL_SCALE;
+                }
+                if let Some((width, height)) = split {
+                    state
+                        .plan
+                        .resize(f64::from(width.round()), f64::from(height.round().max(1.0)));
+                }
+            }
+        }
         match beside_path {
             Some(path) => {
                 // Along the longer side, so both halves keep a usable shape; before the first

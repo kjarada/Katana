@@ -210,6 +210,12 @@ impl LayerManagerDialog {
         true
     }
 
+    /// QObject::setObjectName: drawn as `name` rather than LAYER_MANAGER, as the C++ window named
+    /// Format > Layers' copy formatLayersDialog.
+    pub fn set_object_name(&mut self, name: &str) {
+        self.frame.set_name(name);
+    }
+
     // ---- the table and the form ----------------------------------------------------------------
 
     /// What the status line says.
