@@ -3245,14 +3245,17 @@ impl SheetEditor {
         let _ = self.check_before_plot(&*host, all_sheets);
         let set = host.document().sheet_set();
         let suggested = suggested_plot_file(host.document());
-        let title = host.document().metadata().name.clone();
-        self.plot_dialog = Some(plot_interactively(
+        let mut said: Vec<(String, bool)> = Vec::new();
+        self.plot_dialog = plot_interactively(
             &set,
             self.current_sheet(),
             all_sheets,
             &suggested,
-            &title,
-        ));
+            &mut |text: &str, error: bool| said.push((String::from(text), error)),
+        );
+        for (text, error) in said {
+            self.report(host, &text, error);
+        }
     }
 
     // ---- Generate Sheets --------------------------------------------------------------------
@@ -4259,7 +4262,7 @@ impl SheetEditor {
             if let Some(name) = self.fields.line(ui, "sheetName", &sheet.name, "")
                 && name != sheet.name
             {
-                edit(&mut self.queued, "RENAME_SHEET", Box::new(move |s| s.name = name));
+                edit(&mut self.queued, "RENAME_SHEET", Box::new(move |s: &mut Sheet| s.name = name));
             }
             ui.end_row();
             ui.label("Paper");
@@ -4275,7 +4278,7 @@ impl SheetEditor {
                     .unwrap_or(at);
                 if picked != at {
                     let paper = PAPERS[picked];
-                    edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s| s.paper = paper));
+                    edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s: &mut Sheet| s.paper = paper));
                 }
             }
             ui.end_row();
@@ -4296,7 +4299,7 @@ impl SheetEditor {
                     edit(
                         &mut self.queued,
                         "EDIT_SHEET",
-                        Box::new(move |s| s.landscape = picked == 0),
+                        Box::new(move |s: &mut Sheet| s.landscape = picked == 0),
                     );
                 }
             }
@@ -4309,7 +4312,7 @@ impl SheetEditor {
                 edit(
                     &mut self.queued,
                     "EDIT_SHEET",
-                    Box::new(move |s| {
+                    Box::new(move |s: &mut Sheet| {
                         s.frame = if on {
                             String::from(BUILT_IN_FRAME_ID)
                         } else {
@@ -4324,7 +4327,7 @@ impl SheetEditor {
                 .fields
                 .check(ui, "sheetFrameLegend", "Utility legend block", sheet.frame_legend)
             {
-                edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s| s.frame_legend = on));
+                edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s: &mut Sheet| s.frame_legend = on));
             }
             ui.end_row();
             ui.label("");
@@ -4370,7 +4373,7 @@ impl SheetEditor {
                     edit(
                         &mut self.queued,
                         "SHEET_FIELD",
-                        Box::new(move |s| {
+                        Box::new(move |s: &mut Sheet| {
                             if value.is_empty() {
                                 s.fields.remove(&field);
                             } else {
@@ -4388,7 +4391,7 @@ impl SheetEditor {
             })
             .inner;
         if clear.clicked() {
-            edit(&mut self.queued, "SHEET_FIELD", Box::new(|s| s.fields.clear()));
+            edit(&mut self.queued, "SHEET_FIELD", Box::new(|s: &mut Sheet| s.fields.clear()));
         }
         for problem in &self.canvas.last_stats().problems {
             ui.colored_label(egui::Color32::from_rgb(0xd0, 0x50, 0x50), problem.as_str());
@@ -4450,7 +4453,7 @@ impl SheetEditor {
                 Queued::HiddenLayers(id) => self.choose_hidden_layers(&*host, &id),
                 Queued::BrowseImage(id) => self.browse_image(host, &id),
                 Queued::ChoosePaper => {
-                    let _ = self.open_suggest_paper_dialog(&*host);
+                    let _ = self.open_suggest_paper_dialog(host);
                 }
                 Queued::Trigger(name) => {
                     if let Err(error) = self.trigger(host, &name) {
@@ -5041,12 +5044,11 @@ impl SheetEditor {
             });
             if chosen.is_some() || away {
                 self.context_menu = None;
-                if let Some(name) = &chosen {
+                if let Some(name) = chosen.take() {
                     // Kept for the item that acts on it, then let go.
                     self.context_menu = Some((at, id));
-                    let _ = self.trigger(host, name);
+                    let _ = self.trigger(host, &name);
                     self.context_menu = None;
-                    chosen = None;
                 }
             }
         }
