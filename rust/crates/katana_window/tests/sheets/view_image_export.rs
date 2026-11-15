@@ -1,8 +1,8 @@
 //! The twins of tests/qt_widgets/plotting/test_view_image_export.cpp's Snapshot and
 //! ViewImageDialog suites: the SNAPSHOT line read and written, a picture's size and its file
 //! (katana_window::plotting::view_image_export), and File > Export View as Image driven by its
-//! controls' object names. Its ViewImage suite paints a plan view (the plan view's render to
-//! image) and waits for VP's viewport_widget.
+//! controls' object names; and its ViewImage suite (wave 4's stragglers): the plan view painted
+//! into an image (viewport_widget's render_to_image) without touching the view.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -332,5 +332,115 @@ mod view_image_dialog {
         replace.set(true);
         bench.dialog.export_image(&mut bench.host);
         assert_eq!(bench.host.lines().len(), 1);
+    }
+}
+
+/// The line (0, 0)-(100, 50) framed in a 400 x 300 plan view: its midpoint is the view's centre,
+/// and so the centre of any image of the view. The view is the plan view itself
+/// (viewport_widget's PlanView), as the C++'s was the widget, with the drawing as its host.
+struct FramedLine {
+    document: katana_cad::Document,
+    state: katana_cad::view_set::ViewState,
+    view: katana_window::viewport_widget::PlanView,
+}
+
+impl FramedLine {
+    fn new() -> Self {
+        use katana_commands::{EntityAttributes, create_line};
+        use katana_geometry::Point2;
+
+        let mut document = katana_cad::Document::new(None);
+        assert!(
+            document
+                .execute(create_line(
+                    Point2::new(0.0, 0.0),
+                    Point2::new(100.0, 50.0),
+                    EntityAttributes::default()
+                ))
+                .is_ok()
+        );
+        let mut views = katana_cad::view_set::ViewSet::new();
+        let mut state = views
+            .add(katana_cad::viewport_layout::ViewKind::Plan)
+            .clone();
+        let mut view = katana_window::viewport_widget::PlanView::new(&document, &mut state);
+        view.resize(&mut state, 400, 300);
+        view.set_grid_visible(true);
+        // The widget harness's paint: the view painted at its size, as the screen would.
+        let _ = view.paint(&document, &mut state);
+        Self {
+            document,
+            state,
+            view,
+        }
+    }
+
+    /// renderToImage: the drawing as the view shows it, `width` x `height` on `ground`.
+    fn render(&self, width: u32, height: u32, ground: Color, as_plotted: bool) -> Image {
+        self.view
+            .render_to_image(&self.document, &self.state, width, height, ground, as_plotted)
+    }
+}
+
+/// Whether any pixel within `reach` of (x, y) is not `ground`.
+fn ink_near(image: &Image, x: i32, y: i32, reach: i32, ground: Color) -> bool {
+    for py in y - reach..=y + reach {
+        for px in x - reach..=x + reach {
+            if image.pixel(px as u32, py as u32) != ground {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// The plan view painted into an image (the plan view's render_to_image) without touching the view.
+mod view_image {
+    use super::*;
+
+    #[test]
+    fn the_plan_view_is_painted_at_the_size_asked_without_its_grid_or_touching_the_view() {
+        let framed = FramedLine::new();
+        assert!(framed.state.plan_framed);
+        let paints = framed.view.drawing_paint_count();
+        let before = framed.state.plan;
+        let image = framed.render(800, 600, Color::BLACK, false);
+        assert_eq!((image.width(), image.height()), (800, 600));
+        assert!(
+            ink_near(&image, 400, 300, 3, Color::BLACK),
+            "the line's midpoint"
+        );
+        // The grid is on in the view and not in the picture: away from the line every pixel is
+        // the ground.
+        for (x, y) in [(5, 5), (795, 5), (5, 595), (795, 595)] {
+            assert!(!ink_near(&image, x, y, 4, Color::BLACK), "{x},{y}");
+        }
+        assert_eq!(
+            framed.view.drawing_paint_count(),
+            paints,
+            "the view repainted its own drawing"
+        );
+        assert_eq!(framed.state.plan.scale, before.scale);
+        assert_eq!(framed.state.plan.width_pixels, before.width_pixels);
+    }
+
+    #[test]
+    fn on_white_the_drawing_is_painted_as_a_plot_with_its_white_pens_black() {
+        let framed = FramedLine::new();
+        // Layer 0 draws white, which on white would vanish.
+        let screen = framed.render(400, 300, Color::WHITE, false);
+        let plotted = framed.render(400, 300, Color::WHITE, true);
+        let darkest = |image: &Image| {
+            let mut least = 255_u8;
+            for y in 290 / 2..=310 / 2 {
+                for x in 390 / 2..=410 / 2 {
+                    let pixel = image.pixel(x, y);
+                    least = least.min(pixel.r).min(pixel.g).min(pixel.b);
+                }
+            }
+            least
+        };
+        assert!(darkest(&screen) > 200, "a white pen on white");
+        assert!(darkest(&plotted) < 128, "printed black");
     }
 }

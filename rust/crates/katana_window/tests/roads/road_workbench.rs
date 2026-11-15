@@ -3,9 +3,9 @@
 //! QMainWindow the C++ tests installed it in - over a host whose executor is the interpreter on
 //! the same drawing.
 //!
-//! Not twinned: RoadWorkbench.AThreeDViewThatHidesALayerOfItsOwnDoesNotDrawTheRoadObjectsOnIt,
-//! which opens its two 3D views through the workspace (view_workspace, wave 3) and hands it the
-//! meshes.
+//! RoadWorkbench.AThreeDViewThatHidesALayerOfItsOwnDoesNotDrawTheRoadObjectsOnIt opens its two 3D
+//! views through the workspace (view_workspace, wave 3) and lends them the meshes as the window
+//! does (Scenery); twinned in wave 4 once the workspace had come.
 //!
 //! Show Road Model is the session's one switch (plan_painter's road_model_shown), process-wide as
 //! the C++'s is. The C++ cases ran one at a time; these run on threads of one process, so the
@@ -116,6 +116,107 @@ mod road_workbench {
         handed(&mut window, &mut meshes);
         assert_eq!(meshes.last().copied(), Some(0));
         window.workbench.set_show_checked(&mut host, true); // the session's switch, back as it was
+    }
+
+    // A view's own hidden layers hide the road objects on them (docs/road_design.md): the plan
+    // view's painter does, and the 3D views have to as well, though the window hands them all one
+    // list of meshes.
+    #[test]
+    fn a_three_d_view_that_hides_a_layer_of_its_own_does_not_draw_the_road_objects_on_it() {
+        use katana_cad::scene::SceneMesh;
+        use katana_cad::view_set::ViewId;
+        use katana_cad::viewport_layout::ViewKind;
+        use katana_geometry::{Point3, TriangleMesh};
+        use katana_window::view_workspace::{Scenery, ViewWorkspace};
+
+        let mut document = Document::new(None);
+        let views = ViewWorkspace::new(&document);
+        views.set_area(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 700.0),
+        ));
+
+        // Two objects of the road model, a triangle each and the same shape, on two layers: the
+        // pavement's and the kerb's.
+        let pavement = TriangleMesh {
+            vertices: vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(10.0, 0.0, 0.0),
+                Point3::new(0.0, 10.0, 0.0),
+            ],
+            faces: vec![[0, 1, 2]],
+        };
+        let kerb = TriangleMesh {
+            vertices: vec![
+                Point3::new(20.0, 0.0, 0.0),
+                Point3::new(30.0, 0.0, 0.0),
+                Point3::new(20.0, 10.0, 0.0),
+            ],
+            faces: vec![[0, 1, 2]],
+        };
+        let meshes = vec![
+            SceneMesh {
+                name: String::from("pavement"),
+                mesh: Some(&pavement),
+                layer: String::from("road/pavement"),
+                ..SceneMesh::default()
+            },
+            SceneMesh {
+                name: String::from("kerb"),
+                mesh: Some(&kerb),
+                layer: String::from("road/kerb"),
+                ..SceneMesh::default()
+            },
+        ];
+        // setMeshes: the window's list, lent to the views at each call; the views told.
+        views.scenery_changed();
+
+        let first = views.open_view(&mut document, ViewKind::Model3D, true);
+        let second = views.open_view(&mut document, ViewKind::Model3D, true);
+        // The widget harness's paint of view `id`: the triangles its scene drew.
+        let paint = |id: ViewId| -> usize {
+            let scenery = Scenery {
+                surfaces: &[],
+                meshes: &meshes,
+            };
+            views
+                .with_render_view(id, &document, scenery, |view, scene, state| {
+                    let _ = view.paint(scene, state);
+                    view.scene_layers().terrain.triangles.len()
+                })
+                .unwrap_or_else(|| panic!("view {id} is a 3D view"))
+        };
+        let both = paint(second);
+        assert!(both > 0, "the objects were never drawn");
+        assert_eq!(
+            both % 2,
+            0,
+            "two meshes of one triangle each draw the same number"
+        );
+        assert_eq!(paint(first), both);
+
+        // The kerb's layer hidden in the first view only (VIEWS HIDE, or its Layers popup): that
+        // view draws the pavement alone, the other both.
+        let hide = |id: ViewId, hidden: &[&str]| {
+            views
+                .with_state(id, |state| {
+                    state.layers.clear();
+                    for layer in hidden {
+                        let _ = state.layers.hide(layer);
+                    }
+                })
+                .unwrap_or_else(|| panic!("view {id} is open"));
+            views.view_settings_changed(id);
+        };
+        hide(first, &["road/kerb"]);
+        assert_eq!(paint(first), both / 2);
+        assert_eq!(paint(second), both);
+
+        // A parent hides what is under it, as in plan; and showing it again brings both back.
+        hide(first, &["road"]);
+        assert_eq!(paint(first), 0);
+        hide(first, &[]);
+        assert_eq!(paint(first), both);
     }
 
     #[test]

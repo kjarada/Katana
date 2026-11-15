@@ -1,7 +1,8 @@
 //! The 3D, elevation and section views and the GPU view (V3, step 7 wave 3): the twins of
 //! tests/qt_widgets' test_render_view, test_render_view_gpu, test_section_view and
 //! test_section_recut, and of tests/gpu/test_gpu_scene_view - one module a C++ file, the suites as
-//! modules inside.
+//! modules inside. Wave 4's stragglers added terrain/test_surface_legend_3d, whose 3D views the
+//! workspace opens.
 //!
 //! The views are driven alone, as the C++ tests drive a widget with no window: their events are
 //! their own methods at a pixel of the view, and what they draw is read from the framebuffer or
@@ -44,3 +45,4 @@ mod render_view;
 mod render_view_gpu;
 mod section_recut;
 mod section_view;
+mod surface_legend_3d;
