@@ -818,18 +818,33 @@ impl SurveyPointReportDialog {
                 );
             },
             |ui, form| {
-                ui.horizontal(|ui| {
-                    for (name, text) in [
-                        ("refresh", "Refresh"),
-                        ("copy", "Copy"),
-                        ("saveCsv", "Save As CSV..."),
-                        ("close", "Close"),
-                    ] {
+                // Refresh, Copy and Save at the left, what they do to the report; Close at the right.
+                let pick = |ui: &mut Ui, buttons: &[(&'static str, &str)]| {
+                    let mut pressed = None;
+                    for (name, text) in buttons {
                         if drive::button(ui, name, text).clicked() {
-                            form.pressed = Some(name);
+                            pressed = Some(*name);
                         }
                     }
-                });
+                    pressed
+                };
+                let (left, right) = crate::shell::dialog::button_row(
+                    ui,
+                    |ui| {
+                        pick(
+                            ui,
+                            &[
+                                ("refresh", "Refresh"),
+                                ("copy", "Copy"),
+                                ("saveCsv", "Save As CSV..."),
+                            ],
+                        )
+                    },
+                    |ui| pick(ui, &[("close", "Close")]),
+                );
+                if let Some(name) = left.or(right) {
+                    form.pressed = Some(name);
+                }
             },
         );
         if shown.closed {

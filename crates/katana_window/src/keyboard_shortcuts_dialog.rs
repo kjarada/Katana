@@ -217,12 +217,17 @@ impl ShortcutsState {
 
     fn footer(&mut self, ui: &mut Ui) {
         let count = self.count_text();
-        ui.horizontal(|ui| {
-            label(ui, "keyboardShortcutsCount", &count);
-            if button(ui, "keyboardShortcutsClose", "Close").clicked() {
-                self.close = true;
-            }
-        });
+        // The count at the left, Close at the right.
+        let ((), close) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
+                label(ui, "keyboardShortcutsCount", &count);
+            },
+            |ui| button(ui, "keyboardShortcutsClose", "Close").clicked(),
+        );
+        if close {
+            self.close = true;
+        }
     }
 }
 

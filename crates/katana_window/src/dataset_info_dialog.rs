@@ -415,8 +415,10 @@ impl DatasetInfoDialog {
             &reply,
             egui::Label::new(reply.as_str()).wrap(),
         );
-        let (stats, check, close) = ui
-            .horizontal(|ui| {
+        // Statistics and Check at the left, what they read; Close at the right.
+        let ((stats, check), close) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
                 let stats = mnemonic_button(ui, "datasetInfoStats", "Compute &Statistics")
                     .on_hover_text(
                         "INFO ... STATS: every band's minimum, maximum, mean and standard \
@@ -429,10 +431,10 @@ impl DatasetInfoDialog {
                          read",
                     )
                     .clicked();
-                let close = button(ui, "datasetInfoClose", "Close").clicked();
-                (stats, check, close)
-            })
-            .inner;
+                (stats, check)
+            },
+            |ui| button(ui, "datasetInfoClose", "Close").clicked(),
+        );
         if stats {
             self.run_line(host, "STATS", Shows::Records);
         }

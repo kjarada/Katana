@@ -59,9 +59,11 @@ use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{
     DocumentWatcher, ScopeFilterView, ScopeFilterWidget, scope_filter_views,
 };
-use crate::drive::{Action, LineOptions, TextOptions, button, label_as, line_with, text_with};
+use crate::drive::{
+    Action, LineOptions, TextOptions, button, label_as, line_with, primary, text_with,
+};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::theme::palette;
 
 /// The workspace's open views, asked afresh each time a scope's View choice is filled; shared, as
@@ -596,6 +598,8 @@ fn show_outcome<T: GisTool + ?Sized>(tool: &mut T, outcome: &VerbOutcome) {
 struct Lent<'a, 'h, T: ?Sized> {
     tool: &'a mut T,
     host: &'a mut (dyn Host + 'h),
+    /// Whether the footer's Preview and Run were pressed.
+    pressed: (bool, bool),
 }
 
 fn tool_ui<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
@@ -622,24 +626,18 @@ fn tool_ui<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) 
         let mut lent = Lent {
             tool: &mut *tool,
             host: &mut *host,
+            pressed: (false, false),
         };
         let shown = frame.show(
             &ctx,
             &mut lent,
             |ui, lent| body(&mut *lent.tool, ui, &mut *lent.host),
-            |ui, lent| {
-                let name = format!("{}Close", lent.tool.frame().name);
-                ui.horizontal(|ui| {
-                    if button(ui, &name, "Close").clicked() {
-                        lent.tool.frame_mut().visible = false;
-                    }
-                });
-            },
+            |ui, lent| lent.pressed = footer(&mut *lent.tool, ui),
         );
         if shown.closed {
             lent.tool.frame_mut().visible = false;
         }
-        shown.body
+        lent.pressed
     };
     tool.frame_mut().frame = frame;
     if preview {
@@ -650,11 +648,11 @@ fn tool_ui<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) 
     }
 }
 
-/// The scope beside the fields, then the line, the status with Preview and Run, and the reply.
-/// Answers whether Preview and Run were pressed.
-fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) -> (bool, bool) {
+/// The scope beside the fields, then the line and the reply.
+fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
     ui.set_max_width(tool.frame().width);
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0 * dialog::GROUP_GAP;
         if let Some(scope) = tool.frame_mut().scope.as_mut() {
             ui.vertical(|ui| {
                 ui.set_max_width(SCOPE_WIDTH);
@@ -662,10 +660,13 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) -> 
             });
         }
         ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.x = dialog::GROUP_GAP;
+            ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
             tool.fields_ui(ui, host);
             let frame = tool.frame_mut();
             if let Some(problems) = frame.problems.as_ref() {
                 let name = format!("{}Problems", frame.name);
+                ui.add_space(dialog::GROUP_GAP);
                 let shown = egui::ScrollArea::vertical()
                     .id_salt(name.as_str())
                     .max_height(160.0)
@@ -689,11 +690,11 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) -> 
         });
     });
 
+    ui.add_space(dialog::GROUP_GAP);
     let frame = tool.frame_mut();
     let prefix = frame.name.clone();
     let placeholder = frame.placeholder.clone();
-    ui.horizontal(|ui| {
-        ui.label("Command:");
+    dialog::labelled(ui, "Command:", |ui| {
         line_with(
             ui,
             &format!("{prefix}Command"),
@@ -710,34 +711,7 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) -> 
              or katana_mcp, and it does the same",
         );
     });
-    let status = frame.status.clone();
-    let ready = frame.ready;
-    let is_error = frame.status_error;
-    let pressed = ui
-        .horizontal(|ui| {
-            let mut text = RichText::new(status.as_str());
-            if is_error {
-                text = text.color(palette::error().to_egui());
-            }
-            // A refusal's words, never markup.
-            label_as(
-                ui,
-                &format!("{prefix}Status"),
-                &status,
-                egui::Label::new(text).wrap(),
-            );
-            ui.add_enabled_ui(ready, |ui| {
-                let preview = button(ui, &format!("{prefix}Preview"), "Preview")
-                    .on_hover_text(
-                        "Run the line with PREVIEW: what the scope takes, and nothing changed",
-                    )
-                    .clicked();
-                let run = button(ui, &format!("{prefix}Run"), "Run").clicked();
-                (preview, run)
-            })
-            .inner
-        })
-        .inner;
+    ui.add_space(dialog::GROUP_GAP);
     // Records are one to a line: the box is fixed pitch and not wrapped.
     text_with(
         ui,
@@ -749,10 +723,55 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) -> 
             monospace: true,
         },
     );
+}
+
+/// The status, and under it Close, Preview and Run - Run the dialog's act, in the accent. Answers
+/// whether Preview and Run were pressed.
+fn footer<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui) -> (bool, bool) {
+    let frame = tool.frame_mut();
+    let prefix = frame.name.clone();
+    let status = frame.status.clone();
+    let ready = frame.ready;
+    let is_error = frame.status_error;
+    let mut text = RichText::new(status.as_str());
+    if is_error {
+        text = text.color(palette::error().to_egui());
+    }
+    let ((), (close, pressed)) = dialog::button_row(
+        ui,
+        // The status at the left of the buttons; a refusal's words, never markup.
+        |ui| {
+            label_as(
+                ui,
+                &format!("{prefix}Status"),
+                &status,
+                egui::Label::new(text).wrap(),
+            );
+        },
+        |ui| {
+            let close = button(ui, &format!("{prefix}Close"), "Close").clicked();
+            let pressed = ui
+                .add_enabled_ui(ready, |ui| {
+                    let preview = button(ui, &format!("{prefix}Preview"), "Preview")
+                        .on_hover_text(
+                            "Run the line with PREVIEW: what the scope takes, and nothing changed",
+                        )
+                        .clicked();
+                    let run = primary(ui, &format!("{prefix}Run"), "Run").clicked();
+                    (preview, run)
+                })
+                .inner;
+            (close, pressed)
+        },
+    );
+    if close {
+        frame.visible = false;
+    }
     pressed
 }
 
-/// A line edit named `name` with a placeholder and a tip, under its label: a dialog's field.
+/// A line edit named `name` with a placeholder and a tip, beside its label in the form's label
+/// column: a dialog's field.
 pub fn gis_field(
     ui: &mut Ui,
     name: &str,
@@ -761,10 +780,7 @@ pub fn gis_field(
     placeholder: &str,
     tip: &str,
 ) -> egui::Response {
-    ui.horizontal(|ui| {
-        if !label.is_empty() {
-            ui.label(label);
-        }
+    dialog::labelled(ui, label, |ui| {
         line_with(
             ui,
             name,
@@ -776,7 +792,39 @@ pub fn gis_field(
         )
         .on_hover_text(tip)
     })
-    .inner
+}
+
+/// A check box under a dialog's fields, lined up with them (in the form's second column).
+pub fn gis_check(ui: &mut Ui, name: &str, text: &str, on: &mut bool) -> egui::Response {
+    dialog::labelled(ui, "", |ui| crate::drive::check(ui, name, text, on))
+}
+
+/// A file's field and a Browse button beside it, in one labelled row: the field leaves the
+/// button its room. `names` are the field's and the button's. Whether Browse was clicked.
+pub fn gis_file_field(
+    ui: &mut Ui,
+    names: (&str, &str),
+    label: &str,
+    value: &mut String,
+    placeholder: &str,
+    tip: &str,
+) -> bool {
+    let (name, browse) = names;
+    dialog::labelled(ui, label, |ui| {
+        let width = dialog::beside_a_button(ui, "Browse...");
+        line_with(
+            ui,
+            name,
+            value,
+            LineOptions {
+                placeholder,
+                width: Some(width),
+                ..LineOptions::default()
+            },
+        )
+        .on_hover_text(tip);
+        button(ui, browse, "Browse...").clicked()
+    })
 }
 
 // ---- the menu items ----------------------------------------------------------------------------

@@ -16,10 +16,9 @@ use egui::Ui;
 use katana_core::Result;
 
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_layer_target,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target,
     gis_scope, gis_word,
 };
-use crate::drive::check;
 use crate::host::Host;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -112,7 +111,7 @@ impl GisTool for GisDissolveDialog {
             "by=a,b: areas merge only with those whose properties agree - superlots by owner, \
              stages by stage",
         );
-        check(
+        gis_check(
             ui,
             "gisDissolveKeepIdentical",
             "Keep the properties each group shares",
@@ -122,7 +121,7 @@ impl GisTool for GisDissolveDialog {
             "keep=identical: a property every area of a group holds alike is kept on the merged \
              area; the rest are left behind",
         );
-        check(
+        gis_check(
             ui,
             "gisDissolveReplace",
             "Delete the areas merged",

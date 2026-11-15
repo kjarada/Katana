@@ -424,58 +424,58 @@ impl ScriptRunState {
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         self.refresh_if_changed();
-        ui.add(
-            egui::Label::new(
-                "A script is a file of commands, one a line, as katana_cli runs it: blank lines \
-                 and lines starting with # are skipped. Each line is run as if typed and is its \
-                 own undo step; the run stops at the first line refused.",
-            )
-            .wrap(),
+        crate::shell::dialog::note(
+            ui,
+            "A script is a file of commands, one a line, as katana_cli runs it: blank lines and \
+             lines starting with # are skipped. Each line is run as if typed and is its own undo \
+             step; the run stops at the first line refused.",
         );
-        let mut browse = false;
-        ui.horizontal(|ui| {
-            ui.label("Script:");
+        ui.add_space(crate::shell::dialog::GROUP_GAP);
+        let browse = crate::shell::dialog::labelled(ui, "Script:", |ui| {
+            let width = crate::shell::dialog::beside_a_button(ui, "Browse...");
             line_with(
                 ui,
                 "scriptPath",
                 &mut self.path,
                 LineOptions {
                     placeholder: "the script: a .kcs file of commands",
-                    width: Some(380.0),
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             );
-            browse = button(ui, "scriptBrowse", "Browse...").clicked();
+            button(ui, "scriptBrowse", "Browse...").clicked()
         });
         if browse {
             self.browse(host);
         }
         self.refresh_if_changed();
-        ui.label("Commands:");
         let mut preview = self.preview.clone();
-        text_with(
-            ui,
-            "scriptPreview",
-            &mut preview,
-            TextOptions {
-                read_only: true,
-                rows: 8,
-                monospace: true,
-            },
-        );
-        check(
-            ui,
-            "scriptContinueOnError",
-            "Continue after errors",
-            &mut self.continue_on_error,
-        )
+        crate::shell::dialog::labelled(ui, "Commands:", |ui| {
+            text_with(
+                ui,
+                "scriptPreview",
+                &mut preview,
+                TextOptions {
+                    read_only: true,
+                    rows: 8,
+                    monospace: true,
+                },
+            )
+        });
+        crate::shell::dialog::labelled(ui, "", |ui| {
+            check(
+                ui,
+                "scriptContinueOnError",
+                "Continue after errors",
+                &mut self.continue_on_error,
+            )
+        })
         .on_hover_text(
             "Run every line and count the refused ones (SCRIPT ... CONTINUE), rather than stop \
              at the first",
         );
         self.refresh_if_changed();
-        ui.horizontal(|ui| {
-            ui.label("Command:");
+        crate::shell::dialog::labelled(ui, "Command:", |ui| {
             let mut command = self.command.clone();
             line_with(
                 ui,
@@ -483,7 +483,7 @@ impl ScriptRunState {
                 &mut command,
                 LineOptions {
                     read_only: true,
-                    width: Some(380.0),
+                    width: Some(f32::INFINITY),
                     ..LineOptions::default()
                 },
             )
@@ -494,22 +494,31 @@ impl ScriptRunState {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        let mut run = false;
-        ui.horizontal(|ui| {
-            label_as(
-                ui,
-                "scriptStatus",
-                &self.status,
-                egui::Label::new(self.status.as_str()).wrap(),
-            );
-            run = ui
-                .add_enabled_ui(self.ready, |ui| button(ui, "scriptRun", "Run"))
-                .inner
-                .clicked();
-            if button(ui, "scriptClose", "Close").clicked() {
-                self.close = true;
-            }
-        });
+        // The status at the left; Close, then Run - the dialog's act, in the accent - at the right.
+        let status = self.status.clone();
+        let ready = self.ready;
+        let ((), (close, run)) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
+                label_as(
+                    ui,
+                    "scriptStatus",
+                    &status,
+                    egui::Label::new(status.as_str()).wrap(),
+                );
+            },
+            |ui| {
+                let close = button(ui, "scriptClose", "Close").clicked();
+                let run = ui
+                    .add_enabled_ui(ready, |ui| crate::drive::primary(ui, "scriptRun", "Run"))
+                    .inner
+                    .clicked();
+                (close, run)
+            },
+        );
+        if close {
+            self.close = true;
+        }
         if run {
             self.run(host);
         }

@@ -413,23 +413,34 @@ impl FormatsDialog {
 
     /// The count, the line, Run and Close: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
-            label(ui, "gisFormatsCount", &self.count);
-            label(ui, "gisFormatsCommand", &self.command).on_hover_text(
-                "The line this table shows; type it, or put it in a script, for the same records",
-            );
-            if button(ui, "gisFormatsRun", "Run in Command Line")
-                .on_hover_text(
-                    "Run the line through the command line, so the records are in its log",
-                )
-                .clicked()
-            {
-                let line = self.line();
-                let _ = host.run(&line);
-            }
-            if button(ui, "gisFormatsClose", "Close").clicked() {
-                self.hide();
-            }
-        });
+        // The count and the line at the left; Close and Run in Command Line at the right.
+        let count = self.count.clone();
+        let command = self.command.clone();
+        let ((), (close, run)) = crate::shell::dialog::button_row(
+            ui,
+            |ui| {
+                label(ui, "gisFormatsCount", &count);
+                label(ui, "gisFormatsCommand", &command).on_hover_text(
+                    "The line this table shows; type it, or put it in a script, for the same \
+                     records",
+                );
+            },
+            |ui| {
+                let close = button(ui, "gisFormatsClose", "Close").clicked();
+                let run = button(ui, "gisFormatsRun", "Run in Command Line")
+                    .on_hover_text(
+                        "Run the line through the command line, so the records are in its log",
+                    )
+                    .clicked();
+                (close, run)
+            },
+        );
+        if run {
+            let line = self.line();
+            let _ = host.run(&line);
+        }
+        if close {
+            self.hide();
+        }
     }
 }

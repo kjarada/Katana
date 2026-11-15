@@ -325,10 +325,21 @@ impl BindingPicker {
                              (RASTER <id>)",
                         )
                         .changed();
-                    if self.raster_texts.is_empty() {
-                        ui.weak("no reference raster yet - GIS > Import Raster, or REFS");
-                    }
                 });
+                // Under the list, not beside it: the list fills its row.
+                if self.raster_texts.is_empty() {
+                    row(ui, "", |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    "no reference raster yet - GIS > Import Raster, or REFS",
+                                )
+                                .weak(),
+                            )
+                            .wrap(),
+                        )
+                    });
+                }
             }
             BindingKind::SURFACE => {
                 let name = self.named("Surface");
@@ -338,10 +349,17 @@ impl BindingPicker {
                             "A surface, sampled at the centre of each cell (SURFACE <name>)",
                         )
                         .changed();
-                    if self.surfaces.is_empty() {
-                        ui.weak("no surface yet - Terrain > Surfaces");
-                    }
                 });
+                if self.surfaces.is_empty() {
+                    row(ui, "", |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new("no surface yet - Terrain > Surfaces").weak(),
+                            )
+                            .wrap(),
+                        )
+                    });
+                }
                 let name = self.named("Cell");
                 row(ui, "Cell (m):", |ui| {
                     if field(ui, &name, &mut self.cell, "suggested for its extent")
@@ -358,6 +376,8 @@ impl BindingPicker {
                 let name = self.named("File");
                 let browse_name = self.named("Browse");
                 let browse = row(ui, "File:", |ui| {
+                    ui.spacing_mut().text_edit_width =
+                        crate::shell::dialog::beside_a_button(ui, "Browse...");
                     if field(ui, &name, &mut self.file, "a path, a /vsi path or a URL")
                         .on_hover_text(
                             "FILE: GDAL opens it as it is - a /vsi path or a URL passes through",

@@ -280,7 +280,8 @@ impl DemToolsDialog {
         let resamplings = choices_of(&["raster", "reproject"], "resampling");
         let mut dialog = Self {
             watcher: DocumentWatcher::new(host.document()),
-            frame: DialogFrame::new("demToolsDialog", "DEM Tools"),
+            frame: DialogFrame::new("demToolsDialog", "DEM Tools")
+                .width(crate::shell::dialog::TWO_COLUMN_WIDTH),
             visible: false,
             tab: 0,
             mosaic_tiles,
@@ -755,8 +756,10 @@ impl DemToolsDialog {
     fn page(&mut self, ui: &mut Ui, host: &mut dyn Host, tool: DemTool) {
         let prefix = tool.prefix();
         let page = ui.vertical(|ui| {
-            ui.horizontal_top(|ui| {
-                ui.group(|ui| {
+            // The raster and the options side by side, each half the page: a form fills what it is
+            // given, and laid out in a row the first would leave the second no room.
+            ui.columns(2, |columns| {
+                columns[0].group(|ui| {
                     ui.vertical(|ui| {
                         ui.label(if tool == DemTool::Difference {
                             "First (minus the second)"
@@ -770,11 +773,11 @@ impl DemToolsDialog {
                         }
                     });
                 });
-                let options = ui.group(|ui| {
+                let options = columns[1].group(|ui| {
                     ui.vertical(|ui| self.options(ui, &*host, tool));
                 });
                 custom(
-                    ui,
+                    &columns[1],
                     &options.response,
                     ControlRecord::new(&format!("{prefix}Options"), ControlKind::Other),
                 );

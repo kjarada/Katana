@@ -105,8 +105,7 @@ impl Default for SelectByIdState {
 
 impl SelectByIdState {
     fn body(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Ids:");
+        crate::shell::dialog::labelled(ui, "Ids:", |ui| {
             line_with(
                 ui,
                 "selectByIdIds",
@@ -121,18 +120,23 @@ impl SelectByIdState {
                  12",
             );
         });
-        check(
-            ui,
-            "selectByIdAdd",
-            "Add to the current selection",
-            &mut self.add,
-        );
-        check(
-            ui,
-            "selectByIdZoom",
-            "Zoom to what is selected",
-            &mut self.zoom,
-        );
+        crate::shell::dialog::labelled(ui, "", |ui| {
+            check(
+                ui,
+                "selectByIdAdd",
+                "Add to the current selection",
+                &mut self.add,
+            )
+        });
+        crate::shell::dialog::labelled(ui, "", |ui| {
+            check(
+                ui,
+                "selectByIdZoom",
+                "Zoom to what is selected",
+                &mut self.zoom,
+            )
+        });
+        ui.add_space(crate::shell::dialog::GROUP_GAP);
         label_as(
             ui,
             "selectByIdStatus",
@@ -142,15 +146,20 @@ impl SelectByIdState {
     }
 
     fn footer(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            // Select keeps the dialog open, for the next id; Close closes it.
-            if button(ui, "selectByIdSelect", "Select").clicked() {
-                self.select = true;
-            }
-            if button(ui, "selectByIdClose", "Close").clicked() {
-                self.close = true;
-            }
-        });
+        // Close closes it; Select - the dialog's act, last and in the accent - keeps it open for the
+        // next id.
+        crate::shell::dialog::button_row(
+            ui,
+            |_| {},
+            |ui| {
+                if button(ui, "selectByIdClose", "Close").clicked() {
+                    self.close = true;
+                }
+                if crate::drive::primary(ui, "selectByIdSelect", "Select").clicked() {
+                    self.select = true;
+                }
+            },
+        );
     }
 }
 

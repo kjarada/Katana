@@ -1023,8 +1023,7 @@ impl ReductionOptionsWidget {
             ui.strong("Control");
             // Two rows, so the options fit the narrow pane of Survey Jobs as well as the wizard's
             // page: which point, then how it is held.
-            ui.horizontal(|ui| {
-                ui.label("Point from");
+            crate::shell::dialog::labelled(ui, "Point from", |ui| {
                 let from = choice_of(
                     ui,
                     "controlFrom",
@@ -1053,8 +1052,7 @@ impl ReductionOptionsWidget {
                     changed |= self.remove_control();
                 }
             });
-            ui.horizontal(|ui| {
-                ui.label("Northing, easting");
+            crate::shell::dialog::labelled(ui, "Northing, easting", |ui| {
                 choice_of(
                     ui,
                     "controlHorizontal",
