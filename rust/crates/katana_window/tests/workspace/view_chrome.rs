@@ -40,9 +40,17 @@ mod view_chrome {
     }
 
     fn rect(w: &Site, id: ViewId) -> Rect {
-        w.views
-            .dock_rect(id)
-            .unwrap_or_else(|| panic!("view {id} is docked"))
+        // What the view was instead, so a run that fails says which way it left the dock area
+        // (docs/rust.md, Not done: this twin's intermittent failure).
+        w.views.dock_rect(id).unwrap_or_else(|| {
+            panic!(
+                "view {id} is docked (maximised={} minimised={} floating={} on_screen={})",
+                w.views.is_maximised(id),
+                w.views.is_minimised(id),
+                w.views.is_floating(id),
+                w.views.on_screen(id)
+            )
+        })
     }
 
     /// Which of a bar's optional zoom tools it shows, by object name.
@@ -515,6 +523,26 @@ mod view_chrome {
         assert_eq!(bottom.width(), right.width());
         // The plan beside them is untouched.
         assert_eq!(rect(&w, plan), left);
+    }
+
+    // Not a twin: the cause of the twin below failing about one run in three. egui_dock's
+    // retain_tabs balanced its emptied leaves in a std HashSet's order, random from one set to the
+    // next, and in one order it moved the 3D view's split to the root without its children: the
+    // view maximised dropped out of the dock. Each Site's maximise empties the plan's leaf and the
+    // section's at once; 32 of them meet both orders (dock_chrome::remove_tabs).
+    #[test]
+    fn maximising_a_view_beside_a_split_keeps_it_in_the_dock_in_any_hash_order() {
+        for round in 0..32 {
+            let mut w = Site::new();
+            let model = w.open(ViewKind::Model3D);
+            let _section = w.open(ViewKind::Section);
+            w.press(model, "DockMaximiseButton");
+            assert_eq!(
+                w.views.dock_rect(model),
+                Some(w.views.rect()),
+                "round {round}: the view maximised fills the workspace"
+            );
+        }
     }
 
     #[test]

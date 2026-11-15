@@ -2401,7 +2401,7 @@ impl ViewWorkspace {
         // The docked views taken out, and put back as the preset's steps say: each halves a view
         // already placed, the new one to its right or below it.
         let leaving: BTreeSet<String> = ids.iter().map(|id| dock_name(*id)).collect();
-        inner.layout.retain_tabs(|tab| !leaving.contains(&tab.0));
+        crate::dock_chrome::remove_tabs(&mut inner.layout, |tab| leaving.contains(&tab.0));
         let mut tree = Tree::new(vec![ViewTab(dock_name(ids[0]))]);
         for step in dock_splits(kind) {
             let existing = dock_name(ids[step.existing]);

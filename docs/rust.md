@@ -1185,6 +1185,29 @@ Evidence, 2026-11-15, after the fix-up round: cargo test 9,172 passed and
 before); the window gate 267 tests, 266 passed, 265 with the C++'s
 streams - left, the two pixel metrics under Not done.
 
+**Docks are taken out one at a time, never with egui_dock's
+`retain_tabs`.** The twin of
+`ViewChrome.AMaximisedViewFillsTheWorkspaceAndRestoreGivesEveryViewBackItsPlace`
+failed about one run in three, and its message, made to say the view's
+state, showed the view maximised but out of the dock. egui_dock 0.21.1's
+`retain_tabs` (and `filter_map_tabs`) balance the tree after them by
+walking the emptied leaves in a std `HashSet` - in an order random from one
+set to the next - and move a lone sibling's node into its parent's place
+without that node's children. A maximise beside a split empties two leaves
+at once; in one order the 3D view's split went to the root and the view,
+its child, was left outside the tree. `dock_chrome::remove_tabs` removes
+each with `remove_tab`, whose `remove_leaf` moves the subtree whole, for the
+maximise and for arranging the views; `put_back`'s `filter_map_tabs` keeps
+every tab, so it empties nothing. A test maximises in that layout 32 times
+in one process: it failed at its first round without the fix. Rejected:
+patching the vendored egui_dock, which the lock file pins as fetched.
+
+The C++ window's file filters no longer name the archive format's vendor
+(the naming rule; the step 7 plan, section 4.13): File > Import's and
+the two exports' filters read "Archive (*.12da)" and "Archive, zipped
+(*.12daz)", as the Rust's always did, keeping the format token. No test or
+script asserted the old text.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -2013,8 +2036,7 @@ pin classifies every algorithm GDAL lists.
   picker can choose a section header; the vector import and the DEM tools
   each give two controls one name (above); the vector export's Browse has
   no headless guard; `OnlineDataWorkbench::areaOf` does not check for a
-  missing view; the export filter names the archive format by its vendor
-  (the naming rule); the code manager's Linework status and Use These Codes
+  missing view; the code manager's Linework status and Use These Codes
   are set only as a field is typed in; `ArgumentForm::setValue` takes "2.0"
   as a whole number and sets 0; the pipeline builder's Add with "write"
   selected leaves the step form hidden; the binding list's Remove reports a
@@ -2122,6 +2144,10 @@ pin classifies every algorithm GDAL lists.
   backup of the schema-9 file, so the dump's name order put them the other
   way. Both programs name a backup by the time it is made; the cause is not
   found yet.
+- **The command line's log is drawn half its panel's width** in the Rust
+  window (seen on the owner's screen and in a headless screenshot of
+  samples/site_plan, 2026-11-15): its text wraps at about 280 points with
+  the rest of the panel empty. No gate test measures it.
 - **The window gate's last two differences are Qt's own pixel metrics**:
   at 125 % the 3D view's kind switcher's arrow inks rows 11 to 16 where
   the C++ test expects 11 to 17 (its comment: Fusion draws the arrow into
@@ -2133,10 +2159,3 @@ pin classifies every algorithm GDAL lists.
   (its pixmap scaling, its toolbar handle, spacing and size hints), not a
   defect of either program; until then the 125 % test fails and the
   toolbar-fit test passes with other numbers.
-- **One workspace twin fails now and then**:
-  `view_chrome::a_maximised_view_fills_the_workspace_and_restore_gives_every_view_back_its_place`
-  failed in 2 of 6 runs at wave 3's integration, and in 1 of about 4 since ("view 2 is docked": the
-  3D view had no place in the dock) and passed on its own, with the other
-  workspace twins and in the whole run. The harness's clock is simulated,
-  the tests run headless with no GPU, and the dock code keeps no state
-  beyond the test; the cause is not found yet.

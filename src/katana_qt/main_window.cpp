@@ -4247,7 +4247,7 @@ QString importFilter()
     const QString archive = patternsFor(interop::archive12dExtensions());
     const QString zipped = patternsFor(interop::archiveExtensions());
     return "All supported (" + vector + " *.ifc " + archive + ' ' + raster + ' ' + cloud + ' ' +
-           zipped + ");;" + "Vector (" + vector + ");;" + "IFC (*.ifc);;" + "12d Archive (" +
+           zipped + ");;" + "Vector (" + vector + ");;" + "IFC (*.ifc);;" + "Archive (" +
            archive + ");;" + "Raster (" + raster + ");;" + "Point cloud (" + cloud + ");;" +
            "Zipped GIS data (" + zipped + ");;" + "All files (*)";
 }
@@ -4504,7 +4504,7 @@ void MainWindow::exportVectorFile()
         filters << (QString::fromStdString(format.description) + " (*." +
                     QString::fromStdString(format.extension) + ")");
     }
-    filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)" << "IFC 4.3 (*.ifc)";
+    filters << "Archive (*.12da)" << "Archive, zipped (*.12daz)" << "IFC 4.3 (*.ifc)";
     QString chosenFilter;
     QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
                                                     filters.join(";;"), &chosenFilter);

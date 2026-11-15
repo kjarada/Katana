@@ -138,7 +138,7 @@ VectorExportDialog::VectorExportDialog(GisDialogContext context, QWidget* parent
             filters << (QString::fromStdString(format.description) + " (*." +
                         QString::fromStdString(format.extension) + ")");
         }
-        filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)";
+        filters << "Archive (*.12da)" << "Archive, zipped (*.12daz)";
         const QString chosen =
             QFileDialog::getSaveFileName(this, "Export", file_->text(), filters.join(";;"));
         if (!chosen.isEmpty()) {

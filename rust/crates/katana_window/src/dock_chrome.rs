@@ -982,6 +982,17 @@ fn find<Tab: DockTab>(state: &DockState<Tab>, name: &str) -> Option<TabPath> {
     state.find_tab_from(|tab| tab.dock_name() == name)
 }
 
+/// Removes every tab `leaving` takes, one at a time (DockState::remove_tab). Not retain_tabs:
+/// egui_dock 0.21.1's balance after it walks the emptied nodes in a std HashSet's order, random from
+/// one process to the next, and moves a lone sibling's node without its subtree - two leaves
+/// emptied at once could leave a third orphaned, out of the tree (maximising a view beside a split
+/// lost the view it maximised in about one run in three). remove_leaf moves the subtree whole.
+pub fn remove_tabs<Tab: DockTab>(state: &mut DockState<Tab>, leaving: impl Fn(&Tab) -> bool) {
+    while let Some(path) = state.find_tab_from(|tab| leaving(tab)) {
+        let _ = state.remove_tab(path);
+    }
+}
+
 /// The names of the tabs open in `state`.
 fn names<Tab: DockTab>(state: &DockState<Tab>) -> BTreeSet<String> {
     state
@@ -1429,7 +1440,7 @@ impl<Tab: DockTab> DockChrome<Tab> {
                 .iter()
                 .map(|tab| String::from(tab.dock_name()))
                 .collect();
-            state.retain_tabs(|tab| !hiding.contains(tab.dock_name()));
+            remove_tabs(state, |tab| hiding.contains(tab.dock_name()));
             self.maximised.push(Maximised {
                 name: String::from(name),
                 floating: false,
