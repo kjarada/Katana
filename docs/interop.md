@@ -848,8 +848,7 @@ On every surface:
   keeps the coordinates. A headless File > Import opens no file dialog: it
   names the verb.
 - **katana_cli**: `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, the move
-  said by the `placed` record after the `imported` one; the DXF import too,
-  in a build without GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
+  said by the `placed` record after the `imported` one; the DXF import too. Giving katana_cli `LOCAL` alone and leaving the rest for later was
   considered and rejected, because a verb the window types and the CLI does
   not is the gap this work closes.
 - **katana_mcp**: `katana_import` takes `placement` (`keep`, `local`,
@@ -920,8 +919,9 @@ warning text="..."
   part - the sample's spoil heaps, one MultiPolygon, are two.
 - **The DXF records are the same in every build.** The DXF steps live in
   `crates/katana_app/src/dxf_verbs.rs`, split as the executor runs a line (a pure
-  read or write, then the apply), and a build without GDAL runs them back to
-  back through `runDxfVerb`. One DXF import, one DXF export, one reply.
+  read or write, then the apply). One DXF import, one DXF export, one reply.
+  (The C++'s build without GDAL ran them back to back; the Rust app always
+  has GDAL, and that arm was not ported.)
 - **This changed the replies.** `imported 9 entities from parcels.geojson`
   and `  extent 0,0 to 185,165` became the records above; the `cli.*`,
   `session::*`, `geo_session::*` and window checks that read the prose were
@@ -1519,17 +1519,17 @@ what the manual does not say and had to be measured.
 The format is a module of its own, `katana_archive12d`, beside `commands` in
 the layering: it sees `core`, `math`, `geometry`, `terrain` and `entity` and
 nothing else. Reading a 12da needs no third-party library - it is text - and
-keeping it that way means the module builds with `-DKATANA_BUILD_IO=OFF`,
-which is the configuration the sanitizer job runs. A hand-written parser of
-untrusted text is exactly the code that most needs to run under
-AddressSanitizer, and it would have been excluded from that had it lived
-behind GDAL.
+keeping it that way means the crate links no C library, so its hand-written
+parser of untrusted text is plain safe Rust, checked by the compiler. (In the
+C++ the reason was the sanitizer build, which ran without GDAL: a parser of
+untrusted text is the code that most needs AddressSanitizer, and it would
+have been excluded from it behind GDAL.)
 
 Only the ZIP container needs a library. That stays in `katana_gis` behind
 `crates/katana_gis/src/zip_container.rs`, opened through GDAL's `/vsizip/`, and only bytes cross
 the wall. **Rejected:** a small inflate of our own inside `katana_archive12d`,
-which would have made `.12daz` available without GDAL. Nobody needs that - a
-build without GDAL has no importer at all - and it would have been a second
+which would have made `.12daz` available without GDAL. Nobody needs that -
+the programs always have GDAL - and it would have been a second
 implementation of something zlib already does, written by us, on untrusted
 input.
 
@@ -1957,20 +1957,21 @@ handling column is asserted by `crates/katana_archive12d/tests/coverage.rs`.
 
 ### Measured
 
-Release, GCC 16.2, this machine (`docs/building.md`, "Toolchain"): the
+These are the C++ build's figures (Release, GCC 16.2, the owner's machine),
+from its `katana_12da_probe` tool, which went with the C++ tree; the Rust
+reader has not been measured (see "Reading a large 12da archive", below). The
 58 MB Windsor Road export (2 364 super strings with per-vertex attributes,
 1 453 trimeshes, UTF-16) decodes in 0.06 s, reads in 0.14 s and maps in
 0.08 s; the 55 MB `Test 4 with Tin` (7 820 strings and a 233 946-triangle
 full_tin written in hexadecimal floats) reads in 0.13 s and builds its
 229 462-triangle surface in 0.13 s; the 33 MB `Test 4 without tin` (26 683
-elements) reads in 0.12 s. Writing the 55 MB file back takes 0.5 s. All from
-`katana_12da_probe`, which prints them.
+elements) reads in 0.12 s. Writing the 55 MB file back takes 0.5 s.
 
-`katana_12da_probe <file.12da> [--rewrite out.12da]` is the tool for the
-question "did the importer take all of it?": it lists every kind of element
+The probe answered "did the importer take all of it?": every kind of element
 with how many were read and imported, every block the reader has no member
-for, and every warning, and with `--rewrite` checks that the file written back
-reads the same.
+for, and every warning, and with `--rewrite` that the file written back read
+the same. It has no Rust twin yet; in the Rust, `IMPORT` of an archive
+reports what it took and its warnings, and the round trip below is a test.
 
 ### The round trip, measured
 
@@ -1984,9 +1985,9 @@ but **"every reading after the first is identical"**, plus "the first pass
 loses nothing" - every style with its symbol, every layer, every mesh with
 its faces and face colours, every surface's triangles.
 
-`katana_12da_probe <file.12da> --roundtrip` runs the same thing on the large
-archives, which are real project data and are not in the repository. Run over
-the fourteen on 2026-09-22:
+The C++ probe's `--roundtrip` ran the same thing on the large archives,
+which are real project data and are not in the repository. Run over the
+fourteen on 2026-09-22, on the C++ build:
 
 | Archive | Result |
 |---|---|

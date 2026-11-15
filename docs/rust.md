@@ -10,7 +10,11 @@ The C++ program was the product while the port was made, and the oracle the
 port was checked against. The rewrite ran beside it, bottom-up by layer. The
 plan was that no C++ would be deleted until the Rust that replaced it had
 passed its gate and shipped; on 2026-11-15 the owner had it removed once
-every layer had passed its gate ("The C++ is removed", next).
+every layer had passed its gate ("The C++ is removed", next). Katana is Rust
+from then on: on 2026-11-16 the workspace moved from `rust/` to the
+checkout's root ("The workspace"), and the owner asked for the Windows build,
+lifting the ruling that kept the port off Windows; that build is being
+brought up ("Where it stands").
 
 ## The C++ is removed (2026-11-15)
 
@@ -50,9 +54,9 @@ Rust - and the owner's word is the reason.
   below is the C++ build, as it was until 2026-11-15.
 - **Not done, because of the removal:** a Rust-only corpus round trip (read,
   write, read again, over the test data) would be a new test, not a reduction
-  of the deleted one; Rust benchmarks for the C++'s measurements
-  (`docs/performance.md`); and registering the layering check with the test
-  runner again (`docs/architecture.md`, "Layering").
+  of the deleted one; and Rust benchmarks for the C++'s measurements
+  (`docs/performance.md`). The layering check is registered with the test
+  runner again (`rust_layering`, `tests/CMakeLists.txt`).
 
 ## The owner's decisions (2026-11-05)
 
@@ -61,7 +65,7 @@ Rust - and the owner's word is the reason.
 | What the window becomes | Rebuilt in Rust with egui and wgpu | No C++ ever calls Rust, so nothing bridges them that way. Printing becomes a PDF printed by the operating system. |
 | C++ while the port runs | Rust first for new work | C++ takes fixes only. A fix to a layer already ported lands in its Rust twin in the same commit (`rust_parity` refuses it otherwise); a new feature waits for its layer and is then written in Rust alone. |
 | How the work is run | At most four agents at a time, one per crate or slice | Each agent ports one crate or slice in a worktree of its own, and at most four run at once; one integration build and whole-suite run per step. The owner first ruled "parallel agents per crate", and on 2026-11-12 ruled "run 1 agent at a time": step 7's wave 2 had six running at once, the account's limit was spent in minutes and all six stopped mid-file; on 2026-11-14 the owner raised it to two ("change it to 2"), and on 2026-11-15 to four ("spawn 4 agents max"). |
-| Where Rust is built | In WSL only, until the port is a fully working version; then it is tested on Windows | Building, testing and the comparison with the C++ all run in WSL. Nothing is run on Windows meanwhile - and so nothing ships, since Windows is where Katana ships first and where the Windows-only code (the updater's swap, Credential Manager, wide paths) can only be tested. The owner first ruled "WSL every day, Windows at every gate", and narrowed it the same day: "i dont want to run anything on windows at this stage just build for wsl then once we have a fully working version we test on windows". |
+| Where Rust is built | In WSL only, until the port is a fully working version; then it is tested on Windows | Building, testing and the comparison with the C++ all run in WSL. Nothing is run on Windows meanwhile - and so nothing ships, since Windows is where Katana ships first and where the Windows-only code (the updater's swap, Credential Manager, wide paths) can only be tested. The owner first ruled "WSL every day, Windows at every gate", and narrowed it the same day: "i dont want to run anything on windows at this stage just build for wsl then once we have a fully working version we test on windows". On 2026-11-16, with the C++ gone and every gate passed in WSL, the owner asked for the Windows build: the ruling is lifted, and step 8 begins. |
 
 Rejected for the window: keeping the Qt window in C++ over a Rust engine (not
 a port of the whole), Slint (weak for docking and a large custom canvas), and
@@ -90,10 +94,10 @@ answers as the C++ does.
 | 8 | Windows | - | the whole of the above on Windows, natively; the updater applies, rolls back and recovers a real update there |
 | 9 | - | - | a release on the Rust programs, one release cycle, then the C++ is removed |
 
-Nothing ships before step 8: the owner's ruling keeps the port off Windows
-until it works, and Windows is where Katana ships first. The case counts are
-what tools/check_rust_parity.py --list printed on 2026-11-05 (9,236 in all);
-the step's own run is the evidence, not this table.
+Nothing ships before step 8: the owner's ruling kept the port off Windows
+until it worked, and Windows is where Katana ships first. The case counts are
+what the parity check (retired with the C++) listed on 2026-11-05 (9,236 in
+all); the step's own run is the evidence, not this table.
 
 ## Where it stands
 
@@ -102,12 +106,14 @@ the step's own run is the evidence, not this table.
 | 0 | done: the workspace of 23 empty crates, the WSL toolchain, `rust_layering`, `rust_parity`, the visible build's cargo stage and WSL mode, the GDAL spike |
 | 1 | done in WSL: core, math and geometry, all 398 C++ cases twinned, plus core's 11 task-pool cases from the render suite; the Release build, Clippy, numeric oracle and whole suite pass |
 | 2 | done in WSL: geodesy, render, entity, commands, terrain, survey and update, all seven test directories held as ported (2,108 cases, render's 11 task-pool cases among them, twinned in core), and the updater program with its test build, its stand-in for Katana and the end-to-end engine; the end-to-end tests' portable cases pass against the Rust programs on Linux. Its gate's Windows parts - a real update applied, rolled back and recovered there, and the first Rust program shipped - wait for step 8 by the owner's ruling |
-| 3 | in progress, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf and ifc whole and held as ported; surveyio whole; storage, dxf, ifc and surveyio held as ported; archive12d but for the legacy customisation readers (209 of 312; the other 103 wait on the owner's decision); the round-trip gate written and passing in WSL ("Step 3's round-trip gate", below) |
+| 3 | done in WSL, begun beside step 2 because it stands only on step 2's finished layers: storage, dxf, ifc and surveyio whole and held as ported; archive12d but for the legacy customisation readers and the converter (209 of 312 cases), which the owner left unported - the built-in is the committed JSON file and the legacy files were declared no longer needed (2026-11-03; `docs/customisation.md`, "Converting a customisation from the legacy formats") - and which went with the C++; the round-trip gate written and passing in WSL until the C++ it compared with was removed ("Step 3's round-trip gate", below) |
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), tests/cad held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 266 of 267 after its fix-up round, 265 with the C++'s streams (the two left are Qt's own pixel metrics, under Not done) |
-| 8-9 | not started; the C++ removed before them, on the owner's word of 2026-11-15 ("The C++ is removed", above) |
+| 7 | done in WSL: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 266 of 267 after its fix-up round, 265 with the C++'s streams. Of the two pixel metrics left, the 125 % menu arrow was settled by the owner on 2026-11-16 (the exact shape at the device's scale, not Fusion's scaled pixmap; its test expects that); the toolbars' natural widths are under Not done, their test passing |
+| - | the C++ removed on the owner's word of 2026-11-15 ("The C++ is removed", above), before step 8 rather than after step 9's release; the workspace moved to the checkout's root on 2026-11-16 ("The workspace"); the run after both: cargo test 9,172 of 9,172, the test runner 789 of 789, no warnings, in WSL |
+| 8 | under way: the owner asked for the Windows build on 2026-11-16, and it is being brought up natively in MSYS2 UCRT64 ("Windows, once the port works", below); its results are recorded here when it has run. The updater's real update on Windows, Credential Manager and the wide paths are first proven there (Not done) |
+| 9 | not started: no release has been made on the Rust programs yet. The release workflow builds the cargo workspace on every platform (`.github/workflows/release.yml`); step 9's "then the C++ is removed" is spent |
 
 ### Step 1: the foundation crates
 
@@ -364,6 +370,10 @@ ported; cargo test 1,302 passed, none failed, none ignored. No Windows run is
 claimed: the update layer's Windows code is written and not compiled.
 
 ### Step 3's round-trip gate
+
+This section is history: the gate compared the Rust with the C++, and was
+removed with the C++ on 2026-11-15 ("The C++ is removed"). It is kept for what
+it found and how it normalised, in the present tense it was written in.
 
 The gate is a Rust test, crates/katana_app/tests/round_trip.rs, that
 runs both programs on every file of the test data and the samples of the
@@ -1178,7 +1188,8 @@ The fix-up round's main-window share (composition and logging) found:
   log after a typed point missed the DIST tool's answer.
 - **A tool its title bar hides is still the bar's button, hidden**: a press
   of it is refused as hidden, as main.cpp refuses it.
-- **Not done**: the toolbars' natural widths along the top
+- **Not done then** (the arrow since settled, the widths still under Not
+  done): the toolbars' natural widths along the top
   (`--check-toolbar-fit`) are 2 to 22 px off the C++'s, which takes Qt's
   toolbar metrics (handle, item spacing, the widgets' size hints) to match;
   and at 125 % the split buttons' arrow is 10 device pixels wide where
@@ -1228,6 +1239,18 @@ Evidence, 2026-11-15, after the fix-up round: cargo test 9,172 passed and
 before); the window gate 267 tests, 266 passed, 265 with the C++'s
 streams - left, the two pixel metrics under Not done.
 
+After the C++ was removed (2026-11-16): the 125 % menu arrow, one of those
+two, was settled by the owner - the Rust draws the arrow's exact shape at
+the device's scale, rows 11 to 16 by the test's own hand working (11.875 to
+16.875), where Fusion scaled a cached pixmap and inked one more row, and the
+test expects the exact rows, the reason beside it (rejected: imitating the
+scaled pixmap). The command line's log, drawn 280 points wide - egui's
+default for a text box - in a panel of 660, is as wide as its panel, held by
+a test that draws the window and failed without the fix. And the build's
+warnings, all from PDAL's own headers compiled by the shim, went once the
+toolchain's include directory was passed as a system one. The run after:
+cargo test 9,172 of 9,172, the test runner 789 of 789.
+
 **Docks are taken out one at a time, never with egui_dock's
 `retain_tabs`.** The twin of
 `view_chrome::a_maximised_view_fills_the_workspace_and_restore_gives_every_view_back_its_place`
@@ -1257,7 +1280,17 @@ script asserted the old text.
 `tools/check_layering.cmake` in `crates/`, named `katana_<layer>`. Two
 names differ: the qt layer's crate is `katana_window` (the window is not Qt
 in the port), and the helper program `katana_updater` is a crate of the update
-layer, as src/katana_updater is.
+layer, as the C++'s helper program was.
+
+The workspace was made in `rust/`, beside the C++ tree, while both were
+built. On 2026-11-16, the C++ gone, the owner had it moved to the checkout's
+root ("reorganise the folders and files here to suit a Rust professional
+project"): `Cargo.toml`, `Cargo.lock` and `clippy.toml` at the root, the
+crates in `crates/`, cargo's output in `target/` (git-ignored), so cargo
+builds from the checkout with no `--manifest-path`. `docs/`, `samples/`,
+`resources/`, `tests/` (the process tests and their data) and `tools/`
+stayed where they were, where a Rust project keeps them. Every path a crate
+climbed to the root by lost one `..`.
 
 A crate's `katana_*` dependencies are exactly the layers the table allows it,
 all of them, declared now. A crate cannot name a crate it does not depend on,
@@ -1265,11 +1298,12 @@ so the layering rule holds by construction; and with every allowed dependency
 declared up front, an agent porting one crate never edits another's
 dependency list. Unused path dependencies cost nothing.
 `tools/check_rust_layering.py` (the `rust_layering` test) keeps the crates and
-the table in step while both exist: every layer has a crate, no crate depends
+the table in step: every layer has a crate, no crate depends
 on a layer the table does not allow it, and no crate re-exports a third-party
 crate (`pub use`), which would put a third-party type in its public
-interface - the table's second rule. Dev-dependencies are not checked, as
-`tests/` is not in the C++ check.
+interface - the table's second rule. Dev-dependencies are not checked: a
+crate's tests may reach further than the crate, as the C++'s tests were
+outside its layering check.
 
 Edition 2024; `rust-version` 1.98, the older of the two compilers. `unsafe`
 is denied in the workspace's lints and allowed only where a module must be
@@ -1277,8 +1311,9 @@ unsafe - an FFI adapter, an OS call, a SIMD kernel, or the one module that
 hands the task pool's tasks disjoint parts of one buffer
 (`katana_render`'s `disjoint.rs`: tiles of a framebuffer have no safe slice
 form, and every step rests on the pool's contract that each index runs once
-and no range overlaps another) - each saying why. Clippy
-runs with `-D warnings`, as `-Werror` does for the C++.
+and no range overlaps another) - each saying why. Taking `unsafe` out
+altogether is decided and not done (Not done). Clippy runs with
+`-D warnings`, as `-Werror` did for the C++.
 
 ## The toolchains
 
@@ -1319,9 +1354,10 @@ the system's (the release job does the same for CMake's tools).
 The sources stay in the worktree on `D:`, where git and the IDE work. Git is
 never run inside WSL: a worktree made by Windows git names its repository by
 a `D:/` path that Linux cannot open, and nothing in the build calls git. The
-builds are on WSL's own disk, in `~/katana-build/<worktree>/` - the C++ in
-`linux-release/`, cargo's target in `cargo/` - because a build on the
-Windows drive, through `/mnt/d`, is slow.
+builds are on WSL's own disk, in `~/katana-build/<worktree>/` - cargo's
+target in `cargo/`, the test runner's build in `tests/` (the C++'s was
+`linux-release/`) - because a build on the Windows drive, through `/mnt/d`,
+is slow.
 
 Fixture tests that need POSIX modes must recreate their input in a native
 temporary directory too. The first full step-1 run passed the Rust stage
@@ -1330,8 +1366,8 @@ appeared executable on the Windows mount. Its existing temporary-tree helper
 now supplies the same bytes with native modes; the manifest expectations and
 producer are unchanged (`docs/update.md`, "The pieces").
 
-cargo links with the prefix's GCC and its sysroot (glibc 2.28), as CMake
-builds with them, and writes the prefix's `lib/` into each program's run
+cargo links with the prefix's GCC and its sysroot (glibc 2.28), as the C++'s
+CMake build did, and writes the prefix's `lib/` into each program's run
 path, so a test finds GDAL without `LD_LIBRARY_PATH`. `tools/build_visible.sh`
 sets both; a crate that links a C library names the prefix as a search path
 from `KATANA_TOOLCHAIN` (as `crates/katana_gis/build.rs` does).
@@ -1362,31 +1398,37 @@ on `PATH` in a build window, because `/c/msys64/ucrt64/bin` is.
 
 It was installed, and the empty workspace's cargo stage with the GDAL spike
 ran green in it once (2026-11-05), before the owner's ruling kept the port
-off Windows; nothing has been run on Windows since, and nothing will be until
-the port is a fully working version (step 8). The Windows ARM64 release job
-will take `mingw-w64-clang-aarch64-rust` from its CLANGARM64 environment, as
-it takes clang ("Not done", below).
+off Windows; nothing was run on Windows after that until the owner asked for
+the Windows build on 2026-11-16 (step 8), which is being brought up now. Its
+phases are those of a WSL run, without `wsl` (`bash tools/build_visible.sh`,
+`... cargo`, `... test`), in MSYS2 UCRT64, with the log and status file in
+`build/windows/`. The release workflow's Windows jobs build with the same
+Rust: UCRT64's on x86-64, and on ARM64 the CLANGARM64 environment's, built
+for clang and libc++ (`aarch64-pc-windows-gnullvm`), since MSYS2 has no GCC
+for ARM64 (`.github/workflows/release.yml`).
 
 ## Building and testing
 
 Every build goes through `tools/build_visible.sh`, in a window the owner
-watches, and the Rust is part of each run. Until step 8 every run is a `wsl`
-one:
+watches:
 
 ```sh
-bash tools/build_visible.sh wsl        # linux-release, its suite under xvfb-run, clippy, cargo build and test
-bash tools/build_visible.sh wsl cargo  # the Rust workspace alone
-bash tools/build_visible.sh wsl test -R Docs   # ctest's arguments, as on Windows
+bash tools/build_visible.sh wsl              # clippy, cargo build, cargo test, then the test runner's suite under xvfb-run
+bash tools/build_visible.sh wsl cargo        # the workspace alone: clippy, build, test (cargo test's arguments narrow it)
+bash tools/build_visible.sh wsl test -R docs # the test runner's suite only, ctest's arguments
 ```
 
-The same phases without `wsl` are the Windows run, for step 8.
+The same phases without `wsl` are the Windows run (step 8, being brought up).
 
-After the C++ build come clippy and the workspace's build with warnings as
-errors; after ctest, `cargo test`, whose counts the log sums into one line
-(`== cargo test: N passed, M failed, K ignored`). A narrow run - `build` with
-targets, `test` with ctest's arguments - leaves the Rust out, as it leaves the
-rest of the C++ out. A WSL run's window, log and status file are on the
+Clippy and the workspace's build run with warnings as errors; `cargo test`'s
+counts the log sums into one line (`== cargo test: N passed, M failed, K
+ignored`); then the test runner - the CMake project that compiles nothing -
+runs the process-level tests against the programs cargo built
+(`docs/testing.md`). A WSL run's window, log and status file are on the
 Windows side, in `build/wsl/`, and are waited on and read as any other.
+Gone with the C++: the C++ configure and build, and the two gates (`gate`,
+`wgate`) that ran the C++ suite's cli and window tests against the Rust
+programs and compared their replies with the C++ programs' own.
 
 ## Tests are the specification
 
@@ -1398,28 +1440,28 @@ Rust test function `case_name` in a module `suite` - the names in snake case,
 the module usually a `mod` block in a file under the crate's `tests/`. Test
 data stays where the C++ reads it, under `tests/`, and is read from there.
 
-tools/check_rust_parity.py (the `rust_parity` test) holds this. A test
-directory listed as ported in rust/parity.toml must have a twin for every
-case, a case added later by a fix in C++ included, unless the file exempts the
-case with its reason (a misuse that the types now refuse to compile, a reader
-the owner chose not to port); an exemption naming a case that does not exist
-fails too. `--list` prints each directory's count. The Rust is read rather
-than built, stepping over comments, string, raw string and character literals,
-so that a brace inside a test's text cannot move a test into another module.
+While the C++ existed, the parity check (the `rust_parity` test) held this.
+A test directory listed as ported in its table had to have a twin for every
+case, a case added later by a fix in C++ included, unless the table exempted
+the case with its reason (a misuse that the types now refuse to compile, a
+reader the owner chose not to port); an exemption naming a case that did not
+exist failed too. It read the Rust rather than building it, stepping over
+comments, string, raw string and character literals, so that a brace inside a
+test's text could not move a test into another module. It went with the C++
+on 2026-11-15: with no gtest cases left there is nothing to twin. Its naming
+rule lives on in the docs check, which holds a test a document cites to it (`tools/check_docs.py`), and the twins keep their copied expectations.
 
-Both checks are shown to see what they claim, on fixtures in
-`tests/rust_check_fixtures/` that break each rule: a crate depending on a
-layer it may not, one re-exporting `rusqlite`, one that is no layer, a layer
-with no crate, a case with no twin, a stale exemption. One fixture must pass:
-`rust_parity_skips_literals`, whose braces are all inside literals and
-comments. It was checked on 2026-11-05 to fail with each of the four kinds of
-literal not stepped over.
+The layering check is shown to see what it claims, on fixtures in
+`tests/rust_check_fixtures/layering/` that break each rule: a crate depending
+on a layer it may not, one re-exporting a third-party crate, one that is no
+layer, a layer with no crate (the `rust_layering_catches_*` tests).
 
 ## Porting rules
 
 - **Behaviour is ported as it is.** A port that also fixes or redesigns loses
   its oracle. A defect found while porting goes under "Not done" here and is
-  fixed after the gate, in both programs, or in Rust alone after the cut-over.
+  fixed after the gate - now, the C++ gone, in the Rust alone, with a test
+  that justifies the new behaviour from outside the program.
 - **Errors.** One `Error` in `katana_core` with the C++'s code, message and
   context and the same `describe()` text; `Result<T>` is
   `std::result::Result<T, Error>` and a status is `Result<()>`. The C++'s
@@ -1452,8 +1494,9 @@ literal not stepped over.
 
 ## Third-party libraries
 
-Each stays confined to one crate, as each is to one module in C++, and is the
-version the C++ build links, from the same toolchain.
+Each stays confined to one crate, as each was to one module in C++, and is
+the version the C++ build linked, from the same toolchain. The table keeps
+the C++ column for the record of what each replaced.
 
 | C++ | Rust | Crate |
 |---|---|---|
@@ -1461,7 +1504,7 @@ version the C++ build links, from the same toolchain.
 | SQLite | hand-written declarations of the 28 functions used, on the same libsqlite3, every pragma kept | storage |
 | Eigen (rank-revealing QR, Cholesky) | nalgebra for the dense storage and the Cholesky factor; the column-pivoted QR is the port's own, Eigen 3.4's algorithm step for step | survey |
 | PROJ | hand-written declarations of the 57 functions used, on the same libproj | geodesy |
-| CGAL (one 385-line file) | spade, if the terrain tests pass unchanged; otherwise that file stays as a C++ shim | terrain |
+| CGAL (one 385-line file) | spade; the C++ shim held in reserve was not needed (the only C++ left is the three shims of gis and pointcloud) | terrain |
 | GDAL, including its algorithm framework | hand-written declarations of the C functions used, each checked by the C compiler against GDAL's headers; a C++ shim of thirteen calls where the C algorithm API has gaps or differs | gis, pointcloud |
 | PDAL (C++ only) | a thin C++ shim of its primitives behind a C ABI, the adapter's logic in Rust | pointcloud |
 | libcurl, the handle GDAL configures | hand-written declarations on the libcurl GDAL loads; a one-call shim for GDAL's C++-only option setter | gis |
@@ -1540,8 +1583,8 @@ in porting:
 
 ## The GDAL algorithm spike
 
-The C++ runs GDAL's algorithm framework through its C++ API
-(src/katana_io/geo/processing.cpp), which no Rust binding wraps; it was
+The C++ ran GDAL's algorithm framework through its C++ API (its geo
+processing module), which no Rust binding wraps; it was
 the one part of the port with no known route. GDAL 3.13 exposes the same
 framework in C (`gdalalgorithm_c.h`). A test of the gis crate ran `gdal
 raster info` on the geo suite's `tests/geo/data/plane.asc` through that
@@ -1562,15 +1605,22 @@ pin classifies every algorithm GDAL lists.
 
 ## Not done
 
-- **No release job builds the Rust yet.** Nothing of the Rust workspace ships before
-  step 8, and a change to `.github/workflows/release.yml` can only be proven
-  by a release run; the cargo steps are added then, when that run is part of
-  the gate anyway. The ARM64 job's Rust (CLANGARM64) and the macOS job's (the
-  conda-forge snapshot) come with them.
-- **Nothing of the port has been tested on Windows** beyond the one cargo
-  stage of the empty workspace: the owner's ruling (above). Step 8 is where
-  the Windows-only code - the updater's swap, Credential Manager, wide paths -
-  is first proven.
+With the C++ removed, "in both programs" and "after the gate" below mean the
+Rust alone, now; a "differs from the C++" entry records what changed at the
+port, for a person who knew the C++ program, and is open only where it says
+what it would take.
+
+- **The release workflow's Rust has not run.** `.github/workflows/release.yml`
+  builds the cargo workspace, runs cargo's tests and the test runner's, and
+  packages the programs on every platform (the ARM64 Windows job with
+  CLANGARM64's Rust), but a change to it is proven only by a release run, and
+  no release has been made on the Rust programs yet (step 9).
+- **The Windows build is being brought up** (step 8, asked for by the owner
+  on 2026-11-16); before it, nothing of the port had run on Windows beyond
+  the one cargo stage of the empty workspace. It is where the Windows-only
+  code - the updater's swap, Credential Manager, wide paths, the 27 update
+  verbs' Windows cases - is first compiled and proven. Its results go in
+  "Where it stands" when it has run.
 - **ARM NEON execution waits for an ARM host.** The current WSL gate runs
   x86-64 and proves AVX2/scalar equivalence; NEON source has not been compiled
   or run in this gate.
@@ -1581,13 +1631,13 @@ pin classifies every algorithm GDAL lists.
   multiplication wrapping. Degenerate closed paths can retain too few
   vertices; extreme splat radii overflow C++ signed arithmetic. Ratio
   reduction has undefined zero/zero and minimum-integer inputs in C++,
-  where the Rust port panics. These need separately justified fixes after
-  the gate, in both implementations. The alignment prose also contradicts
+  where the Rust port panics. These need separately justified fixes in the
+  Rust. The alignment prose also contradicts
   the implementation's acceptance of negative radius magnitudes.
 - **The WSL distribution has no user of the owner's.** The builds run as root
   there; nothing depends on it.
-- **Defects found in porting step 2, ported as they are** (fix after the gate,
-  in both programs):
+- **Defects found in porting step 2, ported as they are** (to fix in the
+  Rust):
   - geodesy: `proj_info()` and `proj_context_create()` run unguarded in
     `projRuntimeInfo` and `ProjContext::create`'s fallback, though PROJ's
     default context is filled lazily and copied without its lock (the Rust
@@ -1654,43 +1704,39 @@ pin classifies every algorithm GDAL lists.
     not compiled, until step 8; so is every NEON kernel.
   - A record's I/O failure in the update layer gives Rust's error text; OpenSSL's initialisation and allocation failures have
     no counterpart.
-- **Decisions waiting on the owner** (step 3):
-  - archive12d's legacy customisation readers and writers
-    (src/katana_archive12d/legacy/, the retired style library and survey
-    code file formats, and `katana_customisation_convert`): ported, or
-    exempt? Their 103 cases are neither twinned nor exempt, so
-    `tests/archive12d` is not yet held as ported.
-  - A project whose text is not UTF-8: the C++ loads the bytes; the Rust
+- **Decisions waiting on the owner** (step 3; the legacy customisation
+  readers, the first of them, were left unported and went with the C++ -
+  "Where it stands"):
+  - A project whose text is not UTF-8: the C++ loaded the bytes; the Rust
     refuses to load it, naming the table and column. Decoding such text as
     Windows-1252, as cad already repairs surface names, would keep such
-    projects openable. To be settled before storage is cut over.
+    projects openable. To be settled before a release on the Rust, since a
+    project saved by the C++ program may hold such text.
   - The naming rule in the archive layer: the fallback layer name, which is
     the vendor's name and which a C++ test asserts; four C++ test names
     holding that name (copied into their Rust twins by the parity rule; the
     fourth, a zip-container case found in step 5, spells it out); and
     the source an archive import gives a surface, the vendor's name before
     "archive <file>" (written by the C++ app and interop layers, and by
-    the Rust IMPORT as they write it, since it is saved with the project).
-- **Decisions waiting on the owner** (step 7), none needed before step 8:
+    the Rust IMPORT as they wrote it, since it is saved with the project).
+- **Decisions waiting on the owner** (step 7), wanted now that step 8 is
+  under way:
   - The window's fonts: egui's embedded UI fonts (Ubuntu-Light, Hack, Noto
     Emoji) are data under the SIL Open Font Licence 1.1 and the Ubuntu Font
     Licence 1.0. Does the rule that a crate be GPL-3.0-compatible apply to
     embedded font data, and which font should the window carry? The work
     goes on with egui's defaults, recorded in THIRD_PARTY_NOTICES.md.
-  - A person's Qt settings at the cut-over: the Rust window cannot read
-    `QSettings` (the registry on Windows), so the online data keys, recent
-    scripts, start-up and toolbar choices, the project folder and the
-    layout are lost unless migrated at step 8 or 9.
+  - A person's settings from the C++ window: the Rust window keeps its
+    settings in a JSON file of its own (`settings.json` in the user's
+    configuration folder, `crates/katana_window/src/host/user_settings.rs`)
+    and does not read the C++ window's (the registry on Windows), so the
+    online data keys, recent scripts, start-up and toolbar choices, the
+    project folder and the layout are lost on the first Rust release unless
+    migrated at step 8 or 9.
   - Views floating onto another screen: egui_dock floats a view inside
     the main window, where the C++'s can leave it.
   - A `rust_notices` check that every crate of the lock is listed in
     THIRD_PARTY_NOTICES.md with its version.
-- **Step 3's round-trip gate must normalise line ends in stored SQL.** The
-  WSL build reads this Windows checkout, where `core.autocrlf` gives the
-  C++ sources CRLF, so the C++ built there stores CRLF in the CREATE
-  statements of `sqlite_master`; the Rust stores LF, as the committed source
-  does. (Whether the Windows-built program stores CRLF too is to be
-  checked.)
 - **What is still written more than once in the port**: the civil date
   and UTC timestamp, which now have a home in `katana_core::civil_date` but
   whose private copies remain (core's log, storage, ifc, surveyio's RINEX,
@@ -1931,19 +1977,6 @@ pin classifies every algorithm GDAL lists.
   app layer's SURVEY verbs; the drive harness's headless runner and the
   foundation's harness both run frames until the window is idle; and the
   roads dialogs keep the C++'s two refusals of a missing command line.
-- **The foundation's gaps found by wave 1**, to settle before wave 2: the
-  host lends its interpreter only to read, where running a line needs it
-  to write; a workbench's dialog that runs a line reaches back into the
-  workbench drawing it; a menu item draws no icon cell, and a submenu has
-  no icon or status tip; an action has no tooltip of its own; a text field
-  has no placeholder; a path cannot be transformed; a colour has no lighter
-  or darker; a rectangle has no intersection test; font metrics have no
-  cap height; an image keeps no dots per metre; the clipboard carries only
-  text and images; a radio button has no mnemonic; and an act taken in a
-  pass egui throws away is spent where the icons' controls carry it over.
-  Two roads twins were shortened until wave 1 joined: the road object icons
-  are checked by name, not by their ink, and the command reference's road
-  object verbs by their help, not by its sections.
 - **Where step 7's wave 1 differs from the C++:** a curve's stroke is
   offset by tiny-skia's stroker, which follows a circle more closely than
   Qt's, so an edge pixel can differ by a shade; the viewport clipboard
@@ -2001,12 +2034,14 @@ pin classifies every algorithm GDAL lists.
   stable where `std::sort` is not, which changes nothing the hull reads;
   MOSAIC's temporary name takes the system clock's nanoseconds, and a
   rounding to an integer saturates past range where the C++ is undefined.
-- **One run of the round-trip gate, under the suite's load, found one
-  project's two backups the other way round** in the Rust (the schema-13
-  one first, the schema-9 one 0.75 s after the save). Six runs of both
-  programs alone, and the gate's later runs, gave the C++'s order; the
-  storage writes its backups on one thread through SQLite's own backup.
-  Not explained; to be watched.
+- **A migrated project's two backups were twice found the other way round**
+  in the Rust under the whole suite's load (the schema-13 one named first,
+  the schema-9 one 0.75 s, and in wave 4's run 6 s, after it), by the
+  round-trip gate and the corpus round trip; runs alone gave the C++'s
+  order. Both programs name a backup by the time it is made, and the storage
+  writes its backups on one thread through SQLite's own backup. Not
+  explained; the tests that saw it went with the C++, so a Rust-only test of
+  a migration's backup order would be needed to watch it.
 - **Where step 5's Rust differs**: text from GDAL and PDAL is decoded
   lossily; a point with a NaN coordinate is empty where the C++
   constructor may make it not; a temporary name's suffix comes from the
@@ -2022,25 +2057,20 @@ pin classifies every algorithm GDAL lists.
   form for a number past 64 characters; the cache's pruning walks its
   folder by a simpler route, which its porter judged to remove the same
   files.
-- **Before step 8, for the updater:** Rust's standard library imports
+- **For the updater on Windows (step 8):** Rust's standard library imports
   `bcryptprimitives.dll` on Windows (its random numbers), which the import
   checks' allowed lists (`tests/update/check_updater_imports.cmake`) must
   take, with that reason; the control case that expects a test program to
   import a toolchain DLL may need another program; whether the test key's
   text survives optimisation in the Rust test programs, which the
-  test-key check relies on, is unverified; `tools/check_install_rules.cmake`
-  must refuse the Rust test programs by name once a Rust program is
-  packaged; the Windows tests' console probes declare two kernel32
+  test-key check relies on, is unverified; the Windows tests' console probes declare two kernel32
   functions by hand where a windows-sys feature would do.
-- **The two programs reading each other's plan, journal and records** is
-  not tested directly yet: both pass the same tests on the same formats,
-  and the records are written to nlohmann's text, but no case has the C++
-  engine stage what the Rust helper swaps, or the reverse. The first is
-  part of step 8's real update on Windows.
-- **The round-trip gate does not scan `tests/data`** (the customisations,
-  a survey file and a terrain grid shared by several suites): its table
-  is checked against each suite's own data folder, as it was first
-  written.
+- **The C++ updater and the Rust reading each other's plan, journal and
+  records** was never tested directly: both passed the same tests on the
+  same formats, and the records are written to nlohmann's text, but no case
+  had the C++ engine stage what the Rust helper swaps. It matters once
+  more: an installed C++ release (0.3.0 and before) applies the first Rust
+  release with its own engine. Part of step 8's real update on Windows.
 - **A GPU hardware test that loses its display aborts** instead of
   skipping, as it skips without a device. The cause of the aborts seen in
   WSL was the cases' `xvfb-run -a` launchers racing for one display, now
@@ -2049,20 +2079,15 @@ pin classifies every algorithm GDAL lists.
 - **nlohmann widens its indent string once**, so an indent over 1,024
   characters reads past it in C++ (undefined); `katana_core::json` widens it
   until it fits, the same text wherever the C++ is defined.
-- **A non-default `-DKATANA_UPDATE_REPO` or `-DKATANA_UPDATE_FEED` does not
-  reach the Rust yet.** Its `build.rs` reads the defaults from
-  src/katana_update/CMakeLists.txt and would take environment variables of
-  the same names, but nothing sets them; the cargo stage of
-  `tools/build_visible.sh` and the release jobs must pass them when a build
-  that is not the default is made.
-- **A non-default built-in customisation does not reach the Rust yet.**
-  cad's `build.rs` reads the default and the alternates from
-  src/katana_cad/CMakeLists.txt; the alternates could come from a
-  `KATANA_ALTERNATE_CUSTOMISATIONS` that the cargo stage and the release jobs
-  pass, but the default cannot come in under its CMake name, which is also
-  the run-time setting that chooses a built-in. It wants a build-time
-  variable of another name, decided when a build that is not the default is
-  made.
+- **A non-default built-in customisation cannot be built in yet.** cad's
+  `build.rs` holds the default (the C++ build's, from its CMake file, gone
+  with it) and takes the alternates from `KATANA_ALTERNATE_CUSTOMISATIONS`
+  in cargo's environment, but the default cannot come in under its old
+  CMake name, `KATANA_BUILTIN_CUSTOMISATION`, which is also the run-time
+  setting that chooses a built-in. It wants a build-time variable of another
+  name, decided when a build that is not the default is made. (The update
+  repository and feed do come from cargo's environment, `KATANA_UPDATE_REPO`
+  and `KATANA_UPDATE_FEED`, which the release workflow sets.)
 - **Defects found in porting step 7's wave 2, ported as they are:** the
   vertex panel's Insert After computes `segmentCount() - 1` unsigned (a
   polyline with no segments wraps; the Rust refuses the row); the plan
@@ -2180,17 +2205,6 @@ pin classifies every algorithm GDAL lists.
     (`LayerManagerDialog::set_object_name`,
     `StyleManagerDialog::set_object_name`); a manager made on its own keeps
     `layerManager` and `styleManager`, which its twins drive it by.
-- **The corpus round trip failed once under the whole suite's load**
-  (every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust,
-  wave 4's run) and passed on its own: the schema-9 project's backups
-  differed, the Rust side's backup of the migrated file named 6 s before its
-  backup of the schema-9 file, so the dump's name order put them the other
-  way. Both programs name a backup by the time it is made; the cause is not
-  found yet.
-- **The command line's log is drawn half its panel's width** in the Rust
-  window (seen on the owner's screen and in a headless screenshot of
-  samples/site_plan, 2026-11-15): its text wraps at about 280 points with
-  the rest of the panel empty. No gate test measures it.
 - **Removing `unsafe` is decided but not done.** The owner asked for it on
   2026-11-16 and settled how: GDAL's algorithm framework and PDAL keep one
   small boundary each (their shims have no safe binding); safe crates
@@ -2203,11 +2217,9 @@ pin classifies every algorithm GDAL lists.
   in katana_gis (about 480), katana_update (about 175), katana_core (about
   95) and katana_geodesy (about 70).
 - **The toolbars' natural widths along the top are 2 to 22 points off the
-  C++'s** (`--check-toolbar-fit`; the test passes, its rows still fit).
-  Matching them is laying out as Qt did (its toolbar handle, spacing and
-  size hints). The 125 % menu arrows, the other pixel difference the
-  window gate showed, were settled by the owner on 2026-11-16: the Rust
-  draws the arrow's exact shape at the device's scale, rows 11 to 16 by the
-  test's own hand working (11.875 to 16.875), where Fusion scaled a cached
-  pixmap and inked one more row; the test now expects the exact rows, the
-  reason beside it.
+  C++'s** (`--check-toolbar-fit`; the test passes, its rows still fit), the
+  last difference the window gate showed. Matching them is laying out as Qt
+  did (its toolbar handle, spacing and size hints); with the C++ gone, only
+  the owner's eye on the Rust window can say whether that is wanted. The
+  125 % menu arrows, the other, were settled on 2026-11-16 (step 7's
+  record, above).

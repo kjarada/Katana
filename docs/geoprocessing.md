@@ -1750,8 +1750,8 @@ packages build on:
   `katana_import` and `katana_export` hand them to an agent, and D1's and
   D2's tools can.
 - **`import_records.rs`** and **`dxf_verbs.rs`** in `crates/katana_app`: the
-  records and the DXF steps every build shares, so a build without GDAL
-  replies in the same records.
+  records and the DXF steps, so a DXF file and a GIS file reply in the same
+  records.
 - The session's store came to hold a 12d archive's surfaces; since
   2026-10-15 they are the drawing's (`docs/terrain.md`, "Surfaces in the
   drawing").

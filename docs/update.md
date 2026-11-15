@@ -423,16 +423,18 @@ ships has an ASCII name, and the producer refuses one that does not.
 ## Signing and trust
 
 **The scheme.** Ed25519 (RFC 8032) over the manifest's exact bytes, verified
-in the process by OpenSSL's EVP interface, never by running a program
-(`crates/katana_update/src/signature.rs`). The signature file is one line,
+in the process by ed25519-dalek's strict verification, never by running a
+program (`crates/katana_update/src/signature.rs`; the C++ verified with
+OpenSSL's EVP interface, and the port kept every check it made). The signature file is one line,
 `ed25519 <key id> <base64>`; the key id is the first 16 hexadecimal digits of
 the public key.
 
 **Two keys are pinned** at build time in `cmake/KatanaUpdateKeys.cmake`: the
 ACTIVE key, whose private half signs releases, and a SPARE, which stays
 offline. Either verifies. The keys reach one source file,
-`crates/katana_update/src/trust.rs`, as compile definitions and nothing else can
-read them.
+`crates/katana_update/src/trust.rs`, as compile-time values that the crate's
+build script (`crates/katana_update/build.rs`) reads from
+`cmake/KatanaUpdateKeys.cmake`, and nothing else can read them.
 
 **The gate** is one function, `katana_update::trust::verify_manifest`
 (`crates/katana_update/src/trust.rs`), and nothing that reads a network answer
@@ -463,26 +465,32 @@ variable, file or switch at run time changes whose signature counts, and the
 test `update_test_keys_are_in_no_shipped_program` reads the bytes of the four
 programs to see that no test key is in them.
 
-**Nothing in the environment changes what "verified" means.** The helper's
-first act is `katana_update::signature::harden_open_ssl_environment`: `OPENSSL_CONF`,
-`OPENSSL_MODULES` and `OPENSSL_ENGINES` are removed from its process and
-libcrypto is started without a configuration file
+**Nothing in the environment changes what "verified" means.** The Rust
+verifier reads no file and loads no code, so there is no OpenSSL
+configuration to subvert; the helper's first act still removes
+`OPENSSL_CONF`, `OPENSSL_MODULES` and `OPENSSL_ENGINES` from its process
+(`katana_update::signature::harden_open_ssl_environment`, the C++'s guard
+kept for the programs it starts), and its self-test passes under hostile
+values of all three
 (`helper_program::the_self_test_passes_under_a_hostile_open_ssl_conf_modules_or_engines_and_says_what_it_removed`).
 It lends the person's own values back to the programs it starts.
 
-**What the verifier refuses beyond OpenSSL.** Measured while the signature
-code was written: OpenSSL 3.6.5 answered "valid" for an all-zero public key
-and an all-zero signature on a one-byte message, because that key is a point
-of small order. So a signature whose S is not below the group order, and a
-public key that is not a canonical point of the prime-order subgroup, are
-refused before OpenSSL is asked for its verdict.
+**What the verifier refuses beyond the equation.** Measured while the C++
+signature code was written: OpenSSL 3.6.5 answered "valid" for an all-zero
+public key and an all-zero signature on a one-byte message, because that key
+is a point of small order. So a signature whose S is not below the group
+order, and a public key that is not a canonical point of the prime-order
+subgroup, are refused before the library is asked for its verdict - checked
+in Katana's own code, with curve25519-dalek, so that the rule does not
+depend on which library a build links.
 
 **Placeholders.** Until the owner's key steps (2026-10-14) the pinned keys were
 32 bytes that spelled `PLACEHOLDER-...` in ASCII and are the encoding of no
 curve point, so no private key matched them. A build with placeholders
 refuses every release - it cannot be updated, and it cannot be forged for -
-and `KATANA_REQUIRE_UPDATE_KEYS=ON`, which every job of the release workflow
-passes, makes the configure fail while they are in place. A release can
+and `KATANA_REQUIRE_UPDATE_KEYS=ON` in cargo's environment, which every job
+of the release workflow sets, makes the build fail while they are in place
+(`crates/katana_update/build.rs`). A release can
 never ship with them.
 
 **Rotation.** Ship a build that pins a new spare beside the active key. If
@@ -580,7 +588,7 @@ web server does, and Settings > Updates says so.
 | `current` | the feed's release is not above it | `skipped` when it is, and the person skipped that version |
 | `blocked` | this very release was installed here, did not start and was put back | `blocked_before`, with a `detail=` that says the way back: "this release was installed here before, did not start and was put back, so it is not offered; UPDATE BLOCKED CLEAR (Settings > Updates in the window) offers it again" |
 | `unreachable` | the feed could not be read, or did not verify | `offline`, `http_404`, `http_403`, `http_429`, `http_<n>`, `html_page` (a sign-in page where the file should be), `bad_redirect` (a redirect to an address that cannot be used: none, or one that is not https), `too_many_redirects` (a sixth), `too_large`, `bad_signature`, `untrusted_key`, `placeholder_keys`, `malformed`, `wrong_product`, `wrong_target`, `wrong_channel`, `verify_unavailable`, `asset_missing`, `cancelled`, `no_transport`, and `error` for a failure the transport gave no token of its own |
-| `unsupported` | this copy cannot update | `development_tree`, `disabled_build`, `install_record`, `no_network` (a build without the HTTP stack, `-DKATANA_BUILD_IO=OFF`) |
+| `unsupported` | this copy cannot update | `development_tree`, `disabled_build`, `install_record`; `no_network` (a build without the HTTP stack) was the C++'s, whose build could leave GDAL out - the Rust always has it, so its own transport never gives the token (a fetch that does is still reported so) |
 
 A fresh install is not offered the release it came from: with no record of
 an update beside it, it counts as the release it was made from, and only a
@@ -1478,8 +1486,8 @@ the update system can hold (`crates/katana_update/src/credential.rs`).
 
 | Target | Gets | Why |
 |---|---|---|
-| Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.rs`, `spawn_win.rs` in `crates/katana_update/src/`; `process_scan_win.rs`, `registry_win.rs` in `crates/katana_updater/src/`) |
-| Windows on ARM64 | the same code | it was written on a machine with no ARM64 toolchain. The release workflow's ARM64 job built it and ran the helper's `--selftest` and `UPDATE STATUS` of the installed copy (run 38580778852: `selftest=ok`, `kind=installer`); no update has been applied there ("To verify on first release") |
+| Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.rs`, `spawn_win.rs` in `crates/katana_update/src/`; `process_scan_win.rs`, `registry_win.rs` in `crates/katana_updater/src/`); in the Rust they are written and not yet compiled or run on Windows ("Not done") |
+| Windows on ARM64 | the same code | it was written on a machine with no ARM64 toolchain. The release workflow's ARM64 job built the C++ update system and ran the helper's `--selftest` and `UPDATE STATUS` of the installed copy (run 38580778852: `selftest=ok`, `kind=installer`); the Rust's has not been built there yet, and no update has been applied there ("To verify on first release") |
 | Linux x86-64, aarch64 | check and notify: `UPDATE CHECK` and `UPDATE STATUS` work, and the dialog says "This copy cannot update itself: the release notes say where to download it." | the apply's file system and launcher are not written for Linux (`crates/katana_update/src/fsops_posix.rs`, `spawn_posix.rs`: every operation is one refusal). `UPDATE DOWNLOAD` and `UPDATE APPLY` are refused, `reason=platform`, before a request is sent; the helper, which the package carries, refuses a swap and a recovery the same way (exit 13) and writes nothing. The manifests and update zips are published all the same |
 | macOS on Apple silicon | check and notify, from a notify-only manifest: `update=available reason=notify_only` | a file changed inside `Katana.app` breaks the seal of the bundle, so nothing is ever replaced there: the package holds no helper, and the refusal stands for good, whatever is later written for Linux |
 
@@ -1600,9 +1608,11 @@ And the engineering decisions, each with what was rejected:
   mutable `feed` tag*, which can disagree with a release, *and the REST API*
   as the ordinary route: 60 requests an hour for each network address
   without a token.
-- **OpenSSL's EVP for Ed25519**, which the toolchain already carries.
-  *Rejected: Monocypher* (a new library to vendor) *and libsodium* (a new
-  DLL).
+- **ed25519-dalek and curve25519-dalek for Ed25519** in the Rust: pure Rust,
+  so no C library or DLL to load, with the strict verification RFC 8032
+  asks for. The C++ chose OpenSSL's EVP, which its toolchain already carried
+  (*rejected then: Monocypher*, a new library to vendor, *and libsodium*, a
+  new DLL); the port replaced it (`docs/rust.md`, "Third-party libraries").
 - **The helper runs from a copy in U.** *Rejected: running it in place*,
   which would rest on renaming the image of a running program, for which
   the design found only informal evidence.
@@ -1714,6 +1724,15 @@ whatever more the manifest's parser allows (4 GiB).
 
 ## Not done
 
+- **The Rust update system has not run on Windows.** It was ported in WSL,
+  where the Windows-only code - the file operations and launcher, the
+  process scan, the registry, Credential Manager, the long path forms - and
+  the update verbs' Windows cases are written but not compiled. The Windows
+  build the owner asked for on 2026-11-16 is being brought up, and it is
+  where they are first compiled and run; a real update applied, rolled back
+  and recovered there is part of it (`docs/rust.md`, "Where it stands", step
+  8). Everything this document says was seen on Windows was seen with the
+  C++ programs.
 - **Linux does not install an update** (the design's task T18): the apply's
   file system (`rename(2)`, `fsync` of the directory, `flock`), its launcher
   and the scan of `/proc` are not written. Open with it: a Linux helper

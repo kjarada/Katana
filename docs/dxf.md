@@ -233,9 +233,11 @@ drawn.
 
 ## Measured
 
-Measured on 2026-09-24, on a laptop shared with other work and on battery:
-the claim is the ratios and the counts, and the seconds are what they were
-that afternoon.
+Every figure in this section is the C++ build's, measured on 2026-09-24 on
+a laptop shared with other work and on battery: the claim is the ratios and
+the counts, and the seconds are what they were that afternoon. The Rust
+module is a port of that one, and has not been measured yet: a benchmark
+beside `katana_dxf` would be the place, and none is written.
 
 ### The committed benchmark
 
@@ -266,8 +268,8 @@ median, either copy) and the native reader 7.5-9.1 times. GDAL is not run at
 
 'Test 4 without tin' - 27 886 entities read from its .12da archive (14 089
 points, 9 980 3D strings, 1 885 lines, 1 518 texts, 414 plan polylines on 13
-layers) - through `katana_cli`: this branch's Release build for the native
-module, main's Release build for GDAL, three rounds alternating between them,
+layers) - through the C++ `katana_cli`: that branch's Release build for the native
+module, main's Release build then for GDAL, three rounds alternating between them,
 twice. The export is `IMPORT` of the archive and `EXPORT` less the `IMPORT`
 alone; the import is `IMPORT` of the file less the start-up.
 
@@ -299,5 +301,5 @@ independent DXF library, and GDAL's driver reads all 27 886 of its entities.
   `import_command.rs`, `robustness.rs`: `cargo test -p katana_dxf`.
 - `cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer`:
   the command line both ways.
-- the C++ build's `bench_dxf` benchmark measured native against GDAL, write
-  and read; it went with the C++ tree and has no Rust twin yet.
+- no benchmark: the C++ build's, which measured native against GDAL, write
+  and read, went with the C++ tree and has no Rust twin yet.

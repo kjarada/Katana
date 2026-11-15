@@ -401,7 +401,7 @@ the viewport cull and validation for free.
 | `export.rs` | the export's match |
 | `command_interpreter.rs` | `describe`'s `Detail` visitor |
 | `plan_painter.rs` | `draw_geometry`'s visitor (it moved there from `viewport_widget.rs`) |
-| the window's entity description (the C++ `main_window.cpp`'s describeGeometry) | where it is in the Rust window was not re-traced after the port |
+| `crates/katana_window/src/property_panel.rs` | `geometry_rows`, the Properties panel's description of an entity (the C++ window's describeGeometry) |
 | `anchor.rs` | `resolve_anchor`, which points of a kind a dimension or leader can follow |
 | `modify_transform.rs` | the Stretch tool's `Stretcher` |
 | `crates/katana_dxf/src/reader.rs` | `translate` and `place_geometry` (a block's contents under its insert) |
@@ -426,7 +426,7 @@ to each chain, so a kind taught to `curve_pieces` reaches all of them.
 | `snapping.rs` `append_curves` | an `if let` chain. A curve-like kind contributes no curves, so Intersection and Nearest snap stop working for it — no error, the cursor just will not snap. |
 | `spatial_query.rs` `query_extents` | special-cases `Arc2` because an arc's centre lies outside its bounding box. A kind with any snap point outside its bbox is rejected by the broad phase — and because that is index-dependent, it can work on a small drawing and fail as the drawing grows, looking like a performance flake. |
 | `section.rs` (the crossings) | a curve-like kind produces no section crossings. **The section comes out missing features and looks complete** — a wrong answer in a signed deliverable. |
-| Surface From Drawing (the C++ `main_window.cpp`'s buildSurfaceFromDrawing; where the Rust window does it was not re-traced) | a kind carrying surveyed vertices contributes nothing, and the TIN comes out missing a breakline while looking plausible. |
+| `crates/katana_cad/src/geo/surface_input.rs` `surface_input` (Surface From Drawing and `SURFACE FROM DRAWING`) | its `_ =>` arm counts any other kind as skipped, so a kind carrying surveyed vertices contributes nothing, and the TIN comes out missing a breakline while looking plausible. |
 | `editing.rs` `Curve2` | a second enum. A curve-like kind almost certainly belongs here too. |
 | `entity_commands.rs` | `as_curve`, `edge_curves`, `as_segment` decide what is trimmable, offsettable and filletable. |
 | `import.rs` | maps `katana_gis::gdal_adapter::GeometryKind` inwards; only Point/LineString/Polygon exist there. |

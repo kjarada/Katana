@@ -158,42 +158,43 @@ column and producing an empty drawing.
 
 ### One trap found on the way
 
-`std::string_view{}` has a **null** `data()`, and SQLite binds a null pointer as
-SQL NULL rather than as empty text. Writing the legacy column as
-`std::string_view{}` therefore violated its `NOT NULL` constraint. The fix is in
-the wrapper rather than at the call site: `SqliteStatement::bind` now
-substitutes a pointer to an empty string, so no future caller can mean "empty"
-and silently get NULL.
+In the C++, an empty `std::string_view` has a **null** `data()`, and SQLite
+binds a null pointer as SQL NULL rather than as empty text, so writing the
+legacy column empty violated its `NOT NULL` constraint. The fix went in the
+wrapper rather than at the call site, and the Rust keeps it there for the
+same trap in another form - an empty slice's pointer dangles:
+`SqliteStatement::bind` binds empty text from a real empty string, so no
+caller can mean "empty" and silently get NULL.
 
 ## What is still open
 
-SQLite now accounts for the majority of what remains (195 ms for 50 000
-entities). Before reopening the engine question, note that the remaining time
+SQLite accounted for the majority of what remained in the C++ build (195 ms
+for 50 000 entities; the Rust store is a port of it, over the same SQLite, and
+has not been measured). Before reopening the engine question, note that the remaining time
 includes `apply_to_model` — validating and inserting every entity into the model —
 which no database change would touch. Measure that split first.
 
 ## Reproducing
 
-```sh
-cmake --build build/release --target katana_benchmarks
-./build/release/bin/benchmarks/katana_benchmarks.exe \
-    --benchmark_filter="ProjectSave|ProjectOpen|GeometryJson" --benchmark_min_time=0.3s
-```
-
-Re-run this before changing anything in this document. A decision recorded
-without its measurement is an opinion.
+Every figure in this document is the C++ build's, from its storage benchmark
+(`ProjectSave`, `ProjectOpen` and `GeometryJson`), which went with the C++
+tree on 2026-11-15. There is no Rust benchmark yet: before changing anything
+in this document, write one beside `katana_storage` that measures the same
+three on the same 50 000-entity model, and measure the Rust first. A decision
+recorded without its measurement is an opinion.
 
 ## Loading a project without copying it twice
 
-Opening a 50 000-entity project allocated 1.38 million times, and 287 563 of
+Opening a 50 000-entity project in the C++ build allocated 1.38 million
+times, and 287 563 of
 those - 22.6% - were `apply_to_model` duplicating every `Entity` on its way from
 the loaded `ProjectContents` into the model. The contents are thrown away on the
 next line.
 
-`apply_to_model` therefore has two overloads, a copying one and a consuming one,
-sharing a single templated body so that the insertion order and the built-in
-name rules cannot drift apart between them. `Document::open` uses the consuming
-one, taking the metadata out **before** the call and installing it only after
+There are therefore two, a copying `apply_to_model` and a consuming
+`apply_to_model_consuming`, sharing one body so that the insertion order and
+the built-in name rules cannot drift apart between them (in the C++, two
+overloads of one template). `Document::open` uses the consuming one, taking the metadata out **before** the call and installing it only after
 the apply succeeds - a failed open must leave the document exactly as it was,
 and that promise is what the staging in `apply_to_model` exists to keep.
 
