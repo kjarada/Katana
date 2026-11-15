@@ -345,12 +345,13 @@ pub mod plotting {
     pub mod sheet_tables;
     pub mod sheet_thumbnails;
     pub mod view_image_export;
-    // SH2: pub mod plot_dialog;
-    //      pub mod sheet_arrange;
-    //      pub mod sheet_canvas_editing;
-    //      pub mod sheet_checks;
-    //      pub mod sheet_editor_editing;
-    //      pub mod sheet_set_menu;
+    // SH2
+    pub mod plot_dialog;
+    pub mod sheet_arrange;
+    pub mod sheet_canvas_editing;
+    pub mod sheet_checks;
+    pub mod sheet_editor_editing;
+    pub mod sheet_set_menu;
 }
 
 pub mod survey {
@@ -484,7 +485,8 @@ pub mod surface_raster_dialog;
 // WS:  pub mod start_dialog;
 //      pub mod view_layers_popup;
 //      pub mod view_workspace;
-// SH2: pub mod sheet_editor;
+// SH2
+pub mod sheet_editor;
 // K:   pub mod main_window;
 //      pub mod main_window_ifc;
 
@@ -518,3 +520,5 @@ pub use sheet_painter::{
 // CU1
 pub use layer_manager::LayerManagerDialog;
 pub use style_manager::StyleManagerDialog;
+// SH2
+pub use sheet_editor::{SheetCanvas, SheetEditor, SheetKey, SourceProvider, sheet_verb_context_for};
