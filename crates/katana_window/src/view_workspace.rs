@@ -96,15 +96,18 @@ use crate::viewport_widget::{
     ViewKey,
 };
 
-/// The gap between two docked views, in points: the C++ window's, measured from its headless
-/// screenshots (docs/rust.md, "The headless window has the C++'s geometry": two views split the
-/// 660 points of the views' area 327 | 328).
-pub const SEPARATOR: f32 = 5.0;
+/// The gap between two docked views, in points: the design's 4 (2026-11-16), the gap between the
+/// main window's docks too, so every seam of the window is one width. The C++ window's was 5,
+/// measured from its headless screenshots (docs/rust.md, "The headless window has the C++'s
+/// geometry": two views split the 660 points of the views' area 327 | 328).
+pub const SEPARATOR: f32 = 4.0;
 /// The tab strip over a group of tabbed views (QTabBar's height in the window's style), at the
 /// top: tabs above the views they switch between, where the eye looks for a title.
 pub const TAB_STRIP: f32 = 24.0;
-/// The kind switcher's width: 22 and the 12 of the arrow's box beside the icon.
-const KIND_BUTTON_WIDTH: f32 = 34.0;
+/// The kind switcher's width: the 20 point button and 12 for the arrow's box beside the icon, as
+/// the C++'s 22 and 12 - so its icon sits where every other title bar button's does (3, 3), and its
+/// arrow 3 points clear of it.
+const KIND_BUTTON_WIDTH: f32 = 32.0;
 /// The optional zoom tools' priorities on a view's bar: Zoom to Selection outlasts In and Out,
 /// which the wheel does as well.
 const ZOOM_IN_OUT_PRIORITY: i32 = 1;

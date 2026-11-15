@@ -182,20 +182,21 @@ mod dock_chrome {
     }
 
     // By hand: a panel's bar is 6 + 18 (its icon) + 4 + 1 + 24 (the title's least) + 6 + three
-    // window buttons of 22 and their spacing, 69, + 3 = 131 points at least; a view's with its
-    // 34 point kind switcher, four window buttons (92) and two tools always shown (46) is
-    // 6 + 34 + 4 + 1 + 24 + 46 + 6 + 92 + 3 = 216. With the title 30 points wide the optional tools
-    // have the width less 131 and 12 more (36, its text and the gap, less the least 24): at 200,
-    // 57; at 170, 27; at 150, 7. Each tool takes 22 and its spacing, 23.
+    // window buttons of 20 and their spacing, 63, + 3 = 125 points at least; a view's with its
+    // 34 point kind switcher, four window buttons (84) and two tools always shown (42) is
+    // 6 + 34 + 4 + 1 + 24 + 42 + 6 + 84 + 3 = 204. With the title 30 points wide the optional tools
+    // have the width less 125 and 12 more (36, its text and the gap, less the least 24): at 200,
+    // 63; at 170, 33; at 150, 13. Each tool takes 20 and its spacing, 21. (The design of
+    // 2026-11-16 made the buttons 20 points, from the C++'s 22: 131 and 216 were the C++'s.)
     #[test]
     fn optional_tools_are_shown_highest_priority_first_while_they_fit() {
         let mut bar = DockTitleBar::new("Layers", DockRole::Panel);
-        assert_eq!(bar.minimum_width(), 131.0);
+        assert_eq!(bar.minimum_width(), 125.0);
         bar.add_tool(TitleBarButton::new("first", "", "First", ""), 2);
         bar.add_tool(TitleBarButton::new("second", "", "Second", ""), 1);
         assert_eq!(
             bar.minimum_width(),
-            131.0,
+            125.0,
             "an optional tool is never in it"
         );
         bar.fit(200.0, 30.0);
@@ -219,24 +220,25 @@ mod dock_chrome {
             TitleBarButton::new("ViewZoomExtentsButton", "", "Zoom", ""),
             ALWAYS,
         );
-        assert_eq!(view.minimum_width(), 216.0);
-        // A higher priority that does not fit keeps a lower one out though it would.
+        assert_eq!(view.minimum_width(), 204.0);
+        // A higher priority that does not fit keeps a lower one out though it would: at 273 the
+        // room is 273 - 204 - 12 = 57, short of the wide tool's 61 and enough for the narrow's 21.
         view.add_tool(TitleBarButton::new("wide", "", "Wide", "").width(60.0), 2);
         view.add_tool(TitleBarButton::new("narrow", "", "Narrow", ""), 1);
-        view.fit(285.0, 30.0);
+        view.fit(273.0, 30.0);
         assert_eq!(
             view.shown_tools(),
             ["ViewLayersButton", "ViewZoomExtentsButton"]
         );
     }
 
-    // By hand, a panel's bar from 0 to 300 at a point a pixel: Close at 300 - 3 - 22 = 275, Float
-    // 23 before it at 252, Minimise at 229; the icon's cell at 6; the title from 6 + 18 + 4 + 1 =
-    // 29 to 229 - 1 - 6 = 222.
+    // By hand, a panel's bar from 0 to 300 at a point a pixel: Close at 300 - 3 - 20 = 277, Float
+    // 21 before it at 256, Minimise at 235; the icon's cell at 6; the title from 6 + 18 + 4 + 1 =
+    // 29 to 235 - 1 - 6 = 228. (The C++'s 22 point buttons put them at 229, 252 and 275.)
     #[test]
     fn a_bar_lays_its_parts_out_as_the_cpps_row_does() {
         let bar = DockTitleBar::new("Layers", DockRole::Panel);
-        let layout = bar.layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 26.0)), 1.0);
+        let layout = bar.layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 24.0)), 1.0);
         let lefts: Vec<(WindowButton, f32)> = layout
             .buttons
             .iter()
@@ -245,15 +247,15 @@ mod dock_chrome {
         assert_eq!(
             lefts,
             [
-                (WindowButton::Minimise, 229.0),
-                (WindowButton::Float, 252.0),
-                (WindowButton::Close, 275.0),
+                (WindowButton::Minimise, 235.0),
+                (WindowButton::Float, 256.0),
+                (WindowButton::Close, 277.0),
             ]
         );
         assert_eq!(layout.lead.min, pos2(6.0, 2.0));
         assert_eq!(layout.title.min.x, 29.0);
-        assert_eq!(layout.title.max.x, 222.0);
-        assert_eq!(layout.buttons[0].1.height(), 22.0);
+        assert_eq!(layout.title.max.x, 228.0);
+        assert_eq!(layout.buttons[0].1.height(), 20.0);
     }
 
     /// One frame of the window: every dock open drawn in a rectangle of its own with its bar, and

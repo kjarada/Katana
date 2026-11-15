@@ -19,59 +19,86 @@ use crate::canvas::Color;
 
 // ---- surfaces, darkest to lightest ---------------------------------------------------------------
 //
-// The viewport sits below all of them so that the drawing is the deepest thing on screen and the
-// panels float above it.
+// The design of 2026-11-16 (the owner's "modern dark": low-contrast chrome in the manner of VS Code,
+// Figma and Blender, the drawing the brightest thing on screen, one accent). The chrome is neutral
+// grey, a step of about 7 in each channel between the frame, the panels, the raised controls and
+// the hover, so that a surface reads as above the one under it without a border having to say so;
+// borders are one pixel of `border`, a little lighter again. The viewport keeps its own #1e2329 -
+// the drawing's ground is content, and the plan painter's contrast figures (feedback_painter) are
+// worked against it.
 
 /// #1e2329, the existing drawing background.
 pub const fn viewport() -> Color {
     Color::rgb(0x1e, 0x23, 0x29)
 }
 
-/// The frame: menu bar, toolbars, status bar.
+/// The frame: menu bar, toolbars, status bar, and the gaps between the docks (#1e1f22).
 pub const fn window() -> Color {
-    Color::rgb(0x23, 0x28, 0x2f)
+    Color::rgb(0x1e, 0x1f, 0x22)
 }
 
-/// Dock contents, lists, trees.
+/// Dock contents, dialogs, lists and trees (#25262a).
 pub const fn panel() -> Color {
-    Color::rgb(0x2a, 0x30, 0x38)
+    Color::rgb(0x25, 0x26, 0x2a)
 }
 
-/// Inputs, buttons.
+/// Buttons, a checked tool's ground, a menu's open item (#2d2f34).
 pub const fn raised() -> Color {
-    Color::rgb(0x32, 0x3a, 0x44)
+    Color::rgb(0x2d, 0x2f, 0x34)
 }
 
+/// Under the pointer (#363940).
 pub const fn hover() -> Color {
-    Color::rgb(0x3a, 0x44, 0x50)
+    Color::rgb(0x36, 0x39, 0x40)
 }
 
+/// What a line of text is typed into: a step BELOW the panel it sits in (#1a1b1e), so a field
+/// reads as a well and a button as a raised key, and the two are never mistaken.
+pub const fn input() -> Color {
+    Color::rgb(0x1a, 0x1b, 0x1e)
+}
+
+/// One pixel round a panel, a field, a dialog; separators (#3a3c42).
 pub const fn border() -> Color {
-    Color::rgb(0x3d, 0x47, 0x53)
+    Color::rgb(0x3a, 0x3c, 0x42)
 }
 
 pub const fn text() -> Color {
-    Color::rgb(0xd7, 0xdd, 0xe5)
+    Color::rgb(0xd4, 0xd6, 0xdb)
 }
 
+/// Secondary text: labels of a status line, a toolbar's name, a count beside a layer (#9a9ea6).
 pub const fn text_muted() -> Color {
-    Color::rgb(0x8b, 0x97, 0xa5)
+    Color::rgb(0x9a, 0x9e, 0xa6)
 }
 
 pub const fn text_disabled() -> Color {
-    Color::rgb(0x5c, 0x67, 0x73)
+    Color::rgb(0x5f, 0x63, 0x6b)
 }
 
-/// One accent, used for everything interactive: the checked tool, focus, selection in lists, and
-/// the accent stroke of every icon. Blue rather than the red of the logo, because in an
-/// engineering program red already means "error" and a checked tool must not read as one.
+/// One accent, used for everything interactive: the checked tool, focus, selection in lists, the
+/// primary button and the accent stroke of every icon. Blue rather than the red of the logo,
+/// because in an engineering program red already means "error" and a checked tool must not read
+/// as one (#4c8dff).
 pub const fn accent() -> Color {
-    Color::rgb(0x4c, 0x9f, 0xfe)
+    Color::rgb(0x4c, 0x8d, 0xff)
 }
 
-/// Text drawn on the accent.
+/// The accent under the pointer: a primary button hovered (#6aa1ff).
+pub const fn accent_hover() -> Color {
+    Color::rgb(0x6a, 0xa1, 0xff)
+}
+
+/// Text drawn on the accent: near black. On #4c8dff it is 5.8 : 1, past the WCAG 2.1 (1.4.3)
+/// 4.5 : 1 for body text; white there is 3.2 : 1, which fails it. (#0f1419)
 pub const fn accent_text() -> Color {
     Color::rgb(0x0f, 0x14, 0x19)
+}
+
+/// A selected row of a list or tree, and selected text: the accent mixed a third into the panel
+/// (#2f4a7a), light enough to find, dark enough that the row's text stays `text`.
+pub const fn selection() -> Color {
+    Color::rgb(0x2f, 0x4a, 0x7a)
 }
 
 pub const fn error() -> Color {
