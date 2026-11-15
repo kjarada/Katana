@@ -1,23 +1,26 @@
-//! What the C++ build compiles into the update library, read from the same files and with the same
-//! defaults, so that one build of the checkout gives both programs the same values:
+//! What is compiled into the update library, from the checkout's files and with the defaults the
+//! C++ build declared for them (its src/katana_update/CMakeLists.txt, gone with the C++):
 //!
-//! * KATANA_VERSION: project(Katana VERSION ...) of the checkout's CMakeLists.txt, which the C++
-//!   build passes to the library (src/katana_update/CMakeLists.txt), so the version is still
-//!   written in one place.
-//! * KATANA_UPDATE_REPO and KATANA_UPDATE_FEED: the cache defaults that
-//!   src/katana_update/CMakeLists.txt declares ("kjarada/Katana" and ""). A configure that is given
-//!   another value (`-DKATANA_UPDATE_REPO=...`) changes the C++ alone; the same value reaches the
-//!   Rust when the variable of that name is in cargo's environment, which nothing sets yet
-//!   (docs/rust.md, "Not done").
+//! * KATANA_VERSION: project(Katana VERSION ...) of the checkout's CMakeLists.txt, so the version
+//!   is still written in one place.
+//! * KATANA_UPDATE_REPO and KATANA_UPDATE_FEED: the variables of those names in cargo's
+//!   environment, else the defaults below ("kjarada/Katana" and "").
 //! * KATANA_UPDATE_KEY_ACTIVE, KATANA_UPDATE_KEY_SPARE and KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS: the
 //!   block of cmake/KatanaUpdateKeys.cmake that tools/update_keytool.py rewrites, held to the rules
-//!   that file holds a configure to. A `-D` cannot move them in the C++ either: the file sets them
-//!   as plain variables, which hide a cache value of the same name. So no environment variable is
-//!   read for them here: whose signature counts is the file's alone. KATANA_REQUIRE_UPDATE_KEYS,
-//!   which fails a configure that still holds the placeholders, is read from the environment as
-//!   the feed's two are.
+//!   that file holds a configure to. No environment variable is read for them: whose signature
+//!   counts is the file's alone, as a `-D` could not move them in the C++ build either.
+//!   KATANA_REQUIRE_UPDATE_KEYS, which fails a build that still holds the placeholders, is read
+//!   from the environment as the feed's two are.
 
 use std::path::{Path, PathBuf};
+
+// owner/name of the GitHub repository releases are fetched from (empty with an empty feed: no
+// auto-update), and the base URL of a release host of the owner's own instead of GitHub (it must
+// honour Range; empty: GitHub, from the repository).
+const DEFAULTS: [(&str, &str); 2] = [
+    ("KATANA_UPDATE_REPO", "kjarada/Katana"),
+    ("KATANA_UPDATE_FEED", ""),
+];
 
 fn main() {
     let manifest = PathBuf::from(
@@ -31,13 +34,8 @@ fn main() {
         .unwrap_or_else(|| panic!("{} has no project(Katana VERSION ...)", cmake.display()));
     println!("cargo:rustc-env=KATANA_VERSION={version}");
 
-    let library = checkout.join("src/katana_update/CMakeLists.txt");
-    let text = read(&library);
-    for name in ["KATANA_UPDATE_REPO", "KATANA_UPDATE_FEED"] {
-        let value = configured(name).unwrap_or_else(|| {
-            cache_default(&text, name)
-                .unwrap_or_else(|| panic!("{} declares no {name}", library.display()))
-        });
+    for (name, default) in DEFAULTS {
+        let value = configured(name).unwrap_or_else(|| default.to_owned());
         println!("cargo:rustc-env={name}={value}");
     }
 
@@ -78,16 +76,6 @@ fn project_version(text: &str) -> Option<&str> {
         }
     }
     None
-}
-
-// The quoted default of `set(<name> "<value>" CACHE ...)`.
-fn cache_default(text: &str, name: &str) -> Option<String> {
-    let opening = format!("set({name} ");
-    let start = text.find(&opening)? + opening.len();
-    let rest = text[start..].trim_start().strip_prefix('"')?;
-    let value = &rest[..rest.find('"')?];
-    let after = rest[value.len() + 1..].trim_start();
-    after.starts_with("CACHE").then(|| value.to_owned())
 }
 
 // The value of `set(<name> <value>)` inside the block that tools/update_keytool.py rewrites

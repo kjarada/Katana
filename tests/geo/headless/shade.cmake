@@ -9,7 +9,7 @@
 # lists - the dialog's line and the typed one reach one reference data.
 add_test(NAME qt_terrain_shading_dialog_adds_a_reference_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=@terrainShading|shadingStyle=Colour relief|?shadingCommand|!shadingRun|>SURFACE LIST"

@@ -1,9 +1,6 @@
 build/
 # cargo's output for the Rust port on Windows (docs/rust.md; WSL builds elsewhere).
 rust/target/
-cmake-build-debug/
-cmake-build-release/
-third_party/_cache/
 .vscode/
 .idea/
 *.user
@@ -11,7 +8,6 @@ third_party/_cache/
 *.swo
 *.DS_Store
 CMakeUserPresets.json
-aqtinstall.log
 legacy-scaffold-*.zip
 
 # Python's bytecode cache, written beside a tools/*.py module that another
@@ -25,34 +21,26 @@ samples/*/backups/
 # Third-party reference material under its author's own licence, kept on disk
 # and never in the repository: the reference customisation in the legacy
 # formats (two style libraries and two survey code files, with their colour
-# table), which the tracked resources/customisation/nsw.customisation.json is
-# made from. The build reads nothing here, and neither does the program. One
-# suite does, through KATANA_REFERENCE_CUSTOMISATION_DIR: the legacy readers'
-# and writers' own reference tests and the converter's test of what it makes of
-# these files (tests/archive12d), which skip where the folder is absent or
-# holds no such file.
+# table), which the tracked resources/customisation/nsw.customisation.json was
+# made from. Neither the build, the program nor the tests read anything here.
 docs/12d Refrence Files/
 
 # The TfNSW Utility Schema and Specification workbook (DMS-FT-493), under
 # TfNSW's licence: kept on disk, never in the repository. The cli.utility_check
-# tests read it when it is there (src/katana_app/CMakeLists.txt) and are not
+# tests read it when it is there (tests/cli/CMakeLists.txt) and are not
 # registered when it is not; tools/utility_schema_domains.py reads any copy.
 docs/TfNSW Reference Files/
 
-# Not ignored, on purpose: resources/customisation/nsw.customisation.json, the
-# customisation compiled into the build (KATANA_BUILTIN_CUSTOMISATION). It is
-# tracked, committed on the owner's decision of 2026-10-08, and it is the one
-# file derived from the reference files above that is:
-# katana_customisation_convert made it from them (docs/customisation.md, "The
-# reference customisation"), less the notice text the converter copies into its
-# `notice` member, which the owner removed. The reference files stay ignored.
-# .gitattributes keeps its bytes the
-# same in every checkout, since it is embedded with #embed and a customisation
-# kept from it records a digest of those bytes.
-#
-# Nothing else is read from that folder: the older embedding, which read four
-# legacy files from it, is gone (docs/building.md, "The built-in customisation
-# and the reference folder"). The legacy files are not kept there.
+# Not ignored, on purpose: resources/customisation/nsw.customisation.json, a
+# customisation compiled into the programs (rust/crates/katana_cad/build.rs). It
+# is tracked, committed on the owner's decision of 2026-10-08, and it is the one
+# file derived from the reference files above that is: the converter of the
+# legacy formats made it from them (docs/customisation.md, "The reference
+# customisation"), less the notice text the converter copied into its `notice`
+# member, which the owner removed. The reference files stay ignored.
+# .gitattributes keeps its bytes the same in every checkout, since it is
+# compiled in byte for byte and a customisation kept from it records a digest
+# of those bytes.
 
 # Git worktrees created for parallel agents (CLAUDE.md section 8). Each is a
 # checkout of its own; tracking one would embed a repository in this one.
@@ -72,7 +60,7 @@ samples/**/*.aux.xml
 
 # The update system's signing keys (docs/update.md): the private halves never enter the
 # repository. The public halves are data and ARE committed (cmake/KatanaUpdateKeys.cmake).
-# The test key of tests/update is RFC 8032's published vector and is kept as hex, never
-# as a .pem (tests/update/test_key.hpp).
+# The test keys of tests/update are RFC 8032's published vectors and are kept as hex, never
+# as a .pem (tests/update/test_keys.txt).
 *.pem
 update-signing*

@@ -2,20 +2,16 @@
 # tools/check_installer_licence.cmake says what is held). Included from
 # tests/CMakeLists.txt beside the other packaging tests.
 #
-# The first test runs the check on this build's own configure: the CPackConfig.cmake
-# it wrote, the sources, the install rules. The others hand the check a configure that
-# is wrong in one way each and read its refusal, so that a check which stopped looking
-# would be seen to: the installer had no licence page for a release, and nothing noticed.
+# The tests hand the check a configure that is complete, and configures that are wrong
+# in one way each, and read its answer, so that a check which stopped looking would be
+# seen to: the installer had no licence page for a release, and nothing noticed. (The
+# check of the build's own CPackConfig.cmake went with the C++ build, which wrote one;
+# this runner writes none.)
 #
-# Windows only, because the installer is. A build without NSIS passes the first test
-# having checked the template only (the check says so).
+# Windows only, because the installer is.
 if(NOT WIN32)
     return()
 endif()
-
-add_test(NAME packaging_installer_shows_the_licence
-    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR} -DKATANA_BINARY=${CMAKE_BINARY_DIR}
-            -P ${PROJECT_SOURCE_DIR}/tools/check_installer_licence.cmake)
 
 set(_licence_fixture_root "${CMAKE_CURRENT_BINARY_DIR}/installer_licence_fixtures")
 

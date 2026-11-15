@@ -15,12 +15,12 @@ add_test(NAME qt_gis_verbs_folder
 set_tests_properties(qt_gis_verbs_folder PROPERTIES FIXTURES_SETUP qt_gis_verbs)
 
 # The IMPORT line katana_cli runs in cli.gis_import_line_gives_the_records_the_window_gives
-# (src/katana_app/geo/cli/gis_verbs.cmake), typed here, with the same expected
+# (tests/cli/geo/gis_verbs.cmake), typed here, with the same expected
 # records: ALONGSIDE puts the parcels' corner (180, 0) on the rectangle's
 # (1000, 2000).
 add_test(NAME qt_gis_import_line_gives_the_sessions_records_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>RECT 1000,2000 1010,2005|>IMPORT \"${_gis_verbs_samples}/parcels.geojson\" ALONGSIDE"
         "-DEXPECT=imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 layers=1 features=8 skipped=0 bounds=1000,2000,1185,2165 crs=\"[^\"]*EPSG:32630[^\"]*\"[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\""
@@ -32,7 +32,7 @@ add_test(NAME qt_gis_import_line_gives_the_sessions_records_headless
 # handed back as its reply, and the import one undo step.
 add_test(NAME qt_gis_import_through_the_windows_executor_is_one_undo_step_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=<IMPORT \"${_gis_verbs_samples}/parcels.geojson\" LOCAL|>LIST|>UNDO|>LIST"
         "-DEXPECT=--run-line IMPORT [^\r\n]*: ok=yes[\r\n]+  reply: imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 [^\r\n]*bounds=0,0,185,165[^\r\n]*[\r\n]+  reply: placed placement=local east=-180 north=0 .*9 entities.*1 undone.*0 entities"
@@ -44,7 +44,7 @@ add_test(NAME qt_gis_import_through_the_windows_executor_is_one_undo_step_headle
 # nine entities to a GeoPackage in a folder with a blank in its name.
 add_test(NAME qt_gis_refs_and_export_after_an_import_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${_gis_verbs_samples}/parcels.geojson"
         "-DDRIVE=>REFS|>EXPORT \"${_gis_verbs_out}/qt parcels.gpkg\""
@@ -68,7 +68,7 @@ set_tests_properties(qt_gis_verbs_folder
 # opening a file dialog.
 add_test(NAME qt_gis_export_point_cloud_line_writes_the_cloud_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>IMPORT \"${_gis_verbs_samples}/survey_scan.las\"|<EXPORT \"${_gis_verbs_out}/qt scan.laz\" CLOUD 1|*exportPointCloud"
         "-DEXPECT=--run-line EXPORT [^\r\n]*: ok=yes[\r\n]+  reply: exported file=\"[^\"]*/qt scan\\.laz\" kind=cloud format=laz cloud=survey_scan id=1 points=40000 source_points=40000 sample=no.*type EXPORT <file\\.las\\|\\.laz> CLOUD 1 instead"

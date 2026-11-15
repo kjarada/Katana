@@ -84,7 +84,7 @@ class TheTestKeys(ToolTest):
             self.assertEqual(producer.sign_file(OPENSSL, pem, message).hex(), signature_hex)
 
     def test_the_python_and_the_cpp_side_use_the_same_keys(self) -> None:
-        header = (REPO / "tests" / "update" / "test_key.hpp").read_text(encoding="utf-8")
+        header = (REPO / "tests" / "update" / "test_keys.txt").read_text(encoding="utf-8")
         found = dict(re.findall(r'(kTest\w+Hex)\s*=\s*"([0-9a-f]{64})"', header))
         self.assertEqual(found["kTestActiveSeedHex"], self.seed_file("active"))
         self.assertEqual(found["kTestSpareSeedHex"], self.seed_file("spare"))

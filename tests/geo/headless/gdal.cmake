@@ -7,7 +7,7 @@
 # reply says what the scope took.
 add_test(NAME qt_gdal_typed_on_the_command_line_runs_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>LINE 0,0 100,0|>GDAL vector buffer --distance=1 --endcap-style=flat FROM DRAWING TO LAYER gis/buffer|>LIST"
         "-DEXPECT=gdal algorithm=\"vector buffer\" policy=safe seconds=[0-9.]+ cancelled=no.*scope arg=input scope=drawing matched=1 used=1 points=0 lines=1 polygons=0.*output arg=output kind=vector target=layer layer=gis/buffer created=1.*Polyline  layer=gis/buffer  vertices=4  closed  length=204  area=200"
@@ -19,7 +19,7 @@ add_test(NAME qt_gdal_typed_on_the_command_line_runs_headless
 # the features go to gis/buffer.
 add_test(NAME qt_gdal_line_through_the_windows_executor_is_one_undo_step_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>LINE 0,0 100,0|<GDAL vector buffer distance=1 FROM DRAWING|>LIST|>UNDO|>LIST"
         "-DEXPECT=--run-line GDAL vector buffer distance=1 FROM DRAWING: ok=yes.*reply: output arg=output kind=vector target=layer layer=gis/buffer created=1.*2 entities.*1 undone.*1 entities"

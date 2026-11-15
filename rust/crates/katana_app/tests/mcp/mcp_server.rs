@@ -328,7 +328,7 @@ mod mcp_server {
 
     // What an agent is told of a field file whose setup stands on RTK marks,
     // and where the import puts the shots: the hand-built file of the surveyio
-    // tests, its positions worked by hand in src/katana_app/CMakeLists.txt
+    // tests, its positions worked by hand in tests/cli/CMakeLists.txt
     // beside cli.survey_import_rtk_setup_field_file - the marks, two GNSS
     // positions, orient the setup, and each shot's offset is applied.
     #[test]
@@ -373,7 +373,7 @@ mod mcp_server {
     // sends: SURVEY IMPORT is the session's verb (survey_verbs), and CRS SET
     // takes the WKT with its quotes, which the verb once lost. The field file
     // is the hand-built one of the surveyio tests; its 4 points are worked by
-    // hand in src/katana_app/CMakeLists.txt, beside cli.survey_import_field_file.
+    // hand in tests/cli/CMakeLists.txt, beside cli.survey_import_field_file.
     #[test]
     fn an_agent_imports_a_field_file_and_sets_the_system_by_its_wkt() {
         let mut client = Client::new();
@@ -415,7 +415,7 @@ mod mcp_server {
     // A Sokkia SDR file reaches an agent through the same lines: the registry
     // gives SURVEY READ and SURVEY IMPORT every format surveyio reads. The file
     // is the hand-built one of the surveyio tests; its 4 points are worked by
-    // hand in src/katana_app/CMakeLists.txt, beside cli.survey_import_sokkia_sdr,
+    // hand in tests/cli/CMakeLists.txt, beside cli.survey_import_sokkia_sdr,
     // and its 8 warnings are its 7 deleted records and its coordinate order
     // (option 2, read east first), said once.
     #[test]
@@ -462,7 +462,7 @@ mod mcp_server {
     // point of the drawing, as the wizard's control can: FORWARD puts CP1
     // there, and SURVEY IMPORT's SET holds it (survey_verbs). The file is
     // traverse.sdr less its coordinate records; alone it places nothing. Held,
-    // it places CP2, T1 and T2 where src/katana_app/CMakeLists.txt works them
+    // it places CP2, T1 and T2 where tests/cli/CMakeLists.txt works them
     // by hand beside cli.survey_import_holds_a_point_of_the_drawing, and CP1
     // stays the drawing's, not drawn again.
     #[test]

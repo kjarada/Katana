@@ -10,7 +10,7 @@
 # read from the text grid: 24.892 to 38.819 (cli.surface_* say why).
 add_test(NAME qt_surface_from_raster_menu_runs_the_surface_line_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=@surfaceFromRaster|?surfaceFromCommand|!surfaceFromRun|>SURFACE LIST"
@@ -21,7 +21,7 @@ add_test(NAME qt_surface_from_raster_menu_runs_the_surface_line_headless
 # its fields and runs it; the grid is 119 x 89 at the sample's 1.5 m cell.
 add_test(NAME qt_export_surface_dialog_writes_the_dem_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=>SURFACE FROM RASTER 1 NAME ground|@exportSurfaceDem|surfaceRasterCell=1.5|surfaceRasterFile=${CMAKE_CURRENT_BINARY_DIR}/export_surface_dialog.tif|surfaceRasterOverwrite=on|?surfaceRasterCommand|!surfaceRasterRun"

@@ -12,7 +12,7 @@
 # envelope, the higher of the two, as another.
 add_test(NAME qt_volumes_dialog_measures_inside_typed_corners_and_makes_the_cut_fill_map_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>LAYER NEW base|>LAYER SET base|>PLINE3D 0,0,10 10,0,10 10,10,10 0,10,10 CLOSE|>LAYER NEW top|>LAYER SET top|>PLINE3D 0,0,11 10,0,11 10,10,11 0,10,11 CLOSE|>SURFACE FROM LAYERS base ONLY NAME base|>SURFACE FROM LAYERS top ONLY NAME top|@terrainVolumes|volumesBase=base|volumesTop=top|!volumesBoundaryCorners|volumesCorners=2,2 6,2 6,6 2,6|?volumesCommand|!volumesRun|?volumesStatus|!volumesCutFillMap|?volumesStatus|!volumesEnvelope|?volumesReply|?volumesStatus"
         "-DEXPECT=--dialog terrainVolumes opened volumesDialog \"Volumes\".*volumesCommand: VOLUME SURFACES base top INSIDE 2,2 6,2 6,6 2,6.*volumesStatus: Cut 0\\.000 m3, fill 16\\.000 m3, net 16\\.000 m3.*volumesStatus: Made the cut/fill map.*volumesReply: envelope first=base second=top side=max.*volumesStatus: Made the envelope"

@@ -37,7 +37,7 @@ set(_update_headless_environment
 # of any server: the copy is known to be a development one from its own files.
 add_test(NAME qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@updateDialog|?updateStateText|?updateDetailText|@helpKeyboardShortcuts"
         "-DEXPECT=--dialog updateDialog opened updateDialog \"Check for Updates\"[\r\n].*updateStateText: Updates are not available for this copy of Katana: it is a development build, not an installed release\\.[\r\n]+updateDetailText: [\r\n]"
@@ -48,7 +48,7 @@ add_test(NAME qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_canno
 # press of a hidden button fails the run (docs/headless.md, the steps).
 add_test(NAME qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dialog_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@updateDialog|?updateStateText|!updateCheckNow"
         "-DREFUSED=updateStateText: Updates are not available for this copy of Katana: .*--press: updateDialog's button updateCheckNow is hidden"
@@ -61,7 +61,7 @@ add_test(NAME qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dia
 # menu is then listed with the tip each item shows.
 add_test(NAME qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_its_own_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DCHECK_SHORTCUTS=ON"
         "-DCHECK_MENUS=ON"
@@ -76,7 +76,7 @@ add_test(NAME qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_i
 # run), with no words on it: no update is known, and none is offered.
 add_test(NAME qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>UPDATE STATUS|?statusUpdateAvailable"
         "-DEXPECT=kind=development.*statusUpdateAvailable: [\r\n]"
@@ -88,7 +88,7 @@ add_test(NAME qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_h
 # refusal of the line).
 add_test(NAME qt_a_typed_update_download_and_apply_say_a_headless_run_does_neither_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>UPDATE DOWNLOAD CONFIRM|>UPDATE APPLY CONFIRM"
         "-DEXPECT=reason=headless.*reason=headless"
@@ -107,7 +107,7 @@ add_test(NAME qt_a_typed_update_download_and_apply_say_a_headless_run_does_neith
 # would say unasked. No host is reached: a development copy asks nobody.
 add_test(NAME qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the_dialog_shows_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>UPDATE CHECK|@updateDialog|?updateStateText|@helpKeyboardShortcuts"
         "-DEXPECT=update=unsupported.*reason=development_tree.*--dialog updateDialog opened updateDialog \"Check for Updates\".*updateStateText: Updates are not available for this copy of Katana: it is a development build, not an installed release\\."
@@ -122,7 +122,7 @@ add_test(NAME qt_a_typed_update_check_is_run_as_a_job_and_its_answer_is_what_the
 # only has the shape of one.
 add_test(NAME qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>UPDATE TOKEN ghp_k9w2ZqNotAToken|?commandLog"
         "-DEXPECT=commandLog: .*> UPDATE TOKEN \\*\\*\\*"
@@ -136,7 +136,7 @@ add_test(NAME qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_he
 # was not told to. The box is off: nobody says the automatic check is on.
 add_test(NAME qt_settings_has_an_updates_page_that_says_what_a_check_sends_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@fileSettings|settingsPages=Updates|?settingsUpdateNote|?settingsUpdateSends|?settingsUpdateAuto|?settingsUpdateTokenState"
         "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+settingsUpdateNote: A headless run keeps no update settings and checks only when it is told to \\(UPDATE CHECK\\)\\.[\r\n]+settingsUpdateSends: A check asks the release server for the newest version\\. It sends only \"Katana/<version> \\(<target>\\)\" as its user agent - nothing about you, your files or your drawings - and, as with every website, the release server sees this computer's network address\\.[\r\n]+settingsUpdateAuto: Check for updates automatically, unchecked[\r\n]+settingsUpdateTokenState: This session keeps no access token. the environment variable KATANA_UPDATE_TOKEN gives a run one\\."
@@ -148,7 +148,7 @@ add_test(NAME qt_settings_has_an_updates_page_that_says_what_a_check_sends_headl
 # press of a disabled button fails the run.
 add_test(NAME qt_a_headless_run_saves_no_access_token_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@fileSettings|settingsPages=Updates|!settingsUpdateTokenSave"
         "-DREFUSED=--dialog fileSettings opened settingsDialog.*--press: fileSettings's button settingsUpdateTokenSave is disabled"
@@ -170,7 +170,7 @@ add_test(NAME qt_a_headless_run_saves_no_access_token_headless
 # written: this run is one of those the "no per-user state" check below holds.
 add_test(NAME qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@fileSettings|settingsPages=Updates|?settingsUpdateUnblock|!settingsUpdateUnblock|?settingsStatus|?commandLog"
         "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+settingsUpdateUnblock: Offer the version that was put back again[\r\n].*settingsStatus: > UPDATE BLOCKED CLEAR Refused: [^\r\n]*reason=headless[^\r\n]*[\r\n]+commandLog: [^\r\n]*> UPDATE BLOCKED CLEAR"
@@ -194,7 +194,7 @@ set(_update_health_state "${CMAKE_CURRENT_BINARY_DIR}/update_health_state")
 add_test(NAME update_health_state_folder_is_emptied_before_the_health_run
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${_update_health_state}")
 add_test(NAME qt_the_health_run_writes_its_marker_and_exits_headless
-    COMMAND $<TARGET_FILE:katana> --update-health 0a1b2c3d)
+    COMMAND ${KATANA_PROGRAM_katana} --update-health 0a1b2c3d)
 add_test(NAME update_health_marker_is_there_after_the_health_run
     COMMAND ${CMAKE_COMMAND} -E cat "${_update_health_state}/healthy-0a1b2c3d")
 set_tests_properties(update_health_state_folder_is_emptied_before_the_health_run
@@ -213,7 +213,7 @@ set_tests_properties(update_health_marker_is_there_after_the_health_run
 # taken: anything else - here, a path that climbs out of the folder - ends the
 # run before a window is built, saying so, and writes nothing.
 add_test(NAME qt_a_health_run_given_no_transaction_id_is_refused_headless
-    COMMAND $<TARGET_FILE:katana> --update-health ../healthy)
+    COMMAND ${KATANA_PROGRAM_katana} --update-health ../healthy)
 set_tests_properties(qt_a_health_run_given_no_transaction_id_is_refused_headless
     PROPERTIES PASS_REGULAR_EXPRESSION
         "--update-health needs the transaction id the update helper gives it"

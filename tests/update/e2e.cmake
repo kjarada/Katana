@@ -1,6 +1,6 @@
 # The end-to-end tests of the update system, and the test of the fake feed they fetch from (T12).
-# Included by tests/update/CMakeLists.txt (it globs e2e*.cmake) once katana_update_e2e,
-# katana_updater_test and katana_updater_stub exist.
+# Included by tests/update/CMakeLists.txt (it globs e2e*.cmake); the programs are cargo's
+# katana_update_e2e, katana_updater_test and katana_updater_stub (rust/crates/katana_updater).
 #
 #   update_e2e_program_...   katana_update_e2e by itself: its usage, and that it cannot leave the machine
 #   update_tools_fake_feed   tools/update_fake_feed.py asked with urllib (tool_tests/test_fake_feed.py)
@@ -23,20 +23,11 @@
 # passes as quietly as one that ran. The end-to-end cases also need openssl 3 for the producer's
 # signature, like the release tools' tests.
 
-# katana_update_e2e speaks to the feed over plain sockets (e2e_main.cpp). The update library needs
-# ws2_32 too, but only as a private need of its static libcrypto: the program says what it uses.
-if(WIN32)
-    target_link_libraries(katana_update_e2e PRIVATE ws2_32)
-endif()
-
-# katana_update_e2e is linked like the test suites and not like the helper: it is not static, and
-# loads the C++ runtime (libstdc++, libgcc) from the toolchain's folder. So every test that starts
-# it - by itself, below, or through the driver, which hands its own environment on to the programs
-# it runs - has that folder first on PATH, whatever shell ctest was started from. In a Git Bash
-# whose PATH puts another MinGW first the program would load the wrong runtime and die before main
-# (0xc0000139), and with none on PATH it would not start at all (tests/CMakeLists.txt says the same
-# of the application's own checks). The helper and the stand-in for Katana need nothing: they are
-# linked static (CMakeLists.txt, beside this file).
+# Every test that starts katana_update_e2e - by itself, below, or through the driver, which hands
+# its own environment on to the programs it runs - has the runtime's folder (KATANA_RUNTIME_BIN)
+# first on PATH, whatever shell ctest was started from, as the window's checks have
+# (tests/CMakeLists.txt): a program that loads a library found elsewhere on PATH can die before
+# main, and one that finds none does not start at all.
 set(_katana_e2e_runtime "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
 
 # A test added below without that passes only where the caller's own PATH happens to be right, and
@@ -75,12 +66,12 @@ cmake_language(DEFER CALL katana_name_update_e2e_tests_without_their_environment
 # ---- the program's own rule, with no feed and no Python ------------------------------------------
 #
 # katana_update_e2e is what every case below fetches with, so that it cannot leave the machine is a
-# promise worth a test of its own (e2e_main.cpp, "THE WIRE REACHES 127.0.0.1 AND NOTHING ELSE"): a
+# promise worth a test of its own (src/bin/katana_update_e2e.rs of rust/crates/katana_updater): a
 # feed that is not `http://127.0.0.1` is refused on the command line, a name is never looked up
 # (localhost included), and GitHub's own addresses are not connected to unless --connect says which
 # loopback port stands in for the host. None of these opens a socket. The install they name is the
 # T3 fixtures' (read, never written); the state folder is never made.
-add_test(NAME update_e2e_program_prints_its_usage_when_given_no_command COMMAND katana_update_e2e)
+add_test(NAME update_e2e_program_prints_its_usage_when_given_no_command COMMAND ${KATANA_PROGRAM_katana_update_e2e})
 set_tests_properties(update_e2e_program_prints_its_usage_when_given_no_command PROPERTIES
     PASS_REGULAR_EXPRESSION "usage: katana_update_e2e check[|]plan[|]stage"
     ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
@@ -95,14 +86,14 @@ foreach(_katana_e2e_refused IN ITEMS
     list(GET _katana_e2e_refused 0 _katana_e2e_what)
     list(GET _katana_e2e_refused 1 _katana_e2e_address)
     add_test(NAME update_e2e_program_refuses_${_katana_e2e_what}
-        COMMAND katana_update_e2e check ${_katana_e2e_fixture_install} --feed "${_katana_e2e_address}")
+        COMMAND ${KATANA_PROGRAM_katana_update_e2e} check ${_katana_e2e_fixture_install} --feed "${_katana_e2e_address}")
     set_tests_properties(update_e2e_program_refuses_${_katana_e2e_what} PROPERTIES
         PASS_REGULAR_EXPRESSION "--feed is an http address on the loopback"
         ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
         TIMEOUT 300)
 endforeach()
 add_test(NAME update_e2e_program_connects_to_no_github_address_it_was_given_no_route_for
-    COMMAND katana_update_e2e check ${_katana_e2e_fixture_install} --github kjarada/Katana)
+    COMMAND ${KATANA_PROGRAM_katana_update_e2e} check ${_katana_e2e_fixture_install} --github kjarada/Katana)
 set_tests_properties(update_e2e_program_connects_to_no_github_address_it_was_given_no_route_for PROPERTIES
     PASS_REGULAR_EXPRESSION "detail=the test client reaches the loopback address only"
     ENVIRONMENT_MODIFICATION "${_katana_e2e_runtime}"
@@ -156,12 +147,12 @@ endif()
 # Where the swap is written (Windows) every case runs, with the helper and the stand-in for Katana.
 # Elsewhere the engine still checks a feed, so the cases that ask a feed and start no program of the
 # install run there, with the engine alone (update_e2e.py --list marks them `portable`).
-set(_katana_e2e_programs --engine "$<TARGET_FILE:katana_update_e2e>")
+set(_katana_e2e_programs --engine "${KATANA_PROGRAM_katana_update_e2e}")
 set(_katana_e2e_swaps OFF)
-if(WIN32 AND TARGET katana_updater_test AND TARGET katana_updater_stub)
+if(WIN32)
     set(_katana_e2e_swaps ON)
     list(APPEND _katana_e2e_programs
-        --helper "$<TARGET_FILE:katana_updater_test>" --stub "$<TARGET_FILE:katana_updater_stub>")
+        --helper "${KATANA_PROGRAM_katana_updater_test}" --stub "${KATANA_PROGRAM_katana_updater_stub}")
 endif()
 
 set(_katana_e2e_cases "")
