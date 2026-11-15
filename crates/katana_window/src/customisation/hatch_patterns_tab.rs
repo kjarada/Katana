@@ -63,6 +63,7 @@ use super::customisation_context::CustomisationContext;
 use super::document_watcher::DocumentWatcher;
 use crate::annotation::dialog_support::table;
 use crate::command_word::command_word;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -798,7 +799,7 @@ impl HatchPatternsTab {
                 {
                     self.revert(host.document());
                 }
-                if controls::button(ui, "hatchPatternSave", "Save")
+                if layout::primary(ui, "hatchPatternSave", "Save")
                     .on_hover_text("HATCH SET name angle spacing ... (or SOLID): one undo step")
                     .clicked()
                 {

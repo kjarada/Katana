@@ -703,6 +703,9 @@ enum LabelPressed {
     Clear,
 }
 
+/// The label style manager's body width on both its tabs.
+const LABEL_BODY_WIDTH: f32 = 860.0;
+
 /// Format > Label Styles and Rules... (see the module comment).
 pub struct LabelStyleManagerDialog {
     frame: DialogFrame,
@@ -1535,6 +1538,8 @@ impl LabelStyleManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // One width on both tabs (the look of 2026-11-16): the list beside the form.
+        ui.set_width(LABEL_BODY_WIDTH);
         controls::tabs(
             ui,
             "labelStyleTabs",
@@ -1589,7 +1594,7 @@ impl LabelStyleManagerDialog {
                     if button(ui, "labelStyleDefaults", "Add Standard Set").clicked() {
                         self.pressed = Some(LabelPressed::Defaults);
                     }
-                    if button(ui, "labelStyleApply", "Apply").clicked() {
+                    if layout::primary(ui, "labelStyleApply", "Apply").clicked() {
                         self.pressed = Some(LabelPressed::Apply);
                     }
                 });
@@ -1602,14 +1607,14 @@ impl LabelStyleManagerDialog {
         egui::Grid::new("labelStyleForm")
             .num_columns(2)
             .show(ui, |ui| {
-                ui.label("Kind");
+                layout::form_label(ui, "Kind");
                 ui.add_enabled_ui(false, |ui| {
                     // Fixed once made; New asks for it.
                     combo(ui, "labelStyleKind", &KINDS, &mut self.kind);
                 });
                 ui.end_row();
 
-                ui.label("Template");
+                layout::form_label(ui, "Template");
                 ui.horizontal(|ui| {
                     if controls::line_with(
                         ui,
@@ -1667,7 +1672,7 @@ impl LabelStyleManagerDialog {
                 controls::label(ui, "labelStyleTemplateCheck", &self.template_check);
                 ui.end_row();
 
-                ui.label("Text style");
+                layout::form_label(ui, "Text style");
                 controls::choice(
                     ui,
                     "labelStyleTextStyle",
@@ -1676,13 +1681,13 @@ impl LabelStyleManagerDialog {
                 );
                 ui.end_row();
 
-                ui.label("Height on paper (0: the text style's)");
+                layout::form_label(ui, "Height on paper (0: the text style's)");
                 controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER);
                 ui.end_row();
-                ui.label("Placement");
+                layout::form_label(ui, "Placement");
                 combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
                 ui.end_row();
-                ui.label("Orientation");
+                layout::form_label(ui, "Orientation");
                 combo(
                     ui,
                     "labelStyleOrientation",
@@ -1690,7 +1695,7 @@ impl LabelStyleManagerDialog {
                     &mut self.orientation,
                 );
                 ui.end_row();
-                ui.label("Offset");
+                layout::form_label(ui, "Offset");
                 controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
                 ui.end_row();
                 check(
@@ -1706,7 +1711,7 @@ impl LabelStyleManagerDialog {
                     &mut self.displace,
                 );
                 ui.end_row();
-                ui.label("Priority");
+                layout::form_label(ui, "Priority");
                 controls::whole(
                     ui,
                     "labelStylePriority",
@@ -1714,7 +1719,7 @@ impl LabelStyleManagerDialog {
                     PRIORITY_LOWEST..=PRIORITY_HIGHEST,
                 );
                 ui.end_row();
-                ui.label("Marker");
+                layout::form_label(ui, "Marker");
                 combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
                 ui.end_row();
                 let boxes = [

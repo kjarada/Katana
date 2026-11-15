@@ -34,6 +34,7 @@ use katana_core::{ErrorCode, Result};
 use katana_entity::entity::{property_to_string, type_name};
 use katana_entity::{EntityId, PropertyValue};
 
+use crate::dialog_layout as layout;
 use crate::drive::mailbox::lists_no;
 use crate::drive::{
     Choice, ControlKind, ControlRecord, LineOptions, button, choice, custom, line_with, registry,
@@ -361,34 +362,38 @@ impl AttributeManagerDialog {
             &mut parts,
             |ui, parts| {
                 let (state, chosen, _) = parts;
-                ui.label(subject.as_str());
+                ui.set_width(BODY_WIDTH);
+                ui.label(
+                    RichText::new(subject.as_str()).color(crate::theme::text_muted().to_egui()),
+                );
                 tree_ui(ui, state, &rows, chosen);
-                ui.horizontal(|ui| {
-                    ui.label("Value");
-                    line_with(
-                        ui,
-                        "attributeValue",
-                        &mut state.value,
-                        LineOptions::default(),
-                    );
-                });
+                ui.add_space(layout::GAP);
                 let types: Vec<String> = TYPES.iter().map(|t| String::from(*t)).collect();
-                ui.horizontal(|ui| {
-                    ui.label("Type");
-                    choice(ui, "attributeType", &types, &mut state.kind);
+                layout::form(ui, "attributeForm", |ui| {
+                    layout::row(ui, "Value", |ui| {
+                        line_with(
+                            ui,
+                            "attributeValue",
+                            &mut state.value,
+                            LineOptions::default(),
+                        );
+                    });
+                    layout::row(ui, "Type", |ui| {
+                        choice(ui, "attributeType", &types, &mut state.kind);
+                    });
+                    layout::row(ui, "Name", |ui| {
+                        line_with(
+                            ui,
+                            "attributeName",
+                            &mut state.name,
+                            LineOptions {
+                                placeholder: "use / to nest, e.g. Asset/Dimensions/Size",
+                                ..LineOptions::default()
+                            },
+                        );
+                    });
                 });
-                ui.horizontal(|ui| {
-                    ui.label("Name");
-                    line_with(
-                        ui,
-                        "attributeName",
-                        &mut state.name,
-                        LineOptions {
-                            placeholder: "use / to nest, e.g. Asset/Dimensions/Size",
-                            ..LineOptions::default()
-                        },
-                    );
-                });
+                ui.add_space(layout::INNER);
                 ui.horizontal(|ui| {
                     if button(ui, "attributeAdd", "Add")
                         .on_hover_text(
@@ -416,7 +421,9 @@ impl AttributeManagerDialog {
                 });
             },
             |ui, parts| {
-                if button(ui, "attributeClose", "Close").clicked() {
+                if layout::footer_buttons(ui, |ui| layout::button(ui, "attributeClose", "Close"))
+                    .clicked()
+                {
                     *parts.2 = true;
                 }
             },
@@ -436,6 +443,10 @@ impl AttributeManagerDialog {
         }
     }
 }
+
+/// The dialog's body width (the look of 2026-11-16): the tree's name, value and type, and the form
+/// under it.
+const BODY_WIDTH: f32 = 420.0;
 
 /// The tree drawn: a branch opens and closes, a leaf is chosen. Recorded as `attributeTree`, its
 /// rows shown "Attribute | Value | Type"; a fill chooses the row whose name is the text given.
