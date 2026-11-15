@@ -1,15 +1,15 @@
 # GPU rendering: the 3D view on Direct3D 11, Vulkan and Metal
 
-The 3D view can draw on the CPU (`render::Rasterizer`, docs/render.md) or on
+The 3D view can draw on the CPU (`katana_render::Rasterizer`, docs/render.md) or on
 the GPU. This document is the record of the GPU renderer: it takes the same
-`render::DrawList`s and `render::Camera` and draws them with QRhi, Qt's
+`katana_render::DrawList`s and `katana_render::Camera` and draws them with QRhi, Qt's
 rendering hardware interface - on Direct3D 11 on Windows, on Vulkan on Linux,
 on Metal on macOS.
-It lives in `src/katana_qt/gpu` (library `katana_gpu`), is tested in
+It lives in `rust/crates/katana_gpu/src` (library `katana_gpu`), is tested in
 `tests/gpu` and timed in `benchmarks/gpu`.
 
 **Status (2026-09-26).** Built by default on Windows and Linux, and HOSTED:
-`RenderViewWidget` draws with it wherever the renderer rules choose it, and
+`RenderView` draws with it wherever the renderer rules choose it, and
 with the software rasteriser everywhere else - every headless run and test,
 and after a GPU view fails ("Hosting", below). The Direct3D 11 path is the
 one measured on the owner's machine; the Vulkan path is tested on Mesa's
@@ -36,15 +36,15 @@ Camera ─────────────── relativeViewProjection (dou
 
 | File | What it is |
 | --- | --- |
-| `scene_origin.hpp` | The precision rule in code: the scene origin, the camera matrix built in double against it, the reversed-Z projection. Plain arithmetic, no Qt. |
-| `gpu_scene.hpp` | A DrawList packed the way the GPU reads it (float offsets from the origin, 32-bit indices, lines and points carrying their own ends). No Qt; unit-tested without a device. Point clouds packed to a budget. |
-| `shader_library.hpp` | Where shaders come from: the HLSL sources, the library of serialized `.qsb` blobs, and `defaultShaders()`, the one this build draws with. |
-| `shader_compiler.hpp` | Windows' library: the HLSL compiled to bytecode once per process. |
+| `scene_origin.rs` | The precision rule in code: the scene origin, the camera matrix built in double against it, the reversed-Z projection. Plain arithmetic, no Qt. |
+| `gpu_scene.rs` | A DrawList packed the way the GPU reads it (float offsets from the origin, 32-bit indices, lines and points carrying their own ends). No Qt; unit-tested without a device. Point clouds packed to a budget. |
+| `shader_library.rs` | Where shaders come from: the HLSL sources, the library of serialized `.qsb` blobs, and `defaultShaders()`, the one this build draws with. |
+| `shader_compiler.rs` | Windows' library: the HLSL compiled to bytecode once per process. |
 | `shaders/`, `baked_shaders.hpp` | Linux's library: the same stages as Vulkan-style GLSL, baked to SPIR-V by `qsb` at build time and embedded with `#embed`. |
-| `gpu_renderer.hpp` | Draws a packed scene - one draw list, or layers each with its own depth rule - through a camera into whatever render target it is given. Owns buffers and pipelines, not the target. |
-| `offscreen_gpu.hpp` | A QRhi of its own rendering into a texture, with read-back and GPU timestamps: what the tests and the benchmark draw with. |
-| `gpu_scene_view.hpp` | The widget: a `QRhiWidget` subclass with the 3D view's mouse and keys. |
-| `renderer_choice.hpp` | The fallback rule: GPU or software, and why. |
+| `gpu_renderer.rs` | Draws a packed scene - one draw list, or layers each with its own depth rule - through a camera into whatever render target it is given. Owns buffers and pipelines, not the target. |
+| `offscreen_gpu.rs` | A QRhi of its own rendering into a texture, with read-back and GPU timestamps: what the tests and the benchmark draw with. |
+| `gpu_scene_view.rs` | The widget: a `QRhiWidget` subclass with the 3D view's mouse and keys. |
+| `renderer_choice.rs` | The fallback rule: GPU or software, and why. |
 
 **What it does differently from the software path**, with the same DrawList:
 
@@ -77,25 +77,25 @@ Camera ─────────────── relativeViewProjection (dou
   degrees steep seen 35 degrees down, 17.5% at 125%. Each mark now moves along
   its own ray - same pixels, nearer depth - by three pixels' worth of world at
   its depth for every pixel it reaches beyond the first, and draws whole
-  (`MarksLyingOnASlopedSurfaceDrawWholeOverIt`: 100% and 99.97%, orthographic
+  (`gpu_render::marks_lying_on_a_sloped_surface_draw_whole_over_it`: 100% and 99.97%, orthographic
   100%). A 1 px line is not moved at all. The price is that a mark shows
   through a surface nearer to it than about its own size on screen; a wall
   twice a point's size in front still hides it
-  (`APointWellBehindAWallStaysHidden`). The working is at `kMarkPull` in
-  `gpu_renderer.cpp`.
+  (`APointWellBehindAWallStaysHidden`). The working is at `MARK_PULL` in
+  `gpu_renderer.rs`.
 * **Per-pixel lighting from face normals** (`LightingMode::PerPixel`), from the
   screen-space derivatives of the position because the draw list has no
   normals. The normal is turned to face the eye, so a face lit from behind gets
   ambient only - where the software path's baked `abs(n.l)` lights both sides
   alike. The scene builder bakes lighting into the colours, so this mode is for
-  a list built with `cad::SceneOptions::lightDirection` set to zero (which the
+  a list built with `SceneOptions::light_direction` set to zero (which the
   builder documents as "no shading"); the default, `Baked`, draws the colours as
   they are and matches the software path.
-* **Vertical exaggeration as a uniform** (`FrameSettings::verticalExaggeration`
+* **Vertical exaggeration as a uniform** (`FrameSettings::vertical_exaggeration`
   and its datum): changing it redraws and rebuilds nothing, where the software
   view, as of this writing, rebuilds its whole scene for it.
 
-**Uploads happen only when the scene changes.** `setDrawList` packs the list and
+**Uploads happen only when the scene changes.** `set_draw_list` packs the list and
 marks it dirty; the next frame uploads it once. Every other frame writes one
 160-byte uniform block (the camera and the frame settings) and draws
 (`AFrameThatOnlyMovesTheCameraUploadsNothing`). A packed vertex is 16 bytes
@@ -103,7 +103,7 @@ against the draw list's 28.
 
 ## Packing
 
-`packDrawList` runs on the CPU for every layer the 3D view rebuilds, so every
+`pack_draw_list` runs on the CPU for every layer the 3D view rebuilds, so every
 edit pays it before anything reaches the GPU, and on a dense TIN it was
 several milliseconds. `BM_GpuPack` times it on the ground grid with a line
 along each triangle edge, as a TIN's edges are drawn (no device needed; its
@@ -113,17 +113,17 @@ order the profile ranked them (2026-09-25):
 1. **Bounds once per vertex.** `DrawList::bounds()` visited a vertex once for
    every primitive using it, and a TIN's vertex is a corner of about six
    triangles and an end of as many edges. Each layer was also bounded twice,
-   once for the scene's origin (`setLayers`) and once inside `packDrawList`.
+   once for the scene's origin (`set_layers`) and once inside `pack_draw_list`.
    That was 61% of the time. `DrawList::bounds()` now marks the vertices its
    primitives use and bounds each marked vertex once, in index order. This is
    the scene builder's walk (`docs/performance.md`, "The 3D scene build"),
-   moved into `render::DrawList` so that both callers share one copy. When an
+   moved into `katana_render::DrawList` so that both callers share one copy. When an
    extreme is a zero, the one case where the visiting order decides the
    result (which zero's sign), it falls back to primitive order.
-   `tests/render/test_draw_list.cpp` holds it to the old walk, to the bit, on
+   `rust/crates/katana_render/tests/draw_list.rs` holds it to the old walk, to the bit, on
    2000 generated lists with both zeros, NaN, infinities, unused vertices and
-   indices past the end. `setLayers` bounds each layer once and passes the box
-   in (`packDrawList(list, origin, bounds, out)`).
+   indices past the end. `set_layers` bounds each layer once and passes the box
+   in (`pack_draw_list(list, origin, bounds, out)`).
 2. **Triangle indices written in place.** They were appended, three
    `push_back`s a triangle, and that made the whole pack 14% slower than
    sizing the array once (plain integers: one memset), writing through a
@@ -138,7 +138,7 @@ order the profile ranked them (2026-09-25):
    float as `static_cast<float>` does. It is the smallest of the three
    changes, because once the first two were done the vertex pass was about
    3% of the profile. Its output is the loop's to the bit
-   (`PackDrawList.EveryVertexPacksToTheSameBitsAtEachSimdLevel`: every length
+   (`pack_draw_list::every_vertex_packs_to_the_same_bits_at_each_simd_level`: every length
    0-70, with both zeros, infinities, NaN, subnormals and doubles outside
    float's range). A wrong byte rotation, and the tail reading the wrong
    origin lane, each fail that test and the hand-worked one after it. The
@@ -179,7 +179,7 @@ A GPU takes positions and matrices as 32-bit floats, and at an MGA northing of
 6 250 000 m a float steps in **0.5 m**. Survey data uploaded as it is would snap
 to a half-metre lattice and shimmer as the camera moves. The software path never
 meets this because it multiplies by the camera in double all the way to clip
-space. The rule, written once in `scene_origin.hpp`:
+space. The rule, written once in `scene_origin.rs`:
 
 1. Every position is uploaded as a float **offset from a scene origin** kept in
    double - the centre of the scene's box, so the largest offset is half the
@@ -201,21 +201,21 @@ far from it, the float offsets there round to more than a pixel, and one stray
 entity at (0, 0) under a survey at MGA coordinates puts the centre of the
 scene's box 3000 km from the survey, where a float steps in 0.25 m. So the host
 packs every layer again against the camera's pivot once the bound on the error
-there passes a twentieth of a pixel (`gpu::originErrorPixels`,
-`kOriginErrorPixels`; `RenderViewWidget::prepareGpuFrame`, before the layers
+there passes a twentieth of a pixel (`katana_gpu::scene_origin::origin_error_pixels`,
+`ORIGIN_ERROR_PIXELS`; `render_view_widget::prepare_gpu_frame`, before the layers
 are sent). The bound is 10 u |pivot - origin| over a pixel's footprint at the
 pivot, u = 2^-24: a vertex's offset and the matrix's translation are rounded
 once each, and the shader's four-term dot product rounds both again (Higham's
-bound for a dot product, `scene_origin.hpp` works the count). Measured with
+bound for a dot product, `scene_origin.rs` works the count). Measured with
 the shader's float arithmetic, the error stays under the bound for origins
 from 1 m to 3000 km from a point seen from 0.2 m, and with the origin at the
 pivot it is under a thousandth of a pixel
-(`RelativeViewProjection.AtTheOriginsErrorBoundThePivotIsDrawnWithinItAndItsOwnOriginDrawsItExactly`).
+(`relative_view_projection::at_the_origins_error_bound_the_pivot_is_drawn_within_it_and_its_own_origin_draws_it_exactly`).
 On the device, a line 3100 km from the scene's centre and a millimetre a pixel
 is drawn where it is only when packed against the pivot
-(`GpuLayers.LayersPackedAgainstThePivotDrawASurveyZoomedInCloseWhereItIs`,
+(`gpu_layers::layers_packed_against_the_pivot_draw_a_survey_zoomed_in_close_where_it_is`,
 both devices), and the 3D view repacks as it zooms
-(`RenderViewGpu.OnTheDesktopADeepZoomFarFromTheScenesCentrePacksTheLayersAgainstThePivot`:
+(`render_view_gpu::on_the_desktop_a_deep_zoom_far_from_the_scenes_centre_packs_the_layers_against_the_pivot`:
 without the repack the origin stays 2950 km off and the line lands off the
 cursor, a stub at the top edge).
 
@@ -235,7 +235,7 @@ covers.
 ## Shaders
 
 **Windows: HLSL compiled at run time, once per process.** The shaders are HLSL
-text in `shader_library.cpp`, assembled from shared pieces (the constant buffer,
+text in `shader_library.rs`, assembled from shared pieces (the constant buffer,
 the quad vertex, the quad builders) so each stage compiles exactly what it uses.
 They are compiled by `d3dcompiler_47.dll`, which every Windows 10 and 11 install
 carries: no build-time tool and no package, at the price of Direct3D 11 only.
@@ -244,7 +244,7 @@ QRhi can take the HLSL source itself (`runtimeHlslShaders()`), but then every
 new QRhi compiles it again - the first 3D view, a second one, a 3D dock floated
 into a window of its own, each test target - and the eleven stages cost more
 than the device, the target and the pipelines together. So the default,
-`compiledHlslShaders()` (`shader_compiler.hpp`), calls the same compiler itself,
+`compiledHlslShaders()` (`shader_compiler.rs`), calls the same compiler itself,
 keeps each stage's bytecode for the life of the process (keyed by the source
 text, so a changed source cannot be answered from a stale entry) and hands QRhi
 bytecode. `precompileHlslShaders()` lets a host pay the compile on a worker
@@ -252,7 +252,7 @@ thread at start-up, so no view waits for it; and a compile error comes back as a
 `Status` carrying the compiler's own message, where QRhi only logs it.
 
 **Linux: precompiled `.qsb`, drawn on Vulkan.** The same thirteen stages are
-written a second time as Vulkan-style GLSL in `src/katana_qt/gpu/shaders/`,
+written a second time as Vulkan-style GLSL in `rust/crates/katana_gpu/src/shaders/`,
 stage for stage and function for function, with the shared pieces
 (`frame.glsl`, the constant block; `quad.glsl`, the quad builders) included
 where the HLSL splices its strings. At build time Qt's `qsb`
@@ -283,7 +283,7 @@ under the offscreen platform there.
 
 What the Vulkan conventions change, and why the shaders did not need to
 change with them: clip-space y points down and depth runs 0 to 1, so
-`reversedZProjection` flips y for Vulkan (`rhi.isYUpInNDC()`) and needs no
+`reversed_z_projection` flips y for Vulkan (`rhi.isYUpInNDC()`) and needs no
 depth correction; every quad is symmetric about its line or centre, so the
 flipped screen y covers the same pixels. Were the OpenGL backend used, its
 depth correction z' = 2z - w keeps z' = w at the near plane, so the shaders'
@@ -332,12 +332,12 @@ depth test run early was measured slower ("Measurements").
 ## Point clouds
 
 The software path never draws clouds in 3D. The GPU renderer draws one cloud
-after the scene, as round sprites of `FrameSettings::cloudPointSize` logical
+after the scene, as round sprites of `FrameSettings::cloud_point_size` logical
 pixels, from a buffer of 16-byte points (against the engine's 40) relative to
-the cloud's own origin (`GpuRenderer::setPointCloud`). `packPointCloud` thins a
+the cloud's own origin (`GpuRenderer::set_point_cloud`). `pack_point_cloud` thins a
 cloud to a **point budget** by taking every k-th point through the source order,
 k the smallest that fits - the right thinning for a file read in scan or tile
-order - and has an overload that reads `pointcloud::PointCloud` in place, each
+order - and has an overload that reads `katana_pointcloud::point_cloud_engine::PointCloud` in place, each
 point in its own colour when the file has colour.
 
 A budget has to come from the GPU: one million random-order points as 2 px
@@ -347,7 +347,7 @@ file in scan or tile order, which is kinder to the GPU's caches than random.
 
 Not done here, because it needs files this module does not own: carrying the
 reference clouds to the 3D view (its `ViewContext`), choosing the budget per
-frame (COPC resolution levels already give level of detail, `point_cloud_engine.hpp`),
+frame (COPC resolution levels already give level of detail, `point_cloud_engine.rs`),
 and eye-dome lighting, which would read the depth buffer in a second pass.
 
 ## Fallback: which renderer a 3D view uses
@@ -362,10 +362,10 @@ lavapipe, Mesa's software Vulkan, are what the tests draw on where there is no
 GPU; neither is offered as a fallback, because each runs the GPU's work on the
 CPU, which the rasteriser was written to do well and they were not. A GPU
 view that finds only such a device fails, and the host falls back to the
-rasteriser (`GpuSceneView::setSoftwareDeviceAllowed`).
+rasteriser (`GpuSceneView::set_software_device_allowed`).
 
-`chooseRenderer(RendererEnvironment)` is the rule, a pure function unit-tested
-without a GPU; `currentRendererEnvironment()` is the one place that reads the
+`choose_renderer(RendererEnvironment)` is the rule, a pure function unit-tested
+without a GPU; `current_renderer_environment()` is the one place that reads the
 real platform and environment. First match wins:
 
 1. The GPU renderer was not built (`KATANA_GPU` off) - software.
@@ -382,24 +382,24 @@ real platform and environment. First match wins:
 
 `KATANA_RENDERER=gpu` cannot undo rules 1-5, and the GPU is already the
 default; what it does add is permission to draw on a software device
-(`RendererDecision::softwareDeviceAllowed`), for a machine where that is
+(`RendererDecision::software_device_allowed`), for a machine where that is
 wanted and for the desktop tests. Any other value is ignored and named in the
 reason, so a typo shows in the log. Help > About Katana names the choice and
 its reason, and the vector kernels in force.
 
 ### Hosting
 
-`RenderViewWidget` keeps what it owns - the document, the scene building, the
+`RenderView` keeps what it owns - the document, the scene building, the
 legend, the empty message, the status line - and, when the rules choose the
 GPU, a child that covers it: `makeGpuSceneViewIfChosen(camera,
 currentRendererEnvironment(false, failedBefore))`. The child takes the host's
 camera by reference, so switching renderers keeps the view.
 
 * **The same layers, with the same depth rules.** The host builds
-  `cad::SceneLayers` as it always did, and hands the GPU all six
-  (`GpuRenderer::setLayers`): the grid, the edges and the selection's casing
+  `katana_cad::scene::SceneLayers` as it always did, and hands the GPU all six
+  (`GpuRenderer::set_layers`): the grid, the edges and the selection's casing
   tested but not written, the terrain, the drawing and the selection written
-  - `cad::renderLayers`' rules, for the same defects (`GpuLayers.*` tests:
+  - `katana_cad::scene::render_layers`' rules, for the same defects (`gpu_layers` tests:
   the grid through a flat pad, a draped line dashed by TIN edges, a selected
   line drawn dark by its own casing - pulled nearer than the core by its
   width, below). One draw list, as the first design here had it, could not
@@ -409,27 +409,27 @@ camera by reference, so switching renderers keeps the view.
   and its core) against the origin the terrain set; a click sends the
   selection alone - as the software
   view rebuilds only its overlay (docs/render.md, "The scene in layers").
-* **Each frame, what `renderLayers` does first** (`GpuSceneView::onPrepareFrame`):
+* **Each frame, what `render_layers` does first** (`GpuSceneView::onPrepareFrame`):
   the scene rebuilt if it is dirty, the depth range fitted to the layers and
   the grid, and the edges faded for the frame's scale - and only when a fade
   step changed is the edge layer sent again.
 * **Widths in logical pixels.** The software framebuffer is in device pixels,
-  so its scene is built with `SceneOptions::pixelScale` = the display's ratio;
-  the GPU view scales logical widths itself (`FrameSettings::pixelRatio`), so
+  so its scene is built with `SceneOptions::pixel_scale` = the display's ratio;
+  the GPU view scales logical widths itself (`FrameSettings::pixel_ratio`), so
   its scene is built with 1, and the scene is rebuilt when the renderer
   changes.
 * **The camera.** Framing, panning by pixels and zooming about a pixel count
   against the viewport's own size, so the view does not depend on its pixel
   count: the GPU child sizes the camera to its logical pixels, the software
-  view to device pixels before each paint. `setCameraFramed(framed)` - the
+  view to device pixels before each paint. `set_camera_framed(framed)` - the
   software view's own test - keeps a camera the user has orbited through a
   renderer switch, a re-tile or a re-dock; `onZoomExtents` has the host frame
-  what it built, and the host writes `ViewState::cameraFramed` as before. A
+  what it built, and the host writes `ViewState::camera_framed` as before. A
   resize reframes, until the user moves the camera, at the child's next frame
   and its new size.
 * **The mouse and the keys** are the child's, the same as the software view's
   (below); the host's focus proxy is the child, and focus reaching it
-  activates the view (`view_focus.hpp`).
+  activates the view (`view_focus.rs`).
 * **The legend and the empty message** are painted by a transparent child over
   the GPU view, which `QRhiWidget` composes like any other widget.
 * **`onRenderFailed`** - remembered for the session (rule 4); the child is
@@ -442,26 +442,26 @@ camera by reference, so switching renderers keeps the view.
 Not done: vertical exaggeration still rebuilds the scene - its datum decides
 where undraped linework goes, which the scene builder owns - rather than going
 to `FrameSettings`; and the view does not yet carry reference point clouds
-(`GpuRenderer::setPointCloud` is ready for them; the `ViewContext` has none).
+(`GpuRenderer::set_point_cloud` is ready for them; the `ViewContext` has none).
 
-The widget's mouse and keys are `RenderViewWidget`'s (left drag orbits, or pans
+The widget's mouse and keys are `RenderView`'s (left drag orbits, or pans
 in an elevation view; middle or Shift+left pans; double-click and E frame; 1-5
 and 0 standard views; P the projection), in logical pixels: a pan or a zoom
 about the cursor moves the world the same distance whichever pixels it is
 counted in. Only the frame is drawn at the display's real resolution. The
 wheel is the host's: the child hands it over through `onWheelZoom`, as it
 hands framing over through `onZoomExtents`, and the host zooms towards what
-it built under the cursor, `Camera::kZoomPerNotch` a notch
-(`RenderViewWidget::zoomAtPixel`; docs/render.md, "Zooming towards the
+it built under the cursor, `Camera::ZOOM_PER_NOTCH` a notch
+(`render_view_widget::zoom_at_pixel`; docs/render.md, "Zooming towards the
 cursor"). The child holds only packed lists, so without a host it zooms about
 the target's plane - which stalls over ground beyond that plane. The desktop
 case that holds the hand-over puts the cursor on a point of its line 21.7 m
 beyond the target's plane, where the child's own zoom magnifies by 1.124 a
 notch instead of 1.15, so it fails without the hand-over; with the cursor on
 the target itself, as it first was, both zooms agree and it could not
-(`RenderViewGpu.OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor`;
+(`render_view_gpu::on_the_desktop_the_wheel_over_the_gpu_view_zooms_towards_what_is_under_the_cursor`;
 run by hand on the Windows platform on 2026-09-30, passing, and failing at
-the first notch with 1.1245 when `makeGpuView` did not hand the wheel over).
+the first notch with 1.1245 when `make_gpu_view` did not hand the wheel over).
 
 Checked only on Linux (xcb under Xvfb, lavapipe), and to be checked on the
 Windows platform by hand: floating a 3D dock creates a new top-level window,
@@ -486,7 +486,7 @@ Windows: QRhi is inside `Qt6Gui.dll`, and `d3dcompiler_47.dll` is part of
 Windows. On Linux the Vulkan loader, `libvulkan.so.1`, comes with the
 graphics driver, and Qt loads it when a view first asks for Vulkan.
 
-**Layering.** `tools/check_layering.cmake` gives `src/katana_qt/gpu` its own
+**Layering.** `tools/check_layering.cmake` gives `rust/crates/katana_gpu/src` its own
 layer, `gpu`, allowed `core`, `math`, `geometry`, `render` and `pointcloud`: the
 software renderer's rule plus the cloud's plain types, never a `Document`,
 although the directory sits under `katana_qt`. The `qt` layer may see `gpu`:
@@ -544,14 +544,14 @@ against survey coordinates) is compared pixel for pixel.
   the first frame, leaving the camera in logical pixels for the software
   view, and refusing a software device unless allowed - run instead of
   skipping. ctest does not set it on Windows, so run it by hand after changing
-  `gpu_scene_view.*`; the camera-pixels case can only tell the two pixel sizes
+  `gpu_scene_view.rs`; the camera-pixels case can only tell the two pixel sizes
   apart on a display scaled above 100%. On Linux ctest sets
   `KATANA_GPU_TEST_PLATFORM=xcb` itself. The same holds for the widget
   suite's `RenderViewGpu.OnTheDesktop...` cases with
   `KATANA_WIDGET_TEST_PLATFORM=windows`, the wheel's hand-over to the host
   and the repack of a deep zoom among them; that the child hands the wheel
   over at all needs no device
-  (`TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor`). Run
+  (`gpu_scene_view::the_wheel_is_handed_to_the_host_that_zooms_towards_what_is_under_the_cursor`). Run
   either binary with `C:/msys64/ucrt64/bin` first on `PATH`, as ctest does:
   with `build/release/bin` and its deployed copies of the runtime first, the
   widget suite hung with nothing printed - even `--gtest_list_tests`, offscreen
@@ -562,7 +562,7 @@ against survey coordinates) is compared pixel for pixel.
   grab after the first reads back nothing - all zeros, about 3 s a grab on this
   laptop - where a shown widget's grabs take 2-5 ms and read back the frame. A
   desktop test that draws twice shows its widget first
-  (`OnTheDesktopADrawListArrivingAfterTheFirstFrameIsFramed`).
+  (`gpu_scene_view::on_the_desktop_a_draw_list_arriving_after_the_first_frame_is_framed`).
 
 ## Measurements
 

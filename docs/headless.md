@@ -2,8 +2,10 @@
 
 Katana runs without a display in two ways: `katana_cli`, the engine with no
 GUI at all, and the desktop application `katana` driven by switches, which
-builds the real window offscreen, acts on it as a person would and writes a
-screenshot or a PDF. The second is how the window, its menus and its dialogs
+builds the real window with no display - the egui window drawn by the
+headless runner (`rust/crates/katana_window/src/drive/headless.rs`) on the
+CPU, with no GPU and no windowing system - acts on it as a person would and
+writes a screenshot or a PDF. The second is how the window, its menus and its dialogs
 are tested (`docs/testing.md`) and how a change to the look is reviewed by
 someone - or a model - who cannot watch a screen. The window itself is
 `docs/desktop.md`.
@@ -26,8 +28,8 @@ Scripts and `-c` batches stop at the first failing command and exit 1, so the
 tool composes with shell pipelines. A refusal is one line on stderr; a
 refusal that carries a report - `UTILITY CHECK` of a schedule with errors -
 prints the report after it on stdout, where a reply goes, so output kept from
-stdout has it (`tests/app/test_session.cpp`). The `cli.*` tests
-(`src/katana_app/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
+stdout has it (`rust/crates/katana_app/tests/session/session.rs`). The `cli.*` tests
+(`tests/cli/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
 process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
 code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
@@ -52,7 +54,7 @@ The same session is served to Claude over the Model Context Protocol by
 
 ### Text and names
 
-Text in the model is UTF-8 (`core/text_encoding.hpp`), and two things follow
+Text in the model is UTF-8 (`rust/crates/katana_core/src/text_encoding.rs`), and two things follow
 from that for `katana_cli` and `katana_mcp`, which on Windows are handed a
 command line, a script and a pipe in the ANSI code page unless they ask for
 more. Until this change they did not: an accented letter in a path ended the
@@ -65,25 +67,23 @@ LEGEND JSON`). One rule now, applied where text arrives:
 
 - **Arguments are read wide.** `katana_cli` and `katana_mcp` take their
   command line from `GetCommandLineW` and convert it to UTF-8
-  (`update::utf8Arguments`, the one reader the update helper uses too), so
+  (`katana_update::utf8_arguments`, the one reader the update helper uses too), so
   `katana_cli -c "OPEN C:/Users/Łukasz/site"` and `katana_mcp --project
   C:/Users/José/site` name the folder that was typed. Elsewhere `argv` is
   taken as given.
-- **A script is a text file** (`Session::readScript`): it is decoded as every
-  other text format is (`core::decodeText`), so a byte order mark, UTF-16 and
+- **A script is a text file** (`Session::read_script`): it is decoded as every
+  other text format is (`katana_core::text_encoding::decode_text`), so a byte order mark, UTF-16 and
   the Windows-1252 an ANSI editor writes read as the text they are, and a
   guess is said on stderr (`note: the script ... read as Windows-1252`). Its
-  path is made with `core::pathFromUtf8`. `katana_run_script` reads the same
+  path is made with `katana_core::path_text::path_from_utf8`. `katana_run_script` reads the same
   way.
-- **A path is made from text through `core::pathFromUtf8`**, never by handing
-  a `std::string` to a function that takes a `std::filesystem::path`. That
-  conversion is implicit and means what the standard library says: UTF-8 in
-  libstdc++, the ANSI code page in libc++ on Windows (the Windows ARM64
-  release job). `OPEN` and `SAVE` did it until 2026-11-04. GCC never showed
-  it, and the clang check (docs/building.md) saved `SAVE "…/José-Łukasz-测/site"`
-  into a folder named `JosÃ©-Åukasz-æµ‹`. Since the conversion is implicit,
-  no grep finds it and no compiler warns of it. `tools/find_narrow_paths.py`
-  asks clang's AST for every one instead.
+- **A path is made from text through `katana_core::path_text::path_from_utf8`**.
+  In the C++ build a `std::string` handed to a function that took a
+  `std::filesystem::path` was converted implicitly, as UTF-8 in libstdc++ and
+  in the ANSI code page in libc++ on Windows: `OPEN` and `SAVE` did it until
+  2026-11-04, and the clang check saved `SAVE "…/José-Łukasz-测/site"` into a
+  folder named `JosÃ©-Åukasz-æµ‹`. Rust has no such implicit conversion: a
+  path is made from text in one place, by that function.
 - **A console is read wide.** Standard input that is a console is read with
   `ReadConsoleW` (the "é" typed at an OEM-850 prompt was the byte 0x82, which
   is no text in either code page), and the console's output code page is set
@@ -94,56 +94,61 @@ LEGEND JSON`). One rule now, applied where text arrives:
   which says so on stderr once per session. The alternative was to refuse it,
   as a layer's name with a stray byte used to be; that turns away a person
   whose pipe comes from a tool that writes the ANSI page. Windows-1252 is the
-  page `decodeText` falls back on. Only on Windows: elsewhere a line's bytes
-  are the terminal's and the file system's, `core::pathFromUtf8` takes a path
+  page `decode_text` falls back on. Only on Windows: elsewhere a line's bytes
+  are the terminal's and the file system's, `katana_core::path_text::path_from_utf8` takes a path
   that is not UTF-8 as the narrow name it is (a file named in Latin-1 stays
   reachable), and a name that is not UTF-8 is refused by its table's door.
   An exception that still escapes a verb is reported as `error: Internal:
   ...` and fails the line; it no longer ends the process.
 - **Whatever reaches the model is UTF-8, and each kind of text is checked at
-  one door** with `core::isValidUtf8`: a surface's name, source and style at
-  `SurfaceStore::add`, `rename` and `setStyle`; a surface style's name and
-  description at `checkSurfaceStyle` (every route to a style ends there); a
+  one door** with `katana_core::text_encoding::is_valid_utf8`: a surface's name, source and style at
+  `SurfaceStore::add`, `rename` and `set_style`; a surface style's name and
+  description at `check_surface_style` (every route to a style ends there); a
   layer's and an alignment's in their own tables. The refusal is
   `InvalidArgument` and does not echo the bytes. The window's strings are
-  UTF-8 from Qt and MCP's are UTF-8 from JSON, so for them the door is a
+  UTF-8 from egui and MCP's are UTF-8 from JSON, so for them the door is a
   backstop.
 - **A JSON reply never throws.** The replies that write names (`SURFACE LIST
   JSON`, `SURFACE LEGEND ... JSON`, `LEADER LIST JSON`, `SURFACESTYLE LIST
-  JSON`, the `katana://surface-styles` resource) dump with nlohmann's
-  `replace` handler, so a byte that got past the doors is U+FFFD in the reply
-  and not an exception that ends the process. The style set that a SAVE
+  JSON`, the `katana://surface-styles` resource) are written with a byte that is
+  not UTF-8 replaced, so a byte that got past the doors is U+FFFD in the
+  reply and not a failure that ends the process. The style set that a SAVE
   writes is the other case: a stored value is not to be rewritten silently, so
-  `Document::writeSurfaceState` refuses the save with the style named
-  (`checkSurfaceStyleSet`) rather than write a U+FFFD into the user's project.
+  `Document::write_surface_state` refuses the save with the style named
+  (`check_surface_style_set`) rather than write a U+FFFD into the user's project.
   A project written by an earlier build that holds a surface name the door
   now refuses (ANSI bytes, a double quote an importer let through) opens, with
   the name repaired (`SurfaceStore::nameable`) and a warning in the log.
 
-What is tested without a console: `tests/core/test_text_encoding.cpp` (the
-Windows-1252 reading), `tests/update/test_contract.cpp` (UTF-16 to UTF-8, the
+What is tested without a console: `rust/crates/katana_core/tests/text_encoding.rs` (the
+Windows-1252 reading), `rust/crates/katana_update/tests/contract.rs` (UTF-16 to UTF-8, the
 conversion every wide argument goes through), the door tests in
-`tests/geo/test_surface_store.cpp`, `tests/cad/terrain/test_surface_style.cpp`
-and `tests/cad/terrain/test_surface_verbs.cpp`, and the `cli.non_ascii_*` /
+`rust/crates/katana_terrain/tests/geo_terrain/surface_store.rs`, `rust/crates/katana_cad/tests/document/surface_style.rs`
+and `rust/crates/katana_cad/tests/terrain_utility_verbs/surface_verbs.rs`, and the `cli.non_ascii_*` /
 `cli.ansi_lines_*` / `cli.mcp_opens_a_non_ascii_*` tests
-(`src/katana_app/text_cli.cmake`), which start the real programs from a
+(`tests/cli/text_cli.cmake`), which start the real programs from a
 folder named with an accented letter, a letter in no Western code page and a
 Han character. The one part not driven is the console's own line read
-(`ReadConsoleW` in `main.cpp`): ctest has no console.
+(`ReadConsoleW` in `main.rs`): ctest has no console.
 
 ## katana with --screenshot and --plot
 
 ```sh
-QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
+timeout 120 <programs>/katana \
     <copy-of-project> [files to import] --screenshot out.png [steps...]
-QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
+timeout 120 <programs>/katana \
     <copy-of-project> --plot out.pdf [--fit | --scale N] [--paper A3] [--landscape | --portrait] [--dpi N]
-QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
+timeout 120 <programs>/katana \
     <copy-of-project> --plot-sheets out.pdf|folder [--sheets 1,3-5] [--format pdf|pdfs|png|tiff] \
     [--plot-style colour|grey|mono] [--dpi N] [--line-weight-scale F]
 ```
 
-Either switch makes the run HEADLESS (`MainWindow::setHeadless`): the window
+`<programs>` is cargo's release folder - in WSL
+`~/katana-build/<checkout>/cargo/release`, the folder the CMake test runner's
+`KATANA_PROGRAMS` names (`docs/building.md`). No display is needed: a
+headless run opens no window and asks for no GPU.
+
+Either switch makes the run HEADLESS (`MainWindow::set_headless`): the window
 is not shown to anyone, and it never opens a modal box ("A headless session
 never opens a modal box", below). Always open a COPY of a project: opening
 can back up or migrate the project directory in place.
@@ -163,7 +168,7 @@ size comes out. It protects construction, not appearance: LOOK at the PNG.
 A headless window is always the window as built, 1360 x 860 at the
 platform's text size: it neither reads nor writes the place, layout, text
 size and toolbar choices an interactive session keeps
-(`MainWindow::restoreSession`, `docs/desktop.md`, "How the window starts"),
+(`MainWindow::restore_session`, `docs/desktop.md`, "How the window starts"),
 so a screenshot is the same on every machine and a test leaves no settings
 behind. The same goes for the customisation: a headless run reads no
 per-user place for one ("The customisation a run starts with", below).
@@ -172,7 +177,7 @@ per-user place for one ("The customisation a run starts with", below).
 PDF"). `--fit` (the default) picks the first standard scale at which the
 drawing fits; `--scale N` plots at 1:N; `--paper` is A0 to A4; `--dpi` sets
 the resolution. The dialog, the window's `PLOT` verb and the switch share
-`plotDrawingToPdf`, so the `qt_plot_headless` test exercises the code the menu
+`plot_drawing_to_pdf`, so the `qt_plot_headless` test exercises the code the menu
 does; it also runs a `PLOT` script in each plot style and weight and checks
 the inks each prints (`docs/desktop.md`, "Plot to PDF and view images").
 
@@ -188,8 +193,8 @@ file-name pattern; `--plot-style` prints in `colour`, `grey` or `mono`;
 `--dpi` is the resolution of a raster and of a PDF's 3D snapshot (300 by
 default); `--line-weight-scale` multiplies every line weight (0.1 to 5).
 Every file written is printed on stdout, a path a line. The File menu's Plot
-dialog and the switch share `plotSheets` in
-`src/katana_qt/plotting/plot_output.hpp`. `--plot` takes `--plot-style` and
+dialog and the switch share `plot_sheets` in
+`rust/crates/katana_window/src/plotting/plot_output.rs`. `--plot` takes `--plot-style` and
 `--line-weight-scale` too.
 
 **`--sheets-json out.json`** writes the
@@ -205,7 +210,7 @@ way an agent drives the sheets (`docs/plotting.md`, "Sheets on the command
 line"):
 
 ```sh
-QT_QPA_PLATFORM=offscreen ./build/release/bin/katana.exe <copy-of-project> \
+<programs>/katana <copy-of-project> \
     --command "GENERATE grid scale=500 keyplan=on" --command SAVE \
     --sheets-json sheets.json --plot-sheets sheets.pdf
 ```
@@ -214,20 +219,24 @@ The `qt_sheets_headless` test runs that (`tools/check_sheets_headless.cmake`),
 plots one sheet with the window's `PLOTSHEETS` verb, reads the saved copy back
 with `--sheets-json -`, and checks that a refused line fails the run.
 
-Offscreen Qt has no monospace font, so a screenshot's command log and any
-fixed-pitch text differ from a real display; judge fonts on a real screen.
+The headless window draws with egui's own fonts and reads no system font,
+so a screenshot's text may differ from a real display's; judge fonts on a
+real screen.
 
 ## The switches
 
-`src/katana_qt/main.cpp` parses them, and the usage comment above its `main`
-is the reference. Arguments that are not switches are opened (a directory) or
+The program driver parses them (`katana_window::drive::run::read_switches`,
+`rust/crates/katana_window/src/drive/run.rs`; the steps' switches are
+`StepKind::from_switch` in `rust/crates/katana_window/src/drive/steps.rs`), and
+its module comment is the reference; `rust/crates/katana_window/src/bin/katana/main.rs`
+is the program around it. Arguments that are not switches are opened (a directory) or
 imported (anything else), in order, before any step runs.
 
 | Switch | What it does |
 |---|---|
 | `--screenshot PNG` | grab the target at the end - the window, or the dialog, dock or panel the steps made the target |
 | `--plot PDF` with `--fit`, `--scale N`, `--paper A0..A4`, `--landscape`, `--portrait`, `--dpi N` | plot the drawing to a PDF and exit |
-| `--plot-sheets PDF` | plot every sheet of the project to one PDF, a page a sheet, and exit; a project with no sheets plots one fitted to the drawing (`MainWindow::plotSheetsToPdf`). What the sheet checks find is logged to stderr first (`docs/plotting.md`, "The sheet painter", "Preflight checks") |
+| `--plot-sheets PDF` | plot every sheet of the project to one PDF, a page a sheet, and exit; a project with no sheets plots one fitted to the drawing (`sheet_painter::plot_sheets_to_pdf`). What the sheet checks find is logged to stderr first (`docs/plotting.md`, "The sheet painter", "Preflight checks") |
 | `--plot-sheets` with `--sheets 1,3-5` | plot only those sheets (positions from 1, ranges, sheet ids), in that order |
 | `--plot-sheets` with `--format pdf\|pdfs\|png\|tiff` | one PDF (the default), or a PDF, PNG or TIFF a sheet in the FOLDER given to `--plot-sheets`, named by the page setup's pattern; each file written is printed on stdout |
 | `--plot-style colour\|grey\|mono`, `--line-weight-scale F` | with `--plot-sheets` or `--plot`: print in colour, greyscale or monochrome, every line weight times F (0.1 to 5) |
@@ -240,12 +249,12 @@ imported (anything else), in order, before any step runs.
 | `--style-manager` | open the styles and linetypes manager and grab it |
 | `--layer-manager` | open the Layers dialog and grab it; Format > Layers is non-modal, so `--dialog formatLayers` reaches the same dialog as a step |
 | `--attributes [ID]` | open the attribute manager (Edit > Attributes, still modal in a person's session) on entity ID and grab it |
-| `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it; for a DXF or a .12da the import dialog is File > Import's placement step (`docs/interop.md`, "Placing an import"). With steps, it is the target they start on, so `--fill vectorImportWhere=...`, `--press vectorImportPreview` and `--report vectorImportMatchCount` drive it (`qt_vector_import_dialog_previews_its_line_headless`). Its Import and Cancel are `<dialog>Run` and `<dialog>Cancel` (`vectorImportRun`, `rasterImportRun`, `pointCloudImportRun`); a pressed Run imports as the menu's accepted dialog does, through `MainWindow::finishImport` (`qt_vector_import_dialog_imports_what_its_filter_takes_headless`) |
+| `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it; for a DXF or a .12da the import dialog is File > Import's placement step (`docs/interop.md`, "Placing an import"). With steps, it is the target they start on, so `--fill vectorImportWhere=...`, `--press vectorImportPreview` and `--report vectorImportMatchCount` drive it (`qt_vector_import_dialog_previews_its_line_headless`). Its Import and Cancel are `<dialog>Run` and `<dialog>Cancel` (`vectorImportRun`, `rasterImportRun`, `pointCloudImportRun`); a pressed Run imports as the menu's accepted dialog does, through `MainWindow::finish_import` (`qt_vector_import_dialog_imports_what_its_filter_takes_headless`) |
 | `--check-shortcuts` | fail the run when a key reaches more than one thing (`desktop.md`, "Every key reaches one thing") |
 | `--check-menus` | fail the run when a menu item, in any submenu, has no icon or no status tip, listing each (`desktop.md`, "Every menu item has an icon and says what it does") |
-| `--check-toolbars` | measure every icon-only button with a menu on a toolbar or in a dock's title bar (the tool families, Undo, Redo, each view's kind switcher) from its own rendering - where it draws its icon, and what its menu adds - print a `toolbar button` or `title bar button` line for each, and fail the run, with a `menu sign clash:` line, when a menu's sign is drawn over the icon or not at all (`tools::menuSignClashes`; `desktop.md`, "Tool families on the toolbars"). It measures once the `--action` switches and the steps have run, so a `--trigger viewToolBarIconsLarge` or a `--command` starting a tool is measured; on a scaled screen it judges in device pixels, and each line says so |
-| `--check-toolbar-fit WxH[,WxH...]` | resize the window to each size and fail the run, with a `toolbar fit clash:` line, when a toolbar along the top has an action behind its extension arrow (`MainWindow::toolBarFit`); print a `toolbar fit` line for each size, with the width each row of toolbars needs beside the width it has. Then, at the narrowest size, restore the layouts an older build saved - Surface Edit and BIM on the second row, neither of them, a toolbar the person hid - and hold the window to the same (`MainWindow::restoreLayout`; `desktop.md`, "Fitting the screen") |
-| `--check-session-restore` | before the window is first shown, restore into it what an older build saved - a layout of version 1 with Surface Edit and BIM beside GIS, in a window left maximised - as a session starts (`MainWindow::restoreWindow`), then show it; fail the run when a toolbar is in no area or Surface Edit and BIM are not on a row of their own, and print a `session restore:` line. A start from such a session crashed until 2026-10-21 (`desktop.md`, "Fitting the screen") |
+| `--check-toolbars` | measure every icon-only button with a menu on a toolbar or in a dock's title bar (the tool families, Undo, Redo, each view's kind switcher) from its own rendering - where it draws its icon, and what its menu adds - print a `toolbar button` or `title bar button` line for each, and fail the run, with a `menu sign clash:` line, when a menu's sign is drawn over the icon or not at all (`tools::menu_sign_clashes`; `desktop.md`, "Tool families on the toolbars"). It measures once the `--action` switches and the steps have run, so a `--trigger viewToolBarIconsLarge` or a `--command` starting a tool is measured; on a scaled screen it judges in device pixels, and each line says so |
+| `--check-toolbar-fit WxH[,WxH...]` | resize the window to each size and fail the run, with a `toolbar fit clash:` line, when a toolbar along the top has an action behind its extension arrow (`MainWindow::tool_bar_fit`); print a `toolbar fit` line for each size, with the width each row of toolbars needs beside the width it has. Then, at the narrowest size, restore the layouts an older build saved - Surface Edit and BIM on the second row, neither of them, a toolbar the person hid - and hold the window to the same (`MainWindow::restore_layout`; `desktop.md`, "Fitting the screen") |
+| `--check-session-restore` | before the window is first shown, restore into it what an older build saved - a layout of version 1 with Surface Edit and BIM beside GIS, in a window left maximised - as a session starts (`layout::restore_session`), then show it; fail the run when a toolbar is in no area or Surface Edit and BIM are not on a row of their own, and print a `session restore:` line. A start from such a session crashed until 2026-10-21 (`desktop.md`, "Fitting the screen") |
 | `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
 | `--update-health TX` | not for a person: the update helper starts the version it has just put in place with it, to learn whether that version starts. The window is built - headless, never shown - the marker `healthy-<TX>` is written in the update state folder on the event loop's first idle turn, and the run exits 0 (1 when the marker could not be written). TX is taken only when it is a transaction id as the helper makes them; anything else ends the run with exit 2 and writes nothing. Every other switch beside it is ignored ("Updates in a headless run", below) |
 | the steps | below |
@@ -253,16 +262,16 @@ imported (anything else), in order, before any step runs.
 ## The customisation a run starts with
 
 The window starts with a customisation - linestyles, symbols and survey codes
-- before it opens anything (`MainWindow::loadDefaultCustomisation`,
-`cad::startCustomisation`; `docs/desktop.md`, "How the window starts"), and
+- before it opens anything (`MainWindow::load_default_customisation`,
+`katana_cad::customisation_host::start_customisation`; `docs/desktop.md`, "How the window starts"), and
 two environment variables say which. The window reads them once, at start-up.
-(The seam is cad's own, `cad::builtInCustomisation`, so every front end that
+(The seam is cad's own, `katana_cad::customisation_host::built_in_customisation`, so every front end that
 hands a host over reads it the same way: `katana_cli` and `katana_mcp` do,
 through their session's `startCustomisation`.)
 
 | Variable | What it says |
 |---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`include/katana/cad/customisation_host.hpp`), tried in this order: unset, the built-in is the DEFAULT customisation compiled into the program (Katana Standard), when the build has one; `none`, there is no built-in for this run; a built-in's NAME (`NSW`, `Katana Standard`; any letter case), that compiled-in built-in is the built-in of this run; otherwise a path, THAT Katana customisation file is the built-in (a file in the working folder called like a built-in is given as `./name`). One that does not read is said - a word that is no built-in's name also lists the names there are - and the run has no built-in, never the compiled-in one in its place |
+| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`rust/crates/katana_cad/src/customisation_host.rs`), tried in this order: unset, the built-in is the DEFAULT customisation compiled into the program (Katana Standard), when the build has one; `none`, there is no built-in for this run; a built-in's NAME (`NSW`, `Katana Standard`; any letter case), that compiled-in built-in is the built-in of this run; otherwise a path, THAT Katana customisation file is the built-in (a file in the working folder called like a built-in is given as `./name`). One that does not read is said - a word that is no built-in's name also lists the names there are - and the run has no built-in, never the compiled-in one in its place |
 | `KATANA_CUSTOMISATION` | the kept customisation file: what `CUSTOMISE KEEP` writes and the next start reads in the place of the built-in. Unset, a headless run has none, and `KEEP` and `REVERT` are refused naming the variable. It is the ONLY way a headless run reads or writes one: it looks in no per-user place, so that it is the same run on every machine. (An interactive window with the variable unset keeps its own in the per-user place: `docs/desktop.md`, "How the window starts") |
 
 The start-up line says what was installed, on stderr with the rest of the
@@ -325,7 +334,7 @@ say would be two tests. Two parts, which share nothing:
   (`qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless`,
   `qt_a_kept_customisation_is_what_the_next_window_starts_with_headless`).
   It is deferred to the end of the TOP directory, so a directory added after
-  `tests/` (`benchmarks`) is reached too. The `cli.` tests carry their
+  `tests/` is reached too. The `cli.` tests carry their
   environment on a `cmake -E env` command line, which the scan cannot read
   and need not: the test property is set on the process that line starts
   from, so a variable named there still wins.
@@ -367,13 +376,11 @@ reached with `set_property(TEST ... DIRECTORY ...)`, which needs CMake 3.28.
 With an older one `tests/CMakeLists.txt` does what it can and says so (it
 refused to configure at all until 2026-10-07): the scan is deferred to the
 end of `tests/` and reaches that directory's own program tests, the `cli.`
-tests and the window checks of other directories are left to the build and
-the caller's environment, and neither check is registered - each would name
-them at every run, for a reason nobody running the suite can mend. One
+tests and the window checks of other directories are left to the caller's
+environment, and neither check is registered - each would name them at every
+run, for a reason nobody running the suite can mend. One
 `message(STATUS ...)` says all of that as the tree is configured. (The top
-`CMakeLists.txt` and the presets declare 3.24. Raising that also turns on
-every policy up to the new minimum, C++ module scanning of each source among
-them, which is a decision about the build and not about this scan.) There is
+`CMakeLists.txt` declares 3.24.) There is
 no older CMake on the machines this was written on: the degraded path was
 run with the scan's own text in a throwaway project that sets
 `CMAKE_VERSION` to 3.27 first. Rejected: one line in each test's own
@@ -382,15 +389,17 @@ it. What the check cannot see is a program started from inside a script or a
 test executable without being named on the command line; there is none.
 
 The `cli.` tests are held by the same variable: `katana_cli` starts its
-session through `cad::startCustomisation` and reads the seam
-(`src/katana_app/session.cpp`).
+session through `katana_cad::customisation_host::start_customisation` and reads the seam
+(`rust/crates/katana_app/src/session.rs`).
 
 ## The steps: driving dialogs, docks and the command line
 
-The steps run in the order given, with the event loop run between them as it
-runs between two things a person does, so what one step sets going has
-happened before the next. Everything is found by OBJECT NAME, which is why
-every action, field, button and tab gets one. In a test they are one
+The steps run in the order given, with frames drawn between them until the
+window is idle (the headless runner's idle rule), as between two things a
+person does, so what one step sets going has happened before the next.
+Everything is found by its NAME - the object name the C++ window gave it,
+kept by every control of the Rust window - which is why every action,
+field, button and tab gets one. In a test they are one
 `-DDRIVE=` list of `tools/check_screenshot.cmake`, a step per sigil:
 
 | Switch | `-DDRIVE` step | What it does |
@@ -402,8 +411,8 @@ every action, field, button and tab gets one. In a test they are one
 | `--press BUTTON` | `!BUTTON` | clicks it - a radio button too, which is how one is chosen (`!utilitySourceDrawing`); a disabled button fails the run, and so does one its owner has hidden - a view bar's tool it had no room for, or a Link its kind has none of - which a press once clicked though nobody could see it (`qt_a_press_of_a_hidden_bar_tool_is_refused_headless`) |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
-| `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
-| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it - its OWN items: a submenu is one item, by its title, and is asked by its own object name (`?fileImportMenu`, `?fileExportMenu`, the two of File; `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`), and the section titles between items are not listed; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`); when it drew one of the drawing's surfaces it goes on with what of them - `surfaces=N triangles=N edges=N tinted=N contours=N labels=N covered=N legends=N`, the surfaces drawn, their triangles in view, edges stroked and triangles tinted, contour runs, labels, the pixels their faces cover and the legends (`docs/surface_display.md`, `qt_a_surface_is_drawn_in_plan_in_its_style_headless`) and, for each part of a style it could not draw, a trailing ` problem="ground (style Fine): contours: an interval of 0.000500 crosses this surface's triangles more than 4000000 times; not drawn - set a larger interval"` (`PlanPaintStats::surfaceProblems`; the window's log says the same once, and a plot or a sheet reports it too: `docs/surface_display.md`, "In plan") A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person; when it stacked legends for the surfaces drawn in a style (`docs/surface_display.md`, "In 3D"), it goes on with `legends=N` and a `legend="surface - style"` for each, in the order drawn (`qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless`) |
+| `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::run_verb_line`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
+| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text (without its markup; as written when the label's text is plain, so a word in angle brackets that it shows is reported: every label was read as markup until 2026-10-07, and `CUSTOMISE <file>` lost its `<file>` in the report while the screen had it, `qt_the_import_wizards_options_note_names_the_customise_line_headless`), a field's, a list's rows, a button's accessible name and, when it can be checked, whether it is (`%View2\|?ViewLinkButton` prints `ViewLinkButton: Linked, checked`, `qt_linked_plan_views_zoom_together_headless`) - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it - its OWN items: a submenu is one item, by its title, and is asked by its own object name (`?fileImportMenu`, `?fileExportMenu`, the two of File; `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`), and the section titles between items are not listed; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`). A plan view is `PlanView<id>`, as its dock is `View<id>`: painted afresh, it prints what it drew - `PlanView2: drawn=1 ghosts=1 grips=0`, the entities, the selection's ghosts on layers it hides, and the grips it offers - which a screenshot shows only to a person (`qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless`); when it drew one of the drawing's surfaces it goes on with what of them - `surfaces=N triangles=N edges=N tinted=N contours=N labels=N covered=N legends=N`, the surfaces drawn, their triangles in view, edges stroked and triangles tinted, contour runs, labels, the pixels their faces cover and the legends (`docs/surface_display.md`, `qt_a_surface_is_drawn_in_plan_in_its_style_headless`) and, for each part of a style it could not draw, a trailing ` problem="ground (style Fine): contours: an interval of 0.000500 crosses this surface's triangles more than 4000000 times; not drawn - set a larger interval"` (`PlanPaintStats::surface_problems`; the window's log says the same once, and a plot or a sheet reports it too: `docs/surface_display.md`, "In plan") A 3D or elevation view is `RenderView<id>`, as its dock is `View<id>`: painted afresh, it prints how many of its pixels are not its background and where its camera is, by the keys a view's record uses - `RenderView2: painted=27324 target=85.375,68.69...,31.85... distance=483.19... azimuth=-135 elevation=35.26... projection=perspective` - which a screenshot shows only to a person; when it stacked legends for the surfaces drawn in a style (`docs/surface_display.md`, "In 3D"), it goes on with `legends=N` and a `legend="surface - style"` for each, in the order drawn (`qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless`) |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 | `--export-options FILE` | `^FILE` | opens the dialog of File > Export > Export Drawing for FILE, in its turn, and makes it the target - what the menu opens once its file dialog has answered, which a headless run never opens. A step rather than a switch, so the `--command` lines before it have made the drawing whose layers and scope it offers (`qt_vector_export_dialog_writes_what_its_filter_takes_headless`) |
 | `--wheel "NAME X,Y N"` | `~NAME X,Y N` | turns the mouse wheel N notches - positive away from the person, which zooms in; negative, out - over widget NAME at X,Y in its logical pixels, NAME found as `--report` finds one. Each notch is a wheel event of its own, sent to the widget under that point (a 3D view's GPU child, where it has one) with the event loop run after it, as a person's wheel reaches the view; so a 3D view's zoom is driven in the real window, `~RenderView2 160,330 10|?RenderView2` (`qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless`). A step that is not three words, no such widget, a point outside it or no notches ends the run |
@@ -422,8 +431,8 @@ passed. A step that cannot be taken - an unknown
 dialog or widget, a fill of a choice the dialog does not offer, a press of a
 disabled button - ends the run with exit 1 and a sentence on stderr, never a
 crash and never a silent no-op. The names a dialog's fields carry are listed
-in its header (`survey/survey_dialogs.hpp`, `survey_import_wizard.hpp`,
-`survey_points_ui.hpp`, `src/katana_qt/ifc_dialogs.hpp`, the managers' own).
+in its module (`rust/crates/katana_window/src/survey/survey_dialogs.rs`, `survey_import_wizard.rs`,
+`survey_points_ui.rs`, `rust/crates/katana_window/src/ifc_dialogs.rs`, the managers' own).
 File > Export IFC, for one, is `@fileExportIfc|ifcExportFile=out.ifc|!ifcExportPreview|?ifcExportClasses|!ifcExportExport`:
 the preview's table printed, then the file written
 (`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`). A
@@ -434,7 +443,7 @@ and `%symbolLibraryDialog` then makes the library the target again
 (`qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`;
 `docs/desktop.md`, "The definition editor"). The
 IFC dialogs, which run lines, echo each on stderr as "> <line>" before its
-reply (`MainWindow::runIfcCommand`), so a test reads which line a press ran.
+reply (`MainWindow::run_ifc_command`), so a test reads which line a press ran.
 
 A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.
@@ -443,26 +452,26 @@ what a command REPORTED.
 picks follow one: before the pointer steps a run could start Insert Vertex
 but never show where a vertex would go, and a pick step (a vertex, a
 segment) refused every typed coordinate it was not written to take. `~` and
-`+` (`MainWindow::pointerAt`, `ViewWorkspace::pointerAt`,
-`ViewportWidget::pointerAt`) paint the view so its transform is the one on
-screen, map the model point to a pixel through it, send a real `QMouseEvent`
+`+` (`MainWindow::pointer_at`, `ViewWorkspace::pointer_at`,
+`viewport_widget::pointer_at`) paint the view so its transform is the one on
+screen, map the model point to a pixel through it, send the view a real mouse
 move - and for `+` a press and a release - and paint again. The view cannot
 tell them from a person's mouse, so they drive the same code: snapping, the
 grips, the tool's pick. Each prints one line, numbers exact
-(`formatExactReal`), what the view then drew of the running tool's preview
-by role (`drawing/feedback_painter.hpp`) - `enter` counts where Enter,
+(`format_exact_real`), what the view then drew of the running tool's preview
+by role (`rust/crates/katana_window/src/drawing/feedback_painter.rs`) - `enter` counts where Enter,
 not a click, would add:
 
     pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 enter=0 focus=4 refused=no caption="new vertex between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
 
 It is a reply record like every verb's (`docs/cad.md`): the roles' keys are
-their names (`cad::toString(FeedbackRole)`), and the caption and the prompt
-are written by `core::replyQuoted`, so `core::readReplyRecord` reads the
+their names (`FeedbackRole::name`), and the caption and the prompt
+are written by `katana_core::text::reply_quoted`, so `katana_core::text::read_reply_record` reads the
 line back whole. Quoted by hand, Move Vertex's caption - which ends in a
 bearing, `0°00'00"` - closed its value early and the line was no record at
 all; it is written `0°00'00\"` now
 (`qt_pointer_record_quotes_a_bearing_as_a_reply_does_headless`,
-`VertexToolHover.ThePointerRecordReadsBackAsOneRecordWithABearingInItsCaption`).
+`vertex_tool_hover::the_pointer_record_reads_back_as_one_record_with_a_bearing_in_its_caption`).
 
 The counts are of what is ON SCREEN: an Added vertex the painter leaves out
 beside a Removed one (a fillet a few pixels across) is not counted, nor a
@@ -489,7 +498,7 @@ the PNG for the look; the record is what a test asserts
 A headless run's pointer never leaves the view - there is no step for
 that - so a tool started after a `~` step previews where the pointer is;
 in the window, the pointer leaving the view for a menu takes the preview
-away (`PlanViewTools.NoPreviewIsDrawnWhileThePointerIsOutsideTheView`).
+away (`plan_view_tools::no_preview_is_drawn_while_the_pointer_is_outside_the_view`).
 
 The views are reached by their verbs (`docs/cad.md`, "The window's views:
 VIEWS and ZOOM"), so a run sets up linked views as a person would and reads
@@ -509,24 +518,19 @@ press of its bar's button reads back
 To is driven by its own names - `@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|?zoomToLine|!zoomToRun|?zoomToStatus`
 (`qt_zoom_to_dialog_runs_its_line_headless`).
 
-A test binary of Qt widgets run by hand needs MSYS2's runtime first on PATH,
-as ctest puts it (`KATANA_RUNTIME_BIN`): with `build/release/bin` first,
-Qt loads the copy of `Qt6Core.dll` there and looks for its platform plugin
-beside the test binary, in `bin/tests/platforms`, which the build does not
-fill - and a GUI program with no platform plugin waits on a message box
-nobody sees. `katana.exe` itself finds `bin/platforms` beside it.
-
 ## check_screenshot.cmake: the test side
 
-Every `qt_*_headless` test in `tests/CMakeLists.txt` runs
+Every `qt_*_headless` test in `tests/CMakeLists.txt` (and in `tests/geo/headless/`,
+`tests/update/headless/` and `tests/interop/`) runs
 `tools/check_screenshot.cmake` (or `tools/check_plot.cmake` for the plot,
 `tools/check_sheets_headless.cmake` for the sheets) with `cmake -P`. The script COPIES the project it is given before opening it,
-runs `katana` with the switches its variables ask for, and checks the result.
+runs `katana` (the cargo-built program, `-DAPP`) with the switches its
+variables ask for, and checks the result.
 Its variables:
 
 | Variable | Switch or check |
 |---|---|
-| `-DAPP`, `-DPROJECT`, `-DOUTPUT` | the executable, the project to copy, the PNG to write (required) |
+| `-DAPP`, `-DPROJECT`, `-DOUTPUT` | the program (the runner passes `${KATANA_PROGRAM_katana}`), the project to copy, the PNG to write (required) |
 | `-DIMPORT=<file>` | a file to import first. It is put before every switch, `--customise` above all, which takes each path up to the next switch: after it, the file was read as one more customisation file, the one `CUSTOMISE` line loaded nothing, and nothing was imported (`qt_a_customisation_folder_and_an_import_file_are_both_taken_headless`) |
 | `-DCUSTOMISE_DIR=<dir>` | `--customise` with every `*.customisation.json` in it, in name order - one `CUSTOMISE` line; a directory that holds none is reported and the run goes on, so give an `-DEXPECT` naming what must have loaded (`qt_customisation_headless`) |
 | `-DTOGGLE_LAYER`, `-DSTYLE_MANAGER=ON`, `-DLAYER_MANAGER=ON`, `-DATTRIBUTES=<id>`, `-DDATASET_INFO`, `-DIMPORT_OPTIONS`, `-DSELECT_ALL=ON`, `-DCHECK_SHORTCUTS=ON`, `-DCHECK_MENUS=ON`, `-DCHECK_TOOLBARS=ON`, `-DCHECK_TOOLBAR_FIT=WxH,...`, `-DCHECK_SESSION_RESTORE=ON` | the switches of the same names |
@@ -558,8 +562,8 @@ is still read, and a failure prints the text that was checked. Pair it with an
 nothing wrong. `docs/survey.md` has the survey import wizard's use of these.
 
 Before any of `-DEXPECT`, `-DREFUSED` and `-DFORBID` is matched, the script
-drops the whole lines in which Qt's platform layer says the plugin cannot do
-a window-management request - "This plugin does not support
+drops the whole lines in which Qt's platform layer said (in the C++ window)
+the plugin could not do a window-management request - "This plugin does not support
 propagateSizeHints()", `raise()`, `lower()`, window opacity or masks, keyboard
 or mouse grabs. Linux's offscreen plugin prints the first whenever a window's
 minimum size changes (a dialog shown, views arranged), Windows' does not, so
@@ -586,7 +590,7 @@ starting the window:
 - **No automatic check.** `UpdateWorkbench::start` is called by `main()` only
   for a window that is shown, and does nothing in a headless one.
 - **No per-user state.** The UPDATE verbs are given the headless window's
-  surface (`src/katana_app/update_verbs.hpp`, `HeadlessWindow`), whose context
+  surface (`rust/crates/katana_app/src/update_verbs.rs`, `HeadlessWindow`), whose context
   has no state folder: nothing is read from or written to the update folder
   of whoever runs the suite - not when the last check was, not a skipped
   version, not how the last update ended, which an interactive start shows
@@ -652,19 +656,19 @@ release still downloaded. A window nobody drove says it in a message box as
 well, since nobody reads a GUI program's stderr; a run that was given a line
 to run - `--command`, `--enter` or `--run-line` - is shown none, because
 whoever started it may not be there to close it, and it would wait for ever
-(`src/katana_qt/main.cpp`). Which runs are shown none is a function of the
-steps the run was given, and tested (`updateFailureIsBoxed`,
-`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`); `main()`'s
+(`rust/crates/katana_window/src/bin/katana/main.rs`). Which runs are shown none is a function of the
+steps the run was given, and tested (`update_failure_is_boxed`,
+`update_decisions::an_update_that_could_not_be_started_is_boxed_only_in_a_window_nobody_drove`); `main()`'s
 own path - stderr, exit 1, the box - is reached by no test (`docs/desktop.md`,
 "Not done" under "Help > Check for Updates").
 
 Two things every run does about updates, headless or not, both before the
 window exists:
 
-**`update::recover`, first in `main()`.** The program looks whether an update
+**`katana_update::recover`, first in `main()`.** The program looks whether an update
 of the install it was started from was interrupted - a crash, a power cut -
 and has the install put back before it goes on
-(`include/katana/update/recover.hpp`). With nothing interrupted, which is
+(`rust/crates/katana_update/src/recover.rs`). With nothing interrupted, which is
 every start but that one, it is a listing of one folder, and of none in a
 copy that has never updated: a build tree. This is not a per-user matter: an
 install half swapped is no state for any run to start from. And it writes
@@ -681,7 +685,7 @@ state folder, to find the copy of the helper the interrupted update ran from
 install's own `bin/` is half swapped), and that is all it does there. It
 makes, changes and deletes nothing in that folder - no `cleanup.list` is
 begun, and the copy it ran is left where it was
-(`RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
+(`helper_swap::recovery_started_the_way_a_headless_program_starts_it_writes_the_recovery_log_and_no_per_user_state`
 compares the folder before and after, entry by entry and byte by byte).
 That copy is removed at the next start of an interactive window of the
 installed copy, which learns of it from the install's own `recovery.log`;
@@ -690,9 +694,9 @@ recovery that fails is said on stderr with the command that puts the install
 right by hand, and the run goes on.
 
 **`--update-health TX`.** How the helper asks a version it has just put in
-place whether it starts (`include/katana/update/apply.hpp`, step 7). The run
+place whether it starts (`rust/crates/katana_update/src/apply.rs`, step 7). The run
 is headless and its window is never shown; the marker `healthy-<TX>` goes to
-the update state folder (`include/katana/update/state.hpp`) - the one thing a
+the update state folder (`rust/crates/katana_update/src/state.rs`) - the one thing a
 headless run writes to a per-user place, and the reason the switch exists.
 Then it EXITS: the helper waits for that exit, and starts Katana again itself
 as a person would (`docs/desktop.md`, "Help > Check for Updates", "the health
@@ -710,10 +714,10 @@ read.
 ## A headless session never opens a modal box
 
 A modal box in a headless run is a hang until the test's timeout. So
-`MainWindow::setHeadless` turns every question into a sentence:
+`MainWindow::set_headless` turns every question into a sentence:
 
 - the "far from the current drawing" question keeps survey coordinates and
-  says so, and every "Import failed" box (`warnUser`) becomes a line in the
+  says so, and every "Import failed" box (`warn_user`) becomes a line in the
   log - a scripted import of a missing file used to sit on a warning box until
   the harness killed it;
 - a question the window would have to ask - discard unsaved changes, discard
@@ -726,7 +730,7 @@ A modal box in a headless run is a hang until the test's timeout. So
   same - `OPEN <directory>`, `SAVE <directory>`,
   `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT <file>` - since
   `--trigger` reaches them by their object names
-  (`MainWindow::refuseFileDialog`,
+  (`MainWindow::refuse_file_dialog`,
   `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
   an empty drawing says so in the log, not in a box. The GIS menu's Import
   Vector Data, Import Raster, Import Point Cloud and Dataset Information ask
@@ -748,7 +752,7 @@ A modal box in a headless run is a hang until the test's timeout. So
 - GIS > Convert Point Cloud to COPC opens no file dialog and names the verb
   that asks nothing, `COPC <source> <destination.copc.laz>`
   (`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`);
-- the Sheets editor (`SheetEditor::setHeadless`, set by File > Sheets) opens
+- the Sheets editor (`SheetEditor::set_headless`, set by File > Sheets) opens
   no file dialog either: an image view's Browse names `VIEW SET id
   file="path"`, and Sheet Set's Save, Load and Append name `SHEETS SAVE`,
   `LOAD` and `APPEND`; Load's "Replace the sheets?" is never asked. Its
@@ -770,14 +774,15 @@ A modal box in a headless run is a hang until the test's timeout. So
   every run here starts from a build tree, which is a development copy and
   never asks a server, downloads or applies. Those states, and what the
   window decides from a check's answer, the update folder and the last
-  result, are the widget tests' (`tests/qt_widgets/test_update_dialog.cpp`,
+  result, are the widget tests' (`rust/crates/katana_window/tests/update/update_dialog.rs`,
   `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
   the update system's own end-to-end tests'.
 - No step presses a key into a view (`&KEY` was proposed for a view's own
   keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
-  through `>` alone; the rest is tested in `tests/qt_widgets` with real key
-  events, where Qt's shortcut map is not in the way, so Delete through the
-  window's shortcut map is not driven end to end.
+  through `>` alone; the rest is tested in the window's own tests
+  (`rust/crates/katana_window/tests/`) with real key events, where the
+  window's shortcut map is not in the way, so Delete through that map is not
+  driven end to end.
 - No step drags: `+` is a press and a release at one point. A grip drag is
   a click to pick the grip up and a second click to put it down.
 - A `--fill` of a list selects the row, as a click on its text does, but never
@@ -791,28 +796,29 @@ A modal box in a headless run is a hang until the test's timeout. So
   fix is to save the script as UTF-8. Reading it in the machine's own code
   page (`GetACP`) would be right on Windows and wrong for a script moved from
   another machine, so it was not guessed.
-- `katana_customisation_convert`'s own wide reader (`src/katana_archive12d/legacy/
-  convert_main.cpp`) is a second copy of what `update::utf8Arguments` does.
-- **A non-ASCII path is still wrong in libc++ on Windows outside `OPEN` and
-  `SAVE`.** On 2026-11-04 `tools/find_narrow_paths.py` found, in 32 files of
-  `src/`, 9 more paths made from narrow text and 167 `path.string()` calls.
+- **A non-ASCII path was still wrong in the C++ build's libc++ on Windows
+  outside `OPEN` and `SAVE`.** On 2026-11-04 a scan of the C++ sources found,
+  in 32 files, 9 more paths made from narrow text and 167 `path.string()`
+  calls. Whether each of the Rust files below makes its paths through
+  `path_from_utf8` has not been re-checked since the port; the list stands as
+  where to look.
   - Most of them hand a file name to GDAL, PDAL or a message. Examples:
-    `src/katana_io/gdal_adapter.cpp`, `src/katana_io/point_cloud_engine.cpp`,
-    `src/katana_interop/import.cpp` and `src/katana_interop/terrain_io.cpp`.
+    `rust/crates/katana_gis/src/gdal_adapter.rs`, `rust/crates/katana_pointcloud/src/point_cloud_engine.rs`,
+    `rust/crates/katana_interop/src/import.rs` and `rust/crates/katana_interop/src/terrain_io.rs`.
   - The Windows ARM64 build therefore cannot import, for example, a raster
-    under `C:/Users/José`. The GCC builds can: `pathToUtf8` and
-    `pathFromUtf8` give exactly what libstdc++ gives there, and on Linux and
+    under `C:/Users/José`. The GCC builds can: `path_to_utf8` and
+    `path_from_utf8` give exactly what libstdc++ gives there, and on Linux and
     macOS too, so replacing every one changes nothing on those builds.
   - Each direction needs the other for a file to be found, so the replacement
     is one change, with a test per reader that opens a file under a folder
     named as the `cli.non_ascii_*` tests' is.
   - Two of the nine are urgent on GCC too, both in
-    `src/katana_interop/archive12d.cpp`:
+    `rust/crates/katana_interop/src/archive12d.rs`:
     - one takes a zip member's name, which may be code page 437;
     - the other takes a file name the archive references, written on Windows,
       which may be Windows-1252.
-    libstdc++ throws at a byte that is not UTF-8, and `pathFromUtf8` never
+    libstdc++ throws at a byte that is not UTF-8, and `path_from_utf8` never
     does.
-  - Two in `src/katana_qt/gis_online.cpp` read an environment variable with
-    `std::getenv`, which `include/katana/core/path_text.hpp` says to read
-    through `environmentVariable`.
+  - Two in `rust/crates/katana_window/src/gis_online.rs` read an environment variable with
+    the C library's `getenv` in the C++, which `rust/crates/katana_core/src/path_text.rs` says to
+    read through `environment_variable`.

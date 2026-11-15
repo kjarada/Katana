@@ -1,8 +1,8 @@
 # Editing surfaces, and surfaces made of others
 
 The owner asked on 2026-10-15 for "more tools to terrain, editing terrain ...
-mixed terrain". Until then a `TinSurface` (`include/katana/terrain/tin_surface.hpp`)
-was immutable and nothing changed one: `buildTin` made it, and that was all.
+mixed terrain". Until then a `TinSurface` (`rust/crates/katana_terrain/src/tin_surface.rs`)
+was immutable and nothing changed one: `build_tin` made it, and that was all.
 This document records how a surface is edited now, on every front end, and
 why it is done that way. The surfaces themselves - kept in the drawing,
 saved, undone, styled - are `docs/terrain.md`'s.
@@ -11,10 +11,10 @@ saved, undone, styled - are `docs/terrain.md`'s.
 
 | Layer | Where | What |
 |---|---|---|
-| terrain | `include/katana/terrain/tin_edit.hpp`, `src/katana_terrain/tin_edit.cpp`, `tin_patch.*`, `tin_thin.cpp` | pure functions: a surface in, a NEW surface or a refusal out |
-| cad | `include/katana/cad/terrain/surface_edit_verbs.hpp`, `src/katana_cad/terrain/surface_edit_verbs.cpp` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
-| cad | `src/katana_cad/tools/terrain_edit.cpp` | nine catalogue tools, category Terrain, each running the verb |
-| qt | `src/katana_qt/terrain/surface_edit_ui.*`, `surface_edit_dialogs.*`, `src/katana_qt/tools/icons_terrain.cpp` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
+| terrain | `rust/crates/katana_terrain/src/tin_edit.rs`, `tin_patch.rs`, `tin_thin.rs` | pure functions: a surface in, a NEW surface or a refusal out |
+| cad | `rust/crates/katana_cad/src/terrain/surface_edit_verbs.rs` | `SURFACE EDIT`, `MERGE`, `PASTE`, `CLIP`, `OFFSET`, one undo step each |
+| cad | `rust/crates/katana_cad/src/tools/terrain_edit.rs` | nine catalogue tools, category Terrain, each running the verb |
+| qt | `rust/crates/katana_window/src/terrain/surface_edit_ui.rs`, `surface_edit_dialogs.rs`, `rust/crates/katana_window/src/tools/icons_terrain.rs` | Terrain > Edit Surface, the Surface Edit toolbar, nine dialogs |
 
 The verbs (`HELP SURFACE EDIT` prints them all):
 
@@ -40,20 +40,20 @@ SURFACE OFFSET <name> <dz> NAME <new>
 `<polygon>`, `<line>` and `<points>` are the drawing's data, the three ways
 every verb on drawing data takes it (`docs/cad.md`, "Scope and filter"): `#id
 ...`, coordinates typed in (`x,y[,z] ...`), or `FROM <scope> [WHERE k=v ...]`
-through the one scope parser (`include/katana/cad/scope_verbs.hpp`), the
+through the one scope parser (`rust/crates/katana_cad/src/scope_verbs.rs`), the
 reply's first record saying what the scope took (`scope=drawing matched=3
 polygons=2 skipped=1`). A `<polygon>` and a `<line>` are read by the one
 reader of the drawing's polygons that the volumes use too
-(`include/katana/cad/terrain/drawing_shapes.hpp`, which says what each kind
+(`rust/crates/katana_cad/src/terrain/drawing_shapes.rs`, which says what each kind
 of entity gives): a polygon is a closed polyline or curve polyline, one
 drawn back to its first vertex, a circle or a full ellipse; a line a line,
 polyline or curve polyline. Where the two readers had differed, the shared
 rule is the one that takes more (`docs/volumes.md`, "Inside a polygon"):
 for these verbs that made `FROM` with no scope word the selection, as the
 scope grammar says of no scope word, where it was refused
-(`SurfaceEditVerbs.FromWithNoScopeWordIsTheSelectionAsTheScopeGrammarHasIt`),
+(`surface_edit_verbs::from_with_no_scope_word_is_the_selection_as_the_scope_grammar_has_it`),
 and a polygon typed back to its first corner that corner once
-(`DrawingShapes.TypedCornersMakeAPolygonWithAndWithoutHeights`). The
+(`drawing_shapes::typed_corners_make_a_polygon_with_and_without_heights`). The
 words of the replies and refusals stay this family's own. `PREVIEW`,
 anywhere after the surface's name, works the edit out and changes nothing -
 except where the grammar wants a value: a surface called `Preview` (the first
@@ -92,11 +92,11 @@ two polygons where `BOUNDARY` takes one.
 
 Every edit that changes triangles - adding and deleting points, breaklines,
 boundaries, holes, a paste - goes through one mechanism,
-`detail::rebuildPatch` (`src/katana_terrain/tin_patch.hpp`). An edit names a
+`katana_terrain::tin_patch::rebuild_patch` (`rust/crates/katana_terrain/src/tin_patch.rs`). An edit names a
 REGION, the triangles it has to rebuild, and what goes into it: points, new
 breakline segments, the edges of a cut. The region's vertices and the new
 points are triangulated by THE constrained Delaunay kernel
-(`src/katana_terrain/cdt_backend.hpp`) with the ring of edges round the
+(`rust/crates/katana_terrain/src/cdt_backend.rs`) with the ring of edges round the
 region as constraints, so the new triangles meet the untouched ones edge for
 edge, and only the region changes. The rest of the surface is the same
 triangles, vertex for vertex.
@@ -116,31 +116,32 @@ triangles, vertex for vertex.
   surface is the region, which is always correct, only slower.
 - **The region is never bigger than the edit needs.** Added points take the
   triangles whose circumcircle holds them, reached across unconstrained edges
-  (`detail::markInsertionCavity`, the Bowyer-Watson cavity) - so a point added
+  (`katana_terrain::tin_patch::mark_insertion_cavity`, the Bowyer-Watson cavity) - so a point added
   to a Delaunay surface leaves it Delaunay; a line or a polygon takes the
-  triangles it passes through (`detail::TriangleGrid::markAlong`, a uniform
+  triangles it passes through (`TriangleGrid::mark_along`, a uniform
   grid of the triangles, conservative by a rounding margin).
 - **Exact where it decides.** Which side of an edge a point lies on, whether
-  a point is in a triangle, on an edge or at a vertex (`detail::placeOf`), and
+  a point is in a triangle, on an edge or at a vertex (`tin_patch::place_of`), and
   whether two triangles make a convex quadrilateral (FLIP) are decided with
-  the kernel's own exact predicate, `detail::orientation`, added to
-  `cdt_backend` for it. Coincidence is `tolerance::kGeometric`, the rule
+  the kernel's own exact predicate, `cdt_backend::orientation`, added to
+  `cdt_backend` for it. Coincidence is `tolerance::GEOMETRIC`, the rule
   buildTin merges by - and it is the rule for a point and an EDGE as well as
   a point and a vertex:
-  - **A point within `kGeometric` of an edge it is not an end of is on it.**
+  - **A point within `GEOMETRIC` of an edge it is not an end of is on it.**
     A point decimal arithmetic puts on a line (14.3, 4.29 on y = 0.3 x) is a
     few ulps off it, on one side or the other by luck of the last bit. The
     kernel decides only exactly, so such a point did not split the edge, and a
     new edge that ended at it crossed the old one a few ulps from its own end.
-    CGAL's `Exact_predicates_tag` moves a crossing it cannot place to the
+    CGAL's `Exact_predicates_tag`, whose answer the Rust kernel reproduces
+    (`rust/crates/katana_terrain/src/cdt_backend.rs`), moves a crossing it cannot place to the
     nearer END of the crossed edge (`Constrained_triangulation_2.h`,
     `insert_intersection`, CGAL 6.2), tens of metres away when the crossed edge
     is a long breakline, and the constraint is reported running through that
     vertex. The result was a ramp where a level line was typed, a sliver of
     no width beside a breakline, a rectangle whose edge lay along a breakline
     refused ("touches or crosses itself", at the far end of the breakline) one
-    time in four. `tryPatch` now bends the edge through the point before the
-    kernel is asked (`pointsOnConstraints`: a/b becomes a/p and p/b, the point
+    time in four. `try_patch` now bends the edge through the point before the
+    kernel is asked (`points_on_constraints`: a/b becomes a/p and p/b, the point
     found by a grid of the edges' boxes, the nearest edge taking it): the
     junction is exact whatever the last bit was, a T-junction splits the old
     constraint as an exact one always did, and the point keeps the coordinates
@@ -153,16 +154,16 @@ triangles, vertex for vertex.
     snapped to the wrong end, is `InvalidGeometry` "an edge of the edit passes
     so close to the end of another that the kernel could not place the crossing
     on it: move the end onto the edge or clear of it".
-  - **Within `kGeometric` beyond a RIM edge is on the surface.**
-    `TinSurface::locate` and `elevationAt` count a position within
-    `kGeometric` of an edge as on the surface, and `placeOf` said Outside for
+  - **Within `GEOMETRIC` beyond a RIM edge is on the surface.**
+    `TinSurface::locate` and `elevation_at` count a position within
+    `GEOMETRIC` of an edge as on the surface, and `place_of` said Outside for
     one that was beyond a rim edge by the exact test, so there were two
     definitions of "on the surface": a breakline ending on a boundary just cut
     was refused "off the surface" about half the time, and ADD POINT at such a
     position joined it to the rim with a fin of no width that rose to its level
     (a 10 m2 wall on a 100 m2 square). It is now an Edge of the rim triangle and
     goes through the patch like any point on the rim.
-- **The result is canonical**, as buildTin's is (`detail::finishSurface`):
+- **The result is canonical**, as buildTin's is (`tin_patch::finish_surface`):
   vertices left without a triangle dropped, the rest in order, then the new
   ones; triangles rotated to start at their smallest vertex and sorted;
   constraint flags made to agree across every shared edge; validated by
@@ -182,7 +183,7 @@ triangles, vertex for vertex.
 The kernel makes a vertex where two constraints cross. Its level comes from
 the constraint whose level holds there, strongest first:
 
-1. a paste's seam: the top surface's rim (`PatchRequest::cutHasLevels`);
+1. a paste's seam: the top surface's rim (`PatchRequest::cut_has_levels`);
 2. an EXISTING constrained edge - a breakline or boundary of the surface;
 3. a new 3D line segment (both ends with levels, or one given and one draped);
 4. an unconstrained edge of the surface held for its shape;
@@ -196,7 +197,7 @@ DRAWING` asks for `Average` instead: it makes a surface from linework, which an
 edit of a surface keeping its constrained edges does not). That holds for the
 lines of ONE edit as for one line crossing itself: `BREAKLINE <line> <line>`
 and `BREAKLINE FROM <scope>` put every line in one patch
-(`tin::addBreaklines`), where they were added one after the other and the
+(`katana_terrain::tin_edit::add_breaklines`), where they were added one after the other and the
 earlier line, already a constrained edge, won the crossing - which level a
 person got depended on the order the lines were named in. A POINT given
 exactly on an old breakline keeps its own level, as a survey point on a
@@ -219,9 +220,9 @@ visit's, and silently none when the first was draped.
 
 A stretch of a new breakline between two vertices that both lack a level
 FOLLOWS the surface: the region's unconstrained edges are held as shape
-constraints (`PatchRequest::keepShape`), a vertex is made at every crossing
+constraints (`PatchRequest::keep_shape`), a vertex is made at every crossing
 at the old edge's level, and the surface keeps its shape exactly
-(`TinEdit.ADrapedBreaklineKeepsTheShapeOfTheSurface`). A stretch with a level
+(`tin_edit::a_draped_breakline_keeps_the_shape_of_the_surface`). A stretch with a level
 at either end is straight in 3D, and the region is re-triangulated about it.
 Boundaries, holes and the paste's cut always keep the shape: they cut
 triangles, they do not reshape them.
@@ -236,10 +237,10 @@ triangles, they do not reshape them.
   constrained edge.
 - **The footprint.** Deleting a rim vertex fills the gap only as far as the
   old rim allows: a new triangle that would reach past the rim edges at the
-  deleted vertex (`segmentMeetsInterior`, exact) is not kept, so the
-  footprint never grows (`TinEdit.DeletingACornerOfTheRimNeverGrowsTheFootprint`).
+  deleted vertex (`segment_meets_interior`, exact) is not kept, so the
+  footprint never grows (`tin_edit::deleting_a_corner_of_the_rim_never_grows_the_footprint`).
 - **The surface given.** Every edit returns a new surface; the one handed in
-  is never touched (`TinEdit.AnEditLeavesTheSurfaceItWasGivenAsItWas`), which
+  is never touched (`tin_edit::an_edit_leaves_the_surface_it_was_given_as_it_was`), which
   is what lets the verb keep the old one for UNDO.
 
 ## Decided
@@ -248,7 +249,7 @@ triangles, they do not reshape them.
   the rim edges it sees: the surface's rim vertices and the new points are
   triangulated with the rim edges as constraints, and the triangles outside
   the old footprint that have a new point as a corner are added
-  (`detail::extendSurface`). A point in a hole joins the hole's rim the same
+  (`katana_terrain::tin_patch::extend_surface`). A point in a hole joins the hole's rim the same
   way. Only the rim takes part, so the cost follows the rim, not the surface.
   The kernel triangulates the convex hull, so outside the footprint it also
   makes triangles of three rim vertices, and those are kept when the new
@@ -263,7 +264,7 @@ triangles, they do not reshape them.
   surface (the brief asked that it extend it); joining it to the whole convex
   hull (that fills every concavity of the footprint between it and the
   surface, including those open to the outside).
-- **A coordinate or level beyond `terrain::kMostMagnitude` (1e9 m) is refused**
+- **A coordinate or level beyond `katana_terrain::tin_edit::MOST_MAGNITUDE` (1e9 m) is refused**
   where it is typed - ADD POINT, a breakline's vertex, a polygon's corner, a
   height change and the level it makes: `RAISE 1e308` was finite, and the plan
   area of the surface it made read `nan`. A UTM easting is at most 1e7; the
@@ -271,9 +272,9 @@ triangles, they do not reshape them.
   finite. One gate in the edit core, so the window's dialogs and an agent's
   line meet it alike.
 - **DELETE BREAKLINE makes the breakline edges along a line ordinary edges**
-  (`terrain::deleteBreaklines`). It clears the constrained flag on both sides
+  (`katana_terrain::tin_edit::delete_breaklines`). It clears the constrained flag on both sides
   of every edge that LIES ALONG the line - both its ends within
-  `tolerance::kGeometric` of one segment of it, the closing segment of a closed
+  `tolerance::GEOMETRIC` of one segment of it, the closing segment of a closed
   line included - and nothing else: the vertices and the triangles are exactly
   as they were, in the same order, so the edit is a flag per edge and no
   re-triangulation, and it is one undo step like the others. A line over part
@@ -295,7 +296,7 @@ triangles, they do not reshape them.
   breakline it came from, since that vertex is a vertex of the surface); and a
   catalogue tool that picks one polyline - the Terrain menu's dialog takes the
   lines by the shared scope, which a click on one entity cannot say.
-- **MOVE POINT moves a vertex in plan as ONE patch** (`terrain::movePoint`).
+- **MOVE POINT moves a vertex in plan as ONE patch** (`katana_terrain::tin_edit::move_point`).
   `MOVE POINT x,y TO x2,y2` names the vertex as DELETE POINT does (the corner of
   the triangle under `x,y` nearest it, or with `reach=` the nearest vertex within
   it) and puts it at `x2,y2` at its own level: the target is `x,y` only, since a
@@ -313,7 +314,7 @@ triangles, they do not reshape them.
   constrained edge (a breakline or boundary: DELETE BREAKLINE first, or the
   triangles round it deleted), a vertex on the rim or on the edge of a hole, a
   target off the surface (ADD POINT extends it; a move does not), a target within
-  `tolerance::kGeometric` of another vertex. A move of less than that tolerance
+  `tolerance::GEOMETRIC` of another vertex. A move of less than that tolerance
   is no move: the surface as it was, `changed=no`. The rim is refused before the
   breakline, since a boundary or hole makes its rim edges constrained and
   "clear the breakline" would send a person after an edge DELETE BREAKLINE never
@@ -326,7 +327,7 @@ triangles, they do not reshape them.
 - **A point at an existing vertex gives it its level**, and no triangle
   changes (`relevelled=`). That is what a surveyor means by "the ground is
   here, at this level". Two points at one position with levels more than
-  `tolerance::kCoordinate` apart are refused, as buildTin refuses them.
+  `tolerance::COORDINATE` apart are refused, as buildTin refuses them.
 - **DELETE TRIANGLES INSIDE/OUTSIDE goes by centroid**, as survey packages
   do; DELETE LONG and DELETE THIN take every triangle of the surface that
   qualifies, not only those on the rim. A person trimming the long slivers
@@ -350,9 +351,9 @@ triangles, they do not reshape them.
   only when that sum is within the tolerance. The flattest go first (the
   first measurement runs on the TaskPool, the order then sequential, so the
   result is the same at any thread count:
-  `TinEdit.ThinningGivesTheSameSurfaceAtAnyThreadCount`). A tolerance of 0
-  removes what changes nothing, to `tolerance::kGeometric`, the length
-  tolerance by which two lengths are equal (`math::lengthsEqual`); without it
+  `tin_edit::thinning_gives_the_same_surface_at_any_thread_count`). A tolerance of 0
+  removes what changes nothing, to `tolerance::GEOMETRIC`, the length
+  tolerance by which two lengths are equal (`katana_math::numerics::lengths_equal`); without it
   rounding of the order of 1e-16 would keep every coplanar point.
   *Rejected:* measuring a removal at the removed vertex alone, the usual
   decimation shortcut: a new diagonal can cross a ridge the vertex was on and
@@ -363,14 +364,14 @@ triangles, they do not reshape them.
   triangles (a fan from the opposite corner, or from the centroid when two
   or three sides are split - the centroid is on the top's plane, so the top
   keeps its shape) and makes the seam constrained on both sides. No gap, no
-  overlap (`TinEditCombine.APastedPadReplacesTheGroundInsideItsFootprintWithACleanSeam`:
+  overlap (`tin_edit_combine::a_pasted_pad_replaces_the_ground_inside_its_footprint_with_a_clean_seam`:
   the area is the ground's to 1e-6, every seam vertex on the pad's rim at
   the pad's level). Where the top reaches past the base it is kept as it is.
-- **MERGE is `combineSurfaces`** (`include/katana/terrain/super_surface.hpp`):
+- **MERGE is `combine_surfaces`** (`rust/crates/katana_terrain/src/super_surface.rs`):
   later members win, a lower member's triangle dropped whole where a later
   one covers any AREA of it, so its seam is ragged by up to a triangle. A
   member that only ABUTS a triangle - shares an edge or a corner, or overlaps
-  it by less than `kGeometric`, the sliver rounding leaves between two clips of
+  it by less than `GEOMETRIC`, the sliver rounding leaves between two clips of
   one surface - covers none of it, and the triangle stays: two tiles of one
   survey merge into both, where the lower tile was dropped whole (or, along
   the seam, a row of it). The test is the pair of triangles, not samples: a
@@ -388,23 +389,23 @@ triangles, they do not reshape them.
   seam. The merged result is compacted (combineSurfaces keeps the vertices of
   dropped triangles).
 - **HOLE of several footprints is cut in as few patches as are correct**
-  (`terrain::cutHoles`; `HOLE FROM <scope>`, `HOLE #a #b ...`). A patch costs
-  the whole surface - the stars of its vertices, the copies, `finishSurface`'s
+  (`katana_terrain::tin_edit::cut_holes`; `HOLE FROM <scope>`, `HOLE #a #b ...`). A patch costs
+  the whole surface - the stars of its vertices, the copies, `finish_surface`'s
   sort, `TinSurface::create`'s adjacency and locator, about a third of a second
   on 400 000 triangles - and a hole is cut where a polygon is, not where the
   surface is, so a hundred buildings cost a hundred rebuilds when cut one after
   the other. The footprints are taken in the order given and gathered into a
   batch while each one is **separate** from every one already in it - the
-  outlines nowhere within `tolerance::kGeometric` of each other (boxes first,
+  outlines nowhere within `tolerance::GEOMETRIC` of each other (boxes first,
   then only the edges that reach the other's box, decided with the exact
   predicate the kernel uses), and neither inside the other - **and** reaches
-  no triangle one of them reaches (`detail::markReachedByPoint` and
-  `TriangleGrid::markAlong`, the rule `rebuildPatch` grows its region by). The
+  no triangle one of them reaches (`katana_terrain::tin_patch::mark_reached_by_point` and
+  `TriangleGrid::mark_along`, the rule `rebuild_patch` grows its region by). The
   first footprint that is not, ends the batch: the batch is cut in one patch,
   and the footprint begins the next one on the surface the batch left. So
   overlapping, touching, nested and identical footprints, and two in one
   triangle, are cut one patch each, in the order given, exactly as the loop of
-  `cutHole` cut them. Why both tests: separate outlines are what makes the cut
+  `cut_hole` cut them. Why both tests: separate outlines are what makes the cut
   correct - a patch decides which side of the cut a piece is on from the cut
   edges that bound it, and a piece between two footprints that overlap would be
   taken for outside both - while a shared triangle is what makes it the loop's
@@ -412,7 +413,7 @@ triangles, they do not reshape them.
   where the loop triangulated the first's pieces and then cut those. The result
   is the loop's surface: the same triangles, vertices and constrained edges, in
   a different numbering of the vertices the cut made (`HoleCutStats::patches`
-  counts the rebuilds; `TinEdit.HolesApartFromEachOtherAreCutInOnePatchAndGiveWhatCuttingThemOneByOneGives`
+  counts the rebuilds; `tin_edit::holes_apart_from_each_other_are_cut_in_one_patch_and_give_what_cutting_them_one_by_one_gives`
   and its neighbours compare the two runs vertex for vertex and triangle for
   triangle, the report field for field). A batch the kernel refuses is cut again one footprint at a time, so
   the refusal is the loop's, with its words. *Rejected:* one patch for every
@@ -424,14 +425,14 @@ triangles, they do not reshape them.
   without a rebuild of the whole). Nothing here runs in parallel, so the
   result cannot depend on the thread count.
 - **A record prints any finite number, in full.** The edits refuse a level past
-  `kMostMagnitude`, but a project, an archive or a LandXML file may hold one,
+  `MOST_MAGNITUDE`, but a project, an archive or a LandXML file may hold one,
   and the SURFACE records that name the surface (`bounds=`, `zmin=`, `zmax=`)
   printed `nan` for a FINITE level whose digits and three decimals filled more
   than the 64 characters their formatter had (1e61, a level of 61 digits,
   where 1e60 filled it to the last). The formatter was written twice, in
-  `src/katana_cad/terrain/surface_verbs.cpp` and in
-  `src/katana_app/geo/replies.cpp`; it is now one, `core::formatFixed`
-  (`include/katana/core/text.hpp`), whose buffer is the longest fixed text of
+  `rust/crates/katana_cad/src/terrain/surface_verbs.rs` and in
+  `rust/crates/katana_app/src/geo/replies.rs`; it is now one, `katana_core::text::format_fixed`
+  (`rust/crates/katana_core/src/text.rs`), whose buffer is the longest fixed text of
   a double (DBL_MAX, 309 digits) and which the two `fixed3` call. The text of
   an ordinary value is unchanged byte for byte; a value that rounds to nothing
   has no sign ("-0.0004" is "0.000", as before; "-0.0005" is "-0.001": the
@@ -443,11 +444,11 @@ triangles, they do not reshape them.
   text would take it for a bound it is not).
 - **PASTE says why when the top's rim cannot be kept apart.** The seam is the
   top's rim, so its vertices are points of the patch, and the patch takes two
-  within `tolerance::kGeometric` for one (the rule buildTin merges by): a top
+  within `tolerance::GEOMETRIC` for one (the rule buildTin merges by): a top
   with two rim vertices that close - an imported surface's sliver - came out
   with a triangle naming one vertex twice, which `TinSurface::create` refused
   as "triangle names a vertex twice" with the number of a triangle of the
-  result. `pasteSurface` now looks at the top's triangles after the patch, where
+  result. `paste_surface` now looks at the top's triangles after the patch, where
   two corners that are different vertices of the top have become one of the
   result, and refuses with the cause: InvalidGeometry, "two vertices of the top
   surface's rim land on one vertex of the result: they are closer to each other,
@@ -456,7 +457,7 @@ triangles, they do not reshape them.
   whose rim touches itself at a vertex that is duplicated (two triangles meeting
   at a point, each with a vertex of its own there) merges the pair into one
   vertex of a valid surface, and is pasted as it always was
-  (`TinEditCombine.ATopWhoseRimTouchesItselfAtADuplicatedVertexIsStillPasted`).
+  (`tin_edit_combine::a_top_whose_rim_touches_itself_at_a_duplicated_vertex_is_still_pasted`).
   *Rejected:* looking at the rim's vertices before the patch, which would
   refuse that pasteable top as well, and merging the pair silently, which makes
   a triangle of no area.
@@ -464,10 +465,10 @@ triangles, they do not reshape them.
   each, the verbs name them for the person making a new surface.
 - **The active surface is the program's, not the drawing's.** Which surface
   a person is editing is not part of the drawing, so it is not saved or
-  undone: `cad::surfaceEditTarget`, one for the program as the edit tools'
+  undone: `katana_cad::terrain::surface_edit_verbs::surface_edit_target`, one for the program as the edit tools'
   `EditDefaults` are (`docs/tools.md`). A tool acts on it when the drawing
   has it, else on the first visible surface, else the first
-  (`cad::activeEditSurface`).
+  (`katana_cad::terrain::surface_edit_verbs::active_edit_surface`).
 
 ## In the window
 
@@ -488,7 +489,7 @@ a layer, the selection or a view, with the scope's filter) and
 Add Points from the Drawing... (`surfaceAddPointsDialog`, `ADD POINTS FROM
 <scope>`). Each has the shared scope widget with no tick box in front of it
 (the scope is what the dialog is about), the surface, the line it will run,
-Preview and Run; the lines are made by `surfaceLevelsLine`, tested without a
+Preview and Run; the lines are made by `surface_levels_line`, tested without a
 window.
 Terrain > **Combine Surfaces...** (`surfaceCombineDialog`) makes a merge, a
 paste, a clip or an offset. The **Surface Edit** toolbar (`SurfaceEditToolBar`,
@@ -499,16 +500,16 @@ surface (`surfaceEditActive`).
   aliases `TINDELTRI`, `TINFLIP`, `TINADDPT`, `TINDELPT`, `TINMOVPT`,
   `TINDELIN`, `TINBRK`, `TINBOUNDARY`, `TINHOLE`), so the menu and toolbar are
   filled by
-  `tools::fillToolMenus`, the window handing it this submenu and toolbar as
+  `tools::fill_tool_menus`, the window handing it this submenu and toolbar as
   the Terrain category's. Each turns what it was told into the SURFACE EDIT
-  line a person would type, plans it with the verb's own `planSurfaceEdit`
-  and returns `Document::surfacesCommand`'s command - one code path with the
+  line a person would type, plans it with the verb's own `plan_surface_edit`
+  and returns `Document::surfaces_command`'s command - one code path with the
   verb, one undo step - and reports the line and the reply. Each starts
   again after an edit, as Point does, so a run of flips is a run of clicks.
 - **How a person picks the surface**: the toolbar's list, or a tool's own S
-  option (S, then the name), which also sets the list: `cad::setSurfaceEditTarget`
-  tells the observers registered with `cad::addSurfaceEditTargetObserver`, and
-  the toolbar's list is one (`SurfaceEditUi::syncActive`). The list is wired to
+  option (S, then the name), which also sets the list: `katana_cad::terrain::surface_edit_verbs::set_surface_edit_target`
+  tells the observers registered with `katana_cad::terrain::surface_edit_verbs::add_surface_edit_target_observer`, and
+  the toolbar's list is one (`SurfaceEditUi::sync_active`). The list is wired to
   `currentIndexChanged`, not `activated`, so a choice made by the program (the
   headless driver's fill) points the tools too. A tool with no surface in the
   drawing says so in its prompt and refuses every click. The dialogs open on the
@@ -520,7 +521,7 @@ surface (`surfaceEditActive`).
 - **Add Point** takes the click, then the level typed; Enter takes the
   surface's own level there (a vertex on the surface, no change of shape). A
   typed `x,y,z` adds the point in one go. **Delete Point** takes the vertex
-  within the view's vertex reach (`vertexReach`, the snap aperture), passed
+  within the view's vertex reach (`vertex_reach`, the snap aperture), passed
   to the verb as `reach=`: the corner of the triangle under the click when it
   is within reach, else the nearest vertex within reach wherever it is, so a
   click a hair outside a rim corner finds the corner (it was refused as "no
@@ -529,7 +530,7 @@ surface (`surfaceEditActive`).
   **Move Point** takes two clicks: the vertex (the same reach; one the verb
   would refuse - a rim vertex, the end of a breakline or boundary edge - is
   refused at this click, before a target is asked for) and then where it goes.
-  Between them the prompt says which vertex is held (`lastPoint`, for the
+  Between them the prompt says which vertex is held (`last_point`, for the
   rubber band), the preview marks the vertex where it is (Removed) and where
   the cursor would put it (Added), and says in red that a cursor off the surface
   is refused; a target the verb refuses (off the surface, on another vertex)
@@ -539,46 +540,46 @@ surface (`surfaceEditActive`).
 - **The previews** mark what a click would take - the triangle (Removed),
   the edge (Target), the vertex with its level - and say in red why a click
   would be refused: off the surface, an edge on the rim, a breakline. Delete
-  Point asks the core's own rule (`terrain::onConstrainedEdge`, the test
-  `deletePoints` refuses by) and says "a breakline or boundary vertex is kept,
+  Point asks the core's own rule (`katana_terrain::tin_edit::on_constrained_edge`, the test
+  `delete_points` refuses by) and says "a breakline or boundary vertex is kept,
   not deleted" in red before the click, as the click would be refused; it was
   offered with `refused=no`.
 - **The dialogs write lines** and hand them to the window's one executor
-  (`MainWindow::runVerbLine`), the line shown in `<prefix>Command` as it will
+  (`MainWindow::run_verb_line`), the line shown in `<prefix>Command` as it will
   run, Preview running it with PREVIEW. "Only inside a polygon" and Combine's
   clip take the polygon through the shared scope widget
-  (`src/katana_qt/customisation/scope_filter_widget.hpp`), written as `FROM
+  (`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`), written as `FROM
   <scope>`. The lines are made by pure functions (`surfaceLevelsLine`,
-  `surfaceCombineLine`), tested without a window.
+  `surface_combine_line`), tested without a window.
 - **The dialogs follow the Document.** They are non-modal and kept, and they
   used to read the drawing's surfaces only when constructed, shown or after
   their own Run: an UNDO that removed the surface they offered left Run enabled
   on a line the verb refused (NotFound), and a surface made by a typed line
   could not be chosen until the dialog was closed and shown again (showing it
   from the menu while it was open sends no show event). Each now owns a
-  `DocumentWatcher` (`src/katana_qt/customisation/document_watcher.hpp`), the
+  `DocumentWatcher` (`rust/crates/katana_window/src/customisation/document_watcher.rs`), the
   last member so it dies first, which says from the event loop that the model
   changed - on every execute, undo and redo, and on New and Open - and the
   lists are read again, keeping what is chosen where it is still there
-  (`SurfaceLevelsDialog.TheSurfaceListFollowsTheDrawingWhileTheDialogStaysOpen`,
-  `SurfaceCombineDialog.TheListsFollowTheDrawingWhileTheDialogStaysOpen`).
+  (`surface_levels_dialog::the_surface_list_follows_the_drawing_while_the_dialog_stays_open`,
+  `surface_combine_dialog::the_lists_follow_the_drawing_while_the_dialog_stays_open`).
   Rejected: a Document listener of each dialog's own on each kind of change
   (Surfaces, Replaced ...), reloading inside the notification: the watcher
   already defers and coalesces, as a table rebuilt inside the command that
   notified once crashed the layer panel (docs/cad.md).
 - **Icons**: `Icon::SurfaceEdit`, `SurfaceLevels`, `SurfaceSmooth`,
-  `SurfaceThin`, `SurfaceDeleteLong`, `SurfaceCombine` (`src/katana_qt/icons.cpp`)
-  and the tools' own (`src/katana_qt/tools/icons_terrain.cpp`), each the same
+  `SurfaceThin`, `SurfaceDeleteLong`, `SurfaceCombine` (`rust/crates/katana_window/src/icons.rs`)
+  and the tools' own (`rust/crates/katana_window/src/tools/icons_terrain.rs`), each the same
   small TIN with what the tool does in the accent.
-- `Document::surfacesCommand` is const: the command it builds captures the
+- `Document::surfaces_command` is const: the command it builds captures the
   Document it will change and changes nothing until the host executes it, so a
   tool holding a const Document makes one without a cast. (The one
-  `const_cast` is inside it, `surface_document.cpp`, safe because the command
+  `const_cast` is inside it, `surface_document.rs`, safe because the command
   only ever runs through the non-const `Document::execute` of the Document that
   made it. The tool carried a cast of its own and a comment that gave a false
   reason for it.)
 - **The tools read a pick with the verbs' reader.** Whether an entity is a
-  polygon or a line is `cad::shapeOf` (`drawing_shapes.hpp`), asked by the tool
+  polygon or a line is `katana_cad::shape_of` (`drawing_shapes.rs`), asked by the tool
   and by the verb: the tool had a copy of the rule that refused a curve
   polyline drawn back to its start without the closed flag, which the verb
   cuts (`PLINE 20,20 60,20 ARC 60,60 LINE 20,60 20,20`).
@@ -591,17 +592,17 @@ geoprocessing executor keeps SURFACE LIST, INFO, REMOVE, FROM and EXPORT and
 hands every other SURFACE line to the interpreter (`docs/terrain.md`). No MCP
 tool of its own: the replies are records, and what an agent needs to choose
 a surface is `katana_terrain_list`'s, which reads the edited surface
-(`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads`). DELETE
+(`mcp_server::a_surface_edit_through_the_command_tool_is_what_the_terrain_list_reads`). DELETE
 BREAKLINE and MOVE POINT are lines like the rest and need no tool either: an
 agent clears a breakline and moves a vertex of it by `katana_run_commands` and
 reads `edges_cleared=` and `moved=` in the records
-(`McpServer.AnAgentClearsABreaklineAndMovesAVertexByTheSurfaceEditLines`).
+(`mcp_server::an_agent_clears_a_breakline_and_moves_a_vertex_by_the_surface_edit_lines`).
 
 ## Tests
 
-- `tests/terrain/test_tin_edit.cpp`, `test_tin_edit_combine.cpp`,
-  `test_super_surface.cpp`: every edit on hand-made surfaces - a square of two triangles flipped
-  (`TinEdit.FlippingTheDiagonalOfASquareOfTwoTrianglesGivesTheOtherDiagonal`),
+- `rust/crates/katana_terrain/tests/tin_edit.rs`, `tin_edit_combine.rs`,
+  `super_surface.rs`: every edit on hand-made surfaces - a square of two triangles flipped
+  (`tin_edit::flipping_the_diagonal_of_a_square_of_two_triangles_gives_the_other_diagonal`),
   a point in the middle giving four triangles at the worked levels, a hole of
   known area, raise by 1 adding exactly 1, smoothing holding breakline
   vertices, thinning at 0 removing exactly the two points whose neighbours
@@ -617,7 +618,7 @@ reads `edges_cleared=` and `moved=` in the records
   polygon refused, a point in a square hole (area back to 400) and beyond an L's
   notch (500), two abutting squares merged (200) and a pyramid with a top that
   touches two faces at a point (400).
-- Breaklines: `TinEdit.DeletingABreaklineMakesItsEdgesOrdinaryAndChangesNoTriangleNorVertex`
+- Breaklines: `tin_edit::deleting_a_breakline_makes_its_edges_ordinary_and_changes_no_triangle_nor_vertex`
   (six lattice edges of a breakline along a row, cleared by a line that runs
   past both ends, the triangles and vertices equal, the middle vertex refused
   by DELETE POINT before and taken after), the same for a line over half of it
@@ -626,20 +627,20 @@ reads `edges_cleared=` and `moved=` in the records
   (beyond the tolerance, 1e-7: nothing; 5e-8 above: all six), a closed line's
   closing side, several lines, the constrained rim held and counted, and every
   refusal.
-- Moving a vertex: `TinEdit.AMovedVertexKeepsItsLevelAndTheFootprintWhereverItIsTaken`
+- Moving a vertex: `tin_edit::a_moved_vertex_keeps_its_level_and_the_footprint_wherever_it_is_taken`
   (the vertex (2,2) of a plane at 1.5 taken to six places - inside its own star,
   across the ring of it onto a triangle beyond, onto the ring edge, onto the
   diagonal it is an end of, two cells away, onto a corner cell's diagonal - each
   leaving the area 16, the 25 vertices and 32 triangles, every other vertex where
   it was and the moved one at 1.5 and not the plane's there), a vertex taken
   across a breakline leaving it as long as it was, and every refusal.
-- `tests/cad/terrain/test_surface_edit_verbs.cpp`: the verbs through the
+- `rust/crates/katana_cad/tests/terrain_utility_verbs/surface_edit_verbs.rs`: the verbs through the
   interpreter, one undo step, PREVIEW, `changed=no` with no step, every
-  refusal; `test_surface_edit_tools.cpp`: the tools with `ToolDriver`;
-  `test_drawing_shapes.cpp`: the polygons' and lines' reader these verbs
+  refusal; `surface_edit_tools.rs`: the tools with `ToolDriver`;
+  `drawing_shapes.rs`: the polygons' and lines' reader these verbs
   share with the volumes - each kind of entity, typed corners with and
   without heights, the words, a scope that takes nothing.
-- `tests/qt_widgets/terrain/test_surface_edit_dialogs.cpp`: the lines, the
+- `rust/crates/katana_window/tests/surfaces/surface_edit_dialogs.rs`: the lines, the
   dialogs and the toolbar by object name;
   `qt_the_surface_heights_dialog_raises_the_surface_headless`: the real window,
   the dialog opened by its action and its line run through the executor.
@@ -662,12 +663,12 @@ reads `edges_cleared=` and `moved=` in the records
   and its levels kept and a rim vertex refused
   (`cli.surface_edit_move_point_keeps_the_vertex_count_and_the_levels`,
   `cli.surface_edit_move_point_of_a_rim_vertex_is_refused`)
-  (`src/katana_app/geo/cli/surface_edit.cmake`).
+  (`tests/cli/geo/surface_edit.cmake`).
 
 ## Measured performance
 
-The cases are in `benchmarks/bench_terrain.cpp` (`katana_benchmarks
---benchmark_filter=BM_Edit`), on the surface the review measured: 447 x 447
+The cases were in the C++ build's `bench_terrain` benchmark (`katana_benchmarks
+--benchmark_filter=BM_Edit`; removed with the C++ tree, not yet ported), on the surface the review measured: 447 x 447
 cells of 1 m, 399 618 triangles and 200 704 vertices, the most `SURFACE FROM`
 makes by default. One iteration each, since the slow ones take seconds. The
 polygons are regular, radius 150 m about the ground's middle; the footprints
@@ -677,8 +678,8 @@ A polygon-scoped edit was not local in cost: every triangle or vertex was
 classified against the whole polygon, so it cost the surface times the
 polygon's corners, and HOLE FROM <scope> paid the whole-surface rebuild once
 per footprint. They are now asked once per connected piece of triangles
-outside the region (`rebuildPatch`) and through a banded polygon classifier
-(`geometry::PolygonClassifier`, the same crossing rule as
+outside the region (`rebuild_patch`) and through a banded polygon classifier
+(`katana_geometry::primitives2d::PolygonClassifier`, the same crossing rule as
 `Polyline2::classify`, tested to agree with it point for point), and
 footprints that can be cut together are cut in one patch (above).
 
@@ -718,7 +719,7 @@ on the GUI thread from the window (Not done).
   the geoprocessing executor's verbs, which copy their inputs on the GUI thread
   and land the result there. A cad verb as a job needs the same two halves for
   one undo step (the surface handed to the job as the shared immutable pointer
-  it already is, and `Document::surfacesCommand` built where it lands), which
+  it already is, and `Document::surfaces_command` built where it lands), which
   is a change of the window's executor and not of this area.
 - **Editing a vertex's level by dragging it in the window**: only ADD POINT at
   an existing vertex relevels it. (Moving a vertex in plan is MOVE POINT.)

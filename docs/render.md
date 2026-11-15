@@ -2,22 +2,23 @@
 
 `katana_render` turns a list of primitives into pixels. It may see only
 `core`, `math` and `geometry` - it cannot include an Entity or a Document
-(Rule 3, enforced by the layering test) - and `katana::cad::SceneBuilder` is the
+(Rule 3, enforced by the layering test) - and `katana_cad::scene::SceneBuilder` is the
 one place that knows both a Document and a DrawList. This document is the
 record of the decisions in both and in the 3D view widget that drives them; the
 code comments say the same things next to the lines they govern.
 
 ## What draws what
 
-* The **plan view** (`katana_qt/viewport_widget.cpp`) paints with `QPainter`
-  straight from the model, and the drawing's surfaces in their styles
+* The **plan view** (`rust/crates/katana_window/src/viewport_widget.rs`) paints with the window's canvas
+  (`rust/crates/katana_window/src/canvas/`, a painter over tiny-skia) straight
+  from the model, and the drawing's surfaces in their styles
   (`docs/surface_display.md`). It is not on the DrawList path.
 * The **3D and Elevation views** are docks of the view workspace
-  (`katana_qt/view_workspace.cpp`), each a `RenderViewWidget`. The widget owns a
-  camera (in the view's `cad::ViewState`) and a framebuffer and nothing else:
-  `SceneBuilder` builds the scene in layers, `cad::renderLayers` draws them
+  (`rust/crates/katana_window/src/view_workspace.rs`), each a `RenderView`. The view owns a
+  camera (in the view's `katana_cad::view_set::ViewState`) and a framebuffer and nothing else:
+  `SceneBuilder` builds the scene in layers, `katana_cad::scene::render_layers` draws them
   with the software `Rasterizer` into one depth buffer, and the framebuffer's
-  bytes are blitted as a `QImage` without a copy. (The tiled viewport this page
+  bytes are handed to egui as one texture. (The tiled viewport this page
   used to describe is gone; the views dock, float and tab.)
 * The GPU renderer (`docs/gpu.md`) draws the same layers through the same
   camera wherever the renderer rules choose it - Direct3D 11 on Windows,
@@ -50,7 +51,7 @@ this work, and each fixed below:
 | A corridor as a sliver; sides cut off in a tall view | framed by the bounding sphere, before the view had a size | projected corners, re-framed at the first real size ([Framing](#framing)) |
 | A click in plan cost 104-178 ms in an open 3D view | every notification rebuilt the whole scene | the scene in layers; a selection rebuilds only its overlay ([Layers](#the-scene-in-layers)) |
 
-## Conventions (`camera.hpp`)
+## Conventions (`camera.rs`)
 
 World right-handed and Z-UP (survey data is Z-up; converting at the door would
 mean converting every picked coordinate back). Eye space looks down -Z. Screen
@@ -76,32 +77,32 @@ the test is **strictly greater**, so of two equal depths the first drawn wins
   0.03 rad below level): the strip and the ground behind it round to the same
   float depth at 93.9% of 20 001 distances on standard depth (39.1% with the
   old near = far x 1e-5), and at none reversed; the reversed case is rendered
-  by `RenderDepth.WithTheEyeInsideTheSceneSurfacesAKilometreAwayStillSeparate`.
+  by `render_depth::with_the_eye_inside_the_scene_surfaces_a_kilometre_away_still_separate`.
   The GPU convention is the same (D32F, compare Greater).
 * **The near clip plane** is clip z ≤ w - exactly w ≥ near - and a vertex cut
   there gets depth exactly 1. The far plane is not clipped; the test rejects
   anything at or below the cleared 0.
-* **The range is fitted to the scene every frame** (`Camera::fitDepthRange`,
+* **The range is fitted to the scene every frame** (`Camera::fit_depth_range`,
   called by the widget's paint before it renders): near and far bracket the
   eight corners of the scene's box along the view direction, with a pad of
   1/1000 of the box's diagonal. With the eye inside the box the near plane
-  falls back to far x 1e-6 (`kNearFarFloor`), which reversed Z can afford - or
-  to a thousandth of the pivot's distance (`kNearPivotFloor`) once that is
-  nearer, never below `tol::kGeometric`. A zoom into a large scene brings the
+  falls back to far x 1e-6 (`NEAR_FAR_FLOOR`), which reversed Z can afford - or
+  to a thousandth of the pivot's distance (`NEAR_PIVOT_FLOOR`) once that is
+  nearer, never below `tolerance::GEOMETRIC`. A zoom into a large scene brings the
   pivot closer than a millionth of the far plane: one stray entity at the
   origin under a survey at MGA coordinates made the far plane the grid's far
   corner, a thousand kilometres off, and the floor a metre, which cut away the
   ground the zoom went towards
-  (`RenderCamera.WithThePivotCloseTheNearPlaneKeepsAThousandthOfItsDistanceInFront`).
+  (`render_camera::with_the_pivot_close_the_near_plane_keeps_a_thousandth_of_its_distance_in_front`).
   A view not zoomed that deep keeps the planes it always had.
   Fitted to a framed scene, two planes 5 cm apart a kilometre away are
   hundreds of float steps apart (`RenderDepth.ASurfaceFiveCentimetres...`).
 * **Orthographic standoff.** An orthographic view has no reason to cut away
-  what lies behind an eye a zoom moved into the model, so `fitDepthRange` moves
+  what lies behind an eye a zoom moved into the model, so `fit_depth_range` moves
   the eye back along the view direction until the whole box is in front of it
-  (`orthographicStandoff()`). Only the depths change: an orthographic ray's
+  (`orthographic_standoff()`). Only the depths change: an orthographic ray's
   screen position does not depend on where along the view direction it
-  starts (`RenderDepth.TheOrthographicStandoffMovesOnlyTheDepthsNotThePicture`).
+  starts (`render_depth::the_orthographic_standoff_moves_only_the_depths_not_the_picture`).
 
 ### Bias
 
@@ -112,12 +113,12 @@ was 1 to 25 times the whole scene's depth span, and a line on the ground behind
 a 25 m building showed through all of it. Two parts replace it:
 
 * **Lines and points are pulled towards the eye by a number of pixel
-  footprints** (`DrawLine::depthBias`, `DrawPoint::depthBias`; the unit changed
+  footprints** (`DrawLine::depth_bias`, `DrawPoint::depth_bias`; the unit changed
   from NDC depth - a GPU renderer must read it this way). A footprint is the
   world size of one pixel at the primitive's own depth
-  (`Camera::worldPerPixelAt`). Under both reversed projections that pull is an
+  (`Camera::world_per_pixel_at`). Under both reversed projections that pull is an
   affine map of the depth itself, so it is applied to each end and
-  interpolates exactly (`Rasterizer::depthPullFor`):
+  interpolates exactly (`Rasterizer::depth_pull_for`):
 
   - perspective: d = n (f - z) / ((f - n) z), a footprint is z · 2 tan(fov/2) / H,
     and the pull is `pixels · (2 tan(fov/2) / H) · (d + n / (f - n))`;
@@ -135,9 +136,9 @@ a 25 m building showed through all of it. Two parts replace it:
   slope covers exactly that and nothing more. It is per triangle and
   screen-constant, so the fill loop only adds it.
 
-Pinned by `RenderDepth.ALineOnTheGroundBehindABuildingIsHidden` (0 pixels, both
+Pinned by `render_depth::a_line_on_the_ground_behind_a_building_is_hidden` (0 pixels, both
 projections, both orders) and
-`RenderDepth.ALineLyingOnTheGroundIsDrawnWholeOverIt` (every pixel it draws
+`render_depth::a_line_lying_on_the_ground_is_drawn_whole_over_it` (every pixel it draws
 alone).
 
 ### Framing
@@ -158,7 +159,7 @@ size cut the sides off a tall view.
 Reported on 2026-09-30: "when I zoom in 3D, zooming stops". It did, and it could
 also go blank.
 
-**The cause.** A wheel notch was `Camera::dollyAtPixel` alone: it anchors on the
+**The cause.** A wheel notch was `Camera::dolly_at_pixel` alone: it anchors on the
 point under the cursor OF THE TARGET'S PLANE - the plane through the orbit
 target, facing the eye - multiplies the distance by 1/1.15 and slides the
 target so that point stays under the cursor. Neither the plane nor the view
@@ -182,13 +183,13 @@ target). With the ground at depth zS and the anchor at zA, the distance:
 
 Of 80 pixels probed over the framed sample terrain, 20 stalled and 60 dived
 (after 8.7 to 33 notches). The near plane was not the cause: it is fitted
-every frame (`cad::renderLayers`, and the GPU view's frame), and in no notch of
+every frame (`katana_cad::scene::render_layers`, and the GPU view's frame), and in no notch of
 any case measured did it clip the point under the cursor.
 
-**The fix** (`include/katana/cad/scene_zoom.hpp`): each notch zooms towards
+**The fix** (`rust/crates/katana_cad/src/scene_zoom.rs`): each notch zooms towards
 what the cursor points at.
 
-1. `cad::pickDrawnPoint` finds what is drawn there: the nearest of a terrain or
+1. `katana_cad::scene_zoom::pick_drawn_point` finds what is drawn there: the nearest of a terrain or
    drawing triangle the pixel's ray passes through, and a line or point within
    three pixels of the ray. It works in a frame about the ray, where the ray is
    an axis: a triangle is hit when its shadow along the ray covers the origin,
@@ -197,8 +198,8 @@ what the cursor points at.
    cannot slip between them. A line is clipped to the aperture (Liang-Barsky)
    and its point nearest the ray taken. With nothing drawn there, the pick is
    the datum's plane - where the grid stands and linework without a height
-   lies - inside `cad::sceneDepthBox` in plan, where the grid is drawn.
-2. `cad::zoomAnchor` goes on where nothing is drawn, which is most of a docked
+   lies - inside `katana_cad::scene::scene_depth_box` in plan, where the grid is drawn.
+2. `katana_cad::scene_zoom::zoom_anchor` goes on where nothing is drawn, which is most of a docked
    3D view as it opens: the datum beyond the grid and the background round the
    model, 66% of a 330 x 520 dock over the sample (below). There the target's
    plane had taken over again, and with it the fault: below the model the eye
@@ -206,7 +207,7 @@ what the cursor points at.
    either way the whole view was blank from notch 8 to 22 and no notch changed
    it. So the anchor is where the ray meets the datum's plane, however far
    out, or the ray's point as deep as the scene reaches - the furthest corner
-   of `sceneDepthBox` along the view - whichever is nearer. The datum keeps
+   of `scene_depth_box` along the view - whichever is nearer. The datum keeps
    the eye above the ground it goes towards. The reach keeps a pixel near the
    horizon from anchoring kilometres off, where a notch would cover 13% of
    kilometres, and leaves nothing drawn beyond the anchor, so nothing drawn
@@ -222,20 +223,20 @@ what the cursor points at.
    is 12.76 degrees below the horizon. Towards the reach above the model, the
    eye flies over it. Zooming out takes the same path back, and E frames the
    scene.
-3. `Camera::setPivotDepth` moves the target along the view axis to that
+3. `Camera::set_pivot_depth` moves the target along the view axis to that
    depth and the distance to it. The eye does not move, so nothing on screen
    does; in perspective the orthographic height becomes what the view shows at
    that depth, 2 d tan(fov/2), so P keeps the scale there.
-4. `dollyAtPixel` then anchors on that depth: the point stays under the
+4. `dolly_at_pixel` then anchors on that depth: the point stays under the
    cursor, its footprint shrinks by exactly 1.15 a notch, and the eye closes
    13% of the way each notch and never arrives. The pan drags that depth's
    plane, so ground as deep as the zoom went follows the cursor one to one and
    ground at depth d moves pivot / d of the drag, as any perspective pan does
-   (`RenderView.AfterAZoomAPanStartedElsewhereMovesTheGroundThereInProportionToThePivotsDepth`);
+   (`render_view::after_a_zoom_a_pan_started_elsewhere_moves_the_ground_there_in_proportion_to_the_pivots_depth`);
    the orbit turns about the view axis at that depth
-   (`RenderView.AfterAZoomTheOrbitTurnsAboutThePointOfTheViewAxisAsDeepAsWhatTheZoomWentTowards`);
+   (`render_view::after_a_zoom_the_orbit_turns_about_the_point_of_the_view_axis_as_deep_as_what_the_zoom_went_towards`);
    the edges fade by it.
-5. **How near it goes** (`cad::minimumApproach`): where what draws the view
+5. **How near it goes** (`katana_cad::scene_zoom::minimum_approach`): where what draws the view
    stops drawing it right - not a fraction of the scene. The first limit was
    1e-4 of the diagonal of the scene's depth box, for the GPU's float error.
    But the box is the whole scene, the grid and any stray entity included:
@@ -246,12 +247,12 @@ what the cursor points at.
    1.87 m tall. Now it is the larger of:
    * `tol::kGeometric / Camera::kNearPivotFloor`, 0.1 mm: the near plane stays
      a thousandth of the pivot's distance in front of the eye ("Depth", above)
-     and never nearer than `tol::kGeometric`, so below 0.1 mm it would stop
+     and never nearer than `tolerance::GEOMETRIC`, so below 0.1 mm it would stop
      keeping clear of the point zoomed into;
    * 16 x 2^-53 of the point's distance from the origin over a tenth of a
      pixel's angle: the bound on the double arithmetic that projects it, whose
      view translation, as far from the origin as the point, is taken from it
-     (Higham's bound for a dot product; `scene_zoom.hpp` counts the
+     (Higham's bound for a dot product; `scene_zoom.rs` counts the
      roundings). It is 0.11 mm at an MGA northing on an 800 px tall view, the
      same length whatever the drawing's unit, which is what binds a survey
      drawn in millimetres.
@@ -264,13 +265,13 @@ what the cursor points at.
    not limited. At the limit the status line says "3D view: zoomed in as far
    as it can be drawn exactly", where a wheel that stops without a word reads
    as the fault it once was, and says nothing before it
-   (`RenderView.AZoomHeldAtItsLimitSaysSoOnTheStatusLineAndNothingBefore`).
+   (`render_view::a_zoom_held_at_its_limit_says_so_on_the_status_line_and_nothing_before`).
 
-`cad::zoomAtPixel` is all of it, headless; `RenderViewWidget::zoomAtPixel` calls
+`katana_cad::scene_zoom::zoom_at_pixel` is all of it, headless; `render_view_widget::zoom_at_pixel` calls
 it for the wheel over either renderer, and the GPU child hands its wheel to the
-host through `GpuSceneView::onWheelZoom`, as it hands framing through
-`onZoomExtents`: only the host holds the scene, and `gpu` may not see `cad`.
-The factor is one constant, `Camera::kZoomPerNotch`, where each widget had a
+host through `GpuSceneHost::wheel_zoom`, as it hands framing through
+`GpuSceneHost::zoom_extents`: only the host holds the scene, and `gpu` may not see `cad`.
+The factor is one constant, `Camera::ZOOM_PER_NOTCH`, where each widget had a
 copy.
 
 **What else a zoom now changes.** The pivot follows the zoom: after a notch the
@@ -316,13 +317,13 @@ work was stopped to save the owner's tokens):
   software view, but the GPU's is multisampled D32F, which Direct3D 11 cannot
   resolve, so the GPU view would need a second mechanism. The CPU pick serves
   both, and is testable without a device.
-* `geometry::intersect(Ray, Triangle3)`, the Moller-Trumbore test the codebase
+* `katana_geometry::intersect()`, the Moller-Trumbore test the codebase
   has, for the pick: it is not watertight - a ray down the edge two triangles
-  share can miss both - it refuses rays within `tol::kAngular` of the
+  share can miss both - it refuses rays within `tolerance::ANGULAR` of the
   triangle's plane, which the ground near the horizon is, and the cull must
   test the signs of the very numbers the full test uses or the culled pick
   could not equal the full one to the bit. So the pick has its own, edge
-  functions in a frame about the ray (`scene_zoom.cpp`).
+  functions in a frame about the ray (`scene_zoom.rs`).
 * Putting the orbit target on the picked point itself: the camera keeps its
   target on the view axis, so the view would jump to centre it.
 * Off the model, snapping the anchor to the model's nearest point, or zooming
@@ -343,7 +344,7 @@ work was stopped to save the owner's tokens):
   under it at depth times the factor): at those costs it is not worth the
   invalidation an orbit, a pan, a rebuild or a resize would need.
 
-**Measured** (`BM_PickUnderCursor`, `benchmarks/bench_render.cpp`: the
+**Measured** (`BM_PickUnderCursor`, the C++ build's `bench_render` benchmark: the
 synthetic survey's layers framed at 1600 x 1000, four pixels a round; median
 CPU of five repetitions on the owner's machine, with other builds running;
 a notch is a quarter of a round):
@@ -356,11 +357,11 @@ a notch is a quarter of a round):
 The culled pick finds exactly what the full one does: every sixth pixel of
 four views of a survey, both ways, 1 261 terrain, 1 611 drawing, 3 752 datum
 and 10 656 empty answers, all equal to the bit
-(`ScenePick.TheCulledPickFindsExactlyWhatTheFullOneDoes`) - the cull tests the
+(`scene_pick::the_culled_pick_finds_exactly_what_the_full_one_does`) - the cull tests the
 signs of the very numbers the full test uses.
 
 The view as the owner meets it, measured with a harness that drives the real
-`RenderViewWidget` with wheel events over `samples/site_plan` and the sample
+`RenderView` with wheel events over `samples/site_plan` and the sample
 terrain as the 3D view opens, each notch checked against a ray march of the
 TIN and the depth buffer: before is the zoom of item 1 with the target's plane
 off the model and the scene-box limit, after is this.
@@ -377,33 +378,34 @@ off the model and the scene-box limit, after is this.
 
 **Tests.** The widget's, driving wheel events on the software view and finding
 the ground under the cursor by hand:
-`RenderView.EveryWheelNotchMagnifiesTheGroundUnderTheCursorByTheSameFactor`,
-`WheelNotchesOverTheNearGroundNeverTakeTheEyeThroughIt`,
-`AfterZoomingInADragStillCarriesTheGroundUnderTheCursorWithIt` and
+`render_view::every_wheel_notch_magnifies_the_ground_under_the_cursor_by_the_same_factor`,
+`render_view::wheel_notches_over_the_near_ground_never_take_the_eye_through_it`,
+`render_view::after_zooming_in_a_drag_still_carries_the_ground_under_the_cursor_with_it` and
 `ANotchOutAfterZoomingInShrinksTheGroundUnderTheCursorByTheSameFactor` over
-the model; `InADockSizedViewTheWheelBelowTheModelZoomsTowardsTheDatumAndBackOutAgain`
-and `InADockSizedViewTheWheelAboveTheModelKeepsMagnifyingTheSceneAsFarAsItReaches`
+the model; `render_view::in_a_dock_sized_view_the_wheel_below_the_model_zooms_towards_the_datum_and_back_out_again`
+and `render_view::in_a_dock_sized_view_the_wheel_above_the_model_keeps_magnifying_the_scene_as_far_as_it_reaches`
 off it; and the pan and orbit cases of item 4. The zoom's own, with scenes
-worked by hand (`SceneZoom.*`), among them
-`OffTheModelANotchZoomsTowardsTheDatumAndTheEyeNeverGoesUnderIt`,
-`BeyondTheScenesReachANotchZoomsAsDeepAsItReachesSoNothingDrawnStalls`,
-`OneStrayEntityAtTheOriginNoLongerStopsTheZoomHundredsOfMetresFromASurvey` and
-`AnOrthographicViewOfAKilometresWideSceneZoomsOnPastWhereTheScenesSizeStoppedIt`.
+worked by hand (`scene_zoom`), among them
+`scene_zoom::off_the_model_a_notch_zooms_towards_the_datum_and_the_eye_never_goes_under_it`,
+`scene_zoom::beyond_the_scenes_reach_a_notch_zooms_as_deep_as_it_reaches_so_nothing_drawn_stalls`,
+`scene_zoom::one_stray_entity_at_the_origin_no_longer_stops_the_zoom_hundreds_of_metres_from_a_survey` and
+`scene_zoom::an_orthographic_view_of_a_kilometres_wide_scene_zooms_on_past_where_the_scenes_size_stopped_it`.
 Before the first fix the over-the-model cases failed with the numbers above: a
 gain of 1.111 at notch 1 falling to 1.0018 at notch 40, 4.25x in all where
 1.15^40 = 267.9x is due; the eye under the ground and the view blank from notch
 10; a 100 px drag moving the ground 4.75 px; a notch out undoing 0.7%. With the
 second's fixes taken out - the pivot's share of the near plane's floor,
-`zoomAnchor`'s fall-back, the limit, the GPU's origin and the wheel's hand-over
-- 14 of its tests fail in ctest: the stray-entity case with the wheel not
+`zoom_anchor`'s fall-back, the limit, the GPU's origin and the wheel's hand-over
+- 14 of its tests failed in the C++ suite: the stray-entity case with the wheel not
 moving at all (468 m from the ground, the old limit 834 m), the eye under the
 datum, 1.256 and 1.113 a notch at the dock's bottom and top, the pivot cut away
-by a near plane 1.16 m out; and the two desktop GPU cases by hand. The first
-case also runs at `QT_SCALE_FACTOR=1.25` (`qt_render_view_zoom_at_125_percent`),
-where the cursor's logical pixels must become the camera's device pixels. The
-GPU child's hand-over is `GpuSceneView.TheWheelIsHandedToTheHostThatZoomsTowardsWhatIsUnderTheCursor`
+by a near plane 1.16 m out; and the two desktop GPU cases by hand. The C++
+suite also ran the first case at `QT_SCALE_FACTOR=1.25`, where the cursor's
+logical pixels must become the camera's device pixels; the Rust twins run at
+a ratio of 1, as the headless window does. The
+GPU child's hand-over is `gpu_scene_view::the_wheel_is_handed_to_the_host_that_zooms_towards_what_is_under_the_cursor`
 (no device needed) and, where a GPU view can be shown,
-`RenderViewGpu.OnTheDesktopTheWheelOverTheGpuViewZoomsTowardsWhatIsUnderTheCursor`
+`render_view_gpu::on_the_desktop_the_wheel_over_the_gpu_view_zooms_towards_what_is_under_the_cursor`
 (docs/gpu.md has why its cursor is off the target's plane).
 `KATANA_RENDER_VIEW_IMAGES=<dir>` saves the software view's frames at chosen
 notches, to look at.
@@ -416,10 +418,10 @@ at 328 x 497, and ten notches at a time over its near ground it paints 115 349,
 then all 163 016 pixels at 20 and 30 notches, and 30 notches out the 27 324 it
 opened with
 (`qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless`).
-With the wheel's old dolly put back in `RenderViewWidget::zoomAtPixel` it
+With the wheel's old dolly put back in `render_view_widget::zoom_at_pixel` it
 painted 152 904, then 0 and 0: the eye under the ground.
 
-## The rasteriser, in three stages (`rasterizer.hpp`)
+## The rasteriser, in three stages (`rasterizer.rs`)
 
 1. **Transform** every vertex once, in parallel, into clip space, and classify
    it into a five-bit clip code (below). A DrawList is indexed precisely so a
@@ -435,9 +437,9 @@ painted 152 904, then 0 and 0: the eye under the ground.
 **Determinism (Rule 7).** Chunks are contiguous ranges of the primitive stream
 and a tile visits them in index order, so a tile sees its primitives in
 DrawList order whatever the chunk count. With a strict depth test the frame is
-reproducible bit for bit; `ThreadCountDoesNotChangeASinglePixel` renders the
+reproducible bit for bit; `render_rasterizer::thread_count_does_not_change_a_single_pixel` renders the
 same scene with 0, 1, 3 and 7 workers and compares the buffers byte for byte.
-`cad::renderLayers` draws the layers one after another into the same buffer
+`katana_cad::scene::render_layers` draws the layers one after another into the same buffer
 in a fixed order, so the same holds for a whole view.
 
 ### Clipping (rewritten 2026-09-23, audit REN-01)
@@ -445,7 +447,7 @@ in a fixed order, so the same holds for a whole view.
 Five planes, in clip space, before the divide:
 
 * the **near plane**, clip z ≤ w under reversed Z - exactly w ≥ near, and
-  `setDepthRange` refuses near ≤ 0, so every kept vertex has w > 0;
+  `set_depth_range` refuses near ≤ 0, so every kept vertex has w > 0;
 * a **guard band**, |x| ≤ 2w and |y| ≤ 2w, which bounds every projected
   coordinate to within half a viewport of the image.
 
@@ -458,12 +460,13 @@ through, and one whose codes AND to non-zero is dropped.
   and the float-to-int conversion in the binning is undefined there - a
   triangle crossing the eye plane was dropped whole. GCC's
   `-fsanitize=undefined` does not include `float-cast-overflow`, which is why no
-  sanitizer run saw it; `cmake/KatanaSanitizers.cmake` now names it.
+  sanitizer run saw it; the C++ build's sanitizer preset named it from then on
+(the Rust conversion `as i32` saturates, so the case cannot recur).
 * **The cut is computed in double**; a cut vertex is small however large its
   endpoints, so rounding it back to float costs nothing.
 * **A band of 2**: wider than the image so a point or a wide line centred just
   outside still draws the part that reaches in.
-* Every float-to-int conversion is clamped first (`pixelFloor`).
+* Every float-to-int conversion is clamped first (`pixel_floor`).
 
 ### Lines, points, fill
 
@@ -474,13 +477,13 @@ through, and one whose codes AND to non-zero is dropped.
   exactly size x size wherever the point falls. It drew floor(c - h) to
   floor(c + h), one pixel too many on each axis (audit REN-10).
 * **A point is decided once, at its centre, and drawn whole**
-  (`Rasterizer::decidePoints`). Its square has one depth, the centre's;
+  (`Rasterizer::decide_points`). Its square has one depth, the centre's;
   tested pixel by pixel against the surface it is draped on it lost its lower
   rows, because at elevation e the surface under a row k pixels below the
   centre is about k / tan(e) footprints nearer, past the surface's one-pixel
   push and the point's 1.5-footprint pull once k > 1: 6.4% of the pixels of
   draped survey points at the iso view, 20% at 0.25 rad and 25% at 0.12
-  (`RenderDepth.SurveyPointsLyingOnASlopedSurfaceAreDrawnWhole`). A bigger
+  (`render_depth::survey_points_lying_on_a_sloped_surface_are_drawn_whole`). A bigger
   pull would show points through the walls in front of them instead.
   **Solids hide a point; the linework of its own pass does not.** A list with
   points is swept in two parts: its filled triangles first, then every point
@@ -490,7 +493,7 @@ through, and one whose codes AND to non-zero is dropped.
   pass's lines, a survey point tied with the string through its centre (same
   pass, same pull) and vanished: the kerb points of `plot_PW_example_data`
   at 12 notches in did, where before the review they drew as ragged bars
-  (`RenderDepth.SurveyPointsOnTheVerticesOfDrapedStringsAreDrawnWholeOverThem`).
+  (`render_depth::survey_points_on_the_vertices_of_draped_strings_are_drawn_whole_over_them`).
   Stream order is kept in every tile - filled triangles, line quads, points -
   so nothing else changes, and the frame is the same on any number of
   threads. The 3D view's drawing pass has no filled triangles and takes one
@@ -498,28 +501,28 @@ through, and one whose codes AND to non-zero is dropped.
   Between two points of one pass the nearer still wins pixel by pixel (a
   per-tile mask of the pixels a point has drawn), and a point behind a
   building stays hidden
-  (`RenderDepth.APointOnTheGroundBehindABuildingIsHidden`). The price: a
+  (`render_depth::a_point_on_the_ground_behind_a_building_is_hidden`). The price: a
   visible point draws over up to half its size of a nearer silhouette beside
   its centre. Up to 4 096 points the decisions are made on the calling
   thread: a pool dispatch wakes every worker and waits for each, and two
   extra dispatches made `BM_SceneFrame` 5-9% slower on the median for its
   400 points. The pixels are the same either way
-  (`RenderDepth.PointsDrawTheSamePixelsOnTheCallingThreadAndAcrossThreads`).
-* **A pass may write no depth** (`RenderOptions::depthWrite`): it draws where
+  (`render_depth::points_draw_the_same_pixels_on_the_calling_thread_and_across_threads`).
+* **A pass may write no depth** (`RenderOptions::depth_write`): it draws where
   the test passes and leaves the depth buffer as it found it, so later passes
   are tested as if it were not there, and within it what is drawn later covers
   what was drawn earlier
-  (`RenderDepth.APassThatWritesNoDepthIsCoveredByWhateverIsDrawnAfterIt`).
+  (`render_depth::a_pass_that_writes_no_depth_is_covered_by_whatever_is_drawn_after_it`).
 * **No top-left fill rule** and no blending: a pixel exactly on a shared edge
   is written twice to the same result. It must be added before any blended
   pass. No anti-aliasing yet.
 * **Perspective-correct colour**: c/w and 1/w are interpolated and divided.
 
-## The scene (`cad/scene.hpp`)
+## The scene (`rust/crates/katana_cad/src/scene.rs`)
 
 Curves are tessellated here, not in the renderer, because how finely an arc is
 chorded is a modelling decision. **What is drawn is what the plan draws**: an
-entity is in the scene only when `cad::isDrawn` says so, and `sceneBounds`
+entity is in the scene only when `katana_cad::selection::is_drawn` says so, and `scene_bounds`
 covers drawn entities only (audit REN-03/04). Vertical exaggeration scales z
 about a datum as the scene is built, so framing, draping and depth all agree.
 
@@ -532,23 +535,23 @@ changes, drawn in this order into one depth buffer:
 |---|---|---|
 | `grid` | the navigation grid | the terrain or the drawing's bounds change |
 | `terrain` | surfaces and meshes | surfaces, meshes, options or exaggeration change |
-| `edges` | surface edges that fade | with the terrain; recoloured (not rebuilt) by `fadeEdges` |
-| `entities` | the drawing | the document's `modelRevision` moves (any command, undo, redo, open) |
-| `selectionCasing` | the dark casing under each selected line and point | with `selection` |
+| `edges` | surface edges that fade | with the terrain; recoloured (not rebuilt) by `fade_edges` |
+| `entities` | the drawing | the document's `model_revision` moves (any command, undo, redo, open) |
+| `selection_casing` | the dark casing under each selected line and point | with `selection` |
 | `selection` | the selected entities again, in the selection style, and the ghosts | any document notification |
 
-A document notification that leaves `Document::modelRevision` where it was is a
+A document notification that leaves `Document::model_revision` where it was is a
 selection or current-layer change, so the widget rebuilds the overlay alone
-(`RenderView.ASelectionClickRebuildsTheOverlayAndNothingUnderIt`). A vertical
+(`render_view::a_selection_click_rebuilds_the_overlay_and_nothing_under_it`). A vertical
 exaggeration change rebuilds every layer, because every one of them is built at
 exaggerated heights. `SceneBuilder::build` still makes the whole scene as one
 list for callers that want that (the benchmarks, headless tools); one list
 cannot carry the depth rules below, so there a surface flat at the datum shows
 the grid through it.
 
-`cad::renderLayers` draws one frame of the layers: it fits the depth range to
+`katana_cad::scene::render_layers` draws one frame of the layers: it fits the depth range to
 them, the grid and the selection (a ghost lies where the view draws nothing,
-so outside the rest: `SceneFrame.TheDepthRangeTakesInAGhostOutsideWhatTheViewDraws`),
+so outside the rest: `scene_frame::the_depth_range_takes_in_a_ghost_outside_what_the_view_draws`),
 fades the edges, then draws the six in the order above. The widget calls it
 and nothing else, so the tests draw exactly what the view does. Three of the
 passes **write no depth**:
@@ -558,7 +561,7 @@ passes **write no depth**:
   with depth it beat that surface, which the slope-scaled offset pushes back,
   and its whole pattern showed across a flat pad: grid lines on 7 894 of
   131 804 pad pixels at the perspective iso view and 12 331-13 392 of about
-  320 355 from the top (`SceneFrame.AFlatSurfaceAtTheDatumCoversTheGridStandingUnderIt`).
+  320 355 from the top (`scene_frame::a_flat_surface_at_the_datum_covers_the_grid_standing_under_it`).
   Drawn first and writing no depth, it is covered by the model everywhere.
   Seen from below the datum it is still behind the terrain: it is a reference,
   not an object.
@@ -568,43 +571,43 @@ passes **write no depth**:
   pixel of the surface's slope, which at a low angle is more than the half
   footprint between them. The edge, drawn first, broke every draped line it
   crossed: 2.2%, 9.2% and 17.2% of the line pixels at 0.61, 0.25 and 0.12 rad
-  (`SceneFrame.DrawingLinesDrapedOnASurfaceCrossItsEdgesUnbroken`). Nearer
+  (`scene_frame::drawing_lines_draped_on_a_surface_cross_its_edges_unbroken`). Nearer
   terrain still hides the edges, and linework is tested against the surface
   alone, which it beats everywhere. Painted in order, a later surface's
   edges would cover an earlier one's where the two coincide (a design
   repeating the existing triangles outside the works), while in the terrain
   the surface drawn first wins that tie and is the one seen; so
-  `buildTerrain` emits the edges surface by surface in reverse, and the
+  `build_terrain` emits the edges surface by surface in reverse, and the
   edges on top are the seen surface's
-  (`SceneFrame.OfTwoCoincidentSurfacesTheEdgesShownAreThoseOfTheSurfaceShown`;
+  (`scene_frame::of_two_coincident_surfaces_the_edges_shown_are_those_of_the_surface_shown`;
   without it, `plot_PW_example_data`'s dark edges went pale under the design
   surface's weaker ones).
 * **The selection's casing is tested but not written**, so the core drawn
   next covers it wherever the two overlap and the casing shows a pixel
   either side: a 3 px core of #FF9F1C over a 5 px casing of (16, 18, 22),
-  and a selected point 9 px over 11 (`cad/selection_style.hpp`;
-  `SceneFrame.ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCasing`).
+  and a selected point 9 px over 11 (`rust/crates/katana_cad/src/selection_style.rs`;
+  `scene_frame::a_selected_line_is_drawn_in_the_selection_colour_between_two_edges_of_its_casing`).
   In the core's own list, the software view drew it right by the bias alone
   (2.0 under the core's 2.5), but the GPU pulls a mark nearer by its width
   and reads no bias, so there the wider casing won and a selected line was
-  dark (`GpuLayers.ASelectionCoreDrawnAfterACasingThatWritesNoDepthKeepsItsColour`,
+  dark (`gpu_layers::a_selection_core_drawn_after_a_casing_that_writes_no_depth_keeps_its_colour`,
   its control).
 
 **The selection overlay** walks the selection's ids alone, in ascending id
 order (the order a walk of the drawing visits), through the one emitter: the
 selected entities the view draws, as the core, then - when the view's
-`SceneOptions::selectionGhosts` is on - its GHOSTS: selected entities the
-document draws and the view (`SceneOptions::layers`) hides (`cad::isGhost`,
+`SceneOptions::selection_ghosts` is on - its GHOSTS: selected entities the
+document draws and the view (`SceneOptions::layers`) hides (`katana_cad::selection::is_ghost`,
 the rule the plan painter and a section ask too), each
 one 1 px line of (130, 88, 32), the selection colour at 45 % mixed over the
 view's ground beforehand, with no casing (`docs/desktop.md`, "The selection
 in every view"). The one-list build (`SceneBuilder::build`), which no view
 draws - the benchmarks and tests do, and a sheet's 3D snapshot is built by
-layer (`buildTerrain`, `buildEntities`) with no selection at all - draws a
+layer (`build_terrain`, `build_entities`) with no selection at all - draws a
 selected entity in the core's colour and width, without the casing: it kept
 a width of its own (the option `selectedLineWidth`, since removed), 2 px, which no view
 read and which looked like the view's setting
-(`CadScene.TheOneListBuildDrawsASelectedLineAtTheSelectionsOneWidth`). Walking
+(`cad_scene::the_one_list_build_draws_a_selected_line_at_the_selections_one_width`). Walking
 the ids rather than the drawing took `BM_SceneSelectionBuild` from 0.039 /
 0.028 ms to 0.006 / 0.005 ms (256 / 512 cells; medians of three, main
 against the view-sync worktree, both Release, 2026-09-30), casing and all.
@@ -614,18 +617,18 @@ meets in the selection colour, and the overlay is exactly its
 selection-coloured lines and points, vertex for vertex and in order - with
 unselected entities between the selected, one on a layer the drawing hides
 and a selected id whose entity is gone
-(`SceneLayersBuild.TheOverlayWalkingTheSelectionFindsExactlyWhatAWalkOfTheDrawingFinds`,
+(`scene_layers_build::the_overlay_walking_the_selection_finds_exactly_what_a_walk_of_the_drawing_finds`,
 shown failing with the walk made to drop an id).
 
 **Where a set of entities stands in 3D** is where the overlay would draw
-them: `SceneBuilder::overlayBounds` runs the overlay's own emits - the core,
+them: `SceneBuilder::overlay_bounds` runs the overlay's own emits - the core,
 and the ghosts when the view shows them - over the ids asked about rather
 than the selection's, on the datum the drawing was built on, and returns
 their box without keeping a draw list. It is what a 3D view frames for ZOOM
 on a scope, Zoom to Selection among them (`docs/desktop.md`, "Zoom to
 Selection frames what the view shows of it"), so a 3D view has no second
 rule for where an entity stands
-(`SceneLayersBuild.OverlayBoundsAreWhereTheOverlayWouldDrawTheIds`). ZOOM
+(`scene_layers_build::overlay_bounds_are_where_the_overlay_would_draw_the_ids`). ZOOM
 hands it only the entities the view shows - the ones it draws, and with its
 ghosts on the selected ones it ghosts - so a ghost is framed only where one
 is drawn.
@@ -638,7 +641,7 @@ passes' depth writes off.
 `SceneOptions::linework` (`LineworkHeights`) puts each drawing vertex in z; the
 default is **HeightsThenDrape**:
 
-1. a vertex with a **height of its own** (`entity::heightsOf`: a 3D string's
+1. a vertex with a **height of its own** (`katana_entity::entity::heights_of`: a 3D string's
    `elevations`, a point's or circle's `elevation`) is drawn at it;
 2. else it is **draped** on the top visible surface under it, and a chord
    between two draped vertices on the same TIN is bent at every edge it
@@ -646,10 +649,10 @@ default is **HeightsThenDrape**:
    on the surface rather than cutting ridges or floating over valleys;
 3. else it goes on the **datum**: the lowest visible surface or mesh; with
    neither, the lowest height any entity carries; with none of those,
-   `SceneOptions::entityElevation`.
+   `SceneOptions::entity_elevation`.
 
 `Heights`, `Drape` and `Datum` restrict it to one rule. Dashes are laid along
-the plan of the draped path and take their heights from it. `sceneBounds` reads
+the plan of the draped path and take their heights from it. `scene_bounds` reads
 the same heights per geometry kind (one for a point, text or circle, one per
 vertex for a line or polyline; arcs and dimensions drape), so zoom-extents sees
 the z the build uses; the widget frames what it built.
@@ -659,7 +662,7 @@ the z the build uses; the widget frames what it built.
 * **`SurfaceStyle::Automatic`** (the default) is ShadedWithEdges up to 50 000
   triangles and Shaded above: a dense TIN's edges are all the eye can see at
   any useful zoom, and a line per edge doubled the frame.
-* **Edges fade by projected size** (`SceneBuilder::fadeEdges`, every frame): the
+* **Edges fade by projected size** (`SceneBuilder::fade_edges`, every frame): the
   typical edge of a surface is the side of an equilateral triangle of its mean
   plan area; below 4 px on screen the edges are gone, from 12 px they are at
   full strength, smoothstepped in eighths so an orbit does not recolour a
@@ -669,8 +672,8 @@ the z the build uses; the widget frames what it built.
 * **One elevation ramp** spans the lowest to the highest of every visible
   surface coloured by elevation, so a height is one colour everywhere; the
   widget draws a small legend of it with its two heights
-  (`elevationRampColor` is what both use). Its colours, and the slope
-  colours, are the ramp table's (`src/katana_cad/terrain/surface_ramps.cpp`):
+  (`elevation_ramp_color` is what both use). Its colours, and the slope
+  colours, are the ramp table's (`rust/crates/katana_cad/src/terrain/surface_colouring.rs`):
   the elevation ramp to the bit, the slope colours at their stops.
 * **A surface in a display style** (`SceneSurface::display`) is coloured by
   its style - smooth or banded elevation, stops, slope, aspect or flat, on
@@ -686,7 +689,7 @@ the z the build uses; the widget frames what it built.
 
 Baked by the scene builder (per vertex on a surface, per face on a mesh); the
 rasteriser only interpolates. A **hillshade**: the sun from the north-west, 45°
-up (`lightDirection` (-0.5, 0.5, 0.707), the cartographic convention, so relief
+up (`light_direction` (-0.5, 0.5, 0.707), the cartographic convention, so relief
 reads as raised); a **hemispheric ambient** from 0.10 for a face turned straight
 down to 0.30 for one facing up, blended by the normal's z; plus
 0.80 · max(0, n · sun). Never the absolute value: `abs()` lit a face turned away
@@ -694,8 +697,8 @@ from the sun as brightly as one facing it and made faces steeper than about 52°
 brighter as they steepened. TIN normals are turned to face up (a height field's
 outside) and summed area-weighted per vertex for smooth shading; a mesh face is
 lit by its winding, so the far side of a wall is darker
-(`SceneMeshes.AWallTurnedAwayFromTheSunIsDarkerThanOneFacingIt`: 0.20 against
-0.77). A zero `lightDirection` turns lighting off.
+(`scene_meshes::a_wall_turned_away_from_the_sun_is_darker_than_one_facing_it`: 0.20 against
+0.77). A zero `light_direction` turns lighting off.
 
 ### Grid
 
@@ -713,31 +716,32 @@ fixed grid's 162 long diagonals cost 70-95 ms a frame at 1600x1000-1920x1080,
 With no depth written, a later grid line covers an earlier one where they
 cross, so the plain lines are emitted first, then every fifth, then the axes:
 no plain line breaks an axis
-(`CadScene.TheGridDrawsItsAxesLastSoNoOtherGridLineBreaksThem`).
+(`cad_scene::the_grid_draws_its_axes_last_so_no_other_grid_line_breaks_them`).
 
 ### HiDPI
 
-The framebuffer is the widget's size times `devicePixelRatioF()` and the
-`QImage` carries that ratio, so Qt draws it one to one. Line widths and point
-sizes scale by `SceneOptions::pixelScale`; pan and zoom-at-cursor count in
+The framebuffer is the view's size times the display's pixels a point, and
+the image egui shows carries that ratio, so it is drawn one to one. Line widths and point
+sizes scale by `SceneOptions::pixel_scale`; pan and zoom-at-cursor count in
 device pixels. The owner's display runs at 125%: the view rendered at 80% of
 its resolution and was scaled up nearest-neighbour, beading 1 px lines into
-1-2 px steps. At `QT_SCALE_FACTOR=1.25` a 400 x 300 view renders 500 x 375
-(`qt_render_view_at_125_percent`); a 960 x 640 view drew 960 x 640 and was
-scaled to 1200 x 800, and now draws 1200 x 800.
+1-2 px steps. At a ratio of 1.25 a 400 x 300 view renders 500 x 375; a 960 x 640 view drew
+960 x 640 and was scaled to 1200 x 800, and now draws 1200 x 800
+(`render_view::the_framebuffer_is_the_views_size_in_device_pixels`, at the
+headless ratio of 1; the C++ suite ran it again at `QT_SCALE_FACTOR=1.25`).
 
 ## Measurements
 
 All on the i7-1270P laptop this project is built on, shared with other agents
 and on battery: **ratios and counts, not absolute times**.
 
-### Benchmarks (`benchmarks/bench_render.cpp`)
+### Benchmarks (the C++ build's `bench_render`, removed with the C++ tree)
 
 `BM_SceneBuild` and `BM_SceneFrame` run a synthetic survey (a rolling TIN of
 N x N cells over 1 km at MGA-like coordinates, 400 3D strings with heights, 400
 plan strings, 400 points) through `SceneBuilder::build` and one framed frame at
 1600x1000; `BM_SceneSelectionBuild` builds the selection overlay alone. Run
-with `tools/compare_benchmarks.py --alternate 5 "BM_Scene|BM_Render"` against
+with the C++ build's `compare_benchmarks.py --alternate 5 "BM_Scene|BM_Render"` against
 the benchmark binary built before this work, with a second copy of the new
 binary as the A/A control:
 
@@ -789,7 +793,7 @@ were still dispatched to the pool, `BM_SceneFrame` measured 5-9% slower on
 the median (10.88 / 11.48 and 19.26 / 21.46), which is why the decisions of
 up to 4 096 points are made inline. `BM_SceneLayersFrame` is new with these
 fixes: it draws the same survey as `BM_SceneFrame` through
-`cad::renderLayers` - five passes, the edges drawn at 64 cells - which is
+`katana_cad::scene::render_layers` - five passes, the edges drawn at 64 cells - which is
 what a paint of the 3D view costs; it has no before.
 
 What the fixes changed in the headless pictures of the four archives
@@ -802,7 +806,7 @@ every archive under 530 pixels.
 
 ### The real archives (headless widget, 1200x800)
 
-A scratch harness drove `RenderViewWidget` offscreen over each archive and
+A scratch harness drove `RenderView` offscreen over each archive and
 saved what it painted - iso, top, 12 notches in, 8 notches out, orthographic
 12 in, a low orbit - with the build before this work and after it, and timed
 the paint that follows a selection click (single samples on a busy machine:
@@ -834,21 +838,21 @@ read them as sizes, not ratios). What changed, looking at the pictures:
   (and re-lighting only) would make it free.
 * No anti-aliasing, no transparency, no text in 3D (text is a point marker),
   no point clouds in 3D, no selecting in 3D: the zoom finds what is drawn
-  under the cursor (`cad::pickDrawnPoint`), a click does not.
+  under the cursor (`katana_cad::scene_zoom::pick_drawn_point`), a click does not.
 * No verb reaches a 3D view's camera: its zoom cannot be typed on the
   window's command line or run by a script. The headless driver reaches it
   as a person does, with the wheel (`~RenderView2 X,Y N`, docs/headless.md),
   and reads it back (`?RenderView2`); `katana_cli` and `katana_mcp` have no
   views, so nothing there has a camera to zoom. The verb is not added here
   because the view-sync branch moves `ZOOM` into the shared interpreter (its
-  own view_verbs.hpp in cad), with `ZOOM IN`, `OUT` and a factor for plan views
+  own `view_verbs.rs` in cad), with `ZOOM IN`, `OUT` and a factor for plan views
   that it refuses for a 3D one; a second `ZOOM` beside that one would be a
   defect. Where the two meet, those words on a 3D view should call
-  `RenderViewWidget::zoomAtPixel` at the view's middle (or `AT x,y`), and a
+  `render_view_widget::zoom_at_pixel` at the view's middle (or `AT x,y`), and a
   `-DDRIVE` test read the camera back from `VIEWS`, whose record for a 3D
   view carries the keys `?RenderView2` prints. Also at that merge:
-  view-sync's `prepareGpuFrame` widens the depth box by the selection's
-  ghosts, where this change's uses `cad::sceneDepthBox`, which must then take
+  view-sync's `prepare_gpu_frame` widens the depth box by the selection's
+  ghosts, where this change's uses `katana_cad::scene::scene_depth_box`, which must then take
   them too.
 * The 3D pick's aperture is an angle about the pixel's ray: three pixels in
   the middle of the view and more towards its edges, up to 1.5 times in the
@@ -865,25 +869,25 @@ read them as sizes, not ratios). What changed, looking at the pictures:
   dense TIN at extents is still bound by triangle setup and binning.
 * Zoom-extents centres the scene's box, so in perspective the near half of a
   large flat site fills more of the view than the far half.
-* `draw_list.hpp` still describes `DrawLine::depthBias` as NDC depth; it is
+* `draw_list.rs` still describes `DrawLine::depth_bias` as NDC depth; it is
   pixel footprints of view distance (above).
 * The GPU renderer must match four rules of this path: the grid, edges and
   selection-casing passes write no depth; the edges come surface by surface in reverse (as
-  `buildTerrain` emits them); a point sprite is decided at its centre against
+  `build_terrain` emits them); a point sprite is decided at its centre against
   the solids before it, not its own pass's lines, and drawn whole (a larger
   pull instead shows points through thin walls); and the layers are drawn in
-  `renderLayers`' order.
+  `render_layers`' order.
 * A mesh styled ShadedWithEdges (meshes default to Shaded) keeps its edges in
   the terrain list, where they write depth: linework at its own heights lying
   exactly in a mesh face can still lose pixels where it crosses a mesh edge.
 * A drawing flat in one plane and seen face-on - the top view of a drawing
   with no heights - has a depth range thinner than one pixel's pull, so every
-  line's pull stops at the near plane (`pullTowardsEye`'s clamp), the pulls
+  line's pull stops at the near plane (`pull_towards_eye`'s clamp), the pulls
   tie and the one drawn first wins: there a selected line shows its own
   colour down the middle of the overlay's core. A depth range kept a few
-  pixel footprints deep (`Camera::fitDepthRange`) would keep the pulls
+  pixel footprints deep (`Camera::fit_depth_range`) would keep the pulls
   apart; not done with the selection work, since it moves every flat view's
-  depths (`SceneFrame.ASelectedLineIsDrawnInTheSelectionColourBetweenTwoEdgesOfItsCasing`
+  depths (`scene_frame::a_selected_line_is_drawn_in_the_selection_colour_between_two_edges_of_its_casing`
   is drawn from the iso view for that reason).
 * The open render defects of the audit are in `docs/audit/2026-09-23-defects.md`,
   section REN; REN-02, 05, 06, 07, 08 and 10 are fixed here and need their

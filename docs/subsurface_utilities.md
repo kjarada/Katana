@@ -2,10 +2,10 @@
 
 Tools for surveying buried services and grading what is known about them by
 the quality levels of AS 5488.1-2019, "Classification of subsurface utility
-information". The code is `katana::survey::subsurface`
-(`include/katana/survey/subsurface/`, `src/katana_survey/subsurface_*.cpp`);
+information". The code is `katana_survey::subsurface`
+(`rust/crates/katana_survey/src/subsurface/`);
 the command line reaches it through `UTILITY`
-(`include/katana/cad/utilities/utility_verbs.hpp`), a verb of the shared
+(`rust/crates/katana_cad/src/utilities/utility_verbs.rs`), a verb of the shared
 `CommandInterpreter`, so the window's command line, `katana_cli`,
 `katana_mcp` and an agent all run the same code. The calculation sits in
 `katana_survey` because it is survey calculation - positions, tolerances,
@@ -34,17 +34,17 @@ where the project specification differs.
 | Question | Function | `UTILITY` |
 |---|---|---|
 | What quality level does this located point support? | `subsurface::classify` | `REPORT` |
-| What level is each stretch of a service, and how long is each? | `subsurface::gradeLine` | `REPORT` |
-| How deep is it? | `subsurface::depthOfCover`, `subsurface::topLevel` | `REPORT ... MINCOVER` |
-| Does the deliverable claim more than its evidence supports? | `GradedVertex::overClaim` | `REPORT` findings |
-| Can we build here? | `subsurface::checkClearance` | `CLEARANCE` |
-| Were the QL-B detections as good as the locator said? | `subsurface::verifyDetections` | `VERIFY` |
-| Does the deliverable meet the client's schema? | `subsurface::checkDelivery` | `CHECK ... SCHEMA` |
-| What should the schema's Clash attribute say? | `subsurface::clashOf` | `CLEARANCE` |
-| Where is each stretch, at what level, on the plan? | `utilities::drawUtilities` | `DRAW` |
-| Which services are the survey's, or an import's, lines and points? | `utilities::readGeometryServices` | `DRAW <scope>` |
-| What does it grade as now that it has been edited in CAD? | `utilities::planUtilityRegrade` | `REGRADE` |
-| What does the drawing deliver, as a schedule? | `subsurface::writeUtilityCsv` | `SCHEDULE` |
+| What level is each stretch of a service, and how long is each? | `subsurface::grade_line` | `REPORT` |
+| How deep is it? | `subsurface::depth_of_cover`, `subsurface::top_level` | `REPORT ... MINCOVER` |
+| Does the deliverable claim more than its evidence supports? | `GradedVertex::over_claim` | `REPORT` findings |
+| Can we build here? | `subsurface::check_clearance` | `CLEARANCE` |
+| Were the QL-B detections as good as the locator said? | `subsurface::verify_detections` | `VERIFY` |
+| Does the deliverable meet the client's schema? | `subsurface::check_delivery` | `CHECK ... SCHEMA` |
+| What should the schema's Clash attribute say? | `subsurface::clash_of` | `CLEARANCE` |
+| Where is each stretch, at what level, on the plan? | `utilities::draw_utilities` | `DRAW` |
+| Which services are the survey's, or an import's, lines and points? | `utilities::read_geometry_services` | `DRAW <scope>` |
+| What does it grade as now that it has been edited in CAD? | `utility_data::plan_utility_regrade` | `REGRADE` |
+| What does the drawing deliver, as a schedule? | `subsurface::write_utility_csv` | `SCHEDULE` |
 
 Every question is asked of a schedule file or of what is drawn, chosen by
 the scope and filter words every verb shares ("Drawing data", below) - the
@@ -54,7 +54,7 @@ lines and points ("Services from surveyed and imported geometry", below).
 ## Decisions, and where this is stricter than the standard
 
 **A level is decided by the method first and the tolerance second.**
-`maximumQualityLevel` caps every record by how it was obtained: no stated
+`maximum_quality_level` caps every record by how it was obtained: no stated
 accuracy makes a radar pick QL-A, because QL-A means the service was seen.
 Only then are the uncertainties tested (`subsurface::classify`).
 
@@ -69,7 +69,7 @@ tolerance, is QL-B in plan (`Classification::reasons` says why).
 
 **A plan position and a level are graded separately.** A QL-B detection
 whose depth estimate is outside +/-500 mm keeps its QL-B plan position and
-has `Classification::levelQualified` false: its depth of cover is reported
+has `Classification::level_qualified` false: its depth of cover is reported
 with a note not to rely on it, and clearance never uses it vertically.
 
 **A segment is never better than the worse of its two ends, nor than what
@@ -80,7 +80,7 @@ service there. So `PathEvidence` records what is known of each segment:
 - `Exposed` (an open trench) keeps the level of its ends, and is the only way
   a segment is QL-A;
 - `Detected` is capped at QL-B, and at QL-C when the segment is longer than
-  `GradingSettings::maximumDetectedSpacing` (default 10 m) - a line
+  `GradingSettings::maximum_detected_spacing` (default 10 m) - a line
   interpolated across a longer gap was not traced, it was assumed;
 - `Assumed` is capped at QL-C.
 
@@ -98,7 +98,7 @@ widened by its level's horizontal tolerance: clear across the whole
 tolerance is `Clear`, clear only at the drawn position is `WithinTolerance`,
 not clear even there is `Conflict`. A QL-C or QL-D position is not a
 measurement, so near the works (within the required clearance plus
-`ClearanceRequirement::unverifiedMargin`, default 2 m) it is `Unconfirmed`
+`ClearanceRequirement::unverified_margin`, default 2 m) it is `Unconfirmed`
 rather than either, and the report lists where to pothole next. Where the
 plan clearance fails and both the works and the service have qualified
 levels, vertical separation - also widened by its tolerance - can clear a
@@ -118,10 +118,10 @@ that is not itself QL-A checks nothing and is reported as unused.
 
 ## The schedule format
 
-`subsurface::parseUtilityCsv` reads one row per located vertex; rows with the
+`subsurface::parse_utility_csv` reads one row per located vertex; rows with the
 same `line` form one service in file order. Columns are found by name from a
 header row, in any order and letter case, with aliases
-(`subsurface::utilityCsvColumns`). Required: `line`, `point`, `easting`,
+(`subsurface::utility_csv_columns`). Required: `line`, `point`, `easting`,
 `northing`, `method`. Optional: `level`, `level_ref`, `surface`, `h_unc`,
 `v_unc`, `ql` (the level the deliverable claims), `path` (evidence to the
 next vertex), `verifies`, and the service's attributes `type`, `owner`,
@@ -130,7 +130,7 @@ next vertex), `verifies`, and the service's attributes `type`, `owner`,
 It refuses rather than guesses: an unknown column (a misspelt `survace` read
 past would leave every cover uncomputed), `x` and `y` for the coordinates
 (which is which differs between conventions - the same rule as
-`include/katana/surveyio/delimited_points.hpp`), an unparseable value, and
+`rust/crates/katana_surveyio/src/delimited_points.rs`), an unparseable value, and
 two rows of one service that give different attributes. Diameter is the one
 column with its unit in its name, because a diameter in a utility schedule is
 millimetres by habit and metres everywhere else in this program. An empty
@@ -174,7 +174,7 @@ located point an `IfcAnnotation` carrying its evidence (`docs/ifc.md`,
 
 ## UTILITY on the command line
 
-`UTILITY` is the interpreter's (`utilities::runUtilityVerb`), so it is typed
+`UTILITY` is the interpreter's (`utilities::run_utility_verb`), so it is typed
 the same at the window's command line, in a `katana_cli` script and in a
 `katana_mcp` batch. Words are case-insensitive and a path with blanks is
 quoted. `HELP UTILITY` lists every option.
@@ -211,7 +211,7 @@ with its directory (`./drawing`).
 
 `REPORT`, `VERIFY`, `CLEARANCE`, `CHECK` and `SCHEDULE` read and reply; they
 never touch the drawing, so they are safe against any open project.
-`SPACING` is `GradingSettings::maximumDetectedSpacing` (default 10 m) for
+`SPACING` is `GradingSettings::maximum_detected_spacing` (default 10 m) for
 `REPORT`, `DRAW` and `REGRADE`, so a drawing and a report of one schedule
 agree. `CHECK` with errors against the schema is refused, and the refusal
 carries the whole check - a script that stops must still say why. `katana_cli`
@@ -226,44 +226,44 @@ The proposed works `CLEARANCE` measures against are a design centre line
 from one of three places. `DESIGN` may be left out, since the design file's
 second place is what the verb always took:
 
-- **A design file** (`parseDesignCsv`), as before.
+- **A design file** (`parse_design_csv`), as before.
 - **An entity drawn as the centre line**, `#<id>`: a line or a polyline (a
   closed one returns to its start; anything else is refused by its kind).
   Its levels are `LEVEL`'s at every vertex when given, else the entity's own
-  heights (`entity::heightsOf`, the `elevation`/`elevations` a 3D string
+  heights (`katana_entity::entity::heights_of`, the `elevation`/`elevations` a 3D string
   carries), else none - and a design with no levels is cleared in plan only,
   as a design file without a level column is. `LEVEL` with a file or an
   alignment is refused: they carry their own.
 - **A document alignment**, `ALIGNMENT <name>` - one made with the `ALIGN`
   verb (`docs/cad.md`); the word is `ALIGNMENT`, not `ALIGN`: its
   horizontal geometry chorded to 1 mm and its design profile's levels, where
-  it has one (`utilities::designFromAlignment`). The stations are each
+  it has one (`utilities::design_from_alignment`). The stations are each
   element's ends, as many along a curve as the one sagitta rule
-  (`geometry::sagittaChordCount`) asks for 1 mm, every key station of the
+  (`katana_geometry::chording::sagitta_chord_count`) asks for 1 mm, every key station of the
   profile, and enough inside each vertical curve that the straight line
   between two samples is within 1 mm of the parabola: a chord of length l on
   a curve whose grade changes by A over L departs from it by at most
   A l^2 / (8 L), so l = sqrt(8 L x 0.001 / A). A millimetre because the
   clearance report prints millimetres. Stations the profile does not reach
-  have no level. `UtilityData.AnAlignmentsDesignIsWithinAMillimetreOfItsCurvesInPlanAndInLevel`
+  have no level. `utility_data::an_alignments_design_is_within_a_millimetre_of_its_curves_in_plan_and_in_level`
   holds every chord to it, on an alignment with a curve and a crest. The
   design always runs from the alignment's start to its end: a station a
   rounding outside them is held to the nearer end, not dropped. The last
   element's end is the elements' lengths summed from the start chainage,
-  which can come out one unit in the last place past `endStation()`; dropping
+  which can come out one unit in the last place past `end_station()`; dropping
   it once dropped the whole last tangent, and a hard conflict on it was
   reported clear (in about 2 % of start chainages, swept by the reviewer).
-  `UtilityData.AnAlignmentsDesignEndsAtItsEndWhenItsLengthsSumARoundingPastIt`
+  `utility_data::an_alignments_design_ends_at_its_end_when_its_lengths_sum_a_rounding_past_it`
   reproduces it at chainage 43.45.
 
 ## Drawing the services
 
 `UTILITY DRAW` grades the schedule as `REPORT` does and adds it to the drawing
-as ONE undo step named `UTILITY DRAW` (`utilities::utilityDrawCommand`). It is
+as ONE undo step named `UTILITY DRAW` (`utility_drawing::utility_draw_command`). It is
 all or nothing: a line that cannot be graded - one located vertex, a
 coordinate that is not a number - refuses the whole draw, naming the line,
-and nothing is added. `utilities::drawUtilities` builds the drawing as values
-with no document, which is what `tests/cad/utilities/test_utility_drawing.cpp`
+and nothing is added. `utilities::draw_utilities` builds the drawing as values
+with no document, which is what `rust/crates/katana_cad/tests/utilities/utility_drawing.rs`
 tests; the command then creates what the drawing lacks, in this order:
 
 - **Linetypes** by quality level, named `utility-ql-b`, `utility-ql-c` and
@@ -285,7 +285,7 @@ tests; the command then creates what the drawing lacks, in this order:
   `<type>` is one word per kind of service:
   `water`, `electricity`, `telecommunications`, `gas`, `recycled-water`,
   `fire-service`, `sewer`, `stormwater`, `fuel`, `its`, `other`, `unknown`
-  (`utilities::utilityTypeWord`). A QL layer takes its level's linetype; every
+  (`utilities::utility_type_word`). A QL layer takes its level's linetype; every
   layer of a type, and the `<prefix>/<type>` group, takes the type's colour. A
   layer that already exists is used as it is: its colour, linetype and lock
   are the person's. A locked one refuses the draw when it runs, as any edit
@@ -320,7 +320,7 @@ the table is taken to be the 2019 one, which no free page confirms.
 |---|---|---|---|---|
 | water | blue (W) | `#2F80ED` | 4.09 : 1 | 3.87 : 1 |
 | electricity | orange (E) | `#E07000` | 4.89 : 1 | 3.24 : 1 |
-| telecommunications | white (C), black on a white ground | `#FFFFFF` | 15.82 : 1 | prints black (`PlotSettings::whiteToBlack`): 21.00 : 1 |
+| telecommunications | white (C), black on a white ground | `#FFFFFF` | 15.82 : 1 | prints black (`PlotSettings::white_to_black`): 21.00 : 1 |
 | gas | yellow (G) | `#FFD500` | 11.12 : 1 | 1.42 : 1, prints light |
 | recycled-water | purple (R) | `#9B59D0` | 3.57 : 1 | 4.44 : 1 |
 | fire-service | red (F) | `#E53935` | 3.74 : 1 | 4.23 : 1 |
@@ -360,11 +360,11 @@ and says so rather than claiming the standard requires it.
 **Katana's values.** Each is at least 3:1 against the plan view's ground
 (`#1E2329`). Each is also at least 3:1 against white paper as it prints, except
 yellow gas and cream sewer, which keep the ground's 3:1 and print light
-("Yellow and cream print light", below). `UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaperExceptYellowAndCreamWhichPrintLight`
+("Yellow and cream print light", below). `utility_drawing::every_type_colour_reads_on_the_screen_and_on_paper_except_yellow_and_cream_which_print_light`
 holds both, with the two exceptions named, and
-`UtilityDrawing.TheColourTableIsAS5488sByTypeAndEachValueIsTheColourItsNameSays`
+`utility_drawing::the_colour_table_is_as5488s_by_type_and_each_value_is_the_colour_its_name_says`
 holds the ten names and that each value reads as its name (hue, saturation and
-value bands), and `UtilityDrawing.TheColourTableIsTheDocumentedOneValueForValue`
+value bands), and `utility_drawing::the_colour_table_is_the_documented_one_value_for_value`
 holds each of the twelve values exactly and requires this section's table to
 show the same one on the row of its type. Dymark's chart draws the same names in values of the same hues
 (orange `#E24727`, yellow `#FFD400`, cream `#F9E7B6`, pink `#EE3A7F`, green
@@ -378,20 +378,20 @@ only others.
 on white paper and still be yellow and cream, and the colour is the
 standard's, so Katana does not darken it: they keep 3:1 against the plan
 ground and print light on paper (1.42 and 1.30 : 1). The plot's white rule
-(`PlotSettings::whiteToBlack`, `cad::paperColour`) turns white and near-white
+(`PlotSettings::white_to_black`, `katana_cad::plot::paper_colour`) turns white and near-white
 pens black, which is how communications reads on paper, and does nothing for
 a light yellow: a rule that darkened one would change every plot, including a
-"light yellow" somebody chose on purpose, which `cad::kNearWhiteChannel`'s
+"light yellow" somebody chose on purpose, which `katana_cad::plot::NEAR_WHITE_CHANNEL`'s
 note keeps as chosen. So it is not done (see "Not done"), and
-`UtilityDrawing.OnPaperCommunicationsPrintsBlackAndYellowGasAndCreamSewerPrintAsDrawn`
+`utility_drawing::on_paper_communications_prints_black_and_yellow_gas_and_cream_sewer_print_as_drawn`
 says what the plot does today. A plot of gas or sewer that must read firmly
 on white is plotted monochrome, which prints every pen black, or has the
 layers recoloured.
 
-**One table.** `utilityTypeColour` is the table; the Katana Standard survey
+**One table.** `utility_type_colour` is the table; the Katana Standard survey
 library (`docs/katana_standard.md`) draws a coded service in the same values,
 so a coded service and a drawn one are one colour in one drawing.
-`KatanaStandard.EveryServiceColourIsTheColourUtilityDrawUses` reads the
+`katana_standard::every_service_colour_is_the_colour_utility_draw_uses` reads the
 committed library file and requires each of its 186 coded services to draw in
 the colour of its kind, and every kind but `other` (the library has no code
 for it) to be reached. A palette colour that no code uses is not held to the
@@ -429,7 +429,7 @@ the runs are derived output that `UTILITY REGRADE` draws again.
 | each point: the row | `utility.line`, `utility.vertex`, `utility.order` (its place along the line, from 1), `utility.method`, `utility.level` and `utility.depth` (as recorded), `utility.level_ref`, `utility.surface_level`, `utility.h_unc` and `utility.v_unc`, `utility.claimed`, `utility.verifies`, `utility.path` (to the next point: on every point but the last when the schedule gave a path for any stretch of the line, else on none), and the line's `utility.type`, `utility.owner`, `utility.material`, `utility.diameter`, `utility.diameter_inside`, `utility.configuration`, `utility.description`, `utility.status` |
 | each point: the grading | `utility.quality_level` (the vertex's graded level), `utility.over_claim`, `utility.service_level`, `utility.level_qualified`, `utility.cover` with `utility.cover_note`, `utility.cover_below_minimum` (only with `MINCOVER`) |
 | each point: the settings | `utility.spacing`, the `SPACING` it was graded with (metres; absent only when the rule was switched off through the API), and `utility.min_cover`, the `MINCOVER` (absent when none was given): what `REGRADE` grades it with again unless told otherwise |
-| both | a delivery schema's own attributes, uninterpreted, as `utility.field.<name>`: a polyline its line's, a point its line's and its own. Which is which is the schedule format's to say (`subsurface::utilityCsvColumns`, `CarriedOn`), as it said when the schedule was read |
+| both | a delivery schema's own attributes, uninterpreted, as `utility.field.<name>`: a polyline its line's, a point its line's and its own. Which is which is the schedule format's to say (`subsurface::utility_csv_columns`, `CarriedOn`), as it said when the schedule was read |
 | both | a cell the reader reads as "not recorded", or in part, as the schedule wrote it, as `utility.recorded.<column>`: the line's `type` ("Not Specified", "N"), `status` ("Unknown") and `size` ("Not Applicable", "1200 x 900", a size beside `diameter_mm`) on its polylines and points; a vertex's `ql` ("Unknown") and `level_ref` (given with nothing measured on it) on its point. See `UTILITY CHECK <scope>`, below |
 
 The reply is one record a line: the drawing, then each service.
@@ -445,9 +445,9 @@ line id=G1 type=gas length=40.000 ql_a=0.000 ql_b=0.000 ql_c=0.000 ql_d=40.000
 `layers=` counts the layers that hold what was drawn, made or reused, not the
 groups above them; `bounds=` is the box of every located vertex, for a front
 end to frame - survey data in a real coordinate system usually lands far
-from what is on the screen. `utilities::drawReplyBounds` reads it back from
+from what is on the screen. `utilities::draw_reply_bounds` reads it back from
 the reply, so every front end reads it the same way. `cli.utility_draw_adds_the_graded_sample_to_the_drawing`
-and `tests/cad/utilities/test_utility_verbs.cpp` run it on the sample.
+and `rust/crates/katana_cad/tests/terrain_utility_verbs/utility_verbs.rs` run it on the sample.
 
 ## Drawing data: the verbs on what is drawn
 
@@ -460,7 +460,7 @@ what is drawn, and `DRAW` a file or the survey's own geometry (the next
 section). The file stays a source beside the drawing: a delivered
 schedule is still checked before anyone draws it.
 
-`utilities::readUtilityData` (`include/katana/cad/utilities/utility_data.hpp`)
+`utilities::read_utility_data` (`rust/crates/katana_cad/src/utilities/utility_data.rs`)
 reads the scope's services from the drawn points:
 
 - **A scope that takes part of a line takes the whole line**, because the
@@ -490,35 +490,35 @@ reads the scope's services from the drawn points:
   is refused by its point id and entity id, naming the lines whose attributes
   it carries - when the scope takes it, and when the scope takes a line it
   may be a point of, wherever it is
-  (`UtilityData.APointWhoseLineWasDeletedRefusesItsLineRatherThanLeavingItShort`).
+  (`utility_data::a_point_whose_line_was_deleted_refuses_its_line_rather_than_leaving_it_short`).
   To make it a point of no line, delete its `utility.vertex` and
   `utility.order` too. Values a person types in the property panel read as the schedule
   reads them: `EML` is a method, `19` is a level, `2.5` a place between the
   second and third points, `trench` an exposed path - through the schedule
-  reader's own `subsurface::parsePathEvidence`; until 2026-09-26 the drawing
+  reader's own `subsurface::parse_path_evidence`; until 2026-09-26 the drawing
   had a second reading of a path that knew only the three words it writes,
   and refused `trench`
-  (`UtilityData.APathTypedOnAPointReadsAsTheSchedulesPathColumnReadsIt`).
+  (`utility_data::a_path_typed_on_a_point_reads_as_the_schedules_path_column_reads_it`).
 
 Three proofs hold the drawing to the schedule, each a test in
-`tests/cad/utilities/test_utility_data.cpp`:
+`rust/crates/katana_cad/tests/terrain_utility_verbs/utility_data.rs`:
 
 1. **A schedule drawn and reported from the drawing is the schedule's
    report**, word for word after the scope record, for both samples and with
-   `MINCOVER` and `SPACING` (`UtilityData.TheReportOfTheDrawingIsTheReportOfTheScheduleItWasDrawnFrom`);
+   `MINCOVER` and `SPACING` (`utility_data::the_report_of_the_drawing_is_the_report_of_the_schedule_it_was_drawn_from`);
    `VERIFY` and `CLEARANCE` likewise.
 2. **The schedule written from the drawing reads back as the lines drawn**,
    field for field and doubles to the bit - `UtilityLine`'s `==`
-   (`UtilityData.AScheduleWrittenFromTheDrawingReadsBackAsTheLinesDrawn`).
+   (`utility_data::a_schedule_written_from_the_drawing_reads_back_as_the_lines_drawn`).
 3. **A point moved or a method edited, then `REGRADE`, draws exactly what a
    `DRAW` of the schedule so edited draws**, entity for entity, and one undo
    puts every entity back, ids and all
-   (`UtilityData.RegradeAfterAMovedPointDrawsWhatADrawOfTheScheduleSoEditedDraws`).
+   (`utility_data::regrade_after_a_moved_point_draws_what_a_draw_of_the_schedule_so_edited_draws`).
 
 **`UTILITY REGRADE <scope> [SPACING <m>] [MINCOVER <m>]`** grades the lines in
 scope again from their points as they are now and replaces their runs and
 their points' graded properties, as ONE undo step named `UTILITY REGRADE`
-(`utilities::planUtilityRegrade`). A point keeps its id and everything that
+(`utility_data::plan_utility_regrade`). A point keeps its id and everything that
 is a person's - their own properties (another `utility.` one too), style,
 colour; its `utility.` properties are those a `DRAW` of its row writes. A
 line whose runs come out the same is left alone, and a regrade that changes
@@ -529,7 +529,7 @@ type's layer, one a person put elsewhere stays there. It is all or nothing:
 a line that cannot be graded, or a run on a locked layer, refuses the whole
 regrade and nothing changes. The reply is `DRAW`'s records, the first
 `utilities regraded changed=<lines changed> ... bounds=`, which
-`utilities::drawReplyBounds` reads as it reads a draw's, then the scope
+`utilities::draw_reply_bounds` reads as it reads a draw's, then the scope
 record.
 
 `SPACING` and `MINCOVER` left out are **each line's own, as it was drawn**
@@ -541,16 +541,16 @@ are stored on its points for the next regrade. The points of one line must
 agree on them, as on the line's attributes. To drop a `MINCOVER` a drawing
 was made with, take `utility.min_cover` off its points (`MODIFY ... SET
 UNPROP=utility.min_cover`) and regrade
-(`UtilityData.RegradeGradesEachLineWithTheSettingsItWasDrawnWithUnlessToldOtherwise`).
+(`utility_data::regrade_grades_each_line_with_the_settings_it_was_drawn_with_unless_told_otherwise`).
 
 **`UTILITY SCHEDULE <out.csv> <scope> [SCHEMA <schema.csv>]`** writes the lines
-in scope as a schedule (`subsurface::writeUtilityCsv`), so a drawing edited
+in scope as a schedule (`subsurface::write_utility_csv`), so a drawing edited
 in CAD becomes a deliverable again: one row per point, the line's attributes
 on every row, each number in the shortest text that reads back exactly
-(`core::formatExactReal`), a diameter in the millimetres that divide back to
+(`katana_core::text::format_exact_real`), a diameter in the millimetres that divide back to
 it, and a column only when some row has a value for it. It overwrites the
 file, as every export does headless. With `SCHEMA`, it writes in the
-client's words (`subsurface::utilityCsvDialect`): each column under the
+client's words (`subsurface::utility_csv_dialect`): each column under the
 schema attribute that is one of its names (`line` as `AssetIdentifier`,
 `method` as `LocateMethod`), each word value in the first spelling the
 schema's domain lists for it (`in service` as `In Service`, QL-B as
@@ -585,8 +585,8 @@ nothing, or as less. And each is written back only while it still reads as
 the value held (`Unknown` while there is no claim, `1200 x 900` while the
 diameter is 1.2 m inside): an edit made since wins, which is what keeps it
 from the staleness above
-(`UtilityData.WhatTheScheduleSaidItDidNotKnowIsKeptSoTheDrawingMeetsTheSameSchema`,
-`SubsurfaceScheduleWriter.CellsTheReaderReadsAsNotRecordedAreWrittenAsTheScheduleWroteThem`).
+(`utility_data::what_the_schedule_said_it_did_not_know_is_kept_so_the_drawing_meets_the_same_schema`,
+`subsurface_schedule_writer::cells_the_reader_reads_as_not_recorded_are_written_as_the_schedule_wrote_them`).
 
 A drawn plan exported to IFC (`EXPORT <file.ifc>`, File > Export IFC) goes
 out by service, not by layer: each run the class the schedule's own export
@@ -603,8 +603,8 @@ archive, IFC, a shapefile, DXF. Until then a service reached the drawing only th
 so a survey had to be typed into a `.csv` before any of this could grade it.
 
 **`UTILITY DRAW <scope>` draws the geometry in scope as services**
-(`utilities::readGeometryServices`, `utilities::drawGeometryServices`,
-`include/katana/cad/utilities/utility_data.hpp`), exactly as a `DRAW` of the
+(`utilities::read_geometry_services`, `utility_data::draw_geometry_services`,
+`rust/crates/katana_cad/src/utilities/utility_data.rs`), exactly as a `DRAW` of the
 schedule that says the same thing draws it: the same layers, runs and points,
 the points carrying the same rows. So everything after it - `REPORT`,
 `VERIFY`, `CLEARANCE`, `CHECK`, `REGRADE`, `SCHEDULE`, the IFC export - works on
@@ -614,18 +614,18 @@ carrying its string name in `code`, `docs/survey_coding.md`) and points (a
 point carrying its number in `point`, `docs/survey.md`), a `.12da` archive's
 strings (named in `12d.name`), a DXF's or a shapefile's lines, an IFC file's
 pipes - heights and all, since every import writes them one way
-(`entity::setHeights`).
+(`katana_entity::entity::set_heights`).
 
 - **A service is each line or open polyline in scope**, its vertices the
   located vertices in order. A closed polyline is an outline - a pit, a
   building, a parcel - not a run, and is counted `ignored`, as are arcs,
   circles, texts and the rest.
 - **Its id is its name**: the first code or name survey coding finds on it
-  (`cad::codePropertyCandidates`), else `#<entity id>`. A name two sources in
+  (`katana_cad::survey_coding::code_property_candidates`), else `#<entity id>`. A name two sources in
   the draw share, or a service drawn already has, is told apart as
   `<name>#<entity id>`, since a line id is what holds a service's points
   together.
-- **A point in scope on a vertex** - within `tolerance::kCoordinate`, the one
+- **A point in scope on a vertex** - within `tolerance::COORDINATE`, the one
   ground mark - gives it its point number as the vertex id (else
   `<line>-<n>`) and whatever the point says of itself. Two points on one
   vertex are refused by name: which is the survey's is not guessed. A point
@@ -666,7 +666,7 @@ pipes - heights and all, since every import writes them one way
   schedule's columns**: `FIELDS type=ASSET_TYPE,line=ASSET_ID` reads a
   shapefile's `ASSET_TYPE` as each service's type and its `ASSET_ID` as its
   id. A column is named as a schedule's header names it, aliases and all
-  (`subsurface::utilityCsvColumnNamed`, the schedule reader's own lookup), so
+  (`subsurface::utility_csv_column_named`, the schedule reader's own lookup), so
   `LocateMethod=LOC_METHOD` and a delivery schema's own attributes
   (`AssetFeature=FEAT`) read as they would in a schedule; `diameter_mm` is
   millimetres, as the schedule's is. A property a person set in Katana
@@ -687,7 +687,7 @@ pipes - heights and all, since every import writes them one way
   anyone who later deleted the drawn services.
 
 The reply is the draw's, with what the scope took after its first record, as
-a regrade's is - so `utilities::drawReplyBounds` frames it the same way:
+a regrade's is - so `utilities::draw_reply_bounds` frames it the same way:
 
 ```
 utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000.000,6250000.000,334040.000,6250007.200
@@ -701,13 +701,13 @@ cannot be a service. A `REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `REGRADE`
 or `SCHEDULE` whose scope takes only such geometry - the survey, not yet
 drawn as services - says that `UTILITY DRAW` with the same scope draws it.
 
-Held by `tests/cad/utilities/test_utility_geometry.cpp`: a survey read as
+Held by `rust/crates/katana_cad/tests/terrain_utility_verbs/utility_geometry.rs`: a survey read as
 services is, field for field, the schedule written by hand from the same
 field book, and drawn it is that schedule's drawing, entity for entity
-(`UtilityGeometry.ASurveyDrawnAsServicesDrawsWhatTheScheduleOfTheSameSurveyDraws`);
+(`utility_geometry::a_survey_drawn_as_services_draws_what_the_schedule_of_the_same_survey_draws`);
 every other verb then reads it as that schedule's drawing, and a regrade of it
 changes nothing
-(`UtilityGeometry.EveryVerbReadsWhatWasDrawnFromTheSurveyAsTheSchedulesDrawing`).
+(`utility_geometry::every_verb_reads_what_was_drawn_from_the_survey_as_the_schedules_drawing`).
 Through a real import, `located_services.geojson` draws and reports what
 `schedule.csv` does, word for word
 (`cli.utility_draw_takes_the_services_an_import_left_in_the_drawing`).
@@ -740,7 +740,7 @@ asset - `AssetIdentifier`, `AssetTypeCode`, `AssetOwner`, `Size`,
 most of them mandatory, most of them taking a value from a list. Two things
 use it, and they are kept apart on purpose.
 
-**Grading reads its attribute names.** `subsurface::parseUtilityCsv` takes a
+**Grading reads its attribute names.** `subsurface::parse_utility_csv` takes a
 schedule whose columns are the schema's attribute names, so that one file is
 both a TfNSW deliverable and something `REPORT`, `VERIFY` and `CLEARANCE` can
 grade. `samples/utilities/schedule_tfnsw.csv` is one. The schema has no
@@ -798,7 +798,7 @@ Utility-Schema-and-Specification-v1.2.xlsx in the git-ignored folder
 `cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong`, which checks the
 sample against it. (The two `cli.utility_check_with_errors_*` tests use a
 schema written by hand and run in every checkout.) The format of the schema file is in
-`include/katana/survey/subsurface/delivery_schema.hpp`; nothing in the
+`rust/crates/katana_survey/src/subsurface/delivery_schema.rs`; nothing in the
 checker is TfNSW's, so another client's schema can be written by hand.
 
 Two things found in v1.2 while writing the extraction:
@@ -882,7 +882,7 @@ they are written as (`docs/ifc.md`, "In the window").
   separately from its position) are not modelled.
 - Yellow gas and cream sewer print light on white paper (1.42 and 1.30 : 1):
   they are AS 5488's colours, and the plot has no rule that darkens a light
-  pen, only white and near-white ones (`cad::paperColour`). A rule that did,
+  pen, only white and near-white ones (`katana_cad::plot::paper_colour`). A rule that did,
   for any pen under 3:1 on white, is a change to every plot and the owner's to
   decide; until then, plot such a sheet monochrome or recolour the layers.
 - The A3 frame's built-in public utilities legend
@@ -893,7 +893,7 @@ they are written as (`docs/ifc.md`, "In the window").
   DRAW` layers that keeps the frame's legend block therefore shows a legend
   that does not match its lines. The frame is a measured reproduction, so
   changing its palette is the owner's decision; until then turn the block off
-  (`Sheet::frameLegend`) and add a Legend sheet, which draws a sample of each
+  (`Sheet::frame_legend`) and add a Legend sheet, which draws a sample of each
   layer in the colour the layer prints.
 - `CHECK` does not evaluate the schema's conditional attributes (it cannot
   know the condition) and does not check the `EPSG Code` beside the

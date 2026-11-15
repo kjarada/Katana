@@ -10,36 +10,73 @@
 # Why a test and not a habit: documents trail the code. Of 150 code commits
 # measured on 2026-09-24, 12 touched a document, and the newest commit then
 # had left three passages describing a dialog it had just changed. A path, a
-# Class::member or a test name that no longer exists is the cheapest sign of
+# qualified name or a test name that no longer exists is the cheapest sign of
 # such rot, and it can be checked mechanically.
 #
-# What is checked, in every top-level docs/*.md not in NOT_YET_CHECKED:
-#   * repository paths (src/..., include/..., tests/..., tools/..., docs/...,
-#     cmake/..., benchmarks/..., resources/..., samples/..., and the root
-#     build files) in backticks, in links and in fenced code: the file or
-#     folder exists, or a glob matches when the path has * or <placeholder>;
-#     a path under a git-ignored folder is skipped, since a clean checkout
-#     does not have it;
-#   * backticked qualified names (`Document::setCurrentStyle`): the last two
-#     names both occur in one file under include/, src/, tests/ or
-#     benchmarks/ - a renamed or deleted member leaves no such file. The
-#     CMake files there count for these alone, which is where a target's
-#     namespaced name lives (`Qt6::GuiPrivate`); a test name listed in CMake
-#     and gone from the code must still fail the next check;
-#   * test names: `qt_..._headless`, `qt_widgets.Suite.Case` and `cli....`
-#     are registered in a CMakeLists.txt or a TEST(), and a long backticked
-#     CamelCase name (a test case, by this project's naming rule) occurs in
-#     the code;
-#   * no citation of the removed root documents (the plan, the contributor
-#     instructions, the readme);
-# and, over all of docs/*.md, that docs/index.md lists every document and
-# names none that does not exist (EXPECTED ones excepted); that
-# docs/headless.md names every switch src/katana_qt/main.cpp parses and every
+# Katana is a Rust project (docs/rust.md): the C++ tree - src/, include/,
+# benchmarks/ and the gtest sources under tests/ - was removed on the owner's
+# word of 2026-11-15. The forms a document may cite, each checked as said:
+#
+#   * A repository path, in backticks, in a link or in fenced code:
+#     `rust/crates/katana_cad/src/global_modify.rs`, `tests/data/...`,
+#     `tools/build_visible.sh`, `docs/...`, `cmake/...`, `resources/...`,
+#     `samples/...`, and the root files (CMakeLists.txt, CMakePresets.json,
+#     .gitignore). The file or folder exists, or a glob matches when the path
+#     has * or <placeholder>; a path under a git-ignored folder is skipped,
+#     since a clean checkout does not have it. A path into the removed C++
+#     tree (src/, include/, benchmarks/, a .cpp/.hpp/.h under tests/) is
+#     reported as such: cite the Rust file it became (the layout mirrors it:
+#     src/katana_qt/x.cpp is rust/crates/katana_window/src/x.rs,
+#     src/katana_cad/y.cpp is rust/crates/katana_cad/src/y.rs), or write the
+#     history as a sentence without the path.
+#   * A Rust path rooted at a crate: `katana_cad::global_modify::match_entities`,
+#     `katana_entity::Document::set_current_style`. The crate is a folder of
+#     rust/crates; the modules are followed through the files (x.rs or
+#     x/mod.rs, or an inline `mod x {`) as far as they go; the first name after
+#     them is declared (fn, struct, enum, trait, type, const, static, mod,
+#     macro_rules!) in that module or below it - a re-export at the crate root
+#     is found that way - and any name after that (a method, a variant, an
+#     associated constant) occurs in the crate's code in a file that names the
+#     one before it.
+#   * A shorter qualified name, `Type::method`, `Enum::Variant` or
+#     `module::item` (`Document::set_current_style`,
+#     `global_modify::match_entities`): its last two names both occur in the
+#     code of one .rs file under rust/, a file's own module name (its stem, or
+#     its folder's name for mod.rs, lib.rs and main.rs) counting as a word in
+#     it. `std::...` and the crates the workspace depends on (`egui::...`,
+#     `wgpu::...`) are not checked.
+#   * A Rust test, `suite::case_name`: the twin of the gtest case
+#     Suite.CaseName (tools/check_rust_parity.py's rule, kept here): a
+#     #[test] function `case_name` whose innermost module is `suite` - a
+#     `mod suite { ... }`, or the file suite.rs when the function is at its
+#     top. A qualified name whose last name is a #[test] function anywhere,
+#     and of three words or more, is held to this form. A long snake_case name on its own
+#     (`five_or_more_words_like_this`) is checked as a long CamelCase name is.
+#   * A process test - `cli.<name>`, `qt_<name>_headless`, or any long
+#     snake_case name - registered by add_test(NAME ...) in a CMakeLists.txt or
+#     .cmake file of the CMake test runner (tests/, cmake/, tools/, the root
+#     CMakeLists.txt); a function those files define counts as such a name.
+#   * A long CamelCase name (five humps or more: a Rust type, or a name the
+#     code writes, such as an IFC class) occurs in the code, its string
+#     literals counting here, or is a registered process test. A gtest name, `Suite.CaseName` or `qt_widgets.Suite.Case`, is
+#     reported: the C++ tests are gone, so cite the twin `suite::case_name`.
+#
+# "Occurs in the code" means outside comments, and outside string literals
+# but for the long names above: the port's comments cite the C++ names they
+# replaced ("main.cpp's argument loop"), and a C++ name kept alive only by
+# such a comment is exactly the rot this finds.
+#
+# And: no citation of the removed root documents (the plan, the contributor
+# instructions, the readme); over all of docs/*.md, that docs/index.md lists
+# every document and names none that does not exist (EXPECTED ones excepted);
+# that docs/headless.md names every switch the window's headless runner
+# parses (rust/crates/katana_window/src/drive/run.rs and steps.rs) and every
 # variable tools/check_screenshot.cmake reads; and that the worked example
 # docs/customisation.md prints is, character for character, the text the
-# format's own test reads and writes back.
+# format's own test (rust/crates/katana_entity/tests/customisation_format.rs)
+# reads and writes back.
 #
-# Deliberately NOT checked: bare file names (`numerics.hpp` - ambiguous by
+# Deliberately NOT checked: bare file names (`numerics.rs` - ambiguous by
 # design, and the path beside them usually says which), prose, and whether
 # a claim is TRUE. The last is a person's job; this only finds the claims
 # that can no longer be true.
@@ -53,7 +90,7 @@ import sys
 
 # Documents still being brought up to the standard this checks. Each name is
 # removed from here in the commit that makes its document pass; the list only
-# shrinks. The last four are being written as this list is made.
+# shrinks.
 NOT_YET_CHECKED = {
     'performance.md',
     'terrain.md',
@@ -66,14 +103,19 @@ NOT_YET_CHECKED = {
 # Documents docs/index.md may name before they exist.
 EXPECTED = {'plan_view.md', 'plotting.md', 'gpu.md', 'dxf.md'}
 
+# src, include and benchmarks are the removed C++ tree: still read as paths so
+# that a citation of one is reported, never as somewhere a name may live.
 ROOTS = ('src', 'include', 'tests', 'tools', 'docs', 'cmake', 'benchmarks', 'resources',
          'samples', 'third_party', 'rust')
+REMOVED_TREE = re.compile(r'^(?:src|include|benchmarks)(?:/|$)|^tests/.*\.(?:cpp|hpp|h)$')
 ROOT_FILES = ('CMakeLists.txt', 'CMakePresets.json', '.gitignore', '.clang-format',
               '.clang-tidy')
-# rust/ is the Rust port (docs/rust.md): a name a document cites may live there.
-CODE_ROOTS = ('include', 'src', 'tests', 'benchmarks', 'rust')
-CODE_SUFFIXES = ('.hpp', '.cpp', '.h', '.inl', '.rs')
-BUILD_FILE_SUFFIXES = ('CMakeLists.txt', '.cmake')
+CRATES = os.path.join('rust', 'crates')
+# The C++ shims under rust/crates/*/native (GDAL's algorithm framework and
+# HTTP, PDAL) are code of the Rust build too.
+CODE_SUFFIXES = ('.rs', '.cpp', '.h')
+# The CMake test runner: where a process test is registered.
+TEST_RUNNER_ROOTS = ('tests', 'cmake', 'tools')
 
 # The removed root documents, as a citation would name them. Split so that
 # this file does not itself read as one.
@@ -81,19 +123,40 @@ FORBIDDEN = re.compile(r'\bPLAN' + r'\.MD\b|\bPLAN' + r'\.md\b|\bCLAUDE' + r'\.m
                        + r'ME(\.md)?\b|\bplan/[0-9]')
 
 # Not preceded by a word character, a dot, a slash or a hyphen, so that the
-# src/ inside build/release/src/... is not read as a path of its own.
+# src/ inside rust/crates/katana_cad/src/... is not read as a path of its own.
 PATH_TOKEN = re.compile(r'(?<![\w./-])(?:\.\./)*(?:' + '|'.join(ROOTS)
                         + r')/[^\s`\'"),;|\]]*')
 ROOT_FILE_TOKEN = re.compile(r'(?<![\w/.])(?:' + '|'.join(re.escape(f) for f in ROOT_FILES)
                              + r')(?![\w/])')
-QUALIFIED = re.compile(r'^~?[A-Za-z_]\w*(?:::~?[A-Za-z_]\w*)+(?:\(.*\))?$')
+QUALIFIED = re.compile(r'^[A-Za-z_]\w*(?:::[A-Za-z_]\w*)+(?:\(.*\))?(?:!)?$')
 CAMEL_TEST = re.compile(r'^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*){4,}$')
-QT_TEST = re.compile(r'^qt_[a-z0-9_]+$')
-QT_WIDGETS = re.compile(r'^qt_widgets\.([A-Za-z0-9_]+)\.(\*|[A-Za-z0-9_]+)$')
+SNAKE_TEST = re.compile(r'^[a-z][a-z0-9]*(?:_[a-z0-9]+){4,}$')
+GTEST = re.compile(r'^(?:qt_widgets\.)?[A-Z][A-Za-z0-9]*\.(?:\*|[A-Z][A-Za-z0-9_]{8,})$')
+QT_TEST = re.compile(r'^qt_[a-z0-9_]+_headless$')
 CLI_TEST = re.compile(r'^cli\.[a-z0-9_]+$')
 LINK = re.compile(r'\]\(([^)\s]+)\)')
 BACKTICK = re.compile(r'`([^`\n]+)`')
 WORD = re.compile(r'[A-Za-z_]\w*')
+DECLARATION = r'\b(?:fn|struct|enum|trait|type|const|static|mod|union|macro_rules!)\s+(?:r#)?%s\b'
+
+# The tokens of Rust source that matter for finding code words, test
+# functions and the modules around them. Order matters: a raw or byte string
+# before an identifier, a character literal before a lifetime.
+TOKEN = re.compile(r'''
+      (?P<line_comment>//[^\n]*)
+    | (?P<block_comment>/\*)
+    | (?P<raw_string>(?<![\w])[bc]?r(?P<hashes>\#*)")
+    | (?P<string>(?<![\w])[bc]"|")
+    | (?P<char>'(?:\\(?:u\{[0-9A-Fa-f_]*\}|x[0-9A-Fa-f]{2}|.)|[^\\'\n])')
+    | (?P<lifetime>'[A-Za-z_]\w*)
+    | (?P<test>\#\[test\])
+    | (?P<ident>(?:r\#)?[A-Za-z_]\w*)
+    | (?P<open>\{)
+    | (?P<close>\})
+    | (?P<semicolon>;)
+''', re.VERBOSE)
+STRING_BODY = re.compile(r'(?:[^"\\]|\\.)*"', re.DOTALL)
+COMMENT_EDGE = re.compile(r'/\*|\*/')
 
 
 def read(path):
@@ -126,45 +189,235 @@ def is_ignored(path, patterns):
                for pattern in patterns)
 
 
-def code_index(root, suffixes=CODE_SUFFIXES):
-    """word -> set of files, over the code roots' files ending in `suffixes`."""
-    files_by_word = {}
-    for top in CODE_ROOTS:
-        for directory, folders, names in os.walk(os.path.join(root, top)):
+def module_name(path):
+    """The module a .rs file is: its stem, or its folder's for mod/lib/main.rs."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    if stem in ('mod', 'lib', 'main'):
+        return os.path.basename(os.path.dirname(path))
+    return stem
+
+
+def scan_rust(text, file_module):
+    """The code of Rust source `text`: (its words outside comments and string
+    literals, the words in its string literals, the (module, function) of
+    every #[test] function, the code itself with comments and literals
+    blanked)."""
+    words = []
+    literal_words = []
+    tests = []
+    code = []
+    stack = []          # (module name, brace depth at which it closes)
+    depth = 0
+    pending_mod = None  # a `mod name` waiting for its `{`
+    expect = None
+    after_test = False  # a #[test] attribute was seen; the next fn is a test
+    pos = 0
+    while True:
+        match = TOKEN.search(text, pos)
+        if not match:
+            break
+        code.append(text[pos:match.start()])
+        pos = match.end()
+        kind = match.lastgroup
+        if kind == 'hashes':
+            kind = 'raw_string'
+        if kind == 'line_comment' or kind == 'char' or kind == 'lifetime':
+            code.append(' ')
+            continue
+        if kind == 'block_comment':
+            level = 1
+            while level:
+                edge = COMMENT_EDGE.search(text, pos)
+                if not edge:
+                    pos = len(text)
+                    break
+                level += 1 if edge.group(0) == '/*' else -1
+                pos = edge.end()
+            code.append(' ')
+            continue
+        if kind == 'raw_string':
+            closing = '"' + match.group('hashes')
+            end = text.find(closing, pos)
+            stop = len(text) if end < 0 else end
+            literal_words += WORD.findall(text[pos:stop])
+            pos = len(text) if end < 0 else end + len(closing)
+            code.append('""')
+            continue
+        if kind == 'string':
+            body = STRING_BODY.match(text, pos)
+            stop = len(text) if not body else body.end()
+            literal_words += WORD.findall(text[pos:stop])
+            pos = stop
+            code.append('""')
+            continue
+        code.append(match.group(0))
+        if kind == 'test':
+            after_test = True
+        elif kind == 'open':
+            depth += 1
+            if pending_mod is not None:
+                stack.append((pending_mod, depth))
+                pending_mod = None
+        elif kind == 'close':
+            if stack and stack[-1][1] == depth:
+                stack.pop()
+            depth -= 1
+        elif kind == 'semicolon':
+            pending_mod = None  # `mod name;`: a module in a file of its own
+        elif kind == 'ident':
+            token = match.group(0).removeprefix('r#')
+            words.append(token)
+            if expect == 'mod name':
+                pending_mod = token
+                expect = None
+            elif expect == 'fn name':
+                tests.append((stack[-1][0] if stack else file_module, token))
+                expect = None
+            elif token == 'mod':
+                expect = 'mod name'
+            elif token == 'fn' and after_test:
+                expect = 'fn name'
+                after_test = False
+    code.append(text[pos:])
+    return words, literal_words, tests, ''.join(code)
+
+
+class Code:
+    """What the Rust tree declares, read and not built."""
+
+    def __init__(self, root):
+        self.root = root
+        self.words = {}        # word -> set of files whose code has it
+        self.literal_words = set()  # every word in a string literal
+        self.code = {}         # file -> its code, comments and literals blanked
+        self.tests = set()     # 'module::function' of every #[test] function
+        self.test_names = set()
+        self.crates = set()
+        crates = os.path.join(root, CRATES)
+        if os.path.isdir(crates):
+            self.crates = {name for name in os.listdir(crates)
+                           if os.path.isdir(os.path.join(crates, name))}
+        # core and alloc are std's too, but katana's own `core` was a C++
+        # namespace a stale citation would name: only std is skipped outright.
+        self.external = {'std'} | self._dependencies()
+        for directory, folders, names in os.walk(os.path.join(root, 'rust')):
             # cargo's output, generated sources among it, is not the code.
-            folders[:] = [f for f in folders if not (top == 'rust' and f == 'target')]
+            folders[:] = [f for f in folders if f != 'target']
             for name in names:
-                if not name.endswith(suffixes):
+                if not name.endswith(CODE_SUFFIXES):
                     continue
                 path = os.path.join(directory, name)
-                for word in set(WORD.findall(read(path))):
-                    files_by_word.setdefault(word, set()).add(path)
-    return files_by_word
+                text = read(path)
+                if name.endswith('.rs'):
+                    module = module_name(path)
+                    words, literals, tests, code = scan_rust(text, module)
+                    words.append(module)
+                    self.literal_words.update(literals)
+                    for test in tests:
+                        self.tests.add('%s::%s' % test)
+                        self.test_names.add(test[1])
+                else:
+                    words, code = WORD.findall(text), text
+                self.code[path] = code
+                for word in set(words):
+                    self.words.setdefault(word, set()).add(path)
+
+    def _dependencies(self):
+        """The crates the workspace depends on, by the name code uses."""
+        names = set()
+        for path in glob.glob(os.path.join(self.root, 'rust', '**', 'Cargo.toml'),
+                              recursive=True):
+            section = None
+            for line in read(path).splitlines():
+                line = line.strip()
+                if line.startswith('['):
+                    section = line.strip('[]')
+                    continue
+                if section and 'dependencies' in section:
+                    name = re.match(r'([A-Za-z0-9_-]+)\s*=', line)
+                    if name:
+                        names.add(name.group(1).replace('-', '_'))
+        return names - self.crates
+
+    def in_one_file(self, first, second, within=None):
+        files = self.words.get(first, set()) & self.words.get(second, set())
+        if within:
+            files = {f for f in files if f.startswith(within)}
+        return files
+
+    def declared_in(self, name, files):
+        pattern = re.compile(DECLARATION % re.escape(name))
+        return [f for f in files if pattern.search(self.code.get(f, ''))]
+
+    def resolve(self, parts):
+        """None when the crate-rooted path `parts` names something, else why."""
+        crate = parts[0]
+        source = os.path.join(self.root, CRATES, crate, 'src')
+        if not os.path.isdir(source):
+            return 'no crate %s in rust/crates' % crate
+        folder = source
+        candidates = [os.path.join(source, 'lib.rs'), os.path.join(source, 'main.rs')]
+        current = next((c for c in candidates if os.path.exists(c)), None)
+        rest = parts[1:]
+        while rest:
+            name = rest[0]
+            as_file = os.path.join(folder, name + '.rs')
+            as_folder = os.path.join(folder, name, 'mod.rs')
+            if os.path.exists(as_file):
+                current, folder = as_file, os.path.join(folder, name)
+            elif os.path.exists(as_folder):
+                current, folder = as_folder, os.path.join(folder, name)
+            elif current and re.search(r'\bmod\s+%s\s*\{' % re.escape(name),
+                                       self.code.get(current, '')):
+                pass  # an inline module: its items are in the same file
+            else:
+                break
+            rest = rest[1:]
+        if not rest:
+            return None  # the path names a module
+        subtree = {f for f in self.code
+                   if f == current or f.startswith(folder + os.sep)}
+        if not self.declared_in(rest[0], subtree):
+            # A re-export: declared anywhere in the crate, and the module the
+            # path stopped at names it in its code.
+            crate_files = {f for f in self.code if f.startswith(
+                os.path.join(self.root, CRATES, crate) + os.sep)}
+            reexported = current and re.search(r'\b%s\b' % re.escape(rest[0]),
+                                               self.code.get(current, ''))
+            if not (reexported and self.declared_in(rest[0], crate_files)):
+                return 'nothing declares %s in %s' % (
+                    rest[0], os.path.relpath(current or folder, self.root).replace(os.sep, '/'))
+        within = os.path.join(self.root, CRATES, crate) + os.sep
+        for owner, member in zip(rest, rest[1:]):
+            if not self.in_one_file(owner, member, within):
+                return 'no file of %s names both %s and %s' % (crate, owner, member)
+        return None
 
 
 def registered_tests(root):
-    """Every name given to add_test(NAME ...) and every TEST() suite and case."""
+    """Every name given to add_test(NAME ...) by the CMake test runner, and
+    the names of its functions."""
     names = set()
-    suites = {}
-    for top in ('tests', 'src', 'benchmarks'):
-        for directory, _, files in os.walk(os.path.join(root, top)):
-            for name in files:
-                path = os.path.join(directory, name)
-                if name == 'CMakeLists.txt' or name.endswith('.cmake'):
-                    names.update(re.findall(r'NAME\s+"?([A-Za-z0-9_.]+)', read(path)))
-                elif name.endswith('.cpp'):
-                    for suite, case in re.findall(
-                            r'\bTEST(?:_F|_P)?\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)',
-                            read(path)):
-                        suites.setdefault(suite, set()).add(case)
-    return names, suites
+    files = [os.path.join(root, 'CMakeLists.txt')]
+    for top in TEST_RUNNER_ROOTS:
+        for directory, _, found in os.walk(os.path.join(root, top)):
+            files += [os.path.join(directory, n) for n in found
+                      if n == 'CMakeLists.txt' or n.endswith('.cmake')]
+    for path in files:
+        if os.path.exists(path):
+            text = read(path)
+            names.update(re.findall(r'NAME\s+"?([A-Za-z0-9_.]+)', text))
+            # A function of the runner (katana_say_what_every_program_test_starts_with)
+            # is cited as a test's mechanism is.
+            names.update(re.findall(r'\bfunction\(\s*([A-Za-z0-9_]+)', text))
+    return names
 
 
 def path_exists(root, docs_dir, token, doc_path):
     """None when the path is fine (exists, or is skipped), else a reason."""
     token = token.rstrip('.:,')
     if '...' in token or token.endswith('/..'):
-        return None  # a placeholder such as src/...
+        return None  # a placeholder such as rust/crates/...
     if token.startswith('../'):
         resolved = os.path.normpath(os.path.join(os.path.dirname(doc_path), token))
         relative = os.path.relpath(resolved, root).replace(os.sep, '/')
@@ -173,6 +426,8 @@ def path_exists(root, docs_dir, token, doc_path):
     relative = relative.split('#', 1)[0].rstrip('/')
     if not relative:
         return None
+    if REMOVED_TREE.search(relative):
+        return 'cites the removed C++ tree: ' + token
     if any(c in relative for c in '*<>{}'):
         pattern = re.sub(r'<[^>]*>', '*', relative)
         if '{' in pattern:
@@ -198,8 +453,29 @@ def fenced_blocks(lines):
     return flags
 
 
-def check_document(root, doc_path, ignored, words, build_words, tests, suites, problems,
-                   counts):
+def check_name(span, code, counts):
+    """None when the qualified name `span` is fine, else why not."""
+    name = re.sub(r'(?:\(.*\))?!?$', '', span)
+    parts = name.split('::')
+    if parts[0] in code.external:
+        return None
+    last, owner = parts[-1], parts[-2]
+    # A test is named by a sentence; a short name (`Style::name`) that some
+    # test also happens to bear is read as the item it is.
+    if last in code.test_names and last.count('_') >= 2:
+        counts['tests'] += 1
+        if '%s::%s' % (owner, last) not in code.tests:
+            return 'no #[test] fn %s in a module %s' % (last, owner)
+        return None
+    counts['names'] += 1
+    if parts[0] in code.crates:
+        return code.resolve(parts)
+    if not code.in_one_file(owner, last):
+        return 'no Rust file names both %s and %s (%s)' % (owner, last, span)
+    return None
+
+
+def check_document(root, doc_path, ignored, code, tests, problems, counts):
     relative_doc = os.path.relpath(doc_path, root).replace(os.sep, '/')
     lines = read(doc_path).split('\n')
     in_code = fenced_blocks(lines)
@@ -238,33 +514,24 @@ def check_document(root, doc_path, ignored, words, build_words, tests, suites, p
         for span in spans:
             span = span.strip()
             if QUALIFIED.match(span):
-                name = re.sub(r'\(.*\)$', '', span)
-                parts = [p.lstrip('~') for p in name.split('::')]
-                if parts[0] == 'std':
-                    continue
-                last, owner = parts[-1], parts[-2]
-                counts['names'] += 1
-                if not (words.get(last, set()) & words.get(owner, set())) and not (
-                        build_words.get(last, set()) & build_words.get(owner, set())):
-                    report(number, 'no file names both %s and %s (%s)' % (owner, last, span))
+                reason = check_name(span, code, counts)
+                if reason:
+                    report(number, reason)
                 continue
-            widgets = QT_WIDGETS.match(span)
-            if widgets:
-                suite, case = widgets.groups()
+            if GTEST.match(span):
                 counts['tests'] += 1
-                if suite not in suites:
-                    report(number, 'no widget test suite ' + suite)
-                elif case != '*' and case not in suites[suite]:
-                    report(number, 'no widget test %s.%s' % (suite, case))
+                report(number, 'a C++ test name (%s): cite its Rust twin, suite::case_name'
+                       % span)
                 continue
-            if QT_TEST.match(span) and span.endswith('_headless') or CLI_TEST.match(span):
+            if QT_TEST.match(span) or CLI_TEST.match(span):
                 counts['tests'] += 1
                 if span not in tests:
                     report(number, 'no registered test ' + span)
                 continue
-            if CAMEL_TEST.match(span):
+            if CAMEL_TEST.match(span) or SNAKE_TEST.match(span):
                 counts['tests'] += 1
-                if span not in words:
+                if (span not in code.words and span not in code.literal_words
+                        and span not in tests):
                     report(number, 'no test or name %s in the code' % span)
 
 
@@ -288,21 +555,29 @@ def check_index(root, docs, problems):
 
 
 def check_switches(root, problems):
-    """Every switch katana parses and every variable check_screenshot.cmake
-    reads is named in docs/headless.md: a switch nobody can find is one
-    nobody uses, and the switches were once spread over four documents with
-    three of them in none."""
+    """Every switch the window's headless runner parses and every variable
+    check_screenshot.cmake reads is named in docs/headless.md: a switch nobody
+    can find is one nobody uses, and the switches were once spread over four
+    documents with three of them in none. The switches are the match arms of
+    the runner's argument loop (read_switches) and of the steps it records
+    (StepKind::from_switch)."""
     headless = os.path.join(root, 'docs', 'headless.md')
-    main_cpp = os.path.join(root, 'src', 'katana_qt', 'main.cpp')
+    drive = os.path.join(root, CRATES, 'katana_window', 'src', 'drive')
     script = os.path.join(root, 'tools', 'check_screenshot.cmake')
     if not os.path.exists(headless):
         return
     text = read(headless)
-    if os.path.exists(main_cpp):
-        for switch in sorted(set(re.findall(r'argument == "(--[a-z0-9-]+)"', read(main_cpp)))):
+    for name in ('run.rs', 'steps.rs'):
+        source = os.path.join(drive, name)
+        if not os.path.exists(source):
+            problems.append('docs/headless.md: cannot read the switches: no %s'
+                            % os.path.relpath(source, root).replace(os.sep, '/'))
+            continue
+        arms = re.findall(r'"(--[a-z0-9-]+)"\s*(?=\||=>)', read(source))
+        for switch in sorted(set(arms)):
             if not re.search(re.escape(switch) + r'(?![a-z0-9-])', text):
                 problems.append('docs/headless.md: does not name the switch %s '
-                                '(src/katana_qt/main.cpp)' % switch)
+                                '(rust/crates/katana_window/src/drive/%s)' % (switch, name))
     if os.path.exists(script):
         source = read(script)
         variables = set(re.findall(r'DEFINED\s+([A-Z][A-Z0-9_]+)', source))
@@ -315,15 +590,15 @@ def check_switches(root, problems):
 
 def check_worked_example(root, problems):
     """The example docs/customisation.md prints under "A worked example" is
-    the text tests/entity/customisation/test_customisation_format.cpp reads
-    and writes back byte for byte. A person may copy that example to start a
-    file of their own, so it must be what the writer writes; the test proves
-    that of its own copy, held in a raw string, and this holds the document
-    to that copy - a claim in a document that IS checked, where the rest of
-    this script only checks that what is cited exists."""
+    the text rust/crates/katana_entity/tests/customisation_format.rs reads and
+    writes back byte for byte. A person may copy that example to start a file
+    of their own, so it must be what the writer writes; the test
+    (customisation::the_worked_example_of_the_document_is_written_as_it_is_printed)
+    proves that of its own copy, held in a raw string, and this holds the
+    document to that copy - a claim in a document that IS checked, where the
+    rest of this script only checks that what is cited exists."""
     document = os.path.join(root, 'docs', 'customisation.md')
-    test = os.path.join(root, 'tests', 'entity', 'customisation',
-                        'test_customisation_format.cpp')
+    test = os.path.join(root, CRATES, 'katana_entity', 'tests', 'customisation_format.rs')
     if not os.path.exists(document):
         return
     lines = read(document).split('\n')
@@ -335,11 +610,12 @@ def check_worked_example(root, problems):
         problems.append('docs/customisation.md: no ```json block under '
                         '"### A worked example"')
         return
-    literal = 'R"json(' + '\n'.join(lines[begin:end]) + '\n)json"'
+    literal = 'r##"' + '\n'.join(lines[begin:end]) + '\n"##'
     if not os.path.exists(test) or literal not in read(test):
         problems.append('docs/customisation.md:%d: the worked example is not the text '
-                        'tests/entity/customisation/test_customisation_format.cpp holds '
-                        '(TheWorkedExampleOfTheDocumentIsWrittenAsItIsPrinted)' % (begin + 1))
+                        'rust/crates/katana_entity/tests/customisation_format.rs holds '
+                        '(the_worked_example_of_the_document_is_written_as_it_is_printed)'
+                        % (begin + 1))
 
 
 def main():
@@ -352,9 +628,8 @@ def main():
         print('check_docs: no docs/*.md under %s' % root)
         return 1
     ignored = ignored_patterns(root)
-    words = code_index(root)
-    build_words = code_index(root, BUILD_FILE_SUFFIXES)
-    tests, suites = registered_tests(root)
+    code = Code(root)
+    tests = registered_tests(root)
 
     problems = []
     counts = {'paths': 0, 'names': 0, 'tests': 0}
@@ -363,8 +638,7 @@ def main():
         if os.path.basename(doc) in NOT_YET_CHECKED and not everything:
             continue
         checked += 1
-        check_document(root, doc, ignored, words, build_words, tests, suites, problems,
-                       counts)
+        check_document(root, doc, ignored, code, tests, problems, counts)
     check_index(root, docs, problems)
     check_switches(root, problems)
     check_worked_example(root, problems)
