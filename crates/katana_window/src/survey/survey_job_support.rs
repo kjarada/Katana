@@ -198,7 +198,11 @@ pub fn export_report(job: &SurveyJob, path: &str, format: ReportFileFormat) -> S
     let bytes: Vec<u8> = match format {
         ReportFileFormat::Html => job.report_html.as_bytes().to_vec(),
         ReportFileFormat::Text => job.report_text.as_bytes().to_vec(),
-        ReportFileFormat::Pdf => pdf_of_text(&job.report_text).map_err(|error| {
+        ReportFileFormat::Pdf => pdf_of_text(
+            &job.report_text,
+            &format!("Reduction report - {}", job.source_file_name),
+        )
+        .map_err(|error| {
             let context = format!("{path}: {}", error.context);
             error.with_context(context)
         })?,
@@ -233,8 +237,9 @@ pub fn export_report(job: &SurveyJob, path: &str, format: ReportFileFormat) -> S
 /// PDF canvas: a line of the report a line of the page, in an 8 pt fixed-pitch face, as the
 /// report's tables are read in columns; a line too long for the page is cut at the right margin
 /// rather than wrapped, for the same reason. FileExportFailure when the PDF cannot be written
-/// (PdfDocument::finish).
-fn pdf_of_text(text: &str) -> Result<Vec<u8>> {
+/// (PdfDocument::finish). `title` is the PDF's title, Katana its creator, as the C++'s QPdfWriter
+/// was given.
+fn pdf_of_text(text: &str, title: &str) -> Result<Vec<u8>> {
     // QPdfWriter's own resolution (canvas::pdf), so the page is laid out in the pixels the C++'s
     // was.
     const RESOLUTION: f64 = 1200.0;
@@ -273,6 +278,7 @@ fn pdf_of_text(text: &str) -> Result<Vec<u8>> {
         pages.push(&[]);
     }
     let mut document = PdfDocument::new();
+    document.set_info(title, crate::canvas::pdf::CREATOR);
     for page_lines in pages {
         let mut page = PdfCanvas::new(points(PAGE_MM.0), points(PAGE_MM.1), RESOLUTION);
         page.set_pen(Pen::new(Color::BLACK));

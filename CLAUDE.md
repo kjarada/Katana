@@ -145,17 +145,23 @@ labelling, coding, export, modify, measure, and drawing from data.
 
 ## 3. Building - MANDATORY, the owner's standing instructions
 
-**Build in WSL only, Rust only.** The owner's instructions (2026-11-05: "i dont
-want to run anything on windows at this stage just build for wsl then once we
-have a fully working version we test on windows"; 2026-11-15: "i just want
-rust"). Every build and test run is in the WSL distribution `Ubuntu-24.04`,
-with the toolchain prefix `/opt/katana-toolchain` (rustc, cargo, the GCC that
-builds the shims, PROJ, GDAL, PDAL; `tools/setup_linux_toolchain.py`). Nothing
-is built or run on Windows until the owner says the Rust window is ready to
-be tried there.
+**Rust only, in WSL and on Windows.** The owner's instructions (2026-11-15: "i
+just want rust"; 2026-11-16: "build for windows so i can test", which lifted the
+WSL-only rule of 2026-11-05). Two hosts build the same workspace:
+
+- **WSL**, the distribution `Ubuntu-24.04`, with the toolchain prefix
+  `/opt/katana-toolchain` (rustc, cargo, the GCC that builds the shims, PROJ,
+  GDAL, PDAL; `tools/setup_linux_toolchain.py`); output in
+  `~/katana-build/<checkout>/`.
+- **Windows**, natively in MSYS2 UCRT64 (its rust, gcc, cmake, gdal, pdal,
+  proj, sqlite3 and curl packages; `docs/building.md`); output in `target/`.
+  The programs need UCRT64's DLLs beside them: `bash tools/stage_windows.sh`
+  makes a runnable copy in `build/windows/Katana` (`--beside` puts the same
+  runtime beside `target/release`).
 
 A build and a test run are, in WSL, with `CARGO_TARGET_DIR` in
-`~/katana-build/<checkout>/cargo`:
+`~/katana-build/<checkout>/cargo` (on Windows the same commands, without the
+`xvfb-run`, with `target/` and the `release` preset):
 
 ```sh
 cargo clippy --locked --workspace --all-targets --release -- -D warnings
@@ -194,7 +200,8 @@ watches (below, "Show the build"); never type them into Claude's shell.
   - Start it from the checkout or worktree root. It opens the window and
     returns at once:
     - `bash tools/build_visible.sh wsl` - Clippy, the build, cargo test and the
-      process tests (the whole suite);
+      process tests (the whole suite); `bash tools/build_visible.sh` without
+      `wsl` runs the same natively on Windows (logs in `build/windows/`);
     - `bash tools/build_visible.sh wsl cargo [cargo test arguments]` - Clippy,
       the build and cargo test, only the tests named if any (e.g.
       `wsl cargo -p katana_window --test workspace maximis`);
@@ -314,20 +321,24 @@ Outstanding: <what this deliberately does not do>
 
 Before handing back:
 
-1. Build Release and run the whole suite (`bash tools/build_visible.sh wsl`).
-2. Confirm the programs in `~/katana-build/<checkout>/cargo/release` are newer
-   than the sources you changed. A stale program still launches.
+1. Build Release and run the whole suite (`bash tools/build_visible.sh wsl`,
+   and `bash tools/build_visible.sh` on Windows when the change can differ
+   there).
+2. Confirm the programs are newer than the sources you changed. A stale
+   program still launches.
 3. Tell the owner how to run it, with sample data where that makes the
    feature visible:
-   - the window (in WSL, shown on the desktop through WSLg):
+   - the window on Windows: `bash tools/stage_windows.sh`, then
+     `build/windows/Katana/bin/katana.exe <copy of samples/site_plan>`;
+   - in WSL, shown on the desktop through WSLg:
      `~/katana-build/<checkout>/cargo/release/katana <copy of samples/site_plan>`;
-   - the command line: `.../cargo/release/katana_cli -c "..."`.
+   - the command line: `katana_cli -c "..."` beside it.
    - Open a COPY of a sample: a session writes into the project it opens.
    - Samples are `samples/site_plan`, `samples/gis` and `samples/utilities`.
 4. **Say what to look at:** the menu item, the command, and what correct looks
    like.
 5. **Never launch the window detached in Claude's shell.** Show it to the
-   owner in a console window of its own (`cmd.exe /c start ... wsl.exe ...`),
+   owner in a console window of its own (`cmd.exe /c start ...`),
    which the owner closes. Run it yourself only headless, under `timeout`:
    `--screenshot`, `--command`, `--dialog` and `--report` (`docs/headless.md`).
    Then read the PNG and check it.

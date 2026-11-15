@@ -3729,6 +3729,7 @@ impl PdfPageWriter for CanvasPdfWriter {
         } else {
             crate::canvas::PdfDocument::new()
         };
+        document.set_info(&page.title, &page.creator);
         document
             .add_page(canvas)
             .map_err(|_| PdfPageFailure::Finish)?;
@@ -3769,15 +3770,8 @@ pub fn plot_plan_to_pdf(
     let page = PdfPage {
         path: path.to_path_buf(),
         resolution: resolution.resolution,
-        // QFileInfo::completeBaseName: the name without its last suffix.
-        title: if title.is_empty() {
-            path.file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        } else {
-            String::from(title)
-        },
-        creator: String::from("Katana"),
+        title: crate::canvas::title_or_file_name(title, path),
+        creator: String::from(crate::canvas::pdf::CREATOR),
         width_mm: paper.width_mm,
         height_mm: paper.height_mm,
     };

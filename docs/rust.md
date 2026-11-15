@@ -112,7 +112,7 @@ all); the step's own run is the evidence, not this table.
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
 | 7 | done in WSL: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 266 of 267 after its fix-up round, 265 with the C++'s streams. Of the two pixel metrics left, the 125 % menu arrow was settled by the owner on 2026-11-16 (the exact shape at the device's scale, not Fusion's scaled pixmap; its test expects that); the toolbars' natural widths are under Not done, their test passing |
 | - | the C++ removed on the owner's word of 2026-11-15 ("The C++ is removed", above), before step 8 rather than after step 9's release; the workspace moved to the checkout's root on 2026-11-16 ("The workspace"); the run after both: cargo test 9,172 of 9,172, the test runner 789 of 789, no warnings, in WSL |
-| 8 | under way: the owner asked for the Windows build on 2026-11-16, and it is being brought up natively in MSYS2 UCRT64 ("Windows, once the port works", below); its results are recorded here when it has run. The updater's real update on Windows, Credential Manager and the wide paths are first proven there (Not done) |
+| 8 | built and tested on Windows, natively in MSYS2 UCRT64 (2026-11-16, at the owner's word): Clippy clean, cargo test 9,353 passed and 0 failed (the Windows-only cases - the update verbs', Credential Manager's, the wide paths' - among them), and the test runner's suite 821 of 821, its last three after the fixes below. What Windows found: the standard library imports `bcryptprimitives.dll` (allowed by the import checks, with that reason); `std::path::absolute` takes a name's trailing dots off as Windows does (the update journal's paths now made absolute without it); a script piped to `katana_cli` with CRLF line ends ended its lines with a CR, which the C++'s text-mode standard input had taken off (taken off on Windows now); and the plot's PDF named no creator or title (every PDF now names Katana, with the C++'s title). `tools/stage_windows.sh` puts UCRT64's DLLs and GDAL's and PROJ's data beside the programs, so they start from Explorer. Still open: the updater's real update applied, rolled back and recovered on Windows (Not done) |
 | 9 | not started: no release has been made on the Rust programs yet. The release workflow builds the cargo workspace on every platform (`.github/workflows/release.yml`); step 9's "then the C++ is removed" is spent |
 
 ### Step 1: the foundation crates
@@ -1399,7 +1399,8 @@ on `PATH` in a build window, because `/c/msys64/ucrt64/bin` is.
 It was installed, and the empty workspace's cargo stage with the GDAL spike
 ran green in it once (2026-11-05), before the owner's ruling kept the port
 off Windows; nothing was run on Windows after that until the owner asked for
-the Windows build on 2026-11-16 (step 8), which is being brought up now. Its
+the Windows build on 2026-11-16 (step 8), which now builds and passes the
+whole suite natively ("Where it stands"). Its
 phases are those of a WSL run, without `wsl` (`bash tools/build_visible.sh`,
 `... cargo`, `... test`), in MSYS2 UCRT64, with the log and status file in
 `build/windows/`. The release workflow's Windows jobs build with the same
@@ -1418,7 +1419,9 @@ bash tools/build_visible.sh wsl cargo        # the workspace alone: clippy, buil
 bash tools/build_visible.sh wsl test -R docs # the test runner's suite only, ctest's arguments
 ```
 
-The same phases without `wsl` are the Windows run (step 8, being brought up).
+The same phases without `wsl` are the Windows run, natively in MSYS2 UCRT64;
+`bash tools/stage_windows.sh` then makes a copy that starts from Explorer
+(`build/windows/Katana`, or `--beside` for `target/release` itself).
 
 Clippy and the workspace's build run with warnings as errors; `cargo test`'s
 counts the log sums into one line (`== cargo test: N passed, M failed, K
@@ -1615,12 +1618,11 @@ what it would take.
   packages the programs on every platform (the ARM64 Windows job with
   CLANGARM64's Rust), but a change to it is proven only by a release run, and
   no release has been made on the Rust programs yet (step 9).
-- **The Windows build is being brought up** (step 8, asked for by the owner
-  on 2026-11-16); before it, nothing of the port had run on Windows beyond
-  the one cargo stage of the empty workspace. It is where the Windows-only
-  code - the updater's swap, Credential Manager, wide paths, the 27 update
-  verbs' Windows cases - is first compiled and proven. Its results go in
-  "Where it stands" when it has run.
+- **A real update on Windows** (step 8): the Windows build passes the whole
+  suite ("Where it stands"), the updater's Windows cases among it, but no
+  update has yet been applied, rolled back and recovered by the Rust
+  updater in a scratch install on Windows; it takes a release built by the
+  release workflow to update from and to.
 - **ARM NEON execution waits for an ARM host.** The current WSL gate runs
   x86-64 and proves AVX2/scalar equivalence; NEON source has not been compiled
   or run in this gate.
@@ -1985,8 +1987,7 @@ what it would take.
   face has no bold; a TIFF drops a translucent raster's alpha (a plotted
   sheet is opaque); a disabled control is faded, not recoloured; a combo
   box's per-item tooltips are folded into its own, and a grid's cell
-  colours are not drawn; the survey report's PDF has no title or creator,
-  which the PDF canvas does not write yet; a number in a roads message is
+  colours are not drawn; a number in a roads message is
   written as `%g` to six digits and a darker colour is worked per channel,
   either of which can differ by one; the survey dialog's Enter does not run
   its first verb; a step of the drive that does not settle, or a name drawn
@@ -2057,11 +2058,7 @@ what it would take.
   form for a number past 64 characters; the cache's pruning walks its
   folder by a simpler route, which its porter judged to remove the same
   files.
-- **For the updater on Windows (step 8):** Rust's standard library imports
-  `bcryptprimitives.dll` on Windows (its random numbers), which the import
-  checks' allowed lists (`tests/update/check_updater_imports.cmake`) must
-  take, with that reason; the control case that expects a test program to
-  import a toolchain DLL may need another program; whether the test key's
+- **For the updater on Windows (step 8):** whether the test key's
   text survives optimisation in the Rust test programs, which the
   test-key check relies on, is unverified; the Windows tests' console probes declare two kernel32
   functions by hand where a windows-sys feature would do.
@@ -2116,8 +2113,7 @@ what it would take.
   undefined names, bold current row or header sort), as are the census and
   apply tables' marks and the Formats table's sort; a number box shows no
   special text or prefix (`SpinRange` has neither), and the command lines
-  are not monospace (`LineOptions` has no font); a PDF's title and creator
-  are not written (the PDF canvas cannot yet); the plan view's measure of
+  are not monospace (`LineOptions` has no font); the plan view's measure of
   wrapped text and the sheet's cap height are private seams over the
   canvas; online data's "today" is UTC where Qt's was local.
 - **Printing is not handed to the operating system yet**:

@@ -9,8 +9,8 @@
 //! where the file system did not: a copy under R/.update/<tx>/new/ is about 46 characters deeper
 //! than the file it will replace.
 //!
-//! Nothing here touches the disk (std::path::absolute asks the system to lexically complete a
-//! relative path, as the C++'s std::filesystem::absolute does).
+//! Nothing here touches the disk (a relative path is joined to the current folder, as the C++'s
+//! std::filesystem::absolute did; the system is not asked, see absolute_normal).
 
 use std::path::{Path, PathBuf};
 
@@ -77,7 +77,18 @@ mod windows {
         if path.as_os_str().is_empty() {
             return PathBuf::new();
         }
-        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        // Not std::path::absolute: on Windows it is GetFullPathNameW, which drops a trailing dot or
+        // space from the last name, so "trail." became "trail" before ends_in_dot_or_space could
+        // ask for the prefix that keeps the two apart. As libstdc++'s absolute (the C++'s): an
+        // absolute path as it is, any other joined to the current folder, then made normal by
+        // its text alone.
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|folder| folder.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        };
         lexically_normal(&absolute)
     }
 

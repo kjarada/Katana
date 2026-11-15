@@ -25,6 +25,7 @@ use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, LineCap, LineJoin, SpreadMethod, Stop, Stroke, StrokeDash};
 use krilla::surface::Surface;
+use krilla::metadata::Metadata;
 use krilla::{Document, SerializeSettings};
 
 use katana_core::error::make_error;
@@ -736,6 +737,22 @@ pub struct PdfDocument {
     document: Document,
 }
 
+/// The creator every PDF names (the C++'s QPdfWriter::setCreator("Katana")).
+pub const CREATOR: &str = "Katana";
+
+/// A PDF's title: `title`, or when it is empty the file's own name without its last suffix
+/// (QFileInfo::completeBaseName, which the C++'s writers fell back on), so an untitled plot is
+/// still named in a viewer's tab.
+pub fn title_or_file_name(title: &str, path: &FilePath) -> String {
+    if title.is_empty() {
+        path.file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        String::from(title)
+    }
+}
+
 impl Default for PdfDocument {
     fn default() -> Self {
         Self::new()
@@ -743,24 +760,41 @@ impl Default for PdfDocument {
 }
 
 impl PdfDocument {
-    /// A PDF whose page contents are compressed, as every plot is written.
+    /// A PDF whose page contents are compressed, as every plot is written. Its creator is Katana
+    /// and it has no title until set_info gives it one.
     pub fn new() -> Self {
-        Self {
-            document: Document::new_with(SerializeSettings::default()),
-        }
+        Self::with_settings(SerializeSettings::default())
     }
 
     /// A PDF whose page contents and text maps are written as they are, for a test or a person
     /// to read: spaced too, each dictionary's key apart from its value ("/Subtype /Image", as
     /// QPdfWriter writes it, where krilla's compact form is "/Subtype/Image").
     pub fn uncompressed() -> Self {
-        Self {
-            document: Document::new_with(SerializeSettings {
-                compress_content_streams: false,
-                pretty: true,
-                ..SerializeSettings::default()
-            }),
-        }
+        Self::with_settings(SerializeSettings {
+            compress_content_streams: false,
+            pretty: true,
+            ..SerializeSettings::default()
+        })
+    }
+
+    // Katana is the creator of every PDF it writes, as QPdfWriter's setCreator made every one
+    // of the C++'s: a document list or a viewer's properties say where the file came from.
+    fn with_settings(settings: SerializeSettings) -> Self {
+        let mut document = Document::new_with(settings);
+        document.set_metadata(Metadata::new().creator(String::from(CREATOR)));
+        Self { document }
+    }
+
+    /// The document's title and creator, as QPdfWriter's setTitle and setCreator wrote them: a
+    /// viewer's tab and a document list then say what the file is. An empty string leaves that
+    /// entry out (krilla writes no empty entry); an empty creator is Katana.
+    pub fn set_info(&mut self, title: &str, creator: &str) {
+        let creator = if creator.is_empty() { CREATOR } else { creator };
+        self.document.set_metadata(
+            Metadata::new()
+                .title(String::from(title))
+                .creator(String::from(creator)),
+        );
     }
 
     /// `page`, drawn, as the document's next page. InvalidArgument for a page of no size.

@@ -185,7 +185,11 @@ mod windows_console {
 }
 
 // One line of standard input as bytes, as std::getline reads it: up to a
-// '\n', which is taken off; a '\r' before it stays. None at the end of input.
+// '\n', which is taken off. On Windows a '\r' before it is taken off too, as
+// the C runtime's text-mode standard input took it off before getline saw it:
+// a file written with CRLF line ends (a .cmake script checked out on Windows)
+// ended its QUIT with a '\r', and QUIT\r is no command. Elsewhere it stays, as
+// getline leaves it. None at the end of input.
 fn read_bytes_line(input: &mut StdinLock<'_>) -> Option<Vec<u8>> {
     let mut line = Vec::new();
     match input.read_until(b'\n', &mut line) {
@@ -193,6 +197,9 @@ fn read_bytes_line(input: &mut StdinLock<'_>) -> Option<Vec<u8>> {
         Ok(_) => {
             if line.last() == Some(&b'\n') {
                 line.pop();
+                if cfg!(windows) && line.last() == Some(&b'\r') {
+                    line.pop();
+                }
             }
             Some(line)
         }

@@ -10,7 +10,7 @@ use katana_core::ErrorCode;
 use katana_window::canvas::{
     Brush, Canvas, Color, FillRule, Font, FontMetrics, FontSize, Image, ImageFormat, Path,
     PdfCanvas, PdfDocument, Pen, PenCap, PenJoin, PenStyle, PointF, RasterCanvas, RectF, TextFlags,
-    decode_image, encode_png,
+    decode_image, encode_png, title_or_file_name,
 };
 use katana_window::host::MemoryClipboard;
 use katana_window::plotting::viewport_clipboard::{
@@ -362,6 +362,76 @@ mod pdf_canvas {
         assert!(pdf.starts_with(b"%PDF-"));
         let text = extracted_text(&pdf);
         assert!(text.contains("Katana plot"), "extracted {text:?}");
+    }
+
+    /// The document information entry `key` of `pdf` (a literal string, as krilla writes an ASCII
+    /// one: "/Creator (Katana)"); None when the PDF has no such entry.
+    fn info_entry(pdf: &[u8], key: &str) -> Option<String> {
+        let name = format!("/{key}");
+        let start = pdf
+            .windows(name.len())
+            .position(|window| window == name.as_bytes())?
+            + name.len();
+        let rest = &pdf[start..];
+        let open = rest.iter().position(|&byte| !byte.is_ascii_whitespace())?;
+        if rest[open] != b'(' {
+            return None;
+        }
+        let close = rest[open..].iter().position(|&byte| byte == b')')? + open;
+        Some(String::from_utf8_lossy(&rest[open + 1..close]).into_owned())
+    }
+
+    fn one_page(document: &mut PdfDocument) {
+        document
+            .add_page(PdfCanvas::new(595.0, 842.0, 72.0))
+            .expect("the page is added");
+    }
+
+    // Every PDF Katana writes names it as the creator, as QPdfWriter's setCreator did for the
+    // C++, and has no title until it is given one: a document list says where the file came from.
+    #[test]
+    fn every_pdf_names_katana_as_its_creator_and_no_title_until_given_one() {
+        for mut document in [PdfDocument::new(), PdfDocument::uncompressed()] {
+            one_page(&mut document);
+            let pdf = document.finish().expect("the PDF is written");
+            assert_eq!(info_entry(&pdf, "Creator").as_deref(), Some("Katana"));
+            assert_eq!(info_entry(&pdf, "Title"), None);
+        }
+    }
+
+    // set_info writes the title and creator asked for; an empty creator is still Katana, and an
+    // empty title writes no title entry.
+    #[test]
+    fn set_info_writes_the_title_and_an_empty_creator_is_katana() {
+        let mut titled = PdfDocument::uncompressed();
+        titled.set_info("Site plan", "");
+        one_page(&mut titled);
+        let pdf = titled.finish().expect("the PDF is written");
+        assert_eq!(info_entry(&pdf, "Title").as_deref(), Some("Site plan"));
+        assert_eq!(info_entry(&pdf, "Creator").as_deref(), Some("Katana"));
+
+        let mut untitled = PdfDocument::uncompressed();
+        untitled.set_info("", "Someone else");
+        one_page(&mut untitled);
+        let pdf = untitled.finish().expect("the PDF is written");
+        assert_eq!(info_entry(&pdf, "Title"), None);
+        assert_eq!(info_entry(&pdf, "Creator").as_deref(), Some("Someone else"));
+    }
+
+    // An untitled PDF is named by its file, less the last suffix only (QFileInfo's
+    // completeBaseName: "plot.v2.pdf" is "plot.v2"); a path with no file name gives no title.
+    #[test]
+    fn an_untitled_pdf_takes_its_files_name_less_the_last_suffix() {
+        use std::path::Path as FilePath;
+        assert_eq!(
+            title_or_file_name("", FilePath::new("out/plot.v2.pdf")),
+            "plot.v2"
+        );
+        assert_eq!(
+            title_or_file_name("Sheets", FilePath::new("out/plot.pdf")),
+            "Sheets"
+        );
+        assert_eq!(title_or_file_name("", FilePath::new("")), "");
     }
 
     // A page is as large as asked, in points, whatever its resolution: the device's pixels at
