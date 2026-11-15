@@ -385,7 +385,7 @@ Delete on a polyline with no vertex to spare, Insert After on an open
 polyline's last vertex, Fillet and Chamfer where there is no corner (an end,
 beside an arc, in line).
 
-`popup`, not `exec`: nothing waits on the menu, and it deletes itself when it
+Nothing waits on the menu: it is drawn while it is open and goes when it
 closes. It is not built in a headless run, which has no mouse; everything on
 it is a menu action or a verb, so an agent reaches the same through
 `--trigger` and `--command`. `crates/katana_window/tests/plan_view/plan_context_menu.rs`
@@ -1942,10 +1942,9 @@ through a `DocumentWatcher`, so an undo or a typed command reloads it once,
 from the event loop, keeping the selected layer and the form's unsaved edits
 when that layer did not change underneath them; New, New Child and Rename or
 Move ask for a name in a prompt row inside the dialog; a colour is typed as
-`#RRGGBB` (`layerColourText`) or picked in a colour dialog opened with
-`open()`, never `exec()`'d; and once its Document is gone it reads and changes
-nothing, every control but Close disabled the first time a person reaches for
-one. Its constructor is unchanged, and `selected_layer()` and `select_layer()`
+`#RRGGBB` (`layerColourText`) or picked in a colour picker that waits on
+nothing; and it is lent the Document for each frame, keeping no reference to
+it, so a dialog outliving a drawing reads and changes nothing. Its constructor is unchanged, and `selected_layer()` and `select_layer()`
 are public for a caller that opens it on a layer. Since 2026-09-24 the
 window keeps ONE instance, made the first time Format > Layers is chosen and
 shown, raised and reused after that (`formatLayersDialog`), as the Format
