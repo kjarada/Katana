@@ -3,7 +3,7 @@
 //! (draw_divide, modify_length, modify_properties and select_tools in katana_cad's tools). The
 //! object is in the neutral tone, what the tool makes or does in the accent.
 
-use super::tool_icons::{STROKE, ToolInk, circle, polyline, pt, rectangle};
+use super::tool_icons::{FINE, STROKE, ToolInk, circle, polyline, pt, rectangle};
 
 /// An arrow head at (x, y) pointing along +x (dx = 1) or -x (dx = -1).
 fn head(ink: &mut ToolInk<'_>, x: f64, y: f64, dx: f64, accent: bool) {
@@ -29,7 +29,7 @@ pub fn paint_draw_divide_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         ink.node(3.0, 14.0, false);
         ink.node(21.0, 14.0, false);
         for x in [7.5, 12.0, 16.5] {
-            ink.line(x, 9.0, x, 19.0, true, 1.4);
+            ink.line(x, 9.0, x, 19.0, true, STROKE);
         }
         return true;
     }
@@ -39,11 +39,11 @@ pub fn paint_draw_divide_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         ink.line(3.0, 15.0, 21.0, 15.0, false, STROKE);
         ink.node(3.0, 15.0, false);
         for x in [8.0, 13.0, 18.0] {
-            ink.line(x, 10.0, x, 20.0, true, 1.4);
+            ink.line(x, 10.0, x, 20.0, true, STROKE);
         }
-        ink.line(3.0, 6.0, 8.0, 6.0, true, 1.1);
-        ink.line(3.0, 4.0, 3.0, 8.0, true, 1.1);
-        ink.line(8.0, 4.0, 8.0, 8.0, true, 1.1);
+        ink.line(3.0, 6.0, 8.0, 6.0, true, FINE);
+        ink.line(3.0, 4.0, 3.0, 8.0, true, FINE);
+        ink.line(8.0, 4.0, 8.0, 8.0, true, FINE);
         return true;
     }
     false
@@ -74,7 +74,7 @@ pub fn paint_property_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "modify.match_properties" {
         // A brush: its handle neutral, its bristles carrying the accent onto the stroke it
         // paints.
-        ink.line(19.0, 3.0, 12.5, 11.5, false, 2.4);
+        ink.line(19.0, 3.0, 12.5, 11.5, false, STROKE);
         ink.fill(
             &polyline(
                 &[
@@ -121,7 +121,7 @@ pub fn paint_select_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
             false,
             STROKE,
         );
-        ink.line(12.0, 13.0, 12.0, 22.5, true, 1.4);
+        ink.line(12.0, 13.0, 12.0, 22.5, true, STROKE);
         ink.dot(12.0, 8.0, 1.6, true);
         return true;
     }

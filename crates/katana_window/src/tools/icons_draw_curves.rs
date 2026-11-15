@@ -7,7 +7,7 @@
 
 use crate::canvas::PointF;
 
-use super::tool_icons::{STROKE, ToolInk, arc, circle, polyline, pt, rectangle};
+use super::tool_icons::{FINE, STROKE, ToolInk, arc, circle, polyline, pt, rectangle};
 
 /// The point at `degrees` (counter-clockwise on paper) on the circle about (cx, cy): the
 /// painter's y points down, so sine is subtracted.
@@ -49,7 +49,7 @@ pub fn paint_draw_curve_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "draw.circle" {
         // The application's Circle: a radius at 45 degrees from a centre node.
         ink.stroke(&circle(12.0, 12.0, 8.0), true, STROKE);
-        ink.line(12.0, 12.0, 17.66, 6.34, false, 1.1);
+        ink.line(12.0, 12.0, 17.66, 6.34, false, FINE);
         ink.node(12.0, 12.0, false);
         ink.node(17.66, 6.34, false);
         return true;
@@ -57,7 +57,7 @@ pub fn paint_draw_curve_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "draw.circle.diameter" {
         // The radius carried through the centre to the far side.
         ink.stroke(&circle(12.0, 12.0, 8.0), true, STROKE);
-        ink.line(6.34, 17.66, 17.66, 6.34, false, 1.1);
+        ink.line(6.34, 17.66, 17.66, 6.34, false, FINE);
         ink.node(12.0, 12.0, false);
         ink.node(6.34, 17.66, false);
         ink.node(17.66, 6.34, false);
@@ -105,12 +105,12 @@ pub fn paint_draw_curve_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         // since the two differ only in the order of the picks.
         let centre_first = tool_id == "draw.arc.cse";
         ink.stroke(&arc(6.0, 18.0, 13.0, 0.0, 90.0), true, STROKE);
-        ink.line(6.0, 18.0, 19.0, 18.0, false, 1.1);
-        ink.line(6.0, 18.0, 6.0, 5.0, false, 1.1);
+        ink.line(6.0, 18.0, 19.0, 18.0, false, FINE);
+        ink.line(6.0, 18.0, 6.0, 5.0, false, FINE);
         ink.node(6.0, 5.0, false);
         if centre_first {
-            ink.line(6.0, 14.2, 6.0, 21.8, false, 1.7);
-            ink.line(2.2, 18.0, 9.8, 18.0, false, 1.7);
+            ink.line(6.0, 14.2, 6.0, 21.8, false, STROKE);
+            ink.line(2.2, 18.0, 9.8, 18.0, false, STROKE);
             ink.node(19.0, 18.0, false);
         } else {
             ink.node(6.0, 18.0, false);
@@ -127,7 +127,7 @@ pub fn paint_draw_curve_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         pick(ink, 20.66, 15.0);
         pick(ink, 3.34, 15.0);
         let on_arc = on_circle(12.0, 20.0, 10.0, 65.0);
-        ink.line(12.0, 20.0, on_arc.x, on_arc.y, false, 1.1);
+        ink.line(12.0, 20.0, on_arc.x, on_arc.y, false, FINE);
         arrowhead(ink, pt(12.0, 20.0), on_arc);
         return true;
     }

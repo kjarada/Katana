@@ -8,7 +8,7 @@
 //! default way of drawing one. Rectangle marks only the two opposite corners it is drawn from,
 //! where icons marks all four.
 
-use super::tool_icons::{STROKE, ToolInk, polyline, pt, rectangle};
+use super::tool_icons::{FINE, STROKE, ToolInk, polyline, pt, rectangle};
 
 pub fn paint_draw_line_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "draw.point" {
@@ -56,7 +56,7 @@ pub fn paint_draw_line_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
             true,
             STROKE,
         );
-        ink.line(12.0, 13.0, right.x, right.y, false, 1.1);
+        ink.line(12.0, 13.0, right.x, right.y, false, FINE);
         ink.node(12.0, 13.0, false);
         ink.node(right.x, right.y, false);
         return true;
