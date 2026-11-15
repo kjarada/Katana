@@ -1852,7 +1852,9 @@ impl DefinitionEditorDialog {
         if self.offered {
             delete_panel(ui, &mut self.pressed);
         } else {
-            hidden(ui, "definitionDeletePanel", |ui| {
+            // Hidden AND disabled, as the C++ sets both: a press is refused as disabled, its
+            // first check.
+            controls::withdrawn(ui, "definitionDeletePanel", |ui| {
                 delete_panel(ui, &mut self.pressed);
             });
         }

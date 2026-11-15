@@ -264,6 +264,18 @@ fn html_escaped(text: &str) -> String {
     out
 }
 
+/// The explanation's heading as a person reads it: its bold tags gone and what `html_escaped`
+/// escaped read back, as Qt shows the rich text.
+fn plain_of_heading(heading: &str) -> String {
+    heading
+        .replace("<b>", "")
+        .replace("</b>", "")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+}
+
 // ---- a tree of rows as one named control --------------------------------------------------------
 
 /// One row of a tree drawn by `tree_rows`.
@@ -2004,16 +2016,15 @@ impl SurveyCodeManagerDialog {
             {
                 self.events.push(Event::TestCode);
             }
-            // The heading is kept as the C++ wrote it, its code in bold tags; it is drawn plain.
-            let plain = self
-                .explain_heading
-                .replace("<b>", "")
-                .replace("</b>", "");
+            // The heading is kept as the C++ wrote it, its code in bold tags; it is drawn plain,
+            // and reported plain, as --report reads a rich QLabel through
+            // QTextDocumentFragment::fromHtml.
+            let plain = plain_of_heading(&self.explain_heading);
             controls::label_as(
                 ui,
                 "explainHeading",
-                &self.explain_heading,
-                egui::Label::new(plain).wrap(),
+                &plain,
+                egui::Label::new(plain.as_str()).wrap(),
             );
             let rows = self.explained_fields();
             let shown = table(

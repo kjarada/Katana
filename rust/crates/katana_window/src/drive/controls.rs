@@ -49,12 +49,40 @@ fn refuse(ui: &Ui, taken: &Taken, sentence: String) {
     settle(ui, taken, Err(sentence));
 }
 
+/// The tag of a `Ui` drawn by `withdrawn`: what its owner both hid and disabled.
+const WITHDRAWN: &str = "katanaWithdrawn";
+
+/// What a widget its owner hid AND disabled is (setVisible(false) with setEnabled(false)): drawn
+/// invisible, as `Ui::add_visible(false, ..)` draws one, and a press or a fill of it is refused as
+/// disabled, as the C++'s --press and --fill ask isEnabled before isHidden. An invisible egui `Ui`
+/// is always disabled, so only this tag tells such a widget from one that is merely hidden.
+pub fn withdrawn<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("katanaWithdrawn", salt))
+            .invisible()
+            .ui_stack_info(egui::UiStackInfo::default().with_tag(WITHDRAWN)),
+    );
+    add(&mut child)
+}
+
+/// Whether `ui` is in one `withdrawn` drew.
+fn is_withdrawn(ui: &Ui) -> bool {
+    ui.stack().iter().any(|frame| frame.tags().contains(WITHDRAWN))
+}
+
 /// A press reaches a control a person could click: refused when its owner hid it, and when it is
 /// disabled. The --press step asks disabled first; an invisible egui `Ui` is always disabled too,
-/// so hidden is asked first here, and a button both hidden and disabled is refused as hidden.
+/// so hidden is asked first here, and a button both hidden and disabled is refused as hidden -
+/// unless its owner drew it `withdrawn`, saying it disabled it too.
 pub(crate) fn accept_press(ui: &Ui, taken: &Taken) -> bool {
     if !ui.is_visible() {
-        refuse(ui, taken, press_hidden(&taken.posted));
+        let sentence = if is_withdrawn(ui) {
+            press_disabled(&taken.posted)
+        } else {
+            press_hidden(&taken.posted)
+        };
+        refuse(ui, taken, sentence);
         return false;
     }
     if !ui.is_enabled() {
@@ -67,9 +95,10 @@ pub(crate) fn accept_press(ui: &Ui, taken: &Taken) -> bool {
 /// A fill reaches a field a person could type into: refused when it is disabled, whatever its
 /// kind, before anything else (fillField: "gridToSurface was disabled and --fill filled it,
 /// silently"). A hidden field takes a fill, as Qt's setText fills a hidden QLineEdit; since an
-/// invisible egui `Ui` is disabled too, only a visible field is refused as disabled.
+/// invisible egui `Ui` is disabled too, only a visible field is refused as disabled, and one its
+/// owner drew `withdrawn`.
 pub(crate) fn accept_fill(ui: &Ui, taken: &Taken) -> bool {
-    if ui.is_visible() && !ui.is_enabled() {
+    if (ui.is_visible() && !ui.is_enabled()) || is_withdrawn(ui) {
         refuse(ui, taken, fill_disabled(&taken.posted));
         return false;
     }
