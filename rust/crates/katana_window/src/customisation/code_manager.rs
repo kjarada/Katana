@@ -92,7 +92,9 @@ use super::code_manager_support::{
     symbol_state, write_file_bytes,
 };
 use super::code_manager_tabs::TabState;
-use super::codes_seams::{CodesContext, StylePreview, UNDEFINED_NAME_COLOUR};
+use super::customisation_context::CustomisationContext;
+use super::name_picker::UNDEFINED_NAME_COLOUR;
+use super::style_preview::StylePreview;
 use super::definition_thumbnails::ThumbnailKind;
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use super::filter_bar::FilterBar;
@@ -524,7 +526,7 @@ pub struct SurveyCodeManagerDialog {
     /// The dialog was shown since its last frame: the layers and views the scopes offer are the
     /// drawing's and the window's as they are then.
     pub(super) just_shown: bool,
-    pub(super) context: CodesContext,
+    pub(super) context: CustomisationContext,
     pub(super) buffer: SurveyMap,
     /// The drawing's map as the manager last saw it - taken, applied, or changed elsewhere: what
     /// dirty() is measured against.
@@ -575,7 +577,7 @@ pub struct SurveyCodeManagerDialog {
 
 impl SurveyCodeManagerDialog {
     /// The manager over `document`, shown, its buffer the drawing's survey map.
-    pub fn new(document: &Document, context: CodesContext) -> Self {
+    pub fn new(document: &Document, context: CustomisationContext) -> Self {
         let names: Vec<&str> = SECTION_CHIPS.iter().map(|(name, _)| *name).collect();
         let mut table_filter = FilterBar::new(&names);
         let table_chip_labels: Vec<String> = SECTION_CHIPS
@@ -588,6 +590,7 @@ impl SurveyCodeManagerDialog {
         table_filter
             .set_placeholder_text("Search keys, descriptions, layers, linestyles, symbols");
         let buffer = document.survey_map().clone();
+        let form = RuleForm::new(&context, Some(document));
         let mut dialog = Self {
             frame: DialogFrame::new(DIALOG, "Survey Code Manager"),
             open: true,
@@ -618,9 +621,9 @@ impl SurveyCodeManagerDialog {
             explain_fields: Vec::new(),
             explain_definitions: String::new(),
             explain_near_misses: String::new(),
-            linestyle_preview: StylePreview::new(),
-            symbol_preview: StylePreview::new(),
-            form: RuleForm::new(Some(document)),
+            linestyle_preview: StylePreview::new(document),
+            symbol_preview: StylePreview::new(document),
+            form,
             tabs: TabState::new(),
             pending: None,
             events: Vec::new(),
@@ -733,7 +736,11 @@ impl SurveyCodeManagerDialog {
         // set_survey_map leaves the session "not kept" and only the maker of the context can have
         // noted that it was; and what it hands back after it, which is where a session that was
         // kept is kept again. This manager knows neither.
-        let committed = self.context.begin(host);
+        let committed = self
+            .context
+            .begin_commit
+            .clone()
+            .and_then(|begin| begin(host));
         host.document_mut().set_survey_map(self.buffer.clone());
         if let Some(committed) = committed {
             committed(host);
@@ -1201,7 +1208,7 @@ impl SurveyCodeManagerDialog {
         host: &mut dyn Host,
         line: &str,
     ) -> std::result::Result<VerbOutcome, String> {
-        if !self.context.command_line {
+        if !self.context.has_runner {
             // Said, and nothing done: the work is the line's, and a manager with no command line
             // to hand it to does not do it some other way.
             return Err(format!(
@@ -1931,7 +1938,7 @@ impl SurveyCodeManagerDialog {
         Some((id, size))
     }
 
-    fn code_table_tab(&mut self, ui: &mut Ui) {
+    fn code_table_tab(&mut self, ui: &mut Ui, document: &Document) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 if self.table_filter_ui(ui) {
@@ -1975,14 +1982,14 @@ impl SurveyCodeManagerDialog {
                 }
             });
             ui.vertical(|ui| {
-                self.detail_pane(ui);
+                self.detail_pane(ui, document);
                 ui.separator();
                 self.rule_form_ui(ui);
             });
         });
     }
 
-    fn detail_pane(&mut self, ui: &mut Ui) {
+    fn detail_pane(&mut self, ui: &mut Ui, document: &Document) {
         let pane = ui.vertical(|ui| {
             if controls::line_with(
                 ui,
@@ -2038,10 +2045,14 @@ impl SurveyCodeManagerDialog {
                 misses(ui, &self.explain_near_misses);
             }
             ui.horizontal(|ui| {
-                self.linestyle_preview
-                    .ui(ui, "linestylePreview", egui::vec2(200.0, 70.0));
+                self.linestyle_preview.ui(
+                    ui,
+                    "linestylePreview",
+                    document,
+                    egui::vec2(200.0, 70.0),
+                );
                 self.symbol_preview
-                    .ui(ui, "symbolPreview", egui::vec2(90.0, 70.0));
+                    .ui(ui, "symbolPreview", document, egui::vec2(90.0, 70.0));
             });
         });
         custom(
@@ -2051,7 +2062,7 @@ impl SurveyCodeManagerDialog {
         );
     }
 
-    fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // Files: what comes into the buffer and what goes out of it.
         ui.horizontal(|ui| {
             if controls::button(ui, "importCodes", "Import Codes...")
@@ -2095,7 +2106,9 @@ impl SurveyCodeManagerDialog {
         ui.separator();
         // Every tab is drawn, the ones behind offstage: a driver fills and presses a control of a
         // tab that is not in front, as it did on a hidden Qt page.
-        let pages: [fn(&mut Self, &mut Ui); 5] = [
+        // The previews paint what they show from the drawing.
+        let document: &Document = host.document();
+        let pages: [fn(&mut Self, &mut Ui, &Document); 5] = [
             Self::code_table_tab,
             Self::census_tab,
             Self::issues_tab,
@@ -2105,7 +2118,7 @@ impl SurveyCodeManagerDialog {
         let front = self.tab.min(pages.len() - 1);
         for (at, page) in pages.into_iter().enumerate() {
             let mut draw = |ui: &mut Ui| {
-                let drawn = ui.vertical(|ui| page(self, ui));
+                let drawn = ui.vertical(|ui| page(self, ui, document));
                 custom(
                     ui,
                     &drawn.response,

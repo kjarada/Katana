@@ -37,7 +37,8 @@ use super::code_manager::{
     CensusRow, Event, Jump, REFUSAL_COLOUR, SurveyCodeManagerDialog, match_class,
 };
 use super::code_manager_form::ascii_trimmed;
-use super::codes_seams::{UNDEFINED_NAME_COLOUR, linework_control_label};
+use super::linework_labels::linework_control_label;
+use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::definition_editor::index_choice;
 use super::filter_bar::{FilterBar, FilterBarChanges};
 use super::scope_filter_widget::{ScopeChoice, ScopeFilterWidget, ViewsFn};
@@ -393,7 +394,7 @@ impl SurveyCodeManagerDialog {
         // A refused line is in the log already, where the executor ran it; only a manager with no
         // executor has yet to say so.
         if let Err(said) = self.run_line(host, &line)
-            && !self.context.command_line
+            && !self.context.has_runner
         {
             self.log(said, true);
         }
@@ -725,7 +726,7 @@ impl SurveyCodeManagerDialog {
                 self.tabs.apply_report = said.clone();
                 // A refused line is in the log already, where the executor ran it; only a manager
                 // with no executor has yet to say so.
-                if !self.context.command_line {
+                if !self.context.has_runner {
                     self.log(said, true);
                 }
             }
@@ -841,7 +842,7 @@ impl SurveyCodeManagerDialog {
         }
         if let Err(said) = self.run_line(host, &line) {
             self.tabs.linework_codes_status = said.clone();
-            if !self.context.command_line {
+            if !self.context.has_runner {
                 self.log(said, true);
             }
             return;
@@ -1007,7 +1008,7 @@ impl SurveyCodeManagerDialog {
             Ok(outcome) => outcome,
             Err(said) => {
                 self.tabs.linework_summary = said.clone();
-                if !self.context.command_line {
+                if !self.context.has_runner {
                     self.log(said, true);
                 }
                 return;
@@ -1102,7 +1103,7 @@ impl SurveyCodeManagerDialog {
 
     // ---- the tabs' pages -----------------------------------------------------------------------
 
-    pub(super) fn census_tab(&mut self, ui: &mut Ui) {
+    pub(super) fn census_tab(&mut self, ui: &mut Ui, _document: &Document) {
         let tabs = &mut self.tabs;
         let events = &mut self.events;
         ui.horizontal_top(|ui| {
@@ -1187,7 +1188,7 @@ impl SurveyCodeManagerDialog {
         });
     }
 
-    pub(super) fn issues_tab(&mut self, ui: &mut Ui) {
+    pub(super) fn issues_tab(&mut self, ui: &mut Ui, _document: &Document) {
         let tabs = &mut self.tabs;
         if nested_filter(ui, "issuesFilter", &mut tabs.issues_filter).any() {
             self.events.push(Event::IssuesFilter);
@@ -1207,7 +1208,7 @@ impl SurveyCodeManagerDialog {
         controls::label(ui, "issuesSummary", &tabs.issues_summary);
     }
 
-    pub(super) fn apply_tab(&mut self, ui: &mut Ui) {
+    pub(super) fn apply_tab(&mut self, ui: &mut Ui, _document: &Document) {
         let edited = self.dirty();
         let tabs = &mut self.tabs;
         let events = &mut self.events;
@@ -1289,7 +1290,7 @@ impl SurveyCodeManagerDialog {
         });
     }
 
-    pub(super) fn linework_tab(&mut self, ui: &mut Ui) {
+    pub(super) fn linework_tab(&mut self, ui: &mut Ui, _document: &Document) {
         let edited = self.dirty();
         let tabs = &mut self.tabs;
         let events = &mut self.events;

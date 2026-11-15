@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use katana_cad::style_catalogue::DefinitionSource;
 use katana_cad::symbol_assign::SymbolLibraryEntry;
 
-use super::codes_seams::UNDEFINED_NAME_COLOUR;
+use super::name_picker::UNDEFINED_NAME_COLOUR;
 use crate::canvas::{
     Brush, Canvas, Color, Font, FontSize, FontWeight, Image, Pen, PenCap, PenJoin, PenStyle,
     RasterCanvas, RectF, RenderHint, TextFlags,

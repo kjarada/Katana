@@ -104,7 +104,8 @@ use katana_entity::style_library::add_or_replace;
 use katana_entity::{LineStyle, StyleUnits};
 use katana_geometry::Point2;
 
-use super::codes_seams::{CodesContext, DefinitionAs, DefinitionEdit, StylePreview};
+use super::customisation_context::{CustomisationContext, DefinitionEdit};
+use super::style_preview::{DefinitionAs, StylePreview};
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use crate::annotation::dialog_support::show_dialog;
 use crate::command_word::exact_number;
@@ -395,7 +396,7 @@ enum Pressed {
 pub struct DefinitionEditorDialog {
     frame: DialogFrame,
     open: bool,
-    context: CodesContext,
+    context: CustomisationContext,
     /// The library definition Save replaces; None while a new one is being made.
     existing: Option<String>,
     /// The library's definition of that name as the editor last knew it; None when the library
@@ -447,8 +448,8 @@ pub struct DefinitionEditorDialog {
 
 impl DefinitionEditorDialog {
     /// The editor over `document`, shown, holding an empty linestyle.
-    pub fn new(document: &Document, context: CodesContext) -> Self {
-        let preview = StylePreview::new();
+    pub fn new(document: &Document, context: CustomisationContext) -> Self {
+        let preview = StylePreview::new(document);
         let plot_scale = StylePreview::PLOT_SCALES
             .iter()
             .position(|&denominator| denominator == preview.scale_denominator())
@@ -482,8 +483,8 @@ impl DefinitionEditorDialog {
             revert_enabled: false,
             in_library: false,
             offered: false,
-            preview: preview.clone(),
-            line_preview: preview,
+            preview,
+            line_preview: StylePreview::new(document),
             plot_scale,
             edited_now: false,
             pressed: None,
@@ -990,7 +991,11 @@ impl DefinitionEditorDialog {
                 return false;
             }
         };
-        let committed = self.context.begin(host);
+        let committed = self
+            .context
+            .begin_commit
+            .clone()
+            .and_then(|begin| begin(host));
         host.document_mut().set_style_library(library);
         if let Some(committed) = committed {
             committed(host);
@@ -1115,7 +1120,7 @@ impl DefinitionEditorDialog {
                 return false;
             }
         };
-        if !self.context.command_line {
+        if !self.context.has_runner {
             self.say(
                 Some(host.document()),
                 "Nothing here can run CUSTOMISE REMOVE: the editor has no command line.",
@@ -1123,7 +1128,11 @@ impl DefinitionEditorDialog {
             );
             return false;
         }
-        let committed = self.context.begin(host);
+        let committed = self
+            .context
+            .begin_commit
+            .clone()
+            .and_then(|begin| begin(host));
         self.flush(host);
         let outcome = host.run(&line);
         if !self.alive() {
@@ -1506,7 +1515,9 @@ impl DefinitionEditorDialog {
         }
     }
 
-    fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The previews paint what they show from the drawing's library.
+        let document: &Document = host.document();
         controls::label_as(
             ui,
             "definitionHeading",
@@ -1735,21 +1746,26 @@ impl DefinitionEditorDialog {
                 ui.group(|ui| {
                     ui.label("As a symbol, on its insertion point");
                     self.preview
-                        .ui(ui, "definitionPreview", egui::vec2(260.0, 170.0));
+                        .ui(ui, "definitionPreview", document, egui::vec2(260.0, 170.0));
                 });
-                let line_box = |ui: &mut Ui, preview: &StylePreview| {
+                let line_box = |ui: &mut Ui, preview: &mut StylePreview| {
                     ui.group(|ui| {
                         ui.label("Along a line");
-                        preview.ui(ui, "definitionLinePreview", egui::vec2(260.0, 130.0));
+                        preview.ui(
+                            ui,
+                            "definitionLinePreview",
+                            document,
+                            egui::vec2(260.0, 130.0),
+                        );
                     });
                 };
                 // A symbol has no pattern along a line: that pane goes.
                 if self.form.symbol {
                     hidden(ui, "definitionLineBox", |ui| {
-                        line_box(ui, &self.line_preview);
+                        line_box(ui, &mut self.line_preview);
                     });
                 } else {
-                    line_box(ui, &self.line_preview);
+                    line_box(ui, &mut self.line_preview);
                 }
                 // Said while the text does not read and the last picture that did stays up.
                 controls::label_as(

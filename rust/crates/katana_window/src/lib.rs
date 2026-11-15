@@ -244,12 +244,11 @@ pub mod customisation {
     // CU1: pub mod drawing_summary_dialog;
     //      pub mod global_modify_dialog;
     //      pub mod hatch_patterns_tab;
-    // CU2 (codes_seams: its seams to CU1's customisation_context, name_picker and style_preview
-    // and UP's linework_labels, for the integrator to join)
+    // CU2 (its seams to customisation_context, name_picker, style_preview and linework_labels
+    // joined by WS, and the seam file gone)
     pub mod code_manager;
     pub(crate) mod code_manager_form;
     pub(crate) mod code_manager_tabs;
-    pub mod codes_seams;
     pub mod definition_editor;
     pub mod symbol_library;
     pub mod symbol_library_model;
@@ -259,7 +258,10 @@ pub mod customisation {
     pub use symbol_library::SymbolLibraryDialog;
     // UP:  pub mod linework_labels;
     //      pub mod settings_dialog;
-    // WS:  pub mod customisation_workbench;
+    // WS
+    pub mod customisation_workbench;
+
+    pub use customisation_workbench::{CustomisationServices, CustomisationWorkbench};
 }
 
 pub mod drawing {
@@ -493,6 +495,11 @@ pub mod surface_raster_dialog;
 //      pub mod view_workspace;
 // SH2
 pub mod sheet_editor;
+// WS
+pub mod start_dialog;
+pub mod view_layers_popup;
+pub mod view_workspace;
+// SH2: pub mod sheet_editor;
 // K:   pub mod main_window;
 //      pub mod main_window_ifc;
 
@@ -534,3 +541,7 @@ pub use annotation::{AnnotationWorkbench, DimensionStyleManagerDialog};
 pub use bim::road_workbench::{RoadWorkbench, RoadWorkbenchEvent};
 // SH2
 pub use sheet_editor::{SheetCanvas, SheetEditor, SheetKey, SourceProvider, sheet_verb_context_for};
+// WS
+pub use view_layers_popup::{ViewLayersPopup, view_layers_line, view_references_line};
+pub use start_dialog::{StartChoices, StartDialog};
+pub use view_workspace::{Scenery, ViewWorkspace, WorkspaceEvent, WorkspaceLines};

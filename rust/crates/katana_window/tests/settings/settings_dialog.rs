@@ -7,7 +7,7 @@
 use katana_cad::customisation_host::{CustomisationHost, start_customisation};
 use katana_cad::CustomisationOrigin;
 use katana_entity::linework_codes::{LineworkCodes, linework_code_members};
-use katana_window::customisation::codes_seams::{self, CodesContext};
+use katana_window::customisation::customisation_context::CustomisationContext;
 use katana_window::customisation::linework_labels::{
     LINEWORK_CONTROL_LABELS, linework_control_label,
 };
@@ -1291,12 +1291,11 @@ mod settings_dialog {
     // words are read from what the tab labels its fields by and its fields hold, not written out
     // again here: this is the case that finds a field labelled otherwise than Settings says it.
     // (The tab's labels are not named controls, so their words are the labeller the tab draws
-    // them with - codes_seams' linework_control_label, until the integrator joins it to this
-    // slice's list.)
+    // them with - linework_labels' linework_control_label.)
     #[test]
     fn the_linework_controls_are_called_what_their_one_editor_calls_them() {
         let mut host = RecordingHost::new();
-        let mut manager = SurveyCodeManagerDialog::new(host.document(), CodesContext::default());
+        let mut manager = SurveyCodeManagerDialog::new(host.document(), CustomisationContext::with_runner());
         let mut harness = Harness::new();
         harness
             .run(|ui| {
@@ -1323,7 +1322,7 @@ mod settings_dialog {
                 .control(name)
                 .unwrap_or_else(|| panic!("no {name}"));
             assert_eq!(field.value, spelling, "{name}");
-            let label = codes_seams::linework_control_label(member);
+            let label = linework_control_label(member);
             assert!(!label.is_empty(), "{name}");
             words.push(format!("{label}: {spelling}"));
         }

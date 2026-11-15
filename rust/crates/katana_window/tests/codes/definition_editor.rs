@@ -44,8 +44,8 @@ use katana_entity::{
     StyleLibrary, StyleUnits, SurveyMap, SurveyRule, SurveySection, SurveySymbol,
 };
 use katana_geometry::Point2;
-use katana_window::customisation::codes_seams::{
-    BeginCommit, CodesContext, Committed, DefinitionEdit,
+use katana_window::customisation::customisation_context::{
+    AfterCommit, BeginCommit, CustomisationContext, DefinitionEdit,
 };
 use katana_window::customisation::definition_editor::DefinitionEditorDialog;
 use katana_window::drive::Harness;
@@ -201,14 +201,20 @@ fn fixture_host() -> RecordingHost {
     )))
 }
 
-fn editor_with(host: RecordingHost, context: CodesContext) -> Editor {
+fn editor_with(host: RecordingHost, context: CustomisationContext) -> Editor {
     Bench::new(host, |document| {
         DefinitionEditorDialog::new(document, context)
     })
 }
 
 fn editor(host: RecordingHost) -> Editor {
-    editor_with(host, CodesContext::default())
+    editor_with(host, CustomisationContext::with_runner())
+}
+
+/// The same context with no command line: the dialog then says it cannot run its line.
+fn without_runner(mut context: CustomisationContext) -> CustomisationContext {
+    context.has_runner = false;
+    context
 }
 
 fn in_library(bench: &Editor, name: &str) -> LineStyle {
@@ -1107,7 +1113,7 @@ mod definition_editor {
         // A line refused with nothing said at all is still said to be refused.
         bench.host.answer = Answer::Fixed(VerbOutcome::default());
         let mut mute =
-            DefinitionEditorDialog::new(bench.host.document(), CodesContext::default());
+            DefinitionEditorDialog::new(bench.host.document(), CustomisationContext::with_runner());
         assert!(mute.edit_definition(&mut bench.host, "TEST Spare"));
         assert!(!mute.remove(&mut bench.host, false));
         assert!(
@@ -1187,7 +1193,7 @@ mod definition_editor {
         add_to_library(bench.document_mut(), &lone);
         bench.host.take_lines();
         let mut other =
-            DefinitionEditorDialog::new(bench.host.document(), CodesContext::default());
+            DefinitionEditorDialog::new(bench.host.document(), CustomisationContext::with_runner());
         assert!(other.delete_definition(&mut bench.host, "Lone"));
         assert_eq!(bench.lines(), strings(&["CUSTOMISE REMOVE \"Lone\""]));
         assert!(!has_definition(&bench, "Lone"));
@@ -1196,7 +1202,7 @@ mod definition_editor {
         // no Delete Anyway: FORCE would not answer it.
         let mut bare = editor_with(
             fixture_host(),
-            CodesContext::default().without_command_line(),
+            without_runner(CustomisationContext::with_runner()),
         );
         assert!(!bare.dialog.delete_definition(&mut bare.host, "TEST Spare"));
         bare.draw();
@@ -1322,7 +1328,7 @@ mod definition_editor {
         });
         let begin: BeginCommit = {
             let seen = Rc::clone(&seen);
-            Rc::new(move |host: &mut dyn Host| -> Option<Committed> {
+            Rc::new(move |host: &mut dyn Host| -> Option<AfterCommit> {
                 seen.begun.set(seen.begun.get() + 1);
                 seen.generation_at_begin
                     .set(host.document().library_generation());
@@ -1350,9 +1356,9 @@ mod definition_editor {
         ));
         let mut bench = editor_with(
             host,
-            CodesContext {
+            CustomisationContext {
                 begin_commit: Some(begin),
-                ..CodesContext::default()
+                ..CustomisationContext::with_runner()
             },
         );
         assert!(edit(&mut bench, "TEST Kerb"));
@@ -1625,7 +1631,7 @@ mod definition_editor {
     fn the_dialog_outlives_its_document_and_does_nothing_after_it() {
         let mut bench = editor_with(
             fixture_host(),
-            CodesContext::default().without_command_line(),
+            without_runner(CustomisationContext::with_runner()),
         );
         assert!(edit(&mut bench, "TEST Kerb"));
         bench.fill("definitionLength", "15");
@@ -1817,7 +1823,7 @@ mod definition_editor {
         // form shows is kept. (A second editor, opened on it and told nothing yet: the first
         // still shows its last refusal first, as it does until its form is next edited.)
         let mut second =
-            DefinitionEditorDialog::new(bench.host.document(), CodesContext::default());
+            DefinitionEditorDialog::new(bench.host.document(), CustomisationContext::with_runner());
         assert!(second.edit_definition(&mut bench.host, "TEST Kerb"));
         let kerb_stray = LineStyle {
             strokes: stray_strokes,

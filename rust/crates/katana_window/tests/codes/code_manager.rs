@@ -50,7 +50,9 @@ use katana_geometry::Point2;
 use katana_window::customisation::code_manager::{
     CODE_TABLE_HEADERS, CodeTreeRow, SurveyCodeManagerDialog,
 };
-use katana_window::customisation::codes_seams::{BeginCommit, CodesContext, Committed};
+use katana_window::customisation::customisation_context::{
+    AfterCommit, BeginCommit, CustomisationContext,
+};
 use katana_window::host::{Host, RecordingHost};
 
 use crate::fixture_customisation::{
@@ -72,14 +74,14 @@ fn fixture_host() -> RecordingHost {
     interpreter_host(document)
 }
 
-fn context() -> CodesContext {
-    CodesContext {
+fn context() -> CustomisationContext {
+    CustomisationContext {
         thumbnails: Some(thumbnails()),
-        ..CodesContext::default()
+        ..CustomisationContext::with_runner()
     }
 }
 
-fn manager_with(host: RecordingHost, context: CodesContext) -> Manager {
+fn manager_with(host: RecordingHost, context: CustomisationContext) -> Manager {
     Bench::new(host, |document| {
         SurveyCodeManagerDialog::new(document, context)
     })
@@ -87,6 +89,12 @@ fn manager_with(host: RecordingHost, context: CodesContext) -> Manager {
 
 fn manager(host: RecordingHost) -> Manager {
     manager_with(host, context())
+}
+
+/// The same context with no command line: the dialog then says it cannot run its line.
+fn without_runner(mut context: CustomisationContext) -> CustomisationContext {
+    context.has_runner = false;
+    context
 }
 
 fn add_point(host: &mut RecordingHost, x: f64, code: &str, number: &str) -> EntityId {
@@ -750,7 +758,7 @@ mod survey_code_manager {
         add_point(&mut host, 5.0, "WM01", "2");
         let undo_before = host.document().history().undo_count();
         let revision = host.document().model_revision();
-        let mut bench = manager_with(host, context().without_command_line());
+        let mut bench = manager_with(host, without_runner(context()));
 
         bench.press("applyExecute");
         assert!(bench.logged_containing("cannot run \"CODE DRAWING\""));
@@ -893,7 +901,7 @@ mod survey_code_manager {
     fn the_census_tab_with_no_executor_says_it_cannot_run_its_line() {
         let mut host = fixture_host();
         add_point(&mut host, 0.0, "WM01", "1");
-        let mut bench = manager_with(host, context().without_command_line());
+        let mut bench = manager_with(host, without_runner(context()));
         bench.press("censusRun");
         assert!(bench.logged_containing("cannot run \"CODE CENSUS DRAWING\""));
         // The table is still the census of the drawing: counting is not the line's.
@@ -1177,7 +1185,7 @@ mod survey_code_manager {
         });
         let begin: BeginCommit = {
             let seen = Rc::clone(&seen);
-            Rc::new(move |host: &mut dyn Host| -> Option<Committed> {
+            Rc::new(move |host: &mut dyn Host| -> Option<AfterCommit> {
                 seen.begun.set(seen.begun.get() + 1);
                 seen.map_at_begin
                     .set(host.document().survey_map_generation());
@@ -1198,7 +1206,7 @@ mod survey_code_manager {
         };
         let mut bench = manager_with(
             host,
-            CodesContext {
+            CustomisationContext {
                 begin_commit: Some(begin),
                 ..context()
             },
@@ -1328,7 +1336,7 @@ mod survey_code_manager {
         assert_eq!(document.customisation_state().sources.len(), 4);
         assert_eq!(document.customisation_state().colours.size(), 2);
         assert!(document.customisation().based_on.is_some());
-        let mut bench = manager_with(interpreter_host(document), CodesContext::default());
+        let mut bench = manager_with(interpreter_host(document), CustomisationContext::with_runner());
         assert_eq!(bench.dialog.buffer().size(), 2);
 
         let path = scratch.path("noticed.customisation.json");
@@ -1518,7 +1526,7 @@ mod survey_code_manager {
         );
         document.set_survey_map(map.clone());
         assert_eq!(document.customisation_state().name, "");
-        let mut bench = manager_with(interpreter_host(document), CodesContext::default());
+        let mut bench = manager_with(interpreter_host(document), CustomisationContext::with_runner());
         let path = scratch.path("site codes.customisation.json");
         assert!(bench.dialog.export_codes(&mut bench.host, &path).is_ok());
         // The session has no name, so the line gives the file's own.
@@ -1595,7 +1603,7 @@ mod survey_code_manager {
     #[test]
     fn exporting_with_no_command_line_says_so_and_does_not_write_the_file_itself() {
         let scratch = Scratch::new("codes-no-runner");
-        let mut bench = manager_with(fixture_host(), context().without_command_line());
+        let mut bench = manager_with(fixture_host(), without_runner(context()));
         let path = scratch.path("no_runner.customisation.json");
         let error = bench
             .dialog
@@ -2034,7 +2042,7 @@ mod survey_code_manager {
     fn the_dialog_outlives_its_document_and_then_refuses_to_apply() {
         let mut bench = manager_with(
             interpreter_host(Document::new(None)),
-            CodesContext::default(),
+            CustomisationContext::with_runner(),
         );
         bench.close_drawing();
         assert!(bench.dialog.apply(&mut bench.host).is_err());
@@ -2047,7 +2055,7 @@ mod survey_code_manager {
 
     #[test]
     fn once_its_document_has_gone_the_form_saves_each_rule_with_its_own_names() {
-        let mut bench = manager_with(fixture_host(), CodesContext::default());
+        let mut bench = manager_with(fixture_host(), CustomisationContext::with_runner());
         let original = bench.dialog.buffer().clone();
         // While the drawing is open the pickers are loaded last with #7's symbol ("TEST Survey
         // Mark") and then #0's linestyle ("TEST Water Main"). Once it has gone they can no longer
