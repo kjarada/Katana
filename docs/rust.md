@@ -1969,8 +1969,8 @@ pin classifies every algorithm GDAL lists.
   `QT_SCALE_FACTOR=1.25` reruns have no twin; `ErrorCode` has no Cancelled,
   so a cancel is `InvalidState`; the customisation workbench named the style
   manager `styleManager` where the C++ renamed it `styleManagerDialog`
-  (since put right, below); the plan painter's road model switch is process-wide, and the twins that set
-  it hold a mutex; the sheet editor's source provider is given only the
+  (since put right, below); the plan painter's road model switch is
+  process-wide, and the twins that set it hold a mutex; the sheet editor's source provider is given only the
   Document (reference data, meshes, surfaces and the logo must reach it
   another way, in wave 4).
 - **Found in the window gate's fix-up round (dialogs and managers):**
