@@ -541,8 +541,9 @@ No script and no agent makes or sees a private key. These are the steps
 
 ### At each release
 
-1. Set the version where `docs/release.md` says the product's version is
-   kept, and merge it.
+1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION
+   X.Y.Z)` (the one place it is written: `katana_update`'s build script reads
+   it there), and merge it.
 2. Actions > Release > Run workflow, on `main`, with the tag `vX.Y.Z`. The
    Publish job runs in the environment `release`; approve it on the run's
    page when the environment names reviewers. Once the environment is

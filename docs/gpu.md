@@ -1,49 +1,61 @@
-# GPU rendering: the 3D view on Direct3D 11, Vulkan and Metal
+# GPU rendering: the 3D view on wgpu (Vulkan, Direct3D 12, Metal)
 
 The 3D view can draw on the CPU (`katana_render::Rasterizer`, docs/render.md) or on
 the GPU. This document is the record of the GPU renderer: it takes the same
-`katana_render::DrawList`s and `katana_render::Camera` and draws them with QRhi, Qt's
-rendering hardware interface - on Direct3D 11 on Windows, on Vulkan on Linux,
-on Metal on macOS.
-It lives in `rust/crates/katana_gpu/src` (library `katana_gpu`), is tested in
-`tests/gpu` and timed in `benchmarks/gpu`.
+`katana_render::DrawList`s and `katana_render::Camera` and draws them through
+wgpu - on Vulkan on Linux and in WSL (Mesa's lavapipe where there is no GPU),
+on Direct3D 12 on Windows (WARP as its software device), on Metal on macOS.
+It is the crate `katana_gpu` (`rust/crates/katana_gpu/src/`), tested in
+`rust/crates/katana_gpu/tests/gpu/` (`cargo test -p katana_gpu`).
 
-**Status (2026-09-26).** Built by default on Windows and Linux, and HOSTED:
-`RenderView` draws with it wherever the renderer rules choose it, and
-with the software rasteriser everywhere else - every headless run and test,
-and after a GPU view fails ("Hosting", below). The Direct3D 11 path is the
-one measured on the owner's machine; the Vulkan path is tested on Mesa's
-software Vulkan (lavapipe), not yet on a hardware GPU. The Metal path (macOS,
-since 2026-09-26) is tested by the release workflow's macOS job, which runs
-the `gpu.` suite on the runner's Metal device before packaging: on the first
-run (GitHub `macos-15`, Apple silicon, 2026-09-26) all 17 hardware device
-cases passed - every `GpuRender` and `GpuLayers` comparison with the software
-rasteriser, the instanced expansion Metal draws with, and
-`SerializedShadersDrawWhatTheRuntimeShadersDraw` - and 70 of 70 ran or
-skipped as expected (the software-device cases skip: macOS has no software
-Metal device; the five `OnTheDesktop` cases skip under the offscreen
-platform). It has not been measured.
+**Status (2026-11-15).** The C++ renderer this was ported from drew through
+QRhi, Qt's rendering hardware interface, on Direct3D 11, Vulkan and Metal; it
+went with the C++ tree on the owner's word of 2026-11-15, and the Rust is the
+only renderer. Where a passage below records what QRhi did, it says so. What
+changed with the move (`rust/crates/katana_gpu/src/lib.rs`):
+
+* **The shaders are WGSL modules** (`rust/crates/katana_gpu/src/shaders/`,
+  assembled by `shader_library.rs`), checked by naga - the compiler wgpu runs -
+  once per process (`shader_compiler.rs`), so a mistake comes back as a
+  `Status` carrying naga's own message before wgpu is asked for anything. One
+  set of shaders serves every backend: the C++ wrote HLSL for Windows and the
+  same stages again as GLSL baked by Qt's `qsb` for Vulkan and Metal.
+* **Lines and points are widened by instancing.** wgpu has no geometry stage,
+  so the C++'s default expansion, a geometry shader, has no twin
+  ("Lines and points").
+* **A device can be shared** (`offscreen_gpu.rs`, `GpuContext`): the tests make
+  one context of each kind per process, and the window can hand its own to the
+  renderer. The offscreen tests need no display at all, where the C++'s Linux
+  tests needed an X server for Vulkan.
+* **The backends' names** are wgpu's (`renderer_choice.rs`, `GpuBackend`):
+  Direct3D 12 on Windows where QRhi used Direct3D 11.
+
+Not done: the desktop window's 3D views draw with the software rasteriser for
+now, because the window is made before eframe's wgpu device exists and handing
+it that device afterwards is left (`rust/crates/katana_window/src/bin/katana/main.rs`;
+`docs/rust.md`, "Not done"). The GPU renderer runs in its tests, on a real GPU
+or the software device, and in `gpu_scene_view.rs` where a host gives it a
+device.
 
 ## Architecture
 
 ```
-DrawList ──packDrawList──▶ GpuSceneData ──GpuRenderer──▶ QRhi (Direct3D 11)
-Camera ─────────────── relativeViewProjection (double) ─▶ one uniform block
+DrawList ──pack_draw_list──▶ GpuSceneData ──GpuRenderer──▶ wgpu (a texture or a pass)
+Camera ─────────────── relative_view_projection (double) ─▶ one uniform block
                                                              │
-                                  GpuSceneView (QRhiWidget) ◀┤ on the desktop
-                                  OffscreenGpu (a texture)  ◀┘ tests, benchmark
+                                  GpuSceneView (the window) ◀┤ on the desktop
+                                  OffscreenGpu (a texture)  ◀┘ tests
 ```
 
 | File | What it is |
 | --- | --- |
-| `scene_origin.rs` | The precision rule in code: the scene origin, the camera matrix built in double against it, the reversed-Z projection. Plain arithmetic, no Qt. |
-| `gpu_scene.rs` | A DrawList packed the way the GPU reads it (float offsets from the origin, 32-bit indices, lines and points carrying their own ends). No Qt; unit-tested without a device. Point clouds packed to a budget. |
-| `shader_library.rs` | Where shaders come from: the HLSL sources, the library of serialized `.qsb` blobs, and `defaultShaders()`, the one this build draws with. |
-| `shader_compiler.rs` | Windows' library: the HLSL compiled to bytecode once per process. |
-| `shaders/`, `baked_shaders.hpp` | Linux's library: the same stages as Vulkan-style GLSL, baked to SPIR-V by `qsb` at build time and embedded with `#embed`. |
+| `scene_origin.rs` | The precision rule in code: the scene origin, the camera matrix built in double against it, the reversed-Z projection. Plain arithmetic, no device. |
+| `gpu_scene.rs` | A DrawList packed the way the GPU reads it (float offsets from the origin, 32-bit indices, lines and points carrying their own ends). Unit-tested without a device. Point clouds packed to a budget. |
+| `shader_library.rs`, `shaders/` | The WGSL modules (`frame.wgsl`, the constant block; `quad.wgsl`, the quad builders; a module per kind of mark), embedded in the program, and the programs made of them. |
+| `shader_compiler.rs` | Every module parsed and validated by naga once per process. |
 | `gpu_renderer.rs` | Draws a packed scene - one draw list, or layers each with its own depth rule - through a camera into whatever render target it is given. Owns buffers and pipelines, not the target. |
-| `offscreen_gpu.rs` | A QRhi of its own rendering into a texture, with read-back and GPU timestamps: what the tests and the benchmark draw with. |
-| `gpu_scene_view.rs` | The widget: a `QRhiWidget` subclass with the 3D view's mouse and keys. |
+| `offscreen_gpu.rs` | A device (`GpuContext`) and a texture to render into, with read-back and GPU timestamps: what the tests draw with. |
+| `rust/crates/katana_window/src/gpu_scene_view.rs` | The window's view of it, with the 3D view's mouse and keys. |
 | `renderer_choice.rs` | The fallback rule: GPU or software, and why. |
 
 **What it does differently from the software path**, with the same DrawList:
@@ -151,7 +163,7 @@ order the profile ranked them (2026-09-25):
    qemu-aarch64 (`docs/performance.md`, "SIMD: NEON on 64-bit ARM"); its
    any-length rule is the AVX2 kernel's, not measured on ARM.
 
-`tools/compare_benchmarks.py --alternate 7 BM_GpuPack before=... after=...
+the C++ build's `compare_benchmarks.py --alternate 7 BM_GpuPack before=... after=...
 after_again=...`, on the cloud container's 4-core Xeon at 2.10 GHz. `before`
 is this tree with only the benchmark added; `after again` is a byte copy of
 `after`, the A/A control. The digests are the same in all three binaries and
@@ -234,25 +246,32 @@ covers.
 
 ## Shaders
 
-**Windows: HLSL compiled at run time, once per process.** The shaders are HLSL
-text in `shader_library.rs`, assembled from shared pieces (the constant buffer,
-the quad vertex, the quad builders) so each stage compiles exactly what it uses.
-They are compiled by `d3dcompiler_47.dll`, which every Windows 10 and 11 install
-carries: no build-time tool and no package, at the price of Direct3D 11 only.
+**Now: WGSL, checked by naga once per process** (above, and
+`shader_compiler.rs`). What follows is how the C++ renderer carried its
+shaders, kept because the choices it records (one compile per process, an
+error as a `Status`, the same pixels from every backend) are the ones the
+WGSL keeps.
 
-QRhi can take the HLSL source itself (`runtimeHlslShaders()`), but then every
-new QRhi compiles it again - the first 3D view, a second one, a 3D dock floated
-into a window of its own, each test target - and the eleven stages cost more
-than the device, the target and the pipelines together. So the default,
-`compiledHlslShaders()` (`shader_compiler.rs`), calls the same compiler itself,
-keeps each stage's bytecode for the life of the process (keyed by the source
-text, so a changed source cannot be answered from a stale entry) and hands QRhi
-bytecode. `precompileHlslShaders()` lets a host pay the compile on a worker
-thread at start-up, so no view waits for it; and a compile error comes back as a
-`Status` carrying the compiler's own message, where QRhi only logs it.
+**Windows (C++): HLSL compiled at run time, once per process.** The shaders were HLSL
+text, assembled from shared pieces (the constant buffer, the quad vertex, the
+quad builders) so each stage compiled exactly what it used - the shape the WGSL
+modules keep. They were compiled by `d3dcompiler_47.dll`, which every Windows
+10 and 11 install carries: no build-time tool and no package, at the price of
+Direct3D 11 only.
 
-**Linux: precompiled `.qsb`, drawn on Vulkan.** The same thirteen stages are
-written a second time as Vulkan-style GLSL in `rust/crates/katana_gpu/src/shaders/`,
+QRhi could take the HLSL source itself, but then every new QRhi compiled it
+again - the first 3D view, a second one, a 3D dock floated into a window of its
+own, each test target - and the eleven stages cost more than the device, the
+target and the pipelines together. So the C++ called the same compiler itself,
+kept each stage's bytecode for the life of the process and handed QRhi
+bytecode, compiled on a worker thread at start-up; and a compile error came
+back as a `Status` carrying the compiler's own message, where QRhi only logged
+it. Under wgpu the first reason does not arise (a module is compiled when its
+pipeline is made, from text the program carries); the second does, which is
+why `shader_compiler.rs` validates every module first.
+
+**Linux (C++): precompiled `.qsb`, drawn on Vulkan.** The same thirteen stages
+were written a second time as Vulkan-style GLSL,
 stage for stage and function for function, with the shared pieces
 (`frame.glsl`, the constant block; `quad.glsl`, the quad builders) included
 where the HLSL splices its strings. At build time Qt's `qsb`
@@ -269,12 +288,12 @@ and the default expansion is one. The two sets must draw the same thing; a
 change to one belongs in the other, and the tests hold each to the software
 rasteriser on its own platform.
 
-**macOS: the same `.qsb`, with Metal Shading Language, drawn on Metal.** The
+**macOS (C++): the same `.qsb`, with Metal Shading Language, drawn on Metal.** The
 GLSL above is baked with `qsb --msl 12` as well, so each `.qsb` carries MSL 1.2
 beside the SPIR-V, translated by SPIRV-Cross inside `qsb`; QRhi's Metal
 backend picks the MSL. Metal has no geometry stage, so the two geometry
 shaders are baked as SPIR-V only (`qsb` cannot translate them), and the
-renderer, finding `QRhi::GeometryShader` unsupported, draws lines and points
+renderer, finding QRhi's geometry stage unsupported, drew lines and points
 with `Expansion::Instanced`, whose stages are all translated. No shader was
 written a third time. Checked on Linux before any Mac: `qsb --msl 12`
 translates all eleven non-geometry stages. Metal, like Direct3D 11, renders
@@ -289,9 +308,11 @@ flipped screen y covers the same pixels. Were the OpenGL backend used, its
 depth correction z' = 2z - w keeps z' = w at the near plane, so the shaders'
 near-plane test (w - z < 0) and the mark pull hold there too - but OpenGL's
 window depth adds 1 before halving, which throws away what reversed Z gains,
-so Linux draws on Vulkan and not on OpenGL. `SerializedShadersDrawWhatTheRuntimeShadersDraw`
-round-trips whichever library the build carries (0 differing pixels on
-lavapipe).
+so Linux draws on Vulkan and not on OpenGL (wgpu's GLES backend is not
+built, `rust/Cargo.toml`). The C++ suite's
+SerializedShadersDrawWhatTheRuntimeShadersDraw round-tripped whichever
+library the build carried (0 differing pixels on lavapipe); the WGSL has one
+library, so the Rust has no such case.
 
 ## Lines and points
 
@@ -308,10 +329,12 @@ of their size; cloud points are round.
 
 There are two ways to turn a line or a point into its quad (`Expansion`):
 
-* **Geometry shader** (the default). A line is two vertices of a line list and a
+* **Geometry shader** (the C++ default; wgpu has no geometry stage, so the
+  Rust draws only the other). A line is two vertices of a line list and a
   point one vertex of a point list. The vertex shader transforms each end once;
   a geometry shader appends a four-vertex strip.
-* **Instanced** (the fallback where there is no geometry stage). Each line or
+* **Instanced** (the C++'s fallback where there was no geometry stage; the
+  Rust's only way). Each line or
   point is an instance of six vertices, and the vertex shader builds one corner
   per invocation - so each of the six transforms both ends again.
 
@@ -322,9 +345,10 @@ the camera where no line reaches the screen, which is what zooming into a large
 TIN approaches, the geometry shader takes 2.0 ms against instancing's 5.1: the
 per-line vertex work is 2.5 times cheaper.
 
-Both run the same HLSL functions and split the quad along the same diagonal, so
-they draw the same pixels (`TheGeometryShaderAndInstancingDrawTheSameLinesPointsAndCloud`:
-0 differing on the UHD and on WARP). A line's two ends are 20-byte vertices that
+Both ran the same HLSL functions and split the quad along the same diagonal, so
+they drew the same pixels (the C++ case
+TheGeometryShaderAndInstancingDrawTheSameLinesPointsAndCloud: 0 differing on
+the UHD and on WARP). A line's two ends are 20-byte vertices that
 together make its 40-byte instance, so one buffer serves both. Lines keep their
 depth writes and discard empty fringe fragments: turning that off to let the
 depth test run early was measured slower ("Measurements").
@@ -352,10 +376,10 @@ and eye-dome lighting, which would read the depth buffer in a second pass.
 
 ## Fallback: which renderer a 3D view uses
 
-The software rasteriser is not going away. It is the only renderer that works
-under Qt's offscreen platform, where every test and every headless screenshot
-runs - `QRhiWidget` reports `renderFailed` there for every graphics API, while
-raw QRhi on Direct3D 11 still renders into textures - it is the bit-exact
+The software rasteriser is not going away. It is the only renderer of a
+headless run, where every test and every headless screenshot runs (in the
+C++, `QRhiWidget` reported `renderFailed` under Qt's offscreen platform for
+every graphics API); it is the bit-exact
 reference the GPU is tested against, and it is what a machine whose GPU or driver
 misbehaves falls back to. WARP, Windows' software Direct3D device, and
 lavapipe, Mesa's software Vulkan, are what the tests draw on where there is no
@@ -375,7 +399,7 @@ real platform and environment. First match wins:
    would not build) - software. A renderer that failed once is not retried
    behind the user's back.
 5. The platform cannot show the build's view (`GpuBackend`): offscreen and
-   minimal always; for the Direct3D 11 build anything but `windows`, for the
+   minimal always; for the Direct3D 12 build anything but `windows`, for the
    Vulkan build anything but `xcb` and `wayland`, for the Metal build
    anything but `cocoa` - software.
 6. Otherwise - the GPU.
@@ -409,7 +433,7 @@ camera by reference, so switching renderers keeps the view.
   and its core) against the origin the terrain set; a click sends the
   selection alone - as the software
   view rebuilds only its overlay (docs/render.md, "The scene in layers").
-* **Each frame, what `render_layers` does first** (`GpuSceneView::onPrepareFrame`):
+* **Each frame, what `render_layers` does first** (`render_view_widget::prepare_gpu_frame`):
   the scene rebuilt if it is dirty, the depth range fitted to the layers and
   the grid, and the edges faded for the frame's scale - and only when a fade
   step changed is the edge layer sent again.
@@ -430,14 +454,14 @@ camera by reference, so switching renderers keeps the view.
 * **The mouse and the keys** are the child's, the same as the software view's
   (below); the host's focus proxy is the child, and focus reaching it
   activates the view (`view_focus.rs`).
-* **The legend and the empty message** are painted by a transparent child over
-  the GPU view, which `QRhiWidget` composes like any other widget.
+* **The legend and the empty message** are painted over the GPU view, as over
+  the software one.
 * **`onRenderFailed`** - remembered for the session (rule 4); the child is
   deleted after its own call returns, the rasteriser draws from the next paint,
   and the reason goes to the status line.
-* **At application start-up** on Windows, `precompileHlslShaders()` runs on a
-  worker thread, so the first GPU view finds its bytecode ready. The Vulkan
-  build compiled its shaders when it was built.
+* **At application start-up** the C++ compiled its HLSL on a worker thread so
+  the first GPU view found its bytecode ready; the WGSL is validated once per
+  process at the first pipeline.
 
 Not done: vertical exaggeration still rebuilds the scene - its datum decides
 where undraped linework goes, which the scene builder owns - rather than going
@@ -449,8 +473,9 @@ in an elevation view; middle or Shift+left pans; double-click and E frame; 1-5
 and 0 standard views; P the projection), in logical pixels: a pan or a zoom
 about the cursor moves the world the same distance whichever pixels it is
 counted in. Only the frame is drawn at the display's real resolution. The
-wheel is the host's: the child hands it over through `onWheelZoom`, as it
-hands framing over through `onZoomExtents`, and the host zooms towards what
+wheel is the host's: the child hands it over through
+`GpuSceneHost::wheel_zoom`, as it hands framing over through
+`GpuSceneHost::zoom_extents`, and the host zooms towards what
 it built under the cursor, `Camera::ZOOM_PER_NOTCH` a notch
 (`render_view_widget::zoom_at_pixel`; docs/render.md, "Zooming towards the
 cursor"). The child holds only packed lists, so without a host it zooms about
@@ -463,65 +488,42 @@ the target itself, as it first was, both zooms agree and it could not
 run by hand on the Windows platform on 2026-09-30, passing, and failing at
 the first notch with 1.1245 when `make_gpu_view` did not hand the wheel over).
 
-Checked only on Linux (xcb under Xvfb, lavapipe), and to be checked on the
-Windows platform by hand: floating a 3D dock creates a new top-level window,
-which releases GPU resources and starts QRhi again, and every `QRhiWidget` in
-one window must use the same API.
+Checked in the C++ only on Linux (xcb under Xvfb, lavapipe): floating a 3D
+dock created a new top-level window, which released GPU resources and started
+QRhi again. In the Rust the window does not yet hand its device to the 3D views
+("Status", above), so this is to be checked again when it does.
 
 ## Build
 
-`KATANA_GPU` (ON by default on Windows, Linux and macOS, OFF elsewhere) builds
-`katana_gpu`, which defines `KATANA_HAS_GPU` for whoever links it, and
-`KATANA_GPU_D3D11`, `KATANA_GPU_VULKAN` or `KATANA_GPU_METAL` for the backend
-it was built for;
-`katana` and the widget tests link it when it is built. QRhi's headers are
-semi-public: they reach the include path only through `Qt6::GuiPrivate`, with
-a narrower compatibility promise than the rest of Qt, which is why everything
-QRhi-shaped stays in this directory behind Katana's own types. If
-`GuiPrivate` is missing - or, on Linux and macOS, Qt's shader baker
-`Qt6::qsb` - or the platform is none of Windows, Linux and macOS, configure
-says why and the GPU module
-is skipped: the 3D view keeps the software rasteriser. No new DLL ships on
-Windows: QRhi is inside `Qt6Gui.dll`, and `d3dcompiler_47.dll` is part of
-Windows. On Linux the Vulkan loader, `libvulkan.so.1`, comes with the
-graphics driver, and Qt loads it when a view first asks for Vulkan.
+`katana_gpu` is a crate of the workspace and always built: wgpu with the
+Vulkan, Direct3D 12 and Metal backends and the WGSL front end (`rust/Cargo.toml`;
+GLES, WebGPU and WebGL are off). The window and the GPU layer name the
+workspace's one wgpu, the version egui-wgpu asks for. Nothing ships beside the
+program for it: the Vulkan loader, `libvulkan.so.1`, comes with the graphics
+driver on Linux, and Direct3D 12 is part of Windows. The C++ build had a
+`KATANA_GPU` option and needed Qt's semi-public `GuiPrivate` headers and, on
+Linux and macOS, Qt's shader baker; neither has a Rust counterpart.
 
-**Layering.** `tools/check_layering.cmake` gives `rust/crates/katana_gpu/src` its own
-layer, `gpu`, allowed `core`, `math`, `geometry`, `render` and `pointcloud`: the
-software renderer's rule plus the cloud's plain types, never a `Document`,
-although the directory sits under `katana_qt`. The `qt` layer may see `gpu`:
-it hosts it.
+**Layering.** `tools/check_layering.cmake` gives `gpu` its own layer, allowed
+`core`, `math`, `geometry`, `render` and `pointcloud`: the software renderer's
+rule plus the cloud's plain types, never a `Document`. The window may see
+`gpu`: it hosts it.
 
 ## Testing
 
-`katana_gpu_tests`, registered with ctest as `gpu.*`. The render cases draw
-small DrawLists into a texture through `OffscreenGpu` twice - on the machine's
-GPU and on its software device (WARP on Windows, lavapipe on Linux) - and
-**skip** when that device is missing, rather than fail; the arithmetic,
-packing and fallback cases need no device and always run.
+`cargo test -p katana_gpu` (`rust/crates/katana_gpu/tests/gpu/`). The render
+cases draw small DrawLists into a texture through `OffscreenGpu` twice - on
+the machine's GPU and on its software device (lavapipe on Linux and in WSL,
+WARP on Windows) - and **skip** when that device is missing, rather than fail;
+the arithmetic, packing and fallback cases need no device and always run. They
+need no display: wgpu renders into a texture with no window. In WSL the device
+cases run on lavapipe (Debian and Ubuntu: `mesa-vulkan-drivers`).
 
-* **Windows** runs the suite offscreen, like every Katana Qt test: raw QRhi on
-  Direct3D 11 renders into textures there.
-* **Linux** runs it on `xcb` under Xvfb (`xvfb-run`, found at configure time):
-  Qt's offscreen platform cannot make the Vulkan instance every device case
-  needs. There the `OnTheDesktop` cases below draw a real `QRhiWidget` too, in
-  ctest, on lavapipe when there is no GPU (Debian and Ubuntu:
-  `mesa-vulkan-drivers`, `xvfb`). The one offscreen case is registered again as
-  `gpu_offscreen.*`. Without `xvfb-run` the suite runs offscreen and its device
-  cases skip, saying why. Each case starts its own `xvfb-run -a`, so the
-  cases hold one ctest `RESOURCE_LOCK`, `xvfb_run`, and never run beside each
-  other: `-a` picks a free display by its lock file, two started at once
-  under `--parallel` can take the same number, and a case then reaches the
-  other's server with its own cookie and aborts ("Authorization required
-  ... could not connect to display"). Seen three times in WSL on
-  2026-11-11, first taken for the suite's load.
-  Without a Vulkan driver at all (no `mesa-vulkan-drivers` and no GPU driver:
-  the loader's "Failed to create Vulkan instance: -9") the `OnTheDesktop`
-  cases skip too, saying so, through the suite's `whyNoVulkanDriver`, as the
-  device cases skip without a device; a driver that is there and fails still
-  fails them. The `gpu_offscreen.*` and `qt_widgets_gpu.*` tests are plain
-  `add_test`s, so they carry a `SKIP_REGULAR_EXPRESSION`: without it ctest
-  counted a skipped case as passed.
+The C++ suite (`katana_gpu_tests`, ctest's `gpu.*`) needed an X server on
+Linux, because Qt's offscreen platform could not make a Vulkan instance: each
+case started its own `xvfb-run -a` under one ctest `RESOURCE_LOCK`, and the
+desktop cases (`GpuSceneView.OnTheDesktop...`) drew a real `QRhiWidget`. Those
+registrations (`gpu_offscreen.*`, `qt_widgets_gpu.*`) went with the C++.
 
 A GPU frame is never bit-identical to the CPU's (multisampled edges, the
 antialiased fringe, fill rules rounding differently at exact pixel centres), nor
@@ -533,12 +535,13 @@ from one driver to the next, so GPU against CPU is compared by:
 * **colour** - over pixels whose whole 3x3 neighbourhood is covered in both,
   where no edge reaches, the colours agree within 2 levels.
 
-GPU against GPU (the two expansions, runtime against serialized shaders, origin
-against survey coordinates) is compared pixel for pixel.
+GPU against GPU (origin against survey coordinates; in the C++, the two
+expansions and runtime against serialized shaders too) is compared pixel for
+pixel.
 
 * `KATANA_GPU_TEST_IMAGES=<dir>` saves every compared image as a PNG to look at.
-* `KATANA_GPU_TEST_PLATFORM=windows` runs the binary on the desktop platform,
-  where the cases that need a real `QRhiWidget` frame - the
+* In the C++ suite, `KATANA_GPU_TEST_PLATFORM=windows` ran the binary on the
+  desktop platform, where the cases that needed a real `QRhiWidget` frame - the
   `GpuSceneView.OnTheDesktop...` cases: drawing through the host's camera,
   keeping a camera the host says is framed, framing a list that arrives after
   the first frame, leaving the camera in logical pixels for the software
@@ -566,6 +569,10 @@ against survey coordinates) is compared pixel for pixel.
 
 ## Measurements
 
+The figures below are the C++ renderer's (QRhi on Direct3D 11), measured
+with the C++ build's benchmarks, which went with the C++ tree and have no
+Rust twins yet; the wgpu renderer has not been measured.
+
 `katana_gpu_benchmarks` (built with `KATANA_BUILD_BENCHMARKS`), 1920x1080, 4x
 multisampling, Intel UHD Graphics on the i7-1270P. GPU times are the GPU's own,
 from QRhi timestamps (`UseManualTime`); `Wall` rows are from beginning the frame
@@ -574,7 +581,7 @@ as the 3D view runs it, on the same list, camera and size. The scene cases need
 `KATANA_BENCH_SCENE` to name a `.12da` (survey data, not in the repository) and
 skip without it; `KATANA_BENCH_SCENE_IMAGES=<dir>` also saves that scene's frame
 from each renderer, to look at what was timed. The laptop is shared and on battery, so every figure below is
-from `tools/compare_benchmarks.py --alternate` with an A/A control (the same
+from the C++ build's `compare_benchmarks.py --alternate` with an A/A control (the same
 binary twice), and ratios mean more than absolutes.
 
 **GPU against the software rasteriser**, medians of two alternated binaries
@@ -645,8 +652,9 @@ points 17.23 / 17.27, two million 26.30 / 26.11.
 
 ## Risks
 
-* QRhi is semi-public (`GuiPrivate`): a Qt update can change it. It is confined
-  to this directory, and the Qt version is pinned by the toolchain.
+* wgpu moves quickly between versions: it is pinned in the workspace
+  (`rust/Cargo.toml`, the version egui-wgpu asks for) and named only by this
+  crate and the window. (The C++ renderer's risk was QRhi's semi-public API.)
 * Two renderers to keep in agreement. The GPU tests compare against the CPU with
   tolerances; the CPU stays the bit-exact reference (the determinism rule does
   not reach the GPU - its frames are not reproducible bit for bit across
@@ -654,5 +662,6 @@ points 17.23 / 17.27, two million 26.30 / 26.11.
 * The integrated GPU shares system memory; large clouds need the budget, and a
   large scene's buffers sit beside the CPU copies until the software path is
   dropped for that view.
-* Everything is verified on one machine (Intel UHD, driver 32.0.101.7088) and
-  WARP. Other vendors' drivers are untested.
+* The C++ renderer was verified on one machine (Intel UHD, driver
+  32.0.101.7088) and WARP; the wgpu renderer on lavapipe in WSL. Other
+  vendors' drivers are untested.

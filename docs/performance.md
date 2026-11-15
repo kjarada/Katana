@@ -1,8 +1,20 @@
 # Performance: the standard, the measurements, and what actually moved
 
-`PLAN.MD` §32 sets the targets and `CLAUDE.md` §4 sets the rules: measure in
+The removed plan's §32 sets the targets (`docs/architecture.md`, "Performance
+targets") and the contributor instructions' §4 sets the rules: measure in
 Release, record both numbers, and never claim a speed-up that was not
 measured. This file is where the numbers live.
+
+**Every figure below is the C++ build's.** Katana was C++ until the owner had
+the C++ removed on 2026-11-15 (`docs/rust.md`); the benchmarks (benchmarks/,
+Google Benchmark programs) and the scripts that compared them
+(compare_benchmarks.py) went with it, and none has a Rust twin yet. The Rust
+ports the same algorithms, the same culls and the same SIMD kernels
+(bit-identical to their scalar references, `docs/rust.md`, "SIMD"), so the
+decisions recorded here stand; the Rust has not been measured against them.
+Where a passage names a C++ file, flag or check, it is the record of the C++
+build. Not done: Rust benchmarks (criterion or the like) for the measurements
+below, so that a claim can be measured again.
 
 Machine for every figure below: Windows 11, 16 logical cores, GCC 16.2
 (MSYS2 UCRT64), Ninja, `-O3 -DNDEBUG`, `-ffp-contract=off -fno-fast-math`.
@@ -47,7 +59,7 @@ the only intended difference.
 ## What was optimised, and why
 
 The work below came from a read-only analysis of the hot paths, done by
-parallel agents (`CLAUDE.md` §5.3), and each item was checked against the
+parallel agents (the contributor instructions' §5.3), and each item was checked against the
 code before it was acted on. Where the analysis was wrong, that is recorded
 too - a rejected finding is as useful as an accepted one.
 
@@ -86,7 +98,7 @@ frame. A scene-building benchmark is the obvious next step.
 ## The optimisation pass of 2026-09-23
 
 Five hot paths were analysed and changed at once, by parallel agents working on
-disjoint directories (`CLAUDE.md` §5.3). **Every figure below was re-measured
+disjoint directories (the contributor instructions' §5.3). **Every figure below was re-measured
 centrally afterwards**, not taken from an agent's report, and two of the
 agents' own numbers turned out to be wrong in opposite directions - one badly
 understated, one unmeasurable. That is the reason for the rule.
@@ -142,8 +154,8 @@ figure on the shape that reaches the code is twenty times larger than that.
 
 `is_simple`, `clip_polygon`, `Rectangle2::closest_point`, `elevations_at` and
 `build_all` were optimised against a scratch harness that lived in a temporary
-directory and is now gone. `CLAUDE.md` §4 says a measurement lives in
-`benchmarks/` so that it can be repeated; these five could not be. They now have
+directory and is now gone. The contributor instructions' §4 said a
+measurement lives in the C++ build's benchmarks so that it can be repeated; these five could not be. They now have
 benchmarks in `bench_terrain.cpp` and `bench_geometry.cpp`, which is how the
 numbers above were taken and how the next contributor will notice a regression.
 
@@ -243,7 +255,7 @@ spill on every token - produces the same output again.
 ### The rasteriser's clipping rewrite (2026-09-23)
 
 The software rasteriser had pixel tests and no timing. Its clipping was
-rewritten to fix a correctness defect (PLAN.MD Phase 15: primitives crossing
+rewritten to fix a correctness defect (the plan's Phase 15: primitives crossing
 the eye plane were dropped whole), and the new clipping does work on every
 triangle, so `bench_render.cpp` was written first and run on the old code.
 Ground grids at 1920x1080: `Framed` has every vertex in view (the pass-through
@@ -400,8 +412,9 @@ not a guarantee.
 
 So a kernel file follows these rules:
 
-1. It is named `*_avx2.rs` and added with
-   `katana_add_simd_sources(<target> AVX2 <files>)` (`cmake/KatanaSimd.cmake`).
+1. It is named `*_avx2.cpp` and added with
+   `katana_add_simd_sources(<target> AVX2 <files>)` (the C++ build's
+   KatanaSimd.cmake).
    The helper compiles it into an OBJECT library with `-mavx2 -mfma` added to
    the project's own flags, and links the objects into the target. The
    helper refuses any other name. The option `KATANA_SIMD_KERNELS=OFF`, or
@@ -417,10 +430,14 @@ So a kernel file follows these rules:
 
 ### The guard
 
-Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`:
+Every C++ `ctest` run included three checks, all in its
+check_simd_kernels.cmake. The Rust needs none of them: `#[target_feature]`
+confines AVX2 to the kernel function itself, so no other code can be compiled
+with it, and Rust never fuses a multiply and an add unless asked
+(`docs/rust.md`, "SIMD"). The checks were:
 
 - **`simd_kernel_sources`** reads source files, like `layering` does. It
-  checks rule 2 for each `src/**/*_avx2.cpp` and for its declarations header,
+  checks rule 2 for each `*_avx2.cpp` and for its declarations header,
   which may contain no braces other than `extern "C"` and namespace blocks.
   It also enforces the OpenMP rule below.
 - **`simd_kernel_objects`** reads the objects this build actually produced,
@@ -429,7 +446,7 @@ Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`
   object. `objdump -h` must find no `.ctors` or `.init_array` section.
   `objdump -d` must find no `vfmadd`, `vfmsub`, `vfnmadd` or `vfnmsub`
   (on AArch64: no `fmla`, `fmls`, `fmadd`, `fmsub`, `fnmadd` or `fnmsub`).
-- **`simd_kernel_objects_under_asan`** runs the same object check on the
+- **simd_kernel_objects_under_asan** runs the same object check on the
   kernels compiled a second time with `-fsanitize=address`, as the
   `linux-sanitize` preset compiles them. They are only compiled, never
   linked, so it runs on MinGW too, which has no ASan runtime. It exists
@@ -590,7 +607,7 @@ binaries in alternating rounds:
 - `new again`: a byte-identical copy of `new`, as the A/A control.
 
 The command was
-`python tools/compare_benchmarks.py --alternate 6 "BM_(DecodeUtf16|IsValidUtf8|TransformPoints[23]Batch|BoundsOfPoints|PolylineBoundingBoxes)" main=... new=... new_again=...`,
+`python compare_benchmarks.py --alternate 6 "BM_(DecodeUtf16|IsValidUtf8|TransformPoints[23]Batch|BoundsOfPoints|PolylineBoundingBoxes)" main=... new=... new_again=...`,
 giving 18 samples per cell. Each cell is min / median in ms.
 
 | benchmark | main | new, scalar | new, avx2 | new again, avx2 (A/A) |
@@ -719,15 +736,14 @@ hold than two, and because the object check's third rule matters more on
 AArch64, not less: `fmla` and `fmadd` are baseline instructions there, and
 both compilers fuse by default - `a * b + c` at `-O2`, without the flag,
 comes out as one `fmadd` from GCC 16 and from clang 21, in C++26 mode too -
-so ordinary code would be fused the moment `-ffp-contract=off` were lost. `tools/check_simd_kernels.cmake`
-now reads `*_neon.rs` sources (their own intrinsics header only), expects
+so ordinary code would be fused the moment `-ffp-contract=off` were lost. The C++ check_simd_kernels.cmake
+then read `*_neon.rs` sources (their own intrinsics header only), expects
 `katana_neon_` entries in a `*_neon.rs` object (Mach-O's leading underscore
 allowed), refuses Mach-O's `__mod_init_func` as it refuses `.init_array`, and
 refuses `fmla`, `fmls`, `fmadd`, `fmsub`, `fnmadd` and `fnmsub` in either
 objdump's spelling (GNU's `fmla v0.2d, ...`, LLVM's `fmla.2d v0, ...`).
-`simd_kernel_objects_catches_a_fused_multiply_add` compiles a fixture kernel
-of the build's own set that fuses (`tests/simd_kernel_fixtures/`), and
-passes only when the check refuses it, so a pattern that could not see an
+simd_kernel_objects_catches_a_fused_multiply_add compiled a fixture kernel
+of the build's own set that fuses, and passed only when the check refuses it, so a pattern that could not see an
 AArch64 FMLA would fail the suite rather than pass it quietly. Before the
 LLVM spelling was added, that fixture compiled for macOS passed the check.
 
@@ -814,8 +830,8 @@ On 2026-09-26:
 - `simd_scalar.*` and `simd_neon.*` for core, geometry, render and cad all
   passed: 88, 204, 74 and 45 (the cad suite's scene tests) cases at each
   level, none skipped. `simd_kernel_sources`, `simd_kernel_objects` (read
-  with the aarch64 `nm` and `objdump`), `simd_kernel_objects_under_asan` and
-  `simd_kernel_objects_catches_a_fused_multiply_add` passed.
+  with the aarch64 `nm` and `objdump`), simd_kernel_objects_under_asan and
+  simd_kernel_objects_catches_a_fused_multiply_add passed.
 - The whole cross-built suite: 3,863 of 3,922 passed. The 59 that failed
   are every `cli.*` test, which runs `katana_cli` through `cmake -E env`
   rather than through `CMAKE_CROSSCOMPILING_EMULATOR`, so the host tried to
@@ -865,7 +881,7 @@ object checks, `layering` and `docs` pass as before.
 
 The CPU rasteriser draws every headless frame and every 3D view without a
 GPU. Four changes, all in `rust/crates/katana_render/src/rasterizer.rs` and the kernel
-file `src/katana_render/simd/raster_avx2.cpp`. None of them changes a pixel.
+file (the C++ raster_avx2.cpp; `rust/crates/katana_render/src/simd/avx2.rs` is its port). None of them changes a pixel.
 
 - **Tiles a triangle cannot reach are not binned.** A triangle whose box
   spans several 64 px tiles is tested at each tile's corners and left out of
@@ -1117,7 +1133,7 @@ and at both SIMD levels (`splat_cloud::the_image_is_the_same_at_every_thread_cou
   are now left out of the copy.
 
 **Measured**, Release, 1600 x 1000, 16 threads (i7-1270P), `bench_plan_cloud.cpp`,
-interleaved with `tools/compare_benchmarks.py --alternate 3` against main's
+interleaved with `compare_benchmarks.py --alternate 3` against main's
 painter built from the same benchmark source, with a second copy of each
 binary as the A/A control. The table gives the minimum in ms, and the A/A
 spread is the difference between the two copies.

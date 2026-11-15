@@ -2,162 +2,159 @@
 
 What the tests are, how one is added and registered, how the window is tested
 without a display, and the rules that make a test evidence rather than
-decoration. How to configure and build is `docs/building.md`.
+decoration. How to build is `docs/building.md`.
+
+Katana is Rust (`docs/rust.md`). Its tests are of two kinds, run by two
+runners: cargo's tests of each crate, and the process-level tests - the
+programs run as a person or an agent runs them - which a CMake project that
+compiles nothing registers and CTest runs against the programs cargo built
+(the test runner, `CMakeLists.txt`; `docs/building.md`). The C++ suite these
+were ported from (GoogleTest, one executable per module) went with the C++
+tree on 2026-11-15; every one of its cases has a Rust twin or a recorded
+exemption (`docs/rust.md`, "Tests are the specification").
 
 ## Running
 
+Until the port is built on Windows every run is in WSL, through
+`tools/build_visible.sh`, in a console window the owner watches (the
+contributor instructions, "Show the build"):
+
 ```sh
-ctest --preset debug                       # everything, in build/debug
-ctest --test-dir build/wt -j 8             # a hand-made build tree
-ctest --test-dir build/wt -R '^qt_'        # the window: widget tests and headless checks
-ctest --test-dir build/wt -R 'Snapping'    # one suite's cases, by name
-ctest --test-dir build/wt -N               # list every test without running it
-./build/wt/bin/tests/katana_cad_tests.exe --gtest_filter='Snap*'
+bash tools/build_visible.sh wsl                          # clippy, build, cargo test, then the runner's whole suite
+bash tools/build_visible.sh wsl cargo                    # the Rust workspace alone: clippy, build, test
+bash tools/build_visible.sh wsl cargo -p katana_cad      # one crate's tests
+bash tools/build_visible.sh wsl test -R '^qt_'           # the runner's suite only: the window's headless checks
+bash tools/build_visible.sh wsl test -R '^cli\.'         # the command line's
 ```
 
-Run the WHOLE suite before a commit, not only the module touched: the
-`layering` and `docs` tests are part of it, and a change in one module breaks
-another's tests more often than its own. Run it in Release as well as Debug
-before handing back: results must match across optimisation levels
-(`docs/architecture.md`, "Determinism"), and a Debug-only green says nothing
-about the configuration that ships.
+Inside WSL, by hand, the same is `cargo test --release` in `rust/` and `ctest`
+in the runner's build folder (`~/katana-build/<checkout>/tests`).
+
+Run the WHOLE suite before a commit, not only the crate touched: the `docs`
+test is part of it, and a change in one crate breaks another's tests more
+often than its own.
 
 ## What there is
 
 | Kind | Registered by | Named | Where |
 |---|---|---|---|
-| unit, integration, property and regression cases (GoogleTest) | `katana_add_test_suite` | `<Suite>.<Case>` | `tests/<module>/`, one executable per module |
-| widget tests, offscreen | `tests/qt_widgets/CMakeLists.txt` | `qt_widgets.<Suite>.<Case>` | `tests/qt_widgets/` |
-| the whole window, headless | `add_test` in `tests/CMakeLists.txt` | `qt_<what it shows>_headless` | `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
-| end-to-end command line | `add_test` in `tests/cli/CMakeLists.txt` | `cli.<what it shows>` | `katana_cli` run as a process |
-| the layering rules | `tests/CMakeLists.txt` | `layering` | `tools/check_layering.cmake` |
-| what the programs link and install | `tests/CMakeLists.txt` | `the_programs_link_none_of_the_legacy_customisation_readers`, `packaging_installs_only_present_first_party_files` | the link closure walked at configure time; `tools/check_install_rules.cmake` ("What the programs hold", below) |
+| unit, integration, property and regression cases | `#[test]` | `<module>::<case>`, the twin of the C++ `<Suite>.<Case>` in snake case | `rust/crates/<crate>/tests/` (and a crate's own `#[cfg(test)]` modules) |
+| the window's own tests, with no display | `#[test]`, `rust/crates/katana_window/tests/` | `<module>::<case>` | the headless runner (`rust/crates/katana_window/src/drive/`) |
+| the whole window, headless | `add_test` in `tests/CMakeLists.txt` (and `tests/geo/headless/`, `tests/update/headless/`, `tests/interop/`) | `qt_<what it shows>_headless` | `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
+| end-to-end command line | `add_test` in `tests/cli/CMakeLists.txt` (and `tests/cli/geo/*.cmake` and the files beside it) | `cli.<what it shows>` | `katana_cli` run as a process |
+| what the programs install | `tests/CMakeLists.txt` | `packaging_check_on_fixture_<what>`, `packaging_check_on_deploy_script_<what>` | `tools/check_install_rules.cmake` ("What the programs hold", below) |
 | the documents' references | `tests/CMakeLists.txt` | `docs` | `tools/check_docs.py` ("The docs test", below) |
-| the Rust port's crates keep the layering rules; every C++ case of a ported layer has its Rust twin | `tests/CMakeLists.txt` | `rust_layering`, `rust_parity`, and `rust_layering_catches_<what>` and `rust_parity_catches_<what>` on fixtures that break each rule | `tools/check_rust_layering.py`, `tools/check_rust_parity.py`, `tests/rust_check_fixtures/` (`docs/rust.md`, "Tests are the specification") |
-| the Rust port's own tests | `cargo test`, the cargo stage of `tools/build_visible.sh` | `<module>::<test>` | `rust/crates/<crate>/tests/` (`docs/rust.md`) |
+| Katana Standard is what its data makes | `tests/CMakeLists.txt` | `katana_standard_current`, `katana_standard_<check>` | `tools/katana_standard/` (`docs/katana_standard.md`) |
 | the update system end to end, on a feed of the tests' own | `tests/update/e2e.cmake` | `update_e2e_<what it shows>` | `tests/update/update_e2e.py` driving `tools/update_fake_feed.py`, `katana_update_e2e` and `katana_updater_test` ("The update system's tests", below) |
-| the release tools, and the build's promises about updating | `tests/update/CMakeLists.txt` | `update_tools_<tool>`, `update_keys_<what it shows>`, `katana_updater_imports_only_os_dlls`, `update_test_keys_are_in_no_shipped_program`, `packaging_nsis_<what it shows>` | Python `unittest` files in `tests/update/tool_tests/`; CMake scripts in `tests/update/` |
+| the release tools, and the build's promises about updating | `tests/update/CMakeLists.txt` | `update_tools_<tool>`, `update_keys_<what it shows>`, `katana_updater_imports_only_os_dlls`, `update_test_keys_are_in_no_shipped_program` | Python `unittest` files in `tests/update/tool_tests/`; CMake scripts in `tests/update/` |
 
-`ctest -N` gives the current count of each; this document does not, because a
-number here would be stale by the next commit.
+`cargo test -- --list` and `ctest -N` give the current count of each; this
+document does not, because a number here would be stale by the next commit.
 
-### A module's suite
+The C++ suite also registered the layering check (`layering`, and since the
+port `rust_layering` and `rust_parity`), the link-closure checks of the legacy
+customisation readers and the SIMD kernel checks. The layering check survives
+as `tools/check_rust_layering.py` over the table `tools/check_layering.cmake`,
+not registered (`docs/architecture.md`, "Layering"); the parity check had
+nothing left to compare once the C++ cases were gone; the readers were never
+ported; and `#[target_feature]` leaves the kernel checks nothing to find
+(`docs/performance.md`).
 
-```cmake
-katana_add_test_suite(geodesy
-    LIBS katana_geodesy
-    SOURCES
-        test_units.cpp
-        test_coordinate_reference_system.cpp
-        test_coordinate_transformer.cpp
-)
-```
+### A crate's tests
 
-`katana_add_test_suite(<module> LIBS <targets...> SOURCES <files...>)`
-(`tests/CMakeLists.txt`) builds `katana_<module>_tests` into
-`<build>/bin/tests`, links GoogleTest's main, applies the project's compiler
-settings and registers every case with `katana_discover_tests`
-(`cmake/KatanaTargetDefaults.cmake`): each case is a test that starts the
-executable directly with `--gtest_filter`. The cases are listed at test time,
-by running the executable, with a 60 s timeout, since the first run after a
-runtime redeploy loads freshly copied DLLs slowly; the list is kept beside the
-suite's `CTestTestfile.cmake` and made again only when the executable is
-rebuilt. Why this and not `gtest_discover_tests` itself is in
-`docs/building.md`, "Build and test speed". One executable per module keeps
-link dependencies honest: the math tests cannot rely on SQLite, the geometry tests
-cannot rely on Qt. `tests/<name>/` is configured only when module
-`katana_<name>` is, so `KATANA_MODULE_FILTER` narrows the tests with the
-build. Some folders are globbed (`tests/cad/customisation/`,
-`tests/cad/tools/`, and the same two under `tests/qt_widgets/`) so that
-authors working at the same time do not all edit one list.
+A crate's integration tests are `rust/crates/<crate>/tests/<file>.rs` or a
+folder with a `main.rs` that names its modules (`mod plan_view;`), each module
+holding the cases of one C++ suite: the twin of `Suite.CaseName` is
+`fn case_name` inside `mod suite`, or at the top of `suite.rs` (the rule
+`tools/check_docs.py` resolves a cited `<suite>::<case_name>` by). Shared helpers
+are a `support` module beside them (`rust/crates/katana_cad/tests/support/`,
+`rust/crates/katana_window/tests/support/window_support.rs`). A crate's tests
+can use only what the crate and its `[dev-dependencies]` give them, so the
+math tests cannot rely on SQLite and the geometry tests cannot rely on the
+window - the property the C++ got from one executable per module. A folder of
+cases whose environment differs (`customisation_env`, `customisation_verbs_env`:
+cases that set the built-in's variable) is a test binary of its own: cargo runs one binary's cases on threads of one
+process, where the variable is the process's, so each such case holds a lock
+for its whole length and puts the variable back before it lets go.
 
-`tests/geo/` is the one suite that belongs to no single module: the
-geoprocessing bridge, its bindings and its executor are three
-(`docs/geoprocessing.md`). It is configured whenever `katana_app` is built
-with the interop module, links `katana_app`, and globs its `*.rs`, as
-the geoprocessing packages add theirs side by side. Its window checks are
-`tests/geo/headless/*.cmake` and its `cli.*` cases
-`tests/cli/geo/*.cmake`, each included from the file that would
-otherwise list them.
+The geoprocessing tests are split across the crates they test - the bridge
+and its policy in `katana_gis`, the bindings in `katana_interop`, the
+executor and the verbs in `katana_app` (`docs/geoprocessing.md`). Their
+window checks are `tests/geo/headless/*.cmake` and their `cli.*` cases
+`tests/cli/geo/*.cmake`, each included from the file that would otherwise
+list them.
 
 ### Interactive tools: ToolDriver
 
 A drawing tool is a state machine in `katana_cad` (`docs/tools.md`), tested
-with no Qt through `rust/crates/katana_cad/tests/support/tool_driver.rs`. `ToolDriver` starts a
+with no window through `rust/crates/katana_cad/tests/support/tool_driver.rs`. `ToolDriver` starts a
 catalogue tool by id and feeds it what a user would - `click(x, y)`,
 `pick(id, x, y)`, typed text, Enter, Undo - and executes the one command a
 finished step returns on its own `Document`, exactly as the plan view does.
 The test then asserts on the document against geometry worked out by hand.
 
-### The widgets: qt_widgets
+### The window's tests
 
-`katana_qt_widget_tests` links the view widgets, the workspace, the dock
-chrome, the managers and the tool host - the application's own objects,
-`katana_qt_ui` in `src/katana_qt/CMakeLists.txt`, compiled once and linked
-into the application too - into one executable, and runs on Qt's offscreen
-platform. `rust/crates/katana_window/tests/support/window_support.rs` paints a widget,
-runs the event loop twice (an activation queued by the first pass is
-delivered by the second), makes a window the active one and builds any of the
-three views; the managers' tests find their fields and buttons by object name
-and assert on the `Document`. What cannot be tested here is anything that
-needs `MainWindow`, which is not compiled into this target: that is what the
-headless checks are for.
+`rust/crates/katana_window/tests/` builds the views, the workspace, the dock
+chrome, the managers, the dialogs and the main window with no display: the
+headless runner draws egui frames on the CPU (`docs/headless.md`), and
+`rust/crates/katana_window/tests/support/window_support.rs` draws a frame,
+draws until the window is idle, and finds a control by its name - the object
+name the C++ widget had - to fill or press it, as a person would; the tests
+assert on the `Document`. The C++ widget suite (`qt_widgets.*`) could not
+build `MainWindow`; the Rust's can, so a case that needed the whole window no
+longer needs a process of its own.
 
 ### The whole window: qt_*_headless
 
-A headless check runs the real `katana` under `QT_QPA_PLATFORM=offscreen`
-through `tools/check_screenshot.cmake`, which copies the project, runs the
-window with switches built from its `-D` variables and checks the exit code,
-the log and the PNG. The switches and the variables are `docs/headless.md`:
-`-DDRIVE=` drives dialogs, docks and the command line step by step with a
-sigil per step (`@` a dialog, `#` a dock, `%` a panel, `>` a command, `?` a
-report, `*` a menu item, `!` a button, `~` the pointer moved to a model
-point and `+` a click there, anything else a fill), `-DEXPECT=`
-checks what the run printed, `-DFORBID=` what it must never print,
-`-DREFUSED=` that it was refused (exit 1, never a crash), and `-DCOMPARE=`
-the files it wrote. A new check is an `add_test` in `tests/CMakeLists.txt`
-beside the others, with `PATH` given the toolchain's runtime,
-`QT_QPA_PLATFORM=offscreen` and a `TIMEOUT`, because a modal box in a
-headless run is a hang.
+A headless check runs the real `katana` (the cargo-built program, which the
+runner names `KATANA_PROGRAM_katana`) through `tools/check_screenshot.cmake`,
+which copies the project, runs the window with switches built from its `-D`
+variables and checks the exit code, the log and the PNG. The switches and the
+variables are `docs/headless.md`: `-DDRIVE=` drives dialogs, docks and the
+command line step by step with a sigil per step (`@` a dialog, `#` a dock,
+`%` a panel, `>` a command, `?` a report, `*` a menu item, `!` a button, `~`
+the pointer moved to a model point and `+` a click there, anything else a
+fill), `-DEXPECT=` checks what the run printed, `-DFORBID=` what it must never
+print, `-DREFUSED=` that it was refused (exit 1, never a crash), and
+`-DCOMPARE=` the files it wrote. A new check is an `add_test` in
+`tests/CMakeLists.txt` beside the others, with a `TIMEOUT`, because a run that
+waits on something is a hang. The names are still `qt_`: the tests are the
+C++ window's, run against the Rust one, and a test's name is how it is cited.
 
-### The same suite on Linux
+### Windows and Linux
 
-The suite is written on Windows (MSYS2) and also run on Linux against
-conda-forge's toolchain (`tools/setup_linux_toolchain.py`). What differs,
-and how the tests hold on both:
+The suite was written on Windows (MSYS2) and also run on Linux against
+conda-forge's toolchain (`tools/setup_linux_toolchain.py`), which is where
+the Rust is built and tested today (WSL). What differs, and how the tests
+hold on both:
 
-- **Qt's offscreen plugin talks.** On Linux it prints "This plugin does not
-  support raise()" and the like for each window call it stubs out.
-  `tools/check_screenshot.cmake` takes those lines out before it matches
-  `-DEXPECT=`, because they are Qt's and not the window's report
-  (`docs/headless.md` lists which).
 - **GDAL's drivers differ by build.** conda-forge's GDAL 3.13.2 has no PDF
   driver, so its catalogue has 120 leaf algorithms where MSYS2's has 121
   (`gdal driver pdf list-layers`); it has the CAD driver, which reads
   `.dwg`, and MSYS2's has not. A test that counts on a driver asks
   `katana_gis::formats::find_format` whether it is there and expects what follows.
 - **A test's paths are made native.** A dialog test that hands in a Windows
-  path (`C:\out\view.png`) builds it with `QDir::toNativeSeparators`: on
-  Linux a backslash is a legal file-name character, and
-  `QDir::fromNativeSeparators` rightly leaves it alone.
+  path (`C:\out\view.png`) builds it with the platform's separators: on
+  Linux a backslash is a legal file-name character, and it is rightly left
+  alone.
 - **The GPU cases need a Vulkan driver.** With Mesa's lavapipe
-  (`mesa-vulkan-drivers`) the "OnTheDesktop" cases draw under Xvfb; on a
-  machine with no Vulkan driver at all they skip, saying why.
-- **A file dialog is answered with the name box unfocused.** The dialog
-  tests share `choose_file` (`rust/crates/katana_window/tests/support/window_support.rs`), which
-  takes the focus off the name box before `selectFile`; without that, a
-  late poll left the box empty and the dialog waited for ever.
+  (`mesa-vulkan-drivers`) the device cases draw; on a machine with no Vulkan
+  driver at all they skip, saying why (`docs/gpu.md`, "Testing").
 
-Each of these is explained, with the evidence, in "The eighteen tests that
-failed in the Linux cloud container" below.
+The C++ suite's further Linux differences - Qt's offscreen plugin's messages,
+which `tools/check_screenshot.cmake` still drops, and the file dialog
+answered with its name box unfocused - are explained, with the evidence, in
+"The eighteen tests that failed in the Linux cloud container" below.
 
-Choose the lighter tool: a widget test when the widget can be built alone, a
-headless check when the behaviour needs the window, its menus or the
-interplay of several parts. A headless check proves construction and what
-the window SAYS; whether it LOOKS right is for a person, so look at the PNG
-the check leaves in the build tree.
+Choose the lighter tool: a crate's test when the behaviour can be reached
+from its crate, a headless check when the behaviour needs the program, its
+menus or the interplay of several parts. A headless check proves construction
+and what the window SAYS; whether it LOOKS right is for a person, so look at
+the PNG the check leaves in the runner's build folder.
 
 ### The command line: cli.*
+
 
 `tests/cli/CMakeLists.txt` runs `katana_cli` as a process: draw, save,
 reopen in a SECOND process and query, so a round trip through the project
@@ -232,16 +229,14 @@ committed and never needed by a test. A test that reads the git-ignored
 reference customisation, or the compiled-in one, must pass without it
 (`docs/building.md`, "The built-in customisation and the reference folder").
 
-**The suites that read third-party data** are these: the legacy readers' and
-writers' reference tests (`tests/archive12d`; the converter's was removed on
-2026-11-03, `docs/customisation.md`), which read
-the reference folder `KATANA_REFERENCE_CUSTOMISATION_DIR` names, and
-`built_in_census`, the NSW half of `built_in_renames` and the NSW cases of
-`built_in_library` (`tests/cad/customisation`), which read the NSW customisation
-compiled in as an alternate built-in, found by name. Each
-skips, saying why, where its data is absent - the reference folder is on the
-owner's machine and in no clone, and a build has a built-in unless its path
-names no file, the file being tracked - and none is ever changed to match what
+**The suites that read third-party data** are these: `built_in_census`, the
+NSW half of `built_in_renames` and the NSW cases of `built_in_library`
+(`rust/crates/katana_cad/tests/customisation/`), which read the NSW customisation
+compiled in as an alternate built-in, found by name. (The C++ build's legacy
+readers' and writers' reference tests, which read the git-ignored reference
+folder, were never ported and went with it.) Each skips, saying why, where
+its data is absent - a build has a built-in unless its path names no file,
+the file being tracked - and none is ever changed to match what
 the program gave: the census's figures are counted by
 `tools/customisation_census.py` and `tools/reference_census.py`, which use none
 of the program's code, and no tracked test or document holds a name from the
@@ -252,26 +247,13 @@ file was the only built-in; today the equivalent is
 `-DKATANA_ALTERNATE_CUSTOMISATIONS=` with an empty list, which leaves Katana
 Standard alone; the cad and app suites): it configures, builds and passes.
 
-**What the programs hold** is proved twice, and each proof is itself proved on
-a fixture, since a check that cannot see a violation passes as quietly as one
-that finds none (`tests/CMakeLists.txt`):
+**What the programs hold** is proved on fixtures, since a check that cannot
+see a violation passes as quietly as one that finds none (`tests/CMakeLists.txt`).
+The C++ build proved it twice: a configure-time walk of the four programs'
+link closure (the legacy customisation readers must be in none of them), and
+the install rules. The readers were never ported, so the first has nothing to
+find and went with the C++; the second stays:
 
-- the link closure. `the_programs_link_none_of_the_legacy_customisation_readers`
-  walks, at configure time, every library `katana`, `katana_cli`,
-  `katana_mcp` and the update helper `katana_updater` link, however deep and
-  however linked, and fails if
-  `katana_legacy_customisation` - the readers of the older customisation
-  formats - is among them; it also fails if the walk did not reach
-  `katana_core` or if one of the four is not a target, which would be a walk
-  that found nothing because it saw nothing. It also fails if any target
-  other than the library and the converter compiles a source file of the
-  readers (`src/katana_archive12d/legacy/*.cpp`) directly, which a walk of
-  library names cannot see. `the_closure_check_refuses_a_program_that_is_not_a_target`
-  and `the_closure_check_finds_a_legacy_source_compiled_directly_and_only_that`
-  prove those two on fixtures. `the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there`
-  runs the same walk over two fixture targets (never built): one that links the
-  library PRIVATELY, through a static library and an interface library, and
-  must be reported, and one that links only the archive module and must not.
 - the install rules. `tools/check_install_rules.cmake` reads the install
   scripts CMake wrote (the top one and those it includes) and fails on any
   program but `katana`, `katana_cli`, `katana_mcp` and the update helper
@@ -340,7 +322,7 @@ The other standing rules:
   regression test. Say in the commit that it was done.
 - **A property test must reach the cases it claims to cover**: count the
   interesting hits and assert the count is not trivial. It uses the
-  fixed-seed generator in `rust/crates/katana_cad/tests/support/property.rs` (`katana::test::Random`,
+  fixed-seed generator in `rust/crates/katana_cad/tests/support/property.rs` (`property::Random`,
   `PROPERTY_ITERATIONS`), so every run explores the same inputs and a failure
   reproduces exactly.
 - **Parallel and culled paths are tested against the plain one.** A
@@ -595,12 +577,11 @@ that cannot see a violation passes as quietly as one that finds none:
 - the helper's imports: `katana_updater_imports_only_os_dlls` reads the
   import table of the helper (Windows), and
   `updater_import_check_names_the_gcc_runtime` runs the same check on the
-  listing of a program that is not static, which it must name. The helper's
-  listing speaks for libcrypto, which it carries, and not for zlib, of
-  which the linker takes nothing into a program that never inflates; the
-  whole link line is held by the same check on `katana_update_link_probe`,
-  which uses both (`katana_update_link_probe_imports_only_os_dlls`,
-  `docs/building.md`, "The update layer");
+  listing of a program that is not static, which it must name. The C++
+  helper carried libcrypto and zlib, and a link probe held the whole link
+  line; the Rust helper links neither, its signature and inflate crates
+  being pure Rust (`docs/architecture.md`), so the import table is the
+  whole of it;
 - no test key in what ships: `update_test_keys_are_in_no_shipped_program`
   looks for the test keys in the bytes of the four programs, and the two
   test executables that DO link them are its controls;
@@ -768,32 +749,22 @@ What no test covers:
 ## Benchmarks
 
 Speed is measured, never asserted (Rules 5 and 6, "Measure, then claim").
-Benchmarks are Google Benchmark cases in `benchmarks/bench_*.cpp`, globbed
-into one `katana_benchmarks` executable, which lands in
-`<build>/bin/benchmarks/`. Measure only in a Release tree:
+The C++ build's benchmarks - Google Benchmark cases in one
+`katana_benchmarks` program, compared with a script that alternated the
+builds - went with the C++ tree on 2026-11-15, and the Rust has none yet
+(`docs/performance.md`). The practice they followed stands for whatever
+replaces them, because this machine is shared with other builds and often on
+battery, so one run of one binary against one run of another measures the
+machine as much as the code: single runs of the same binary have differed by
+up to 2x.
 
-```sh
-cmake -S . -B build/wtr -G Ninja -DCMAKE_BUILD_TYPE=Release -DKATANA_BUILD_BENCHMARKS=ON
-cmake --build build/wtr -j 3 --target katana_benchmarks
-./build/wtr/bin/benchmarks/katana_benchmarks.exe --benchmark_filter='BM_Snap' --benchmark_min_time=0.3s
-```
-
-This machine is shared with other builds and often on battery, so one run of
-one binary against one run of another measures the machine as much as the
-code: single runs of the same binary have differed by up to 2x
-(`docs/performance.md`). The practice is:
-
-1. **Keep both builds.** Copy the baseline's `katana_benchmarks.exe` aside
-   before building the change.
-2. **Alternate them.**
-   `python tools/compare_benchmarks.py --alternate ROUNDS FILTER NAME=EXE [NAME=EXE ...]`
-   runs every binary in each round, reversing the order every round, three
-   repetitions each, and prints the minimum and the median of every
-   benchmark's samples in milliseconds of wall time.
+1. **Keep both builds**, and measure only in Release.
+2. **Alternate them**: every binary in each round, reversing the order every
+   round, several repetitions each; report the minimum and the median of
+   every benchmark's samples in wall time.
 3. **Run an A/A control beside the A/B.** Give the SAME binary twice under two
-   names (`base=a.exe again=a.exe new=b.exe`). The spread between `base` and
-   `again` is the noise on this machine today; an A/B difference inside it is
-   no result.
+   names. The spread between the two is the noise on this machine today; an
+   A/B difference inside it is no result.
 4. **Report ratios and counts** - "new/base 0.62 on the median, A/A
    1.00-1.04, 18 samples each" - not a single absolute time, and name the
    machine and its state.
@@ -801,36 +772,41 @@ code: single runs of the same binary have differed by up to 2x
    repeated, and put the before and after figures in the commit message and
    the module's document.
 
-The two-file form, `compare_benchmarks.py baseline.json candidate.json
-[threshold%]`, compares two saved `--benchmark_format=json` runs by the median
-of their per-benchmark ratios. It reads CPU time, which under-counts work done
-by `TaskPool` threads, so it overstates a parallel path's change (audit
-BLD-12); prefer `--alternate`, which reads wall time, and give a parallel
-benchmark `UseRealTime()`.
+CPU time under-counts work done by `TaskPool` threads, so it overstates a
+parallel path's change (audit BLD-12): read wall time.
 
 ## The docs test
 
 `tools/check_docs.py` runs as the `docs` test (registered only when Python 3
 is found) and fails when a document in `docs/` cites something that does not
-exist:
+exist. The forms it accepts are listed, with how each is checked, at the top
+of the script; in short:
 
-- a repository path (`src/...`, `include/...`, `tests/...`, `tools/...`,
-  `docs/...`, `cmake/...`, `benchmarks/...`, `resources/...`, `samples/...`,
-  and the root build files), in backticks or as a link; paths under a
-  git-ignored folder are not checked, since a clean checkout lacks them;
-- a backticked qualified name (`Document::set_current_style`,
-  `katana_cad::interactive_tool::tool_catalog`): its last two names must both appear in one source or
-  header file;
-- a test name: a `qt_..._headless` or `cli.` test must be registered, and a
-  backticked `CamelCase` name that looks like a test case must be a `TEST`
-  in `tests/`;
+- a repository path (`rust/crates/...`, `tests/...`, `tools/...`, `docs/...`,
+  `cmake/...`, `resources/...`, `samples/...`, and the root files), in
+  backticks, in a link or in fenced code; paths under a git-ignored folder
+  are not checked, since a clean checkout lacks them. A path into the removed
+  C++ tree (src/, include/, the benchmarks, a tests' `.cpp`) is reported
+  as such;
+- a Rust path rooted at a crate (`katana_cad::global_modify::match_entities`),
+  followed through the crate's module files to a declaration;
+- a shorter qualified name (`Document::set_current_style`,
+  `global_modify::match_entities`): its last two names both occur in the code
+  of one `.rs` file - outside comments and strings, so a C++ name a port's
+  comment mentions does not keep a stale citation alive;
+- a test: a Rust twin `<suite>::<case_name>` must be a `#[test]` function whose
+  innermost module is `<suite>`; a `qt_..._headless` or `cli.` test, or any
+  long snake_case name, must be registered by the CMake test runner; a long
+  CamelCase name must occur in the code; a gtest name (`Suite.CaseName`) is
+  reported, with the twin's form to cite instead;
 - a citation of a removed document (the root plan, the root contributor
   instructions, the root readme);
 
 and every document in `docs/` must be listed in `docs/index.md`, and
-`docs/headless.md` must name every switch `rust/crates/katana_window/src/bin/katana/main.rs` parses and
-every `-D` variable `tools/check_screenshot.cmake` reads - a new switch is
-documented in the commit that adds it. Documents
+`docs/headless.md` must name every switch the window's driver parses
+(`rust/crates/katana_window/src/drive/run.rs` and `steps.rs`) and every `-D`
+variable `tools/check_screenshot.cmake` reads - a new switch is documented in
+the commit that adds it. Documents
 still being brought up to this standard are named in the script's
 `NOT_YET_CHECKED` list, which shrinks as each is fixed.
 
@@ -848,6 +824,10 @@ Run it alone with `python tools/check_docs.py` from the checkout root; it
 prints each broken reference with its file and line.
 
 ## The eighteen tests that failed in the Linux cloud container
+
+This section and the four after it are the C++ suite's record (GoogleTest,
+Qt's offscreen platform): what failed, why, and what the fix taught. The
+lessons that outlive the C++ are kept in the rules above.
 
 On 2026-09-26 sixteen tests failed, and two more failed now and then, in the
 Linux container (GCC 16, Qt 6.11.2 from conda-forge, offscreen) while they
@@ -871,10 +851,10 @@ failures. What was wrong with each, and why it was fixed where it was:
   `plot_drawing::the_line_it_writes_is_the_line_it_reads`,
   `snapshot::the_line_it_writes_is_the_line_it_reads`).
   The tests handed the line writer `C:\...` as a platform's file dialog would
-  on Windows, and expected `/` back. On Linux `QDir::fromNativeSeparators`
+  on Windows, and expected `/` back. On Linux QDir::fromNativeSeparators
   rightly leaves `\` alone, because POSIX allows it in a file name
   (POSIX.1-2017, 3.170). So the code was right and the input was not a native
-  path there. The tests now build their input with `QDir::toNativeSeparators`.
+  path there. The tests now build their input with QDir::toNativeSeparators.
   On Windows that is exactly the old backslashed path, so nothing they assert
   there is weaker. On POSIX there is no separator to convert, and that part of
   the check can only be made on Windows.
@@ -885,7 +865,7 @@ failures. What was wrong with each, and why it was fixed where it was:
   - What was wrong. The note written on 2026-09-26 guessed a native dialog.
     That was wrong: a backtrace shows Qt's own widget `QFileDialog` in
     `exec()`, with its file-system thread running. The cause is in how the
-    tests answered it. `QFileDialog::selectFile` writes the name into the
+    tests answered it. QFileDialog::selectFile writes the name into the
     dialog's file-name box only while that box does not have the keyboard
     focus (`qfiledialog.cpp`). The box takes the focus when the dialog is
     activated, which on the offscreen platform happens in the first pass of
@@ -901,7 +881,7 @@ failures. What was wrong with each, and why it was fixed where it was:
     `selectFile`. The image test's helper also cancels a dialog that is still
     up rather than leaving it, so a choice that does not take fails the test
     instead of hanging it.
-  - The regression test. `qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus`
+  - The regression test. qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus
     activates the dialog first, which is the late poll's case, every time.
     Without the fix it fails (result 0, no file chosen). With the fix, the
     three dialog tests and the rest of `SheetSetMenu` and `SheetViewOptions`
@@ -952,12 +932,12 @@ and run on Windows for the first time, on a Hyper-V guest and on the owner's
 machine. Two of the tests added above were correct only on Linux, and one
 suite could not be listed:
 
-- **`qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus`**
-  compared `QFileDialog::selectedFiles()` with the scratch path as
+- **qt_widgets.FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus**
+  compared QFileDialog::selectedFiles() with the scratch path as
   `std::filesystem` gives it. Qt returns `/` on every platform (`QDir`: "Qt
   uses '/' as a universal directory separator"), and on Windows the scratch
   path has `\`, so the same file failed to compare. It now compares against
-  `QDir::fromNativeSeparators` of the path. What the dialog chose is unchanged.
+  QDir::fromNativeSeparators of the path. What the dialog chose is unchanged.
 - **`library_data` and `simd_*.core`** made their scratch prefixes under one
   fixed name. ctest runs the core suite and its `simd_*` reruns at once, so
   one process removed a folder while another held a file in it open, and the
@@ -966,7 +946,7 @@ suite could not be listed:
   --repeat until-fail:10` failed in its first round before the change and
   passed all ten after it.
 - **`katana_qt_widget_tests` was listed with the 5 s default discovery
-  timeout**, not the 60 s every other suite has (`cmake/KatanaTargetDefaults.cmake`).
+  timeout**, not the 60 s every other suite has (the C++ build's KatanaTargetDefaults.cmake).
   On its first launch after a build, on a machine whose virus scanner checks
   new files, listing it took 10.7 s, so ctest ran nothing. It now has 60 s.
 
@@ -1025,7 +1005,7 @@ fixed on 2026-09-29:
   86 such calls (65 in the program, 21 in tests) now use
   `katana_core::text::format_exact_real`, the shortest round-trip text: by the
   standard the same `to_chars` call C++26's `to_string` makes, so GCC's
-  output is unchanged. `tools/check_float_to_string.py` finds any new one; a
+  output is unchanged. The C++ build's check_float_to_string.py found any new one (retired with it: the Rust guard is `rust/clippy.toml`'s disallowed methods); a
   text search cannot, because it cannot tell a double from an int. One test
   that compared against `std::to_string(-33.865)` - the same call as the code
   under test - now compares against the literal "-33.865". The tool exits 1
