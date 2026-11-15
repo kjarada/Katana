@@ -593,6 +593,17 @@ impl DefinitionEditorDialog {
         &self.line_preview
     }
 
+    /// The panes lent to be painted at a size of the caller's (StylePreview::grab), as a C++ test
+    /// grabbed the widgets: a grab paints, and a paint is what works out the layout the readers
+    /// above report, so it needs the pane itself.
+    pub fn symbol_preview_mut(&mut self) -> &mut StylePreview {
+        &mut self.preview
+    }
+
+    pub fn line_preview_mut(&mut self) -> &mut StylePreview {
+        &mut self.line_preview
+    }
+
     pub fn is_open(&self) -> bool {
         self.open
     }
