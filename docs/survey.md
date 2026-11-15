@@ -1268,10 +1268,10 @@ Not done:
   unless its line sets them (`SET grid_scale=projection`) or a person does in
   Survey > Survey Jobs, so a total-station job imported into a projected
   drawing with the defaults is radiated with ground distances.
-- surveyio has eight file-local digit tests (`is_digit` in leica_dbx.rs,
-  leica_gsi.rs, rinex.rs, rinex_common.cpp, rinex_compact.rs,
-  topcon_raw_builder.rs, opcode_field_file.rs and sokkia_sdr.rs), and
-  `crates/katana_core/src/text.rs`, which would be their one home, has none.
+- surveyio has file-local digit tests (`is_digit` in leica_dbx.rs,
+  leica_gsi.rs, rinex_internal.rs and rinex_navigation.rs; the C++ had
+  eight), and `crates/katana_core/src/text.rs`, which would be their one
+  home, has none.
 
 ## The Sokkia SDR file (.sdr)
 
@@ -1624,7 +1624,7 @@ Decisions that are the reader's own, each stated in the source:
   where nothing else does, SETX 6.1 rule 3); it never supersedes the
   coordinates of any other record, which stand, its own going to the point's
   metadata with a warning naming the observation and its view
-  (`position_point`'s `asideBecause`). Straight after is what pairs them: an
+  (`position_point`'s `aside_because`). Straight after is what pairs them: an
   `08` after an `08` of the same point is a record of its own - SETX 8.5.5
   prints the new averaged position straight after the POS view it averages -
   and so is one with a note or any other record between it and the shot. An
@@ -1858,7 +1858,8 @@ Not done:
   non-coaxial instrument (the Level 5 manual's B.4.4) are warned about, not
   applied; notes are kept with their setup, not with the record before or
   after them, since writers of the format disagree which.
-- The mil is defined twice, here and in the GSI reader (`kTwoPi / 6400`),
+- The mil is defined twice, here (`RADIANS_PER_MIL`) and in the GSI reader
+  (its `TWO_PI` over 6400),
   and `crates/katana_survey/src/angles.rs` has no mil conversion to share; lifting one there
   is a change to the GSI reader as well, left for one that edits it. The
   reader's calendar was the C++
@@ -2253,7 +2254,7 @@ where the verb hands it its two words - "The import wizard", below):
    not code, a whole job unasked. Each at most once, and neither on `SURVEY
    READ`.
 2. Without the word, the drawing's customisation: its two automation switches
-   (`Document::customisationState().automation`), which a customisation file
+   (`Document::customisation_state().automation`), which a customisation file
    sets and which are both ON until one says otherwise. On by default because
    bare points on one layer are not what anyone imports a coded file for.
 3. With NO survey codes loaded, nothing is asked of the job at all, whatever
@@ -2272,7 +2273,7 @@ where the verb hands it its two words - "The import wizard", below):
 **How.** The colours are the Document's resolver's (`katana_cad::colour_lookup::colour_lookup`: the
 customisation's own table, then the standard names), so a rule's colour name
 means on a line what it means in the window. The control codes are the
-Document's (`customisationState().linework`). Strings are ordered by point
+Document's (`customisation_state().linework`). Strings are ordered by point
 number; the verb has no `ORDER` (`LINEWORK` has).
 
 **The reply.** `imported ... entities=<n>` is still the POINTS drawn - a
@@ -3007,9 +3008,10 @@ import's own keys, so a point reads back as it went in.
 
 **The import wizard** (`survey_import_wizard.rs`) is a paged dialog in six
 steps - File, Format, Layout, System, Options, Report - with buttons of its
-own: the C++ chose a plain dialog over Qt's `QWizard` because that class's
-buttons had private names and the headless driver presses buttons by name,
-and the egui dialog keeps the named buttons. Its rules are the ones this file started
+own, each with a control name the headless driver presses (`back`, `next`,
+`import` and `close`, with the rest listed in the module); the C++ chose a plain
+dialog over its toolkit's wizard class for the same reason, that class's
+buttons having private names. Its rules are the ones this file started
 with:
 
 - **The format is never assumed.** Step 2 lists every candidate with its
@@ -3129,7 +3131,7 @@ list after a save or a delete and again on show.
 `--dialog ACTION` (repeatable; first called `--survey-dialog`, which still
 works), `--fill field=text`, `--press button` and `--survey-dock ACTION`,
 among the other steps `docs/cad.md` tables (`--command`, `--enter`,
-`--report`, `--trigger`, `--panel`); `--fill` runs the event loop after each fill, as
+`--report`, `--trigger`, `--panel`); `--fill` draws frames until the window is idle after each fill, as
 happens between two user actions, and `--press` on a disabled button fails the
 run rather than doing nothing. `tools/check_screenshot.cmake` strings these
 into `-DDRIVE=@surveyImport|file=...|!next|...|!import|#surveyPointManager|filter=CP`,

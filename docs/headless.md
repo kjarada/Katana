@@ -243,9 +243,9 @@ imported (anything else), in order, before any step runs.
 | `--dpi N` with `--plot-sheets` | the resolution of a PNG or TIFF and of a PDF's 3D snapshot (the page setup's, 300 by default) |
 | `--sheets-json FILE` | write the project's sheets as JSON (`-`: to stdout) and exit; before `--plot-sheets` when both are given |
 | `--customise FILE...` | load Katana customisation files (`docs/customisation.md`) - every path until the next switch - before anything is opened: ONE line, `CUSTOMISE "<file>" ...`, through the window's one executor, merged into what the session started with, all or nothing, and answered with the verb's records (`loaded file= ...`). Each path is made absolute first, so a file called as one of the verb's keywords (`reset`, `json`) is still a file. A refused line fails a run that only writes or runs a script batch, as a refused `--command` does, before any step runs (`qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless`, `qt_a_refused_customise_switch_fails_a_batch_run_headless`); a screenshot run goes on (`qt_a_refused_customise_switch_leaves_a_screenshot_run_going_headless`). The style libraries and survey code files of another program, which the switch once took, are refused as not a Katana customisation file |
-| `--action NAME` | trigger the menu item with that object name after the imports, as a click does; repeatable, in order, before the steps |
+| `--action NAME` | trigger the menu item with that control name after the imports, as a click does; repeatable, in order, before the steps |
 | `--select-all` | select every entity on an unlocked layer before the actions run |
-| `--toggle-layer NAME` | flip the layer's visibility box through the layer panel and refuse to go on if the panel was rebuilt inside its own signal (`desktop.md`, "Panels refresh on the event loop") |
+| `--toggle-layer NAME` | flip the layer's visibility box through the layer panel and refuse to go on if the document and the panel disagree afterwards (`desktop.md`, "Panels refresh on the event loop") |
 | `--style-manager` | open the styles and linetypes manager and grab it |
 | `--layer-manager` | open the Layers dialog and grab it; Format > Layers is non-modal, so `--dialog formatLayers` reaches the same dialog as a step |
 | `--attributes [ID]` | open the attribute manager (Edit > Attributes, still modal in a person's session) on entity ID and grab it |
@@ -267,7 +267,7 @@ The window starts with a customisation - linestyles, symbols and survey codes
 two environment variables say which. The window reads them once, at start-up.
 (The seam is cad's own, `katana_cad::customisation_host::built_in_customisation`, so every front end that
 hands a host over reads it the same way: `katana_cli` and `katana_mcp` do,
-through their session's `startCustomisation`.)
+through their session (`crates/katana_app/src/session.rs`).)
 
 | Variable | What it says |
 |---|---|
@@ -397,9 +397,11 @@ session through `katana_cad::customisation_host::start_customisation` and reads 
 The steps run in the order given, with frames drawn between them until the
 window is idle (the headless runner's idle rule), as between two things a
 person does, so what one step sets going has happened before the next.
-Everything is found by its NAME - the object name the C++ window gave it,
-kept by every control of the Rust window - which is why every action,
-field, button and tab gets one. In a test they are one
+Everything is found by its NAME - the control name each action, field,
+button and tab records as it is drawn (`crates/katana_window/src/drive/registry.rs`;
+the names are the C++ window's object names, kept, so every script and test
+written against it still finds its controls) - which is why every control
+gets one. In a test they are one
 `-DDRIVE=` list of `tools/check_screenshot.cmake`, a step per sigil:
 
 | Switch | `-DDRIVE` step | What it does |
@@ -421,8 +423,8 @@ field, button and tab gets one. In a test they are one
 
 What the target is at the end is what `--screenshot` grabs; steps that were
 all commands leave the window. A dialog that deletes itself when a step
-closes it (Generate Sheets and Page Setup in the Sheets editor, opened with
-`open()`) leaves the window the target: the run says `<NAME> has closed: the
+closes it (Generate Sheets and Page Setup in the Sheets editor, whose frames
+are dropped on close, `DialogFrame::deletes_on_close`) leaves the window the target: the run says `<NAME> has closed: the
 window is grabbed`, and a later `--fill` or `--press` meant for it is refused
 naming it (`qt_a_dialog_that_deletes_itself_on_close_leaves_the_window_the_target_headless`,
 `qt_a_step_for_a_dialog_that_has_closed_is_refused_headless`). The target was
@@ -562,18 +564,17 @@ is still read, and a failure prints the text that was checked. Pair it with an
 nothing wrong. `docs/survey.md` has the survey import wizard's use of these.
 
 Before any of `-DEXPECT`, `-DREFUSED` and `-DFORBID` is matched, the script
-drops the whole lines in which Qt's platform layer said (in the C++ window)
-the plugin could not do a window-management request - "This plugin does not support
+drops the whole lines in which a platform layer says it could not do a
+window-management request - "This plugin does not support
 propagateSizeHints()", `raise()`, `lower()`, window opacity or masks, keyboard
-or mouse grabs. Linux's offscreen plugin prints the first whenever a window's
-minimum size changes (a dialog shown, views arranged), Windows' does not, so
-on Linux it fell between two report lines an `-DEXPECT` pairs and failed four
-checks that pass on Windows. They are Qt's words about the platform, not the
-application's, and dropping only those whole lines keeps every check able to
-say that two reports are adjacent; loosening the checks to `.*` between the
-lines was rejected for that reason. A note that can matter to a check - no
-Vulkan instance, no system fonts, no OpenGL context - is not in the list and
-is still matched.
+or mouse grabs. The C++ window's toolkit printed them on Linux, between two
+report lines an `-DEXPECT` pairs, and failed four checks that passed on
+Windows; the Rust window's headless runner has no platform layer and prints
+none, and the rule stays so that no check can depend on one. Dropping only
+those whole lines keeps every check able to say that two reports are
+adjacent; loosening the checks to `.*` between the lines was rejected for
+that reason. A note that can matter to a check - no device, no fonts - is not
+in the list and is still matched.
 
 A PNG must also be of plausible size (a window that painted only its
 background compresses to a few kilobytes), and PDF and PNG headers are
@@ -729,7 +730,7 @@ A modal box in a headless run is a hang until the test's timeout. So
   File and Export Drawing open no file dialog and name the line that does the
   same - `OPEN <directory>`, `SAVE <directory>`,
   `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT <file>` - since
-  `--trigger` reaches them by their object names
+  `--trigger` reaches them by their control names
   (`MainWindow::refuse_file_dialog`,
   `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
   an empty drawing says so in the log, not in a box. The GIS menu's Import
@@ -758,10 +759,10 @@ A modal box in a headless run is a hang until the test's timeout. So
   `LOAD` and `APPEND`; Load's "Replace the sheets?" is never asked. Its
   Generate Sheets and Page Setup open without waiting, so
   `*fileSheets|@sheetGenerate` and `@sheetPageSetup` fill them by their
-  object names (`qt_generate_sheets_runs_the_line_it_shows_headless`,
+  control names (`qt_generate_sheets_runs_the_line_it_shows_headless`,
   `qt_sheet_set_menu_runs_its_lines_headless`); a dialog goes when it
   closes, so a step after its OK names a new target (`%sheetToolBar`);
-- Edit > Attributes, still `exec()`'d, logs that it is modal and names the
+- Edit > Attributes, still modal, logs that it is modal and names the
   switch that grabs it (`--attributes`) instead of opening; Format > Layers
   is non-modal and opens as any manager does;
 - the Format workbench tells each manager (`CustomisationServices::headless`),
@@ -774,7 +775,7 @@ A modal box in a headless run is a hang until the test's timeout. So
   every run here starts from a build tree, which is a development copy and
   never asks a server, downloads or applies. Those states, and what the
   window decides from a check's answer, the update folder and the last
-  result, are the widget tests' (`crates/katana_window/tests/update/update_dialog.rs`,
+  result, are the window tests' (`crates/katana_window/tests/update/update_dialog.rs`,
   `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
   the update system's own end-to-end tests'.
 - No step presses a key into a view (`&KEY` was proposed for a view's own
@@ -796,29 +797,16 @@ A modal box in a headless run is a hang until the test's timeout. So
   fix is to save the script as UTF-8. Reading it in the machine's own code
   page (`GetACP`) would be right on Windows and wrong for a script moved from
   another machine, so it was not guessed.
-- **A non-ASCII path was still wrong in the C++ build's libc++ on Windows
-  outside `OPEN` and `SAVE`.** On 2026-11-04 a scan of the C++ sources found,
-  in 32 files, 9 more paths made from narrow text and 167 `path.string()`
-  calls. Whether each of the Rust files below makes its paths through
-  `path_from_utf8` has not been re-checked since the port; the list stands as
-  where to look.
-  - Most of them hand a file name to GDAL, PDAL or a message. Examples:
-    `crates/katana_gis/src/gdal_adapter.rs`, `crates/katana_pointcloud/src/point_cloud_engine.rs`,
-    `crates/katana_interop/src/import.rs` and `crates/katana_interop/src/terrain_io.rs`.
-  - The Windows ARM64 build therefore cannot import, for example, a raster
-    under `C:/Users/José`. The GCC builds can: `path_to_utf8` and
-    `path_from_utf8` give exactly what libstdc++ gives there, and on Linux and
-    macOS too, so replacing every one changes nothing on those builds.
-  - Each direction needs the other for a file to be found, so the replacement
-    is one change, with a test per reader that opens a file under a folder
-    named as the `cli.non_ascii_*` tests' is.
-  - Two of the nine are urgent on GCC too, both in
-    `crates/katana_interop/src/archive12d.rs`:
-    - one takes a zip member's name, which may be code page 437;
-    - the other takes a file name the archive references, written on Windows,
-      which may be Windows-1252.
-    libstdc++ throws at a byte that is not UTF-8, and `path_from_utf8` never
-    does.
-  - Two in `crates/katana_window/src/gis_online.rs` read an environment variable with
-    the C library's `getenv` in the C++, which `crates/katana_core/src/path_text.rs` says to
-    read through `environment_variable`.
+- **Not every path is known to keep a non-ASCII name whole.** Rust has no
+  implicit text-to-path conversion, so the C++'s failure (a narrow string
+  made a path in the ANSI code page, found in 32 C++ files on 2026-11-04)
+  cannot recur as it was; but a path turned into text with
+  `to_string_lossy`, to hand a file name to GDAL, PDAL or a message, loses a
+  name that is not valid Unicode, where `katana_core::path_text::path_to_utf8`
+  keeps it. Where to look, not re-checked since the port:
+  `crates/katana_interop/src/import.rs`, `crates/katana_interop/src/terrain_io.rs`
+  and `crates/katana_interop/src/archive12d.rs` (whose zip member names may be
+  code page 437, and whose referenced file names, written on Windows, may be
+  Windows-1252). Each reader wants a test that opens a file under a folder
+  named as the `cli.non_ascii_*` tests' is. This is to be checked on the
+  Windows build, which is being brought up.

@@ -388,8 +388,8 @@ only what a viewport shows, only as finely as it can be seen.
    source area it covers, a pixel its edge cuts counted by the part inside,
    premultiplied first so a transparent pixel's colour does not bleed. It
    reads the raster's own bytes in place, a row at a time, across the task
-   pool - a general image scaler (the C++ build's QImage::scaled) would first
-   convert the crop to premultiplied ARGB, a second 1.6 GB for the whole of that orthophoto. A one-pixel
+   pool - a general image scaler would first convert the crop to
+   premultiplied ARGB, a second 1.6 GB for the whole of that orthophoto. A one-pixel
    checkerboard averaged four to one prints mid grey, not a moire.
 4. It is drawn through the whole image's transform with the crop's offset
    and the resampling folded in, smoothed, at the raster's opacity, beneath
@@ -418,29 +418,33 @@ every resolution.
 
 **A mesh footprint** is outlined with a 0.13 mm pen dashed 2 mm on and 1 mm
 off (`MESH_OUTLINE_PAPER_MILLIMETRES`, `MESH_DASH_PAPER_MILLIMETRES`,
-`MESH_GAP_PAPER_MILLIMETRES`) - a dash is counted in pen widths, as Qt counted
-it, so the screen's dashed pen at 0.13 mm would be dots - and a white mesh prints black.
+`MESH_GAP_PAPER_MILLIMETRES`) - the canvas counts a dash in pen widths (the
+raster convention the C++ had, kept), so the screen's dashed pen at 0.13 mm
+would be dots - and a white mesh prints black.
 
 The sheet painter passes its own `SheetPaintOptions::raster_dpi_cap` through,
 the cap its 3D snapshot has: 200 dpi in a PDF, 110 in the sheet editor. In
-`ASheetPdfOverALargePhotoEmbedsOnlyTheViewportAtTheCappedResolution` a
+`sheet_painter::a_sheet_pdf_over_a_large_photo_embeds_only_the_viewport_at_the_capped_resolution` a
 40 mm viewport filled by a 2000 x 2000 photo of noise plotted at 600 dpi is
 a 1 443 523-byte PDF with the cap lifted to the plot's resolution and
 123 573 bytes at 200 dpi (123 616 through `plot_sheets_to_pdf`).
 
 ## Speed
 
-What follows was measured in the C++ window, which painted with Qt's
-QPainter; the Rust canvas reproduces Qt's raster coverage
+Every figure in this section was measured in the C++ window, which painted
+with Qt's raster engine; the Rust canvas reproduces that engine's coverage
 (`crates/katana_window/src/canvas/coverage.rs`) and keeps every measure
-below, and the benchmark went with the C++ tree and is not yet ported.
+below (the kept drawing layer, thin lines, sprites, clipping). The
+benchmark went with the C++ tree and has no Rust twin yet
+(`docs/performance.md`), so the Rust painter is not measured; where a
+paragraph below names Qt, it explains a C++ figure.
 
 The plan view repainted the whole drawing on every mouse move, and a frame of
 a 28 000-entity survey drawing at zoom extents cost 270-900 ms. Measured
-where the time went (a scratch harness on the owner's archive): QPainter
+where the time went (a scratch harness on the owner's archive): the painter
 stroking every line with an antialiased 1.5 px pen, 14 000 symbols drawn from
 scratch each frame, per-entity display resolution, and plain polylines handed
-to QPainter whole when a sliver of them showed.
+to the painter whole when a sliver of them showed.
 
 ### The benchmark
 
@@ -615,12 +619,12 @@ dimension of the site plan is a long dotted rectangle under the parcel - and
 a small circle seen from afar gets four dots of its ring and reads as a
 plus. A look that says what was selected is polish for later.
 
-The dots are laid down by the painter (`dot_path`), not by Qt's dotted pen.
-The first version (C++) stroked each ghost with Qt's dotted pen: antialiased, every
-dot of a long line seen in part was made and thrown away (a dash pattern
-cannot be clipped without moving its dashes), and every selected note in the
-drawing was laid out before the cull; without antialiasing Qt drew crosses
-and Ts for dots along a diagonal. `dot_path` puts a square dot every pitch,
+The dots are laid down by the painter (`dot_path`), not by a dotted pen.
+The first version (C++) stroked each ghost with a dotted pen: antialiased,
+every dot of a long line seen in part was made and thrown away (a dash
+pattern cannot be clipped without moving its dashes), and every selected
+note in the drawing was laid out before the cull; without antialiasing the
+pen drew crosses and Ts for dots along a diagonal. `dot_path` puts a square dot every pitch,
 carrying the phase from segment to segment and through the segments that
 miss the view - so a pan moves no dot along the line - and keeps only the
 dots in the view; a note is laid out only when its own box is near the view.
@@ -628,7 +632,7 @@ dots in the view; a note is laid out only when its own box is near the view.
 1600 x 1000 with EVERY entity selected and every other layer hidden - the
 worst case, a Select All seen from a view hiding half the layers - with the
 ghosts off (the paint as before) and on, each pair in one run. Measured on
-2026-09-30 in the view-sync worktree's Release build, medians of three (the
+2026-09-30 in the C++ view-sync worktree's Release build, medians of three (the
 first version) and five (dots) repetitions of at least 1 and 2 s, other
 workflows' builds running on the machine, which moves the ghosts-off paint
 by a third between runs:
@@ -661,7 +665,7 @@ centre moved, and its kept drawing is keyed on the centre. `BM_PlanLinkedPan`
 measures one step of a middle-drag pan with a second view linked - the pan,
 the link's `ViewSet::follow` and both views drawn, each 1600 x 1000 on the
 generated drawing zoomed in five times - against `BM_PlanPaintZoomed`, the
-same step of the same view alone. Measured on 2026-09-30 in the view-sync
+same step of the same view alone. Measured on 2026-09-30 in the C++ view-sync
 worktree's Release build, three repetitions of at least 2 s, medians, with
 another workflow's builds running on the machine:
 
@@ -763,14 +767,14 @@ crossed the new vertex's disc where it snapped; Enter's opaque place went
 after the target vertices, and on a short segment hid the chosen vertex a
 few pixels off. Nothing is drawn while the pointer is not over the view: before
 it first is, the cursor is the model's origin, and a tool started from the
-command line drew its band to 0,0; after it has left (`leaveEvent`) the
+command line drew its band to 0,0; after it has left the view the
 cursor is where it left, and a tool chosen from a menu previewed there. A
 new vertex that would sit on a vertex
 that goes (a fillet a few pixels across) is left out, so the X still reads,
 and is not counted; a vertex label is not doubled by the polyline's own
 "0".
 
-What it costs, measured as above (the C++ build's `compare_benchmarks.py --alternate
+What it cost in the C++, measured as above (the C++ build's `compare_benchmarks.py --alternate
 3`, nine samples a cell, `main` at f971317 against this change, the machine
 shared with three other worktrees' builds; microseconds, minimum / median):
 

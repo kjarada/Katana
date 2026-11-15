@@ -492,7 +492,7 @@ the fields the form changed" truly
 The bands box is 2 to `MAXIMUM_SURFACE_BANDS`, the same number the check holds.
 A refused New, Copy or Rename (a name that is taken) leaves the style being
 edited chosen with its unapplied edits: the row a line names is chosen only if
-the line is accepted (`ARefusedNameLeavesTheStyleBeingEditedChosenWithItsUnappliedEdits`);
+the line is accepted (`surface_style_manager::a_refused_name_leaves_the_style_being_edited_chosen_with_its_unapplied_edits`);
 it used to jump to the style that holds the name and replace the form with it.
 Every control's name is in the dialog's module documentation; the Surfaces panel's
 Edit Styles... button triggers the same action.
@@ -553,7 +553,7 @@ surface does not cover) or pixels=
 No MCP tool of its own: the legend as JSON (`SURFACE LEGEND name JSON`) is the
 structured form an agent wants, and it comes back through
 `katana_run_commands` already. The JSON is written as the other JSON replies are, with a byte that is not
-UTF-8 replaced (nlohmann's `replace` handler in the C++ build), so a surface
+UTF-8 replaced, so a surface
 or style name with such a byte is U+FFFD in the reply and not a failure that
 ends katana_cli (`SurfaceStore::check_name` and `check_surface_style` refuse such a
 name where it enters; this is for one that got past; `docs/headless.md`, "Text
@@ -561,14 +561,15 @@ and names"). The guard is reached through a seam: the reply is made of a
 plain-data `SurfaceLegendReply` and written by `katana_cad::terrain::surface_display_verbs::surface_legend_json`, so a
 test hands it the name the store would refuse and reads back U+FFFD and no
 exception (`surface_display_verbs::legend_json_writes_a_bad_byte_of_a_name_or_label_as_u_fffd_and_does_not_throw`).
-A mutation check of 2026-10-15, in the C++ build, had put the strict `dump`
-back and every test of the verb still passed, because no API puts such a name
-into a Document; the strict `dump` threw on these bytes (nlohmann's
-type_error 316), which the test would then report.
+The test is there because a mutation check of 2026-10-15, in the C++ build,
+put the strict writer back and every test of the verb still passed: no API
+puts such a name into a Document.
 
 ## Speed
 
-Measured on 2026-10-15 on a 24-thread machine (Google Benchmark reports
+Every figure here is the C++ build's: the benchmarks went with the C++ tree
+and have no Rust twins yet (`docs/performance.md`), so the Rust painter and
+scene builder are not measured. Measured on 2026-10-15 on a 24-thread machine (Google Benchmark reports
 2496 MHz), in a scratch Release build: this branch's sources at the main
 build's flags (-O3), linked against the main checkout's libraries - not the
 integration build, which had not been made, and not alternated against
@@ -620,8 +621,7 @@ a second time; each surface's colouring is now worked out once a build) -
 paid when the terrain is rebuilt (a style or surface edit, a change of
 exaggeration), not each frame.
 
-To measure again: the benchmarks went with the C++ tree and have no Rust
-twins yet (`docs/performance.md`); these figures are the C++ build's.
+To measure again, the benchmarks are to be written for the Rust first.
 
 ## Tests
 
@@ -669,8 +669,9 @@ twins yet (`docs/performance.md`); these figures are the C++ build's.
   refusal at either side of the limit, an interval that is no number, a level
   surface, the plan's and the check's one answer, the line and the record, the
   styles of a drawing's surfaces without painting); `sheet_painter` problems,
-  `PlanPainter.ASinglePagePlotHandsBack...` and `PlotDrawingDialog.TheWarningRecords...`
-  in the widget tests; `plan.surface-style` in `preflight.rs` and
+  `plan_painter::a_single_page_plot_hands_back_what_it_is_without_of_a_surfaces_style_and_is_written_all_the_same`
+  and `plot_drawing_dialog::the_warning_records_of_the_reply_are_shown_and_the_file_record_stays_the_status`
+  in the window's tests; `plan.surface-style` in `preflight.rs` and
   `sheet_agent_verbs.rs`; `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`,
   `qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`; the 3D
   legends: `scene_surface_style::every_visible_surface_in_a_colouring_style_has_a_legend_in_drawing_order_and_no_other_has_one`
