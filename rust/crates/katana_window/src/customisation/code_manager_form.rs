@@ -25,7 +25,8 @@ use katana_entity::{
 
 use super::code_manager::{Event, REFUSAL_COLOUR, SurveyCodeManagerDialog};
 use super::code_manager_support::ColourField;
-use super::codes_seams::{NamePicker, UNDEFINED_NAME_COLOUR};
+use super::customisation_context::CustomisationContext;
+use super::name_picker::{NamePicker, UNDEFINED_NAME_COLOUR};
 use super::definition_editor::index_choice;
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
@@ -186,7 +187,17 @@ pub(super) struct RuleForm {
 }
 
 impl RuleForm {
-    pub(super) fn new(document: Option<&Document>) -> Self {
+    pub(super) fn new(context: &CustomisationContext, document: Option<&Document>) -> Self {
+        // A picker lists from a drawing; with none (the manager outlived it) an empty one, and
+        // load_form then writes the names as text.
+        let empty;
+        let listed = match document {
+            Some(document) => document,
+            None => {
+                empty = Document::new(None);
+                &empty
+            }
+        };
         Self {
             title: String::new(),
             key: String::new(),
@@ -197,10 +208,10 @@ impl RuleForm {
             model_bad: false,
             colour: ColourField::new(document),
             breakline: 0,
-            linestyle: NamePicker::new(NameRole::Linetype, false),
+            linestyle: NamePicker::new(context, listed, NameRole::Linetype, false),
             weight: String::new(),
             group: String::new(),
-            symbol: NamePicker::new(NameRole::Symbol, false),
+            symbol: NamePicker::new(context, listed, NameRole::Symbol, false),
             symbol_colour: ColourField::new(document),
             symbol_size: String::new(),
             symbol_rotation: String::new(),
@@ -326,7 +337,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             ui.horizontal(|ui| {
                 ui.label("Linestyle");
                 ui.add_enabled_ui(form.pickers_loaded, |ui| {
-                    edited |= form.linestyle.ui(ui, "ruleLinestyle");
+                    edited |= picker_edited(&mut form.linestyle, ui, "ruleLinestyle");
                 });
             });
             edited |= field(ui, "Weight", "ruleWeight", &mut form.weight, "", "");
@@ -336,7 +347,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             ui.horizontal(|ui| {
                 ui.label("Symbol");
                 ui.add_enabled_ui(form.pickers_loaded, |ui| {
-                    edited |= form.symbol.ui(ui, "ruleSymbol");
+                    edited |= picker_edited(&mut form.symbol, ui, "ruleSymbol");
                 });
             });
             ui.horizontal(|ui| {
@@ -471,6 +482,15 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
     edited
 }
 
+/// A name picker drawn as a rule's field: an edit when a name is chosen, and when the field's
+/// text changes as a person types - the form counts typing as an edit, as the editable choice
+/// its field once was did.
+fn picker_edited(picker: &mut NamePicker, ui: &mut Ui, name: &str) -> bool {
+    let before = String::from(picker.current_text());
+    let chosen = picker.ui(ui, name);
+    chosen.is_some() || picker.current_text() != before
+}
+
 impl SurveyCodeManagerDialog {
     pub(super) fn load_form(
         &mut self,
@@ -512,8 +532,15 @@ impl SurveyCodeManagerDialog {
                 form.symbol.set_current_name(document, &symbol.style);
             }
             None => {
-                form.linestyle.set_edit_text(&rule.linestyle);
-                form.symbol.set_edit_text(&symbol.style);
+                // The text as typed, with nothing chosen: what the field shows and form_rule
+                // ignores for loaded_linestyle and loaded_symbol.
+                for (picker, text) in [
+                    (&mut form.linestyle, rule.linestyle.as_str()),
+                    (&mut form.symbol, symbol.style.as_str()),
+                ] {
+                    picker.type_text(text);
+                    picker.close_completions();
+                }
             }
         }
         form.weight = rule.weight.clone();

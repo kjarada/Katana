@@ -17,7 +17,7 @@
 //!
 //! What the C++ did to the grid's selection model is done by the dialog's own calls: a symbol
 //! added to the selection (add_to_selection) and a click with the command key (ctrl_click). The
-//! picker beside Replace in Styles is the seam's (codes_seams), set by set_replacement and
+//! picker beside Replace in Styles is the name picker (name_picker), set by set_replacement and
 //! type_replacement.
 //!
 //! Left for the modules they wait for: ThePicturesAndThePlanDrawAPenInTheColourTheSessions-
@@ -45,8 +45,8 @@ use katana_entity::{
 use katana_geometry::Point2;
 use katana_storage::{ProjectMetadata, ProjectStore, capture_model};
 use katana_window::canvas::{Canvas, Color as CanvasColor, Image, Pen, PenCap, PenJoin, PenStyle};
-use katana_window::customisation::codes_seams::{
-    BeginCommit, CodesContext, Committed, SelectAndShow,
+use katana_window::customisation::customisation_context::{
+    AfterCommit, BeginCommit, CustomisationContext, SelectAndShow,
 };
 use katana_window::customisation::style_painter::{
     CanvasRasterBackend, RasterBackend, style_pen_for,
@@ -77,14 +77,14 @@ fn fixture_host(fixtures: &[&str]) -> RecordingHost {
     interpreter_host(document)
 }
 
-fn context() -> CodesContext {
-    CodesContext {
+fn context() -> CustomisationContext {
+    CustomisationContext {
         thumbnails: Some(thumbnails()),
-        ..CodesContext::default()
+        ..CustomisationContext::with_runner()
     }
 }
 
-fn library_with(host: RecordingHost, context: CodesContext) -> Library {
+fn library_with(host: RecordingHost, context: CustomisationContext) -> Library {
     Bench::new(host, |document| SymbolLibraryDialog::new(document, context))
 }
 
@@ -793,7 +793,7 @@ mod symbol_library {
         });
         let begin: BeginCommit = {
             let seen = Rc::clone(&seen);
-            Rc::new(move |host: &mut dyn Host| -> Option<Committed> {
+            Rc::new(move |host: &mut dyn Host| -> Option<AfterCommit> {
                 seen.begun.set(seen.begun.get() + 1);
                 seen.library_at_begin
                     .set(host.document().library_generation());
@@ -811,7 +811,7 @@ mod symbol_library {
         };
         let mut bench = library_with(
             host,
-            CodesContext {
+            CustomisationContext {
                 begin_commit: Some(begin),
                 ..context()
             },
@@ -1393,7 +1393,7 @@ mod symbol_library {
         };
         let mut bench = library_with(
             host,
-            CodesContext {
+            CustomisationContext {
                 select_and_show: Some(select_and_show),
                 ..context()
             },

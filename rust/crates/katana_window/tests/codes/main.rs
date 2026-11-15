@@ -10,7 +10,7 @@
 //! C++ found by `findChild` are filled, pressed and read by the same object names, and what the
 //! C++ called on the dialog (apply, importCodes, save ...) is called on the Rust dialog. A C++
 //! `processEvents()` is a run of frames (Bench::draw). The customisation's context is the host and
-//! the seams of customisation::codes_seams.
+//! customisation::customisation_context.
 
 #![allow(
     clippy::float_cmp,

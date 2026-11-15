@@ -244,12 +244,11 @@ pub mod customisation {
     // CU1: pub mod drawing_summary_dialog;
     //      pub mod global_modify_dialog;
     //      pub mod hatch_patterns_tab;
-    // CU2 (codes_seams: its seams to CU1's customisation_context, name_picker and style_preview
-    // and UP's linework_labels, for the integrator to join)
+    // CU2 (its seams to customisation_context, name_picker, style_preview and linework_labels
+    // joined by WS, and the seam file gone)
     pub mod code_manager;
     pub(crate) mod code_manager_form;
     pub(crate) mod code_manager_tabs;
-    pub mod codes_seams;
     pub mod definition_editor;
     pub mod symbol_library;
     pub mod symbol_library_model;

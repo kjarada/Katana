@@ -44,8 +44,10 @@
 //! call.
 //!
 //! The four definition buttons (symbolNew, symbolEdit, symbolDuplicate, symbolDelete) only ask:
-//! the definition editor is the maker's, which reads what was asked with
-//! `take_definition_requests` after the frame and hands it to its editor.
+//! the definition editor is the maker's, offered by the context's `edit_definition`, and the
+//! maker reads what was asked with `take_definition_requests` after the frame and hands it to
+//! its editor - the editor is drawn with the host, which a callback made in the middle of this
+//! dialog's frame could not lend it.
 //!
 //! LIFETIME. The dialog may outlive its Document: it watches it through a DocumentWatcher and does
 //! nothing once it has gone. Reloads are the watcher's - at the dialog's next frame - never a
@@ -75,9 +77,9 @@ use katana_geometry::Box2;
 
 use super::code_manager::{TreeLine, tree_rows};
 use super::code_manager_support::{customisation_file_word_of, exported_customisation_name};
-use super::codes_seams::{
-    CodesContext, DefinitionEdit, NamePicker, PreviewGround, StylePreview, UNDEFINED_NAME_COLOUR,
-};
+use super::customisation_context::{CustomisationContext, DefinitionEdit};
+use super::name_picker::{NamePicker, UNDEFINED_NAME_COLOUR};
+use super::style_preview::{PreviewGround, StylePreview};
 use super::definition_editor::index_choice;
 use super::definition_thumbnails::{DefinitionThumbnails, ThumbnailKind};
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
@@ -382,7 +384,7 @@ pub type ChooseFile = Box<dyn Fn() -> PathBuf>;
 pub struct SymbolLibraryDialog {
     frame: DialogFrame,
     open: bool,
-    context: CodesContext,
+    context: CustomisationContext,
     /// The context's picture cache, or this dialog's own when it gave none: a grid of names
     /// without pictures is not a symbol library.
     thumbnails: Rc<RefCell<DefinitionThumbnails>>,
@@ -417,7 +419,7 @@ pub struct SymbolLibraryDialog {
 
 impl SymbolLibraryDialog {
     /// The library over `document`, shown and loaded.
-    pub fn new(document: &Document, context: CodesContext) -> Self {
+    pub fn new(document: &Document, context: CustomisationContext) -> Self {
         let thumbnails = context.thumbnails.clone().unwrap_or_else(|| {
             Rc::new(RefCell::new(DefinitionThumbnails::new(Arc::new(
                 CanvasRasterBackend,
@@ -428,11 +430,12 @@ impl SymbolLibraryDialog {
             filter_bar.set_chip_label(index, label);
         }
         filter_bar.set_placeholder_text("Search name, group or survey code");
-        let preview = StylePreview::new();
+        let preview = StylePreview::new(document);
         let plot_scale = StylePreview::PLOT_SCALES
             .iter()
             .position(|&denominator| denominator == preview.scale_denominator())
             .unwrap_or(0);
+        let replace_with = NamePicker::new(&context, document, NameRole::Symbol, false);
         let mut dialog = Self {
             frame: DialogFrame::new(DIALOG, TITLE),
             open: true,
@@ -455,7 +458,7 @@ impl SymbolLibraryDialog {
             size: 0.0,
             target_styles: Vec::new(),
             target_style: None,
-            replace_with: NamePicker::new(NameRole::Symbol, false),
+            replace_with,
             actions: Actions::default(),
             requests: Vec::new(),
             grid_textures: BTreeMap::new(),
@@ -538,7 +541,8 @@ impl SymbolLibraryDialog {
 
     /// A replacement typed into the picker (QComboBox::setEditText).
     pub fn type_replacement(&mut self, host: &mut dyn Host, text: &str) {
-        self.replace_with.set_edit_text(text);
+        self.replace_with.type_text(text);
+        self.replace_with.close_completions();
         let document = self.live_document(host.document());
         self.update_actions(document);
     }
@@ -991,7 +995,7 @@ impl SymbolLibraryDialog {
         }
         // New needs only an editor to ask; the other three a definition the library holds - not a
         // built-in shape, nor a name nothing defines.
-        let editor = document.is_some() && self.context.definition_editor;
+        let editor = document.is_some() && self.context.edit_definition.is_some();
         actions.new_definition = editor;
         actions.defined = editor
             && entry.is_some()
@@ -1283,7 +1287,7 @@ impl SymbolLibraryDialog {
                 return false;
             }
         };
-        if !self.context.command_line {
+        if !self.context.has_runner {
             self.log(
                 String::from(
                     "Nothing here can run CUSTOMISE DEFINITIONS: the library was given no \
@@ -1301,7 +1305,11 @@ impl SymbolLibraryDialog {
         // which leaves the session "not kept", and what it hands back after a load that was
         // TAKEN - never after one that was refused, when nothing changed and there is nothing to
         // keep.
-        let committed = self.context.begin(host);
+        let committed = self
+            .context
+            .begin_commit
+            .clone()
+            .and_then(|begin| begin(host));
         self.flush(host);
         let outcome = host.run(&format!("CUSTOMISE DEFINITIONS {word}"));
         if !self.alive() {
@@ -1404,7 +1412,7 @@ impl SymbolLibraryDialog {
                 }
             }
         }
-        if !self.context.command_line {
+        if !self.context.has_runner {
             self.log(
                 String::from(
                     "Nothing here can run CUSTOMISE EXPORT: the library was given no command \
@@ -1593,7 +1601,7 @@ impl SymbolLibraryDialog {
             Event::Import => self.import_clicked(host),
             Event::Export => self.export_clicked(host),
             Event::Door(what) => {
-                if self.context.definition_editor {
+                if self.context.edit_definition.is_some() {
                     self.requests.push((what, self.current.clone()));
                 }
             }
@@ -1742,6 +1750,9 @@ impl SymbolLibraryDialog {
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let document = self.live_document(host.document());
+        // What the preview paints from: the drawing it was made over, once it has gone a
+        // preview that paints nothing.
+        let drawing: &Document = host.document();
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.actions.load, |ui| {
                 if controls::button(ui, "importDefinitions", "Import Definitions...")
@@ -1821,7 +1832,7 @@ impl SymbolLibraryDialog {
             // Right: preview, details, actions.
             ui.vertical(|ui| {
                 self.preview
-                    .ui(ui, "symbolPreview", egui::vec2(240.0, 160.0));
+                    .ui(ui, "symbolPreview", drawing, egui::vec2(240.0, 160.0));
                 ui.horizontal(|ui| {
                     ui.label("Plot scale");
                     let scales: Vec<String> = StylePreview::PLOT_SCALES
@@ -1913,7 +1924,9 @@ impl SymbolLibraryDialog {
                     ui.horizontal(|ui| {
                         ui.label("With");
                         // Choosing or typing a replacement only enables the button beside it.
-                        if self.replace_with.ui(ui, "replaceWith") {
+                        let typed = String::from(self.replace_with.current_text());
+                        let chosen = self.replace_with.ui(ui, "replaceWith");
+                        if chosen.is_some() || self.replace_with.current_text() != typed {
                             self.events.push(Event::ReplaceWith);
                         }
                         ui.add_enabled_ui(self.actions.replace, |ui| {
