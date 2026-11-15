@@ -103,7 +103,7 @@ use crate::zoom_to_dialog::{ZoomToContext, ZoomToDialog};
 use crate::render_view_widget::GpuSession;
 
 /// The tools' menus and toolbars, as the catalogue filled them once (buildToolActions).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ToolRows {
     pub draw: Menu,
     pub modify: Menu,
@@ -283,10 +283,10 @@ impl MainWindow {
         );
         let tools = fill_tool_menus(tool_catalog(), &mut targets);
         let take_menu = |targets: &mut ToolMenuTargets, category: &str| {
-            targets.menus.remove(category).unwrap_or_default()
+            targets.menus.remove(category).unwrap_or_else(|| Menu::new("", ""))
         };
         let take_bar = |targets: &mut ToolMenuTargets, category: &str| {
-            targets.tool_bars.remove(category).unwrap_or_default()
+            targets.tool_bars.remove(category).unwrap_or_else(|| ToolBar::new("", ""))
         };
         let mut tool_rows = ToolRows {
             draw: take_menu(&mut targets, "Draw"),
@@ -354,7 +354,7 @@ impl MainWindow {
         let online = OnlineDataWorkbench::new(
             OnlineServices {
                 version: String::from(katana_update::version::program_version_text()),
-                choose_project_crs: Some(Box::new(move |_host, place| {
+                choose_project_crs: Some(Box::new(move |_host: &mut dyn Host, place: Option<(f64, f64)>| {
                     // Nothing waits for an answer here: the dialog shown, and Online Data reads
                     // the system again when it next refreshes.
                     outbox
@@ -1644,7 +1644,7 @@ impl MainWindow {
                 Some((text, ImportOptions::Placement(Box::new(dialog))));
             return Some(name);
         }
-        let description = match katana_interop::describe_source(path, &Default::default()) {
+        let description = match katana_interop::dataset_info::describe_source(path, &Default::default()) {
             Ok(description) => description,
             Err(error) => {
                 exec.log_message(&error.describe(), true);
@@ -1934,7 +1934,7 @@ impl DrivenWindow for MainWindow {
         let dialog = StyleManagerDialog::new(&context, &self.exec.document);
         self.ui.dialogs.style_manager = Some(dialog);
         self.ui.dialogs.style_manager_shown = true;
-        String::from(crate::customisation::customisation_workbench::STYLE_MANAGER_DIALOG)
+        String::from(crate::style_manager::STYLE_MANAGER)
     }
 
     fn open_attribute_manager(&mut self) -> String {
@@ -1947,7 +1947,7 @@ impl DrivenWindow for MainWindow {
         dialog.show_first_row(document);
         self.ui.dialogs.layers = Some(dialog);
         self.ui.dialogs.layers_shown = true;
-        String::from("formatLayersDialog")
+        String::from(crate::layer_manager::LAYER_MANAGER)
     }
 
     fn open_dataset_info(&mut self, path: &Path) -> Option<String> {

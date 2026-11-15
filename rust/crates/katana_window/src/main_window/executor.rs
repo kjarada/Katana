@@ -242,7 +242,7 @@ macro_rules! lend {
             Some(mut boxed) => {
                 let result = {
                     let $wb = &mut *boxed;
-                    let $host: &mut Executor = &mut *$exec;
+                    let $host: &mut $crate::main_window::executor::Executor = &mut *$exec;
                     $body
                 };
                 $exec.$field = Some(boxed);

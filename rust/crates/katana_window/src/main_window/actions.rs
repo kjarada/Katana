@@ -178,7 +178,6 @@ pub fn run_script_action() -> Action {
         "&Run Script...",
         "Run a script of commands (.kcs), a line at a time, as katana_cli runs it",
     )
-    .opens("scriptRunDialog")
 }
 
 pub fn import_ifc_action() -> Action {
@@ -189,7 +188,6 @@ pub fn import_ifc_action() -> Action {
         "Import an IFC file: alignments as PIs and PVIs, elements and annotations with their \
          property sets, terrain as surfaces",
     )
-    .opens("fileImportIfcDialog")
 }
 
 pub fn export_ifc_action() -> Action {
@@ -200,7 +198,6 @@ pub fn export_ifc_action() -> Action {
         "Export IFC 4.3: alignments, the drawing by class and an AS 5488 utility investigation, \
          with a preview of the class each object becomes",
     )
-    .opens("fileExportIfcDialog")
 }
 
 pub fn sheets_action() -> Action {
@@ -220,7 +217,6 @@ pub fn plot_sheets_action() -> Action {
         "Plot Sheets to P&DF...",
         "Plot every sheet of the project to one PDF",
     )
-    .opens("plotDialog")
 }
 
 pub fn apply_codes_action() -> Action {
@@ -298,6 +294,9 @@ pub fn layers_action() -> Action {
         "The drawing's layers: colour, linetype, weight, what is on each",
     )
     .shortcut(ctrl(Key::L))
+    // The manager names itself layerManager (CU1), where the C++ renamed the menu's one
+    // formatLayersDialog: --dialog formatLayers finds it by this.
+    .opens(crate::layer_manager::LAYER_MANAGER)
 }
 
 // ---- Terrain --------------------------------------------------------------------------------
