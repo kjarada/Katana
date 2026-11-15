@@ -486,9 +486,10 @@ pub mod update_workbench;
 pub mod surface_raster_dialog;
 // UP:  pub mod update_dialog;
 //      pub mod update_workbench;
+// WS
+pub mod view_layers_popup;
+pub mod view_workspace;
 // WS:  pub mod start_dialog;
-//      pub mod view_layers_popup;
-//      pub mod view_workspace;
 // SH2: pub mod sheet_editor;
 // K:   pub mod main_window;
 //      pub mod main_window_ifc;
@@ -529,3 +530,6 @@ pub use render_view_widget::{GpuSession, RenderScene, RenderView, RenderViewEven
 pub use section_view_widget::{SectionView, SectionViewEvent};
 pub use annotation::{AnnotationWorkbench, DimensionStyleManagerDialog};
 pub use bim::road_workbench::{RoadWorkbench, RoadWorkbenchEvent};
+// WS
+pub use view_layers_popup::{ViewLayersPopup, view_layers_line, view_references_line};
+pub use view_workspace::{Scenery, ViewWorkspace, WorkspaceEvent, WorkspaceLines};
