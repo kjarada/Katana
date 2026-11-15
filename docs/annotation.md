@@ -23,8 +23,8 @@ label goes without a window; and absent is not zero - a label never prints
 
 An annotation is written for the sheet: a 2.5 mm label is 2.5 mm on a
 1:200 plan and on a 1:2000 one. Every annotation size is therefore PAPER
-millimetres, and there is ONE conversion to the model, `annotationModelSize`:
-`paperMm x scale / 1000` model units at 1 : scale (`annotationPaperSize` is
+millimetres, and there is ONE conversion to the model, `katana_entity::annotation::annotation_model_size`:
+`paperMm x scale / 1000` model units at 1 : scale (`katana_entity::annotation::annotation_paper_size` is
 its inverse).
 
 | 2.5 mm on paper at | is, in the model |
@@ -589,8 +589,8 @@ Decisions:
   `terrain` nor `cad` (its `Cargo.toml` depends on neither). So a plain
   `katana_entity::leader_values::LeaderContext` - a function giving a surface's level by name and
   point, one giving an alignment's station, offset and profile level, and the
-  two lists of names - goes through `anchor_values`, `leaderValues`,
-  `leaderNote` and `check_leader_says_something`, and `katana_cad::annotation::leader_presets::leader_context`
+  two lists of names - goes through `anchor_values`, `leader_values`,
+  `leader_note` and `check_leader_says_something`, and `katana_cad::annotation::leader_presets::leader_context`
   makes it from a Document (`crates/katana_cad/src/annotation/leader_presets.rs`).
   It holds COPIES - of the surface store, a pointer a surface, and of the
   alignments' definitions, each solved once when a leader first reads it -
@@ -611,7 +611,7 @@ Decisions:
   written as nothing. The DXF writer's own fallback - a caller that hands it
   no drawn annotation - cannot see `cad` and passes none.
 * **Only what the template names is read.** A note is made on every paint,
-  and a drawing may hold many surfaces: `leaderNote` reads the context values
+  and a drawing may hold many surfaces: `leader_note` reads the context values
   its template names; `LEADER VALUES`, the Leaders manager and `anchor_values`
   read every one of every surface and alignment, to offer them.
 * **NAME is written as the drawing has it, blanks and all**:
@@ -1256,7 +1256,7 @@ both hand `draw_annotation_for_export` the document's `LeaderContext` (the
 background `EXPORT` job holds the copy it was made with). Written
 without them (a caller that passes nothing), labels and the other dimension
 kinds are skipped with a warning and a leader is its line, landing and note -
-a smart leader's note as it reads (`leaderNote`), without `{code}`, which
+a smart leader's note as it reads (`leader_note`), without `{code}`, which
 survey coding decides and the writer cannot see, and without a line reading a
 surface or an alignment, which the writer cannot see either: that line is
 dropped, never written as nothing.
@@ -1338,7 +1338,7 @@ it skipped dimensions, and so does the archive exporter.
 
 ## Not yet
 
-* **Feet.** A model unit is taken to be a metre (`annotationModelSize`); a
+* **Feet.** A model unit is taken to be a metre (`katana_entity::annotation::annotation_model_size`); a
   drawing in feet would need the conversion to read the project's linear
   unit.
 * **Placement is worked out on every paint.** It costs what the measurement

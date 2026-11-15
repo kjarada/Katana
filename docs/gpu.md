@@ -78,7 +78,7 @@ Camera ─────────────── relative_view_projection (d
   defect). Pushing the fill back by two pixels of its own depth slope, plus 64
   units of the depth's last bit for a face seen straight on, lets an edge lying
   in a surface win without letting a line behind a wall show through it
-  (`ALineOnTheGroundBehindAWallStaysHidden`). Two pixels of slope are enough
+  (`gpu_render::a_line_on_the_ground_behind_a_wall_stays_hidden`). Two pixels of slope are enough
   for a mark that reaches one pixel from its centre - a 1 px line, the TIN's
   edges - and no more, because the same offset lets linework behind a ridge
   show through next to its silhouette.
@@ -93,7 +93,7 @@ Camera ─────────────── relative_view_projection (d
   100%). A 1 px line is not moved at all. The price is that a mark shows
   through a surface nearer to it than about its own size on screen; a wall
   twice a point's size in front still hides it
-  (`APointWellBehindAWallStaysHidden`). The working is at `MARK_PULL` in
+  (`gpu_render::a_point_well_behind_a_wall_stays_hidden`). The working is at `MARK_PULL` in
   `gpu_renderer.rs`.
 * **Per-pixel lighting from face normals** (`LightingMode::PerPixel`), from the
   screen-space derivatives of the position because the draw list has no
@@ -110,7 +110,7 @@ Camera ─────────────── relative_view_projection (d
 **Uploads happen only when the scene changes.** `set_draw_list` packs the list and
 marks it dirty; the next frame uploads it once. Every other frame writes one
 160-byte uniform block (the camera and the frame settings) and draws
-(`AFrameThatOnlyMovesTheCameraUploadsNothing`). A packed vertex is 16 bytes
+(`gpu_render::a_frame_that_only_moves_the_camera_uploads_nothing`). A packed vertex is 16 bytes
 against the draw list's 28.
 
 ## Packing
@@ -212,7 +212,7 @@ space. The rule, written once in `scene_origin.rs`:
 The test that holds it: a site at (300 000, 6 250 000, 50) renders like the same
 site at the origin, 0 differing pixels on the GPU and on WARP; packed against a
 zero origin instead, as a GPU path without the rule would, 510-523 pixels
-differ (`ASceneAtMgaCoordinatesDrawsLikeTheSameSceneAtTheOrigin`).
+differ (`gpu_render::a_scene_at_mga_coordinates_draws_like_the_same_scene_at_the_origin`).
 
 **The origin follows a deep zoom.** The centre of the scene bounds the error
 only while the view is about as large as the scene. Zoomed in close to a point

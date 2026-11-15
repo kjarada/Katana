@@ -243,7 +243,7 @@ imported (anything else), in order, before any step runs.
 | `--dpi N` with `--plot-sheets` | the resolution of a PNG or TIFF and of a PDF's 3D snapshot (the page setup's, 300 by default) |
 | `--sheets-json FILE` | write the project's sheets as JSON (`-`: to stdout) and exit; before `--plot-sheets` when both are given |
 | `--customise FILE...` | load Katana customisation files (`docs/customisation.md`) - every path until the next switch - before anything is opened: ONE line, `CUSTOMISE "<file>" ...`, through the window's one executor, merged into what the session started with, all or nothing, and answered with the verb's records (`loaded file= ...`). Each path is made absolute first, so a file called as one of the verb's keywords (`reset`, `json`) is still a file. A refused line fails a run that only writes or runs a script batch, as a refused `--command` does, before any step runs (`qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless`, `qt_a_refused_customise_switch_fails_a_batch_run_headless`); a screenshot run goes on (`qt_a_refused_customise_switch_leaves_a_screenshot_run_going_headless`). The style libraries and survey code files of another program, which the switch once took, are refused as not a Katana customisation file |
-| `--action NAME` | trigger the menu item with that object name after the imports, as a click does; repeatable, in order, before the steps |
+| `--action NAME` | trigger the menu item with that control name after the imports, as a click does; repeatable, in order, before the steps |
 | `--select-all` | select every entity on an unlocked layer before the actions run |
 | `--toggle-layer NAME` | flip the layer's visibility box through the layer panel and refuse to go on if the document and the panel disagree afterwards (`desktop.md`, "Panels refresh on the event loop") |
 | `--style-manager` | open the styles and linetypes manager and grab it |
@@ -730,7 +730,7 @@ A modal box in a headless run is a hang until the test's timeout. So
   File and Export Drawing open no file dialog and name the line that does the
   same - `OPEN <directory>`, `SAVE <directory>`,
   `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT <file>` - since
-  `--trigger` reaches them by their object names
+  `--trigger` reaches them by their control names
   (`MainWindow::refuse_file_dialog`,
   `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
   an empty drawing says so in the log, not in a box. The GIS menu's Import
@@ -759,7 +759,7 @@ A modal box in a headless run is a hang until the test's timeout. So
   `LOAD` and `APPEND`; Load's "Replace the sheets?" is never asked. Its
   Generate Sheets and Page Setup open without waiting, so
   `*fileSheets|@sheetGenerate` and `@sheetPageSetup` fill them by their
-  object names (`qt_generate_sheets_runs_the_line_it_shows_headless`,
+  control names (`qt_generate_sheets_runs_the_line_it_shows_headless`,
   `qt_sheet_set_menu_runs_its_lines_headless`); a dialog goes when it
   closes, so a step after its OK names a new target (`%sheetToolBar`);
 - Edit > Attributes, still modal, logs that it is modal and names the
@@ -775,7 +775,7 @@ A modal box in a headless run is a hang until the test's timeout. So
   every run here starts from a build tree, which is a development copy and
   never asks a server, downloads or applies. Those states, and what the
   window decides from a check's answer, the update folder and the last
-  result, are the widget tests' (`crates/katana_window/tests/update/update_dialog.rs`,
+  result, are the window tests' (`crates/katana_window/tests/update/update_dialog.rs`,
   `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
   the update system's own end-to-end tests'.
 - No step presses a key into a view (`&KEY` was proposed for a view's own

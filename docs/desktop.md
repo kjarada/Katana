@@ -5,7 +5,9 @@ the Rust port; until 2026-11 it was a Qt program): the window, its theme,
 icons and toolbars, the workspace of docked views, the panels and the
 managers, and the rules every dialog follows. The window is egui on eframe,
 drawn on wgpu, with egui_dock for the workspace of views
-(`docs/rust.md`, "The owner's decisions"). Where a passage below tells how
+(`docs/rust.md`, "The owner's decisions"); its 3D views draw with the
+software rasteriser for now, since the window does not yet hand its wgpu
+device to them (`docs/gpu.md`, "Status"). Where a passage below tells how
 the C++ window met a problem, it is the reason for a rule the Rust keeps;
 the Rust's own answer, and why it differs, is in the module comment of the
 file named beside it. What the window drives - the document, selection,
@@ -2030,7 +2032,7 @@ Customisation and Replace Loaded Customisation (`loadCustomisation`,
 survey code files of another program. Katana no longer reads those files, and
 the two items went with them rather than be kept as doors to a format that
 is gone - and, on 2026-10-07, what was left of them: the two members of
-`CustomisationServices` that carried the actions, which only a widget test
+`CustomisationServices` that carried the actions, which only a window test
 still assigned, and the Survey Code Manager's tip, which said "the loaded
 survey code files" and says "the survey codes of the session's customisation"
 (`general_texts::no_format_menu_item_or_toolbar_button_names_another_program_in_its_text_or_tips`
@@ -2092,7 +2094,7 @@ toolbar (`crates/katana_window/src/main_window/actions.rs`) and hands them over 
 Document, the view workspace, the window's action factory and log, whether
 the session is headless (asked each time, since the window learns it after it
 is built), and the window's own Layers action. So the
-workbench never reaches into `main_window`, and a widget test builds it and
+workbench never reaches into `main_window`, and a window test builds it and
 drives it (`crates/katana_window/tests/workspace/customisation_workbench.rs`).
 It owns what the managers share: the picture cache (`DefinitionThumbnails`)
 and the one `CustomisationContext` each manager is built from. It owns the definition
@@ -2103,13 +2105,13 @@ offers - whether there is a built-in customisation, and the kept file
 (`CustomisationServices::has_built_in`, `kept_file`, `hasKeptFile`).
 
 - **The linework control codes are not the workbench's.** They are the
-  customisation's - the Document's (`customisationState().linework`: what a
+  customisation's - the Document's (`customisation_state().linework`: what a
   customisation file says and `CUSTOMISE SET linework.*` sets) - and the code
   manager's Linework tab reads them there and sets them with that line
   ("Survey Code Manager", below). Until 2026-10-07 the workbench kept a copy
   for the tab, handed over in the managers' context, and followed the
   Document's codes into it from a `DocumentWatcher`
-  (`followLineworkCodes`), filling the tab's seven fields by their object
+  (`followLineworkCodes`), filling the tab's seven fields by their control
   names and pressing its Use These Codes: a second home for one value, with
   window code keeping the two in step, and a button that changed the copy
   alone - codes typed there showed in no `CUSTOMISE` reply and reached no
@@ -2205,8 +2207,8 @@ and Save wrote back whatever they still showed. Now:
 - selecting several styles shows `<varies>` for the fields they differ in,
   and Save leaves those fields of each style alone unless they were edited.
 
-The Layers dialog got the same fix; commands have no `updateLayerIfChanged`,
-so its unchanged Save compares the `Layer`.
+The Layers dialog got the same fix; there is no command that updates a
+layer only if it changed, so its Save compares the `Layer` itself.
 
 Two decisions from the first version still hold:
 
@@ -2596,7 +2598,7 @@ and Linetypes are those lists. The managers' buttons are its menu items.
 
 **What it edits** is one `katana_entity::LineStyle`:
 
-| Field | Object name | Holds |
+| Field | Control name | Holds |
 |---|---|---|
 | Name | `definitionName` | `name`; typed only while the definition is being made |
 | Group | `definitionGroup` | `group`, a `/` path |
@@ -2798,7 +2800,7 @@ have none.
   one's Save and Delete, the Survey Code Manager's Apply and the Symbol
   Library's Import Definitions.
   - *The workbench answers it* (`CustomisationWorkbench::context`): it reads
-    `customisationState().kept` when asked, and hands back the line
+    `customisation_state().kept` when asked, and hands back the line
     `CUSTOMISE KEEP`, through the window's one executor, ONLY when the
     session was the kept one and the session has a kept file
     (`CustomisationServices::has_kept_file`, which the window sets from its
@@ -2861,7 +2863,7 @@ strokes as text, the name a copy takes and the remove line in
 headless, in `qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`,
 `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`
 and `qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless`.
-The widget tests give the editor a runner of their own for `CUSTOMISE
+The window tests give the editor a runner of their own for `CUSTOMISE
 REMOVE`, so that what they assert is the editor's; one gives it the verb
 itself (`definition_editor::the_verb_itself_refuses_a_definition_in_use_and_delete_anyway_removes_it`), and
 that every line the editor can build is read by the verb as that one
@@ -3132,9 +3134,12 @@ number), `quit_at=K` or `cancelled_at=K` when it ended early, and an error
 naming the line that stopped it. `QUIT` or `EXIT` in a script ends the script,
 as it ends `katana_cli`'s, and never closes the window under the person who
 ran it. A script that runs itself, directly or through another, is refused at
-that line (`qt_a_script_may_not_run_itself_headless`). A long run shows
-`scriptProgress` with Cancel, which stops between two lines; a headless run
-shows nothing.
+that line (`qt_a_script_may_not_run_itself_headless`). Not done: a long run
+shows no progress and cannot be cancelled - the script runs inside one call
+(`run_lines` in `crates/katana_window/src/main_window/executor.rs`) and no
+frame is drawn until it ends, where the C++ showed a progress dialog with a
+Cancel that stopped between two lines (`script_runner.rs` takes such a
+callback; the window passes none).
 
 The line a dialog runs gets back everything its script's lines logged: a
 line run inside another's `runVerbLine` adds what it logged to the outer
@@ -3210,7 +3215,7 @@ first paragraph ended by a blank line is the section's introduction. The
 search wants every word it is given, in any case; a double-click puts the
 entry's verb on the command line, to be finished there, and the reference
 itself runs nothing. `window_help_text` lives beside the reference rather than
-in the main window so that the widget tests search the real text; a comment
+in the main window so that the window tests search the real text; a comment
 on `dispatch_line` says a verb added there is added to it, and
 `command_reference::the_window_section_names_every_verb_the_window_runs_itself` checks
 the list. A typed `HELP` (or `?`) alone prints the interpreter's help, the
@@ -3273,7 +3278,7 @@ Both open the dialog.
 asks; `UpdateWorkbench` (`crates/katana_window/src/update_workbench.rs`) owns it and
 does everything else, built as the geoprocessing and utility workbenches are.
 The dialog needs no window and reads no engine: it is given an `UpdateView` -
-plain data - and a context of callbacks, so the widget tests drive it alone
+plain data - and a context of callbacks, so the window tests drive it alone
 (`crates/katana_window/tests/update/update_dialog.rs`). A press changes no text in it:
 what a line did comes back as the next view, never as a guess of the
 dialog's (`update_dialog::a_press_changes_no_sentence_by_itself_the_next_view_does`).
@@ -3281,7 +3286,7 @@ dialog's (`update_dialog::a_press_changes_no_sentence_by_itself_the_next_view_do
 **What the workbench decides is not in the workbench.** It needs the whole
 window, so no test can build it; a decision written inside it is run by
 nothing. So each one is a function of its arguments beside the dialog
-(`update_dialog.rs`, "THE DECISIONS"), in the library the widget tests link,
+(`update_dialog.rs`, "THE DECISIONS"), in the library the window tests link,
 and the workbench only gathers the facts - the disk, the clock, the
 environment, the job runner - and does what they say:
 
@@ -3418,7 +3423,7 @@ somewhere else.
 it to the window's one executor ("One executor: the command runner"), or
 calls one callback (`update_dialog::each_button_builds_exactly_its_line_or_calls_exactly_its_callback`):
 
-| Button | Object name | Does |
+| Button | Control name | Does |
 |---|---|---|
 | Check now | `updateCheckNow` | `UPDATE CHECK` |
 | Retry | `updateRetry` | what failed, again: `UPDATE CHECK` after a failed check, `UPDATE APPLY CONFIRM` for a copy that was blocked |
@@ -3662,7 +3667,7 @@ Not done:
 - **The workbench's wiring has no test of its own.** What it DECIDES is
   tested (`update_decisions`); what it DOES with a decision is not, beyond the
   one job a build tree allows: it needs the window, so it is not in the
-  widget tests' library, and a development copy never asks a server,
+  window tests' library, and a development copy never asks a server,
   downloads or applies. A download's job and its progress, the order of the
   one click, the close that waits and the close that is cancelled, the
   request handed to `main()`, the automatic check starting and being taken
@@ -3834,6 +3839,14 @@ by `qt_plot_headless`, whose `PLOT` script prints the same sheet in each
 style: the colour plot has coloured pixels and the greyscale and monochrome
 ones none, the monochrome one fewer mid greys than the greyscale one, and
 line weights times 4 and times 0.25 more and less ink than times 1.
+
+Not done: printing to a printer. The sheets' Plot dialog offers a Printer
+(`plotPrinter`), but the window knows no printers yet, and a print writes the
+sheets as a PDF and stops there, saying where the PDF is: handing it to the
+operating system's print queue (`hand_to_print_queue` in
+`crates/katana_window/src/plotting/plot_output.rs`) answers Unsupported
+(`docs/plotting.md`; `docs/rust.md`, "Not done"). Print the PDF from a viewer
+meanwhile.
 
 ## Undo and Redo lists
 
@@ -4249,7 +4262,7 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
   open ones, read afresh each time through `GlobalModifyDialog::views`
   (`scopeFilterViews(ViewSet&)`), so a closed view is never pointed at and a
   plan view's "only what is on screen" is its visible area as it is now; the
-  dialog itself never sees the workspace, which is what lets a widget test
+  dialog itself never sees the workspace, which is what lets a window test
   give it views of its own.
 - **Only those that match**: types, layer and style patterns, colour,
   property and value, text, drawn only.
@@ -4383,10 +4396,10 @@ hands it a `SettingsContext`:
   session runs;
 - the built-ins the chooser offers (`SettingsContext::built_ins`). The window
   leaves it empty, and the dialog then lists those compiled into the program
-  (`katana_cad::customisation_host::built_ins()`); a widget test gives its own.
+  (`katana_cad::customisation_host::built_ins()`); a window test gives its own.
 
 Every member has an empty default, and a button whose callback is empty is
-disabled, so a widget test builds the dialog on its own
+disabled, so a window test builds the dialog on its own
 (`crates/katana_window/tests/settings/settings_dialog.rs`) and through the
 workbench (`crates/katana_window/tests/workspace/customisation_workbench.rs`).
 The action's data names the dialog, which is how `--dialog fileSettings`
@@ -4397,7 +4410,7 @@ Customisation (`settingsCustomisation`), which the table below and the rest
 of this section describe, and Updates (`settingsUpdates`; "The Updates page",
 at the end of this section). A third is one more `add_page`.
 
-| Part | Object names | What it shows or runs |
+| Part | Control names | What it shows or runs |
 |---|---|---|
 | What is active | `settingsActiveName`, `settingsActiveOrigin`, `settingsActiveBuiltIn`, `settingsActiveDefinitions`, `settingsActiveSymbols`, `settingsActiveRules`, `settingsActiveKept`, `settingsActiveProblems` | the name; the origin in plain words (None, Built in, Kept by you, Loaded this session, Edited this session); the built-in the session is (`Katana Standard (default)`, `NSW`) or, for a kept or edited copy of one, `Based on NSW`, else `None`; how many definitions, how many of them symbols, and the rules over how many codes; "Kept" or "Not kept" with the kept file's path, or - when the session has no kept file - "Nothing is kept: the next start gives the built-in customisation" (or "no customisation", where the program has none) and the variable that names a file to keep one in; what the START of the session found, in the error colour, hidden when it found nothing |
 | The notice | `settingsShowNotice`, `settingsNotice` | the author's notice, read-only and hidden until asked for: the customisation's own, then each source's under `From <name>:`. The toggle is hidden while there is none |
@@ -4637,7 +4650,7 @@ in a Settings opened on no drawing and after the drawing has closed
 it runs lines and changes nothing itself, with one exception that is the
 reason it exists.
 
-| Part | Object names | What it shows or runs |
+| Part | Control names | What it shows or runs |
 |---|---|---|
 | Note | `settingsUpdateNote` | one sentence, hidden when there is nothing to say: that a headless run keeps no update settings, that a development build is never updated, or that `KATANA_UPDATE_DISABLE` is set |
 | Checking | `settingsUpdateAuto`, `settingsUpdateSends` | "Check for updates automatically": toggled, `UPDATE SET AUTO ON` or `UPDATE SET AUTO OFF`, and the box then shows what the state has - a line that was refused puts it back, as the automation boxes go back to the Document. Under it, what a check sends: only the user agent (`Katana/0.2.0 (win64)`), nothing about the person, their files or their drawings - and that the server it asks sees the computer's network address, as every website does |
@@ -4757,7 +4770,7 @@ triggered, after the workbench has made the dialog, so the page always has
 the dialog it fills. The page is filled again
 at each opening and each time it is turned to, so a `UPDATE SET AUTO OFF`
 typed meanwhile is shown (`settings_updates::turning_to_the_page_reads_the_state_again_and_runs_nothing`).
-Given no services - a widget test's bare dialog - every control on it is
+Given no services - a window test's bare dialog - every control on it is
 disabled (`settings_updates::with_nothing_given_the_pages_controls_are_off_and_it_says_why_no_token_is_kept`).
 *Rejected: a `CustomisationServices` member for them*, which is the tidier
 wiring and one line in the workbench; it was outside the files of the change

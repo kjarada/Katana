@@ -509,9 +509,9 @@ surface (`surfaceEditActive`).
 - **How a person picks the surface**: the toolbar's list, or a tool's own S
   option (S, then the name), which also sets the list: `katana_cad::terrain::surface_edit_verbs::set_surface_edit_target`
   tells the observers registered with `katana_cad::terrain::surface_edit_verbs::add_surface_edit_target_observer`, and
-  the toolbar's list is one (`SurfaceEditUi::sync_active`). The list is wired to
-  `currentIndexChanged`, not `activated`, so a choice made by the program (the
-  headless driver's fill) points the tools too. A tool with no surface in the
+  the toolbar's list is one (`SurfaceEditUi::sync_active`). A choice in the
+  list, a person's or the headless driver's fill alike, sets the target
+  through the same call, so a fill points the tools too. A tool with no surface in the
   drawing says so in its prompt and refuses every click. The dialogs open on the
   first surface, not the target.
 - **What a run of clicks keeps** is held by the catalogue entry that makes the
@@ -549,18 +549,16 @@ surface (`surfaceEditActive`).
   run, Preview running it with PREVIEW. "Only inside a polygon" and Combine's
   clip take the polygon through the shared scope widget
   (`crates/katana_window/src/customisation/scope_filter_widget.rs`), written as `FROM
-  <scope>`. The lines are made by pure functions (`surfaceLevelsLine`,
+  <scope>`. The lines are made by pure functions (`surface_levels_line`,
   `surface_combine_line`), tested without a window.
 - **The dialogs follow the Document.** They are non-modal and kept, and they
-  used to read the drawing's surfaces only when constructed, shown or after
-  their own Run: an UNDO that removed the surface they offered left Run enabled
-  on a line the verb refused (NotFound), and a surface made by a typed line
-  could not be chosen until the dialog was closed and shown again (showing it
-  from the menu while it was open sends no show event). Each now owns a
-  `DocumentWatcher` (`crates/katana_window/src/customisation/document_watcher.rs`), the
-  last member so it dies first, which says from the event loop that the model
-  changed - on every execute, undo and redo, and on New and Open - and the
-  lists are read again, keeping what is chosen where it is still there
+  once read the drawing's surfaces only when made, shown or after their own
+  Run: an UNDO that removed the surface they offered left Run enabled on a
+  line the verb refused (NotFound), and a surface made by a typed line could
+  not be chosen until the dialog was closed and shown again. Each owns a
+  `DocumentWatcher` (`crates/katana_window/src/customisation/document_watcher.rs`),
+  asked when the dialog draws, which says that the model changed - on every
+  execute, undo and redo, and on New and Open - and the lists are read again, keeping what is chosen where it is still there
   (`surface_levels_dialog::the_surface_list_follows_the_drawing_while_the_dialog_stays_open`,
   `surface_combine_dialog::the_lists_follow_the_drawing_while_the_dialog_stays_open`).
   Rejected: a Document listener of each dialog's own on each kind of change
@@ -641,7 +639,7 @@ reads `edges_cleared=` and `moved=` in the records
   share with the volumes - each kind of entity, typed corners with and
   without heights, the words, a scope that takes nothing.
 - `crates/katana_window/tests/surfaces/surface_edit_dialogs.rs`: the lines, the
-  dialogs and the toolbar by object name;
+  dialogs and the toolbar by control name;
   `qt_the_surface_heights_dialog_raises_the_surface_headless`: the real window,
   the dialog opened by its action and its line run through the executor.
 - `cli.surface_edit_raise_moves_every_vertex_by_the_amount`,
@@ -667,7 +665,9 @@ reads `edges_cleared=` and `moved=` in the records
 
 ## Measured performance
 
-The cases were in the C++ build's `bench_terrain` benchmark (`katana_benchmarks
+Every figure here is the C++ build's; the benchmark has no Rust twin yet
+(`docs/performance.md`), and the Rust edits, which keep the same patch
+rebuild and classifier, are not measured. The cases were in the C++ build's `bench_terrain` benchmark (`katana_benchmarks
 --benchmark_filter=BM_Edit`; removed with the C++ tree, not yet ported), on the surface the review measured: 447 x 447
 cells of 1 m, 399 618 triangles and 200 704 vertices, the most `SURFACE FROM`
 makes by default. One iteration each, since the slow ones take seconds. The
@@ -683,7 +683,7 @@ outside the region (`rebuild_patch`) and through a banded polygon classifier
 `Polyline2::classify`, tested to agree with it point for point), and
 footprints that can be cut together are cut in one patch (above).
 
-| Case | Benchmark | Before: the review, wall time of a whole `katana_cli` run (the surface's load, 1.2 to 1.9 s, included) | Now: Release, `katana_benchmarks` |
+| Case | Benchmark | Before: the review, wall time of a whole `katana_cli` run (the surface's load, 1.2 to 1.9 s, included) | After: Release, `katana_benchmarks` (C++) |
 |---|---|---|---|
 | BOUNDARY, polygon of 8 / 500 / 5000 corners | `BM_EditBoundary` | 1.4 to 2.2 s / 4.5 s / 20.7 s | 101 / 106 / 127 ms |
 | DELETE TRIANGLES INSIDE, 8 / 500 / 5000 | `BM_EditDeleteTrianglesInside` | 1.2 to 1.8 s / 4.9 s / 22.2 s | 138 / 135 / 135 ms |
@@ -692,7 +692,7 @@ footprints that can be cut together are cut in one patch (above).
 | HOLE of the same 100 footprints | `BM_EditHolesTogether` (`patches` 1) | - | 270 ms |
 | THIN, tolerance 10 mm / 100 mm | `BM_EditThin` | "seconds", not measured | 1.55 s / 1.66 s |
 
-The last column was measured on 2026-10-16 by the integration build
+The last column was measured on 2026-10-16 by the C++ integration build
 (Release, `katana_benchmarks --benchmark_filter=BM_Edit --benchmark_min_time=0.05s`,
 a 24-thread 2.5 GHz machine, one iteration each): the edit alone, with the
 surface already loaded, where the "before" column is the wall time of a whole

@@ -684,7 +684,7 @@ one in its place, which would pass a test that named a fixture and was given
 something else.
 
 What the variable's value MEANS is a function of its own,
-`built_in_customisation_for(seam, compiledIn, named)`, so that the rule is tested
+`built_in_customisation_for(seam, compiled_in, named)`, so that the rule is tested
 against a stand-in for the compiled-in customisation: tested only through
 the environment, "whatever is compiled in" could not fail in a build that
 compiled nothing in, which is a build made without the file. The variable is read
@@ -705,9 +705,7 @@ owner's decision, `docs/rust.md`), so no program can link them; in the C++
 build a configure-time test walked the three programs' link closure to prove
 it. The install rules (`tools/check_install_rules.cmake`) allow `katana`,
 `katana_cli`, `katana_mcp` and the update helper `katana_updater`, and no
-other. The C++ build's `bench_plan_paint` benchmark took the compiled-in
-customisation's library when there was one and otherwise measured with the
-standard shapes.
+other.
 
 The file that is COMPILED IN is held to its census: `built_in_census`
 (`crates/katana_cad/tests/customisation/builtin_census.rs`) gives, for the compiled-in
@@ -838,7 +836,7 @@ a pattern, when the file gives no `length`, is how far the PEN travels - not
 the span of what was drawn. Measuring only the drawn part read
 `BDGE Abutment Bottom` as a period of 3 rather than 5, so each dash butted
 against the next and the pattern was solid even after the first fix. The pen
-extent now includes bare moves, and `StyleDrawing.ATrailingMoveIsTheGap...`
+extent now includes bare moves, and `style_drawing::a_trailing_move_is_the_gap_and_counts_towards_the_period`
 is the test.
 
 **A millimetre is not a pixel.** `paper_scale` treated one plot millimetre as
@@ -1197,7 +1195,7 @@ keywords, and `st` means `ST` - and the first token is always the name, so a
 code `CL` is a string called CL. An empty spelling switches a control off;
 `validate(LineworkCodes)` refuses a spelling with a blank and two controls
 spelled alike. The spellings are part of a customisation and the session's
-are the Document's (`Document::customisationState().linework`: what a
+are the Document's (`Document::customisation_state().linework`: what a
 customisation file says and `CUSTOMISE SET linework.*` sets). The `LINEWORK`
 verb and a survey import read them there, and so does the Survey Code
 Manager's Linework tab, which shows them, follows them as they change, and
@@ -1478,7 +1476,7 @@ Not done:
   (`docs/survey.md`, "The import wizard"): for a field file the job's own
   finish, for a point list `with_survey_finish` round the points' command with
   no strings of the file's own. The Survey Jobs dialog passes
-  `cad::surveyImportFinish(document).options` as
+  `katana_cad::linework_verbs::survey_import_finish(document).options` as
   `SurveyJobReadjustment::finish` since 2026-10-07: it passed nothing, so a
   point a re-adjustment drew for the first time was styled without a colour
   lookup and got a second style, `<name> (<colour>)`, when its rule names a
@@ -1533,7 +1531,7 @@ a tab of a dialog, which since 2026-10-07 builds this line and runs it
   meant is how a line strings the whole drawing where it was to string one
   layer.
 - **The control codes and the colours are the Document's**
-  (`customisationState().linework`, `katana_cad::colour_lookup::colour_lookup`), as a survey
+  (`customisation_state().linework`, `katana_cad::colour_lookup::colour_lookup`), as a survey
   import's are, so a line strung by hand looks like one an import strung.
 - **A control code alone still makes a line**, and so does the fallback rule
   (`only_ruled_lines` stays off): the run was asked for by name. An import's
@@ -1844,9 +1842,9 @@ preview is a blank white pane; its own `linestyle_state`
 (`code_manager_support.rs`) is a plain / defined / wrong-kind rule that does
 not read `katana_cad::style_catalogue::linetype_status` ("Saying whether it is working"); the
 linework summary is not pluralised ("1 lines"); and the Code Table's Text
-chip has the objectName of the search field beside it, `filterText` (a chip
-is named after its first label), so the two are told apart only by their
-type.
+chip and the search field beside it are one control name, `filterText` (a
+chip is named after its first label): a `--fill` of it is the search and a
+`--press` the chip, so the two cannot be reached apart by name.
 
 ## Saying whether it is working
 
