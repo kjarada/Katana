@@ -9,7 +9,7 @@
 # hand, as LIST measures it.
 add_test(NAME qt_dem_tools_clip_then_footprint_through_the_dialog_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=?terrainDemMenu|@terrainDemTools|demToolsTabs=Clip|demClipKind=File|demClipFile=${PROJECT_SOURCE_DIR}/tests/geo/data/plane.asc|demClipArea=0,0,20,15|demClipName=west|?demClipCommand|!demClipRun|?demClipReply|demToolsTabs=Footprint|demFootprintKind=Reference raster|?demFootprintCommand|!demFootprintRun|>LIST"
         "-DEXPECT=terrainDemMenu: [^\r\n]*DEM Tools.*--dialog terrainDemTools opened demToolsDialog \"DEM Tools\".*demClipCommand: RASTER CLIP FILE [^\r\n]*plane.asc AREA 0,0,20,15 NAME west.*demClipReply: clip algorithm=\"raster clip\" by=area area=0,0,20,15.*name=west raster=20x15.*demFootprintCommand: RASTER FOOTPRINT RASTER 1.*Polyline  layer=gis/footprint  vertices=4  closed  length=70  area=300"

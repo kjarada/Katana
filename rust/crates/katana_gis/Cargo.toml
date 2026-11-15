@@ -1,0 +1,20 @@
+[package]
+name = "katana_gis"
+description = "The gis layer: GDAL: rasters, vectors, reprojection, web access, the geoprocessing bridge."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_core.workspace = true
+katana_pointcloud.workspace = true
+
+[build-dependencies]
+# Compiles native/ (build.rs): the C check of the GDAL declarations, and the
+# shims later waves add beside it.
+cc = "1"
+
+[lints]
+workspace = true

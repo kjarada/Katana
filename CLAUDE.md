@@ -14,15 +14,27 @@ contribute, and the install and verify reference for each platform. Detailed
 development notes belong in `docs/`, and `docs/` does not cite it
 (`tools/check_docs.py`).
 
+**Katana is Rust.** The owner had the whole product ported from C++ (decided
+2026-11-05; the C++ removed on the owner's word on 2026-11-15: "remove c++ i
+dont want to see it"). One Cargo workspace, `rust/`, holds a crate per layer
+(`rust/crates/katana_<layer>`) and the four programs: the window `katana`
+(egui and wgpu), `katana_cli`, `katana_mcp` and `katana_updater`. The only
+C++ left is three small shims inside the crates that GDAL's algorithm
+framework and PDAL need (`rust/crates/katana_gis/native`,
+`rust/crates/katana_pointcloud/native`); write no other. CMake remains only as
+the runner of the process-level tests (`project(Katana LANGUAGES NONE)`; the
+`cli.*` and headless window tests against the cargo-built programs).
+`docs/rust.md` is the port's record.
+
 **Start every session in the checkout root:** the folder that holds `.git`,
-`CMakeLists.txt` and this file, and nothing above it. A session started in a
-folder that merely contains the checkout is not in a git repository, does not
-load this file or `.claude/settings.json` at the start, and puts its own
+`rust/` and this file, and nothing above it. A session started in a folder
+that merely contains the checkout is not in a git repository, does not load
+this file or `.claude/settings.json` at the start, and puts its own
 `.claude/` in that outer folder instead of this one. Where things live:
 
 - **Tracked, shared:** `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/`.
 - **Ignored, per developer:** `.claude/settings.local.json`, `CLAUDE.local.md`,
-  `.claude/worktrees/`, `.vscode/`, `build/`.
+  `.claude/worktrees/`, `.vscode/`, `build/`, `rust/target/`.
 - **Outside the repository, by Claude Code's design:** the auto-memory and the
   session transcripts, in `%USERPROFILE%\.claude\projects\<folder>\` (on
   Windows). They belong to one person's account, are never committed, and are
@@ -38,24 +50,28 @@ Katana is agentic CAD. A person must be able to do everything in the window
 with the mouse, and an AI agent must be able to do everything through a
 command. **Every feature ships, in the same change, in:**
 
-- **The desktop window (`katana`, `src/katana_qt`).**
+- **The desktop window (`katana`, `rust/crates/katana_window`).**
   - A menu item in the right menu and section, plus a toolbar or context-menu
     entry where apt.
-  - A dialog or panel with a stable `objectName` on every action and widget.
+  - A dialog or panel with a stable control name on every action and control
+    (the drive harness's names, which the headless runner and the tests use).
   - The dialog does not do the work itself. It builds the verb line and hands
     it to the window's command executor, exactly as if it had been typed.
     That makes it one code path, logged and undoable like a typed command.
-    Models: `gis_online_dialog.cpp` (GIS > Online Data) and the Survey menu's
-    utilities dialog.
-- **`katana_cli`.** Prefer a verb in the shared `CommandInterpreter`
-  (`katana_cad`). There, the window's command line, `katana_cli` and
-  `katana_mcp` all get it at once; `plotting/sheet_verbs.cpp` is the model for
-  a verb family. A verb that needs GDAL or PDAL lives in
-  `src/katana_app/session.cpp`, and the window's command line must accept it
-  too. Add `cli.*` tests in `src/katana_app/CMakeLists.txt`.
+    Models: `rust/crates/katana_window/src/gis_online_dialog.rs` (GIS > Online
+    Data) and the Survey menu's utilities dialog
+    (`rust/crates/katana_window/src/survey/utility_dialog.rs`).
+- **`katana_cli`.** Prefer a verb in the shared command interpreter
+  (`rust/crates/katana_cad/src/command_interpreter.rs`). There, the window's
+  command line, `katana_cli` and `katana_mcp` all get it at once;
+  `rust/crates/katana_cad/src/plotting/sheet_verbs.rs` is the model for a verb
+  family. A verb that needs GDAL or PDAL lives in
+  `rust/crates/katana_app/src/session.rs`, and the window's command line must
+  accept it too. Add `cli.*` tests in `tests/cli/CMakeLists.txt`.
 - **`katana_mcp`.** It runs session lines, so a verb reaches it. When an agent
-  needs structured data, add a tool or resource in `src/katana_app/mcp_server.cpp`
-  and `docs/mcp.md`, and test it in `tests/app/test_mcp_server.cpp`.
+  needs structured data, add a tool or resource in
+  `rust/crates/katana_app/src/mcp/` and `docs/mcp.md`, and test it in
+  `rust/crates/katana_app/tests/mcp/`.
 
 Underneath all three:
 
@@ -64,8 +80,8 @@ Underneath all three:
   widget. One user edit is one undo step.
 - **Machine-readable results.**
   - Replies are `key=value` records, one per line.
-  - Failures are `core::Status` / `core::Result` with a specific message,
-    never only a message box.
+  - Failures are `katana_core::Status` / `katana_core::Result` with a specific
+    message, never only a message box.
   - State has a plain-data, versioned JSON form where it is edited (as
     `SheetSet` does).
   - Problems go into a list an agent can read.
@@ -89,16 +105,16 @@ labelling, coding, export, modify, measure, and drawing from data.
 - **Filter, "only those that match":** entity types, layer patterns, style,
   colour, property and value, text, drawn only.
 - **One mechanism.**
-  - `cad::ModifyScope` and `cad::ModifyFilter`, resolved by `cad::matchEntities`
-    (`include/katana/cad/global_modify.hpp`).
+  - `ModifyScope` and `ModifyFilter`, resolved by `match_entities`
+    (`rust/crates/katana_cad/src/global_modify.rs`).
   - The verb grammar
     `[SELECTION|VIEW|DRAWING|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]] [WHERE k=v ...]`,
-    read by the one shared parser (`include/katana/cad/scope_verbs.hpp`).
+    read by the one shared parser (`rust/crates/katana_cad/src/scope_verbs.rs`).
     `VIEW` is the window's active plan view, supplied to the interpreter by the
     window; headless it is refused in favour of `AREA`.
   - In the window, the same "Apply to" and "Only those that match" controls
     as the Global Modify dialog, from one shared widget
-    (`src/katana_qt/customisation/scope_filter_widget.*`).
+    (`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`).
   - Never write a second scope or filter implementation. If a tool needs more,
     extend the shared one.
 - **Files stay an alternative source, not the only one.** A tool that also
@@ -112,14 +128,15 @@ labelling, coding, export, modify, measure, and drawing from data.
 
 1. **Read before writing.** Find the existing abstraction. There is one way to
    report failure (`Result<T>` / `Status`), one tolerance policy
-   (`math::tolerance`), one undo mechanism (`Command`), and one layering rule
-   (`tools/check_layering.cmake`, the `layering` test). A second one is a
-   defect, not a shortcut.
+   (`katana_math`'s tolerances), one undo mechanism (the `Command` trait), and
+   one layering rule (`tools/check_layering.cmake`'s table, the
+   `rust_layering` test). A second one is a defect, not a shortcut.
 2. **Write the test first** where the behaviour is checkable (see section 4).
 3. **Implement.**
-4. **Build clean.** `-Werror -Wshadow` are on, so a warning is a failure.
-   Judge a build by its EXIT CODE, never by grepping its output.
-5. **Run the whole suite**, not just your module.
+4. **Build clean.** Clippy runs with `-D warnings` and `RUSTFLAGS` with
+   `-D warnings`, so a warning is a failure. Judge a build by its EXIT CODE,
+   never by grepping its output.
+5. **Run the whole suite**, not just your crate.
 6. **Update the affected `docs/*.md` in the same change.**
    - Record decisions and the reasons for them, not a restatement of the code.
    - When you reject an alternative, write down which one and why.
@@ -128,24 +145,35 @@ labelling, coding, export, modify, measure, and drawing from data.
 
 ## 3. Building - MANDATORY, the owner's standing instructions
 
-A build and a test run are these three commands. On Windows they are run by
-`tools/build_visible.sh`, in a console window the owner watches (below,
-"Show the build"); never type them into Claude's shell there.
+**Build in WSL only, Rust only.** The owner's instructions (2026-11-05: "i dont
+want to run anything on windows at this stage just build for wsl then once we
+have a fully working version we test on windows"; 2026-11-15: "i just want
+rust"). Every build and test run is in the WSL distribution `Ubuntu-24.04`,
+with the toolchain prefix `/opt/katana-toolchain` (rustc, cargo, the GCC that
+builds the shims, PROJ, GDAL, PDAL; `tools/setup_linux_toolchain.py`). Nothing
+is built or run on Windows until the owner says the Rust window is ready to
+be tried there.
+
+A build and a test run are, in WSL, with `CARGO_TARGET_DIR` in
+`~/katana-build/<checkout>/cargo`:
 
 ```sh
-cmake --preset release                       # configure: build/release
-cmake --build build/release --parallel       # ALWAYS --parallel
-QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 14 --output-on-failure
+cargo clippy --manifest-path rust/Cargo.toml --locked --workspace --all-targets --release -- -D warnings
+cargo build  --manifest-path rust/Cargo.toml --locked --workspace --release
+cargo test   --manifest-path rust/Cargo.toml --locked --workspace --release
+cmake --preset linux-release -B ~/katana-build/<checkout>/tests -DKATANA_PROGRAMS=$CARGO_TARGET_DIR/release
+xvfb-run -a ctest --test-dir ~/katana-build/<checkout>/tests --parallel 14 --output-on-failure
 ```
+
+They are run by `tools/build_visible.sh`, in a console window the owner
+watches (below, "Show the build"); never type them into Claude's shell.
 
 - **Build once, at the end - the owner's standing instruction (2026-10-13).** A
   build and a suite run take a long time, and a session that keeps running them
   spends its time waiting.
   - While code is being written - by you, or by several agents editing in
-    parallel worktrees - do NOT run `cmake --build`, `ninja` or `ctest`. Write,
-    read and review the code; check what can be checked by reading it.
-  - A syntax-only compile of one or two files (`g++ -fsyntax-only`, seconds,
-    no `ninja`, no object files) is not a build and is allowed.
+    parallel worktrees - do NOT run cargo or ctest. Write, read and review the
+    code; check what can be checked by reading it.
   - The build and the whole-suite run happen ONCE, as the final step, after
     every agent has finished editing: one integration step builds everything,
     runs everything, and fixes what the merge or the first compile broke. Its
@@ -156,85 +184,52 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --parallel 14 --output-
   - Not covered by this: the owner asking you to build, run a test or drive the
     program, and the hand-off build (section 7).
   - Everything else in this section says how to build when it is time to.
-- **Always `--parallel`.**
 - **Show the build, in its own window, every time - the owner's standing
   instruction (2026-11-03): "show the build process everytime on cmd line so
   i can see it including the test phase".** Claude's shell moves a command
   still running after 10 minutes to the background, and the IDE does not show
   the owner a command's output, so a build run there is one the owner never
-  sees. Every configure, build and ctest run - a one-test `-R` run too - goes
-  through `tools/build_visible.sh`:
+  sees. Every build and test run - a one-test run too - goes through
+  `tools/build_visible.sh`:
   - Start it from the checkout or worktree root. It opens the window and
     returns at once:
-    - `bash tools/build_visible.sh` - configure, build everything, the whole
-      suite;
-    - `bash tools/build_visible.sh build [target...]` - configure and build,
-      only the named targets if any;
-    - `bash tools/build_visible.sh test [ctest arguments]` - the suite only,
-      e.g. `test -R PlanContextMenu`.
+    - `bash tools/build_visible.sh wsl` - Clippy, the build, cargo test and the
+      process tests (the whole suite);
+    - `bash tools/build_visible.sh wsl cargo [cargo test arguments]` - Clippy,
+      the build and cargo test, only the tests named if any (e.g.
+      `wsl cargo -p katana_window --test workspace maximis`);
+    - `bash tools/build_visible.sh wsl test [ctest arguments]` - the process
+      tests only, e.g. `wsl test -R docs`.
   - Then wait with ONE Bash command run with `run_in_background`, which
     notifies you when the run ends:
 
     ```sh
-    until [ -f build/release/visible_build.status ]; do sleep 15; done; cat build/release/visible_build.status
+    until [ -f build/wsl/visible_build.status ]; do sleep 15; done; cat build/wsl/visible_build.status
     ```
 
   - Judge the run by the `exit=` in the status file. Read
-    `build/release/visible_build.log` - every line the window showed - for
-    the failures and the test counts.
+    `build/wsl/visible_build.log` - every line the window showed - for the
+    failures and the test counts.
   - Show everything: no `> log` redirection, and no pipe through `grep`,
     `tail`, `head` or `Select-String` in front of the owner's view. The
     script's `tee` is the copy.
   - Before starting, say in one line what is being built. Afterwards, state
     the exit code and the test counts.
-  - The window stays open after the run until the owner closes it.
-  - Allowed in Claude's shell still: a syntax-only compile of a file (not a
-    build, see above) and reading the log.
-  - On Linux (a cloud session) there is no owner's desktop: run the three
-    commands above in the shell as they are.
-- **Never pipe a build into PowerShell's `Select-Object -First N`.** It stops
-  the pipeline and can kill ninja mid-write.
-- **Never run two builds in one build directory at once.** Two ninjas in one
-  directory corrupt `.ninja_deps`. `tools/build_visible.sh` refuses a second
-  run while one is going in the same `build/release`; wait for the status
-  file before starting another.
-- **If a running Katana stops the build, kill it and build again.** This is
-  the owner's standing instruction (2026-09-30), so do not ask first.
-  - The sign is a link that fails with `cannot open output file
-    bin\katana.exe: Permission denied`, or the same for `katana_cli.exe` or
-    `katana_mcp.exe`. Windows locks a running program's file; it is usually
-    the owner's window, opened from this `build/release`.
-  - Stop only the programs started from the build directory being built,
-    from the checkout or worktree root, then run the same build again:
-
-    ```sh
-    bin="$(cygpath -w "$PWD/build/release/bin")"
-    powershell -NoProfile -Command "Get-Process katana,katana_cli,katana_mcp -ErrorAction SilentlyContinue | Where-Object { \$_.Path -like '$bin\*' } | Stop-Process -Force"
-    ```
-
-  - Never while that directory's own suite is running: its headless tests
-    run `bin/katana.exe` too, and a build there is already forbidden above.
-  - Unsaved work in the window is lost; the owner accepts that. Say in the
-    hand-off that you closed it.
-- **After editing CMake files, run `cmake --preset release` on its own first.**
-  Don't let the build regenerate itself mid-run.
-- **If ninja prints "premature end of file; recovering",** ninja's own recovery
-  does not heal the log. Every later build then recompiles the same files
-  again. Fix it with:
-  - `ninja -C build/release -t recompact`, then build once;
-  - afterwards `ninja -C build/release -t deps | grep -c "premature\|STALE"`
-    must be 0.
-- **The build copies the runtime into `build/release`** (`katana_runtime`,
-  `cmake/KatanaDeploy.cmake.in`), so `bin/katana.exe` runs with no MSYS2 on
-  PATH:
-  - the DLLs;
-  - `share/proj` and `share/gdal`;
-  - `etc/ssl/certs/ca-bundle.crt`, the certificate bundle libcurl checks
-    `https://` against. Without it every web request fails.
-- Presets: `debug`, `release`, `relwithdebinfo`, `sanitize`, `tidy`, and
-  `linux-debug` / `linux-sanitize` for Linux.
-- Toolchain: MSYS2 UCRT64, GCC 16 (a rolling install; check `g++ --version`
-  before quoting it), C++26, Qt 6, Ninja.
+  - The window stays open after the run so the owner can read it. Once you
+    have read its status file and log, close it - the owner's instruction
+    (2026-11-05): "make sure to close any finished cmd". `bash
+    tools/build_visible.sh close` closes this checkout's finished windows and
+    never one whose run is still going.
+  - Allowed in Claude's shell still: reading the log, and running a built
+    program headless under `timeout` (section 7).
+  - On Linux (a cloud session) there is no owner's desktop: run the commands
+    above in the shell as they are.
+- **Never run two builds in one target directory at once.**
+  `tools/build_visible.sh` refuses a second run while one is going in the same
+  checkout; wait for the status file before starting another.
+- **Every crate is pinned in `rust/Cargo.lock`**, at releases at least two
+  weeks old, and every cargo run is `--locked`; a new crate is added with the
+  owner's knowledge and its notice in `THIRD_PARTY_NOTICES.md`.
 
 ## 4. Testing - the cardinal rule
 
@@ -251,18 +246,19 @@ test fails, establish which of these is true before touching anything:
 Never delete or disable a failing test to make a suite green.
 
 - Test names are sentences stating the property
-  (`StationsOffTheSurfaceReportNoElevationRatherThanZero`).
+  (`stations_off_the_surface_report_no_elevation_rather_than_zero`).
 - Assert on values worked out independently, never on a previous run's output.
 - A property test must be shown to reach the cases it claims to cover.
 - When you fix a bug, prove the regression test catches it: remove the fix,
   watch it fail, restore the fix.
 - New public behaviour needs the happy path, every documented failure, and
   the degenerate input (empty, zero, coincident, non-finite, enormous).
-- Qt tests run with `QT_QPA_PLATFORM=offscreen`.
-- The real window is driven headlessly through `tools/check_screenshot.cmake`
-  (`-DDRIVE` steps; see `docs/headless.md`).
-- Fonts differ between Windows and Linux, so assert ink against a baseline,
-  never an absolute pixel count.
+- No test opens a window. The window's tests drive egui headless through the
+  drive harness (`rust/crates/katana_window/src/drive/`); the real program is
+  driven headlessly through `tools/check_screenshot.cmake` (`-DDRIVE` steps;
+  see `docs/headless.md`).
+- Fonts differ between machines, so assert ink against a baseline, never an
+  absolute pixel count.
 - Tests that reach any host other than the loopback address run only with
   `KATANA_ONLINE_TESTS=1`. A test may start its own server on `127.0.0.1`
   (port 0), with proxies disabled.
@@ -270,12 +266,12 @@ Never delete or disable a failing test to make a suite green.
 ## 5. Performance
 
 - Profile before optimising. Measure before and after in **Release**, and put
-  both numbers in the commit message and the docs. `benchmarks/bench_*.cpp`
-  is where a measurement lives so it can be repeated.
+  both numbers in the commit message and the docs. A measurement that must be
+  repeatable lives as a benchmark beside its crate.
 - An optimisation that changes results is a bug. Where one culls work, add a
   test that the culled run finds exactly what the exhaustive one did.
 - Parallel code produces **identical** output whatever the thread count
-  (`katana::core::TaskPool`). Assert it.
+  (`katana_core::task_pool`). Assert it.
 
 ## 6. Commits
 
@@ -318,36 +314,46 @@ Outstanding: <what this deliberately does not do>
 
 Before handing back:
 
-1. Build Release and run the whole suite there.
-2. Confirm `build/release/bin/katana.exe` is newer than the sources you
-   changed. A stale executable still launches.
+1. Build Release and run the whole suite (`bash tools/build_visible.sh wsl`).
+2. Confirm the programs in `~/katana-build/<checkout>/cargo/release` are newer
+   than the sources you changed. A stale program still launches.
 3. Tell the owner how to run it, with sample data where that makes the
    feature visible:
-   - the window: `build/release/bin/katana.exe samples/site_plan`;
-   - the command line: `build/release/bin/katana_cli.exe -c "..."`.
-   - For a self-contained copy, run `cmake --build build/release --target bundle`,
-     then `build/release/dist/Katana/bin/katana.exe`.
+   - the window (in WSL, shown on the desktop through WSLg):
+     `~/katana-build/<checkout>/cargo/release/katana <copy of samples/site_plan>`;
+   - the command line: `.../cargo/release/katana_cli -c "..."`.
+   - Open a COPY of a sample: a session writes into the project it opens.
    - Samples are `samples/site_plan`, `samples/gis` and `samples/utilities`.
 4. **Say what to look at:** the menu item, the command, and what correct looks
    like.
-5. **Never launch the GUI detached or in the background.** A detached
-   `katana.exe` reports exit 139 when its parent shell is reaped, which looks
-   like a crash and is not one. Run it yourself only headless, under
-   `timeout`, with `QT_QPA_PLATFORM=offscreen`: `--screenshot`, `--command`,
-   `--dialog` and `--report` (`docs/headless.md`). Then read the PNG and check
-   it.
+5. **Never launch the window detached in Claude's shell.** Show it to the
+   owner in a console window of its own (`cmd.exe /c start ... wsl.exe ...`),
+   which the owner closes. Run it yourself only headless, under `timeout`:
+   `--screenshot`, `--command`, `--dialog` and `--report` (`docs/headless.md`).
+   Then read the PNG and check it.
 6. **Say plainly what is not yet reachable** in the window, the CLI or MCP
    (section 1).
 
-## 8. Parallel agents and worktrees
+## 8. Agents and worktrees
 
-Use parallel agents when a task splits into parts whose file sets do not
-overlap, each part can be judged on its own, and together they are more than
-a few minutes of work. Read-only sweeps (audits, reviews) are the clearest
-win.
+**Run at most four agents at a time - the owner's standing instruction
+(2026-11-15): "spawn 4 agents max".** It was two from 2026-11-14 and one from
+2026-11-12, after six agents running at once spent the account's limit in
+minutes and all six of a wave stopped mid-file. So:
+
+- At most FOUR agents are running at any moment, a read-only sweep included.
+  Start another only after one of the four has reported (or been stopped).
+- Work that splits into parts whose file sets do not overlap is still split,
+  each part with its own worktree and brief: the parts are run four at a time,
+  not all side by side.
+- An agent that stopped part way is resumed from where it stopped, not
+  started again.
+
+What follows says how each agent's part is set up, whichever order they run
+in.
 
 - **Put worktrees beside the checkout, in `Katana-wt/<name>`**, created from
-  the main checkout with `git worktree add -b <branch> ../Katana-wt/<name> main`.
+  the main checkout with `git worktree add -b <branch> ../Katana-wt/<name> <base>`.
   The path is relative to the checkout so that it holds on any machine, and
   the worktree folder is a sibling of the checkout, never inside it. Never put
   them under `.claude/`, which got wiped. When one is finished and merged,
@@ -356,19 +362,17 @@ win.
   folder is already gone.
   - The harness's `isolation: "worktree"` branches from `origin/main`, not
     local HEAD, so it misses unpushed commits.
-  - Each worktree builds in its own `build/release`.
+  - Each worktree builds in its own `~/katana-build/<worktree>/` in WSL.
 - **Give each agent a disjoint, named file set.** Any shared hotspot needs an
-  exact, small edit: `main_window.cpp`, the Survey menu, CMake source lists.
-  Test sources compiled into `tests/qt_widgets` and `benchmarks/qt` are
-  listed explicitly there, and a missing one is a link error.
-- **A new worktree lacks everything gitignored.** Copy `third_party/_cache` in
-  before configuring if the configure tries to download GoogleTest. Copy the
-  reference customisation in only when the work needs it, and never add those
-  files to git.
-- **Cap the parallelism** when several agents build at once (`-j 4` each:
-  `KATANA_BUILD_JOBS=4 bash tools/build_visible.sh ...`), or build only the
-  targets the part needs. Each worktree's run opens its own window, titled
-  with the worktree's folder.
+  exact, small edit: a crate's `lib.rs` (each agent adds its modules in a
+  commented block of its own, merged with `git merge-file --union`), the main
+  window's modules, `Cargo.toml` files (only the integrator adds a crate).
+- **Cap the parallelism** when several agents build at once
+  (`KATANA_BUILD_JOBS=4 bash tools/build_visible.sh ...`). Each worktree's run
+  opens its own window, titled with the worktree's folder.
+- **Agents read egui's and egui_dock's API from the fetched sources**
+  (`\\wsl.localhost\Ubuntu-24.04\root\.cargo\registry\src\...`), never from
+  memory: they change at every release.
 - **Ask agents for evidence**: what changed, which tests ran, the output.
   Then verify centrally, by building the merged result and running the WHOLE
   suite yourself.
@@ -388,7 +392,7 @@ file".
 
 These are kept on purpose:
 
-- the `.12da` archive format name, the `katana_archive12d` module, persisted
+- the `.12da` archive format name, the `katana_archive12d` crate, persisted
   `12d.*` property keys and format tokens such as the xml12d namespace;
 - the public **TfNSW Utility Schema**, which may be named in the subsurface
   utility tools (`docs/subsurface_utilities.md`, `samples/utilities/`, the
@@ -398,15 +402,16 @@ The original third-party reference files live gitignored on the owner's
 machine and are never installed or committed. The one file derived from them
 that is tracked is `resources/customisation/nsw.customisation.json`, the
 converted NSW built-in, committed on the owner's decision of 2026-10-08. The
-converter copies the libraries' notice into its `notice` member; the owner
+converter copied the libraries' notice into its `notice` member; the owner
 removed that text from the committed file by hand (two rows of dashes are all
-that is left of it), so the file is not what the converter writes. On
+that is left of it), so the file is not what the converter wrote. On
 2026-11-03 the owner stripped the notices from the reference copies too and
 had the test that converted them removed: the NSW built-in is the committed
 JSON file, and the legacy `.4d` files are no longer needed. Tracked
 tests, docs and fixtures still use invented names only, and quote counts, never
-the names or the notice, so the rule above holds for them. Why the file is tracked, and what that does and does
-not settle: `docs/customisation.md`, "Why the built-in is in the repository".
+the names or the notice, so the rule above holds for them. Why the file is
+tracked, and what that does and does not settle: `docs/customisation.md`, "Why
+the built-in is in the repository".
 
 ## 10. Honesty and leaving it better
 
@@ -432,44 +437,61 @@ the conversation.
 
 ## 11. Architecture quick reference
 
-A layer may include only its own headers and those of the layers
-`tools/check_layering.cmake` allows it. The `layering` test enforces this.
+Each layer is a crate, `rust/crates/katana_<layer>`, and may depend only on the
+layers `tools/check_layering.cmake`'s table allows it. The `rust_layering`
+test enforces this on the crates' `Cargo.toml` files.
 
 ```
-core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> cad -> app -> qt
+core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> cad -> app -> window
         geodesy, survey (on core + math)          archive12d, dxf (beside commands, no GDAL)
-        surveyio (survey + geometry; seen only by app and qt)
-        gis, pointcloud (GDAL/PDAL) -> interop (seen by app and qt)
-        gpu (under src/katana_qt, but with render's rule: never a Document)
+        surveyio (survey + geometry; seen only by app and window)
+        gis, pointcloud (GDAL/PDAL) -> interop (seen by app and window)
+        gpu (katana_gpu, with render's rule: never a Document)
 ```
+
+(The window crate is the table's `qt` row, its name from before the port.)
 
 - **`cad` may not see `interop` or `surveyio`.** Keeping GDAL and PDAL out of
-  the core is what lets it build with `-DKATANA_BUILD_IO=OFF`.
+  the core is what lets it build without them.
 - **`render` may not see `entity`.** The renderer consumes a `DrawList`.
-- **No third-party type in a public header.** GDAL, PDAL, PROJ, SQLite, curl
-  and Qt stay behind `src/`.
+- **No third-party type in a public API.** A third-party crate is used only in
+  the crate that adapts it, and never re-exported (the `rust_layering` test
+  checks it).
 - **`katana_app` is the headless session** that `katana_cli` and `katana_mcp`
-  share. The desktop window drives the same `CommandInterpreter`.
-- **Auto-update** is the `update` layer (core only, seen by `app` and `qt`) and
-  a fourth program, `katana_updater`; see `docs/update.md`.
-- **Text and units have one home each:** `core/text_encoding.hpp`,
-  `core/text.hpp` (locale-independent; never `std::isspace` or `strtod` on
-  file text) and `math/unit_ratio.hpp`. A real becomes text through
-  `core::formatExactReal`, never `std::to_string`: libc++ still pads that to
-  six decimals, so it passes on GCC and fails the clang builds
-  (`tools/check_float_to_string.py` finds one).
-- **Absent is not zero.** A missing height is `std::optional`, never a
-  placeholder number.
-- **The entity geometry variant is append-only.** Its index is the on-disk
-  kind byte. A new kind goes at the end, with a storage schema bump.
+  share. The desktop window drives the same command interpreter.
+- **Auto-update** is the `update` layer (core only, seen by `app` and the
+  window) and a fourth program, `katana_updater`; see `docs/update.md`.
+- **Text and units have one home each:** `katana_core::text_encoding`,
+  `katana_core::text` (locale-independent) and `katana_math::unit_ratio`. A
+  real becomes text through `katana_core::text::format_exact_real` and its
+  siblings, never `to_string`: Clippy refuses `ToString::to_string`
+  (`rust/clippy.toml`), and an integer is formatted with `format!`.
+- **Absent is not zero.** A missing height is an `Option`, never a placeholder
+  number.
+- **The entity geometry enum is append-only.** Its index is the on-disk kind
+  byte. A new kind goes at the end, with a storage schema bump.
 
 ## 12. Style
 
 - Follow the file you are editing: its comment density, naming and idiom.
 - Comments say **why**. The code already says what.
-- `Status` success is `return {};`.
+- `Status` success is `Ok(())`.
 - Entity ids are monotonic and never reused.
 - Layer names are `/`-separated paths (`design/surface/tin1`;
-  `include/katana/entity/layer_path.hpp`).
+  `rust/crates/katana_entity/src/layer_path.rs`).
 - Use British spelling in prose. In identifiers, use American spelling where
   the surrounding code does (`color`, `normalize`).
+- `#![deny(unsafe_code)]` everywhere but the named FFI, OS-call and SIMD
+  modules.
+
+## 13. The port's rules that still hold
+
+`docs/rust.md` records the port: the decisions, the waves, the toolchain, what
+differs from the C++ that was, and "Not done". The work is on branch
+`rust-port` (`../Katana-wt/rust-port`; agents in `../Katana-wt/rust-<slice>`)
+and reaches `main` only at a cut-over, with the owner.
+
+- **A test's expectation came from the C++'s test, copied, never
+  recomputed.** The twins keep them; section 4 holds for every change.
+- **A defect found goes under "Not done" in `docs/rust.md`** or the area's
+  document, with what it would take.

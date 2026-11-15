@@ -68,9 +68,13 @@ if(NOT EXISTS "${_script}")
     message(FATAL_ERROR "${_script} does not exist: configure the build first")
 endif()
 
-# Every `TYPE EXECUTABLE` rule of the top script and the scripts it includes,
-# in the order they are met. Followed through the `include(...)` lines CMake
-# wrote, not by searching the build tree: only what `cmake --install` would run.
+# Every `TYPE EXECUTABLE` and `TYPE PROGRAM` rule of the top script and the
+# scripts it includes, in the order they are met. Followed through the
+# `include(...)` lines CMake wrote, not by searching the build tree: only what
+# `cmake --install` would run. A program built by CMake is installed with
+# install(TARGETS), which CMake writes as TYPE EXECUTABLE; the programs cargo
+# builds are installed as files, with install(PROGRAMS) (cmake/KatanaPackaging.cmake),
+# which it writes as TYPE PROGRAM. Both are a program handed on.
 set(KATANA_INSTALLED_PROGRAMS katana katana_cli katana_mcp katana_updater)
 list(JOIN KATANA_INSTALLED_PROGRAMS ", " _allowed_names)
 set(_pending "${_script}")
@@ -83,12 +87,12 @@ while(_pending)
         continue()
     endif()
     list(APPEND _seen "${_current}")
-    file(STRINGS "${_current}" _lines REGEX "include[(]\"|TYPE EXECUTABLE|install[.]json")
+    file(STRINGS "${_current}" _lines REGEX "include[(]\"|TYPE EXECUTABLE|TYPE PROGRAM|install[.]json")
     foreach(_line IN LISTS _lines)
         if(_line MATCHES "^[ \t]*include[(]\"([^\"]+)\"[)]")
             list(APPEND _pending "${CMAKE_MATCH_1}")
-        elseif(_line MATCHES " TYPE EXECUTABLE .*FILES (\"[^)]*)")
-            string(REGEX MATCHALL "\"[^\"]+\"" _quoted "${CMAKE_MATCH_1}")
+        elseif(_line MATCHES " TYPE (EXECUTABLE|PROGRAM) .*FILES (\"[^)]*)")
+            string(REGEX MATCHALL "\"[^\"]+\"" _quoted "${CMAKE_MATCH_2}")
             foreach(_path IN LISTS _quoted)
                 string(REPLACE "\"" "" _path "${_path}")
                 get_filename_component(_program "${_path}" NAME_WE)
@@ -129,7 +133,9 @@ foreach(_rule IN LISTS _rules)
             continue()
         endif()
         file(RELATIVE_PATH _rel "${_root}" "${_path}")
-        if(_rel MATCHES "^build/")
+        # cargo's own target folder in a Windows checkout (rust/target) holds
+        # built programs too.
+        if(_rel MATCHES "^(build|rust/target)/")
             continue()
         endif()
         math(EXPR _checked "${_checked} + 1")

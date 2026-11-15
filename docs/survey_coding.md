@@ -1,7 +1,7 @@
 # Survey coding: survey codes, linestyles and symbols
 
-`PLAN.MD` 20.3 (the plan has since been removed; its section numbers survive
-here as history). How a surveyor's field code becomes a drawing, and the
+Section 20.3 of the plan (the plan has since been removed; its section
+numbers survive here as history). How a surveyor's field code becomes a drawing, and the
 decisions of 2026-09-23 (D1-D9, tabled in `docs/cad.md`) that govern it.
 
 A surveyor shoots a point and types a code. That code is not a label - it is
@@ -11,7 +11,7 @@ point, the linestyle it is drawn with, or the symbol put at each point, and
 the attributes it carries. A code such as `FE01` can mean a fence: layer
 `FENCES`, joined into a line, drawn with the `TEST Fence` linestyle.
 
-A customisation is ONE value, `entity::Customisation`, and ONE file in the
+A customisation is ONE value, `katana_entity::Customisation`, and ONE file in the
 Katana customisation format (JSON; `docs/customisation.md` has the format and
 the verbs). It holds three kinds of thing, which are useless apart:
 
@@ -54,7 +54,7 @@ libraries have one grammar, one reader and one type. What separates a symbol fro
 a linestyle is a single line in the definition, `mode vertex`: put the strokes
 at each vertex of a string rather than running them along it.
 
-So `entity::LineStyle` is both. Katana already half-knew this -
+So `katana_entity::LineStyle` is both. Katana already half-knew this -
 `Style::symbol` and `Style::linetype` have always been two names on one
 record, with the comment "the style of a point and the style of a line are
 one thing".
@@ -70,7 +70,7 @@ library, one in the linestyle library), while the symbol library alone holds
 only **48** are `mode vertex` - every one of the 193 comes from the symbol
 library. A symbol browser built on `atVertices` would have hidden three
 quarters of the symbols the mapfile actually uses. So the rule (the lead's
-decision D3, `cad::classifyDefinition` in `include/katana/cad/style_catalogue.hpp`)
+decision D3, `katana_cad::style_catalogue::classify_definition` in `rust/crates/katana_cad/src/style_catalogue.rs`)
 is that a definition is offered as a SYMBOL when any of these holds:
 
 - it is `mode vertex`;
@@ -85,7 +85,7 @@ is that a definition is offered as a SYMBOL when any of these holds:
   customisation holds both kinds under one name, so a name can no longer say
   which. The style library reader, which does read one kind a file, sets the
   flag by that file-name rule; the catalogue and the lint read the flag
-  (`cad::classifyDefinition`, `SymbolNotSymbolCapable`).
+  (`katana_cad::style_catalogue::classify_definition`, `SymbolNotSymbolCapable`).
 
 It is offered as a LINESTYLE when it is not `mode vertex`, so a definition
 can be both, and `DefinitionKind` keeps each reason so a browser can say why
@@ -93,14 +93,14 @@ a definition is listed where it is. The counts both front ends print are D3's
 too: CUSTOMISE says "792 linestyle and symbol definitions in 71 groups: 472
 offered as symbols, 637 as linestyles (one definition can be both)", and the
 window's log "792 definitions (472 symbols)", and Settings' Symbols row, counting the library entries
-`cad::symbolChoices` offers. They used to count `mode vertex` alone - "157 of
+`katana_cad::style_catalogue::symbol_choices` offers. They used to count `mode vertex` alone - "157 of
 them symbols" - which is not what a symbol is.
 
 ## Where the pieces live, and why
 
 | Piece | Layer | Why there |
 |---|---|---|
-| `entity::LineStyle`, `entity::StyleLibrary`, `entity::Customisation` and its reader and writer | `entity` | the layers need them and cannot all see each other: `commands` applies a code, `cad` draws a definition and keeps the session's customisation, `app` and the window run the verbs |
+| `katana_entity::LineStyle`, `katana_entity::StyleLibrary`, `katana_entity::Customisation` and its reader and writer | `entity` | the layers need them and cannot all see each other: `commands` applies a code, `cad` draws a definition and keeps the session's customisation, `app` and the window run the verbs |
 | the readers and writers of the older formats | `archive12d`, `legacy/` | they share the archive reader's encoding detection and lexer, so they are that module's directory - but a library of their own, `katana_legacy_customisation`, which only the converter and their tests link ("The legacy formats the converter reads") |
 
 **A library is not part of a Model and is not saved inside a project.** That
@@ -130,9 +130,9 @@ customisation ever does spell one differently it will say so rather than draw
 the wrong mark.
 
 The rule has two halves since the managers' foundations were built (decision
-D3): **storage never folds case, a search always does.** `cad::filterChoices`
-(the linetype and symbol pickers) and `cad::codeTableRowMatches` (CODE
-LIST's filter) match a substring with case ignored, and `cad::explainCode`
+D3): **storage never folds case, a search always does.** `katana_cad::style_catalogue::filter_choices`
+(the linetype and symbol pickers) and `katana_cad::code_table::code_table_row_matches` (CODE
+LIST's filter) match a substring with case ignored, and `katana_cad::code_table::explain_code`
 reports a key the code would have met but for its case or surrounding blanks
 (`NearMissKind`) - the only way "wm01" getting nothing from the rule for
 `WM*` is ever explained, since matching itself is byte for byte.
@@ -179,10 +179,10 @@ the map by its most specific key (`SurveyMatchKind`: `Exact`, `Prefix`,
 true only when a key more specific than `*` matched, or the combination names
 a model, a linestyle or a symbol. A code only `*` answers is FALLBACK-ONLY: its
 `*` attributes are still applied - that rule does say every code gets them -
-but it is counted in `SurveyCodingReport::fallbackOnly` and listed in
-`fallbackOnlyCodes`, apart from both the matched and the unmatched codes.
+but it is counted in `SurveyCodingReport::fallback_only` and listed in
+`fallback_only_codes`, apart from both the matched and the unmatched codes.
 Linework uses the same word: a string name only `*` answers is its own key
-with no number (`cad::splitStringName`).
+with no number (`katana_cad::linework::split_string_name`).
 
 **A rule's identity is its index**, and its index is also its precedence
 (among rules of equal specificity the earlier wins). So the map is edited by
@@ -190,17 +190,17 @@ index - `SurveyMap::at`, `replace`, `remove`, `insert`, `move` - each refusing
 a rule `validate` refuses (a key with surrounding blanks, which can match
 nothing a surveyor types; a model that is not a valid layer path) and then
 leaving the map as it was. Every edit, `add` included, invalidates the rule
-pointers `match` handed out and the indices `matchIndices` did; anything
-cached keys on `cad::Document::surveyMapGeneration()`, never on a
-`SurveyRule*`. Lookup is indexed by key - one hash probe for the exact key and
+pointers `match` handed out and the indices `match_indices` did; anything
+cached keys on `Document::survey_map_generation()`, never on a reference to
+a `SurveyRule`. Lookup is indexed by key - one hash probe for the exact key and
 one per prefix length of the code - where it used to test every rule: 1,624
 rules against 20,000 points was 32 million key comparisons.
 
 ## From a definition to geometry
 
-`cad::styleDrawing` turns a definition into polylines and texts in model
+`katana_cad::style_drawing::style_drawing` turns a definition into polylines and texts in model
 coordinates, so the viewport, the plotter and a preview all paint the same
-thing - the arrangement `cad::symbolStrokes` already had, for the same reason.
+thing - the arrangement `katana_cad::symbols::symbol_strokes` already had, for the same reason.
 
 The definition decides how it is placed, not the caller:
 
@@ -224,8 +224,8 @@ vertex has two directions to choose from. It takes the one it is about to be
 drawn along. This is arbitrary but has to be decided, so it is decided in one
 place and stated in a test.
 
-**A two-point style is scaled equally in both axes.** The file's `stretch_mode`
-and `cycle_mode` are kept but not acted on, because no documentation
+**A two-point style is scaled equally in both axes.** The file's `stretchMode`
+and `cycleMode` are kept but not acted on, because no documentation
 available here says what their values mean. A similarity rather than an
 independent scale per axis means a doorway stretched across a wider opening
 is still a doorway; shearing it would be a mistake that looks like a feature.
@@ -236,7 +236,7 @@ instances. This paragraph used to say the pattern was capped at 20,000 "and
 what comes back is still a drawing": it was a drawing of the first 20,000
 repeats, the rest of the line drew nothing - the viewport had already skipped
 the plain line - and nothing said so (audit CAD-04). The budget is now
-all-or-nothing, as `forEachDash`'s is: over it, `layLinestyle` lays nothing
+all-or-nothing, as `for_each_dash`'s is: over it, `lay_linestyle` lays nothing
 and says `OverBudget`, and the caller draws the plain line. A caller that can
 see only part of the line passes the visible box and gets only the repeats
 that can reach it, each where it falls on the WHOLE line; `docs/cad.md`
@@ -257,20 +257,20 @@ The check was not simply deleted, because catching a typo is worth something:
 
 | Where | What it does | Why |
 |---|---|---|
-| `entity::validate(Style)` | accepts any name that is valid UTF-8 | a project can be opened before its library is loaded, and a 12da import brings names of its own |
+| `katana_entity::validate()` | accepts any name that is valid UTF-8 | a project can be opened before its library is loaded, and a 12da import brings names of its own |
 | the `STYLE SET ... symbol` command | refuses a name that is neither built in nor in the loaded library | a person typing a name should be told about a typo, which is the courtesy the `hatch` field already paid |
 
-`cad::Document` carries the loaded library and mapfile, and `definitionFor`
+`katana_cad::Document` carries the loaded library and mapfile, and `definition_for`
 is the single place a name is looked up. What a name then DRAWS - which of the
 library and the model's Linetype table wins, and what a symbol falls back to -
-is `cad/style_resolver.hpp`'s question, described in `docs/cad.md` ("What a
+is `rust/crates/katana_cad/src/style_resolver.rs`'s question, described in `docs/cad.md` ("What a
 style draws").
 
 **Both are session data, by decision (D1).** The library and the map live on
-`cad::Document`: not in the `Model`, not undoable, not saved in the project.
+`katana_cad::Document`: not in the `Model`, not undoable, not saved in the project.
 An editor of either works on a copy - a buffer the dialog owns - and commits
-it whole with `setStyleLibrary` or `setSurveyMap` (Apply; Revert throws the
-buffer away). Each bumps `libraryGeneration()` or `surveyMapGeneration()` and
+it whole with `set_style_library` or `set_survey_map` (Apply; Revert throws the
+buffer away). Each bumps `library_generation()` or `survey_map_generation()` and
 notifies the listeners, and an edit is kept by `CUSTOMISE KEEP`, which writes
 the session to the user's own customisation file (`docs/customisation.md`,
 "The verbs"), or by `CUSTOMISE EXPORT`, which writes it wherever it is told -
@@ -287,7 +287,7 @@ other.
 ## Loading a customisation
 
 `CUSTOMISE <file>...` reads each file as a Katana customisation
-(`entity::customisationFromJson`; `docs/customisation.md`, "The verbs") and
+(`katana_entity::customisation::customisation_from_json`; `docs/customisation.md`, "The verbs") and
 merges it into the session by the rule of "The merge" below; `CUSTOMISE
 REPLACE` replaces what each kind it brings. Every front end runs that one
 verb - the window's command line, `katana_cli` and `katana_mcp` alike. A file
@@ -310,18 +310,18 @@ older files, which do read one kind a file, still set the flag by that
 file-name rule, which is what the converter needs.
 
 **A file named twice in one load is read once**
-(`cad::distinctCustomisationFiles`): read twice, every rule of it would sit in
+(`katana_cad::customisation_record::distinct_customisation_files`): read twice, every rule of it would sit in
 the map twice, since both copies are the load's and the merge keeps them all.
 Each later naming is said - a `repeated file=<file>` record of the
 interpreter's `CUSTOMISE`. Two namings are one file when their absolute,
-lexically normal paths are equal or `std::filesystem::equivalent` says so; a
+lexically normal paths are equal or the file system says they are one file; a
 pair it cannot tell apart is read twice, which doubles rules but never drops a
 file. In the interpreter's family a keyword is the whole first word, so a
 quoted path that begins with "replace" is a path, and a file called exactly
 `replace` is written `./replace`.
 
 **The built-in's faults are said** (audit A12-06, fixed). Both front ends start
-through `cad::startCustomisation` over a built-in that is one Katana
+through `katana_cad::customisation_host::start_customisation` over a built-in that is one Katana
 customisation file, and say what was installed and what went wrong in lines of
 their own. The window's names the customisation and says built in or kept, and
 a problem is `Customisation: <problem>` (`docs/desktop.md`, "How the window
@@ -330,7 +330,7 @@ lines (`docs/customisation.md`, "What katana_cli and katana_mcp start with").
 
 ### What the project records
 
-`storage::ProjectMetadata::customisation` holds the names of the files a
+`katana_storage::ProjectMetadata::customisation` holds the names of the files a
 drawing was drawn with, in load order - a record, not a reference: nothing is
 loaded from it, and a name need not exist where the project is opened. It is
 stored as one `customisation` metadata key, the names separated by line feeds
@@ -338,26 +338,26 @@ stored as one `customisation` metadata key, the names separated by line feeds
 a name that is empty or holds a line break or a path separator. See
 `docs/model.md` for the metadata keys an older build keeps for a newer one.
 
-The rules are in `include/katana/cad/customisation_record.hpp`, and the
+The rules are in `rust/crates/katana_cad/src/customisation_record.rs`, and the
 Document applies them itself ("The customisation on the Document" below);
 each front end did, before, through lists of its own. A source reaches the
 record as a name and what it brought (`CustomisationSource`):
 
-- **Every load is recorded** (`recordCustomisationLoad`), the built-in's files
+- **Every load is recorded** (`record_customisation_load`), the built-in's files
   first. A source loaded again moves to the end; a Replace of a kind takes
   what the earlier sources brought of that kind, and a source left bringing
   neither kind goes.
-- **A save writes the record** (`customisationRecordToSave`): the loaded
+- **A save writes the record** (`customisation_record_to_save`): the loaded
   sources in load order - one that brought definitions alone only while some
   definition still comes from it - then any definition's `LineStyle::source`
   no loaded source accounts for, then the names the project already recorded
   that its OPEN found missing and no load has brought since
-  (`noteCustomisationLoaded`). This session cannot judge those, so saving
+  (`note_customisation_loaded`). This session cannot judge those, so saving
   must not forget them, or every later open anywhere would draw plain lines
   without a word. The save itself writes it, into what it saves
   (`Document::save`), so no front end does and a `SAVE` that cannot go ahead
   marks nothing modified.
-- **An open warns** (`customisationNotLoaded`): the recorded names that are
+- **An open warns** (`customisation_not_loaded`): the recorded names that are
   not loaded now, in the project's order, compared exactly. The window logs
   "Warning: this project was drawn with customisations that are not loaded:
   ... CUSTOMISE <file> loads a Katana customisation file." (it named Format >
@@ -367,7 +367,7 @@ record as a name and what it brought (`CustomisationSource`):
   (`NSW`, when the project was saved while that alternate was the session) is
   no file to load, so both add the verb that makes it the session -
   `CUSTOMISE BUILTIN NSW makes the built-in "NSW" the session`
-  (`cad::builtInAdviceFor`). What a project records of a Katana customisation is the
+  (`katana_cad::customisation_host::built_in_advice_for`). What a project records of a Katana customisation is the
   name it declares and not a file's. Not an error: the drawing opens and
   draws, and what a missing customisation defined draws as a plain line until
   it is loaded.
@@ -377,14 +377,14 @@ record as a name and what it brought (`CustomisationSource`):
 definitions - 4 linestyles and 25 symbols, scale bars and north points among
 them - lost the publisher's word from the front of their names. A project
 saved before records the earlier file names, and its styles can name an
-earlier definition. Both are known to `include/katana/cad/customisation_record.hpp`
-only by hash (`sourceNameHash`, FNV-1a), so no earlier name is spelt in the
+earlier definition. Both are known to `rust/crates/katana_cad/src/customisation_record.rs`
+only by hash (`source_name_hash`, FNV-1a), so no earlier name is spelt in the
 repository:
 
 - **An earlier file name is answered by what took its place**
-  (`builtinRenames`, `RenamedSource`): `customisationNotLoaded` reports it
+  (`builtin_renames`, `RenamedSource`): `customisation_not_loaded` reports it
   missing only when that is, so such a project opens without a warning
-  nobody could clear, and `noteCustomisationLoaded` - through the same helper,
+  nobody could clear, and `note_customisation_loaded` - through the same helper,
   so the two cannot disagree - clears it when a load brings it under its new
   name; the save then records the new name. One earlier name was a plain one
   a person's own file could have (`RenamedSource::distinctive` false): it is
@@ -395,10 +395,10 @@ repository:
   customisation they belonged to, NSW ("What a project records, now that the
   Document keeps it" below).
 - **An earlier definition name** is given its current one by
-  `definitionNameNow` (`builtinDefinitionRenames`), asked only after an exact
+  `definition_name_now` (`builtin_definition_renames`), asked only after an exact
   lookup missed, so a person's own definition that still has such a name is
-  the one found. Every drawing lookup asks it through `findDefinition`
-  (`style_resolver.cpp`): `resolveLinetype`, `resolveSymbol` and
+  the one found. Every drawing lookup asks it through `find_definition`
+  (`style_resolver.rs`): `resolve_linetype`, `resolve_symbol` and
   `DefinitionCache::find`, so a style saved naming an earlier definition
   draws that definition, on screen, on the plot and in every preview.
 
@@ -407,10 +407,10 @@ names; nothing on this side can change that.
 
 Fixed (2026-10-06): a save that has somewhere to go but still fails (an I/O
 error, a directory `ProjectStore::create` refuses) used to leave the record
-written and the drawing marked modified, because `Document::setMetadata`
+written and the drawing marked modified, because `Document::set_metadata`
 cannot be taken back. The save now writes the record into what it saves and
 commits it to the metadata only on success
-(`CustomisationState.ASaveThatFailsPartWayLeavesTheRecordAndTheDrawingAsTheyWere`
+(`customisation_state::a_save_that_fails_part_way_leaves_the_record_and_the_drawing_as_they_were`
 makes the store refuse a save and finds the metadata, the modified flag and
 the project untouched).
 
@@ -423,19 +423,19 @@ made at the install rather than at the load.
 
 Closed (2026-10-07): **every front end hands over a host, so the built-in's
 earlier names are answered.** The Document answered them with the name its
-host's built-in declared (`CustomisationState::builtIn`), and both the
+host's built-in declared (`CustomisationState::built_in`), and both the
 session of `katana_cli` and `katana_mcp` and the window
-(`MainWindow::loadDefaultCustomisation`) start through `startCustomisation`:
+(`MainWindow::load_default_customisation`) start through `startCustomisation`:
 a project recording the earlier names opened without a warning wherever the
 built-in was installed. (2026-10-08, several built-ins: the names are NSW's and
-the Document answers them with `NSW`, `kEarlierFileNamesBelongTo`, whichever
+the Document answers them with `NSW`, `EARLIER_FILE_NAMES_BELONG_TO`, whichever
 built-in its host has; see "The built-in's earlier names" below.) The table the front ends used before answered each
 first name with one of the four general file names, and while one of them
 still used it a project recording the four first names opened there with a
 warning of four missing files. The tables are held to the built-in by
-`BuiltInRenames.*` (`tests/cad/customisation/test_builtin_renames.cpp`): the
+`built_in_renames` (`rust/crates/katana_cad/tests/customisation/builtin_renames.rs`): the
 eight file renames answer with the NAME the table is given, and with no name with
-`NSW`, in every build (`CustomisationState.TheEarlierFileNamesAreAnsweredByNswAndByNoOtherBuiltIn`
+`NSW`, in every build (`customisation_state::the_earlier_file_names_are_answered_by_nsw_and_by_no_other_built_in`
 holds that a session whose built-in is another does not answer them) - and every
 one of the 29 definition renames is defined by the NSW built-in, where the build
 compiled it in, under the name it has now.
@@ -451,14 +451,14 @@ their tests.
 
 Two more things the front ends do differently since the Document took the
 record over, both meant: `NEW` clears the names the last open found missing
-(they were the old project's), and EVERY `Document::save` and `saveAs` writes
+(they were the old project's), and EVERY `Document::save` and `save_as` writes
 the record - a script, a test or a tool that saves a Document, where only a
 front end's own Save and typed `SAVE` did.
 
 ## The customisation on the Document: state, merge, start-up
 
 (2026-10-06.) The Katana customisation format (`docs/customisation.md`) made a
-customisation ONE value, `entity::Customisation`. This is what `cad` does with
+customisation ONE value, `katana_entity::Customisation`. This is what `cad` does with
 one: where a session's customisation lives, how another is merged into it, and
 what a session starts with. **Every front end stands on it** (2026-10-07):
 the shared `CUSTOMISE` verb (`docs/customisation.md`, "The verbs"), the
@@ -473,8 +473,8 @@ readers are reached now only by their own tests.
 
 The library and the survey map were all a Document held; each front end kept
 the rest in lists of its own, and a verb in the shared interpreter can reach
-neither. `Document::customisationState()`
-(`include/katana/cad/customisation_state.hpp`) now holds everything else the
+neither. `Document::customisation_state()`
+(`rust/crates/katana_cad/src/customisation_state.rs`) now holds everything else the
 session knows of its customisation:
 
 | Member | What it is |
@@ -487,19 +487,19 @@ session knows of its customisation:
 | `linework` | the linework control codes - the defaults until a customisation or a setter says otherwise |
 | `automation` | what is applied to survey data without being asked for |
 | `kept` | the session is what the next start would give |
-| `missingAtOpen` | the names the open project recorded that this session lacks |
+| `missing_at_open` | the names the open project recorded that this session lacks |
 | `builtIn` | the name the host's built-in declares, installed or not |
-| `startProblems`, `keptFromAnotherBuiltIn` | what the session's start found: what went wrong, a sentence each, and whether the kept customisation was made from another built-in than the host has ("What a session starts with") |
+| `start_problems`, `keptFromAnotherBuiltIn` | what the session's start found: what went wrong, a sentence each, and whether the kept customisation was made from another built-in than the host has ("What a session starts with") |
 
 It is session data as the library and the map are: not undoable, not in the
 project, kept across NEW and OPEN. **A default Document has none of it and
 installs none**; about thirty tests and `Session(nullptr)` rely on a Document
 that starts empty.
 
-- `installCustomisation(customisation, origin, kept)` installs a whole one in
+- `install_customisation(customisation, origin, kept)` installs a whole one in
   the session's place; `customisation()` gives the session back as one - what
   an export or a KEEP writes, and what a merge starts from. The two are
-  inverses, also through the file (`CustomisationState.TheSessionAsOneCustomisationInstallsBackAsTheSameSession`).
+  inverses, also through the file (`customisation_state::the_session_as_one_customisation_installs_back_as_the_same_session`).
   A customisation that lists no sources is its own one source. **One that says
   nothing of the linework codes or the switches installs the DEFAULTS**, not
   what the session had: an install takes the place of the whole session, and
@@ -511,7 +511,7 @@ that starts empty.
   kept the control codes and the switches it was asked to reset, while the
   state read `builtIn` and `kept`.
 - An install is refused, and nothing changes, for whatever would make the
-  session unfit to be kept or recorded (`customisationFaults`): its name, a
+  session unfit to be kept or recorded (`customisation_faults`): its name, a
   source's name or a definition's `source` that a project's record could not
   hold - the store refuses a name with a line break or a path separator, and
   every save of the session would then fail - linework codes `validate`
@@ -519,20 +519,20 @@ that starts empty.
   merge reports whole for each customisation of a load, so what a load is
   told and what an install refuses cannot come to differ. A customisation
   read from a file has passed all of it already; one built in code has not.
-- The raw `setStyleLibrary` / `setSurveyMap` are what an editor calls, and an
-  edit they are: origin `edited`, `kept` false. `setColourTable`,
-  `setLineworkCodes` and `setAutomation` are the same for their parts.
-- `DocumentChange::Customisation` is bit 18. It is outside `kDrawing` (a name
+- The raw `set_style_library` / `set_survey_map` are what an editor calls, and an
+  edit they are: origin `edited`, `kept` false. `set_colour_table`,
+  `set_linework_codes` and `set_automation` are the same for their parts.
+- `DocumentChange::Customisation` is bit 18. It is outside `DRAWING` (a name
   or a switch draws nothing) and no part of a Replaced drawing (the
   customisation is kept). What does change the drawing is reported with it: an
   install also names `StyleLibrary` and `SurveyMap`, a colour table
-  `StyleLibrary`. **A colour table bumps `libraryGeneration` too**, because a
+  `StyleLibrary`. **A colour table bumps `library_generation` too**, because a
   sprite or a thumbnail of a definition bakes in the colours its pens resolved
   to and is dropped only on that counter.
 - The raw setters still notify EXACTLY what they did
-  (`DocumentChanges.MetadataLibraryAndSurveyMapEachReportTheirOwnPart` pins it),
+  (`document_changes::metadata_library_and_survey_map_each_report_their_own_part` pins it),
   although they now also mark the origin. A panel showing the origin compares
-  `customisationGeneration()`, which every change of the state moves. Rejected:
+  `customisation_generation()`, which every change of the state moves. Rejected:
   a second notification from the setter - every plan view repaints on each.
 
 **Rejected: deriving `kept` from the origin.** A reset to the built-in while a
@@ -544,19 +544,19 @@ of its own, set by whoever knows.
 Five call sites in two front ends wrote the record before a save and worked
 out what was missing after an open. That logic is the Document's:
 
-- **`Document::open` works out `missingAtOpen`** (`customisationNotLoaded`),
+- **`Document::open` works out `missing_at_open`** (`customisation_not_loaded`),
   and reports `Customisation` when it changed. The front end says the warning
-  in its own words from that list. **`newDocument` clears it** - left standing,
+  in its own words from that list. **`new_document` clears it** - left standing,
   a bare `CUSTOMISE` after OPEN then NEW went on naming the old project's
   files.
-- **A save writes the record INTO WHAT IT SAVES** (`customisationRecordToSave`
-  in `Document::saveContents`) and `metadata()` reads it back only once the
-  save has succeeded. It no longer goes through `setMetadata`, which marks the
+- **A save writes the record INTO WHAT IT SAVES** (`customisation_record_to_save`
+  in `Document::save_contents`) and `metadata()` reads it back only once the
+  save has succeeded. It no longer goes through `set_metadata`, which marks the
   drawing modified - so the old trouble is gone at the root: a `SAVE` that
   cannot go ahead leaves an untouched drawing unmodified, and a save that
-  fails part way leaves the metadata as it was. `typedSaveHasDestination`
+  fails part way leaves the metadata as it was. `typed_save_has_destination`
   stays for the reference layers, which a front end still writes through
-  `setMetadata`.
+  `set_metadata`.
 - **A source carries two flags** (`CustomisationSource`: `definitions`,
   `rules`) where it had one `library` bool. A style library brought
   definitions and a survey code file rules, but one Katana customisation
@@ -567,7 +567,7 @@ out what was missing after an open. That logic is the Document's:
   `CustomisationSource` is the very entry a file keeps in its `"sources"`, so
   the session's load record is written and read back without a second type.
 - **The built-in's earlier names are answered by the name of the customisation
-  they belonged to, NSW.** `builtinRenames(builtIn)` gives eight entries in two sets: the four first
+  they belonged to, NSW.** `builtin_renames(builtIn)` gives eight entries in two sets: the four first
   file names, known by hash, and the four general names the files had next
   (`linestyles.4d`, `survey_codes.mapfile`, `survey_codes_names.mapfile`,
   `symbols.4d`). The general names are all PLAIN - anyone's own files might
@@ -576,13 +576,13 @@ out what was missing after an open. That logic is the Document's:
   `symbols.4d` recorded alone is still that person's file, missing when it is.
   The names were NSW's four files, and a program has several built-ins now
   with another for its default, so the answer is NSW's name
-  (`kEarlierFileNamesBelongTo`) and no other's: the Document asks for the table
-  with none (`builtinRenames()`), and does not pass its host's built-in. It did,
+  (`EARLIER_FILE_NAMES_BELONG_TO`) and no other's: the Document asks for the table
+  with none (`builtin_renames()`), and does not pass its host's built-in. It did,
   while NSW was the only built-in; under Katana Standard that answered a project
   drawn with NSW's linestyles as having its customisation loaded. Loaded under
   another name the four stay missing, and `CUSTOMISE BUILTIN NSW` clears them.
-  `customisationNotLoaded`,
-  `noteCustomisationLoaded` and `customisationRecordToSave` take the table
+  `customisation_not_loaded`,
+  `note_customisation_loaded` and `customisation_record_to_save` take the table
   they are given and no longer have a form that takes none: it answered with
   whatever this program had compiled in, which is not the built-in of a run
   the seam gave another, and it made a test's answer a matter of which
@@ -601,20 +601,20 @@ name; hence the set.
 
 ### The merge
 
-`cad::mergeCustomisation(current, loaded, LoadMode)`
-(`include/katana/cad/customisation_merge.hpp`) is the rule of "A load goes ON
-TOP of what is loaded" above, unchanged, over `entity::Customisation`: the
+`katana_cad::merge_customisation()`
+(`rust/crates/katana_cad/src/customisation_merge.rs`) is the rule of "A load goes ON
+TOP of what is loaded" above, unchanged, over `katana_entity::Customisation`: the
 session and one or more loaded customisations in, what to install and a
 report out. It is the only merge there is: the older one, over the style library
-and the map as two things (`archive12d::mergeCustomisation`), is gone with the
+and the map as two things (`katana_cad::customisation_merge::merge_customisation`), is gone with the
 front ends that used it. The twelve tests that came with that one were moved
 here and keep their expectations
-(`tests/cad/customisation/test_customisation_merge.cpp`).
+(`rust/crates/katana_cad/tests/custedit/customisation_merge.rs`).
 
 What one customisation holds beyond definitions and rules is merged by what
 it is:
 
-- **Colours by name**, compared as colour names are (`entity::foldColourName`):
+- **Colours by name**, compared as colour names are (`katana_entity::colour_names::fold_colour_name`):
   a loaded name takes the place of the session's, in both modes. A colour is
   no kind a Replace takes the place of.
 - **Linework codes and automation only when the loaded customisation SAYS
@@ -642,9 +642,9 @@ it is:
 
 ### The built-in, and the seam
 
-Katana customisation files are compiled into `katana_cad` with `#embed`
-(`src/katana_cad/customisation/builtin_customisation.cpp`), as the plot frame
-is: one is the default and the others alternates (`docs/customisation.md`, "The
+Katana customisation files are compiled into `katana_cad` with `include_bytes!`
+(its build script, `rust/crates/katana_cad/build.rs`, writes the table), as the
+plot frame is: one is the default and the others alternates (`docs/customisation.md`, "The
 built-in"). The files are in the repository - the default is Katana's own but
 for its survey code keys, which are the alternate's, and the alternate is
 third-party material, tracked on the owner's decision of
@@ -652,33 +652,31 @@ third-party material, tracked on the owner's decision of
 path names no file does not offer it, and that is a state the program runs in
 rather than a fault:
 
-- `KATANA_BUILTIN_CUSTOMISATION` (a CMake FILEPATH,
-  `resources/customisation/katana-standard.customisation.json` by default)
-  names the default file, and `KATANA_ALTERNATE_CUSTOMISATIONS` (a `;` list,
-  the NSW file by default) the others.
-  Present, it is embedded; absent, the program has no built-in of that name. Whether it is
-  there is asked of the file (`if(EXISTS ... AND NOT IS_DIRECTORY ...)`), not
-  of a glob: to a glob the path is a pattern, so a checkout under a directory
-  with a `[` in its name had no built-in though the file was there, and a
-  directory of that name was taken for the file. A `CONFIGURE_DEPENDS` glob is
-  still there, over the path with its pattern characters bracketed, for the
-  one thing it is for: a file put there after the configure is picked up by
-  the next build.
-- `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes its absence a configure
-  error, to guard a release job against the tracked file having been deleted or
+- The default file is the build script's `DEFAULT`
+  (`resources/customisation/katana-standard.customisation.json`), and the
+  others are `KATANA_ALTERNATE_CUSTOMISATIONS` (a `;` list in cargo's
+  environment; the build script's `ALTERNATES`, the NSW file, when unset).
+  Present, a file is embedded; absent, the program has no built-in of that
+  name. Whether it is there is asked of the file itself - it exists and is not
+  a directory - never of a glob: to the C++ build's glob the path was a
+  pattern, so a checkout under a directory with a `[` in its name had no
+  built-in though the file was there, and a directory of that name was taken
+  for the file.
+- `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=1` in the build's environment makes
+  its absence a build error, to guard a release job against the tracked file having been deleted or
   a path being wrong, which would ship a program that draws plain lines. The
-  configure checks that the file is THERE; that it READS is a test's to say
-  (`CustomisationHost.TheCompiledInCustomisationIsReadOrThereIsNoneAndNeverOneThatDidNotRead`),
+  build checks that the file is THERE; that it READS is a test's to say
+  (`customisation_host::the_compiled_in_customisation_is_read_or_there_is_none_and_never_one_that_did_not_read`),
   which fails a build whose compiled-in file is not a customisation.
-- `compiledInCustomisation()` parses it once, at the first call. One that does
+- `compiled_in_customisation()` parses it once, at the first call. One that does
   not parse is REPORTED, never thrown: the program starts and says so.
 
 **The seam.** The environment variable `KATANA_BUILTIN_CUSTOMISATION` says
 what "the built-in" is for one run, whatever was compiled in: unset, the
 compiled-in default; `none`, no built-in; the NAME of a compiled-in built-in
 (`NSW`), that one; anything else, that Katana customisation FILE is the
-built-in. It is read in one place, `builtInCustomisation()` -
-which is what a front end asks for its host, not `compiledInCustomisation()`.
+built-in. It is read in one place, `built_in_customisation()` -
+which is what a front end asks for its host, not `compiled_in_customisation()`.
 It exists so that a test of a program is the same test on a machine whose
 build has the built-in and on one whose build has not. A file the seam names
 that does not read gives NO built-in and the reason - never the compiled-in
@@ -686,35 +684,33 @@ one in its place, which would pass a test that named a fixture and was given
 something else.
 
 What the variable's value MEANS is a function of its own,
-`builtInCustomisationFor(seam, compiledIn, named)`, so that the rule is tested
+`built_in_customisation_for(seam, compiledIn, named)`, so that the rule is tested
 against a stand-in for the compiled-in customisation: tested only through
 the environment, "whatever is compiled in" could not fail in a build that
 compiled nothing in, which is a build made without the file. The variable is read
-through `core::environmentVariable`, never `getenv`: on Windows that gives
+through `katana_core::path_text::environment_variable`, never `getenv`: on Windows that gives
 the bytes of the ANSI code page, in which a file named outside the code page
 is a file named with `?` and is not found (`docs/customisation.md`, "What
 katana_cli and katana_mcp start with"). The file is then named as text,
-through `core::pathFromUtf8`: text handed to `builtInCustomisationFor` may
-still be narrow bytes that are not UTF-8, and a `std::filesystem::path` built
-straight from those throws at the first of them - out of a function that
-promises to report and never throw.
+through `katana_core::path_text::path_from_utf8`: text handed to `built_in_customisation_for` may
+still be narrow bytes that are not UTF-8, and the C++ build's
+`std::filesystem::path`, built straight from those, threw at the first of
+them - out of a function that promises to report and never throw.
 
 The embedding the program used before - four legacy files turned into a byte
 array by a build script and read at start-up by `katana_archive12d` - is gone,
 with the script, the generated source and the cache variable that named the
-folder. Nothing in `katana`, `katana_cli` or `katana_mcp` links the readers of
-the older formats, and two checks say so: the test
-`the_programs_link_none_of_the_legacy_customisation_readers` walks the link
-closure of the three programs at configure time, and the install rules
-(`tools/check_install_rules.cmake`) allow those three programs, and the update
-helper `katana_updater`, and no other.
-Each is proved on a fixture, the first on a library two targets down linked
-PRIVATELY and the second on an install script that installs the converter.
-`benchmarks/qt/bench_plan_paint.cpp` takes the compiled-in customisation's
-library when there is one and otherwise measures with the standard shapes.
+folder. The readers of the older formats were never ported to Rust (the
+owner's decision, `docs/rust.md`), so no program can link them; in the C++
+build a configure-time test walked the three programs' link closure to prove
+it. The install rules (`tools/check_install_rules.cmake`) allow `katana`,
+`katana_cli`, `katana_mcp` and the update helper `katana_updater`, and no
+other. The C++ build's `bench_plan_paint` benchmark took the compiled-in
+customisation's library when there was one and otherwise measured with the
+standard shapes.
 
-The file that is COMPILED IN is held to its census: `BuiltInCensus.*`
-(`tests/cad/customisation/test_builtin_census.cpp`) gives, for the compiled-in
+The file that is COMPILED IN is held to its census: `built_in_census`
+(`rust/crates/katana_cad/tests/customisation/builtin_census.rs`) gives, for the compiled-in
 built-in named "NSW" (the reference customisation, an alternate), the figures that were counted by
 `tools/customisation_census.py` over the compiled-in file and by
 `tools/reference_census.py` over the four legacy files it was converted from -
@@ -730,7 +726,7 @@ which are on one machine.
 ### What a session starts with
 
 A front end hands over a `CustomisationHost`
-(`include/katana/cad/customisation_host.hpp`): the built-in, which a build may
+(`rust/crates/katana_cad/src/customisation_host.rs`): the built-in, which a build may
 not have, and the path of the file the user keeps their own in, which a front
 end may not have. `startCustomisation(document, host)` installs the kept file
 when it exists and reads (origin `kept`), else the built-in (origin
@@ -752,10 +748,10 @@ what was installed, with counts, and every problem in a sentence.
   codes and the switches included: starting over a changed session - which is
   what a reset to the built-in is - leaves the session a new Document started
   with the same host has
-  (`CustomisationStart.StartingOverAChangedSessionGivesTheSessionAFreshStartGives`).
+  (`customisation_start::starting_over_a_changed_session_gives_the_session_a_fresh_start_gives`).
 - What a start found is left on the Document as well as handed back: the
   report's problems and `keptFromAnotherBuiltIn`
-  (`CustomisationState::startProblems`, `Document::setCustomisationStart`),
+  (`CustomisationState::start_problems`, `Document::set_customisation_start`),
   which `CUSTOMISE JSON` gives as `start` for as long as the session runs
   (`docs/customisation.md`, "The replies"). A front end says them once, where
   its errors go, and a client of `katana_mcp` is never shown that.
@@ -763,35 +759,35 @@ what was installed, with counts, and every problem in a sentence.
 
 Reading a file's bytes, turning typed text into a path and reading an
 environment variable that names a file are core's
-(`include/katana/core/path_text.hpp`): the UTF-8 path helper was private to
-the sheet verbs, with a second copy in the utility verbs. `ifc::pathFromUtf8`
+(`rust/crates/katana_core/src/path_text.rs`): the UTF-8 path helper was private to
+the sheet verbs, with a second copy in the utility verbs. `katana_ifc::front_end::path_from_utf8`
 is core's now too, under the name its callers use; its own conversion threw
 on a name that is not UTF-8. What the standard library does with narrow bytes
 was probed rather than assumed (GCC 16.2, 2026-10-06): `std::filesystem::path`
 converts them as UTF-8 and throws at the first byte that is not. Not done:
-`src/katana_surveyio/reader.cpp` keeps a private copy of the old conversion
+`rust/crates/katana_surveyio/src/reader.rs` keeps a private copy of the old conversion
 for a file named inside a field file. Whether a name that is not UTF-8 can
 reach it was not looked into, and it was left as it is.
 
 ### One resolver for a colour name
 
-`cad::resolveColour(document, name)` (`include/katana/cad/colour_lookup.hpp`)
+`katana_cad::resolve_colour()` (`rust/crates/katana_cad/src/colour_lookup.rs`)
 is the Document's customisation table, then the standard names;
-`colourLookup(document)` is the same as a function, in the shape
-`SurveyCodingOptions::colourOf` and `ColourLookup` take. It asks the Document
+`colour_lookup(document)` is the same as a function, in the shape
+`SurveyCodingOptions::colour_of` and `ColourLookup` take. It asks the Document
 at each call, so it follows a table installed later. **A caller that passes no
 lookup still gets no colours** - it is offered, not applied behind anyone's
-back, and `ColourLookup.SurveyCodingGivenNoLookupStillLeavesColoursAloneWhateverTheDocumentKnows`
+back, and `colour_lookup::survey_coding_given_no_lookup_still_leaves_colours_alone_whatever_the_document_knows`
 holds that.
 
 ## Drawing it
 
 The viewport, the plot and every preview ask one resolver
-(`cad/style_resolver.hpp`; `docs/cad.md`, "What a style draws"):
+(`rust/crates/katana_cad/src/style_resolver.rs`; `docs/cad.md`, "What a style draws"):
 
 - a point whose style names a symbol is drawn with the library definition of
   that name, else with the built-in shape of that name, else with the shape
-  the name suggests (`entity::builtInSymbolFor`), at the style's size and
+  the name suggests (`katana_entity::tables::built_in_symbol_for`), at the style's size and
   UNROTATED: a mapfile symbol's `rotation`, `offset` and `raise` are read into
   `SurveySymbol` and not yet applied, and `Style` has no rotation field to
   carry one (a schema change, deferred under D6);
@@ -809,7 +805,7 @@ The viewport, the plot and every preview ask one resolver
   for a symbol string - is a plain line with the symbols on it;
 - a `colour` command inside a definition changes the pen for the strokes that
   follow it, `view_colour` means the entity's own colour, and on paper a white
-  library pen prints black (decision D7, `cad::paperColour`).
+  library pen prints black (decision D7, `katana_cad::plot::paper_colour`).
 
 ## A library linestyle IS the line
 
@@ -845,7 +841,7 @@ against the next and the pattern was solid even after the first fix. The pen
 extent now includes bare moves, and `StyleDrawing.ATrailingMoveIsTheGap...`
 is the test.
 
-**A millimetre is not a pixel.** `paperScale` treated one plot millimetre as
+**A millimetre is not a pixel.** `paper_scale` treated one plot millimetre as
 one pixel, making every paper linestyle about four times too small: a fence
 style's ticks came out a pixel tall and vanished into the line. It is now a
 millimetre of screen, from the widget's own DPI.
@@ -858,7 +854,7 @@ because the 12da import was never connected to them:
 | What the import did | Why nothing drew |
 |---|---|
 | set `Style::name` to the archive's linestyle name but left `Style::linetype` as `"continuous"` | the name reached nowhere a renderer looks |
-| stored `builtInSymbolFor(name)` instead of the name - "TEST Manhole Cover" became "manhole" | the 473 symbols in a loaded library could never be matched |
+| stored `built_in_symbol_for(name)` instead of the name - "TEST Manhole Cover" became "manhole" | the 473 symbols in a loaded library could never be matched |
 | put a survey code nowhere called "code" - a 12da carries it as the string NAME | `CODE` found nothing to apply |
 
 All three are fixed: the import keeps the REAL names the archive gives, the guess at a
@@ -885,21 +881,21 @@ actually exercised is a test that can pass for the wrong reason.
 
 ## Applying a code
 
-`cad::applySurveyCodes` is what the three files are FOR. An entity carries a
+`katana_cad::survey_coding::apply_survey_codes` is what the three files are FOR. An entity carries a
 field code, and this turns the mapfile's answer into the layer, the style and
 the properties it should have.
 
 Where the code is, is FOUND when nobody names it: the first of
-`codePropertyCandidates()` - `code`, `12d.name`, `Code`, `CODE`,
+`code_property_candidates()` - `code`, `12d.name`, `Code`, `CODE`,
 `feature_code` - that any entity carries as text, and the report names the one
 used. A survey file's points carry `code`; a 12da import records a string's
 name, which in a coded survey IS its code, as provenance metadata
-(`12d.name`), so `surveyCodeOf` asks an entity's properties first and its
+(`12d.name`), so `survey_code_of` asks an entity's properties first and its
 metadata after. Asking the caller which would be asking them to know how the
 drawing got here.
 
 It PLANS rather than acts: everything comes back as one
-`commands::Transaction`, so twenty thousand coded points are **one undo**, not
+`katana_commands::Transaction`, so twenty thousand coded points are **one undo**, not
 twenty thousand. A command per entity would make an undo stack nobody could
 use.
 
@@ -913,8 +909,8 @@ Decisions worth recording:
   library linestyle", and in the reference mapfile every symbol code also says
   linestyle `0`, which comes with 18 different colours - so every one of
   those codes landed on ONE style `0`, and whichever entity came first
-  decided its symbol and colour for all of them. Now (`survey_coding.cpp`,
-  `Appearance`, `drawsAs`, `existingStyleFor`, `nameFor`):
+  decided its symbol and colour for all of them. Now (`survey_coding.rs`,
+  `Appearance`, `draws_as`, `existing_style_for`, `name_for`):
   1. an existing style that DRAWS exactly that appearance is REUSED, whatever
      it is called - so renaming a coded style and applying codes again makes
      no second one. Of the styles that draw it, one whose description is the
@@ -941,11 +937,11 @@ Decisions worth recording:
   the symbol's name, no colour) are not reused for a coded symbol appearance.
   Both are open.
 - **Options that say "no" are honoured one at a time** (audit CAD-18).
-  `createLayers` off: an entity whose rule names a layer the drawing lacks
+  `create_layers` off: an entity whose rule names a layer the drawing lacks
   keeps its layer and still gets its style and attributes; it is counted in
-  `skippedNoLayer` and in its code's row (`SurveyCodeRow::layerKept`), so the
-  row never reads as a move that did not happen. `createStyles` off: an
-  appearance no existing style has leaves the style alone (`skippedNoStyle`).
+  `skipped_no_layer` and in its code's row (`SurveyCodeRow::layer_kept`), so the
+  row never reads as a move that did not happen. `create_styles` off: an
+  appearance no existing style has leaves the style alone (`skipped_no_style`).
 - **A name the library does not define is still recorded**, and reported. It
   is what the survey code file says the thing is; it draws as a plain line or mark until a
   library defines it, which is better than dropping the information.
@@ -956,14 +952,14 @@ Decisions worth recording:
   someone named badly; treating `1.5` as a field code would file it under
   whatever the rule for `1*` says.
 - **A colour name is resolved by whoever is asked to code.** `applySurveyCodes`
-  takes the lookup as a callback (`SurveyCodingOptions::colourOf`), because
+  takes the lookup as a callback (`SurveyCodingOptions::colour_of`), because
   the standard colour names were once known only to `archive12d`, which `cad`
   may not see; without one, colours are left alone rather than guessed at.
   The `CODE` verb no longer depends on a front end for it: it resolves a name
-  through the Document (`cad::resolveColour`: the customisation's own table,
+  through the Document (`katana_cad::colour_lookup::resolve_colour`: the customisation's own table,
   then the standard names, which are the entity layer's since 2026-10-06), and
   no front end passes names of its own any more
-  (`CommandInterpreter::setColourLookup` is gone; `docs/customisation.md`,
+  (the C++ interpreter's setColourLookup is gone; `docs/customisation.md`,
   "Colour names" and "The verbs"). A name nothing knows - a plot pen, `pen 902` - still leaves
   the colour alone.
 
@@ -993,13 +989,13 @@ the map why".)
 ## Asking the map why: explain, list, census, lint
 
 A person looking at a point drawn wrongly has one question - why did this
-code get that? - and until now nothing could answer it. `include/katana/cad/code_table.hpp`
+code get that? - and until now nothing could answer it. `rust/crates/katana_cad/src/code_table.rs`
 holds the answers, below both front ends, each a structured result plus ONE
 formatter, so the application and `katana_cli` print the same words (the two
-used to disagree about what applying codes had done; `formatCodingReport` is
+used to disagree about what applying codes had done; `format_coding_report` is
 now the one report of an application, with a row per code):
 
-The verbs are the `CommandInterpreter`'s (`include/katana/cad/survey_code_verbs.hpp`)
+The verbs are the `CommandInterpreter`'s (`rust/crates/katana_cad/src/survey_code_verbs.rs`)
 since 2026-09-26, so the window's command line, `katana_cli` and `katana_mcp`
 all have them; until then they were `katana_cli`'s own, and the window
 answered "unknown command". `CODE` itself - apply the loaded codes, one undo
@@ -1012,10 +1008,10 @@ scope word is the whole drawing, and how a line's first word is read.
 
 | Question | Function | Verb (every command line) |
 |---|---|---|
-| Why does this code get what it gets? | `explainCode` → `formatCodeExplanation` | `CODE EXPLAIN <code>` |
-| What does the map say, one code per line? | `codeTable`, `codeTableRowMatches` → `formatCodeTable` | `CODE LIST [<filter>]` |
-| Which codes do these entities carry? | `codeCensus` → `formatCodeCensus` | `CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]` |
-| What is wrong with the map before it is applied? | `lintSurveyMap`, `lintSurveyRule` → `formatLint` | `CODE CHECK` |
+| Why does this code get what it gets? | `explain_code` → `format_code_explanation` | `CODE EXPLAIN <code>` |
+| What does the map say, one code per line? | `code_table`, `code_table_row_matches` → `format_code_table` | `CODE LIST [<filter>]` |
+| Which codes do these entities carry? | `code_census` → `format_code_census` | `CODE CENSUS [<scope>] [WHERE ...] [PROPERTY <name>] [PREVIEW]` |
+| What is wrong with the map before it is applied? | `lint_survey_map`, `lint_survey_rule` → `format_lint` | `CODE CHECK` |
 
 **An explanation cites rules by index**, the only identity a rule has. For
 each field it names the FIRST rule, most specific first, that says anything
@@ -1059,11 +1055,11 @@ customisation format's, not the survey code file's (`map_data`, `model`,
 has the table.
 
 `SurveyMap::add` refuses a key with blanks and an invalid layer path, so those
-two can be met only by `lintSurveyRule` on a rule not yet in a map - an
+two can be met only by `lint_survey_rule` on a rule not yet in a map - an
 editor's form before it commits. `CODE CHECK` fails the command when any
 error is found, so a script stops: the refusal's first line counts the errors
 and the lint follows it, as `UTILITY CHECK` carries its check
-(`codeCheckReply`, tested on hand-made issues because no map can hold such
+(`code_check_reply`, tested on hand-made issues because no map can hold such
 a rule today). On the compiled-in customisation, run on 2026-10-07:
 
 ```
@@ -1131,12 +1127,12 @@ A string with one symbol block now takes it whatever its length. That needed
 the exporter to change too: the block built from a style was written only
 inside its `PointGeometry` branch, so a line's symbol was written back from
 `12d.symbol.*` metadata instead - and once the symbol lived on the style
-there was no metadata to write. `setSymbolFromStyle` is now a member both use,
+there was no metadata to write. `set_symbol_from_style` is now a member both use,
 and it writes the style's `symbol` - the library name - rather than the style's
 own name, which a person may have changed since the import.
 
 It is also DRAWN now: a line whose style names a symbol has it at every
-vertex (decision D8, `cad::symbolVertices`), where the viewport used to skip
+vertex (decision D8, `katana_cad::style_resolver::symbol_vertices`), where the viewport used to skip
 symbols on lines "by decision". Only a string carrying a DIFFERENT symbol per
 vertex is still kept, written back and not drawn - there is no one symbol for
 its style to carry - and the import's warning says so.
@@ -1145,21 +1141,21 @@ its style to carry - and the import's warning says so.
 
 A surveyor walking a kerb shoots `KB1`, `KB1`, `KB1` and expects a line, not
 three dots. The mapfile says WHICH codes are lines (`SurveyRule::breakline`)
-and how they look; `include/katana/cad/linework.hpp` is what joins them - what
+and how they look; `rust/crates/katana_cad/src/linework.rs` is what joins them - what
 Civil 3D calls Process Linework, TBC Process Feature Codes and Carlson Field
 to Finish. There are two entry points, and a set of points goes through ONE of
 them, never both, or a kerb the file strung and whose points are also coded
 `KB1` is drawn twice:
 
-- **`processLinework(document, LineworkOptions)`** strings the drawing's
+- **`process_linework(document, LineworkOptions)`** strings the drawing's
   coded points itself;
-- **`drawSurveyFeatures(document, project, SurveyFeatureOptions)`** draws the
+- **`draw_survey_features(document, project, SurveyFeatureOptions)`** draws the
   lines a field file strung for itself (a LandXML `PlanFeature`, a
-  controller's line record: `survey::SurveyFeature`), taking positions from the
+  controller's line record: `katana_survey::data_model::SurveyFeature`), taking positions from the
   project's coordinates rather than from point entities, so it works whether
   or not the points were imported. It draws a feature whatever its code's
   breakline, because the file has said the points are one line - unless
-  `onlyRuledLines` is set, which is how an import uses it (below).
+  `only_ruled_lines` is set, which is how an import uses it (below).
 
 Either returns ONE command - layers, lines, their styling and, when asked,
 the removal of the points - and a report. The lines are styled by calling
@@ -1172,7 +1168,7 @@ any other Document.
 **Which points form one string.** The first token of a point's code is its
 STRING NAME: every point named `WM01` is one water main and `WM02` another,
 and `WM01` and `WM1` are two strings, as they are in the field.
-`splitStringName` reports how a name divides into the key of its most
+`split_string_name` reports how a name divides into the key of its most
 specific rule and a string number (`WM01` under `WM*` is key `WM*`, number
 `01`; an exact key is the whole name, with no number; a name only `*` answers
 is fallback-only, D5) - but the split is reported, not used for grouping.
@@ -1213,10 +1209,10 @@ for the tab until 2026-10-07, and codes typed there reached neither a
 **Curves are chorded.** `Polyline2` has no arc segment, and giving it one is a
 schema change deferred under D6. So each consecutive three curve points
 define an arc - (p0,p1,p2), (p2,p3,p4), ... - densified until the gap between
-chord and arc is at most `chordTolerance`, 5 mm by default: below the
+chord and arc is at most `chord_tolerance`, 5 mm by default: below the
 accuracy of a detail survey, and about 25 chords a quarter turn at a 10 m
 radius. Every surveyed point stays a vertex; heights between them are
-interpolated along the arc and set through `entity::setHeights`, the writer
+interpolated along the arc and set through `katana_entity::entity::set_heights`, the writer
 the archive and survey imports share, and a point with no height gives its vertex
 none. `RECT` on three points p0, p1, p2 makes the closed rectangle with side
 p0-p1 reaching p2's side by p2's distance from it; its two constructed corners
@@ -1232,49 +1228,49 @@ taken to the string's last point, or that a `BC` on the last point curved
 nothing; a curve through collinear points is drawn straight and not counted in
 `LineworkString::curves`.
 
-**`keepPoints`.** On by default. Off, the points a run of their OWN string
+**`keep_points`.** On by default. Off, the points a run of their OWN string
 went into are deleted in the same command - the line now stands for them -
 and nothing else is: a point in no line always stays, and so does a point
 only a `JPN` join reached (a tree or an uncoded control point joined to is
-not replaced by the join line). `pointsRemoved` counts only what was deleted.
+not replaced by the join line). `points_removed` counts only what was deleted.
 No front end turns it off any more: the `LINEWORK` verb never removes a point
 (below), and the Survey Code Manager's box for it went when its Linework tab
 came to run that verb's line.
 
-**`skipLinesAlreadyDrawn`.** Off by default. On, a line planned now that the
+**`skip_lines_already_drawn`.** Off by default. On, a line planned now that the
 drawing already holds is not drawn a second time: a polyline carrying the
 same code and string number that runs through the same vertices at the same
 heights, closed alike, whatever drew it and whatever layer and style it has
-since been given. It is listed in `LineworkReport::alreadyDrawn` instead of
+since been given. It is listed in `LineworkReport::already_drawn` instead of
 `strings`, its points count as placed, and none of them is removed on its
-account whatever `keepPoints` says - the line that would stand in for them
+account whatever `keep_points` says - the line that would stand in for them
 is not this run's. The comparison is exact, with no tolerance: a line is
 built from its points' own coordinates each time, so one that differs in the
 last place is the line of a point that moved. It is an option, and not what
-`processLinework` always does, because an import's own run must not have it:
+`process_linework` always does, because an import's own run must not have it:
 two imports of one file each draw, and own, their lines. The `LINEWORK` verb
 turns it on (below).
 
-**`drawSurveyFeatures` and the code property.** Pass it the options the
+**`draw_survey_features` and the code property.** Pass it the options the
 import was given: the line goes on its code's layer, or with its points when
-the code names none. When the import wrote no code (`codeProperty` empty),
-each line still gets its code, under `codePropertyCandidates().front()`
+the code names none. When the import wrote no code (`code_property` empty),
+each line still gets its code, under `code_property_candidates().front()`
 (`code`), and `LineworkReport::property` names it - a line is styled by the
 code it carries. `coding.createLayers` governs every layer here, as in
-`processLinework`; `import.createLayers` is not read.
+`process_linework`; `import.createLayers` is not read.
 
 Process Linework is the `LINEWORK` verb ("`LINEWORK` on the command line",
 below) - which Survey > Process Linework runs in the window, on the
 selection or, with nothing selected, the drawing - and the Survey Code
 Manager's Linework tab, whose Execute runs that verb's line and whose
-Preview is the verb's own plan (`cad::planLinework`), against the drawing's
+Preview is the verb's own plan (`katana_cad::linework_verbs::plan_linework`), against the drawing's
 map. Draw Survey Features has no command, menu item or
 dialog of its own: it runs inside an import that asks for linework (next
 section).
 
 **A point is coded by its string name.** `applySurveyCodes` looks a POINT up
 by the string name of its field code, its linework controls left out
-(`parseFieldCode`): `ZPBB ST` is coded as `ZPBB`, and reported under `ZPBB`,
+(`parse_field_code`): `ZPBB ST` is coded as `ZPBB`, and reported under `ZPBB`,
 so the styling a point gets and the line it joins agree. It used to read the
 whole field, which left an exact-key point with a control token unmatched.
 Any other entity's code is still looked up whole.
@@ -1283,12 +1279,12 @@ Any other entity's code is still looked up whole.
 writes the name whole in its code column (`KJ01`). A field file whose records
 keep a code column and a string column gives a point the code alone (`KJ`),
 and the readers that share one project builder put the number only in the
-name of the `survey::SurveyFeature` that strings the point. Looked up by the
+name of the `katana_survey::data_model::SurveyFeature` that strings the point. Looked up by the
 code alone, strings 01 and 02 of `KJ` are one string, and a one-letter code
 `B` in string 12 never meets the key written for it, `B1*`: a key with a
 digit before its `*` answers only a name that includes the string number. So
 the number comes into the drawing beside the code, in the property `string`
-(`kSurveyStringProperty`): `nameSurveyStrings` gives each point the name of
+(`SURVEY_STRING_PROPERTY`): `name_survey_strings` gives each point the name of
 the first named feature OF ITS OWN CODE as a metadata key, and the import
 bridge writes it like any other. A feature of another code does not name the
 point (a point shot again under a second code is still of its first), and
@@ -1307,11 +1303,11 @@ string)`:
 - `applySurveyCodes` looks an entity up by its code followed by its string
   number - a point's first token, another entity's whole code - and reports it
   under that name (`B12`);
-- `processLinework` groups by the same name, so `KJ` in string 01 and `KJ` in
+- `process_linework` groups by the same name, so `KJ` in string 01 and `KJ` in
   string 02 are two lines, and a point written `KJ01` whole joins the first;
   the line carries what its points carry (the code, and `string` when they
   have one), so it finds the rule they found;
-- `drawSurveyFeatures`, under `onlyRuledLines`, reads a feature's name as its
+- `draw_survey_features`, under `only_ruled_lines`, reads a feature's name as its
   string number.
 
 The name is tried first and THE CODE ALONE SECOND, when no rule more specific
@@ -1327,20 +1323,20 @@ family of codes - and the code has an exact key: the family rule answers
 An entity with no `string` property is read exactly as it was before the
 property existed.
 
-### One step from field file to finished drawing: `withSurveyFinish`
+### One step from field file to finished drawing: `with_survey_finish`
 
 Importing a coded field file took three steps a person had to know about -
 import, Apply Survey Codes, Process Linework - each its own undo step, the
 second replacing the selection and the third reachable from one dialog.
-`cad::withSurveyFinish` (`include/katana/cad/survey_finish.hpp`) makes them
+`katana_cad::survey_finish::with_survey_finish` (`rust/crates/katana_cad/src/survey_finish.rs`) makes them
 ONE command. It owns the command that draws the points, runs it, and then, as
 `SurveyFinishOptions` say (`codes`, `linework`; both OFF by default, so a
 caller that says nothing imports exactly as before):
 
 1. codes the points that command created (`applySurveyCodes`);
-2. draws the strings the file NUMBERED itself (`drawSurveyFeatures`): the
+2. draws the strings the file NUMBERED itself (`draw_survey_features`): the
    features that have a name and name a point of this import;
-3. strings the other created points by their codes (`processLinework`), so a
+3. strings the other created points by their codes (`process_linework`), so a
    file with no such features - a delimited list coded `KB01 ST`, a controller
    file with no string numbers - is strung by its codes.
 
@@ -1348,8 +1344,8 @@ The decisions, and why:
 
 - **Each step is planned when it runs, and replayed by undo and redo** - what
   the styling of linework's lines always did. `applySurveyCodes` and
-  `processLinework` read the drawing, and the points are not in it until the
-  import has run. `drawSurveyFeatures` and `processLinework` fix the layers
+  `process_linework` read the drawing, and the points are not in it until the
+  import has run. `draw_survey_features` and `process_linework` fix the layers
   they create when they are planned, and creating a layer that exists is
   refused: so the features are planned after the coding step has RUN, and the
   code-strung lines after the features have.
@@ -1359,20 +1355,20 @@ The decisions, and why:
   linework step. The reduced coordinates and the features are a local of the
   job command's `execute` (the project it draws drops the features, and the
   raw project is let go), so a step added afterwards has nothing to draw
-  from; the job records `createdEntities` from its own points command, so
+  from; the job records `created_entities` from its own points command, so
   lines drawn by a later step would be nobody's and Remove Job would leave
   them; and a `Transaction` validates its first part twice, each validation of
   the job command being a reduction.
 - **It acts on what the import created, and nothing else.** An empty id list
   means every entity to `applySurveyCodes` and every point to
-  `processLinework`, so neither is ever handed one: an import that drew
+  `process_linework`, so neither is ever handed one: an import that drew
   nothing codes nothing. A string of the file none of whose points the import
   created is not drawn (`SurveyFeatureOptions::consider`): a longer copy of a
   file topped up with Skip draws the strings that run through a new point,
   not every string of the first copy a second time. It never deletes a point
-  (`keepPoints` stays on): a removed point would fail the job's pairing of
+  (`keep_points` stays on): a removed point would fail the job's pairing of
   entities with points, or read later as deleted by hand.
-- **Only what a rule makes a line is drawn** (`onlyRuledLines` on both
+- **Only what a rule makes a line is drawn** (`only_ruled_lines` on both
   functions): a string is a line when a rule MORE SPECIFIC than the bare `*`
   says so. Some readers make a feature of every coded shot, so unfiltered
   every survey mark of one code is joined to the next; and `lookup` inherits a
@@ -1396,9 +1392,9 @@ The decisions, and why:
   reader it drew no kerb at all and reported that the step ran.
 - **A point is in at most one automatic line of its own string.** A point a
   named feature OF ITS OWN CODE holds is that string's - the test by which
-  `nameSurveyStrings` numbers it - and the feature has answered for it, with
+  `name_survey_strings` numbers it - and the feature has answered for it, with
   a line or with the reason there is none, so it is left out of step 3
-  (`SurveyFinishReport::pointsInFeatures`): its code would say the same of
+  (`SurveyFinishReport::points_in_features`): its code would say the same of
   it a second time. A named feature of ANOTHER code - a line keyed on a
   controller between two kerb points and coded as a boundary - is drawn or
   not on its own and leaves its ends in their own code's string. A feature
@@ -1424,11 +1420,11 @@ The decisions, and why:
   codes and silently got none looks like one whose codes matched nothing.
 
 `SurveyFinishReport` says, per step, what ran or why not: the points coded,
-matched and with no rule (`codesWithNoRule`), the layers and styles created,
+matched and with no rule (`codes_with_no_rule`), the layers and styles created,
 the lines drawn (`lines`: the reply's point count is `points`, never the
 created list, which now holds the lines too), and the features and points in
 no line with their reasons. `describe` gives all of it as sentences, for a
-log. `finishWarnings` gives only the sentences a person may have to act on -
+log. `finish_warnings` gives only the sentences a person may have to act on -
 a step that was asked for and had nothing to go on, codes with no rule, a
 string or a point left out of every line for a reason other than being a
 point code or uncoded, a job's lines deleted or left stale - and those are
@@ -1437,10 +1433,10 @@ sentence there. The report's warnings are what `SURVEY IMPORT` counts and
 lists as `reduction_warnings`, so an import that coded and strung everything
 would have answered with two warnings.
 
-**The job owns its lines.** `SurveyJob::createdEntities` holds the points and
-then the lines; `placedPoints` stays the points alone. Remove Job deletes
+**The job owns its lines.** `SurveyJob::created_entities` holds the points and
+then the lines; `placed_points` stays the points alone. Remove Job deletes
 both. The job's option text (`katana-survey-import-options=1`,
-`writeSurveyJobOptions` / `readSurveyJobOptions`) gains `apply-codes` and
+`write_survey_job_options` / `read_survey_job_options`) gains `apply-codes` and
 `draw-linework`, written only when on, and ABSENT IS OFF with the version
 unchanged: a job imported before the keys existed was not coded, and
 re-adjusting it must not start to. What is stored is what was asked for,
@@ -1455,7 +1451,7 @@ strings first and then the job's other points by code.
 - A line the run still makes is REDRAWN IN PLACE: the earlier line that
   carries the same code and string number is the same entity afterwards - its
   id, its layer, its style, its other properties - with the new vertices and
-  heights (`LineworkOptions::earlierLines`, `LineworkString::redrawn`). A line
+  heights (`LineworkOptions::earlier_lines`, `LineworkString::redrawn`). A line
   none of whose points moved is not touched. Rejected: deleting the job's
   lines and drawing them again, which this did at first. Every command
   carries the associative update, which removes a label whose target is gone
@@ -1480,14 +1476,14 @@ Not done:
   and strings what it draws"), and since 2026-10-07 so does the import
   wizard, from its two boxes and through the same function
   (`docs/survey.md`, "The import wizard"): for a field file the job's own
-  finish, for a point list `withSurveyFinish` round the points' command with
+  finish, for a point list `with_survey_finish` round the points' command with
   no strings of the file's own. The Survey Jobs dialog passes
   `cad::surveyImportFinish(document).options` as
   `SurveyJobReadjustment::finish` since 2026-10-07: it passed nothing, so a
   point a re-adjustment drew for the first time was styled without a colour
   lookup and got a second style, `<name> (<colour>)`, when its rule names a
   colour
-  (`SurveyJobsDialog.APointItsReadjustmentDrawsAgainWearsTheStyleItsNeighboursWear`).
+  (`survey_jobs_dialog::a_point_its_readjustment_draws_again_wears_the_style_its_neighbours_wear`).
 - **A job keeps no string numbers unless it was finished with survey codes
   loaded.** Imported with both options off, or into a drawing with no
   customisation, its points carry the code alone, and nothing adds the number
@@ -1507,7 +1503,7 @@ Not done:
   as its own string, so the rest of that code's points are strung without
   them.
 
-(The Survey Code Manager's Linework tab called `processLinework` itself until
+(The Survey Code Manager's Linework tab called `process_linework` itself until
 2026-10-07, and so drew a finished job's lines a second time over its
 points. It runs the `LINEWORK` line now, which leaves those points out - next
 section.)
@@ -1519,8 +1515,8 @@ LINEWORK [<scope>] [WHERE k=v ...] [PROPERTY <name>] [ORDER number|entity]
          [CHORD <length>] [PREVIEW]
 ```
 
-`processLinework` as a verb of the shared interpreter
-(`include/katana/cad/linework_verbs.hpp`, `runLineworkVerb`), so the window's
+`process_linework` as a verb of the shared interpreter
+(`rust/crates/katana_cad/src/linework_verbs.rs`, `run_linework_verb`), so the window's
 command line, `katana_cli`, `katana_mcp` and an agent all have it; `HELP
 LINEWORK` is its reference. Until 2026-10-06 the one way to string points was
 a tab of a dialog, which since 2026-10-07 builds this line and runs it
@@ -1537,21 +1533,21 @@ a tab of a dialog, which since 2026-10-07 builds this line and runs it
   meant is how a line strings the whole drawing where it was to string one
   layer.
 - **The control codes and the colours are the Document's**
-  (`customisationState().linework`, `cad::colourLookup`), as a survey
+  (`customisationState().linework`, `katana_cad::colour_lookup::colour_lookup`), as a survey
   import's are, so a line strung by hand looks like one an import strung.
 - **A control code alone still makes a line**, and so does the fallback rule
-  (`onlyRuledLines` stays off): the run was asked for by name. An import's
+  (`only_ruled_lines` stays off): the run was asked for by name. An import's
   own run draws only what a rule more specific than `*` makes a line.
-  `processLinework` decides it point by point, so where no rule makes the
+  `process_linework` decides it point by point, so where no rule makes the
   code a line ONLY the points that carry a control code are joined: of `KB
   ST`, `KB`, `KB CL` with no rule for `KB`, the first and third make the
   line and the second is unplaced, with the reason. The help said "or a
   control code asks for one" of the whole string until a review ran it; it
   now says what happens
-  (`LineworkVerb.WithNoRuleForACodeOnlyItsPointsThatCarryAControlCodeAreJoined`).
-- **It never removes a point.** `keepPoints` is not offered: a point taken
+  (`linework_verb::with_no_rule_for_a_code_only_its_points_that_carry_a_control_code_are_joined`).
+- **It never removes a point.** `keep_points` is not offered: a point taken
   out from under a survey job reads to its next re-adjustment as deleted by
-  hand. The tab had a box for it while it ran `processLinework` itself; the
+  hand. The tab had a box for it while it ran `process_linework` itself; the
   box went when the tab came to run this line, rather than keep that second
   path for one option.
 - **`ORDER number|entity`**: by point number (the default; a point with none
@@ -1559,26 +1555,26 @@ a tab of a dialog, which since 2026-10-07 builds this line and runs it
   order the file listed the shots.
 - **`PROPERTY <name>`** (2026-10-07) names the property the codes are read
   from, as `CODE`'s `PROPERTY` does; without it the property is found
-  (`codePropertyCandidates`). Points coded under a name of the drawing's own
+  (`code_property_candidates`). Points coded under a name of the drawing's own
   (GIS data keeps its feature codes under whatever its source called them)
   could be coded by `CODE PROPERTY <name>` and then strung by nothing from a
   line. The lines drawn carry the code under that same property, so `CODE`
   finds the rule for a line that it finds for its points. `PROPERTY ""` is
   refused: an empty name left to mean "find it" would read a line that names
   a property as one that names none.
-- **`CHORD <length>`** (2026-10-07) is `LineworkOptions::chordTolerance`: how
+- **`CHORD <length>`** (2026-10-07) is `LineworkOptions::chord_tolerance`: how
   far, in the drawing's units, the straight segments drawn for a curve may
   stray from it, 0.005 unless said. It is refused by name unless it is a
-  finite number greater than 0, here rather than by `processLinework`, whose
+  finite number greater than 0, here rather than by `process_linework`, whose
   refusal names an option of a struct and not a word of the line.
   Both words came with the Linework tab: it had a control for each while it
-  ran `processLinework` itself, and a control the line could not say would
+  ran `process_linework` itself, and a control the line could not say would
   have had to go. A property is what `CODE` already takes, and a chord length
   is geometry that no survey code holds; the tab's other option, keep-points
   off, the verb refuses on purpose (above).
-- **The plan is a function of its own** (`cad::planLinework`: what the scope
+- **The plan is a function of its own** (`katana_cad::linework_verbs::plan_linework`: what the scope
   took and the three words in, the points left to their job and
-  `processLinework`'s whole result out), which the verb runs and the Linework
+  `process_linework`'s whole result out), which the verb runs and the Linework
   tab's Preview calls. The tab shows more than the reply does - every point
   in no line, every note - so it cannot preview by reading a reply, and a
   preview that read the rules of this section a second time would come to
@@ -1592,7 +1588,7 @@ a tab of a dialog, which since 2026-10-07 builds this line and runs it
   and Remove Job deletes them. A second line through the same points would
   lie on top of the job's and be nobody's. How it is known: the job's stored
   options say `draw-linework`, the point is among the job's
-  `createdEntities`, and a polyline among those same `createdEntities`, still
+  `created_entities`, and a polyline among those same `created_entities`, still
   in the drawing, carries the point's string name (its code's first word
   followed by its string number - what a line drawn by linework carries
   too). So a point of such a job whose string the job has NO line of - a rule
@@ -1602,7 +1598,7 @@ a tab of a dialog, which since 2026-10-07 builds this line and runs it
     imported when no rule made its codes lines would then never be strung by
     anything, and the reply would say its job had strung points that are in
     no line;
-  - handing the job's lines to `processLinework` as `earlierLines`, to be
+  - handing the job's lines to `process_linework` as `earlier_lines`, to be
     redrawn rather than drawn again. A string by code is not the file's
     string: `KB` 1 closed and begun again is two strings of the file and one
     name, and the redrawn line would run through both - the verb would
@@ -1621,14 +1617,14 @@ a tab of a dialog, which since 2026-10-07 builds this line and runs it
   imported with linework off, or over a string whose job line had been
   erased and strung again, laid every line on top of the last and said
   nothing of it. The verb now plans with
-  `LineworkOptions::skipLinesAlreadyDrawn`: a line is the line already drawn
+  `LineworkOptions::skip_lines_already_drawn`: a line is the line already drawn
   when a polyline carries its code and string number and runs through the
   same vertices at the same heights, closed alike. It is the VERY line that
   is known, never its name. A string that has gained a point, or whose point
   was moved or re-levelled, is another line: it is drawn, and the line that
   was there stays until someone erases it. Two alternatives were rejected:
   - redrawing the earlier line in place, as a job redraws its own
-    (`earlierLines`). The verb has no record of which line is whose, so it
+    (`earlier_lines`). The verb has no record of which line is whose, so it
     would take whichever polyline carries the name - and a `KB1` of another
     survey, anywhere in the drawing, would be dragged onto these points;
   - comparing the vertices and not the heights. A string re-levelled and
@@ -1644,15 +1640,15 @@ records when there is something to say, a `string`
 record for each line - its name, key and number, how many points and
 vertices, whether it closed, its layer, `join=yes` on a join and, once
 drawn, its entity - for the
-first 50 (`kLineworkStringsListed`), then `strings_more=<n>`, an `unplaced
+first 50 (`LINEWORK_STRINGS_LISTED`), then `strings_more=<n>`, an `unplaced
 reason="..." points=<n>` record for each reason a point is in no line, and a
 `note kind="..." count=<n>` record for each kind of note. The reasons and
-kinds are `toString(UnplacedReason)` and `toString(LineworkNoteKind)`, the
+kinds are `to_string(UnplacedReason)` and `to_string(LineworkNoteKind)`, the
 words the tab shows, quoted; a second set of one-word names for them would
 be a second vocabulary to keep in step. A scope that takes nothing is
 answered with zeros.
 
-Tests: `tests/cad/customisation/test_linework_verbs.cpp` - the grammar's
+Tests: `rust/crates/katana_cad/tests/customisation_verbs/linework_verbs.rs` - the grammar's
 refusals by name, the default scope and each scope word, the preview, a run
 as one undo step with the Document's colour and control codes, both orders,
 a rectangle, a closed string and a join told apart in their records, every
@@ -1665,9 +1661,9 @@ and what makes a line the same line, case by case), a drawing with no survey
 codes, a control code with and without a rule, points with no code, the cap
 of 50, and the help; `PROPERTY` over three shots coded under a name the
 verb does not look for (no line found, one line named, and the line carrying
-its code there), `CHORD` over the half circle `test_linework.cpp` works by
+its code there), `CHORD` over the half circle `linework.rs` works by
 hand (51 vertices unsaid, 7 at 0.35), their refusals; and `LineworkPlan`, four
-cases of `cad::planLinework` on its own - the plan in full with nothing
+cases of `katana_cad::linework_verbs::plan_linework` on its own - the plan in full with nothing
 changed, an empty list planning nothing rather than every point, what is left
 out and said, and the three words. `cli.linework_strings_points_by_their_control_codes_as_one_undo_step`
 runs it twice through `katana_cli`; `cli.linework_property_reads_the_codes_a_drawing_keeps_under_its_own_name`
@@ -1686,7 +1682,7 @@ Not done:
   strung BY CODE and not as its file strung it: a string the file closed and
   began again under one number (the fixture `gnss.fld`: `KB` 1 closed through
   R001 to R003, then R004) comes out as one open line through all four
-  (`SurveyVerbs.AJobImportedWithLineworkOffIsStrungByTheVerbByCodeAndOnlyOnce`).
+  (`survey_verbs::a_job_imported_with_linework_off_is_strung_by_the_verb_by_code_and_only_once`).
   The file's own strings are drawn only by an import that asks for linework;
   re-importing the job with it on is the way to get them.
 - A code no rule makes a line is strung only through the points that carry
@@ -1701,23 +1697,23 @@ Not done:
 ## The Survey Code Manager
 
 Format > Survey Code Manager... (also on Survey > Survey Coding;
-`src/katana_qt/customisation/code_manager*.cpp`) is the editor D1 asked for: the
+`rust/crates/katana_window/src/customisation/code_manager*.rs`) is the editor D1 asked for: the
 survey code library a surveyor codes against - Civil 3D's description keys, TBC's feature definitions, Carlson's field-to-finish -
 in one non-modal dialog of five tabs, each over one of the cad foundations
 above, so the dialog decides nothing the CLI would say differently:
 
 | Tab | Over | Shows and does |
 |---|---|---|
-| Code Table (`codeTableTab`) | `cad::codeTable`, `explainCode` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, surface, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
-| Codes in Drawing (`codesInDrawingTab`) | `cad::codeCensus`; the `CODE CENSUS` line | the shared "Apply to" and filter controls and the code property; every distinct code in what they take, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; the line the controls say (`CODE CENSUS <scope> [WHERE ...] [PROPERTY p]`) and Run Line, which hands it to the executor; select the entities carrying one, among those the scope took; start a new rule for an unmatched code keyed by `cad::suggestedKey` |
-| Issues (`codeIssuesTab`) | `cad::lintSurveyMap` | the lint of the buffer |
-| Apply Codes (`applyCodesTab`) | the `CODE` line; `cad::applySurveyCodes` for its preview | the shared "Apply to" and filter controls and the code property; a preview, row by code, of what the line would do; Execute runs the line shown, one undo step |
-| Linework (`lineworkTab`) | the `LINEWORK` line; `cad::planLinework` for its preview; `CUSTOMISE SET linework.*` | the customisation's control codes (above), shown and set; the shared scope and filter, the code property, the order and the chord length; a preview of every line, every point in none and every note; Execute runs the line shown, one undo step |
+| Code Table (`codeTableTab`) | `katana_cad::code_table::code_table`, `explain_code` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, surface, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
+| Codes in Drawing (`codesInDrawingTab`) | `katana_cad::code_table::code_census`; the `CODE CENSUS` line | the shared "Apply to" and filter controls and the code property; every distinct code in what they take, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; the line the controls say (`CODE CENSUS <scope> [WHERE ...] [PROPERTY p]`) and Run Line, which hands it to the executor; select the entities carrying one, among those the scope took; start a new rule for an unmatched code keyed by `katana_cad::code_edit::suggested_key` |
+| Issues (`codeIssuesTab`) | `katana_cad::code_table::lint_survey_map` | the lint of the buffer |
+| Apply Codes (`applyCodesTab`) | the `CODE` line; `katana_cad::survey_coding::apply_survey_codes` for its preview | the shared "Apply to" and filter controls and the code property; a preview, row by code, of what the line would do; Execute runs the line shown, one undo step |
+| Linework (`lineworkTab`) | the `LINEWORK` line; `katana_cad::linework_verbs::plan_linework` for its preview; `CUSTOMISE SET linework.*` | the customisation's control codes (above), shown and set; the shared scope and filter, the code property, the order and the chord length; a preview of every line, every point in none and every note; Execute runs the line shown, one undo step |
 
 **Edits go to a BUFFER** (D1). The map is session data, not undoable, so the
 form's buttons change a copy of the drawing's map through `SurveyMap`'s own
 mutators, each refused exactly as `SurveyMap` refuses it, and nothing reaches
-the drawing until **Apply** (`setSurveyMap`). **Revert** takes the drawing's
+the drawing until **Apply** (`set_survey_map`). **Revert** takes the drawing's
 map back. The indicator (`dirtyIndicator`) says which: "No unapplied edits:
 these are the drawing's 1624 rules." or "Unapplied edits: Apply puts them on
 the drawing, Revert discards them. 1625 rules." A map changed from outside -
@@ -1734,9 +1730,9 @@ Manager", has the two tabs: the lines, the shared scope, the controls that
 went and the two the `LINEWORK` verb gained words for).
 
 **Import Codes...** (`importCodes`) reads a Katana customisation file
-(`docs/customisation.md`; `cad::readCustomisationFile`) and merges ITS RULES
+(`docs/customisation.md`; `katana_cad::customisation_host::read_customisation_file`) and merges ITS RULES
 into the BUFFER for review before Apply, Merge by default (D1) and Replace
-with `importReplace` ticked. The merge is `cad::mergeCustomisation`, the one
+with `importReplace` ticked. The merge is `katana_cad::customisation_merge::merge_customisation`, the one
 every load goes through, handed the buffer as the session and the file's
 rules as the load - so Merge and Replace mean here what they mean to
 `CUSTOMISE`: a key's rules in a section take the place of that key's in that
@@ -1760,14 +1756,14 @@ first): no line can name a buffer. It once wrote the buffer itself, by a path
 of its own that truncated the file in place. The file
 is the session's customisation cut down to its codes by the ONE rule a part of a customisation is
 written by - both managers' exports and `CUSTOMISE EXPORT <file> CODES`
-(`cad::customisationPart`, `include/katana/cad/customisation_part.hpp`;
+(`katana_cad::customisation_part::customisation_part`, `rust/crates/katana_cad/src/customisation_part.rs`;
 `docs/desktop.md`, "Symbol Library", has the table, and
 `docs/customisation.md`, "One rule for a part, whoever writes it", the
 reasons):
 
 - the rules, in the buffer's order - order is precedence, so a rule moved
   between two of another section is written between them
-  (`ExportedCodesKeepTheirOrderWhereSectionsInterleave`);
+  (`survey_code_manager::exported_codes_keep_their_order_where_sections_interleave`);
 - the session's description and its author's NOTICE, and the sources that
   brought the session rules, each with its own notice. A notice is "carried
   with the data and shown to whoever uses it" (`docs/customisation.md`), and
@@ -1786,22 +1782,22 @@ reasons):
   edition of the built-in.
 
 It reads back as the buffer, rule for rule
-(`ExportedCodesAreAKatanaCustomisationOfTheRulesAloneThatReadsBackAsTheBuffer`),
+(`survey_code_manager::exported_codes_are_a_katana_customisation_of_the_rules_alone_that_reads_back_as_the_buffer`),
 and a session of four customisations is written byte for byte as worked out
 by hand
-(`ExportedCodesCarryTheSessionsNoticeItsRuleSourcesAndTheColoursTheRulesName`).
+(`survey_code_manager::exported_codes_carry_the_sessions_notice_its_rule_sources_and_the_colours_the_rules_name`).
 *Rejected: writing the session's whole customisation with the buffer's rules
 in it.* What an edited buffer is, is rules; the session's definitions are
 not being edited here and belong to `CUSTOMISE EXPORT`. **Export Code List
-CSV...** writes `cad::codeListCsv` of the buffer.
+CSV...** writes `katana_cad::code_edit::code_list_csv` of the buffer.
 
 These two were "Import Code File..." and "Export Code File..." (`importMapfile`,
 `exportMapfile`), reading and writing another program's survey code file,
 until 2026-10-06. Not done:
 
 - Apply keeps a session that was the kept one, where the session has a
-  kept file: it calls the commit hook round its commit, before `setSurveyMap`
-  and what the hook hands back after (`CustomisationContext::beginCommit`),
+  kept file: it calls the commit hook round its commit, before `set_survey_map`
+  and what the hook hands back after (`CustomisationContext::begin_commit`),
   and the workbench answers with the `CUSTOMISE KEEP` line (`docs/desktop.md`,
   "The definition editor"). An interactive session's kept file is in its
   per-user place; a headless one has a kept file only where
@@ -1809,12 +1805,12 @@ until 2026-10-06. Not done:
   starts").
 - **The buffer does not know where its rules came from.** Import Codes takes
   a file's rules and nothing else, so the file's notice and its sources stop
-  at the buffer: after Apply (`Document::setSurveyMap`, an edit) the session
+  at the buffer: after Apply (`Document::set_survey_map`, an edit) the session
   holds the imported rules and lists no source for them, and an export then
   names the sources of the session's OWN rules. An author's notice that came
   with imported rules is therefore not carried on. It needs the buffer to
   keep the sources its imports brought and Apply to record them
-  (`Document::recordCustomisationLoad`), which belongs with the work that
+  (`Document::record_customisation_load`), which belongs with the work that
   wires Apply to `CUSTOMISE KEEP`. Until then a customisation whose notice
   must travel is loaded whole, with the `CUSTOMISE` line.
 - An export is the manager's own work, not a `CUSTOMISE EXPORT ... CODES`
@@ -1825,8 +1821,8 @@ uses, so its buffer outlives closing it. Closing it with unapplied edits
 (`SurveyCodeManagerDialog::reject`) asks an interactive session Apply /
 Discard / Cancel; a headless one closes, keeps the buffer and says so in the
 log. Quitting asks the same question over the manager,
-shown first (`CustomisationWorkbench::confirmClose`, run by
-`MainWindow::closeEvent` before the unsaved-drawing question, because Apply
+shown first (`CustomisationWorkbench::confirm_close`, run by
+`MainWindow::close` before the unsaved-drawing question, because Apply
 changes the drawing that question is about); Cancel keeps the window and the
 edits. A headless `QUIT` with unapplied edits is refused and said - "Unapplied
 Edits: the Survey Code Manager has rule edits that are not on the drawing ...
@@ -1838,15 +1834,15 @@ Every editable combo in it (colours, text size type, pipe justify and shape,
 property names) has a case-sensitive completer, so a typed name keeps its case
 (D3), and no button is a default, so Enter in a field presses nothing. A
 colour field lists the names the session's customisation defines and then
-`entity::standardColourNames()` - each from the table that resolves it
-(`cad::resolveColour`), so the dialog offers exactly what is drawn and keeps
+`katana_entity::standard_colour_names()` - each from the table that resolves it
+(`katana_cad::colour_lookup::resolve_colour`), so the dialog offers exactly what is drawn and keeps
 no copy of either - and is filled again when the customisation's colours
 change, keeping what it shows. Not done: the dialog takes about 2.4 s to build in a Debug build
 on the reference map, most of it the two pickers' pictures; its linestyle
 preview draws a linestyle small in the middle of its pane and its symbol
-preview is a blank white pane; its own `linestyleState`
-(`code_manager_support.cpp`) is a plain / defined / wrong-kind rule that does
-not read `cad::linetypeStatus` ("Saying whether it is working"); the
+preview is a blank white pane; its own `linestyle_state`
+(`code_manager_support.rs`) is a plain / defined / wrong-kind rule that does
+not read `katana_cad::style_catalogue::linetype_status` ("Saying whether it is working"); the
 linework summary is not pluralised ("1 lines"); and the Code Table's Text
 chip has the objectName of the search field beside it, `filterText` (a chip
 is named after its first label), so the two are told apart only by their
@@ -1866,9 +1862,9 @@ one style whose linetype is `TEST Bollard`, a `mode vertex` symbol, gives
   1 name is loaded as an `at vertices` symbol, not a linestyle, so a linetype naming it draws solid: "TEST Bollard"
 ```
 
-`cad::customisationCoverage` is the one place that counts it, and it counts by
-the one rule every "missing" list reads, `cad::linetypeStatus` and
-`cad::symbolStatus` (`style_catalogue.hpp`; `docs/cad.md`, "What the managers
+`katana_cad::survey_coding::customisation_coverage` is the one place that counts it, and it counts by
+the one rule every "missing" list reads, `katana_cad::style_catalogue::linetype_status` and
+`katana_cad::style_catalogue::symbol_status` (`style_catalogue.rs`; `docs/cad.md`, "What the managers
 stand on"). So a name is missing exactly when what is drawn is a fallback,
 never: a symbol Katana draws itself (`cross`, `manhole`), counted in `builtIn`
 rather than listed (audit CAD-17); a Style linetype of `ByLayer`, which names
@@ -1886,13 +1882,13 @@ fix:
   the viewport draws solid (D2). The library IS loaded and defines the name,
   as a symbol, so the fix is to choose a linestyle; telling that person the
   name is "in no loaded library" sends them looking for a library they have.
-  `cad::formatCoverage`, which CUSTOMISE prints, gives these their own line,
+  `katana_cad::code_table::format_coverage`, which CUSTOMISE prints, gives these their own line,
   as above. (The window logged a coverage of its own after a load, which
   left this line out; it went with the window's loader, and the window's
-  `CUSTOMISE` prints `formatCoverage` as every front end's does.)
+  `CUSTOMISE` prints `format_coverage` as every front end's does.)
 
 The coverage looks at the styles' names only; a layer's missing linetype is
-in `cad::missingNames`, the managers' list of the same thing for every Style
+in `katana_cad::style_catalogue::missing_names`, the managers' list of the same thing for every Style
 and Layer name, with who uses each and `MissingName::status`. The style
 manager's Diagnostics and the symbol library show it ("The Format menu" in
 `docs/cad.md`).
@@ -1910,15 +1906,16 @@ continuous line.
 
 Two decisions worth recording:
 
-**The BYTES are embedded, not generated C++ structures.** Generating the 792
-definitions and 35,000 strokes as brace-initialised structs would skip the
-parse, but it is a multi-megabyte translation unit that costs more to compile
-than the parse costs to run. The file is embedded as it is (`#embed`) and
+**The BYTES are embedded, not generated structures.** Generating the 792
+definitions and 35,000 strokes as initialised structs would skip the parse,
+but it is a multi-megabyte source that costs more to compile than the parse
+costs to run. The file is embedded as it is (`include_bytes!`; `#embed` in the
+C++ build) and
 parsed once, at first use, by the one reader every Katana customisation goes
 through, so there is no second way for a built-in and a loaded one to
 disagree. (The older embedding generated a source from four files with a
-script, which made Python a hard requirement of every build; `#embed` needs
-none.)
+script, which made Python a hard requirement of every build; embedding the
+file needs none.)
 
 **The converted file is committed; nothing else derived from the data is.** The
 customisation is third-party material under its own licence, and the owner
@@ -1926,20 +1923,18 @@ decided on 2026-10-08 to commit the converted file (`docs/customisation.md`,
 "Why the built-in is in the repository"), so a checkout builds a program with
 the built-in. No source is generated from it and the reference files stay out.
 The tests that need it skip where a build's path names no file, and
-`KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` makes its absence a configure error,
+`KATANA_REQUIRE_BUILTIN_CUSTOMISATION=1` makes its absence a build error,
 to guard a release job against the tracked file having been deleted or a path
 being wrong.
 
-**Swapping in another customisation.** Convert it, or write one, as a Katana
-customisation file and point the build at it:
+**Swapping in another customisation.** Write one as a Katana customisation
+file and add it as a built-in when building:
 
 ```
-cmake -S . -B build/release -DKATANA_BUILTIN_CUSTOMISATION=D:/Survey/site.customisation.json
-cmake --build build/release
+KATANA_ALTERNATE_CUSTOMISATIONS="/survey/site.customisation.json" cargo build --release
 ```
 
-or, to add built-ins without replacing the default,
-`-DKATANA_ALTERNATE_CUSTOMISATIONS="<file>;<file>"`; or, without rebuilding, hand
+(the default itself is the build script's `DEFAULT`); or, without rebuilding, hand
 a run the file as its built-in with the environment variable of the same name
 (the seam), or load it on top of the
 built-in: `CUSTOMISE <file>...` merges, `CUSTOMISE REPLACE <file>...` takes the
@@ -1952,25 +1947,28 @@ reissuing the application.
 Two older file formats hold a customisation as it was first delivered: the
 **style library** (`.4d`), of which there are two, one of linestyles and one of
 symbols, and the **survey code file** (`.mapfile`, XML), of which there are
-two, the second a list of names. The program does not read them. They are read
-by the readers in `src/katana_archive12d/legacy/` - a library of their own,
+two, the second a list of names. The program does not read them. They were
+read by the C++ build's legacy readers - a library of their own,
 `katana_legacy_customisation`, built beside the `.12da` archive module whose
-lexer and text utilities they share - which only `katana_customisation_convert`
-and the legacy readers' own tests link. This chapter is what stays true about
-the two formats: the grammar, the sections and what was measured of the real
+lexer and text utilities they shared - which only the converter
+`katana_customisation_convert` and the readers' own tests linked. Neither
+was ported to Rust (the owner's decision: the built-in is the committed JSON
+file and the legacy files are no longer needed, `docs/rust.md`), and both went
+with the C++ tree on 2026-11-15. This chapter is kept as the record of the two
+formats: the grammar, the sections and what was measured of the real
 files. How a conversion is made, and what it gives, is
 `docs/customisation.md` ("Converting a customisation from the legacy
 formats").
 
-The two kinds of file are told apart BY LOOKING INSIDE THEM
-(`customisationKind`), never by name: of the four files this was built
+The two kinds of file were told apart BY LOOKING INSIDE THEM (the C++
+reader's customisationKind), never by name: of the four files this was built
 against, two are survey code files and two are style libraries, and as
 delivered THREE of the four ended in `.4d`, so that extension was two
 different formats in one folder, and a reader that went by the name would
 read half the customisation as the wrong thing. A text holding `<map_file` is
 a survey code file; one holding `worldstyle`, `paperstyle` or `twoptstyle` is
 a style library; anything else is refused. The reader loads a list of files
-whole or not at all (`readCustomisation` fails at the first it cannot read and
+whole or not at all (`read_customisation` fails at the first it cannot read and
 names it), later libraries win a definition and earlier survey code files win
 a field, and every definition read is stamped with the NAME of its file
 (`LineStyle::source`) and, by that name, flagged as a symbol when it holds
@@ -2007,7 +2005,7 @@ and in the code.
 **A radius is a length.** The reference libraries write 45 arcs with a
 NEGATIVE radius (U-turn and speed-zone markings). The sign does not choose a
 side: drawn with the signed radius every one of them came out turned half a
-turn about its centre, and `flattenDefinition` now takes `|r|` for arcs and
+turn about its centre, and `flatten_definition` now takes `|r|` for arcs and
 circles alike. The regression test, on a U-turn, puts the arc's end at
 y = -0.4735 by hand where the signed radius gave +0.4925.
 
@@ -2040,7 +2038,7 @@ uses none of Katana's code:
 
 **No warnings.** Every keyword in 1.2 MB of production data is one the reader
 knows. A keyword it did not know would be counted and named rather than
-skipped quietly, which is the same promise `readArchive` makes.
+skipped quietly, which is the same promise `read_archive` makes.
 
 Three names appear in both files, and a fourth twice in the linestyle library
 (by a count outside Katana, `tools/reference_census.py`: four blocks replaced,
@@ -2111,10 +2109,10 @@ inside a rule is named and the rest of the rule is kept.
 ### Writing the older formats
 
 The two readers have inverses, each tested as one: read what was written and
-get back what was given (`tests/archive12d/customisation/`). They were the
-way an edited library or map was kept, under D1; they are reached now only by
-those tests and by the converter's own, since the Survey Code Manager and the
-symbol library write Katana customisation files (`entity::customisationToJson`)
+get back what was given (the C++ build's archive12d tests). They were the
+way an edited library or map was kept, under D1; at the end they were reached
+only by those tests and by the converter's own, since the Survey Code Manager and the
+symbol library write Katana customisation files (`katana_entity::customisation::customisation_to_json`)
 and `katana_cli` writes the session as one (`CUSTOMISE EXPORT`).
 
 **`writeStyleLibrary(library, StyleLibraryWriteOptions)`** gives `.4d` text,
@@ -2133,7 +2131,7 @@ where a published library carries its licence.
 
 **`writeMapFile(map, MapFileWriteOptions)`** gives the mapfile XML as UTF-8
 text; the reference files are UTF-16LE with a byte order mark, which
-`core::encodeUtf16LittleEndian` makes of it, and the reader takes either.
+`katana_core::text_encoding::encode_utf16_little_endian` makes of it, and the reader takes either.
 Sections go in the reference files' order (`map_data`, `vertex_symbol_data`, `tinable_data`,
 `vertex_textstyle_data`, the three pipe sections, the two attribute
 sections), and within a section the rules keep their order. The subtle part
@@ -2162,4 +2160,4 @@ a value with surrounding blanks (XML text is trimmed on reading) or holding a
 character XML 1.0 cannot carry. One loss the writer cannot help:
 `SurveySymbol` and `SurveyTextStyle` keep size, rotation and offset as plain
 doubles where 0 means absent, so an explicit `<rotation>0</rotation>` goes
-out as no element; telling them apart needs `std::optional` in the model.
+out as no element; telling them apart needs an `Option` in the model.

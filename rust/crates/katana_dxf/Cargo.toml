@@ -1,0 +1,18 @@
+[package]
+name = "katana_dxf"
+description = "The dxf layer: DXF read and written natively."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+katana_commands.workspace = true
+katana_core.workspace = true
+katana_entity.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+
+[lints]
+workspace = true

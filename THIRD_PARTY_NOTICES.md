@@ -3,13 +3,26 @@
 Katana's own code is licensed under GPL-3.0-or-later with the additional terms
 in `ADDITIONAL_TERMS.md` (`LICENSE`, `LICENSING.md`). This file lists the
 third-party components that are compiled into Katana's programs (`katana`,
-`katana_cli`, `katana_mcp`) or travel beside them in its packages. For each:
+`katana_cli`, `katana_mcp` and the update helper `katana_updater`) or travel
+beside them in its packages. For each:
 its licence, how it is linked, what that asks of Katana, and where to get its
 licence text and its source. Every component keeps its own licence; none is
 relicensed by Katana's.
 
-It is an audit made on 2026-10-08, not legal advice. Three words are used
-about how sure each fact is:
+**Katana is Rust since 2026-11-15.** The C++ program was removed on the
+owner's word (`docs/rust.md`), and with it what only the C++ was built with:
+Qt, the CGAL and Eigen headers, nlohmann/json, Boost's headers, GoogleTest and
+Google Benchmark. Section 1 is now the Rust programs': the crates compiled
+into them, the third-party code translated into them, the fonts they embed,
+and the three C++ shims of Katana's own that reach GDAL's and PDAL's C++
+interfaces. The shared libraries of sections 2 and 3 were audited for the C++
+package of 2026-10-08; the Rust programs link GDAL, PDAL, PROJ and SQLite and
+what those bring, not Qt, so the same tables less Qt are what they are
+expected to carry, until the first Rust package is audited (section 7).
+
+It is an audit made on 2026-10-08, brought to the Rust programs on
+2026-11-15, not legal advice. Three words are used about how sure each fact
+is:
 
 * **Verified**: read on the build machine, in the component's own header or
   licence file, or in the project's own documentation.
@@ -37,38 +50,159 @@ the tables.
 
 ## 1. Compiled into the programs
 
-| Component | Version | Licence | What it asks of Katana |
-|---|---|---|---|
-| CGAL, 2D Triangulations package | 6.2 | GPL-3.0-or-later (or a commercial licence from GeometryFactory, which Katana does not hold) | **Decisive.** `src/katana_terrain/cdt_backend.cpp` includes it; CGAL is header-only, so it is compiled into `katana_terrain` and so into all three programs. The programs as a whole must be offered under GPL version 3 or later, with source. |
-| CGAL, other packages used (kernel, spatial sorting, number types, STL extensions) | 6.2 | LGPL-3.0-or-later (or commercial) | Compatible with GPL-3.0-or-later. Keep the notices. |
-| Eigen (`Eigen/Dense` only) | 5.0.1 (the Linux and macOS toolchain pins 3.4) | MPL-2.0; its licence folder also holds Apache-2.0, BSD and MINPACK texts for some parts | Keep the notices. MPL-2.0 section 3.2(a) also asks, when an executable that contains Eigen is passed on, that recipients be told how to obtain Eigen's source (<https://gitlab.com/libeigen/eigen>): the written offer of source has to name it. No LGPL file is reached through `Eigen/Dense` (searched in 5.0.1). |
-| nlohmann/json | 3.12.0 | MIT | Keep the copyright and permission notice. |
-| Boost headers (through CGAL), and the serialization DLL | 1.92.0 | BSL-1.0 | A notice is needed only with source; none for object code. |
+**CGAL decides the programs' licence, through the code translated from it.**
+The C++ program compiled CGAL's 2D Triangulations package in (GPL-3.0-or-later,
+or a commercial licence Katana does not hold). The Rust programs do not
+compile CGAL, but `rust/crates/katana_terrain/src/cdt_backend.rs` translates
+its constrained triangulation and perturbed in-circle test into Rust ("Code
+translated into the Rust port", below), and a translation keeps the licence of
+what it translates: the programs as a whole are offered under GPL version 3
+or later, with source. Of what the C++ build compiled in otherwise, Eigen's
+QR and nlohmann/json survive only as translations (below); Boost's headers,
+which came with CGAL, went with it.
 
-CGAL, in detail (verified, the count made twice: `g++ -M` on `cdt_backend.cpp`
-with the build's flags, then reading each header's `SPDX-License-Identifier`
-line). With the build's `-DCGAL_USE_GMPXX=1`, the 653 CGAL headers that the file
-includes, directly and through each other, carry: 601 `LGPL-3.0-or-later OR
-LicenseRef-Commercial`, 29 `LGPL-3.0-or-later`, 22 `GPL-3.0-or-later OR
-LicenseRef-Commercial`, 1 `BSL-1.0`. Without that define the same walk reaches
-648 (596 of the first kind); the 22 are the same either way. The 22 are the 2D
-Triangulations package and its data structure package, TDS_2 (20 headers:
-`Triangulation_2.h`, `Constrained_Delaunay_triangulation_2.h`,
-`Constrained_triangulation_plus_2.h`, `Triangulation_data_structure_2.h`,
-vertex and face bases, and the rest of the two packages), and two helper
-headers of the BGL package under `CGAL/boost/graph/internal/`
-(`graph_traits_2D_TDS_helper.h`, `graph_traits_2D_triangulation_helper.h`),
-which carry the GPL identifier although that package is otherwise LGPL. CGAL's
-own package files at tag v6.2 (`Triangulation_2/package_info/Triangulation_2/license.txt`
-and the one for `TDS_2`) say "GPL (v3 or later)", and those for the spatial
-sorting, kernel, number types, STL extensions, property map and BGL packages
-say "LGPL (v3 or later)". CGAL's package overview says "License: GPL" for the
-first and "License: LGPL" for the kernel and number types
-(<https://doc.cgal.org/latest/Manual/packages.html>); its licence header
-`CGAL/license/Triangulation_2.h` says the package is used "under the terms of the
-GPLv3+" unless a commercial licence is held. Source and licence texts:
-<https://github.com/CGAL/cgal>, `LICENSE.GPL` and `LICENSE.LGPL`; also in
-`share/licenses/cgal`.
+**Katana's own C++ shims.** `rust/crates/katana_gis/native/algorithm_shim.cpp`,
+`rust/crates/katana_gis/native/http_shim.cpp` and
+`rust/crates/katana_pointcloud/native/pdal_shim.cpp` are Katana's code, under
+its licence, compiled by the crates' build scripts because GDAL's algorithm
+framework and HTTP and PDAL have only C++ interfaces; they include GDAL's and
+PDAL's headers (section 2).
+
+**The crates.** The versions are those of `rust/Cargo.lock`, and the licences are each crate's own
+`license` field as `cargo tree` reported it on 2026-11-07 (recorded). The
+rows up to windows-sys are the crates the port names; the rest come with them. The
+port's JSON is its own (katana_core::json, translated from nlohmann/json, below), so
+no JSON crate is used. `autocfg`
+and `paste` run only while building.
+
+| Crate | Version | Licence | Brought in by |
+|---|---|---|---|
+| nalgebra | 0.34.2 | Apache-2.0 | katana_survey (dense storage, Cholesky) |
+| spade | 2.15.1 | MIT OR Apache-2.0 | katana_terrain (the constrained Delaunay triangulation) |
+| robust | 1.2.0 | MIT OR Apache-2.0 | katana_terrain (exact orientation and in-circle predicates) |
+| miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | katana_update (raw inflate) |
+| ed25519-dalek, curve25519-dalek | 2.2.0, 4.1.3 | BSD-3-Clause | katana_update (Ed25519 verification and the RFC 8032 checks on the key) |
+| windows-sys | 0.60.2 | MIT OR Apache-2.0, unverified (section 7) | katana_update, Windows only |
+| windows-targets, windows_x86_64_gnu | 0.53.5, 0.53.1 | MIT OR Apache-2.0, unverified (section 7) | windows-sys, Windows only |
+| equivalent, hashbrown, foldhash, allocator-api2 | 1.0.3, 0.16.1, 0.2.0, 0.2.21 | Apache-2.0 OR MIT; MIT OR Apache-2.0; Zlib; MIT OR Apache-2.0 | spade |
+| simba, approx, num-traits, num-complex, num-integer, num-rational, typenum, matrixmultiply, rawpointer, wide, safe_arch, bytemuck | 0.9.1, 0.5.1, 0.2.19, 0.4.6, 0.1.47, 0.4.2, 1.20.1, 0.3.11, 0.2.1, 0.7.33, 0.7.4, 1.25.2 | Apache-2.0 (simba, approx); Zlib OR Apache-2.0 OR MIT (wide, safe_arch, bytemuck); MIT OR Apache-2.0 (the rest) | nalgebra |
+| smallvec | 1.16.5 | MIT OR Apache-2.0 | spade |
+| adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | miniz_oxide |
+| ed25519, signature, sha2, digest, block-buffer, crypto-common, generic-array, cpufeatures, cfg-if, subtle, zeroize | 2.2.3, 2.2.0, 0.10.9, 0.10.7, 0.10.4, 0.1.7, 0.14.7, 0.2.17, 1.0.5, 2.6.1, 1.9.1 | Apache-2.0 OR MIT (ed25519, signature, zeroize); MIT (generic-array); BSD-3-Clause (subtle); MIT OR Apache-2.0 (the rest) | ed25519-dalek, curve25519-dalek |
+| autocfg, paste | 1.5.1, 1.0.15 | Apache-2.0 OR MIT; MIT OR Apache-2.0 | build-time only, a build script's helper and a macro, both reached through nalgebra |
+| curve25519-dalek-derive, rustc_version, semver, version_check, proc-macro2, quote, syn, unicode-ident | 0.1.1, 0.4.1, 1.0.28, 0.9.5, 1.0.107, 1.0.47, 2.0.119, 1.0.27 | MIT OR Apache-2.0 (unicode-ident: (MIT OR Apache-2.0) AND Unicode-3.0) | build-time only: a derive macro and build scripts' helpers, reached through curve25519-dalek and generic-array |
+| cc, find-msvc-tools, shlex | 1.11.1, 0.1.15, 2.0.1 | MIT OR Apache-2.0 (`cargo tree`, 2026-11-10) | build-time only: compiles katana_gis's C checks of its GDAL declarations and katana_pointcloud's PDAL shim from their build scripts |
+| egui | 0.36.2 | MIT OR Apache-2.0 | katana_window (the immediate-mode UI) |
+| eframe | 0.36.2 | MIT OR Apache-2.0 | katana_window (the desktop runner, `katana` only) |
+| egui_dock | 0.21.1 | MIT | katana_window (the docks) |
+| egui_extras | 0.36.2 | MIT OR Apache-2.0 | katana_window (the managers' tables) |
+| wgpu | 30.0.1 | MIT OR Apache-2.0 | katana_gpu and katana_window (the GPU layer and egui's renderer) |
+| pollster | 0.4.0 | Apache-2.0 OR MIT | the window's crates below (an older line, beside the port's 1.0.1) |
+| pollster | 1.0.1 | Apache-2.0 OR MIT | katana_gpu and katana_window (waits on wgpu's requests) |
+| tiny-skia | 0.12.0 | BSD-3-Clause | katana_window (the raster canvas) |
+| cosmic-text | 0.19.0 | MIT OR Apache-2.0 | katana_window (text drawn in a drawing) |
+| krilla | 0.8.2 | MIT OR Apache-2.0 | katana_window (PDF plots and sheets) |
+| png | 0.18.1 | MIT OR Apache-2.0 | katana_window (PNG read and written) |
+| image | 0.25.10 | MIT OR Apache-2.0 | katana_window (images in drawings and sheets) |
+| arboard | 3.7.0 | MIT OR Apache-2.0 | katana_window (the desktop clipboard) |
+| rfd | 0.17.2 | MIT | katana_window (the desktop's file dialogs) |
+| epaint_default_fonts | 0.36.2 | (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 | epaint (egui's embedded UI fonts, Ubuntu-Light, Hack and Noto Emoji: font data; whether the GPL-3.0 rule applies to it, and which font the window carries, is the owner's decision, docs/rust.md "Not done") |
+| accesskit_winit, codespan-reporting, gethostname, gl_generator, glutin, glutin_egl_sys, glutin_glx_sys, glutin_wgl_sys, khronos_api, spirv, unicode-general-category, unicode-linebreak, winit | 0.32.2, 0.13.1, 1.1.0, 0.14.0, 0.32.3, 0.7.1, 0.6.1, 0.6.1, 3.1.0, 0.4.0+sdk-1.4.341.0, 1.1.0, 0.1.5, 0.30.13 | Apache-2.0 | the window's crates above |
+| dpi | 0.1.2 | Apache-2.0 AND MIT | the window's crates above |
+| ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | the window's crates above |
+| self_cell | 1.3.0 | Apache-2.0 OR GPL-2.0-only | the window's crates above |
+| async-channel, async-executor, async-io, async-lock, async-process, async-signal, async-task, atomic-waker, atspi, atspi-common, atspi-proxies, bit-set, bit-vec, blocking, color, concurrent-queue, event-listener, event-listener-strategy, fastrand, fearless_simd, futures-lite, glifo, idna_adapter, indexmap, kurbo, linebender_resource_handle, nohash-hasher, parking, peniko, pin-project, pin-project-internal, pin-project-lite, polling, portable-atomic, portable-atomic-util, rustc-hash, rustc-hash, simd_cesu8, swash, utf8_iter, uuid, vello_common, vello_cpu, yazi, zeno | 2.5.0, 1.13.3, 2.6.0, 3.4.2, 2.5.0, 0.2.14, 4.7.1, 1.1.2, 0.29.0, 0.13.0, 0.13.0, 0.10.0, 0.9.1, 1.7.0, 0.3.3, 2.5.0, 5.4.2, 0.5.4, 2.5.0, 0.4.1, 2.6.1, 0.2.0, 1.2.2, 2.14.2, 0.13.1, 0.1.1, 0.2.0, 2.2.1, 0.6.1, 1.1.13, 1.1.13, 0.2.17, 3.11.0, 1.15.0, 0.2.8, 1.1.0, 2.1.3, 1.2.0, 0.2.10, 1.0.4, 1.29.0, 0.1.0, 0.1.0, 0.2.1, 0.3.3 | Apache-2.0 OR MIT | the window's crates above |
+| linux-raw-sys, linux-raw-sys, rustix, rustix, wasip2, wit-bindgen | 0.12.1, 0.4.15, 0.38.44, 1.1.6, 1.0.4+wasi-0.2.12, 0.57.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | the window's crates above |
+| arrayref | 0.3.9 | BSD-2-Clause | the window's crates above |
+| zerocopy, zerocopy-derive | 0.8.63, 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT | the window's crates above |
+| tiny-skia-path | 0.12.0 | BSD-3-Clause | the window's crates above |
+| moxcms, pxfm | 0.8.1, 0.1.30 | BSD-3-Clause OR Apache-2.0 | the window's crates above |
+| num_enum, num_enum_derive | 0.7.6, 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 | the window's crates above |
+| clipboard-win, error-code | 5.4.3, 3.4.0 | BSL-1.0 | the window's crates above |
+| libloading | 0.8.9 | ISC | the window's crates above |
+| android-properties, block2, block2, bytes, calloop, calloop, calloop-wayland-source, calloop-wayland-source, cfg_aliases, color_quant, combine, core_maths, crunchy, dispatch, dlib, endi, fax, float-cmp, fontconfig-parser, fontdb, glutin-winit, harfrust, harfrust, imagesize, libm, libredox, memoffset, objc-sys, objc2, objc2, objc2-app-kit, objc2-cloud-kit, objc2-contacts, objc2-core-data, objc2-core-image, objc2-core-location, objc2-encode, objc2-foundation, objc2-foundation, objc2-link-presentation, objc2-metal, objc2-quartz-core, objc2-symbols, objc2-ui-kit, objc2-uniform-type-identifiers, objc2-user-notifications, orbclient, ordered-float, phf, phf_generator, phf_macros, phf_shared, quick-xml, redox_syscall, redox_syscall, redox_syscall, rustybuzz, simd-adler32, slab, smithay-client-toolkit, smithay-client-toolkit, smithay-clipboard, strict-num, synstructure, tiff, tokio, tracing, tracing-attributes, tracing-core, uds_windows, wayland-backend, wayland-client, wayland-csd-frame, wayland-cursor, wayland-protocols, wayland-protocols-experimental, wayland-protocols-misc, wayland-protocols-plasma, wayland-protocols-wlr, wayland-scanner, wayland-sys, winnow, x11-dl, xcursor, xkbcommon-dl, xml-rs, zbus, zbus-lockstep, zbus-lockstep-macros, zbus_macros, zbus_names, zbus_xml, zcheapstr, zvariant, zvariant_derive, zvariant_utils | 0.2.2, 0.5.1, 0.6.2, 1.12.1, 0.13.0, 0.14.5, 0.3.0, 0.4.1, 0.2.2, 1.1.0, 4.6.9, 0.1.1, 0.2.4, 0.2.0, 0.5.3, 1.1.1, 0.2.7, 0.9.0, 0.5.8, 0.23.0, 0.5.0, 0.12.0, 0.5.2, 0.14.0, 0.2.16, 0.1.25, 0.9.1, 0.3.5, 0.5.3, 0.6.5, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 4.1.0, 0.2.2, 0.3.2, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 0.2.2, 0.3.55, 5.5.1, 0.13.1, 0.13.1, 0.13.1, 0.13.1, 0.41.0, 0.4.1, 0.5.18, 0.9.5, 0.20.1, 0.3.10, 0.4.12, 0.19.2, 0.20.0, 0.7.3, 0.1.1, 0.14.0, 0.11.3, 1.54.1, 0.1.44, 0.1.31, 0.1.36, 1.2.1, 0.3.17, 0.31.15, 0.3.0, 0.31.14, 0.32.13, 20250721.0.1, 0.3.12, 0.3.12, 0.3.12, 0.31.11, 0.31.11, 1.0.4, 2.21.0, 0.3.11, 0.4.2, 0.8.29, 5.19.0, 0.5.2, 0.5.2, 5.19.0, 4.3.5, 5.2.1, 1.1.0, 5.15.1, 5.15.1, 4.2.0 | MIT | the window's crates above |
+| accesskit, accesskit_atspi_common, accesskit_consumer, accesskit_consumer, accesskit_consumer, accesskit_macos, accesskit_unix, accesskit_windows, ahash, android-activity, android_system_properties, arrayvec, as-raw-xcb-connection, ash, async-broadcast, async-recursion, async-trait, base64, bitflags, bitflags, bumpalo, cgl, core-foundation, core-foundation-sys, core-graphics, core-graphics-types, crc32fast, crossbeam-utils, displaydoc, document-features, downcast-rs, duplicate, ecolor, egui-wgpu, egui-winit, egui_glow, either, emath, enum-map, enum-map-derive, enumflags2, enumflags2_derive, epaint, errno, euclid, fdeflate, flate2, font-types, font-types, foreign-types, foreign-types-macros, foreign-types-shared, form_urlencoded, futures-core, futures-io, futures-macro, futures-task, futures-util, getrandom, getrandom, gif, gpu-allocator, guillotiere, half, hashbrown, heck, hermit-abi, hex, idna, image-webp, itertools, itoa, jni, jni-macros, jni-sys, jni-sys, jni-sys-macros, jobserver, js-sys, khronos-egl, litrs, lock_api, log, memmap2, naga, naga-types, ndk, ndk-context, ndk-sys, once_cell, ordered-stream, parking_lot, parking_lot_core, pdf-writer, percent-encoding, piper, pkg-config, plain, polycool, presser, proc-macro-crate, proc-macro2-diagnostics, profiling, quick-error, range-alloc, rangemap, raw-window-metal, read-fonts, read-fonts, read-fonts, renderdoc-sys, roxmltree, rustversion, scoped-tls, scopeguard, serde_repr, signal-hook-registry, simdutf8, siphasher, skrifa, skrifa, skrifa, smol_str, smol_str, stable_deref_trait, static_assertions, subsetter, sys-locale, tempfile, thiserror, thiserror, thiserror-impl, thiserror-impl, toml_datetime, toml_edit, toml_parser, ttf-parser, type-map, unicode-bidi, unicode-bidi-mirroring, unicode-ccc, unicode-properties, unicode-script, unicode-segmentation, unicode-width, url, wasm-bindgen, wasm-bindgen-futures, wasm-bindgen-macro, wasm-bindgen-macro-support, wasm-bindgen-shared, web-sys, web-time, webbrowser, weezl, wgpu-core, wgpu-core-deps-apple, wgpu-core-deps-emscripten, wgpu-core-deps-wasm, wgpu-core-deps-windows-linux-android, wgpu-hal, wgpu-naga-bridge, wgpu-types, windows, windows-collections, windows-core, windows-future, windows-implement, windows-interface, windows-numerics, windows-result, windows-strings, windows-sys, windows-sys, windows-sys, windows-targets, windows-threading, windows_aarch64_gnullvm, windows_aarch64_msvc, windows_i686_gnu, windows_i686_gnullvm, windows_i686_msvc, windows_x86_64_gnu, windows_x86_64_gnullvm, windows_x86_64_msvc, write-fonts, x11rb, x11rb-protocol, xmp-writer | 0.24.1, 0.18.1, 0.35.0, 0.36.0, 0.38.0, 0.26.3, 0.21.1, 0.32.1, 0.8.12, 0.6.1, 0.1.6, 0.7.8, 1.0.1, 0.38.0+1.3.281, 0.7.2, 1.2.0, 0.1.92, 0.22.1, 1.3.2, 2.13.2, 3.20.3, 0.3.2, 0.9.4, 0.8.7, 0.23.2, 0.1.3, 1.5.3, 0.8.23, 0.2.7, 0.2.12, 1.2.1, 2.0.1, 0.36.2, 0.36.2, 0.36.2, 0.36.2, 1.19.0, 0.36.2, 2.7.3, 0.17.0, 0.7.12, 0.7.12, 0.36.2, 0.3.14, 0.22.14, 0.3.7, 1.1.10, 0.11.3, 0.12.7, 0.5.0, 0.2.4, 0.3.1, 1.2.2, 0.3.34, 0.3.34, 0.3.34, 0.3.34, 0.3.34, 0.3.4, 0.4.3, 0.14.2, 0.28.0, 0.7.0, 2.7.1, 0.17.1, 0.5.0, 0.5.3, 0.4.3, 1.1.0, 0.2.4, 0.15.0, 1.0.18, 0.22.4, 0.22.4, 0.3.1, 0.4.1, 0.4.1, 0.1.35, 0.3.106, 6.0.0, 1.0.1, 0.4.14, 0.4.34, 0.9.12, 30.0.1, 30.0.1, 0.9.0, 0.1.1, 0.6.0+11769913, 1.21.4, 0.2.0, 0.12.5, 0.9.12, 0.15.0, 2.3.2, 0.2.5, 0.3.34, 0.2.3, 0.4.0, 0.3.1, 3.5.0, 0.10.1, 1.0.18, 2.0.1, 0.1.5, 1.8.0, 1.1.0, 0.37.0, 0.39.2, 0.41.0, 1.1.0, 0.20.0, 1.0.23, 1.0.1, 1.2.0, 0.1.21, 1.4.8, 0.1.5, 1.0.4, 0.40.0, 0.42.1, 0.44.0, 0.2.2, 0.3.7, 1.2.1, 1.1.0, 0.2.6, 0.3.2, 3.27.0, 1.0.69, 2.0.21, 1.0.69, 2.0.21, 1.1.2+spec-1.1.0, 0.25.17+spec-1.1.0, 1.1.5+spec-1.1.0, 0.25.1, 0.5.1, 0.3.18, 0.4.0, 0.4.0, 0.1.4, 0.5.8, 1.13.3, 0.2.3, 2.5.8, 0.2.129, 0.4.79, 0.2.129, 0.2.129, 0.2.129, 0.3.106, 1.1.0, 1.2.5, 0.1.12, 30.0.1, 30.0.1, 30.0.1, 30.0.1, 30.0.1, 30.0.1, 30.0.1, 30.0.1, 0.62.2, 0.3.2, 0.62.2, 0.3.2, 0.60.2, 0.59.3, 0.3.1, 0.4.1, 0.5.1, 0.52.0, 0.59.0, 0.61.2, 0.52.6, 0.2.1, 0.52.6, 0.52.6, 0.52.6, 0.52.6, 0.52.6, 0.52.6, 0.52.6, 0.52.6, 0.48.1, 0.13.2, 0.13.2, 0.3.3 | MIT OR Apache-2.0 | the window's crates above |
+| r-efi, r-efi | 5.3.0, 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | the window's crates above |
+| cursor-icon, glow, raw-window-handle, xkeysym, zune-core, zune-jpeg | 1.2.0, 0.17.0, 0.6.2, 0.2.1, 0.5.3, 0.5.15 | MIT OR Apache-2.0 OR Zlib | the window's crates above |
+| miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | the window's crates above |
+| icu_collections, icu_locale_core, icu_normalizer, icu_normalizer_data, icu_properties, icu_properties_data, icu_provider, litemap, potential_utf, tinystr, writeable, yoke, yoke-derive, zerofrom, zerofrom-derive, zerotrie, zerovec, zerovec-derive | 2.4.0, 2.4.0, 2.4.0, 2.4.0, 2.4.0, 2.4.0, 2.4.0, 0.8.3, 0.1.6, 0.8.5, 0.6.4, 0.8.4, 0.8.4, 0.1.8, 0.1.8, 0.2.5, 0.11.9, 0.11.7 | Unicode-3.0 | the window's crates above |
+| byteorder-lite, memchr, same-file, termcolor, walkdir, winapi-util | 0.1.0, 2.8.3, 1.0.6, 1.4.1, 2.5.0, 0.1.11 | Unlicense OR MIT | the window's crates above |
+| slotmap, zlib-rs | 1.1.1, 0.6.8 | Zlib | the window's crates above |
+| bytemuck_derive, dispatch2, objc2-app-kit, objc2-core-foundation, objc2-core-graphics, objc2-io-surface, objc2-metal, objc2-quartz-core, objc2-ui-kit, tinyvec | 1.12.1, 0.3.1, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 1.13.3 | Zlib OR Apache-2.0 OR MIT | the window's crates above |
+
+Every licence named is compatible with GPL-3.0-or-later: Apache-2.0 is
+compatible with GPL version 3, and MIT, BSD-2-Clause, BSD-3-Clause, ISC,
+Zlib, 0BSD, BSL-1.0, the Unlicense and Unicode-3.0 are permissive. Where a
+crate offers a choice, Katana takes it under MIT or Apache-2.0 - including
+the crates that also offer GPL-2.0-only or LGPL-2.1-or-later, which are
+not taken.
+
+**The window's crates** (step 7 of the port, from its prelude of
+2026-11-11): the rows from egui on. Their licences are crates.io's `license` field for
+each locked version, read on 2026-11-11 (recorded). Every one was published
+on or before 2026-10-28, two weeks before it was locked; the newer releases
+cargo first chose were pinned back, and `tools/build_visible.sh` builds
+`--locked`. The lock is resolved for every target, so the rows include
+crates compiled only for Windows, macOS, Android or WebAssembly, and
+build-time crates (proc macros and build scripts); none of them is compiled
+into a Linux build that does not need it. egui's embedded fonts
+(`epaint_default_fonts`) are font data under the SIL Open Font Licence 1.1
+and the Ubuntu Font Licence 1.0: whether the GPL-3.0 rule applies to them,
+and which font the window carries, waits on the owner (docs/rust.md, "Not
+done"), and is to be settled before the first Rust release.
+
+**Fonts embedded in the window.** Compiled into `katana_window` with
+`include_bytes!` (`rust/crates/katana_window/src/canvas/text.rs`), so shipped inside the
+window program.
+
+| Font | Version | Licence | Where | What it asks of Katana |
+|---|---|---|---|---|
+| Liberation Sans (Regular, Bold, Italic, BoldItalic) | 2.1.5 (Ubuntu's `fonts-liberation` 1:2.1.5-3) | SIL Open Font License 1.1 (Copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation; digitized data copyright (c) 2010 Google Corporation, with Reserved Fonts Arimo, Tinos and Cousine) | `rust/crates/katana_window/fonts/` | Keep the copyright notice and licence with the fonts (`fonts/LICENSE-LiberationSans.txt`); the fonts may not be sold by themselves, and a modified font may not bear the Reserved Font Names. Bundling them in a program under another licence is allowed (OFL 1.1, condition 1). |
+
+**Code translated into the Rust port.** The Rust port reproduced the C++
+program's behaviour exactly, and in a few places that meant translating a
+third party's code into Rust rather than calling it: the translation is a
+copy of that code in another language, so it keeps that code's copyright and
+licence. Each file names its source at the top; this table lists them
+(verified: the copyright lines were read in the installed headers of
+MSYS2's packages on 2026-11-08, but fdlibm's, which are not installed and
+are quoted as fdlibm distributes them).
+
+| Translated code | Version | Licence | Rust file | What it asks of Katana |
+|---|---|---|---|---|
+| nlohmann/json: the lexer, parser, serializer, value rules and Grisu2 number text | 3.12.0 | MIT (Copyright (c) 2013-2025 Niels Lohmann; to_chars.hpp also Copyright (c) 2009 Florian Loitsch) | `rust/crates/katana_core/src/json.rs`, `json/sax.rs`, `json/serializer.rs`, `json/to_chars.rs` | Keep the copyright and permission notice (below). |
+| fdlibm `e_remainder.c` (`__ieee754_remainder`) | as distributed in fdlibm 5.3 and its descendants | Sun's notice: permission to use, copy, modify and distribute, provided the notice is preserved | `rust/crates/katana_math/src/cpp.rs` (`remainder`) | Preserve the notice, which the file does word for word. |
+| Eigen: ColPivHouseholderQR, Householder, HouseholderSequence | 3.4 | MPL-2.0 (Copyright (C) 2008-2010 Gael Guennebaud and Benoit Jacob) | `rust/crates/katana_survey/src/lsq_core.rs` | The translated file's source stays available under MPL-2.0, with its notice. Eigen's files carry no "Incompatible With Secondary Licenses" notice, so MPL-2.0 section 3.3 lets the larger work be distributed under the GPL. Recorded; whether a translation counts as a Modification of the covered files is unverified (section 7). |
+| CGAL: Constrained_triangulation_plus_2, Constrained_Delaunay_triangulation_2, Triangulation_2 (the perturbed in-circle test) | 6.2 | GPL-3.0-or-later (Copyright (c) 1997-2012 INRIA Sophia-Antipolis) | `rust/crates/katana_terrain/src/cdt_backend.rs` | The same licence as Katana's; keep the notices. |
+| CGAL: Intersections_2/Segment_2_Segment_2 (the crossing point's construction) | 6.2 | LGPL-3.0-or-later (Copyright (c) 2000 Utrecht University, ETH Zurich, INRIA Sophia-Antipolis and others) | `rust/crates/katana_terrain/src/cdt_backend.rs` | Compatible with GPL-3.0-or-later; keep the notice. |
+| libstdc++: `uniform_int_distribution`, `generate_canonical`, `std::clamp` | GCC 16.2 | GPL-3.0-or-later with the GCC Runtime Library Exception (Copyright (C) Free Software Foundation, Inc.) | the tests' random engines (the `tests/support` modules of the geometry, render, entity, dxf, surveyio, terrain and other crates) and `katana_math::cpp::clamp` | The same licence as Katana's. |
+
+nlohmann/json's copyright and permission notice, as its `LICENSE.MIT` gives it:
+
+```text
+MIT License 
+
+Copyright (c) 2013-2025 Niels Lohmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 
 ## 2. Shared libraries beside the programs
 
@@ -76,36 +210,43 @@ These are DLLs in `bin/` next to the executables. A DLL can be replaced by the
 user with a modified build, which is what the LGPL asks for (the project's
 reasoning for DLLs and not static linking is in `docs/building.md`).
 
-The "Imported by" column was read from the import tables of the programs and
-DLLs of a Windows release build (2026-10-08). The three programs import
+The "Imported by" column was read from the import tables of the C++ programs
+and DLLs of a Windows release build (2026-10-08). Those programs imported
 `libgdal`, `libgmp`, `libpdalcpp`, `libproj`, `libsqlite3` and the GCC runtime,
-and `katana.exe` also imports Qt6Core, Qt6Gui, Qt6PrintSupport and Qt6Widgets.
-The others are reached only through those, and "through" says which. A
+and `katana.exe` also Qt. The Rust programs link GDAL, PDAL (through its shim),
+PROJ and SQLite (`rust/crates/*/build.rs`), and the GCC runtime the shims and
+those libraries need; they import no Qt, and GMP (which the C++ took for
+CGAL's number types) is reached only through GDAL's own dependencies. Their
+import tables are to be read from the first Rust package (section 7). The
+others are reached only through those, and "through" says which. A
 library Katana only reaches through another is still shipped, and its licence
 is still passed on.
 
 | Component | Version | Licence | Imported by | What it asks of Katana |
 |---|---|---|---|---|
-| Qt 6: Core, Gui, Widgets, PrintSupport, with the platform, style, image-format and TLS plugins (`qwindows`, `qoffscreen`, `qmodernwindowsstyle`, `qgif`, `qico`, `qjpeg`, `qschannelbackend`, others) | 6.11.2 | The headers read (QtCore, QtGui, QtWidgets, QtNetwork, QtPrintSupport and the private RHI header; the Qt6Network DLL is shipped, but no Katana source or binary uses it and no DLL in `bin/` imports it, so `windeployqt` is presumed to copy it for a plugin) say `LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`; Katana uses them under LGPL-3.0-only | `katana.exe` (the other two programs import no Qt library) | LGPL-3.0 section 4: give prominent notice that Qt is used and covered by the LGPL; accompany the program with the GPL and LGPL texts; where the program displays copyright notices while it runs (the About dialog), include Qt's copyright notice among them with a pointer to those texts; link through a shared-library mechanism, which the DLLs beside the program are. Katana also uses Qt's private GUI headers (`Qt6::GuiPrivate`, in the GPU renderer): the same licence, tied to one Qt version. |
 | GDAL | 3.13.2 | MIT (recorded; the licence file collects the licences of GDAL's bundled parts) | all three programs | Keep the notice. |
 | PDAL | 2.10.2 | BSD-3-Clause (its licence file collects the licences of its bundled parts, among them Apache-2.0) | all three programs | Keep the notice. |
 | PROJ | 9.8.1 | MIT | all three programs | Keep the notice. |
 | GEOS (through GDAL) | 3.15.0 | LGPL-2.1-or-later (recorded; `COPYING` holds the LGPL 2.1 text, "or later" was not checked) | through GDAL (also librttopo, libspatialite) | Allow replacing the DLL; give the licence text and source. |
-| GMP | 6.3.0 | LGPL-3.0-or-later or GPL-2.0-or-later, at the recipient's choice (`gmp.h`) | all three programs (the number types CGAL uses) | As Qt: LGPL notice, texts, replaceable. |
-| MPFR | 4.2.2 | LGPL-3.0-or-later (`mpfr.h`) | through libSFCGAL, which GDAL imports | As Qt. |
+| GMP | 6.3.0 | LGPL-3.0-or-later or GPL-2.0-or-later, at the recipient's choice (`gmp.h`) | the C++ programs (the number types CGAL used); for the Rust, through GDAL's dependencies | LGPL-3.0 section 4: give prominent notice that it is used and covered by the LGPL, accompany the program with the GPL and LGPL texts, keep it a replaceable shared library. |
+| MPFR | 4.2.2 | LGPL-3.0-or-later (`mpfr.h`) | through libSFCGAL, which GDAL imports | As GMP. |
 | libcurl | 8.22.0 | the curl licence (MSYS2 records "MIT") | through GDAL, PDAL, PROJ and others | Keep the notice. |
 | OpenSSL (libcrypto, libssl) | 3.6.5 | Apache-2.0 | through libcurl, GDAL, PDAL and others | Keep the licence text (Apache-2.0 section 4). OpenSSL has no NOTICE file (none at its GitHub `master` or `openssl-3.6`, and none in the MSYS2 package), so section 4(d) has nothing to pass on. Compatible with GPL version 3, not with version 2 (<https://www.gnu.org/licenses/license-list.html#apache2>). |
-| SQLite | 3.53.4 | public domain | all three programs | None. |
-| zlib | 1.3.2 | Zlib | through Qt, GDAL and many others | Keep the notice in source. |
-| GCC runtime (libstdc++, libgcc, libgomp, libgfortran, libquadmath) and libwinpthread | 16.2.0 | GPL-3.0-or-later WITH GCC-exception-3.1 (libquadmath LGPL-2.1-or-later; libwinpthread MIT and BSD-3-Clause-Clear) (recorded) | all three programs (libstdc++, libgcc, libwinpthread); the other runtime libraries through GDAL and others | The GCC Runtime Library Exception lets the object code be conveyed under another licence. |
+| SQLite | 3.53.4 | public domain | the programs (the project store) | None. |
+| zlib | 1.3.2 | Zlib | through GDAL and many others | Keep the notice in source. |
+| GCC runtime (libstdc++, libgcc, libgomp, libgfortran, libquadmath) and libwinpthread | 16.2.0 | GPL-3.0-or-later WITH GCC-exception-3.1 (libquadmath LGPL-2.1-or-later; libwinpthread MIT and BSD-3-Clause-Clear) (recorded) | the programs (libstdc++ for the shims, libgcc, libwinpthread); the other runtime libraries through GDAL and others | The GCC Runtime Library Exception lets the object code be conveyed under another licence. |
 
 Each of these is also in the table in section 3, with the version and licence
 as MSYS2 records them.
 
 ## 3. Everything else in the Windows x86-64 package
 
-The rest of the 200 DLLs come in as the dependencies of GDAL, PDAL, Qt and the
-libraries above; Katana's own code does not call them directly. The table is every MSYS2 package that owns a DLL in
+The rest of the 200 DLLs of the C++ package came in as the dependencies of
+GDAL, PDAL, Qt and the libraries above; Katana's own code does not call them
+directly. The `qt6-base` row is gone with Qt; a few other rows (`md4c`,
+`double-conversion`, and parts of the font and image stack) may have been
+Qt's alone, and which of them a Rust package still carries is to be read from
+it (section 7). The table is every MSYS2 package that owns a DLL in
 `bin/`, 120 in all, with the licence MSYS2 records for it (**recorded**). Where
 MSYS2 lists several licences for a package, the package holds parts under each
 (a library and its tools, say) or offers a choice; which applies to the DLL
@@ -218,7 +359,6 @@ header means that header was read.
 | postgresql | 18.6-4 | PostgreSQL | 1 | <https://www.postgresql.org/> |  |
 | proj | 9.8.1-1 | MIT | 1 | <https://trac.osgeo.org/proj/> | Section 2. |
 | qhull | 2020.2-3 | custom | 1 | <http://www.qhull.org/> |  |
-| qt6-base | 6.11.2-2 | LGPL-3.0-only WITH Qt-GPL-exception-1.0 AND AFL-2.1 AND Apache-2.0 AND BSL-1.0 AND CC0-1.0 AND BSD-3-Clause AND CC-BY-4.0 AND GFDL-1.3-no-invariants-only AND GPL-2.0-only AND GPL-2.0-or-later AND GPL-3.0-only AND custom | 16 | <https://www.qt.io> | Used under LGPL-3.0-only (section 2). The package licence is the union of every part of the Qt tree. |
 | rav1e | 0.8.1-1 | BSD-2-Clause | 1 | <https://github.com/xiph/rav1e/> |  |
 | re2 | 20251105-3 | BSD-3-Clause | 1 | <https://github.com/google/re2> |  |
 | sfcgal | 2.3.0-1 | LGPL-2.0-or-later | 1 | <https://www.sfcgal.org/> | Depends on CGAL (pacman). Whether it uses CGAL's GPL packages was not checked. |
@@ -242,8 +382,8 @@ as DLLs. A few are GPL, all "version 2 or later" where a header was read
 (poppler, librttopo, x264, x265) and `jbigkit` (its source header): they are
 loaded into the same process through GDAL, and "version 2 or later" can be
 passed on under version 3, so they fit Katana being GPL-3.0-or-later. They
-would fit GPL-2.0-only too: it is CGAL's version-3 code, not these, that rules
-version 2 out. `libSFCGAL.dll` depends on CGAL and on MPFR.
+would fit GPL-2.0-only too: it is the version-3 code translated from CGAL,
+not these, that rules version 2 out. `libSFCGAL.dll` depends on CGAL and on MPFR.
 
 ## 4. Data shipped beside the programs
 
@@ -270,20 +410,22 @@ it is possible: see `LICENSING.md`, "What the licence does not cover".
 
 | Component | Version | Licence | Use |
 |---|---|---|---|
-| GoogleTest | 1.14.0 | BSD-3-Clause | the tests; downloaded into `third_party/_cache` (not committed) |
-| Google Benchmark | 1.9.1 | Apache-2.0 | the benchmarks; the release builds switch them off |
 | NSIS | 3.12 (MSYS2) | zlib/libpng licence; its compression modules have their own (`share/licenses/nsis/COPYING`) | makes the Windows installer; its small runtime stub is inside every installer |
-| Qt's tools (`moc`, `rcc`, `windeployqt`, and `qsb` where the GPU shaders are baked) | 6.11.2 | recorded for `qt6-base` and `qt6-tools`: LGPL-3.0-only WITH Qt-GPL-exception-1.0, with GPL-3.0-only parts | build and packaging only; none is shipped |
-| CMake, Ninja, the compilers, Python, `osslsigncode` | n/a | their own licences | build, test and signing; not part of a package |
+| Rust (rustc, cargo, clippy) | 1.98.1 in WSL and on Linux and macOS, 1.99.0 from MSYS2 | MIT OR Apache-2.0 | builds the programs; the standard library compiled into them is under the same licences |
+| CMake (the test runner), Ninja, the C++ compilers of the shims, Python, `osslsigncode` | n/a | their own licences | build, test and signing; not part of a package |
+
+The C++ build also used GoogleTest, Google Benchmark and Qt's tools (`moc`,
+`rcc`, `windeployqt`, `qsb`); none is used since 2026-11-15.
 
 ## 6. The Linux, macOS and Windows ARM64 packages
 
 Not audited. The Linux and macOS packages are built against the conda-forge
-packages named in `tools/setup_linux_toolchain.py` (`qt6-main`, `cgal-cpp`,
-`eigen` 3.4, `proj`, `gdal`, `pdal`, `nlohmann_json`, `openssl`, `zlib`,
-`libsqlite`, `gmp`, `mpfr`, `libboost-headers`), and the libraries
-`KatanaDeployUnix.cmake.in` copies beside the programs are those packages'
-dependencies, so the list differs from section 3. The Windows ARM64 package
+packages named in `tools/setup_linux_toolchain.py` (since 2026-11-15 `proj`,
+`gdal`, `pdal`, `libsqlite` and the Rust toolchain; the C++ build also needed
+`qt6-main`, `cgal-cpp`, `eigen`, `nlohmann_json`, `openssl`, `zlib`, `gmp`,
+`mpfr` and `libboost-headers`), and the libraries
+`cmake/KatanaDeployUnix.cmake.in` copies beside the programs are those
+packages' dependencies, so the list differs from section 3. The Windows ARM64 package
 is built from MSYS2's CLANGARM64 packages. Section 1 holds for all
 platforms, because it comes from Katana's sources. For the others, each
 package's licence is in its `info/licenses` folder and
@@ -293,17 +435,23 @@ package.
 
 ## 7. Not verified
 
+* The shared libraries of a Rust package: sections 2 and 3 are the C++
+  package's audit less Qt. The import tables of the Rust programs, and which
+  DLLs a Rust package carries, are to be read from the first one.
 * The versions and licences in section 3 are MSYS2's records, not read from each
-  source. The headers of x264, x265, poppler, librttopo, libheif, GMP, MPFR and
-  Qt were read, as the notes say.
+  source. The headers of x264, x265, poppler, librttopo, libheif, GMP and MPFR
+  were read, as the notes say.
+* Whether the Rust translation of Eigen's QR (section 1, "Code translated into
+  the Rust port") is a Modification of Eigen's covered files under MPL-2.0, and so
+  must itself stay available under MPL-2.0; the notice is kept either way.
+* The Windows-only Rust crates of section 1 (`windows-sys` and its target
+  crates) are not yet downloaded, because nothing is built on Windows until the
+  owner says so: their licences are not yet read from the crates.
 * `jbigkit`: read in the 2.1 sources of Debian and a mirror, not in the MSYS2
   archive (see the table).
 * The EPSG registry terms behind `proj.db`, and which licence covers the
   certificate bundle file.
 * Everything in section 6.
-* Qt's own licensing pages (doc.qt.io and qt.io) refused automated access
-  (HTTP 403); the Qt licence is taken from the 6.11.2 headers on the build
-  machine.
 * Whether the packages carry the licence texts, the notices and the written offer
   of source that sections 1 and 2 call for. They do not yet: `LICENSE` is the only
   file the install rules copy. This is for packaging to do; `LICENSING.md`,

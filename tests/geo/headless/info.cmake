@@ -7,7 +7,7 @@
 # 24.892 to 38.819 (read from the text); lots.geojson one layer, "lots".
 add_test(NAME qt_info_typed_and_run_as_a_dialog_runs_it_gives_the_records_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>INFO \"${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc\" STATS|<INFO \"${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson\" JSON"
         "-DEXPECT=raster width=120 height=90 bands=1 [^\r\n]*[\r\n]+band band=1 type=Float32 nodata=-9999 min=24\\.89[0-9]* max=38\\.81[0-9]* .*--run-line INFO [^\r\n]*: ok=yes[\r\n]+  reply: \\{\"path\":\"[^\"]*/lots\\.geojson\",\"raster\":null,\"vector\":\\{"

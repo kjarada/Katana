@@ -5,6 +5,18 @@ tested, and published as a GitHub release, how the packages are signed, and why 
 are made the way they are. How to build on one machine is
 `docs/building.md`; this is all of them together.
 
+**Katana is Rust since 2026-11-15** (`docs/rust.md`). The releases up to
+v0.3.0 were the C++ program; on that day the C++ was removed, and the
+workflow, the packaging and this document were re-pointed at the programs
+cargo builds: each job builds the workspace with cargo, runs cargo's tests and
+the test runner's suite, and packages the four programs through the packaging
+project (`packaging/CMakeLists.txt`, "Packaging" below). The packages, their
+layout, the installer, the update assets and the signing are what they were.
+**The workflow in that form has not been run** ("Not done"): nothing of the
+port runs on Windows before the owner says so (`docs/rust.md`, "The owner's
+decisions"), and a release is where the Windows build is first proven. Where
+this document records what a run showed, the run was of the C++ build.
+
 ## Publishing a release
 
 The workflow is `.github/workflows/release.yml`. It runs ONLY when started by
@@ -18,9 +30,10 @@ fetch the next version ("Update assets"), and publishes them.
 
 The owner made the update keys and pinned their public halves on 2026-10-14
 ("Update signing"; `cmake/KatanaUpdateKeys.cmake` holds real keys since
-745606c4). Every job configures with `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, so
-should the tree ever hold placeholder keys again every run stops in its
-first job, a run without a tag included.
+745606c4). Every build job runs cargo with `KATANA_REQUIRE_UPDATE_KEYS=ON`
+and packages with `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, and the first job asks
+the keys file the same question, so should the tree ever hold placeholder
+keys again every run stops in its first job, a run without a tag included.
 
 1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION X.Y.Z)`,
    and merge it to `main`.
@@ -113,7 +126,7 @@ is the latest, and are never offered a version below their own.
 An installed Katana finds a newer version by reading two small files of the
 latest release, and then fetches only the files that differ from its own
 (`docs/update.md`; the addresses are built in
-`include/katana/update/feed.hpp`):
+`rust/crates/katana_update/src/feed.rs`):
 
 ```
 https://github.com/<repo>/releases/latest/download/Katana-update-<token>.json.sig
@@ -156,7 +169,7 @@ What the producer is told about a tree:
 
 | Option | Value | Why |
 |---|---|---|
-| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests, and the one the five packages were configured with | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`isNewerThan`, `include/katana/update/trust.hpp`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
+| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests, and the one the five packages were made with | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`is_newer_than`, `rust/crates/katana_update/src/trust.rs`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
 | `--seed` | `share/katana/samples/*` | a seed is written only where it is absent. Opening a sample project changes it in place, so as ordinary data every update would fetch the samples again and write over what the user had done in them |
 | `--exclude` | `LICENSE`, and for Linux `ssl/*` | a manifest names files under `bin`, `share`, `etc` and `lib` and nowhere else, and the producer refuses a tree that holds anything more rather than leave it out unasked. The licence text lies beside those folders; the Linux tree keeps its certificate bundle in `ssl/`, where the bundled libcurl looks ("How the Linux and macOS packages are made self-contained"). Neither is ever updated |
 | `--version`, `--tag`, `--repo` | what is being published, and where | what a manifest offers, and its link to the release notes |
@@ -168,7 +181,7 @@ and the rehearsal below alike. `share/katana/install.json` needs no option:
 the producer leaves the install record out by itself.
 
 **The package names its own build.** The run's sequence goes to the builds
-as well as to the producer. Every job configures with
+as well as to the producer. Every job's packaging configure is given
 `-DKATANA_UPDATE_SEQUENCE=<sequence>`, and CPack writes it beside the
 version into the package's install record (`cmake/KatanaPackaging.cmake`,
 "install.json"):
@@ -188,10 +201,10 @@ is, and is offered a later build of its version. So the number in a package
 and the number in its manifest must be ONE number, and the workflow holds
 them together in three places:
 
-* each Configure step refuses a sequence that is not a number before CMake
+* each Package step refuses a sequence that is not a number before CMake
   runs - an empty one would configure, and package a Katana that names its
-  version alone - and then finds it in the cache as the option the project
-  declares ("What each job does");
+  version alone - and then finds it in the packaging's cache as the option
+  the project declares ("Packaging");
 * each job's smoke test reads the record out of the package it unpacked:
   the target, the version and the sequence, each a member of its own ("The
   smoke test");
@@ -203,7 +216,7 @@ them together in three places:
 
 A freshly installed copy is not placed by its sequence at all: with no
 record of an update beside it, a release of its own version is not an
-update whatever the two numbers are (`isNewerThan`).
+update whatever the two numbers are (`is_newer_than`).
 
 **The Windows packages are unpacked on Linux,** where the execute bits a zip
 made on Windows carries (its archiver's guess from the file names) become
@@ -217,11 +230,11 @@ on Linux, and the recheck of the manifests it made passed.
 
 **No package holds a symbolic link,** which the producer refuses (a manifest
 has no way to say one, and the updater does not follow links,
-`include/katana/update/plan.hpp`). The Linux tree has none by construction:
+`rust/crates/katana_update/src/plan.rs`). The Linux tree has none by construction:
 `cmake/KatanaDeployUnix.cmake.in` copies each library as a FILE, under the
 name the loader asks for and with the contents its chain of links ends at,
-not the chain. Were one ever to appear - in a Qt plugin folder or a data
-folder, which that script copies from the toolchain prefix as they are - the
+not the chain. Were one ever to appear - in a data folder, which that
+script copies from the toolchain prefix as it is - the
 place to resolve it is that script, so that the tarball and its manifest
 still describe the same tree.
 
@@ -285,15 +298,18 @@ run:
 * The Version job's step "Update keys" ends `Update keys: pinned, active
   <key id>, spare <key id>`, with no warning: the key check ran under the
   runner's own CMake. The job's first step prints the run's sequence.
-* Each Configure step prints `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON`,
-  `KATANA_UPDATE_REPO:STRING=<repo>` and
+* Each Package step prints `Katana packaging: the programs were built with
+  real update keys, version X.Y.Z, repository '<repo>'`, then
+  `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON`, `KATANA_UPDATE_REPO:STRING=<repo>` and
   `KATANA_UPDATE_SEQUENCE:STRING=<the sequence the first job printed>`
-  after CMake's own output, and goes on: the three settings reached the
-  project ("What each job does").
-* The Linux, macOS and Windows ARM64 jobs configure and build at all: they
-  are the first places the update library, and the helper with it (not on
-  macOS), meets those systems - on Linux and macOS OpenSSL and zlib as the
-  toolchain prefix has them, on Windows ARM64 their static libraries.
+  after CMake's own output, and goes on: the settings reached the programs
+  and the packaging ("Packaging").
+* The first Rust run: every job builds and tests at all. Windows (x86-64 and
+  ARM64) and macOS are where the Rust programs first meet those systems -
+  the updater's swap and the Credential Manager on Windows, the shims
+  compiled by CLANGARM64's clang and by conda-forge's clang on macOS, the
+  Metal backend of the window - and the run is that first meeting
+  (`docs/rust.md`, step 8).
 * Each job's smoke test prints, before any program runs, the three members
   it found in the package's install record: `"target":"<token>"`,
   `"version":"X.Y.Z"` and `"sequence":<that same sequence>` ("Update
@@ -320,7 +336,8 @@ v0.2.0`; nothing was changed by reading. The run started at 14:28 UTC on
 approved it.
 
 * Version: `Update keys: pinned, active 4b5436f13549eee7, spare
-  f5f20acdd524798a`, and the same line in every job's configure.
+  f5f20acdd524798a`, and the same line in every job's configure (the C++
+  build's).
 * The five build jobs passed, with the signing steps skipped (no
   certificate) and, on Windows x86-64, the NSIS step skipped by that name.
   The Windows and Linux jobs' smoke tests printed `selftest=ok`, `keys=pinned`
@@ -374,85 +391,95 @@ earlier jobs had).
 
 ## What each job does
 
-Each job runs the commands `docs/building.md` gives for its platform, with
-`KATANA_BUILD_TESTS` on and `KATANA_BUILD_BENCHMARKS` off, then the whole
-suite (`ctest`), then `--target package`. Nothing in the workflow is a second
-way of building.
+Each job runs the commands `docs/building.md` gives for its platform: cargo
+builds the workspace (`--locked --workspace --release`), `cargo test` runs,
+the test runner is configured with the programs cargo built and runs its
+whole suite (`ctest`), and the packaging project makes the package
+("Packaging"). Nothing in the workflow is a second way of building.
 
-| Job | Runner | Toolchain | Configure |
+| Job | Runner | Toolchain | The native shims compiled by |
 |---|---|---|---|
-| Windows x86-64 | `windows-2025` | MSYS2 UCRT64, GCC 16 | `cmake --preset release`, with the compiler and prefix where the action installed MSYS2 |
-| Windows ARM64 | `windows-11-arm` | MSYS2 CLANGARM64, clang and libc++; NSIS from Chocolatey | the same, with `clang++` and `-DKATANA_MAKENSIS` |
-| Linux x86-64 | `ubuntu-24.04` | `tools/setup_linux_toolchain.py`, GCC 16.2 | `cmake --preset linux-release` |
-| Linux ARM64 | `ubuntu-24.04-arm` | the same script, which installs conda-forge's `linux-aarch64` GCC 16.2 on an ARM machine | `cmake --preset linux-release` |
-| macOS arm64 | `macos-15` | the same script, conda-forge's `osx-arm64` clang 23 | `cmake --preset macos-release` |
+| Windows x86-64 | `windows-2025` | MSYS2 UCRT64: its `rust`, GCC, GDAL, PDAL, PROJ, SQLite, curl | `gcc`, `g++` |
+| Windows ARM64 | `windows-11-arm` | MSYS2 CLANGARM64: its `rust`, clang and libc++, the same libraries; NSIS from Chocolatey | `clang`, `clang++` |
+| Linux x86-64 | `ubuntu-24.04` | `tools/setup_linux_toolchain.py`: Rust, GCC 16.2 with the glibc 2.28 sysroot, the libraries | the prefix's GCC; cargo links with it too |
+| Linux ARM64 | `ubuntu-24.04-arm` | the same script, which installs conda-forge's `linux-aarch64` packages on an ARM machine | the same |
+| macOS arm64 | `macos-15` | the same script, conda-forge's `osx-arm64` packages with clang 23 and libc++ | the prefix's clang, against the runner's SDK (`SDKROOT`); cargo links with it too |
 
-Three more settings make each of them a RELEASE and not a developer's build.
-`-DKATANA_REQUIRE_UPDATE_KEYS=ON` fails the configure while
-`cmake/KatanaUpdateKeys.cmake` holds the placeholder update keys, since a
-program built with them can never be updated. `-DKATANA_UPDATE_REPO=<owner/name>`
-is the repository an installed copy asks for the next version: the one the
-run publishes in, which is this repository unless the input `publish_repo`
-names another. `-DKATANA_UPDATE_SEQUENCE=<sequence>` is the run's sequence,
-the number the Version job read before anything was built: CPack writes it
-beside the version into the package's install record, and the Publish job
-writes it into the release's update manifests ("Update assets", "The
-package names its own build"). The step refuses a sequence that is not a
-number before it starts CMake.
+What makes a build a RELEASE and not a developer's is in each job's
+environment, for every cargo of the job alike - a setting given to one cargo
+and not the next would rebuild the workspace, and the tests would run
+against other programs than are packaged:
 
-CMake takes a `-D` the project has no use for with a warning and builds
-without it, and no program says which repository it asks, so a renamed
-option would give green jobs and programs that ask the default repository
-for ever. Each Configure step therefore ends by checking that the three
-settings arrived. In `CMakeCache.txt` each must stand as the option the
-project declares, `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON`,
+| Variable | Read by | Why |
+|---|---|---|
+| `RUSTFLAGS` | rustc | `-D warnings`; on Linux and macOS also `-C link-arg=-Wl,-rpath,<prefix>/lib`, so the tests find the prefix's libraries (the packaging rewrites that entry) |
+| `KATANA_REQUIRE_UPDATE_KEYS=ON` | `rust/crates/katana_update/build.rs` | fails the build while `cmake/KatanaUpdateKeys.cmake` holds the placeholder update keys, since a program built with them can never be updated |
+| `KATANA_UPDATE_REPO=<owner/name>` | the same | the repository an installed copy asks for the next version: the one the run publishes in, which is this repository unless the input `publish_repo` names another |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` | `rust/crates/katana_cad/build.rs` | fails the build when the default built-in customisation is not there, rather than shipping a program that draws plain lines |
+
+Then the packaging configure is given `-DKATANA_REQUIRE_UPDATE_KEYS=ON`,
+`-DKATANA_UPDATE_REPO=<owner/name>` and `-DKATANA_UPDATE_SEQUENCE=<sequence>`,
+the run's sequence, which the Version job read before anything was built:
+CPack writes it beside the version into the package's install record, and
+the Publish job writes it into the release's update manifests ("Update
+assets", "The package names its own build"). The step refuses a sequence
+that is not a number before it starts CMake.
+
+cargo takes an environment variable nothing reads without a word, and CMake
+takes a `-D` the project has no use for with a warning, and no program says
+which repository it asks, so a renamed variable would give green jobs and
+programs that ask the default repository for ever. Two checks close that.
+The packaging configure reads back what katana_update's build script was
+given - the file `output` of its run under `<programs>/build/katana_update-*/`,
+`cargo:rustc-env=NAME=value` a line - and refuses programs not built with
+real keys (`KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS=0`), this version and the
+repository named ("Packaging"). And the step then finds each of its three
+settings in the packaging's `CMakeCache.txt` as the option the project
+declares, `KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON`,
 `KATANA_UPDATE_REPO:STRING=<owner/name>` and
 `KATANA_UPDATE_SEQUENCE:STRING=<sequence>`: a `-D` nothing declares stays
-there as `UNINITIALIZED`. And in `build.ninja` the update library's compile
-line must define `KATANA_UPDATE_REPO` as that repository and as nothing
-else. The sequence is compiled into no program, so there is no compile
-line to look for it on: the cache says the project took it, before anything
-is built, and the smoke test reads it where it ends up, in the package's
-install record. The check of the repository stops at the compile line on
-purpose. Looking for the name
-in the built programs was considered and not done: a short text assigned to
-a string may be compiled into the instructions that store it, piece by
-piece, so its absence from the file's bytes would prove nothing and could
-stop a good release.
+there as `UNINITIALIZED`. The sequence is compiled into no program: the cache
+says the packaging took it, and the smoke test reads it where it ends up, in
+the package's install record. The C++ jobs found the repository on the
+update library's compile line in `build.ninja`; the build script's output is
+the same evidence for cargo, read where cargo writes it. Looking for the name
+in the built programs' bytes was considered and not done, as before: a short
+text may be compiled into the instructions that store it, so its absence
+would prove nothing.
 
 The first job, before any toolchain is installed, asks the keys file the
-same question the configures will: it runs `cmake/KatanaUpdateKeys.cmake`
+same question the builds will: it runs `cmake/KatanaUpdateKeys.cmake`
 as a script with `KATANA_REQUIRE_UPDATE_KEYS` on, so a tree with placeholder
 keys fails in the first minute and says what to do. The step does not run
-the file bare. It is written for a configure, where the root `CMakeLists.txt`
-has set the policies of its minimum CMake before including it; a script
-starts with none set, and the hosted runner's own CMake (3.31.6 on the image
-of 2026-10-04; the build jobs install 4.x) refused the file's
-`if(... IN_LIST ...)`. The file now sets the one policy that needs
-(`cmake_policy(SET CMP0057 NEW)`, held by `update_keys_file_states_the_policy_its_in_list_needs`
-and its `update_keys_policy_check_catches_*` tests, which read the text,
-because CMake 4 sets that policy itself and a run here cannot tell), but the
+the file bare. It is written for a configure, where the including
+`CMakeLists.txt` has set the policies of its minimum CMake before including
+it; a script starts with none set, and the hosted runner's own CMake (3.31.6
+on the image of 2026-10-04) refused the file's `if(... IN_LIST ...)`. The file
+now sets the one policy that needs (`cmake_policy(SET CMP0057 NEW)`), but the
 step still writes a script of two lines, the same `cmake_minimum_required`
 and an `include` of the file, and runs that: it is what the run of
 2026-10-14 passed through, and the file run bare has not been tried under
 3.31.6. Only a refusal the keys file itself states stops the run. If CMake
 stops for another reason, the step says so in a warning and the run goes
-on: each job's configure makes the same check, and a check that could not
+on: each job's build makes the same check, and a check that could not
 run is not a reason to refuse a release.
 
 The ARM64 jobs build natively on GitHub's ARM runners, which private
 repositories have had since 2026-01-29, rather than cross-compiling: the
 package is then smoke-tested on the machine kind it is for, with nothing
 emulated. MSYS2 has no GCC for ARM64 Windows; its CLANGARM64 environment is
-the only one with Qt, GDAL and PDAL for it, so that build is clang's, which
-the macOS build already requires the code to accept.
+the only one with GDAL and PDAL for it, so the shims there are clang's, as
+they are on macOS.
 
 The Linux and macOS toolchain prefixes are cached under a key that is the
 hash of `tools/setup_linux_toolchain.py` and the runner's system and
-architecture: its `SNAPSHOT` and `SPECS` fix every version. MSYS2 is not
-frozen: it installs whatever the rolling distribution has that day, so a
-Windows release records the compiler's version in its log (the "Toolchain"
-step).
+architecture: its `SNAPSHOT` and `SPECS` fix every version. The specs lost
+everything only the C++ needed on 2026-11-15, so the first Rust run solves
+and installs a new prefix. cargo fetches the crates `rust/Cargo.lock` names
+from crates.io in each job; they are not cached. MSYS2 is not frozen: it
+installs whatever the rolling distribution has that day, so a Windows release
+records the versions of rustc, cargo and the compiler in its log (the
+"Toolchain" step).
 
 ### The actions the workflow runs
 
@@ -580,9 +607,10 @@ reads `.github/workflows/release.yml` and refuses it, naming the line, when:
    Publish or more than once, or a job inherits secrets;
 5. Publish does not wait for the Version job and both build jobs, or runs
    without a tag;
-6. a configure step (`cmake --preset`) does not pass
-   `-DKATANA_REQUIRE_UPDATE_KEYS=ON`, `-DKATANA_UPDATE_REPO` and
-   `-DKATANA_UPDATE_SEQUENCE`;
+6. a configure step - the packaging project's, configured with its preset,
+   one in each build job - does not pass `-DKATANA_REQUIRE_UPDATE_KEYS=ON`,
+   `-DKATANA_UPDATE_REPO` and `-DKATANA_UPDATE_SEQUENCE` (the test runner's
+   configure, `cmake -S . -B ...`, packages nothing and is not one of them);
 7. a `run:` holds `${{ inputs.* }}`, `${{ github.event.* }}` or
    `${{ github.head_ref }}`, which a person typed when starting the run: they
    go in through `env:` (script injection);
@@ -616,8 +644,8 @@ action by tag, by a short digest, by branch, the key read by another job,
 `secrets: inherit`, a configure without the update keys, the tag typed into a
 script, a widened exclude list ...) and requires the check to refuse each by
 name, with the empty file, a file of comments, CRLF line ends and a missing
-file as the degenerate inputs; `release_workflow_bash_steps_parse` and
-`release_workflow_pwsh_steps_parse` run the real file through the shells'
+file as the degenerate inputs; release_workflow_bash_steps_parse and
+release_workflow_pwsh_steps_parse run the real file through the shells'
 parsers, and `update_tools_check_release_workflow_scripts` breaks a step of
 each kind (the `$LASTEXITCODE:` case as it was) and checks the same. The last
 three are registered only where the shell answers, since a test that could
@@ -625,24 +653,29 @@ not make its check must not pass.
 
 ### The whole suite, on the machine the package is for
 
-Before packaging, every job builds the tests and runs all of them, in
-parallel, with `QT_QPA_PLATFORM=offscreen`; a single failure stops the job,
-so nothing is packaged from a build with a failing test. On Linux the suite
-runs under Xvfb with Mesa's software Vulkan driver installed, so the `gpu.`
-suite exercises the Vulkan renderer rather than skipping.
+Before packaging, every job runs all of the tests: `cargo test` over the
+workspace, then the test runner's suite in parallel against the programs
+just built. Both run, the runner's after a failed cargo test too, and a
+single failure of either stops the job, so nothing is packaged from a build
+with a failing test. On Linux the runner's suite runs under Xvfb with Mesa's
+software Vulkan driver installed, so the window's and the GPU layer's tests
+draw through Vulkan, as they do in WSL. The C++ jobs ran their suite with
+`QT_QPA_PLATFORM=offscreen`; the Rust window's headless runner needs no such
+variable (`docs/headless.md`).
 
 Until 2026-09-27 the jobs ran only the part of the suite that meets hardware
-nowhere else (`simd_` on the ARM machines, `gpu.` on macOS), and the release's
-question was only whether each package was complete. The whole suite is the
-stronger gate at the cost of runner time: a release is rare (it is started by
-hand), and the five machines are the only place four of the platforms'
-suites run at all. Those runners remain the only place some code meets real
-hardware:
+nowhere else, and the release's question was only whether each package was
+complete. The whole suite is the stronger gate at the cost of runner time: a
+release is rare (it is started by hand), and the five machines are the only
+place four of the platforms' suites run at all - for the Rust, before step 8,
+the only place anything but Linux x86-64 runs. Those runners remain the only
+place some code meets real hardware:
 
 | Job | What only it proves |
 |---|---|
-| macOS arm64 | the Metal renderer against the software one on a real GPU |
-| Linux ARM64, Windows ARM64, macOS arm64 | the NEON kernels at both levels, natively (built on x86-64 they run only under qemu, `docs/building.md`) |
+| macOS arm64 | the GPU layer through Metal against the software rasteriser, on a real GPU |
+| Linux ARM64, Windows ARM64, macOS arm64 | the programs and every test on 64-bit ARM, natively, the SIMD kernels' ARM paths among them |
+| Windows x86-64, Windows ARM64 | the Windows-only code: the updater's swap and its registry, the Credential Manager, wide paths (`docs/rust.md`, step 8) |
 
 ### The smoke test
 
@@ -660,7 +693,7 @@ package's by the rehearsal that follows. Then:
 * `INFO samples/gis/terrain.asc` must name its coordinate system as
   `EPSG:32630`: that shows GDAL reads the `.prj`, and **nothing about PROJ's
   data**: GDAL recognises a WGS 84 UTM zone from its parameters
-  (`AutoIdentifyEPSG`, `gdal_adapter.cpp`) and names it with `proj.db` missing.
+  (GDAL's `OSRAutoIdentifyEPSG`) and names it with `proj.db` missing.
   It was once taken for the check of the packaged PROJ data; shown on a copy
   of the package with `share/proj` hidden, it still names `EPSG:32630`.
   `CRS SET EPSG:7856` is the check: it reads the code from the database and
@@ -671,8 +704,9 @@ package's by the rehearsal that follows. Then:
   make has no `share/proj`;
 * `IMPORT` of `samples/gis/survey_scan.las` (PDAL) and `parcels.geojson`
   (GDAL's vector drivers) must succeed;
-* `katana <project> --screenshot out.png`, offscreen, must write the window's
-  picture - Qt, its platform plugin and the whole start-up;
+* `katana <project> --screenshot out.png`, headless, must write the window's
+  picture - the whole start-up of the window, drawn with no display and no
+  GPU (`docs/headless.md`);
 * `katana_updater --selftest` must succeed and print `selftest=ok` and
   `keys=pinned`: the helper starts with nothing beside it but what the
   package carries, verifies a known signature and refuses an altered one,
@@ -715,6 +749,110 @@ ends and the uninstaller could not then delete it; a runner with no Desktop
 folder gets a warning, since NSIS does not make one), and the
 uninstaller (`Uninstall.exe /S`, kept in place with `_?=` so the step waits for
 it) must remove `bin\katana_cli.exe` and that shortcut.
+
+## Packaging
+
+The packages are made by the packaging project, `packaging/CMakeLists.txt`: a
+CMake project of its own that compiles nothing (`LANGUAGES NONE`), reads the
+version from `project(Katana VERSION ...)` of the root `CMakeLists.txt`, and
+includes `cmake/KatanaPackaging.cmake`, which holds the install rules, the
+dependency deploy and CPack's settings. Given the folder of the programs
+cargo built, it installs them as a self-contained tree and has CPack make
+the packages:
+
+```sh
+cd packaging
+cmake --preset package -DKATANA_PROGRAMS=<cargo target>/release \
+      [-DKATANA_TOOLCHAIN=<prefix>]         # Linux and macOS: where the libraries come from
+      [-DKATANA_RUNTIME_BIN=<msys2>/bin]    # Windows: the same; $MINGW_PREFIX/bin in an MSYS2 shell
+cmake --build ../build/package --target package    # Katana-<version>-<target>.zip, .exe, .tar.gz or .dmg
+cmake --build ../build/package --target bundle     # the same tree in build/package/dist/Katana
+```
+
+Its preset (`packaging/CMakePresets.json`) is Ninja into `build/package`.
+What it takes:
+
+| Setting | Default | What it is |
+|---|---|---|
+| `KATANA_PROGRAMS` | none: required | cargo's release folder; `katana`, `katana_cli`, `katana_mcp` and, except on macOS, `katana_updater` must be in it, or the configure says to build them |
+| `KATANA_PACKAGE_TARGET` | the machine's: `win64`, `win-arm64`, `linux-<processor>`, `macos-<processor>` | the target token: the last part of the package's name, the `target` of its install record and the name of its update manifest. The workflow names it as its matrix names the package, so a package and its update cannot disagree; anything but the five tokens a release has is refused |
+| `KATANA_TOOLCHAIN` | `$KATANA_TOOLCHAIN` | Linux and macOS: the conda-forge prefix the programs were linked against. Without it the libraries are left to the system, and on macOS no `Katana.app` is made |
+| `KATANA_RUNTIME_BIN` | `$MINGW_PREFIX/bin`, else the folder of the `objdump` found | Windows: the toolchain folder the DLLs are copied from |
+| `KATANA_MAKENSIS` | the `makensis` found | Windows: NSIS, for the installer; without it only the zip is made |
+| `KATANA_REQUIRE_UPDATE_KEYS` | `OFF` | refuse placeholder keys in `cmake/KatanaUpdateKeys.cmake`, and refuse programs not built with real ones, for this version and for `KATANA_UPDATE_REPO` ("What each job does") |
+| `KATANA_UPDATE_REPO` | empty: not checked | the repository the programs must have been built to ask |
+| `KATANA_UPDATE_SEQUENCE` | empty | the release's sequence, written into the install record ("Update assets") |
+| `KATANA_MACOS_MINIMUM` | `13.0` | the `LSMinimumSystemVersion` of `Katana.app` ("macOS") |
+| `KATANA_PUBLISHER` | `Jarada` | the publisher the installer and the signatures name ("Signing") |
+
+**Why a project of its own.** The packages were part of the C++ build until
+2026-11-15: its `install(TARGETS)` rules, Qt deployed by `windeployqt`, CPack
+in the same configure. The programs are cargo's now, so they are installed
+as files, from `KATANA_PROGRAMS`, with `install(PROGRAMS)`. The test runner
+is configured for every test run against whatever was built last, while a
+package is made once, for a release, from programs built for it, and the
+runner registers tests while this installs; so the two are separate
+projects. *Rejected:* a Python packager in place of CPack. The per-user
+installer template (`cmake/NSIS.template.in`), the dependency scan
+(`file(GET_RUNTIME_DEPENDENCIES)`), the signing between staging and archiving
+(`cmake/KatanaSign.cmake`) and the install record are written for CPack and
+were proven by the C++ releases; a second packager would start that proof
+again.
+
+**What the deploy does.**
+
+* **Windows** (`cmake/KatanaDeploy.cmake.in`, run by `cmake --install`): a
+  dependency scan of the four installed programs' import tables with the
+  toolchain's `objdump`, every DLL it resolves copied beside them (the
+  operating system's own and the API sets excluded), then `share/proj`,
+  `share/gdal` and `etc/ssl/certs/ca-bundle.crt` from the toolchain. A DLL
+  that does not resolve, or a PROJ without `proj.db`, fails the install:
+  a warning allowed a package that would not start on another machine.
+  Conflicts (one DLL at two paths) are collected, not fatal. What went with
+  the C++: `windeployqt` and the Qt plugins, `qoffscreen.dll` copied by hand
+  for the headless window, and the build tree's own incremental deploy
+  after every link (the `katana_runtime` target) - cargo's target folder is
+  not made self-contained ("How the Linux and macOS packages are made
+  self-contained" has the reasons the layout is what it is).
+* **Linux and macOS** (`cmake/KatanaDeployUnix.cmake.in`): a scan of cargo's
+  programs, which still name the prefix's `lib/` as their run-time path, so
+  every library resolves as the loader resolves it; every library from the
+  prefix copied into `lib/` (`Contents/Frameworks` in `Katana.app`) under
+  the name the loader asks for, the system's own left out; the data; then
+  each installed program's run-time path rewritten from `<prefix>/lib` to
+  `$ORIGIN/../lib` (`@loader_path/../Frameworks` on macOS). On Linux that is
+  CMake's own ELF editor, `file(RPATH_CHANGE)`, which `install(TARGETS)` used
+  for the C++ programs and which needs the new path no longer than the old;
+  on macOS `install_name_tool -rpath`, after which every program and the
+  bundle are signed ad hoc again. An installed program must not name a
+  folder of the machine that built it: an absolute run-time path to a folder
+  that does not exist on the user's machine lets whoever can make that folder
+  choose the libraries. An entry that is not there stops the package: the
+  programs were built without the prefix's run-time path. *Rejected:* adding
+  `$ORIGIN/../lib` beside the prefix's entry at link time, which needs no
+  edit but ships the build machine's path in every program.
+
+**The release configure reads what cargo was given.** With
+`KATANA_REQUIRE_UPDATE_KEYS` on, the configure reads every run of
+katana_update's build script under `<programs>/build/katana_update-*/output`
+and requires `KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS=0`, `KATANA_VERSION=<the
+version>` and, when `KATANA_UPDATE_REPO` is given, that repository. Every run
+is read, because a target folder keeps one per build of other settings; on a
+developer's machine `cargo clean --release -p katana_update` clears the old
+ones. The status line `Katana packaging: the programs were built with real
+update keys ...` says what it read.
+
+**The checks that hold it.** `tools/check_install_rules.cmake` reads a
+configured packaging directory's install scripts and CPack configuration:
+every source file a rule names exists, nothing is installed from
+`resources/customisation` or `docs/`, the programs installed are the four and
+no other (an `install(PROGRAMS)` rule counts as one, as `install(TARGETS)`
+did), only CPack's pre-build script writes `install.json` and it runs before
+the signing script, and the Unix deploy script scans every program that is
+installed. `tools/check_installer_licence.cmake` holds the installer's
+licence page ("The Windows installer"). Their fixture tests are the runner's;
+the C++ build ran both on its own configure as well, and the runner, which
+writes no install rules, no longer can ("Not done").
 
 ## The Windows installer
 
@@ -836,11 +974,13 @@ per-machine installer.
   notices change with the libraries an update brings. *Rejected:* a page of the
   GPL alone, since the additional terms are as binding as it is; showing the
   third-party audit on the page, a long table that is read in the folder it is
-  installed to. `packaging_installer_shows_the_licence` holds this build's
-  own configure to all of it (`tools/check_installer_licence.cmake`), and
-  `packaging_installer_licence_check_*` hand the check a configure wrong in one
-  way each - no licence file, a page of Unix line ends with no licence, a
-  template with no page, notices no install rule names - and read the refusal.
+  installed to. `tools/check_installer_licence.cmake` holds a configure to all
+  of it, and `packaging_installer_licence_check_*` hand the check a configure
+  wrong in one way each - no licence file, a page of Unix line ends with no
+  licence, a template with no page, notices no install rule names - and read
+  the refusal. (The C++ build also ran it on its own configure,
+  packaging_installer_shows_the_licence; the test runner writes no CPack
+  configuration, so that test went with the C++: "Not done".)
   The release smoke test checks that each package holds the notices. *Seen,
   2026-10-15:* the interactive installer, run on a machine that already had
   Katana installed (so it first asked about uninstalling the old one, answered
@@ -878,10 +1018,12 @@ per-machine installer.
   evaluate it refuses, and what is inside a false condition it leaves out, as
   NSIS does; an instruction that is compiled and never reached it cannot see.
   Each `packaging_nsis_check_catches_*` test breaks one rule in that text and
-  requires the check to name it. Where NSIS is
-  installed, `packaging_nsis_installer_builds_from_the_real_configuration` runs
-  the build's own CPack configuration over a small tree, compiles the installer
-  with `makensis` and holds the script CPack generated to the same rules, and
+  requires the check to name it. Until 2026-11-15, where NSIS was installed,
+  packaging_nsis_installer_builds_from_the_real_configuration also ran the
+  C++ build's own CPack configuration over a small tree, compiled the
+  installer with `makensis` and held the script CPack generated to the same
+  rules; the runner has no CPack configuration of its own, so it went with
+  the C++ ("Not done"). Where NSIS is installed,
   `packaging_nsis_uninstaller_removes_what_is_listed_and_nothing_else` compiles
   the uninstaller's own file-removal functions into a throwaway installer and
   runs them over small trees whose manifests have hostile entries, inside the
@@ -907,35 +1049,35 @@ per-machine installer.
 
 ## How the Linux and macOS packages are made self-contained
 
-The Windows package has been self-contained since 2026-09-23
-(`docs/building.md`, "Bundling"). Linux and macOS had no package at all: their
-programs found the toolchain prefix's libraries through an RPATH naming that
-prefix, so they ran only on a machine that had it. No distribution ships the
-libraries Katana needs (GCC 15 or later, CGAL 6, PROJ 9.5), so "let the
-package manager supply them" has nothing to supply them with.
+The programs find the toolchain prefix's libraries through a run-time path
+naming that prefix, so as built they run only on a machine that has it. No
+distribution ships the libraries Katana needs (PROJ 9.5 or later among
+them), so "let the package manager supply them" has nothing to supply them
+with.
 
-`cmake/KatanaDeployUnix.cmake.in`, run by `cmake --install` when the build
-uses a toolchain prefix, copies them in. The installed tree MIRRORS the
-prefix - `bin/`, `lib/`, `lib/qt6/plugins/`, `share/`, `ssl/` - and that is
-the whole trick: conda-forge builds every library with an RPATH relative to
-itself (`$ORIGIN` on Linux, `@loader_path` on macOS) and every Qt plugin with
-`$ORIGIN/../../..`, so in the same layout they find one another with nothing
-rewritten. Only Katana's own programs change, from the prefix's `lib/` to
-`$ORIGIN/../lib` (`CMAKE_INSTALL_RPATH` in `cmake/toolchains/`). Rewriting
-each library's RPATH (what `patchelf`-based tools do) was the alternative; it
-rewrites every bundled library though none needs it and, on macOS, breaks each
-one's code signature.
+`cmake/KatanaDeployUnix.cmake.in`, run by `cmake --install` when the
+packaging is given a toolchain prefix, copies them in ("Packaging"). The
+installed tree MIRRORS the prefix - `bin/`, `lib/`, `share/`, `ssl/` - and
+that is the whole trick: conda-forge builds every library with a run-time
+path relative to itself (`$ORIGIN` on Linux, `@loader_path` on macOS), so in
+the same layout they find one another with nothing rewritten. Only Katana's
+own programs change, from the prefix's `lib/` to `$ORIGIN/../lib`, which the
+deploy writes into each (the C++ build had CMake's install do it).
+Rewriting each library's run-time path (what `patchelf`-based tools do) was
+the alternative; it rewrites every bundled library though none needs it and,
+on macOS, breaks each one's code signature.
 
 Three kinds of file are found by a path compiled into a library for the
-prefix it was built in, which the user's machine does not have. Each is now
-looked for beside the library instead, as PROJ's data already was on Linux
-(`include/katana/core/library_data.hpp`):
+prefix it was built in, which the user's machine does not have. Each is
+looked for beside the library instead
+(`rust/crates/katana_core/src/library_data.rs`, and katana_gis's
+`gdal_registry.rs`, which hands GDAL what it found):
 
 | Library | Reads | From, in the package |
 |---|---|---|
-| PROJ | `proj.db` and grids | `share/proj`, beside `lib/libproj*` (`projDataDirectory`; on Windows PROJ finds `share/proj` beside its DLL itself, and `bundledProjDataDirectory` is what a failed `PROJ_DATA` or `PROJ_LIB` falls back on) |
-| GDAL | `header.dxf` and its other support files | `share/gdal`, beside `lib/libgdal*` (`locateGdalData`, `gdal_adapter.cpp`) |
-| libcurl, through GDAL | the certificates `https://` is checked against | `ssl/cacert.pem`, beside `lib/libcurl*` (`locateCertificates`, `gdal_adapter.cpp`) |
+| PROJ | `proj.db` and grids | `share/proj`, beside `lib/libproj*` (`proj_data_directory`; on Windows PROJ finds `share/proj` beside its DLL itself, and `bundled_proj_data_directory` is what a failed `PROJ_DATA` or `PROJ_LIB` falls back on) |
+| GDAL | `header.dxf` and its other support files | `share/gdal`, beside `lib/libgdal*` (`locate_gdal_data`) |
+| libcurl, through GDAL | the certificates `https://` is checked against | `ssl/cacert.pem`, beside `lib/libcurl*` (`locate_certificates`) |
 
 Each yields to the user's own setting (`PROJ_DATA`, `GDAL_DATA`,
 `CURL_CA_BUNDLE`, `SSL_CERT_FILE`), and does nothing for a distribution's
@@ -956,34 +1098,32 @@ through that code page, so under `C:\Users\Łukasz\AppData\Local\Programs\Katana
 any character" - it looked for a file under `Lukasz` or `??`, and every
 `https://` request failed before reaching a server: Online Data, `/vsicurl/`,
 the update check (`reason=offline`, which the automatic check swallows, so
-such a copy never updated). `locateCertificates` now finds `libcurl*.dll`
-among the loaded modules with the wide API, as `locateGdalData` finds GDAL,
+such a copy never updated). `locate_certificates` finds `libcurl*.dll`
+among the loaded modules with the wide API, as `locate_gdal_data` finds GDAL,
 and hands GDAL the path of `etc/ssl/certs/ca-bundle.crt` beside its `bin/` in
 UTF-8 (`CURL_CA_BUNDLE`, which GDAL gives libcurl as `CURLOPT_CAINFO`;
 OpenSSL opens a UTF-8 path correctly - tried 2026-10-15 with the shipped
-`libcurl-4.dll` under `Łukasz_测试`). The user's own `CURL_CA_BUNDLE` and
-`SSL_CERT_FILE` are read wide (`core::environmentVariable`) and handed on the
-same way, so the documented override works from such a folder too
-(`GdalAdapter.GdalIsPointedAtTheCertificatesBesideLibcurl`). The refusal for
-an unreadable bundle names the file libcurl was given and no longer says only
-to reinstall (`explainHttpFailure`).
-
-Qt's plugins are copied from the prefix into `lib/qt6/plugins`, and
-`bin/qt.conf` points Qt at them; without it Qt asks the prefix compiled into
-it, the build machine's.
+`libcurl-4.dll` under `Łukasz_测试`, with the C++ program). The user's own
+`CURL_CA_BUNDLE` and `SSL_CERT_FILE` are read wide (katana_core's
+`environment_variable`) and handed on the same way, so the documented
+override works from such a folder too. The refusal for an unreadable bundle
+names the file libcurl was given and no longer says only to reinstall
+(`explain_http_failure`).
 
 On macOS the same tree is `Katana.app` ("macOS", below): the layout inside
 `Contents` keeps the same relative paths under Apple's names.
 
 **What stays the system's, on Linux.** The C library, the GL, EGL and Vulkan
 loaders (the graphics driver's), X11's `libX11` and `libxcb`, `fontconfig` and
-`freetype`. The first two cannot be shipped; fontconfig reads its
-configuration through a path compiled in for the prefix, so a shipped copy
-finds no `fonts.conf` and Qt draws no text. The list follows AppImage's
-excludelist, for the same reasons. So a Linux machine needs, beyond glibc
-2.28: `libGL`, `libEGL`, `libfontconfig`, `libfreetype`, `libX11` and `libxcb`
-(Debian and Ubuntu: `libgl1 libegl1 libfontconfig1 libfreetype6 libx11-6
-libxcb1`), which every desktop has.
+`freetype`: the first two cannot be shipped, and the toolchain's copies of the
+others read their configuration through paths compiled in for the prefix. The
+list follows AppImage's excludelist, for the same reasons. The C++ window
+needed all of them through Qt. The Rust window draws through wgpu and
+Vulkan, with its own fonts compiled in, and opens its window through the
+system's X11 or Wayland libraries; which of these a Linux desktop must
+provide for it beyond glibc 2.28 and the Vulkan loader (Debian and Ubuntu:
+`libvulkan1` and the graphics driver) is to be read from the first Rust
+package run on a clean machine ("Not done").
 
 **Why glibc 2.28.** The programs are linked against the sysroot the
 toolchain installs, and the solver used to take the newest (2.39, Ubuntu
@@ -993,77 +1133,39 @@ Debian 10, Ubuntu 20.04 and RHEL 8.
 
 ## macOS
 
-macOS is built with conda-forge's clang 23 and libc++, not GCC, because every
-C++ library conda-forge ships for macOS is built against libc++ and GCC's
-libstdc++ cannot link with them: PDAL's API passes `std::string`. Homebrew was
-the other candidate and fails the same way (its Qt, GDAL and PDAL are also
-libc++), besides not being frozen at a date.
+macOS is built with conda-forge's Rust and, for the PDAL shim and the link,
+its clang 23 and libc++, not GCC, because every C++ library conda-forge ships
+for macOS is built against libc++ and GCC's libstdc++ cannot link with them:
+PDAL's API passes `std::string`. Homebrew was the other candidate and fails
+the same way, besides not being frozen at a date. The job gives cargo the
+prefix's clang as `CC`, `CXX` and the linker, `SDKROOT` from the runner's
+Xcode, `MACOSX_DEPLOYMENT_TARGET=13.0` and `-D_LIBCPP_DISABLE_AVAILABILITY`
+(`docs/building.md`, "macOS"). The C++ build's changes to make its code
+build with clang - its `#embed` warnings, a third SIMD backend for libc++ -
+went with it.
 
-Making the code build with clang took small changes, found by compiling every
-source with clang 21 and libc++ (`-fsyntax-only`, the project's own flags,
-on Linux) before any Mac was involved: 21 of 872 translation units failed.
-
-* `#embed`'s warning is `-Wc23-extensions` in clang and `-Wc++26-extensions`
-  in GCC; the three files that embed pick by compiler.
-* `core/simd.hpp` gained a third backend: libc++ has neither `<simd>` nor the
-  Parallelism TS (it hides the TS behind `-fexperimental-library`), so there
-  a `Vec<T>` is a plain array of 16 bytes' worth of lanes with the same names
-  and lane-by-lane semantics; `test_simd_facade.cpp` holds all three to the
-  same cases.
-* The Style Manager's `connectGuarded` called a slot with no arguments in a
-  form clang checks when the function template is instantiated, not when the
-  call is; the call moved into a helper whose arguments make it dependent.
-* clang warns on lambda captures and private fields that are never used where
-  GCC does not; they were removed, or marked `[[maybe_unused]]` where only the
-  GPU renderer reads them (a build with `KATANA_GPU=OFF` has none).
-* Two missing standard includes (`<span>`, `<numbers>`) that libstdc++ had
-  supplied through other headers.
-* Four thresholds and helpers read only by the AVX2 kernels' call sites
-  (`kValidateMinimum`, `kProjectMinimum`, `kTransformBatchMinimum`,
-  `kernelParams`) went unused on arm64, which has no kernels; they are
-  `[[maybe_unused]]`. A GCC build with `KATANA_SIMD_KERNELS=OFF` failed on
-  `kernelParams` the same way.
-
-`katana` is not a `MACOSX_BUNDLE` in the build tree: there it is
-`bin/katana`, as on Linux, so the headless checks and the tests find it where
-they find it everywhere else. The bundle is made when installing.
-
-**Katana.app.** `cmake --install` (and so `package` and `bundle`) lays the
-tree out as an application bundle, because code signing seals a bundle only
-when code and data are where it expects them, and Finder shows a bundle as
-one application with its icon:
+**Katana.app.** `cmake --install` of the packaging (and so `package` and
+`bundle`) lays the tree out as an application bundle, because code signing
+seals a bundle only when code and data are where it expects them, and Finder
+shows a bundle as one application with its icon:
 
 | In the bundle | What | Stands for, in the Linux tree |
 |---|---|---|
 | `Contents/Info.plist` | the executable (`katana`), the icon, the identifier `com.jarada.katana`, the minimum macOS (`cmake/KatanaInfo.plist.in`) | - |
-| `Contents/MacOS/` | `katana`, `katana_cli`, `katana_mcp`; RPATH `@loader_path/../Frameworks` | `bin/` |
-| `Contents/Frameworks/` | the libraries, and Qt's plugins in `Frameworks/qt6/plugins` | `lib/` |
-| `Contents/Resources/qt.conf` | `Plugins=Frameworks/qt6/plugins`; in a bundle Qt reads `qt.conf` here and resolves it against `Contents` | `bin/qt.conf` |
+| `Contents/MacOS/` | `katana`, `katana_cli`, `katana_mcp`; run-time path `@loader_path/../Frameworks`, written by the deploy | `bin/` |
+| `Contents/Frameworks/` | the libraries | `lib/` |
 | `Contents/Resources/share/`, `ssl/` | GDAL, PROJ and certificate data; the samples | `share/`, `ssl/` |
 | `Contents/Resources/katana.icns` | the icon, made from `resources/katana.png` by `sips` and `iconutil` at install time | - |
 
-`Frameworks` mirrors `lib/`, so every conda-forge library and plugin still
-finds the others through its own relative RPATH; only the data moved, and
-`core::dataBesideLibraryFile` looks in `Resources/` for a library in
-`Frameworks/`. Putting the data in `Contents/share` beside `Frameworks`
+`Frameworks` mirrors `lib/`, so every conda-forge library still finds the
+others through its own relative run-time path; only the data moved, and
+katana_core's `data_beside_library_file` looks in `Resources/` for a library
+in `Frameworks/`. Putting the data in `Contents/share` beside `Frameworks`
 would have needed no code change, but codesign expects everything that is
-not code under `Resources`, and notarisation checks the seal. Moving Qt's
-plugins to the conventional `Contents/PlugIns` was rejected: each plugin's
-RPATH (`@loader_path/../../..`) would then miss `Frameworks`, and rewriting
-them breaks their signatures.
-
-**The window names the plugin folder itself.** The first macOS package to
-reach its smoke test (2026-10-15) ran `katana_cli` whole - GDAL, PROJ, PDAL,
-the update record - and then the window stopped: "Could not find the Qt
-platform plugin", with `Frameworks/qt6/plugins/platforms/` in the bundle,
-signed and sealed. So Qt had not taken that folder from `qt.conf`; why was
-not settled from Qt's source, where a relative path resolves against
-`Contents` only once the application object exists. `katana` on macOS
-therefore adds `Contents/Frameworks/qt6/plugins` to Qt's library paths
-itself, from its own path, before the application object loads the
-platform plugin (`addBundledQtPlugins`, `src/katana_qt/main.cpp`), and the
-smoke test runs the window with `QT_DEBUG_PLUGINS=1` and prints the bundle's
-`qt.conf`, so that the log says where Qt looked.
+not code under `Resources`, and notarisation checks the seal. The C++
+bundle also carried Qt's plugins in `Frameworks/qt6/plugins` with a
+`qt.conf`, and its window had to name that folder to Qt itself; the Rust
+window loads no plugins, so neither is there.
 
 After installing, every library, then `katana_cli` and `katana_mcp`, then the
 bundle (which signs `katana` with `Info.plist` bound to it) are signed ad
@@ -1075,24 +1177,25 @@ app.
 2026-09-27). An Intel build was tried the same day - conda-forge has the whole
 library set for `osx-64`, and GitHub's `macos-15-intel` runner could build it
 natively - and removed before it shipped. Adding it back is a matrix entry in
-the workflow and a host check in `cmake/toolchains/katana-macos.cmake` and the
-setup script choosing the `osx-64` compiler.
+the workflow and the setup script choosing the `osx-64` compiler.
 
-The minimum is macOS 13 (`CMAKE_OSX_DEPLOYMENT_TARGET` in
-`cmake/toolchains/katana-macos.cmake`), the oldest Qt 6.11 supports. libc++'s
-availability markup is switched off (`_LIBCPP_DISABLE_AVAILABILITY`): it
-refuses what the deployment target's SYSTEM libc++ lacks - the first CI build
-stopped at floating-point `std::from_chars`, "introduced in macOS 26.0" - but
-the programs load the libc++ the package carries, never the system's. This is
-conda-forge's documented remedy for the same situation.
+The minimum is macOS 13 (`KATANA_MACOS_MINIMUM` in
+`cmake/KatanaPackaging.cmake`, and the job's `MACOSX_DEPLOYMENT_TARGET`): the
+oldest Qt 6.11 supported, which bound the C++ release. The Rust programs
+have kept it; their own floor - Rust's, wgpu's Metal backend's, and the 11.0
+conda-forge builds its libraries for - has not been measured ("Not done").
+libc++'s availability markup is switched off (`_LIBCPP_DISABLE_AVAILABILITY`):
+it refuses what the deployment target's SYSTEM libc++ lacks - the first C++
+CI build stopped at floating-point `std::from_chars`, "introduced in macOS
+26.0" - but the programs load the libc++ the package carries, never the
+system's. This is conda-forge's documented remedy for the same situation.
 
-The GPU renderer draws on Metal there, from the same GLSL baked to Metal
-Shading Language (`docs/gpu.md`, "Shaders"); the macOS job runs the `gpu.`
-test suite on the runner before packaging.
+The window's GPU layer draws through Metal there (wgpu, `docs/gpu.md`); the
+macOS job runs the whole suite on the runner before packaging.
 
 **Gatekeeper.** Without a Developer ID ("Signing") the app is signed ad hoc
-(`codesign --sign -`, which Apple silicon requires of any code, and which
-`cmake --install` must redo after rewriting the programs' RPATH) and is not
+(`codesign --sign -`, which Apple silicon requires of any code, and which the
+deploy must redo after rewriting the programs' run-time path) and is not
 notarised. A copy downloaded through a browser is quarantined, and macOS
 refuses to open it until the quarantine is cleared once after copying it to
 Applications:
@@ -1103,10 +1206,12 @@ xattr -dr com.apple.quarantine /Applications/Katana.app
 
 ## Signing
 
-Every package names its publisher, `KATANA_PUBLISHER` in the root
-`CMakeLists.txt` (default "Jarada", the owner's choice): the company and
-copyright in `katana.exe`'s version resource, and the installer's publisher
-in Settings > Apps. That costs nothing and needs no key.
+Every package names its publisher, `KATANA_PUBLISHER` (default "Jarada", the
+owner's choice; `cmake/KatanaPackaging.cmake`): the installer's publisher in
+Settings > Apps, and the name the signatures are made under. That costs
+nothing and needs no key. (The C++ `katana.exe` also carried it, as company
+and copyright, in a version resource; the Rust programs have no version
+resource yet: "Not done".)
 
 A SIGNATURE under that name is another matter. It is worth something only
 when the operating system already trusts the key: Windows trusts a
@@ -1124,7 +1229,7 @@ from the environment, so a person signs a local package the same way:
 
 | Platform | Environment | Signs |
 |---|---|---|
-| Windows | `KATANA_SIGN_PFX` (a .pfx), `KATANA_SIGN_PASSWORD` | `katana.exe`, `katana_cli.exe`, `katana_mcp.exe` and the installer, Authenticode SHA-256, time-stamped, with `osslsigncode` (or `signtool`) |
+| Windows | `KATANA_SIGN_PFX` (a .pfx), `KATANA_SIGN_PASSWORD` | `katana.exe`, `katana_cli.exe`, `katana_mcp.exe`, `katana_updater.exe` and the installer, Authenticode SHA-256, time-stamped, with `osslsigncode` (or `signtool`) |
 | macOS | `KATANA_SIGN_IDENTITY` (a keychain identity) | every library and plugin, then the programs, then `Katana.app`, with the hardened runtime, time-stamped; afterwards the `.dmg` |
 
 The workflow fills those from repository secrets (Settings > Secrets and
@@ -1383,76 +1488,83 @@ run in the environment `release` and sees none of that environment's
 secrets, and stops there when it is missing, before anything is built for a
 release that could not be created. (A run without a tag publishes nothing
 and needs no token.) The run then
-builds every program with `-DKATANA_UPDATE_REPO` naming it, writes it into
+builds every program with `KATANA_UPDATE_REPO` naming it, writes it into
 the manifests' links to the release notes, and creates the release there:
 on that repository's default branch, since the commit being released does
 not exist in it, and with the plain note "Katana X.Y.Z".
 
 ## Not done
 
+* **The workflow in its Rust form has never run** (2026-11-15). It was
+  rewritten when the C++ was removed - cargo's build and tests and the
+  runner's suite in place of the C++ configure, build and ctest, the
+  packaging project in place of the C++ build's `package` target - and
+  checked only as far as `tools/check_release_workflow.py` and its tests go
+  (the shape, and that every bash and PowerShell step parses). Nothing of
+  the port has run on Windows or macOS (`docs/rust.md`, step 8), so the first
+  run is where these are first seen: MSYS2's Rust on both Windows runners
+  (CLANGARM64's above all, whose target is `aarch64-pc-windows-gnullvm`), the
+  shims compiled by conda-forge's clang against the runner's SDK, the
+  dependency scan of the Rust programs and whether `katana_updater.exe`
+  imports only the system's DLLs (the C++ helper was static and a test read
+  its import table; nothing reads the Rust one's yet), the run-time path
+  rewrite on Linux (`file(RPATH_CHANGE)`) and macOS (`install_name_tool`),
+  the build-script check of the release configure, and the headless window
+  of each package. A run with the tag left empty is the way to try it.
+* **The Windows programs carry no icon and no version resource.** The C++
+  `katana.exe` had both (`resources/katana.ico`, a `.rc` file); the Rust
+  programs are built without, so Settings > Apps, the Start menu entry and
+  the Desktop shortcut - which take the program's own icon - show Windows'
+  generic one, and the file's properties name no publisher. The installer's
+  own icon is unchanged (`CPACK_NSIS_MUI_ICON`). Not added here: it is a
+  build script for the window crate (a resource compiled with the
+  toolchain's `windres`), which no Windows build can try before step 8.
+* **The packaging's own configure is checked by nobody.** The C++ build ran
+  `tools/check_install_rules.cmake` and `tools/check_installer_licence.cmake`
+  on its own configure, and built a real NSIS installer from its CPack
+  configuration (packaging_installs_only_present_first_party_files,
+  packaging_installer_shows_the_licence,
+  packaging_nsis_installer_builds_from_the_real_configuration). The test
+  runner writes no install rules, so those three went with the C++; the
+  checks' fixture tests remain. A runner test that configures the packaging
+  project into a scratch folder and runs the two checks on it would bring
+  them back.
+* **The Rust programs' oldest macOS and Linux are not measured.** The bundle
+  says macOS 13, the C++ release's floor, and the Linux package needs glibc
+  2.28 and, for the window, a Vulkan loader; which X11 or Wayland libraries
+  the window needs of a desktop is to be read from a run on a clean machine.
 * **The Windows installer and programs are unsigned**, so a browser warns about
   the download ("Windows: why a download is warned about", above): a
   code-signing service has to be chosen and its secrets put in the workflow
   (the owner's), and the signing through a service written.
-* **The workflow has made one release; what changed since has not run on
-  GitHub.** Run 38580778852 (2026-10-14, on `b99e6da3`) was the fourth of
-  that day and the first to pass; "What the first release's run showed" says
-  what it did. The three before it failed. The first stopped, none of it
-  in the workflow, on a mirror timing out for MSYS2's Windows ARM64
-  packages, a test capturing two constants in lambdas that clang rejects as
-  unneeded (`-Wunused-lambda-capture` under `-Werror`), four headless window
-  tests expecting a count grouped with a comma that the Linux runners' C
-  locale does not group, and a fake-feed tool test expecting its records in
-  the order the requests were sent, which a threaded server does not keep;
-  a local build with clang and libc++ (MSYS2 CLANG64, the library of the
-  Windows ARM64 build) found the same day what that job would have met next:
-  `sha256FileHex` hashed the null device as an empty file and returned the
-  digest of a file's first part when a read failed part way, and the update
-  library's path helper turned an empty path into the current folder. All of
-  these are fixed; the logs of the other two are on their run pages. Before
-  the runs, the file was parsed by an independent YAML parser, every script
-  in it passed `bash -n` or PowerShell's parser, every option it gives `gh`
-  and the update tools was held to their own lists, and the scripts of the
-  first job and of the Publish job (all but the OpenPGP step) were run as
-  they stand on made-up packages. The run fetched all six actions by their
-  commits (`actions/download-artifact` in the Publish job too) and gave every
-  package the run's sequence. What no run has used: the Node 24 majors of
-  five actions (7f32475e, 2026-10-15), the licence page and the notices
-  (78677e7b), the installer smoke test's check of `proj.db` (1228fa5d), and
-  the Desktop shortcut and its read-back ("The Windows installer"). That
-  step had a PowerShell parse error from 1228fa5d until 2026-10-15 - a
-  variable followed by a colon inside a string, `"$LASTEXITCODE: ..."` - found
-  by running PowerShell's parser over the step, so it had not run as
-  written. And the rehearsal, the owner's acceptance step, is still to do:
-  a second release installed as an update of the first. v0.2.0 is the only
-  release, so no installed copy has been updated.
+* **The C++ workflow's runs, for the record.** Run 38580778852 (2026-10-14,
+  on `b99e6da3`) was the fourth of that day and the first to pass, and made
+  v0.2.0; "What the first release's run showed" says what it did. The three
+  before it failed on a mirror timing out for MSYS2's Windows ARM64 packages,
+  on clang warnings GCC does not give (`-Wunused-lambda-capture` under
+  `-Werror`), on window tests expecting a digit grouping the Linux runners' C
+  locale does not make, and on a fake-feed tool test expecting a threaded
+  server to keep the order of its requests; a local clang and libc++ build
+  found the same day two faults of the update library's hashing and paths.
+  Run 41581201803 (2026-11-03, build only, on `6991dbf2`) failed on clang's
+  `-Wunused-lambda-capture` again, and on Linux ARM64 three tests of 9,907
+  (a scratch folder two tests shared under ctest's parallel run, a Windows
+  path typed in a test, a toolbar a few pixels too wide for a 1366-px
+  laptop on Linux's fonts); all were fixed on 2026-11-04, and a local CLANG64
+  suite then found five tests saving into a folder whose non-ASCII name
+  libc++ on Windows had read in the ANSI code page (`docs/headless.md`,
+  "Text and names"). The lessons that carry over to the Rust: build with
+  the ARM64 and macOS toolchains' compilers before a run, since the
+  toolchain of one machine passes what other jobs refuse; and every runner
+  is a different locale, path syntax and font set from the developer's.
+  What no run has used: the Node 24 majors of five actions (7f32475e,
+  2026-10-15), the licence page and the notices (78677e7b), the installer
+  smoke test's check of `proj.db` (1228fa5d, whose PowerShell parse error was
+  found by the parser check before any run), and the Desktop shortcut and its
+  read-back ("The Windows installer"). And the rehearsal, the owner's
+  acceptance step, is still to do: a second release installed as an update
+  of the first. No installed copy has been updated.
 
-  Run 41581201803 (2026-11-03, build only - no tag - on `6991dbf2`) was the
-  first since. macOS arm64 and Windows ARM64 failed to compile
-  `road_object_manager.cpp`: a lambda capturing `this` it does not use,
-  which clang's `-Wunused-lambda-capture` refuses under `-Werror` and GCC
-  does not report. Linux ARM64 built and failed three of 9,907 tests: a
-  scratch directory two surface-style tests shared under ctest's parallel
-  run (Linux unlinks a folder whose files are open, Windows refuses, which
-  hid it); a start-screen test that typed a Windows path, whose back slashes
-  are no separators on Linux; and the toolbar-fit check, the first row at
-  1,371 of a 1366-px laptop's width on Linux's fonts once Paper Style Scale
-  had joined the View toolbar (it is now the plan views' and the View
-  menu's only). The two x86-64 jobs were cancelled by hand before they
-  finished. Fixed together on 2026-11-04, with what a clean local CLANG64
-  build (`docs/building.md`, "A build someone can watch") found next: a
-  constant no test used, which clang's `-Wunused-const-variable` refuses.
-  Lesson kept from the first rounds: build with CLANG64 before a run, since
-  GCC alone passes what two of the five jobs refuse. The whole CLANG64 suite,
-  run before the next round, then found two more:
-  - Its first run listed nothing. The test listing had never put the toolchain
-    on PATH, and the window's PATH lacked clang64/bin (`docs/building.md`).
-  - Once it listed, 5 of 10,111 tests failed. `SAVE` and `OPEN` turned the
-    typed path into a `std::filesystem::path` implicitly, and libc++ on
-    Windows reads that in the ANSI code page, so the `cli.non_ascii_*` tests
-    saved into a folder whose name was mojibake. The Windows ARM64 job would
-    have failed the same way: these tests postdate the last run that reached
-    its test phase (`docs/headless.md`, "Text and names").
 * **What holds the workflow holds its shape, and that its scripts parse; no
   more.** `tools/check_release_workflow.py` ("The workflow's shape, held")
   refuses a second trigger, a write outside the Publish job, an action
@@ -1496,9 +1608,9 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   recorded step, not a second person. Until then the approval on the
   run's page is the guard there is.
 * **No program says which repository it asks for updates,** so the jobs
-  prove `-DKATANA_UPDATE_REPO` only as far as the update library's compile
-  line ("What each job does"). Were `UPDATE STATUS` to name the feed, the
-  smoke test could prove it in the program a user runs.
+  prove `KATANA_UPDATE_REPO` only as far as what katana_update's build script
+  was given ("What each job does"). Were `UPDATE STATUS` to name the feed,
+  the smoke test could prove it in the program a user runs.
 * **The keys file run bare has not been tried under CMake 3.31.6.** The file
   states the policy its `IN_LIST` needs (`cmake_policy(SET CMP0057 NEW)`), but
   the host that builds this project has CMake 4, which sets that policy
@@ -1513,7 +1625,7 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   of the four folders a manifest may name, so `ssl/cacert.pem` is excluded
   ("Update assets"). It will matter when a Linux copy can be updated in
   place: then either `ssl` joins the folders
-  (`include/katana/update/paths.hpp` and both tools) or the bundle moves
+  (`rust/crates/katana_update/src/paths.rs` and both tools) or the bundle moves
   under one of them.
 * **No CI on every change.** The whole suite runs in the release workflow,
   which is started by hand; a change is still gated by running the suite
@@ -1541,7 +1653,7 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   lines to write by hand, in its install reference for Linux; an AppImage or a
   `.deb` would carry the entry. macOS needs none: Launchpad finds `Katana.app`.
 * **The Windows toolchain is not frozen.** MSYS2 installs what it has on the
-  day; two runs a month apart may build with different GCC and Qt versions.
+  day; two runs a month apart may build with different Rust, GCC and library versions.
   An update between two such releases therefore fetches the libraries that
   changed as well as the programs (the owner's decision, 2026-10-08: not
   frozen).

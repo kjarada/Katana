@@ -12,7 +12,7 @@ set(_fidelity_headless "${CMAKE_CURRENT_BINARY_DIR}/fidelity_headless")
 file(MAKE_DIRECTORY "${_fidelity_headless}")
 add_test(NAME qt_export_of_a_projected_drawing_to_kml_is_in_longitude_and_latitude_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>CRS SET EPSG:28356|>POINT 330000,6250000|>EXPORT \"${_fidelity_headless}/peg.kml\"|>IMPORT \"${_fidelity_headless}/peg.kml\"|>LIST"
         "-DEXPECT=converted from GDA94 / MGA zone 56 \\(EPSG:28356\\) to longitude and latitude.*Point  layer=0  at 330000,6250000.*Point  layer=0  at 151\\.161906846,-33\\.876653623"

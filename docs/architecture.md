@@ -6,7 +6,9 @@ is which.
 
 ## Purpose
 
-Katana is a deterministic C++ engineering platform for CAD and surveying. The
+Katana is a deterministic engineering platform for CAD and surveying, written
+in Rust (`docs/rust.md`; it was C++ until the owner had the C++ removed on
+2026-11-15). The
 engine must be able to perform every important engineering operation on its own:
 the user interface, the storage format and (later) the AI layer are all
 consumers of it, never participants in it.
@@ -16,11 +18,12 @@ consumers of it, never participants in it.
 Seven rules shape the design. Code comments cite them by number ("Rule 4"),
 so the numbers are fixed: a rule may be reworded here, never renumbered.
 
-**Rule 1 - C++ owns the application.** All core functionality is C++. Python
-is never a run-time dependency of the application, and not a build dependency
-either: the built-in customisation is compiled in with `#embed`, so a build
-without Python is the same build. It is used by developer tools and checks
-(`tools/compare_benchmarks.py`, `tools/audit_register.py`,
+**Rule 1 - The compiled language owns the application.** All core
+functionality is Rust (it was C++, under the rule's first wording "C++ owns
+the application"). Python is never a run-time dependency of the application,
+and not a build dependency either: the built-in customisation is compiled in
+with `include_bytes!`, so a build without Python is the same build. It is used by developer tools and checks
+(`tools/audit_register.py`,
 `tools/check_docs.py`, `tools/customisation_census.py`), which are not
 registered where it is absent.
 
@@ -28,7 +31,7 @@ registered where it is absent.
 end - the window, `katana_cli`, a script, and the AI layer when it comes -
 writes the model or the project database directly. Each issues a structured
 command, which is validated, executed as one transaction and recorded for
-undo: request, `commands::Command`, `validate`, `execute`, the change set,
+undo: request, `katana_commands::Command`, `validate`, `execute`, the change set,
 then storage. `CommandInterpreter` builds the same `Command` objects the
 window's tools do (`docs/cad.md`, "Command interpreter"; `docs/model.md`,
 "Command system"). Direct SQL or memory manipulation from a front end is
@@ -38,14 +41,15 @@ the thing this rule forbids.
 authoritative; the plan view, the 3D view, the section view, the plot and
 every preview are representations of it and hold no state the model does not
 have. Made structural by the layering: `katana_render` sees only core, math
-and geometry and draws a `render::DrawList`, with no idea a Document exists.
+and geometry and draws a `katana_render::DrawList`, with no idea a Document exists.
 
 **Rule 4 - External libraries are isolated.** Third-party types never
 contaminate the code base: each library is wrapped behind a Katana-owned
-interface in one module (`geodesy::CoordinateTransformer` over PROJ,
-`gis::` over GDAL, `terrain::TinSurface` over CGAL, `storage::ProjectStore`
-over SQLite), and no public header under `include/` names a third-party
-type. The `layering` test checks it ("Layering", below).
+interface in one module (`katana_geodesy::coordinate_transformer::CoordinateTransformer` over PROJ,
+`katana_gis` over GDAL, `katana_terrain::TinSurface` over the constrained
+triangulation (spade, and the predicates translated from CGAL),
+`katana_storage::ProjectStore` over SQLite), and no public item of a crate
+names a third-party type ("Layering", below).
 
 **Rule 5 - Test before optimising.** An important subsystem has automated
 tests before it is optimised, and an optimisation that culls work (a spatial
@@ -70,9 +74,10 @@ section in the removed contributor instructions; the number is given in
 brackets so such a citation still resolves.
 
 - **One way of doing a thing** (section 1, and section 6's "collapse it").
-  Failure is reported one way (`core::Result` / `Status`), tolerance is one
-  policy (`math::tolerance`), undo is one mechanism (`commands::Command`),
-  layering is one list (`tools/check_layering.cmake`). A second way of doing
+  Failure is reported one way (`katana_core::Result` / `Status`), tolerance is one
+  policy (`katana_math::numerics::tolerance`), undo is one mechanism (`katana_commands::Command`),
+  layering is one table (`tools/check_layering.cmake`, which the crates'
+  manifests are held to). A second way of doing
   something that already has a first way is a defect, not a shortcut: collapse
   it into the first.
 - **Derived expectations** (section 3). Never change an expected value to
@@ -84,14 +89,16 @@ brackets so such a citation still resolves.
   number). Never delete or disable a failing test. `docs/testing.md` has the
   rest of the testing rules.
 - **Measure, then claim** (section 4). Measure in Release, before and after,
-  with a benchmark committed under `benchmarks/` so the measurement can be
-  repeated; put both numbers in the commit message and the module's document.
+  with a benchmark committed beside the code so the measurement can be
+  repeated (the C++ build's benchmarks went with the C++ tree and have no
+  Rust twin yet: `docs/performance.md`); put both numbers in the commit message and the module's document.
   This machine is shared, so a comparison alternates the builds
-  (`tools/compare_benchmarks.py --alternate`) and runs an A/A control beside
+  (the C++ build had a script for it, compare_benchmarks.py, retired with the
+  C++ benchmarks) and runs an A/A control beside
   the A/B one, and reports ratios rather than single absolute numbers
   (`docs/testing.md`, "Benchmarks").
-- **Judge a build by its exit code.** `-Werror` is on, so a warning is a
-  failure. A build filtered for "error" lines once printed "built" over a
+- **Judge a build by its exit code.** Clippy runs with `-D warnings`
+  (`-Werror` in the C++ build), so a warning is a failure. A build filtered for "error" lines once printed "built" over a
   missing binary, because a link failure prints no line that a source-path
   filter matches.
 - **Comments say why, and every number has a source** (section 6). A constant
@@ -103,9 +110,9 @@ brackets so such a citation still resolves.
   module a change touches is part of the change; `docs/index.md` says which
   document that is, and `tools/check_docs.py` (the `docs` test) checks that
   what the documents cite exists.
-- **Absent is not zero.** A missing measurement is `std::optional`, never a
-  placeholder number: a survey point's height is `std::optional<double>`,
-  and a point with no coordinates is a `survey::UnpositionedPoint`, not a
+- **Absent is not zero.** A missing measurement is an `Option`, never a
+  placeholder number: a survey point's height is an `Option<f64>`,
+  and a point with no coordinates is a `katana_survey::data_model::UnpositionedPoint`, not a
   point at the origin.
 - **Parallel work** (section 5.3). Work that divides into parts with disjoint
   file sets runs as parallel agents, each in its own worktree outside the
@@ -152,79 +159,86 @@ peak and resident memory. `docs/performance.md` has what has been measured.
 Dependencies run one way, lowest first:
 
 ```
-core → math → geometry → { terrain, render, entity } → commands → storage → cad → app → qt
+core → math → geometry → { terrain, render, entity } → commands → storage → cad → app → window
               geodesy, survey              beside geometry (they see core and math)
-              surveyio                     survey + geometry; seen only by app and qt
-              archive12d                   terrain + entity; seen by interop, app, qt (the .12da archive only:
-                                           the older customisation formats' readers are src/katana_archive12d/legacy,
-                                           a library no program links)
-              gis, pointcloud → interop    the GDAL/PDAL adapters (katana_io) and import/export
-              update                       core alone; seen only by app and qt (the auto-update engine, and the
-                                           helper program src/katana_updater, which is of this layer too)
+              surveyio                     survey + geometry; seen only by app and window
+              archive12d                   terrain + entity; seen by interop, app, window (the .12da archive
+                                           only: the older customisation formats' readers were C++ alone and
+                                           went with it)
+              gis, pointcloud → interop    the GDAL/PDAL adapters and import/export
+              update                       core alone; seen only by app and window (the auto-update engine, and
+                                           the helper program rust/crates/katana_updater/src, built on it)
+              gpu                          render's rule (never a Document); seen by the window
 ```
 
 `cad` may see neither `interop` nor `surveyio` nor `archive12d`: the
-application core builds without GDAL and PDAL (`-DKATANA_BUILD_IO=OFF`), and no
-instrument format's or archive reader's own types can reach the drawing. The
-exact lists are in the layering check and nowhere else.
+application core builds without GDAL and PDAL, and no instrument format's or
+archive reader's own types can reach the drawing. The exact lists are in the
+layering table and nowhere else; the crates' `[dependencies]` follow it.
 
-`update` (`include/katana/update/`, `src/katana_update`; `docs/update.md`)
-sits beside `math`, not above anything: it may include `core` and nothing
-else, and only `app` and `qt` may include it. The reason is the fourth
-program. `katana_updater` (`src/katana_updater`) replaces the files of an
+`update` (`rust/crates/katana_update/src/`; `docs/update.md`)
+sits beside `math`, not above anything: it depends on `core` and nothing
+else, and only `app` and the window depend on it. The reason is the fourth
+program. `katana_updater` (`rust/crates/katana_updater/src`) replaces the files of an
 install while Katana is not running, from a copy of itself in a temporary
-folder, so it must be small and static and link no GDAL, no Qt and nothing
-of the drawing - and it is built from this layer and `katana_core` alone.
+folder, so it must be small and static and link no GDAL, no GUI toolkit and
+nothing of the drawing - and it is built from this layer and `katana_core` alone.
 Three consequences follow from the same rule:
 
 - **The network is injected.** The engine takes a function that fetches
-  (`update::Fetch`) as a parameter; `katana_app` makes one from the project's
-  one HTTP stack (`src/katana_app/update_transport.cpp`), and a test hands in
+  (`katana_update::Fetch`) as a parameter; `katana_app` makes one from the project's
+  one HTTP stack (`rust/crates/katana_app/src/update_transport.rs`), and a test hands in
   a fake. The layer never sees libcurl.
 - **The machine is behind interfaces.** Every change to the disk, every
   process started or looked for, the registry and the credential store are
   interfaces of the layer (`FsOps`, `Launcher`, `ProcessOps`, `RegistryOps`,
-  `CredentialStore`), with one real implementation per platform under
-  `src/`, so that the swap and its recovery are driven in process by tests.
+  `CredentialStore`), with one real implementation per platform in the
+  crate, so that the swap and its recovery are driven in process by tests.
   One question about the machine has no interface: whether the process
-  was started as administrator (`update::processIsElevated`). It is asked
+  was started as administrator (`katana_update::process_is_elevated`). It is asked
   in two places and handed on from each, so that a test gives the answer
   and never the machine: when a program's update context is made, as a
   member of that context (`UpdateContext::elevated`); and by
-  `update::recover`, the first act of every program, which hands it to the
-  recovery its tests drive (`detail::recoverWith`).
-- **Its two libraries stay behind `src/`** like every other (Rule 4):
-  OpenSSL's libcrypto for the signature and zlib for inflating, both linked
-  statically on Windows so that the helper imports only the operating
+  `katana_update::recover`, the first act of every program, which hands it to the
+  recovery its tests drive (`katana_update::recover::recover_with`).
+- **Its two libraries stay inside the crate** like every other (Rule 4): the
+  signature is checked with `ed25519-dalek` and an update is inflated with
+  `miniz_oxide` (OpenSSL's libcrypto and zlib in the C++ build), both pure
+  Rust and compiled in, so that the helper imports only the operating
   system's DLLs.
 
 The verbs that drive it, `UPDATE ...`, are the session's
-(`src/katana_app/update_verbs.hpp`), not the interpreter's: `cad` cannot see
+(`rust/crates/katana_app/src/update_verbs.rs`), not the interpreter's: `cad` cannot see
 `update`, and an update acts on the program, not on a drawing.
 
-A module may include headers from the layers it is listed as depending on in
-[`tools/check_layering.cmake`](../tools/check_layering.cmake), and from nowhere
-else. Two rules are checked there and run as the `layering` test:
+A crate may use the crates it lists as `[dependencies]` in its `Cargo.toml`,
+and nothing else: the layering holds by construction, since a crate cannot
+name what it does not depend on. Two rules follow:
 
-1. **One-way dependencies.** `geometry` cannot include `survey`, `cad` or `qt`.
-   The check reads every `#include "katana/<layer>/..."` and compares it against
-   the declared allow-list for the file's own layer. The pattern allows digits
-   in a layer's name, so `katana/archive12d/...` IS checked (audit BLD-03,
-   BLD-11; it was not, and `cad` including the archive reader would have
-   passed): `layering_catches_a_cad_file_including_archive12d` runs the check
-   on a tree that does it. Private headers are not spelled `katana/<layer>/`,
-   so the older customisation formats' headers, which are private to
-   `src/katana_archive12d/legacy/`, are held to their library by a different
-   check - the link closure and the install rules of the four programs
-   (`docs/testing.md`).
-2. **No third-party types in public headers** (Rule 4). Eigen, CGAL, PROJ,
-   SQLite, GDAL, PDAL, Qt, Vulkan, nlohmann, OpenSSL, zlib and libcurl may
-   appear only in `src/`, never under `include/`. Each is wrapped by a Katana-owned interface -
-   `Result<T>`-based, using Katana's own value types - so that replacing a
-   library is a change to one module rather than to the whole code base.
+1. **One-way dependencies.** `geometry` cannot use `survey`, `cad` or the
+   window, because its `Cargo.toml` does not list them, and cargo refuses a
+   cycle. Which layer may depend on which is one table,
+   [`tools/check_layering.cmake`](../tools/check_layering.cmake) (its
+   `KATANA_ALLOWED_<layer>` lines), and `tools/check_rust_layering.py` holds
+   every crate's manifest to it, with the fixtures of
+   `tests/rust_check_fixtures/layering/` that break each rule. In the C++ build
+   the same table was read against every `#include` (the `layering` test).
+2. **No third-party types in a public interface** (Rule 4). PROJ, SQLite,
+   GDAL, PDAL, wgpu, egui and the other third-party crates appear only
+   inside the crate that wraps each - GDAL and PDAL through FFI modules and
+   the three C++ shims under `rust/crates/katana_gis/native/` and
+   `rust/crates/katana_pointcloud/native/`. Each is wrapped by a Katana-owned
+   interface - `Result<T>`-based, using Katana's own value types - so that
+   replacing a library is a change to one crate rather than to the whole code
+   base.
 
-A new module is registered in `tools/check_layering.cmake` in the same commit
-that adds it. The practical consequence of the rules: `katana_math` and
+A new layer is a new crate under `rust/crates/` and a row of the layering
+table, in the same commit.
+
+Not done: since the C++ went, the CMake test runner no longer registers the
+layering check (`rust_layering`) and `tools/build_visible.sh` does not run it,
+so `python tools/check_rust_layering.py` is run by hand; registering it again
+is one `add_test`. The practical consequence of the rules: `katana_math` and
 `katana_geometry` have no dependencies beyond the standard library, and their
 tests link nothing else.
 
@@ -232,8 +246,8 @@ tests link nothing else.
 
 There are no silent failures and no error codes that a caller can ignore by
 accident. Every fallible operation returns
-[`katana::core::Result<T>`](../include/katana/core/error.hpp) (or `Status`, its
-void form), which holds either a value or an `Error` carrying:
+[`katana_core::error::Result<T>`](../rust/crates/katana_core/src/error.rs) (or `Status`, its
+unit form, `Result<()>`), which holds either a value or an `Error` carrying:
 
 * a typed `ErrorCode` — `InvalidGeometry`, `InvalidCRS`,
   `InvalidSurveyObservation`, `AdjustmentFailure`, `TriangulationFailure`,
@@ -242,40 +256,41 @@ void form), which holds either a value or an `Error` carrying:
 * a context string holding the offending input — the entity id, the file path,
   the layer name — so a failure can be diagnosed from a log alone.
 
-`Result` is `[[nodiscard]]`. Exceptions are reserved for programmer error:
-reading `value()` from a failed `Result` throws `BadResultAccess`, because that
-is a bug in the caller, not a runtime condition. Third-party libraries that
-throw (CGAL, nlohmann) or that use return codes (SQLite, PROJ) are converted to
-`Result` at the module boundary; no third-party exception escapes a module.
+`Result` is `#[must_use]`, so an ignored failure is a warning and so a build
+failure. A panic is reserved for programmer error, as an exception was in the
+C++ (`BadResultAccess`). Third-party libraries that use return codes (SQLite,
+PROJ, GDAL) or that may throw behind their C++ API (PDAL, through its shim)
+are converted to `Result` at the crate boundary; no foreign error escapes a
+crate.
 
 A value that cannot be computed is refused or reported, never invented: a
 section that cannot reach the ground is counted, not given an elevation; a
-lossy export counts what it dropped. `Status` success is `return {};`.
+lossy export counts what it dropped. `Status` success is `Ok(())`.
 
 ## Numerical policy
 
 Every tolerance in the code base is a named constant in
-[`numerics.hpp`](../include/katana/math/numerics.hpp), documented with its unit
+[`numerics.rs`](../rust/crates/katana_math/src/numerics.rs), documented with its unit
 and rationale. Ad-hoc epsilons are forbidden — they are how CAD kernels acquire
 inconsistent behaviour between subsystems.
 
 | Constant | Unit | Meaning |
 |---|---|---|
-| `kAbsolute` = 1e-12 | dimensionless | a normalised quantity (a sine, a unit determinant) is zero |
-| `kRelative` = 1e-9 | dimensionless | general-purpose scaled equality |
-| `kAngular` = 1e-10 | radians | directions are parallel |
-| `kGeometric` = 1e-7 | model units | features coincide: duplicate vertices, point-on-curve, tangency |
-| `kCoordinate` = 1e-4 | model units | survey coordinates are the same ground mark |
+| `ABSOLUTE` = 1e-12 | dimensionless | a normalised quantity (a sine, a unit determinant) is zero |
+| `RELATIVE` = 1e-9 | dimensionless | general-purpose scaled equality |
+| `ANGULAR` = 1e-10 | radians | directions are parallel |
+| `GEOMETRIC` = 1e-7 | model units | features coincide: duplicate vertices, point-on-curve, tangency |
+| `COORDINATE` = 1e-4 | model units | survey coordinates are the same ground mark |
 
 The scale that sets these is the projected coordinate: at a UTM northing of
 1e7 m, one ulp of a `double` is about 1.9e-9 m, so no linear tolerance below
-about 1e-8 can carry meaning. `kGeometric` sits about 50 ulp above that, leaving
+about 1e-8 can carry meaning. `GEOMETRIC` sits about 50 ulp above that, leaving
 room for a few chained operations to round.
 
 Two further consequences run through the code:
 
-* **Comparisons are explicit.** `operator==` on `Vec2`/`Vec3` is exact; fuzzy
-  equality is `nearlyEqual(a, b, tolerance)`. Approximate equality is not
+* **Comparisons are explicit.** `==` on `Vec2`/`Vec3` is exact; fuzzy
+  equality is `nearly_equal(a, b, tolerance)`. Approximate equality is not
   transitive and must never hide inside an operator.
 * **Large coordinates are handled deliberately.** Area, centroid and
   triangulation routines work relative to a local origin. A naive shoelace sum
@@ -285,48 +300,45 @@ Two further consequences run through the code:
   and again shifted by (500000, 5000000).
 
 Text and units have one home each, low in the stack, so that every layer can
-reach them: decoding bytes to UTF-8 is `core/text_encoding.hpp`; trimming,
-case folding (`lowered`, `uppered`) and number parsing is `core/text.hpp`
-(locale-independent - never `std::isspace`, `std::tolower`, `std::toupper`
-or `strtod` on file text: Latin-1's toupper makes 0xE0, the lead byte of a
-three-byte UTF-8 sequence, 0xC0); the exact length of a foot or a link is
-`math/unit_ratio.hpp`, which `geodesy/units.hpp` is built from
-(`docs/geodesy.md`). `katana_cad` asks none of the C library's character
-functions now: its five private `upper()` copies - four of them
-`std::toupper` - are `core::uppered`, and the survey coding's private
-`lowered()`, the sheet verbs' name folding (`std::isalnum` and
-`std::tolower`), the plot colour mode's `std::tolower`, the plot preflight's
-three `std::toupper` and the `std::isspace` of the scope words' quoting and
-of the customisation record's word count are `core::lowered`, `uppered`,
-`asciiLower` and `isAsciiSpace`. Not done: the same sweep of `std::toupper`
-in `katana_app` (the geo verbs, the session, the MCP server) and
-`katana_ifc`, and of the `std::isspace` and `std::isalnum` beside some of
-them; `katana_dxf`'s reader keeps an ASCII `upper()` of its own.
+reach them: decoding bytes to UTF-8 is `rust/crates/katana_core/src/text_encoding.rs`; trimming,
+case folding (`lowered`, `uppered`) and number parsing is `rust/crates/katana_core/src/text.rs`
+(locale-independent: the C++ build's rule was never `std::isspace`,
+`std::tolower`, `std::toupper` or `strtod` on file text, since Latin-1's
+toupper makes 0xE0, the lead byte of a three-byte UTF-8 sequence, 0xC0; Rust's
+text functions take no locale, and the port keeps the one home); the exact
+length of a foot or a link is `rust/crates/katana_math/src/unit_ratio.rs`,
+which `rust/crates/katana_geodesy/src/units.rs` is built from
+(`docs/geodesy.md`). The C++ `katana_cad`'s private case-folding copies were
+swept into `katana_core::text::lowered`, `uppered`, `ascii_lower` and
+`is_ascii_space` before the port; the same sweep of `katana_app` and
+`katana_ifc` was not made, and their ports kept the private folding they had
+(`katana_dxf`'s reader keeps an ASCII `upper()` of its own).
 
 ## Determinism
 
 Identical inputs and configuration must give identical results (Rule 7).
 This is a correctness requirement for an engineering tool, not a convenience.
 
-* Containers that feed output are ordered (`std::map`, sorted vectors). No
-  result depends on `unordered_map` iteration order or on pointer addresses.
-* Compilation uses `-ffp-contract=off -fno-fast-math`
-  (`cmake/KatanaTargetDefaults.cmake`), so the compiler may not fuse or
-  reassociate floating-point operations. Results match across optimisation
-  levels, which is why every suite is run in Release as well as Debug.
+* Containers that feed output are ordered (`BTreeMap`, sorted vectors). No
+  result depends on `HashMap` iteration order or on addresses.
+* The compiler may not fuse or reassociate floating-point operations: Rust
+  never contracts `a * b + c` into a fused multiply-add unless the code asks
+  (`mul_add`), and has no fast-math mode (the C++ build had to say
+  `-ffp-contract=off -fno-fast-math`). Results match across optimisation
+  levels.
 * Parallel work partitions its OUTPUT - one screen tile, one vertex, one
   triangle bin per index - so the bytes are those of the serial run whatever
   the thread count, and tests prove it by running with `TaskPool(1)`
   ("Threading", below).
 * Property tests use a fixed-seed generator
-  ([`tests/support/property.hpp`](../tests/support/property.hpp)), so a failure
+  ([`rust/crates/katana_cad/tests/support/property.rs`](../rust/crates/katana_cad/tests/support/property.rs)), so a failure
   reproduces exactly.
 * Entity ids increase monotonically and are never reused, so a recorded id
   cannot come to mean a different entity after an undo.
 
 ## Logging
 
-[`katana::core::Logger`](../include/katana/core/log.hpp) emits structured
+[`katana_core::Logger`](../rust/crates/katana_core/src/log.rs) emits structured
 records: timestamp, level, category, message and key/value fields, rendered as
 `2026-09-19T10:15:30.123Z INFO [command] executed name=CREATE_LINE entities=1`.
 
@@ -340,39 +352,40 @@ logs do not accumulate project data.
 ## Threading
 
 The document, its model, the command stack, the project store and every
-widget belong to one thread, the GUI thread (or `katana_cli`'s main thread),
-and each header says so. What runs in parallel does so inside one call,
+control belong to one thread, the window's (or `katana_cli`'s main thread);
+the types are not `Sync` where that matters, so the compiler says so. What runs in parallel does so inside one call,
 through one primitive:
-[`katana::core::TaskPool`](../include/katana/core/task_pool.hpp).
+[`katana_core::TaskPool`](../rust/crates/katana_core/src/task_pool.rs).
 
-* **What it is.** A `std::jthread` pool, created once and kept warm
-  (`TaskPool::shared()`, never destroyed), with `hardware_concurrency() - 1`
-  workers; the calling thread is the last worker. It offers one operation,
-  "run this index range across the cores": `parallelRanges(begin, end, grain,
-  body)` and its grain-1 form `parallelFor`. There are no futures and no task
+* **What it is.** A pool of `std::thread`s, created once and kept warm
+  (`TaskPool::shared()`, never destroyed), with one worker fewer than the
+  machine's hardware threads; the calling thread is the last worker. It
+  offers one operation, "run this index range across the cores":
+  `parallel_ranges(begin, end, grain, body)` and its grain-1 form
+  `parallel_for`. There are no futures and no task
   graphs, because nothing needs them.
 * **The contract.** `body` is called exactly once for every index; calls that
   run at once touch disjoint state; the ORDER in which indices are visited is
   unspecified and must not matter. A caller meets it by partitioning its
   output, which is what makes the result bit-identical to the serial run
   (Rule 7).
-* **Nesting cannot deadlock.** A `parallelRanges` issued while the pool is
+* **Nesting cannot deadlock.** A `parallel_ranges` issued while the pool is
   busy runs serially on the calling thread. Throughput degrades; correctness
   does not.
-* **Exceptions stop the job.** One escaping `body` is caught, the remaining
-  chunks are skipped, and the first is rethrown to the caller after the
-  workers have stopped.
+* **A panic stops the job.** One escaping `body` is caught, the remaining
+  chunks are skipped, and the first is resumed on the caller after the
+  workers have stopped (an exception in the C++ build).
 * **Grain is measured, not guessed.** A chunk must cost well above what
-  publishing a job to the pool costs; `TinSurface::elevationsAt` records its
+  publishing a job to the pool costs; `TinSurface::elevations_at` records its
   grain of 256 positions with the measurement it came from, and runs inline
   below one grain.
 
 Users today: the software rasteriser (`Rasterizer::render`, which transforms
 vertices, builds screen primitives, bins them and rasterises tiles in
 parallel; a caller may pass its own pool in `RenderOptions::pool`),
-`TiledTerrain::buildAll` (one tile per index) and `TinSurface::elevationsAt`.
+`TiledTerrain::build_all` (one tile per index) and `TinSurface::elevations_at`.
 Other types that are safe to use from several threads say so in their
-headers: `Logger`, and the geodesy value types (`docs/geodesy.md`,
+documentation: `Logger`, and the geodesy value types (`docs/geodesy.md`,
 "Threading model"). A PROJ-backed object (`CoordinateTransformer`,
 `GridFactorCalculator`) and a `GdalDataset` are one per thread.
 
@@ -383,10 +396,9 @@ of the window, and the rules that make a test evidence.
 
 ## Build
 
-`docs/building.md`: presets, options, targets, where binaries land, running
-`katana` and `katana_cli`, and the packaging decisions - "Where things are
-built", "Bundling", "The build tree runs on its own too" and "Why DLLs beside
-the program, and not static linking" moved there from this document.
+`docs/building.md`: building with cargo, where the programs land, running
+`katana` and `katana_cli`, the CMake test runner, and the packaging
+decisions.
 
 ## Failure modes
 
@@ -398,8 +410,8 @@ the program, and not static linking" moved there from this document.
 | Locked layer edited | `CommandRejected`, nothing modified |
 | Project database corrupt | detected on open by integrity check; `recover()` restores the newest sound backup and keeps the damaged file |
 | Project from a newer Katana | refused with `Unsupported` rather than guessed at |
-| Third-party library throws | converted to a `Result` at the module boundary |
-| An update of the program interrupted by a crash or a power cut | `update::recover`, the first thing `main()` does in every program, has the old version's files put back before anything else is read (`docs/update.md`, "Recovery") |
+| Third-party library fails | converted to a `Result` at the crate boundary |
+| An update of the program interrupted by a crash or a power cut | `katana_update::recover`, the first thing `main()` does in every program, has the old version's files put back before anything else is read (`docs/update.md`, "Recovery") |
 | An updated program that does not start | the update helper puts every file back, starts the old version again, and that release is neither offered nor applied again until the person asks for it (`UPDATE BLOCKED CLEAR`; `docs/update.md`, "The swap") |
 | The update helper itself dies while the new version is proving that it starts | the tree is a whole new version that nothing has confirmed, and no program's recovery touches it. It is settled from what is on the disk, under the update lock, by `katana_updater --recover` at the next logon, by a window of that version at its first idle turn, or by the next update: confirmed on the new version's marker; put back only by `--recover`, and only when the files are still that release's and no program of the install is running; otherwise left for a start that can decide (`docs/update.md`, "An update whose helper died during the health check") |
 | A program of the install is started while an update is being prepared | the helper lists the running programs a second time, after its plan and before the first file moves, and gives way: nothing is touched and the download is kept (`docs/update.md`, "The swap", step 4) |
@@ -440,7 +452,7 @@ the document that covers it now.
 | Phase 21 (§26) | alignments, profiles, corridors, parcels, grading | `docs/geometry.md`, `docs/cad.md` |
 | Phase 22 (§27) | drawing and plotting | `docs/cad.md`, "Plotting to PDF" |
 | Phase 23 (§28) | application API: the command interpreter | `docs/cad.md`, "Command interpreter" |
-| Phases 24-26 (§29-30); §31 | Python AI layer, AI agent, production hardening; the AI safety model (a destructive command needs confirmation) | not started, and Rules 1 and 2 bind them; `Command::isDestructive` is in `docs/model.md`, "Command system" |
+| Phases 24-26 (§29-30); §31 | Python AI layer, AI agent, production hardening; the AI safety model (a destructive command needs confirmation) | not started, and Rules 1 and 2 bind them; `Command::is_destructive` is in `docs/model.md`, "Command system" |
 | §45; 45.1 to 45.5 | the survey module and instrument formats | `docs/survey.md` |
 | §46 | the audit register | `docs/audit/2026-09-23-defects.md` |
 | §47 | dockable views, per-view layers | `docs/desktop.md`, "The workspace" |

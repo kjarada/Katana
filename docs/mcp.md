@@ -15,7 +15,7 @@ save it. The tool that runs commands names each `UTILITY` action and the
 scope words in its description, since that is what a client reads first.
 The window can then open the same project.
 
-It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a
+It is the session `katana_cli` runs (`rust/crates/katana_app/src/session.rs`), served to a
 client instead of typed. Every tool that changes anything is a shape over the
 command line's verbs, so there is one implementation of each, pinned by the
 `cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
@@ -73,34 +73,34 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_run_commands` | a list of commands, in order; stops at the first failure unless `stop_on_error` is false | each line |
 | `katana_run_script` | a `.kcs` script file, as `katana_cli script.kcs` runs it: the path is UTF-8 from the JSON, and the file is decoded as a text file is (a byte order mark, UTF-16 or Windows-1252 read as the text they are; `docs/headless.md`, "Text and names") | each line of the file |
 | `katana_help` | the command reference | `HELP` and the session's own verbs |
-| `katana_status` | project, unsaved changes, entity, layer and alignment counts, current layer and style, selection, undo depth | nothing: read from the Document by `cad::documentStatus`, as `STATUS` and `STATUS JSON` read it |
+| `katana_status` | project, unsaved changes, entity, layer and alignment counts, current layer and style, selection, undo depth | nothing: read from the Document by `katana_cad::document_status::document_status`, as `STATUS` and `STATUS JSON` read it |
 | `katana_new_project` | a new, empty drawing | `NEW` |
 | `katana_open_project` | open a project directory | `OPEN "<path>"` |
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
 | `katana_list_entities` | every entity with its id, layer and measurements | `LIST` |
 | `katana_describe_entity` | one entity in full | `INFO #<id>` |
-| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids`, or a `scope` (`selection`, `drawing`, `area` with `area`, `layers` with `scope_layers` and `only`) with `scope_where` conditions - the shared grammar, `matched` counting the leaders it took, a scope that takes none giving none - and `target` narrow it (`docs/annotation.md`, "Scope and filter") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`cad::annotation::leadersJsonOf`), with a `scope` member `{record, matched}` when a scope chose the leaders |
+| `katana_leaders` | the drawing's leaders, each with what its note says now - read off the entity its tip is on and the drawing's surfaces and alignments - its template, the preset it is and what it reads; and the presets, the surfaces and the alignments; `ids`, or a `scope` (`selection`, `drawing`, `area` with `area`, `layers` with `scope_layers` and `only`) with `scope_where` conditions - the shared grammar, `matched` counting the leaders it took, a scope that takes none giving none - and `target` narrow it (`docs/annotation.md`, "Scope and filter") | nothing: read from the Document, the object `LEADER LIST JSON` prints (`katana_cad::annotation::leader_presets::leaders_json_of`), with a `scope` member `{record, matched}` when a scope chose the leaders |
 | `katana_import` | DXF always; GIS vector, raster and point-cloud files with `KATANA_BUILD_IO`; the options of "I3 and I4" below (layers, where, sql, a scope, clip, fields, crs, a raster's band, a cloud's budget, preview ...); `placement` moves what a DXF, vector file or .12da archive holds as one piece: `local` (its lower-left corner to 0,0; also `local: true`), `alongside` (onto the drawing's lower-left corner) or `offset` (by `offset_east`, `offset_north`); `keep` by default; anything but keep is refused for rasters and clouds (`docs/interop.md`, "Placing an import"). With `KATANA_BUILD_IO`, `structuredContent.records` holds the reply's records as objects - `imported`, `placed`, `reference`, `surface`, `tally`, `warning` - numbers as numbers and `bounds` as `[x0, y0, x1, y1]` | `IMPORT "<path>" [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]` |
 | `katana_export` | DXF always; GIS vector formats and .12da archives (with the drawing's surfaces) with `KATANA_BUILD_IO`; the shared scope and EXPORT's options ("I3 and I4" below); with a .las or .laz path and `cloud` (an id or name), a reference point cloud as held (`docs/interop.md`, "The GIS menu"); `structuredContent.records` holds the `exported` record, then the `scope` record and any `warning` | `EXPORT "<path>" [<scope>] [<options>]`, `EXPORT "<path>" CLOUD <id\|name>` |
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
-| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | `scope` (`selection`, `drawing`, `area`, `layers`), `area`, `layers`, `only`, `where` - the shared scope and filter, as `katana_export` takes them; none: every object. Read from the Document by `cad::road::roadObjectsReport`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
-| `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`src/katana_app/update_verbs.hpp`), for the surface `UpdateSurface::Mcp` |
+| `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | `scope` (`selection`, `drawing`, `area`, `layers`), `area`, `layers`, `only`, `where` - the shared scope and filter, as `katana_export` takes them; none: every object. Read from the Document by `katana_cad::road::road_object_verbs::road_objects_report`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
+| `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`rust/crates/katana_app/src/update_verbs.rs`), for the surface `UpdateSurface::Mcp` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
-and are pinned now by `McpServer.DescribeEntityDescribesTheEntityItNames` and
-`McpServer.ImportLocalMovesAQuotedPathsDataToTheOrigin`:
+and are pinned now by `mcp_server::describe_entity_describes_the_entity_it_names` and
+`mcp_server::import_local_moves_a_quoted_paths_data_to_the_origin`:
 `katana_describe_entity` sends `INFO <id>`, which the session read as
 `INFO <file>` before the interpreter could see it; and `katana_import` with
 `local: true` sends `IMPORT "<path>" LOCAL`, from which the session took the
 `LOCAL` and left the quotes on the path. Both front ends now read an `INFO`
 id and an `IMPORT` argument with the interpreter's own functions
-(`CommandInterpreter::isEntityId`, `CommandInterpreter::importArgument`).
+(`CommandInterpreter::is_entity_id`, `CommandInterpreter::import_argument`).
 `INFO 12` is still a file when one is called 12, so the tool sends `INFO #12`,
 which is always the entity: with a file called `1` or `#1` in the server's
 working directory (a mistyped shell `2>1` makes the first), it once answered
 "no importer reads files named ''"
-(`McpServer.DescribeEntityNamesTheEntityWhateverFilesTheWorkingDirectoryHolds`).
+(`mcp_server::describe_entity_names_the_entity_whatever_files_the_working_directory_holds`).
 The tool's description of `local` said it imported "in the drawing's own
 coordinates rather than reprojecting"; it moves the data, and says so.
 
@@ -110,7 +110,7 @@ TYPE=leader` (any scope and filter of the shared grammar) answers
 and the edit verbs after it act on what it selected - the server's
 instructions say so, so an agent need not open `HELP` to find it
 (`docs/cad.md`, "Select by kind";
-`McpServer.AnAgentSelectsTheLeadersByKindAndRecoloursOnlyThem`).
+`mcp_server::an_agent_selects_the_leaders_by_kind_and_recolours_only_them`).
 
 Leaders are made with `katana_run_commands` - `LEADER #12 20,20 preset=surface
 surface=ground` says how far point 12 is above the ground, `preset=level` its
@@ -119,17 +119,17 @@ alignment=MC01` its station and offset - and read with `katana_leaders`, whose
 description lists the presets and the values a template may name, so an
 agent needs no `HELP` first. It reads the Document, as `katana_status` does:
 a read is no line in the session's history
-(`McpServer.TheLeadersToolGivesWhatEachLeaderSaysAndThePresets`). It takes the shared
+(`mcp_server::the_leaders_tool_gives_what_each_leader_says_and_the_presets`). It takes the shared
 scope and filter under the names `katana_import` uses (`scope`, `area`,
 `scope_layers`, `only`, `scope_where`) and says how many leaders the scope took
-(`McpServer.TheLeadersToolTakesAScopeAndFilterAndSaysHowManyLeadersItTook`).
+(`mcp_server::the_leaders_tool_takes_a_scope_and_filter_and_says_how_many_leaders_it_took`).
 Leader records from `katana_leaders` and `LEADER LIST JSON` may also include
 `landing_angle`, in radians, when a leader carries an explicit
 landing direction. Its absence retains the usual direction inferred from
 the leader geometry.
 
 The same records include `points` (the complete ordered `[x,y]` array),
-`text_style`, `paper_height`, `arrow_size` and `landing`. Inspect these before
+`textStyle`, `paper_height`, `arrow_size` and `landing`. Inspect these before
 moving a bend or note; index 0 is the arrow tip and the final point is the
 note end. Edits use the shared command tool, with normal undo:
 
@@ -158,7 +158,7 @@ spelling of it.
 
 A survey field file - any format the survey import reads, the opcode field
 file (`.fld`) and the Sokkia SDR file (`.sdr`,
-`McpServer.AnAgentReadsAndImportsASokkiaSdrFile`) among them - is read and
+`mcp_server::an_agent_reads_and_imports_a_sokkia_sdr_file`) among them - is read and
 imported the same way:
 `SURVEY READ <file>` answers what the reader made of it in records (`survey`,
 `content`, `declared`, each `warning` with its record), and `SURVEY IMPORT
@@ -190,7 +190,7 @@ form, and answers which settings it ran with (`settings`, and a `setting`
 record for each that is not a default). A file that gives no coordinates is
 imported by holding a point of the drawing: `FORWARD` puts a named point
 there, and `SET control=<id>;drawing;fixed;0;fixed;0;fixed;0` holds it
-(`McpServer.AnAgentImportsAFileWithNoCoordinatesHoldingAPointOfTheDrawing`;
+(`mcp_server::an_agent_imports_a_file_with_no_coordinates_holding_a_point_of_the_drawing`;
 `docs/survey.md`, "The reduction settings of SURVEY IMPORT"). The reply then
 says where each point was held (`held`, with the drawing's entity) and what
 the adjustment made of the data (`reduction`, and an `adjustment` record of
@@ -199,11 +199,11 @@ test, and the outliers flagged and rejected), so an agent is told of a
 network whose global test failed as a person is; an id the drawing has at
 two places is refused, naming both. The command tool's description names
 these verbs, so an agent finds them from the tool list
-(`McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`). No tool of its
+(`mcp_server::the_command_tool_names_the_survey_field_file_verbs`). No tool of its
 own: the lines are the whole of it, and the reply's records are the
 structured answer.
 `CRS SET` takes a WKT as the agent sends it, quotes and all
-(`McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`); it once lost
+(`mcp_server::an_agent_imports_a_field_file_and_sets_the_system_by_its_wkt`); it once lost
 them and refused every WKT whose names hold a blank.
 
 `SURVEY IMPORT` also codes and strings what it draws, in that one undo step,
@@ -228,22 +228,22 @@ survey job has strung and the lines the drawing already holds
 The command tool's description names the two words and `LINEWORK` with its
 grammar - `PROPERTY` and `CHORD` among it, since the verb took them on
 2026-10-07 - so an agent finds them from the tool list alone
-(`McpServer.TheCommandToolNamesTheSurveyFieldFileVerbs`).
+(`mcp_server::the_command_tool_names_the_survey_field_file_verbs`).
 
 The annotation styles are read and changed through `katana_run_commands`
 with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
 INFO name` answers one record of every field, the layers that name the style
 and what a dimension of ten reads as, and `DIMSTYLE SET name field value
 [field value ...]` changes several fields as one undo step
-(`McpServer.DimensionStylesAreSetInOneStepAndReadBackAsARecord`). A text is
+(`mcp_server::dimension_styles_are_set_in_one_step_and_read_back_as_a_record`). A text is
 edited as the window's Edit Text edits it, several keys in one `TEXTEDIT`
 with `\n` for a line break, and `katana_describe_entity` reads it back with
 the break written the same way
-(`McpServer.ATextIsEditedInOneStepAndDescribedWithItsLineBreaks`). The label
+(`mcp_server::a_text_is_edited_in_one_step_and_described_with_its_line_breaks`). The label
 rules tab's Preview is `AUTOLABEL PREVIEW` of the rules named, which answers
 the counts and a `rule=NAME labels=N` record a rule, and `LABELSTYLE VALUES
 kind` lists what a template may say
-(`McpServer.ChosenLabelRulesArePreviewedByNameWithACountForEach`).
+(`mcp_server::chosen_label_rules_are_previewed_by_name_with_a_count_for_each`).
 
 Paper-based library linestyles and symbols have a separate **per-plan-view
 style scale**, not `ANNOSCALE` or camera zoom (`docs/plan_view.md`, "Paper
@@ -263,7 +263,7 @@ when that view id exists. This changes neither the entities nor annotation
 or plot scales. MCP and CLI have no live views: only previously saved plan
 view assignments may be named here, and a new session lists `views=0`.
 An unknown id, zero, non-finite or out-of-range denominator is refused with
-the specific error and no edit. `tests/app/test_view_scale.cpp` exercises the
+the specific error and no edit. `rust/crates/katana_app/tests/session/view_scale.rs` exercises the
 MCP result records, undo and the refusal to invent a view.
 
 Each tool that runs commands answers with a transcript (`> command`, then what
@@ -278,7 +278,7 @@ it and the arguments the tool takes. Every schema says
 server used to ignore such an argument: `{"split": true}` given to
 `katana_export` (whose word is `split_by_layer`) wrote one layer where the
 agent had asked for one per drawing layer, and said nothing
-(`McpServer.AnArgumentTheToolDoesNotDeclareIsRefusedByNameAndNothingRuns`).
+(`mcp_server::an_argument_the_tool_does_not_declare_is_refused_by_name_and_nothing_runs`).
 
 The help (`katana://help`), the status (`katana://status`) and the
 customisation (`katana://customisation`, "The customisation" below) are also
@@ -293,29 +293,29 @@ shows in plan and in 3D, its colours, contours, ramp, bands and stops, and
 which is the default (`docs/terrain.md`, "Surfaces in the drawing"). When the
 project's own styles could not be read - a newer Katana wrote them, or they
 are damaged - the built-ins only stand in, and the resource says so with
-`"standing_in": {"code", "message"}` and `"editable"` (`cad::surfaceStylesReport`,
+`"standing_in": {"code", "message"}` and `"editable"` (`katana_cad::terrain::surface_verbs::surface_styles_report`,
 as `SURFACESTYLE LIST JSON` does); an agent
 changes them with SURFACESTYLE lines through `katana_run_commands`
-(`McpServer.TheSurfaceStylesAreAResourceAsSurfaceStyleListJsonSaysThem`). With
+(`mcp_server::the_surface_styles_are_a_resource_as_surface_style_list_json_says_them`). With
 the GIS module, `katana://formats` is the fifth: `FORMATS JSON`, every format
 this GDAL reads and writes (`katana_formats`, below).
 
 The road model (`katana://road-model`, since 2026-10-15) is `ROADMODEL JSON`
-(`road::roadModelJson`, `docs/road_design.md`): every 3D object of every
+(`katana_cad::road::road_verbs::road_model_json`, `docs/road_design.md`): every 3D object of every
 corridor and every placed road object - its id, kind, IFC class and
 predefined type, facility and part, material, colour, layer, triangle count
 and box, quantities and properties, but not its mesh - and every problem that
 kept something from being built. Read from the Document, as the status is,
 so reading it leaves no line in the history; the verbs that make and edit
 the road model reach the server through `katana_run_commands` like any other
-(`McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt`).
+(`mcp_server::the_road_model_is_a_resource_as_road_model_json_gives_it`).
 
 Annotation needs no tool of its own: its verbs reply in `key=value` records
 (`docs/annotation.md`, "The verbs"), which come back in each command's
 `output`. `LABEL LAYOUT` names every label piece that found no room on a
 line of its own (`label=4 piece=0 suppressed=yes`), so an agent can select it
 or pin it elsewhere with `LABEL SET id at=x,y`, as the window's Label Layout
-Report does (`McpServer.LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem`).
+Report does (`mcp_server::label_layout_names_the_labels_with_no_room_so_an_agent_can_move_them`).
 
 ## The customisation
 
@@ -336,7 +336,7 @@ runs.
 | `{part: "problems", filter?, offset?, limit?}` | `{part, total, offset, limit, rules, cannotApply, warnings, problems: [{index, key, sets, severity, kind, message}]}`: the lint `CODE CHECK` prints |
 
 - **The summary is one object, and the only part with no envelope.** It is
-  `cad::customisationJson` whole: no `part`, `total`, `offset` or `limit`
+  `katana_cad::customisation_report::customisation_json` whole: no `part`, `total`, `offset` or `limit`
   stands beside cad's members, and the three lists alone are `{part, total,
   offset, limit, <part>: [...]}`. The tool's description says so, since a
   client that looked for `part` in every reply found none in this one.
@@ -352,12 +352,12 @@ runs.
   built-in of the run (`builtIn` names it), `active` the one the session is - none
   for a kept or edited copy, whose `basedOn` says which it came from - and
   `source` the file it was compiled in from. It is the list `CUSTOMISE BUILTIN` and
-  Settings show (`cad::builtInChoices`); `McpServer.TheCustomisationSummaryListsTheBuiltInsTheProgramHas`
+  Settings show (`katana_cad::customisation_host::built_in_choices`); `mcp_server::the_customisation_summary_lists_the_built_ins_the_program_has`
   holds it. To choose one, an agent runs the line through `katana_run_commands`.
   A name in `missing` that is also a `name` here (a project saved while NSW
   was the session, opened under the default) is no file to `CUSTOMISE`: the same
   line, `CUSTOMISE BUILTIN <name>`, loads it. The window's and `katana_cli`'s
-  warnings say so in words (`cad::builtInAdviceFor`); a client of `katana_mcp`
+  warnings say so in words (`katana_cad::customisation_host::built_in_advice_for`); a client of `katana_mcp`
   never reads standard error, so it reads the two lists side by side.
 - **`start` is what went wrong when the session started**:
   `{problems: [sentence], keptFromAnotherBuiltIn}`. A kept file that did not
@@ -372,7 +372,7 @@ runs.
   with").
 - **A rule and a definition are the objects a file holds, and one member
   more.** Each is written by the Katana customisation format's own writer
-  (`entity::customisationToJson`, `entity::definitionToJson`) and read back as
+  (`katana_entity::customisation::customisation_to_json`, `katana_entity::customisation::definition_to_json`) and read back as
   JSON, so a member is spelt here exactly as `docs/customisation.md`, "The
   members", spells it. The tool has no words of its own for what a
   customisation holds. A member at its default is left out, as in a file.
@@ -415,20 +415,20 @@ runs.
   reply in text made for a person - a line a code, not an object a rule -
   and a read sent through a line would sit in the command history of a
   session it never changed. `katana://customisation` is the summary, the same
-  function (`cad::customisationJson`), as `katana://status` is the status.
+  function (`katana_cad::customisation_report::customisation_json`), as `katana://status` is the status.
 
-`McpServer.TheCustomisationSummaryIsCadsReportAsAToolAndAsAResource`,
-`McpServer.TheCodesPartGivesEachRuleAsItsFileHoldsItFilteredAndPaged`,
-`McpServer.TheDefinitionsPartListsEachDefinitionAndGivesStrokesOnlyForTheOneNamed`
-and `McpServer.TheProblemsPartIsTheRulesLintAnObjectAnIssue` pin them, on the
+`mcp_server::the_customisation_summary_is_cads_report_as_a_tool_and_as_a_resource`,
+`mcp_server::the_codes_part_gives_each_rule_as_its_file_holds_it_filtered_and_paged`,
+`mcp_server::the_definitions_part_lists_each_definition_and_gives_strokes_only_for_the_one_named`
+and `mcp_server::the_problems_part_is_the_rules_lint_an_object_an_issue` pin them, on the
 three files of `tests/data/customisation` and on what their text holds.
-`McpServer.ARuleOrADefinitionTheToolGaveLoadsBackOnceTheToolsOwnMemberIsTakenOff`
+`mcp_server::a_rule_or_a_definition_the_tool_gave_loads_back_once_the_tools_own_member_is_taken_off`
 loads a rule and a definition back both ways, refused with the tool's member
 and read back the same without it. The two tests of `start` run a PROGRAM's
 session, as `katana_mcp` has one, with the two start-up variables set:
-`McpServer.WhatWentWrongWhenTheSessionStartedIsInTheSummaryAndTheResource`
+`mcp_server::what_went_wrong_when_the_session_started_is_in_the_summary_and_the_resource`
 (the kept file holds a rule copied from the tool, `index` and all) and
-`McpServer.AKeptCustomisationMadeFromAnotherBuiltInIsSaidInTheSummary`.
+`mcp_server::a_kept_customisation_made_from_another_built_in_is_said_in_the_summary`.
 
 ### Changing: export, edit the JSON, load it back
 
@@ -468,12 +468,12 @@ customisation must not be rewriting its user's by accident. A kept file that
 does not read at the next start is not what starts - the built-in is - and
 the summary's `start.problems` says so and why.
 
-`McpServer.ACustomisationIsEditedByExportingItChangingTheJsonAndLoadingItBack`
+`mcp_server::a_customisation_is_edited_by_exporting_it_changing_the_json_and_loading_it_back`
 runs the round trip: it exports, moves one rule to another layer in the JSON,
 loads the file back and reads the rule with the tool. `katana_run_commands`'
 description names the lines, and `katana_customisation`'s says that it only
 reads and where an edit goes
-(`McpServer.TheToolListSaysHowACustomisationIsLoadedWrittenAndRead`).
+(`mcp_server::the_tool_list_says_how_a_customisation_is_loaded_written_and_read`).
 
 ## Road objects
 
@@ -490,11 +490,11 @@ and `quantities` by their IFC names (`Length`, `Height`, `Count`,
 `GrossArea`, `GrossVolume` ...) - and its `problems`; `problems` holds every
 object's, each with its `source`. A tool rather than a resource, so an agent
 is told of it in the tool list it reads first.
-`McpServer.TheRoadObjectsToolGivesEachDefinitionWhatWasMadeOfItAndItsProblems`
+`mcp_server::the_road_objects_tool_gives_each_definition_what_was_made_of_it_and_its_problems`
 places a barrier, reads it, deletes its alignment and reads the problem.
 
 The tool takes the shared scope and filter (`docs/road_objects.md`, "Scope and
-filter"), written as `katana_export` writes them (`scopeArgumentWords`, the one
+filter"), written as `katana_export` writes them (`scope_argument_words`, the one
 reading of those arguments): `scope` is `selection`, `drawing`, `area` (with
 `area`, `[x0, y0, x1, y1]`) or `layers` (with `layers` and `only`), an `area`
 alone is the scope, and `where` is a list of conditions - `["PROP=kind:barrier",
@@ -507,19 +507,19 @@ A scope that takes nothing is a reply with no objects. A layer the drawing lacks
 a `TYPE`, `STYLE` or `TEXT` condition (an entity's, refused for a road object by
 name) and `layers` without `scope` are refused. `VIEW` is the window's and is not
 offered; `area` says the same without one.
-`McpServer.TheRoadObjectsToolTakesTheSharedScopeAndFilterAndSaysWhatItTook`
+`mcp_server::the_road_objects_tool_takes_the_shared_scope_and_filter_and_says_what_it_took`
 places a barrier and a sign and takes them by layer, by area, by filter on the
 drawing and by filter on the (empty) selection.
 
 ## Geoprocessing tools
 
 GDAL's algorithm framework (`docs/geoprocessing.md`) as tools, in
-`src/katana_app/geo/mcp_geo_tools.cpp`, with the GIS module only. They are
-built from the same helpers as the tools above (`src/katana_app/mcp_tools.hpp`:
-`Tool`, `ToolReply`, `ToolRefusal`, `objectSchema`, `hints`, `oneLine`),
-which moved there from `mcp_server.cpp` unchanged so that a tool in another
+`rust/crates/katana_app/src/geo/mcp_geo_tools.rs`, with the GIS module only. They are
+built from the same helpers as the tools above (`rust/crates/katana_app/src/mcp/tools.rs`:
+`Tool`, `ToolReply`, `ToolRefusal`, `object_schema`, `hints`, `one_line`),
+which moved there from `mcp_server.rs` unchanged so that a tool in another
 file is the same kind of thing. One subsection per geoprocessing package;
-each adds its tools in its own block of `mcp_geo_tools.cpp`.
+each adds its tools in its own block of `mcp_geo_tools.rs`.
 
 ### F0: katana_gdal_catalogue, katana_gdal_describe, katana_gdal_run
 
@@ -532,15 +532,15 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
 - **Read-only tools read the bridge.** `katana_gdal_catalogue` and
   `katana_gdal_describe` change nothing, so they read the bridge directly;
   a line would add nothing. Their schemas are generated from the argument
-  specs GDAL declares (`src/katana_app/geo/schema.hpp`). An algorithm's
+  specs GDAL declares (`rust/crates/katana_app/src/geo/schema.rs`). An algorithm's
   `arguments_schema` is the JSON Schema of `katana_gdal_run`'s `arguments`,
   and its `inputs_schema` that of its `inputs`. Each input is offered only
   the sources its kinds read (`dataset.sources`): a raster input no drawing
   scope, a vector input no raster or surface, a file to every input
-  (`GeoExecutor.TheInputsSchemaOffersOnlyTheSourcesAnArgumentReads`). A
+  (`geo_executor::the_inputs_schema_offers_only_the_sources_an_argument_reads`). A
   source of another kind given anyway is refused by the GDAL verb's binder
   before anything runs, as it is on the command line and in the window
-  (`McpServer.GdalRunRefusesASourceTheInputDoesNotRead`).
+  (`mcp_server::gdal_run_refuses_a_source_the_input_does_not_read`).
 - **`katana_gdal_run` builds a line.** It builds the GDAL line a person would
   type and runs it through the Session:
   - `arguments` become GDAL's `--name=value` words; a dataset argument there
@@ -548,7 +548,7 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
   - `tokens` are GDAL's own words, as they are;
   - each input becomes a FROM clause; a source is `{scope: "selection" |
     "drawing" | "area" | "layers", area?, layers?, only?, where?}`, written
-    by the shared `cad::formatScopeWords`, or `{raster}`, `{surface, cell?}`,
+    by the shared `katana_cad::scope_verbs::format_scope_words`, or `{raster}`, `{surface, cell?}`,
     `{file, layer?}`; `{where}` without `scope` is the selection, filtered,
     as `WHERE` alone reads on the command line, and is written `SELECTION
     WHERE ...` (so is `katana_export`'s `where` without `scope`);
@@ -557,7 +557,7 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
 
   The text echoes the line (`> GDAL ...`) with the records the command line
   prints; the structured content is those records, read back by
-  `geo::parseRecords`, so an agent reads what the scope matched and what was
+  `katana_app::geo::replies::parse_records`, so an agent reads what the scope matched and what was
   made without parsing text.
 - **Confirm algorithms are gated.** An algorithm whose policy is confirm - it
   changes or removes existing data: vsi delete, dataset rename, raster edit
@@ -572,12 +572,12 @@ each adds its tools in its own block of `mcp_geo_tools.cpp`.
   or not, need `overwrite: true`, which adds OVERWRITE to the line; the verb
   refuses both again (`docs/geoprocessing.md`, "Safety").
 
-`McpServer.GdalRunRefusesAPipelineThatChangesExistingDataUnlessToldTo`,
-`McpServer.GdalCatalogueListsHillshade`,
-`McpServer.GdalDescribeGivesASchemaWithBounds`,
-`McpServer.GdalRunBuildsTheLineAndReturnsOutputs`,
-`McpServer.GdalRunRefusesAConfirmAlgorithmWithoutConfirm` and
-`McpServer.GdalRunRefusesAnArgumentTheAlgorithmHasNot` pin them.
+`mcp_server::gdal_run_refuses_a_pipeline_that_changes_existing_data_unless_told_to`,
+`mcp_server::gdal_catalogue_lists_hillshade`,
+`mcp_server::gdal_describe_gives_a_schema_with_bounds`,
+`mcp_server::gdal_run_builds_the_line_and_returns_outputs`,
+`mcp_server::gdal_run_refuses_a_confirm_algorithm_without_confirm` and
+`mcp_server::gdal_run_refuses_an_argument_the_algorithm_has_not` pin them.
 
 ### T0: katana_terrain_list
 
@@ -597,7 +597,7 @@ undone like any edit (`docs/terrain.md`, "Surfaces in the drawing").
 Read-only and idempotent. Surfaces are made with `SURFACE FROM` through
 `katana_run_commands`, or by `katana_gdal_run` with `output: {surface}`, and
 renamed, restyled, shown, hidden and copied with the SURFACE words the
-interpreter runs. `McpServer.TerrainListGivesTheSessionsSurfacesAndRasters`
+interpreter runs. `mcp_server::terrain_list_gives_the_sessions_surfaces_and_rasters`
 pins it, the style and the shown flag with it, and the three undo steps
 that made and changed the surface.
 
@@ -610,7 +610,7 @@ minor= layer= smoothed=`, the scope's `areas used= skipped.open=`). What an
 agent needs to choose a source is `katana_terrain_list`'s. A tool would only
 restate the verb's options as a schema, and the plan gives CONTOUR none
 (`docs/terrain.md`, "Contours").
-`McpServer.ContoursOfASurfaceAreDrawnThroughTheCommandTool` pins it.
+`mcp_server::contours_of_a_surface_are_drawn_through_the_command_tool` pins it.
 
 ### T2: RASTER SHADE through katana_run_commands
 
@@ -619,7 +619,7 @@ The same: `RASTER SHADE` is a session line, and its reply carries the
 picture. The picture is a derived reference raster, which
 `katana_terrain_list` then lists with `role: "derived"` and the line in
 `derived_from`.
-`McpServer.AShadingMadeThroughTheCommandToolIsListedAsADerivedRaster` pins
+`mcp_server::a_shading_made_through_the_command_tool_is_listed_as_a_derived_raster` pins
 it.
 
 ### T3: RASTER SLOPE and RASTER ASPECT through katana_run_commands
@@ -628,7 +628,7 @@ The same again: the lines run through `katana_run_commands`, and the reply's
 `class name= from= to= unit= area= polygons=` records are the per-class area
 report an agent reads; the areas are one undo step (`UNDO` takes them all).
 The slope raster is listed by `katana_terrain_list` like any derived raster.
-`McpServer.SlopeClassesMadeThroughTheCommandToolAreOneUndoStep` pins it.
+`mcp_server::slope_classes_made_through_the_command_tool_are_one_undo_step` pins it.
 
 ### T4: RASTER ZONAL, RASTER SAMPLE and DRAPE through katana_run_commands
 
@@ -637,7 +637,7 @@ No tool of their own, as the plan gives them none: the lines run through
 `zone entity=<id> mean= count= ...` per zone, `sample at=x,y z=` (or
 `ground=no`, never 0) per point, and the drape's `drape method= entities=
 vertices= off=`. ZONAL and DRAPE change the drawing in place, one undo step
-each. `McpServer.StatisticsByAreaThroughTheCommandToolAreWrittenOnTheLot`
+each. `mcp_server::statistics_by_area_through_the_command_tool_are_written_on_the_lot`
 pins it.
 
 ### T5: RASTER VIEWSHED and LOS through katana_run_commands
@@ -647,7 +647,7 @@ reply carries `observer at= visible_cells=` per observer and the summary's
 `visible_cells=` and `area=`, and the viewshed itself is a derived raster
 `katana_terrain_list` lists; LOS answers with one `sight visible= ...
 clearance= blocked_at=` record.
-`McpServer.ALineOfSightThroughTheCommandToolSaysWhetherTheTargetIsSeen`
+`mcp_server::a_line_of_sight_through_the_command_tool_says_whether_the_target_is_seen`
 pins it.
 
 ### Volumes through katana_run_commands
@@ -666,7 +666,7 @@ curve or beside another stretch, is an `InvalidArgument` error naming the statio
 A tool would restate the verbs' options as a
 schema and add nothing the records do not carry. The surfaces to name are
 `katana_terrain_list`'s.
-`McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool` pins it.
+`mcp_server::a_volume_between_two_surfaces_is_measured_through_the_command_tool` pins it.
 
 ### Surface edits through katana_run_commands
 
@@ -676,7 +676,7 @@ Edit Surface tools and dialogs do, each one undo step, the reply a `surface
 name= operation= triangles_before= ...` record. No tool of their own: what an
 agent reads to choose and check a surface is `katana_terrain_list`'s, which
 sees the edited surface.
-`McpServer.ASurfaceEditThroughTheCommandToolIsWhatTheTerrainListReads` pins it.
+`mcp_server::a_surface_edit_through_the_command_tool_is_what_the_terrain_list_reads` pins it.
 
 ### V5: katana_gis_query
 
@@ -685,7 +685,7 @@ sees the edited surface.
 | `katana_gis_query` | `{sql, scope?, area?, layers?, only?, where?, dialect?}`: one SELECT; the scope `drawing` (the default), `selection`, `area` or `layers`, with the shared filter; `sqlite` (the default, Spatialite's `ST_` functions) or `ogrsql` | `{ok, line, columns, column_types, rows: [{column: value}], matched, used}` |
 
 An agent's question of the drawing in one call - "the easement area per
-owner" - answered as typed JSON (`src/katana_app/geo/sql_mcp.cpp`,
+owner" - answered as typed JSON (`rust/crates/katana_app/src/geo/sql_mcp.rs`,
 `docs/geoprocessing.md` "V5"). It builds the line a person would type,
 `GIS SQL "<sql>" <scope> dialect=<d>`, runs it through the Session, and reads
 the `column` and `row` records back: each cell is typed by its column's type
@@ -695,8 +695,8 @@ with `katana_id`, `layer`, `style`, `colour`, `type` and every property; the
 geometry column is `geometry`. Only a SELECT runs, and it changes nothing
 (read-only hint). A double-quoted identifier is written as a
 `[bracketed]` one, which SQLite reads alike and a command line can carry.
-`GisQueryMcp.GisQueryReturnsRowsAsJson` and
-`GisQueryMcp.AStatementThatIsNotASelectIsRefused` (in `tests/geo`) pin it.
+`gis_query_mcp::gis_query_returns_rows_as_json` and
+`gis_query_mcp::a_statement_that_is_not_a_select_is_refused` (in `tests/geo`) pin it.
 
 ### I2: katana_formats
 
@@ -714,13 +714,13 @@ geometry column is `geometry`. Only a SELECT runs, and it changes nothing
   same objects the tool returns.
 
 The tool and the resource are built from the verb's own chooser and records
-(`src/katana_app/geo/formats_verbs.hpp`), so `FORMATS`, the tool and the
+(`rust/crates/katana_app/src/geo/formats_verbs.rs`), so `FORMATS`, the tool and the
 resource cannot come to differ. The text is the verb's records; the
 structured content is `{gdal_version, formats: [...]}`, or the driver's
 `{format, open_options, creation_options, layer_creation_options}`. An
 unknown driver, or a `kind` or `capability` that is neither word, is
-refused. `McpServer.FormatsReturnsStructuredDrivers` pins it, and
-`McpServer.TheHelpAndStatusAreResources` counts it among the resources: six
+refused. `mcp_server::formats_returns_structured_drivers` pins it, and
+`mcp_server::the_help_and_status_are_resources` counts it among the resources: six
 with the GIS module and five without, each one more than before
 `katana://road-model` was added, two more than before
 `katana://surface-styles` was and three more than before
@@ -734,14 +734,14 @@ with the GIS module and five without, each one more than before
 
 - **It is the INFO line.** The tool builds `INFO "<path>" [LAYER <name>]
   [STATS] [CHECK]`, runs it through the Session and hands back its records as
-  objects (`geo::recordsJson`): numbers as numbers, `yes`/`no` as booleans,
+  objects (`katana_app::geo::gis_records::records_json`): numbers as numbers, `yes`/`no` as booleans,
   `bounds` as `[x0, y0, x1, y1]` and any other comma list of numbers as an
   array (a scope's `area`, a grid's `cell` of `4,3`), an empty value as null
   - absent, not zero. A record's `record` is every word before its first
   `key=`: IFC's `ifc exported file=...` is `{"record": "ifc exported",
   "file": ...}`, where one word made it `ifc` with a field `exported file`
-  (`GisRecords.AKindIsEveryWordBeforeTheFirstKeyAndANumberListIsAnArray`,
-  `McpServer.AnIfcExportsRecordIsItsWholeKindWithItsFields`). A list that is
+  (`gis_records::a_kind_is_every_word_before_the_first_key_and_a_number_list_is_an_array`,
+  `mcp_server::an_ifc_exports_record_is_its_whole_kind_with_its_fields`). A list that is
   not all numbers (`stats=mean,min`) stays a string: its words are the
   verb's, and splitting some lists and not others on the kind of item would
   be a second rule.
@@ -752,7 +752,7 @@ with the GIS module and five without, each one more than before
   without leaving an `.aux.xml` beside the file. Its hints are read-only and
   open-world, since a path may be a URL.
 
-`McpServer.DatasetInfoReturnsRecordsAndGdalsJson` pins it; the records are
+`mcp_server::dataset_info_returns_records_and_gdals_json` pins it; the records are
 `docs/interop.md`'s ("Dataset information").
 
 ### D2: katana_references
@@ -772,7 +772,7 @@ with the GIS module and five without, each one more than before
 - **`restore`** reads again the layers the project records, as opening it
   does; `missing` lists those whose files could not be read.
 
-`McpServer.ReferencesActsOnALayerByIdOrNameAndListsThemAfter` pins it.
+`mcp_server::references_acts_on_a_layer_by_id_or_name_and_lists_them_after` pins it.
 
 ### I3 and I4: katana_import and katana_export options
 
@@ -799,10 +799,10 @@ the Session like any other; the structured reply's `commands` shows it.
   file's attribute filter, which the plan's contract named first.
 - A value holding a double quote or a line break is refused: no line can
   carry one (in SQLite, write an identifier as `[name]`).
-- The scope in JSON is read by the one reader, `mcp::scopeWordsOf`, which
+- The scope in JSON is read by the one reader, `katana_app::mcp::tools::scope_words_of`, which
   `katana_gdal_run` and `katana_gis_query` now share.
 
-`McpServer.ImportTakesItsFilterScopeAndPreviewArgumentsAsTheWordsAPersonTypes`
+`mcp_server::import_takes_its_filter_scope_and_preview_arguments_as_the_words_a_person_types`
 pins the lines and records.
 
 `katana_export` takes EXPORT's scope and options (`docs/interop.md`,
@@ -823,7 +823,7 @@ pins the lines and records.
 Here `layers` and `where` are the scope's (katana_export has no file to
 filter); `structuredContent.records[0]` is still the `exported` record, the
 `scope` record after it.
-`McpServer.ExportTakesTheSharedScopeAndItsOptionsAsTheWordsAPersonTypes` pins
+`mcp_server::export_takes_the_shared_scope_and_its_options_as_the_words_a_person_types` pins
 them.
 
 ## Updates
@@ -835,7 +835,7 @@ and puts every one back if the new version does not start. The verbs are
 `UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`,
 `BLOCKED CLEAR`, `SET AUTO` and `TOKEN STATUS | CLEAR`; their grammar, their
 replies and what each front end may run are written once, in
-`src/katana_app/update_verbs.hpp`, and `HELP UPDATE` prints them.
+`rust/crates/katana_app/src/update_verbs.rs`, and `HELP UPDATE` prints them.
 
 **An agent checks and reports, and nothing more.** `katana_mcp` has one tool
 for all of it:
@@ -877,13 +877,13 @@ What is decided here, and why:
   platform are its user agent. A development copy - every build tree - asks
   nobody: it has no release to compare with, and answers
   `update=unsupported reason=development_tree`
-  (`McpServer.TheUpdateToolAnswersWithTheCheckAndStatusRecordsOfThisCopy`).
+  (`mcp_server::the_update_tool_answers_with_the_check_and_status_records_of_this_copy`).
 - **One thing more is sent in one case, and the tool's description says so.**
   When the environment variable `KATANA_UPDATE_TOKEN` of the server's run
   holds an access token and the public address answers that there is no such
   release - what a private release repository answers - the check asks
   `api.github.com` instead and sends the token there, and to no other host
-  (`include/katana/update/feed.hpp`, "the private-repository route"). A
+  (`rust/crates/katana_update/src/feed.rs`, "the private-repository route"). A
   client is told this in the description before it lets the tool run; without
   the variable no token exists for this surface and nothing but the user
   agent is sent.
@@ -900,11 +900,11 @@ What is decided here, and why:
   names the line, never reach an agent. So `available` from this tool means
   that the feed holds a release above this copy, not that the window will
   offer it to this person, and an agent that reports it should say so
-  (`UpdateVerbs.KatanaMcpsSurfaceReportsAReleaseThisPersonSetAsideAsAvailable`).
+  (`update_verbs::katana_mcps_surface_reports_a_release_this_person_set_aside_as_available`).
   The same call answers the same on every machine, which is what "read-only"
   has to mean for a server a client starts unattended
-  (`UpdateVerbs.KatanaMcpsSurfaceChecksAndReportsAndIsRefusedEverythingElse`,
-  `UpdateVerbs.TheCheckUpdateToolGivesTheTwoRecordsAsTextAndAsObjects`).
+  (`update_verbs::katana_mcps_surface_checks_and_reports_and_is_refused_everything_else`,
+  `update_verbs::the_check_update_tool_gives_the_two_records_as_text_and_as_objects`).
   What the copy *is* is another matter and is read for every surface: on
   Windows `kind` is `installer` when the folder the per-user installer
   recorded - a registry value of that user - is this copy's folder, and
@@ -922,26 +922,26 @@ What is decided here, and why:
   CHECK` and `UPDATE STATUS` included, with `Unsupported: UPDATE lines are
   not run by katana_mcp` and the tool's name, as the window's own verbs are
   refused by name. The server marks its session as an agent's when it is
-  made (`Session::setUpdateSurface`), so no line reaches the verbs from here
-  (`McpServer.AnUpdateLineIsRefusedInEveryToolThatRunsLinesNamingTheUpdateTool`).
+  made (`Session::set_update_surface`), so no line reaches the verbs from here
+  (`mcp_server::an_update_line_is_refused_in_every_tool_that_runs_lines_naming_the_update_tool`).
   Rejected: letting the two read-only lines through. `katana_run_commands`
   tells its client that it reaches no network (its open-world hint is false),
   and a client that trusts the hint lets it run unattended; one line that
   asked a server would make the hint false for every call. A tool of its own
   carries its own hint
-  (`McpServer.TheUpdateToolIsListedReadOnlyAndOpenWorldAndTheToolsThatRunLinesAreNot`).
+  (`mcp_server::the_update_tool_is_listed_read_only_and_open_world_and_the_tools_that_run_lines_are_not`).
   `HELP UPDATE` is a `HELP` line and is answered like any other.
 - **An interrupted update is put back before the server reads anything.**
   The first thing `katana_mcp`'s `main()` does, as `katana_cli`'s does, is
-  `recoverInterruptedUpdate` (`src/katana_app/session.hpp`): when an update of
+  `recover_interrupted_update` (`rust/crates/katana_app/src/session.rs`): when an update of
   the install was cut short - a crash, a power cut - the install is put back
-  before a file of it is read (`include/katana/update/recover.hpp`). With
+  before a file of it is read (`rust/crates/katana_update/src/recover.rs`). With
   nothing interrupted, which is every start but that one, it is the listing
   of one folder, and nothing at all in a build tree. What it has to say goes
   to stderr, the server's log, never to the protocol's stream.
 
 `katana_cli` runs every line, and its tests are of a build tree
-(`src/katana_app/update_cli.cmake`): `UPDATE STATUS` says `kind=development`
+(`tests/cli/update_cli.cmake`): `UPDATE STATUS` says `kind=development`
 (`cli.update_status_in_a_build_tree_says_the_copy_is_a_development_one`),
 `UPDATE CHECK` says `update=unsupported` without asking any server
 (`cli.update_check_in_a_build_tree_is_unsupported_and_asks_no_server`), a
@@ -954,11 +954,11 @@ nothing again afterwards
 (`cli.update_apply_confirm_that_is_not_the_last_line_is_refused`,
 `cli.update_apply_confirm_followed_only_by_notes_and_a_quit_is_the_last_line`).
 Which line that is, is read with the verbs' own splitter
-(`UpdateVerbs.TheLastLineRuleReadsALineAsTheVerbsDo`). Typed or piped on
+(`update_verbs::the_last_line_rule_reads_a_line_as_the_verbs_do`). Typed or piped on
 standard input, where the next line cannot be looked at without waiting for
 it, the session ends with the line and `katana_cli` says on stderr that
 nothing after it is run. `UPDATE BLOCKED CLEAR` is tested in the real program
-too (`src/katana_app/update_blocked.cmake`): against a state file written by
+too (`tests/cli/update_blocked.cmake`): against a state file written by
 hand with two releases blocked, it prints `blocked=none`, the file is read
 back with an empty list, and the version skipped, the switch and the time of
 the last check are as they were
@@ -972,18 +972,18 @@ Those runs keep their state in a folder of the build tree
 
 The verbs themselves are run for real over a fake feed, a scratch install
 and the signed fixtures of the release tools in
-`tests/app/test_update_verbs.cpp`. A build tree is never updated, so what
+`rust/crates/katana_app/tests/session/update_verbs.rs`. A build tree is never updated, so what
 `katana_cli` does with an installed copy is tested there too, through the
-session it runs: `Session::setUpdateContextSource` hands the session the
+session it runs: `Session::set_update_context_source` hands the session the
 scratch install where it would read the running program's
-(`UpdateVerbs.KatanaClisSessionPrintsADownloadsProgressOnceAndKeepsThePreparedApplyToBeTaken`:
+(`update_verbs::katana_clis_session_prints_a_downloads_progress_once_and_keeps_the_prepared_apply_to_be_taken`:
 each progress line printed once, the request handed over once, this process
 as the one the helper waits for, nothing to start again). A prepared apply
 that is not launched - a later one took its place, the session ended without
 its front end taking it, or the helper could not be started - has the
 helper's copy listed for the sweep the next start makes, so it does not stay
-behind (`abandonApply`,
-`UpdateVerbs.ASessionGivesUpAPreparedApplyThatALaterOneReplacesOrThatNobodyTook`).
+behind (`abandon_apply`,
+`update_verbs::a_session_gives_up_a_prepared_apply_that_a_later_one_replaces_or_that_nobody_took`).
 
 Two refusals of `UPDATE APPLY CONFIRM` have a way out that the refusal names,
 and both are tested there:
@@ -994,8 +994,8 @@ and both are tested there:
   (in the window, Settings > Updates) empties the list, the next `UPDATE
   CHECK` offers the release again, and `UPDATE APPLY CONFIRM` hands back the
   request for the release that was already downloaded
-  (`UpdateVerbs.BlockedClearEmptiesTheListAndTheNextCheckOffersTheReleaseAgain`,
-  `UpdateVerbs.AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseThatWasPutBack`).
+  (`update_verbs::blocked_clear_empties_the_list_and_the_next_check_offers_the_release_again`,
+  `update_verbs::after_blocked_clear_apply_confirm_returns_the_request_for_the_release_that_was_put_back`).
   It clears the whole list and takes no sequence: the feed offers one
   release, the newest, so there is no second one to choose. Nothing clears
   the list by itself: a release that does not start on this machine is not
@@ -1008,15 +1008,15 @@ and both are tested there:
   elevated half of a split token it would run with administrator rights from
   there. So the line is refused, `reason=elevated`, before that copy is made,
   and the release stays downloaded for Katana started the ordinary way
-  (`UpdateVerbs.ApplyIsRefusedInAKatanaStartedAsAdministratorBeforeAnyHelperIsCopied`).
+  (`update_verbs::apply_is_refused_in_a_katana_started_as_administrator_before_any_helper_is_copied`).
   A machine with that protection turned off, and the built-in administrator
   account, have one token and no unelevated half to interfere, and are not
-  refused (`include/katana/update/process.hpp`, `processIsElevated`). It is
+  refused (`rust/crates/katana_update/src/process.rs`, `process_is_elevated`). It is
   the last of the line's own refusals, so a build tree says
   `reason=development_tree` from an administrator's prompt as from any other
-  (`UpdateVerbs.TheOtherRefusalsOfApplyAreSaidBeforeTheOneForAnAdministratorsSession`),
+  (`update_verbs::the_other_refusals_of_apply_are_said_before_the_one_for_an_administrators_session`),
   and `UPDATE DOWNLOAD CONFIRM` is not refused
-  (`UpdateVerbs.AKatanaStartedAsAdministratorStillChecksAndDownloads`).
+  (`update_verbs::a_katana_started_as_administrator_still_checks_and_downloads`).
 
 ## What the server adds to the command line
 
@@ -1035,7 +1035,7 @@ watching the window:
   a `QUIT` in a batch is reported and skipped.
 * **The window's own verbs are refused by name.** `PLOT`, `PLOTSHEETS`,
   `SNAPSHOT`, `ONLINE`, `SCRIPT`, `GRID` and `EXAGGERATION` run only in the
-  desktop window (its painter is Qt's; its online workbench keeps the
+  desktop window (its painter is the window's canvas; its online workbench keeps the
   provider keys; a script is `katana_run_script`'s here; the grid and the
   exaggeration are how its views draw), and so do `VIEWS` and `ZOOM`, which
   act on its views (`docs/cad.md`, "The window's views: VIEWS and ZOOM").
@@ -1049,8 +1049,8 @@ watching the window:
   where to run it instead - in `katana_cli` too - where it once said "unknown
   command", which a model cannot tell from a typo (`GRID` and `EXAGGERATION`
   did until 2026-09-30); `katana_run_commands`' description says so as well
-  (`McpServer.TheWindowsOwnVerbsAreRefusedSayingWhereTheyRun`, a `cli.` test
-  for each verb in `src/katana_app/CMakeLists.txt`, and
+  (`mcp_server::the_windows_own_verbs_are_refused_saying_where_they_run`, a `cli.` test
+  for each verb in `tests/cli/CMakeLists.txt`, and
   `cli.a_window_verb_in_a_batch_fails_it`). An agent that needs linked views
   drives the window with `katana --command "VIEWS LINK 1,2"`
   (`docs/headless.md`).
@@ -1064,13 +1064,13 @@ IFC 4.3 is reached as the window's IFC dialogs reach it, by lines: `EXPORT
 `INFO` and `IMPORT` with every choice the dialogs offer, and `IFC RULES` for a
 project's rules to start from (`docs/ifc.md`, "Using it"). Their replies are
 `key=value` records ("Replies" there), which an agent reads as it reads any
-other verb's (`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines`).
+other verb's (`mcp_server::an_agent_previews_exports_describes_and_imports_ifc_by_the_dialogs_lines`).
 The road model - corridors and road objects as `IfcRoad`, its parts and their
 elements - goes out with the drawing, and `NOROADMODEL` leaves it out, as the
 export dialog's "Road model" box does; a reply that carried one has a `road
 elements= skipped= roads= parts=` record, and what the model could not build
 is among its warnings (`docs/ifc.md`, "Road model";
-`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord`, which
+`mcp_server::an_agent_leaves_the_road_model_out_of_an_ifc_export_by_its_word`, which
 previews a corridor both ways). No tool of
 its own: the line is the whole of it, and the road model's own data is the
 road verbs' to report.
@@ -1081,47 +1081,46 @@ project that matters.
 
 ## How it is built
 
-* `src/katana_app/session.cpp` - the session both front ends share: the
+* `rust/crates/katana_app/src/session.rs` - the session both front ends share: the
   Document, its `CommandInterpreter`, and the verbs above `katana_cad`
   (`IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` and the
-  geoprocessing verbs through the executor in `src/katana_app/geo/`, the one
+  geoprocessing verbs through the executor in `rust/crates/katana_app/src/geo/`, the one
   the window runs; `SURVEY`; a build without GDAL has the DXF `IMPORT` and
-  `EXPORT` of `dxf_verbs.cpp`). When it starts it builds the customisation's
+  `EXPORT` of `dxf_verbs.rs`). When it starts it builds the customisation's
   host and starts the Document with it.
   `CODE` was here until 2026-09-26 and is the interpreter's now, with `CODE
   LIST` and `CODE CHECK` (once a verb of their own, `MAPFILE`), so the window
   has them too (`docs/cad.md`); `CUSTOMISE` was here, with a parser and a
   loader of its own, until 2026-10-06, and is the interpreter's family now
   (`docs/customisation.md`, "The verbs"). It was
-  `katana_cli`'s `main.cpp`; `src/katana_app/main.cpp` is now only the command
+  `katana_cli`'s `main.rs`; `rust/crates/katana_app/src/bin/katana_cli/main.rs` is now only the command
   line's argument handling.
-* `src/katana_app/mcp_server.cpp` - `Server::handle`: one JSON-RPC message in,
+* `rust/crates/katana_app/src/mcp/server.rs` - `Server::handle`: one JSON-RPC message in,
   its reply out, and the tools. It has no I/O of its own, which is what lets
-  `tests/app/test_mcp_server.cpp` drive it message by message.
-* `src/katana_app/mcp_customisation.cpp` - `katana_customisation`, built from
-  the helpers of `src/katana_app/mcp_tools.hpp` as the geoprocessing tools
+  `rust/crates/katana_app/tests/mcp/mcp_server.rs` drive it message by message.
+* `rust/crates/katana_app/src/mcp/customisation.rs` - `katana_customisation`, built from
+  the helpers of `rust/crates/katana_app/src/mcp/tools.rs` as the geoprocessing tools
   are.
-* `src/katana_app/update_verbs.cpp` - the `UPDATE` verbs, over the update
-  engine (`include/katana/update/`): one function runs a line for the context
+* `rust/crates/katana_app/src/update_verbs.rs` - the `UPDATE` verbs, over the update
+  engine (`rust/crates/katana_update/src/`): one function runs a line for the context
   it is handed, so `katana_cli`, the window and `katana_check_update` run the
-  same code, and the tests run it on a fake feed. `mcp_server.cpp` builds the
-  tool's reply from the two records (`checkUpdateReply`, declared in
-  `src/katana_app/mcp_tools.hpp`).
-* `src/katana_app/mcp_main.cpp` - the process: the stdio transport
+  same code, and the tests run it on a fake feed. `server.rs` builds the
+  tool's reply from the two records (`check_update_reply`, declared in
+  `rust/crates/katana_app/src/mcp/tools.rs`).
+* `rust/crates/katana_app/src/bin/katana_mcp/main.rs` - the process: the stdio transport
   (newline-delimited JSON-RPC 2.0) and `--project`; before either, an
   interrupted update of the install is put back ("Updates", above).
 
 **stdout belongs to the protocol.** A single stray line on it - a warning a
 verb prints, a library's `printf` - and the client reads a message that is not
-JSON and drops the connection. So each command runs with `std::cout` and
-`std::cerr` captured into the reply, and, below that, `mcp_main.cpp` duplicates
-file descriptor 1 for the protocol and points descriptor 1 itself at stderr
+JSON and drops the connection. So each command runs with its output and its errors captured into the
+reply, and, below that, `main.rs` duplicates file descriptor 1 for the protocol and points descriptor 1 itself at stderr
 before the session is created: whatever else writes to "stdout" lands in the
 client's log of the server. The test
-`McpServer.NothingACommandPrintsLeaksOntoTheRealStreams` pins the first half.
+`mcp_server::nothing_a_command_prints_leaks_onto_the_real_streams` pins the first half.
 
 **Protocol.** The server speaks MCP 2025-06-18 and agrees to 2025-03-26 or
-2024-11-05 when a client asks for one (`kLatestProtocolVersion`); structured
+2024-11-05 when a client asks for one (`LATEST_PROTOCOL_VERSION`); structured
 content is sent only from 2025-06-18, where it was introduced. It answers
 `initialize` and `ping`, the tool methods (list and call), the resource
 methods (list, read and the empty templates list) and the empty prompt list,
@@ -1145,11 +1144,11 @@ anything else with the JSON-RPC error the specification names.
   beforehand, without writing into the install, is not written.
 * **`katana_cli`'s start of the helper has no test.** Everything up to the
   prepared request is tested through the session
-  (`tests/app/test_update_verbs.cpp`); the few lines of `main()` after the
-  session has ended - `update::launchApply`, and the note on stderr when the
+  (`rust/crates/katana_app/tests/session/update_verbs.rs`); the few lines of `main()` after the
+  session has ended - `katana_update::apply::launch_apply`, and the note on stderr when the
   line was typed or piped - run only in an installed copy, and the shipped
   programs cannot be given the test keys an installed copy in a test would
-  need (`include/katana/update/trust.hpp`).
+  need (`rust/crates/katana_update/src/trust.rs`).
 * **Two programs that change the update settings at the same instant can
   lose one change.** A setting is changed by reading the state file and
   writing it back, and `UPDATE CHECK` records its time the same way, into
@@ -1167,7 +1166,7 @@ anything else with the JSON-RPC error the specification names.
 * **No pictures, no plots, no online data.** A tool that plots the drawing
   with the window's headless `--plot` or `--screenshot` (`docs/headless.md`)
   and returns the image would let Claude check its own work by eye; `PLOT`,
-  `PLOTSHEETS` and `SNAPSHOT` need a painter the session has not got (Qt's),
+  `PLOTSHEETS` and `SNAPSHOT` need a painter the session has not got (the window's canvas),
   and `ONLINE` the window's key store and job runner. Moving the online verbs
   behind a service the session can call, and giving the server a plot and a
   picture tool that run the window headless, is the work that closes this.

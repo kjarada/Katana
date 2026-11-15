@@ -1,22 +1,39 @@
-# Installing, bundling and packaging.
+# Installing, bundling and packaging the programs cargo built.
 #
-#   cmake --build build/release --target bundle     -> build/release/dist/Katana/
-#   cmake --build build/release --target package    -> Katana-<version>-win64.zip
+# Included by the packaging project, packaging/CMakeLists.txt, which compiles
+# nothing (LANGUAGES NONE) and is configured with the folder cargo put the
+# release programs in:
+#
+#   cd packaging && cmake --preset package -DKATANA_PROGRAMS=<cargo target>/release
+#   cmake --build build/package --target bundle    -> build/package/dist/Katana/
+#   cmake --build build/package --target package   -> Katana-<version>-win64.zip
 #                                     and .exe, -win-arm64.zip and .exe,
 #                                     -linux-x86_64.tar.gz, -linux-aarch64.tar.gz,
 #                                     -macos-arm64.dmg
-#   cmake --install build/release --prefix <dir>    -> the same tree, anywhere
+#   cmake --install build/package --prefix <dir>   -> the same tree, anywhere
 #
-# The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2, no
-# Qt and no GDAL installed. The same deployment script makes the Windows
-# build tree self-contained unless KATANA_DEPLOY_RUNTIME is switched off.
+# (docs/release.md, "Packaging"). Any project that compiles nothing may include
+# it the same way - the test runner too, whose packaging tests then read its
+# own build directory - given PROJECT_VERSION, Katana's version, and
+# KATANA_PROGRAMS.
+#
+# Until 2026-11-15 this was part of the C++ build: install(TARGETS) of the
+# programs it linked, Qt deployed beside them by windeployqt, and the build
+# tree's own bin/ made self-contained at every build. The programs are cargo's
+# now, so they are installed as files (install(PROGRAMS)) from KATANA_PROGRAMS,
+# there is no Qt to deploy, and cargo's target folder is not made
+# self-contained: a developer runs the programs where the toolchain is, and
+# the bundle is the tree that runs on its own.
+#
+# The installed tree is SELF-CONTAINED: it runs on a machine with no MSYS2 and
+# no GDAL installed.
 #
 #   Katana/
 #     bin/katana.exe, katana_cli.exe,    the programs
 #         katana_mcp.exe, katana_updater.exe   (the updater: the helper that swaps
 #                                           the files; not on macOS, see below)
-#     bin/*.dll                          Qt, GDAL, PDAL, PROJ, the C++ runtime
-#     bin/platforms, styles, ...         Qt plugins, where Qt looks for them
+#     bin/*.dll                          GDAL, PDAL, PROJ, SQLite, libcurl, the C and
+#                                        C++ runtimes the native shims link
 #     share/proj, share/gdal             proj.db and the GDAL support files
 #     etc/ssl/certs/ca-bundle.crt        what libcurl checks https:// against
 #     LICENSE                            the GNU General Public License
@@ -29,15 +46,48 @@
 #
 # bin/ beside share/ is not arbitrary: PROJ looks for its database at
 # <directory of the PROJ DLL>/../share/proj, so this layout is found without
-# any configuration, and interop::useBundledData points GDAL at share/gdal.
+# any configuration, and katana_core's library_data points GDAL at share/gdal
+# and libcurl at the certificates, beside the library that reads them.
+
+cmake_minimum_required(VERSION 3.24)
+
+if(NOT PROJECT_VERSION)
+    message(FATAL_ERROR "cmake/KatanaPackaging.cmake needs PROJECT_VERSION, Katana's version: include it from a project that declares it (packaging/CMakeLists.txt)")
+endif()
+
+# The checkout: the samples, the licence and the notices are taken from it, whichever
+# project includes this.
+get_filename_component(KATANA_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
+set(KATANA_PROGRAMS "" CACHE PATH
+    "The folder cargo put the release programs in (<cargo target>/release): what is installed and packaged")
+if(KATANA_PROGRAMS STREQUAL "")
+    message(FATAL_ERROR "Give -DKATANA_PROGRAMS=<the folder of the release programs cargo built>, "
+                        "e.g. rust/target/release, or ~/katana-build/<worktree>/cargo/release in WSL")
+endif()
+file(TO_CMAKE_PATH "${KATANA_PROGRAMS}" KATANA_PROGRAMS)
+if(NOT DEFINED KATANA_PUBLISHER)
+    set(KATANA_PUBLISHER "Jarada" CACHE STRING "The publisher named in the installer and signatures")
+endif()
+
+# The prefix tools/setup_linux_toolchain.py installs, on Linux and macOS: where
+# the libraries the programs link come from, and so what the deploy copies.
+if(NOT DEFINED KATANA_TOOLCHAIN AND NOT WIN32 AND NOT "$ENV{KATANA_TOOLCHAIN}" STREQUAL "")
+    set(KATANA_TOOLCHAIN "$ENV{KATANA_TOOLCHAIN}" CACHE PATH "The toolchain prefix the programs were built against")
+endif()
+
+set(KATANA_EXE "")
+if(WIN32)
+    set(KATANA_EXE ".exe")
+endif()
 
 # On macOS the same tree is an application bundle, Katana.app, laid out as
-# code signing and Finder expect: programs in Contents/MacOS, libraries and
-# Qt's plugins in Contents/Frameworks, and everything that is not code - GDAL,
-# PROJ and certificate data, the samples - in Contents/Resources. The tree
-# inside Contents keeps the relative layout the programs rely on
+# code signing and Finder expect: programs in Contents/MacOS, libraries in
+# Contents/Frameworks, and everything that is not code - GDAL, PROJ and
+# certificate data, the samples - in Contents/Resources. The tree inside
+# Contents keeps the relative layout the programs rely on
 # (KatanaDeployUnix.cmake.in), with Frameworks for lib/ and Resources for the
-# prefix of share/ and ssl/ (core/library_data.hpp).
+# prefix of share/ and ssl/ (katana_core's library_data).
 if(APPLE AND DEFINED KATANA_TOOLCHAIN)
     set(KATANA_APP_BUNDLE "Katana.app")
     # The name macOS files the application's settings and permissions under;
@@ -45,80 +95,129 @@ if(APPLE AND DEFINED KATANA_TOOLCHAIN)
     # one is a different application to macOS.
     set(KATANA_BUNDLE_IDENTIFIER "com.jarada.katana" CACHE STRING
         "CFBundleIdentifier of Katana.app")
+    # The oldest macOS the bundle says it starts on. 13 was the C++ release's
+    # floor, the oldest its Qt supported; the Rust programs have kept it until
+    # their own is measured (docs/release.md, "Not done").
+    set(KATANA_MACOS_MINIMUM "13.0" CACHE STRING "LSMinimumSystemVersion of Katana.app")
     set(KATANA_INSTALL_BINDIR "${KATANA_APP_BUNDLE}/Contents/MacOS")
     set(KATANA_INSTALL_DATADIR "${KATANA_APP_BUNDLE}/Contents/Resources/share")
 else()
     set(KATANA_APP_BUNDLE "")
-    set(KATANA_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
-    set(KATANA_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}")
+    set(KATANA_INSTALL_BINDIR "bin")
+    set(KATANA_INSTALL_DATADIR "share")
 endif()
 
-if(TARGET katana)
-    install(TARGETS katana RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
-endif()
-foreach(_katana_program katana_cli katana_mcp)
-    if(TARGET ${_katana_program})
-        install(TARGETS ${_katana_program} RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
-    endif()
-endforeach()
-# The fourth program: the helper that swaps the install's files while Katana is
-# not running and puts them back if anything goes wrong (docs/update.md). Static,
-# linked to the update library and katana_core only, so it imports nothing but the
-# operating system's DLLs, and never run from bin/: the engine copies it out first.
-# Not on macOS, where updating is check-and-notify only (a file edited inside
-# Katana.app breaks its seal): a helper that could not be used would only be one
-# more thing signed and notarised.
+# The programs installed are these four, by name, and no others. A fifth
+# program cargo builds - the icon renderers of the window crate, the update
+# tests' stand-ins and their end-to-end driver, which carry a TEST KEY - is
+# never installed: a test key in a shipped program would move the trust root
+# of every update. tools/check_install_rules.cmake fails on a fifth.
 #
-# Linux: cmake/KatanaDeployUnix.cmake.in scans this program for libraries with the other
-# three (tools/check_install_rules.cmake fails if an installed program is missing from that
-# list, and nothing else would notice: a Windows build never runs the script), and the install gives it
-# CMAKE_INSTALL_RPATH, $ORIGIN/../lib, as it gives the others. Not yet settled, and task
-# T18's to settle: a Linux helper cannot be static as the Windows one is (glibc), and it runs
-# from a copy in a state folder, where $ORIGIN/../lib is not the install's lib/, so it needs
-# a way to find that lib/ from there. Nothing here has been built or run on Linux.
-if(TARGET katana_updater AND NOT APPLE)
-    install(TARGETS katana_updater RUNTIME DESTINATION ${KATANA_INSTALL_BINDIR})
+# The fourth is the helper that swaps the install's files while Katana is not
+# running and puts them back if anything goes wrong (docs/update.md); never run
+# from bin/: the engine copies it out first. Not on macOS, where updating is
+# check-and-notify only (a file edited inside Katana.app breaks its seal): a
+# helper that could not be used would only be one more thing signed and
+# notarised.
+set(KATANA_PACKAGED_PROGRAMS katana katana_cli katana_mcp)
+if(NOT APPLE)
+    list(APPEND KATANA_PACKAGED_PROGRAMS katana_updater)
+endif()
+set(_katana_missing "")
+foreach(_katana_program IN LISTS KATANA_PACKAGED_PROGRAMS)
+    set(_katana_file "${KATANA_PROGRAMS}/${_katana_program}${KATANA_EXE}")
+    if(NOT EXISTS "${_katana_file}")
+        list(APPEND _katana_missing "${_katana_file}")
+    endif()
+    install(PROGRAMS "${_katana_file}" DESTINATION "${KATANA_INSTALL_BINDIR}")
+endforeach()
+if(_katana_missing)
+    list(JOIN _katana_missing "\n  " _katana_missing)
+    message(FATAL_ERROR "The programs to package are not built:\n  ${_katana_missing}\n"
+                        "Build them first: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release")
 endif()
 
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
+# --- the programs are the build this packages ----------------------------------------
+#
+# What a release must be built with reaches the programs through cargo's
+# environment, read by rust/crates/katana_update/build.rs: the update keys
+# (cmake/KatanaUpdateKeys.cmake, refused while they are placeholders when
+# KATANA_REQUIRE_UPDATE_KEYS is set), the repository an installed copy asks for
+# the next version (KATANA_UPDATE_REPO) and the version (project(Katana
+# VERSION ...)). A variable cargo was not given is not an error to cargo: the
+# program is built without it, and no program says which repository it asks.
+# So a configure for a release reads back what the build script wrote - the
+# file `output` of its run, under <programs>/build/katana_update-<hash>/, one
+# `cargo:rustc-env=NAME=value` a line - and refuses programs that were not
+# built with real keys, this version and the repository named here. Every run
+# of the script is read, for a target folder may hold one per build of other
+# settings: on a developer's machine `cargo clean --release -p katana_update`
+# clears the old ones.
+option(KATANA_REQUIRE_UPDATE_KEYS
+    "Refuse to configure while the update keys are placeholders, or for programs not built with real ones" OFF)
+include("${CMAKE_CURRENT_LIST_DIR}/KatanaUpdateKeys.cmake")
+set(KATANA_UPDATE_REPO "" CACHE STRING
+    "owner/name of the repository the programs were built to ask for the next version (KATANA_UPDATE_REPO in cargo's environment); empty: not checked")
+if(KATANA_REQUIRE_UPDATE_KEYS)
+    file(GLOB _katana_build_outputs "${KATANA_PROGRAMS}/build/katana_update-*/output")
+    if(NOT _katana_build_outputs)
+        message(FATAL_ERROR
+            "No run of katana_update's build script under ${KATANA_PROGRAMS}/build: the programs there "
+            "were not built by cargo in this target folder, and what they were built with cannot be read")
+    endif()
+    set(_katana_expected
+        "cargo:rustc-env=KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS=0"
+        "cargo:rustc-env=KATANA_VERSION=${PROJECT_VERSION}")
+    if(NOT KATANA_UPDATE_REPO STREQUAL "")
+        list(APPEND _katana_expected "cargo:rustc-env=KATANA_UPDATE_REPO=${KATANA_UPDATE_REPO}")
+    endif()
+    foreach(_katana_output IN LISTS _katana_build_outputs)
+        file(STRINGS "${_katana_output}" _katana_lines)
+        foreach(_katana_line IN LISTS _katana_expected)
+            if(NOT _katana_line IN_LIST _katana_lines)
+                message(FATAL_ERROR
+                    "${_katana_output} does not say ${_katana_line}: the programs in ${KATANA_PROGRAMS} were "
+                    "not built for this release (real update keys, version ${PROJECT_VERSION}, repository "
+                    "'${KATANA_UPDATE_REPO}'). Build them with KATANA_REQUIRE_UPDATE_KEYS=ON and "
+                    "KATANA_UPDATE_REPO in cargo's environment (docs/release.md, \"Packaging\").")
+            endif()
+        endforeach()
+    endforeach()
+    list(LENGTH _katana_build_outputs _katana_count)
+    message(STATUS "Katana packaging: the programs were built with real update keys, version "
+                   "${PROJECT_VERSION}, repository '${KATANA_UPDATE_REPO}' (${_katana_count} build-script run(s) read)")
+endif()
+
+install(DIRECTORY "${KATANA_ROOT}/samples/"
     DESTINATION "${KATANA_INSTALL_DATADIR}/katana/samples"
     # A project directory accumulates backups and caches as it is used; a
     # shipped sample should be the drawing and nothing else.
     PATTERN "backups" EXCLUDE
     PATTERN "cache" EXCLUDE)
-# The built-in customisation is COMPILED INTO the binary (#embed, see
-# src/katana_cad/CMakeLists.txt), so there is nothing to install beside it: its
-# linestyles, symbols and survey codes travel inside the executable and need no
-# files at run time.
+# The built-in customisations are COMPILED INTO the programs
+# (rust/crates/katana_cad/build.rs embeds them with include_bytes!), so there is
+# nothing to install beside them: their linestyles, symbols and survey codes
+# travel inside the executable and need no files at run time.
 #
-# Its SOURCES are a different matter and must never be installed. The file it
-# is compiled from (resources/customisation) is tracked, on the owner's
-# decision of 2026-10-08, and the reference files it was converted from (under
-# docs/) are third-party material kept untracked on the owner's machine: both
-# are inputs to the build, not part of the product, and a bundle is something
-# that gets handed to other people. The file is already in the executable; a
-# second copy beside it would add nothing but a file made from another author's
-# libraries. No install rule here takes anything from resources/ or docs/; the test
-# packaging_installs_only_present_first_party_files
-# (tools/check_install_rules.cmake) fails if one ever does.
-#
-# The programs installed are the four above, by name, and no others: the
-# converter of the older customisation formats is built beside them and
-# carries the readers of those formats, which the product does not, and the
-# two executables the update tests build with a test key (katana_updater_test,
-# katana_update_e2e) must never ship. The same check fails on a fifth program,
-# and a test of the link closure (tests/CMakeLists.txt) fails if one of the four
-# links the readers.
+# Their SOURCES are a different matter and must never be installed. The files
+# they are compiled from (resources/customisation) are tracked, on the owner's
+# decision of 2026-10-08, and the reference files they were converted from
+# (under docs/) are third-party material kept untracked on the owner's
+# machine: both are inputs to the build, not part of the product, and a bundle
+# is something that gets handed to other people. No install rule here takes
+# anything from resources/ or docs/; tools/check_install_rules.cmake fails if
+# one ever does.
 
 # Only files that exist. An install rule naming a missing file is not skipped:
 # `cmake --install` stops at it, after the programs are copied and before the
 # runtime DLLs are, and leaves a tree that does not start. A top-level file
 # this used to install unconditionally was deleted from the repository, and
 # every bundle and package failed that way until the rule was made
-# conditional. The same test fails on a rule that names a missing file.
+# conditional. tools/check_install_rules.cmake fails on a rule that names a
+# missing file.
 foreach(_katana_top_level_file LICENSE)
-    if(EXISTS "${PROJECT_SOURCE_DIR}/${_katana_top_level_file}")
-        install(FILES "${PROJECT_SOURCE_DIR}/${_katana_top_level_file}" DESTINATION .)
+    if(EXISTS "${KATANA_ROOT}/${_katana_top_level_file}")
+        install(FILES "${KATANA_ROOT}/${_katana_top_level_file}" DESTINATION .)
     endif()
 endforeach()
 
@@ -130,94 +229,51 @@ endforeach()
 # so an update brings the notices that match the programs it brings. Only files that exist,
 # for the reason above.
 foreach(_katana_notice ADDITIONAL_TERMS.md LICENSING.md THIRD_PARTY_NOTICES.md)
-    if(EXISTS "${PROJECT_SOURCE_DIR}/${_katana_notice}")
-        install(FILES "${PROJECT_SOURCE_DIR}/${_katana_notice}"
+    if(EXISTS "${KATANA_ROOT}/${_katana_notice}")
+        install(FILES "${KATANA_ROOT}/${_katana_notice}"
             DESTINATION "${KATANA_INSTALL_DATADIR}/katana/licences")
     endif()
 endforeach()
 
 # --- runtime dependencies ------------------------------------------------------
 #
-# Windows only, and only for a toolchain whose DLLs live beside its compiler
-# (MSYS2 / MinGW). Linux and macOS are below.
-set(_katana_bundle_targets "")
-foreach(_target katana katana_cli katana_mcp katana_updater)
-    if(TARGET ${_target})
-        list(APPEND _katana_bundle_targets ${_target})
-    endif()
-endforeach()
-
+# Windows: the DLLs the programs import, from the toolchain whose DLLs live
+# beside its tools (MSYS2: UCRT64, or CLANGARM64 on ARM64), found by a scan of
+# the programs' import tables. KATANA_RUNTIME_BIN is that folder; in an MSYS2
+# shell it is $MINGW_PREFIX/bin.
 if(WIN32)
-    find_program(KATANA_WINDEPLOYQT NAMES windeployqt6 windeployqt
-        HINTS "${KATANA_RUNTIME_BIN}")
-    if(TARGET katana AND KATANA_DEPLOY_RUNTIME AND NOT KATANA_WINDEPLOYQT)
-        message(FATAL_ERROR
-            "windeployqt was not found. Install the matching Qt tools or set "
-            "KATANA_WINDEPLOYQT; katana.exe cannot be deployed without its Qt plugins.")
+    if(NOT DEFINED KATANA_RUNTIME_BIN AND NOT "$ENV{MINGW_PREFIX}" STREQUAL "")
+        file(TO_CMAKE_PATH "$ENV{MINGW_PREFIX}/bin" _katana_mingw_bin)
+        set(KATANA_RUNTIME_BIN "${_katana_mingw_bin}" CACHE PATH
+            "The toolchain folder the programs' DLLs come from (MSYS2: <prefix>/bin)")
     endif()
-    # Where Qt keeps its plugins, for the one windeployqt leaves behind (see
-    # the offscreen note in KatanaDeploy.cmake.in). Asked of Qt itself rather
-    # than guessed from the toolchain layout.
-    set(KATANA_QT_PLUGIN_DIR "")
-    find_program(KATANA_QTPATHS NAMES qtpaths6 qtpaths HINTS "${KATANA_RUNTIME_BIN}")
-    if(TARGET katana AND KATANA_QTPATHS)
-        execute_process(COMMAND "${CMAKE_COMMAND}" -E env
-            "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}" "${KATANA_QTPATHS}" --query QT_INSTALL_PLUGINS
-            OUTPUT_VARIABLE KATANA_QT_PLUGIN_DIR OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE _qtpaths_result ERROR_VARIABLE _qtpaths_error)
-        if(NOT "${_qtpaths_result}" STREQUAL "0" OR NOT IS_DIRECTORY "${KATANA_QT_PLUGIN_DIR}")
-            message(FATAL_ERROR "qtpaths could not locate Qt's plugins (${_qtpaths_result}): "
-                                "${KATANA_QT_PLUGIN_DIR}\n${_qtpaths_error}")
-        endif()
-    elseif(TARGET katana AND KATANA_DEPLOY_RUNTIME)
-        message(FATAL_ERROR "qtpaths was not found. Install the matching Qt tools or set KATANA_QTPATHS.")
+    find_program(KATANA_OBJDUMP NAMES objdump llvm-objdump HINTS "${KATANA_RUNTIME_BIN}")
+    if(NOT KATANA_OBJDUMP)
+        message(FATAL_ERROR "The Windows runtime dependency scan needs objdump; set KATANA_OBJDUMP to the toolchain's objdump.")
     endif()
-    if(_katana_bundle_targets AND KATANA_DEPLOY_RUNTIME AND NOT EXISTS "${CMAKE_OBJDUMP}")
-        message(FATAL_ERROR "The Windows runtime dependency scan needs objdump; set CMAKE_OBJDUMP to the toolchain's objdump.")
+    if(NOT DEFINED KATANA_RUNTIME_BIN)
+        get_filename_component(_katana_objdump_bin "${KATANA_OBJDUMP}" DIRECTORY)
+        set(KATANA_RUNTIME_BIN "${_katana_objdump_bin}" CACHE PATH
+            "The toolchain folder the programs' DLLs come from (MSYS2: <prefix>/bin)")
     endif()
-    # What decides WHICH DLLs a deploy needs, hashed: every module's link
-    # libraries, the toolchain and Qt locations, and the deploy script itself.
-    # The build-tree deploy is skipped while this and the toolchain's files are
-    # unchanged - see step 0 of KatanaDeploy.cmake.in for why this is the key
-    # and not the programs' import tables.
-    set(_katana_deploy_inputs "${KATANA_RUNTIME_BIN}|${KATANA_QT_PLUGIN_DIR}|${KATANA_WINDEPLOYQT}")
-    foreach(_target IN LISTS KATANA_MODULES _katana_bundle_targets ITEMS katana_qt_ui)
-        if(TARGET ${_target})
-            foreach(_property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-                get_target_property(_links ${_target} ${_property})
-                if(_links)
-                    string(APPEND _katana_deploy_inputs "|${_target}.${_property}=${_links}")
-                endif()
-            endforeach()
-        endif()
-    endforeach()
-    file(MD5 "${CMAKE_CURRENT_LIST_DIR}/KatanaDeploy.cmake.in" _katana_deploy_script_hash)
-    string(APPEND _katana_deploy_inputs "|${_katana_deploy_script_hash}")
-    string(MD5 KATANA_DEPLOY_KEY "${_katana_deploy_inputs}")
-
+    if(NOT IS_DIRECTORY "${KATANA_RUNTIME_BIN}")
+        message(FATAL_ERROR "KATANA_RUNTIME_BIN (${KATANA_RUNTIME_BIN}) is not a folder: name the toolchain's bin/, which holds GDAL's DLL")
+    endif()
+    list(JOIN KATANA_PACKAGED_PROGRAMS " " KATANA_DEPLOY_PROGRAMS)
     configure_file("${CMAKE_CURRENT_LIST_DIR}/KatanaDeploy.cmake.in"
                    "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake" @ONLY)
     install(SCRIPT "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake")
 endif()
 
-# Linux and macOS, when the build uses a toolchain prefix of its own
-# (cmake/toolchains/katana-linux.cmake, katana-macos.cmake): the libraries come
-# from that prefix and nowhere else, so an installed tree that did not carry
-# them would run only on the machine that built it. KatanaDeployUnix.cmake.in
-# copies them into lib/, beside Qt's plugins and the GDAL, PROJ and
-# certificate data. A build against a distribution's own libraries leaves the
-# dependencies to its package manager, as before.
+# Linux and macOS, when the programs were built against a toolchain prefix of
+# their own (tools/setup_linux_toolchain.py): the libraries come from that
+# prefix and nowhere else, so an installed tree that did not carry them would
+# run only on the machine that built it. KatanaDeployUnix.cmake.in copies them
+# into lib/, beside the GDAL, PROJ and certificate data, and points the
+# programs' run-time path at that lib/. Programs built against a
+# distribution's own libraries leave the dependencies to its package manager.
 if(NOT WIN32 AND DEFINED KATANA_TOOLCHAIN)
     set(KATANA_TOOLCHAIN_PREFIX "${KATANA_TOOLCHAIN}")
-    set(KATANA_QT_PLUGIN_DIR "")
-    find_program(KATANA_QMAKE NAMES qmake6 qmake HINTS "${KATANA_TOOLCHAIN}/bin" NO_DEFAULT_PATH)
-    if(KATANA_QMAKE)
-        execute_process(COMMAND "${KATANA_QMAKE}" -query QT_INSTALL_PLUGINS
-            OUTPUT_VARIABLE KATANA_QT_PLUGIN_DIR OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    endif()
-    if(NOT IS_DIRECTORY "${KATANA_QT_PLUGIN_DIR}")
-        set(KATANA_QT_PLUGIN_DIR "${KATANA_TOOLCHAIN}/lib/qt6/plugins")
-    endif()
     if(KATANA_APP_BUNDLE)
         configure_file("${CMAKE_CURRENT_LIST_DIR}/KatanaInfo.plist.in"
                        "${CMAKE_BINARY_DIR}/Info.plist" @ONLY)
@@ -227,76 +283,22 @@ if(NOT WIN32 AND DEFINED KATANA_TOOLCHAIN)
     install(SCRIPT "${CMAKE_BINARY_DIR}/KatanaDeployUnix.cmake")
 endif()
 
-# --- the build tree runs on its own ----------------------------------------------
-#
-# GDAL, PDAL, PROJ, Qt and the C++ runtime are copied beside the programs in
-# <build>/bin by the build itself, so build/release/bin/katana.exe starts with
-# no MSYS2 on PATH - part of the program, not borrowed from the toolchain at run
-# time. The same script as the bundle, run incrementally: a full deploy once
-# per configuration or toolchain update, and a check of timestamps (well under
-# a second) on every other build.
-#
-# Each program deploys after linking, including an explicit --target build.
-# The ALL target also checks a no-op build for deleted or outdated DLLs.
-# The shared script locks its destination while checking and copying.
-#
 # Why DLLs beside the program and not static linking: MSYS2 ships PDAL and
 # PROJ as DLLs only, and libpdalcpp links the GDAL DLL itself, so a Katana
 # with GDAL linked in statically would load a second GDAL through PDAL - two
 # driver registries and two error states in one process. A static build means
-# building GDAL, PROJ, PDAL and their dependencies from source; see
-# docs/architecture.md, "Why DLLs beside the program, and not static linking".
-# `bundle` is `cmake --install` into the build tree, under a name a person can
-# find, cleared first so that a file removed from the install rules does not
-# linger in an old bundle.
+# building GDAL, PROJ, PDAL and their dependencies from source (docs/building.md,
+# "Why DLLs beside the program, and not static linking").
+#
+# `bundle` is `cmake --install` into the build directory, under a name a person
+# can find, cleared first so that a file removed from the install rules does
+# not linger in an old bundle.
 add_custom_target(bundle
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/dist/Katana"
-    COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}" --config "$<CONFIG>"
+    COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}"
             --prefix "${CMAKE_BINARY_DIR}/dist/Katana"
-    DEPENDS ${_katana_bundle_targets}
     COMMENT "Bundling a self-contained Katana into ${CMAKE_BINARY_DIR}/dist/Katana"
     USES_TERMINAL)
-
-if(WIN32 AND KATANA_DEPLOY_RUNTIME AND _katana_bundle_targets)
-    list(GET _katana_bundle_targets 0 _katana_runtime_anchor)
-    add_custom_target(katana_runtime ALL
-        COMMAND ${CMAKE_COMMAND}
-                "-DKATANA_DEPLOY_PREFIX=$<TARGET_FILE_DIR:${_katana_runtime_anchor}>/.."
-                "-DKATANA_DEPLOY_BIN=$<TARGET_FILE_DIR:${_katana_runtime_anchor}>"
-                -P "${CMAKE_BINARY_DIR}/KatanaDeploy.cmake"
-        COMMENT "Katana runtime: GDAL, PDAL, PROJ and Qt beside the programs in ${CMAKE_BINARY_DIR}/bin"
-        VERBATIM)
-    add_dependencies(katana_runtime ${_katana_bundle_targets})
-    if(KATANA_BUILD_TESTS)
-        # The deploy copies libcurl beside the programs, and libcurl reads the
-        # certificates it checks https:// against from ../etc/ssl/certs beside
-        # its own DLL. Every web request of GIS > Online Data failed while the
-        # deploy left them out, and no other test saw it: the tests load
-        # libcurl from the toolchain, whose bundle is in place.
-        add_test(NAME runtime_has_the_certificates_https_is_checked_against
-            COMMAND ${CMAKE_COMMAND} -E cat
-                "$<TARGET_FILE_DIR:${_katana_runtime_anchor}>/../etc/ssl/certs/ca-bundle.crt")
-        set_tests_properties(runtime_has_the_certificates_https_is_checked_against PROPERTIES
-            PASS_REGULAR_EXPRESSION "-----BEGIN CERTIFICATE-----")
-        set(_katana_runtime_checks "")
-        foreach(_pair "APP|katana" "CLI|katana_cli" "MCP|katana_mcp")
-            string(REPLACE "|" ";" _parts "${_pair}")
-            list(GET _parts 0 _argument)
-            list(GET _parts 1 _program)
-            if(TARGET ${_program})
-                list(APPEND _katana_runtime_checks "-D${_argument}=$<TARGET_FILE:${_program}>")
-            endif()
-        endforeach()
-        add_test(NAME runtime_programs_start_without_the_toolchain_on_path
-            COMMAND "${CMAKE_COMMAND}" "-DKATANA_ROOT=${PROJECT_SOURCE_DIR}"
-                "-DWORK=${CMAKE_BINARY_DIR}/tests/windows runtime/smoke"
-                ${_katana_runtime_checks}
-                -P "${PROJECT_SOURCE_DIR}/tests/check_windows_runtime.cmake")
-        set_tests_properties(runtime_programs_start_without_the_toolchain_on_path PROPERTIES
-            TIMEOUT 240 ENVIRONMENT_MODIFICATION
-                "KATANA_BUILTIN_CUSTOMISATION=set:none;KATANA_CUSTOMISATION=unset:")
-    endif()
-endif()
 
 # --- CPack -----------------------------------------------------------------------
 set(CPACK_PACKAGE_NAME "Katana")
@@ -306,6 +308,9 @@ set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "High-performance survey and CAD platform")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Katana")
 set(CPACK_PACKAGE_EXECUTABLES "katana" "Katana")
+# Where the packages are written: this build directory, whichever folder cpack
+# is started from.
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}")
 # Signing, between staging the tree and archiving it, so what is inside the
 # archive and the installer is signed; and the installer itself afterwards.
 # Each does nothing unless a certificate is named in the environment
@@ -316,20 +321,33 @@ set(CPACK_PRE_BUILD_SCRIPTS
     "${CMAKE_BINARY_DIR}/KatanaInstallRecord.cmake;${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
 set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/KatanaSign.cmake")
 set(CPACK_KATANA_PUBLISHER "${KATANA_PUBLISHER}")
-set(CPACK_KATANA_OBJDUMP "${CMAKE_OBJDUMP}")
 set(CPACK_KATANA_APP_BUNDLE "${KATANA_APP_BUNDLE}")
 # The target token: the last part of a package's name (Katana-<version>-<token>.zip), the
 # `target` of share/katana/install.json, and the name of the update feed's manifest
 # (Katana-update-<token>.json). One place, so a package and its update cannot disagree
-# about what they are.
+# about what they are. The release workflow names it (-DKATANA_PACKAGE_TARGET) as its
+# matrix names the package; otherwise it is the machine's.
 if(WIN32)
     # win64 is x86-64, as it has been since the first package; ARM64 says so.
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
-        set(KATANA_UPDATE_TARGET "win-arm64")
+        set(_katana_default_target "win-arm64")
     else()
-        set(KATANA_UPDATE_TARGET "win64")
+        set(_katana_default_target "win64")
     endif()
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
+elseif(APPLE)
+    set(_katana_default_target "macos-${CMAKE_SYSTEM_PROCESSOR}")
+else()
+    set(_katana_default_target "linux-${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+set(KATANA_PACKAGE_TARGET "${_katana_default_target}" CACHE STRING
+    "The target token of the package and its update (win64, win-arm64, linux-x86_64, linux-aarch64, macos-arm64)")
+if(NOT KATANA_PACKAGE_TARGET MATCHES "^(win64|win-arm64|linux-x86_64|linux-aarch64|macos-arm64)$")
+    message(FATAL_ERROR "KATANA_PACKAGE_TARGET '${KATANA_PACKAGE_TARGET}' is not a target a release has: "
+                        "win64, win-arm64, linux-x86_64, linux-aarch64 or macos-arm64")
+endif()
+set(KATANA_UPDATE_TARGET "${KATANA_PACKAGE_TARGET}")
+set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
+if(WIN32)
     # A ZIP always; an installer when NSIS is there to build one. NSIS is not
     # a dependency of the project, so its absence is not an error - install it
     # with `pacman -S mingw-w64-ucrt-x86_64-nsis` and reconfigure. MSYS2 has
@@ -337,7 +355,7 @@ if(WIN32)
     # emulated, makes the same installer - pass -DKATANA_MAKENSIS=<its
     # makensis.exe>. The installer's own code is that NSIS's: x86 for its own
     # build, x86-64 for MSYS2's (cmake/NSIS.template.in says which to make);
-    # what it installs is the programs built here.
+    # what it installs is the programs packaged here.
     set(CPACK_GENERATOR "ZIP")
     find_program(KATANA_MAKENSIS NAMES makensis HINTS "${KATANA_RUNTIME_BIN}")
     if(KATANA_MAKENSIS)
@@ -359,14 +377,15 @@ if(WIN32)
                 "cmake/NSIS.template.in is missing: without it CPack builds its own installer, which "
                 "asks for administrator rights and writes machine-wide, and the updater cannot update it")
         endif()
+        list(APPEND CPACK_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
         # Four backslashes: CPack writes this value into CPackConfig.cmake as it is and CMake reads
         # that file again, so the one backslash NSIS wants must survive a second unescaping (with
         # two, cpack stops at "Invalid character escape '\P'").
         set(CPACK_NSIS_INSTALL_ROOT "$LOCALAPPDATA\\\\Programs")
         # The key the installer writes under HKCU Software\<vendor> and ...\Uninstall, and the
-        # updater rewrites DisplayVersion in (include/katana/update/registry.hpp): said here rather
-        # than left to CPack's default, which is the install directory's name, so that renaming one
-        # cannot move the other.
+        # updater rewrites DisplayVersion in (rust/crates/katana_update/src/registry.rs): said
+        # here rather than left to CPack's default, which is the install directory's name, so
+        # that renaming one cannot move the other.
         set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "Katana")
         # The icon Settings > Apps shows, said with a backslash like the rest of the path (the
         # same four as above).
@@ -383,13 +402,13 @@ if(WIN32)
         # want it deletes the file, and nothing puts it back but an install (an update replaces
         # files in the install folder and never the shortcut, which is not one of them:
         # UPDATE_EXCLUDE and the manifest are unchanged). docs/release.md, "The Windows
-        # installer", says it too; tests/update/check_nsis_script.cmake holds the generated script
-        # to all of it. Two things about how the text is written. Single quotes, which NSIS takes
-        # as it takes double ones, because CPack writes the value into CPackConfig.cmake inside
-        # double quotes and a double quote in it would end the string there. And doubled
-        # backslashes, four as at CPACK_NSIS_INSTALL_ROOT above: CMake reads that file again, and
-        # the single backslash NSIS wants must survive the second unescaping. The line break is
-        # \n and not a line of this file, so that it does not depend on this file's line ends.
+        # installer", says it too. Two things about how the text is written. Single quotes, which
+        # NSIS takes as it takes double ones, because CPack writes the value into
+        # CPackConfig.cmake inside double quotes and a double quote in it would end the string
+        # there. And doubled backslashes, four as at CPACK_NSIS_INSTALL_ROOT above: CMake reads
+        # that file again, and the single backslash NSIS wants must survive the second
+        # unescaping. The line break is \n and not a line of this file, so that it does not
+        # depend on this file's line ends.
         set(CPACK_NSIS_CREATE_ICONS_EXTRA
             "  SetOutPath '$INSTDIR'\n  CreateShortCut '$DESKTOP\\\\Katana.lnk' '$INSTDIR\\\\bin\\\\katana.exe'")
         set(CPACK_NSIS_DELETE_ICONS_EXTRA "  Delete '$DESKTOP\\\\Katana.lnk'")
@@ -407,11 +426,11 @@ if(WIN32)
         # installer reads as it is: a character outside it would need a byte order mark that
         # CMake cannot write, so it is refused here, in the configure, by name, rather than shown
         # as other characters on a user's screen. tools/check_installer_licence.cmake holds the
-        # result (the test packaging_installer_shows_the_licence).
-        if(EXISTS "${PROJECT_SOURCE_DIR}/LICENSE" AND EXISTS "${PROJECT_SOURCE_DIR}/ADDITIONAL_TERMS.md")
+        # result.
+        if(EXISTS "${KATANA_ROOT}/LICENSE" AND EXISTS "${KATANA_ROOT}/ADDITIONAL_TERMS.md")
             set(_katana_licence_page "${CMAKE_BINARY_DIR}/KatanaInstallerLicence.txt")
-            file(READ "${PROJECT_SOURCE_DIR}/LICENSE" _katana_gpl)
-            file(READ "${PROJECT_SOURCE_DIR}/ADDITIONAL_TERMS.md" _katana_terms)
+            file(READ "${KATANA_ROOT}/LICENSE" _katana_gpl)
+            file(READ "${KATANA_ROOT}/ADDITIONAL_TERMS.md" _katana_terms)
             set(_katana_licence_text
 "Katana, copyright (c) 2026 Jarada, https://github.com/kjarada/Katana
 
@@ -447,28 +466,20 @@ ${_katana_terms}")
             set(CPACK_RESOURCE_FILE_LICENSE "${_katana_licence_page}")
             # The page is made again when either text changes, not only at the next fresh configure.
             set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-                "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/ADDITIONAL_TERMS.md")
+                "${KATANA_ROOT}/LICENSE" "${KATANA_ROOT}/ADDITIONAL_TERMS.md")
         endif()
-        if(EXISTS "${PROJECT_SOURCE_DIR}/resources/katana.ico")
-            set(CPACK_NSIS_MUI_ICON "${PROJECT_SOURCE_DIR}/resources/katana.ico")
-            set(CPACK_NSIS_MUI_UNIICON "${PROJECT_SOURCE_DIR}/resources/katana.ico")
+        if(EXISTS "${KATANA_ROOT}/resources/katana.ico")
+            set(CPACK_NSIS_MUI_ICON "${KATANA_ROOT}/resources/katana.ico")
+            set(CPACK_NSIS_MUI_UNIICON "${KATANA_ROOT}/resources/katana.ico")
         endif()
     endif()
-elseif(APPLE)
-    set(KATANA_UPDATE_TARGET "macos-${CMAKE_SYSTEM_PROCESSOR}")
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
-    if(KATANA_APP_BUNDLE)
-        # A disk image holding Katana.app beside a link to /Applications, the
-        # drag-to-install a Mac user expects (CPack's DragNDrop adds the link).
-        set(CPACK_GENERATOR "DragNDrop")
-        set(CPACK_DMG_VOLUME_NAME "Katana ${PROJECT_VERSION}")
-        set(CPACK_DMG_FORMAT "UDZO")
-    else()
-        set(CPACK_GENERATOR "TGZ")
-    endif()
+elseif(APPLE AND KATANA_APP_BUNDLE)
+    # A disk image holding Katana.app beside a link to /Applications, the
+    # drag-to-install a Mac user expects (CPack's DragNDrop adds the link).
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "Katana ${PROJECT_VERSION}")
+    set(CPACK_DMG_FORMAT "UDZO")
 else()
-    set(KATANA_UPDATE_TARGET "linux-${CMAKE_SYSTEM_PROCESSOR}")
-    set(CPACK_PACKAGE_FILE_NAME "Katana-${PROJECT_VERSION}-${KATANA_UPDATE_TARGET}")
     set(CPACK_GENERATOR "TGZ")
 endif()
 
@@ -487,21 +498,20 @@ endif()
 # bundle by then, ad hoc
 # (KatanaDeployUnix.cmake.in, step 5), and the record is a file that seal does not list:
 # that is why KatanaSign.cmake seals a bundle again even when no certificate is named.
-# `cmake --install`, the `bundle` target and build/<preset>/bin are development
+# `cmake --install`, the `bundle` target and cargo's target folder are development
 # trees and stay without it: an update there would replace a developer's build with a
 # release. tools/check_install_rules.cmake asserts both halves (no install rule names
-# the file; CPackConfig.cmake runs this script before the signing script) and the
-# tests of that check prove it on fixtures.
+# the file; CPackConfig.cmake runs this script before the signing script).
 #
 # The target is the token above and not the machine's: Windows on ARM running the x64 zip
 # is win64 and must be updated with the x64 files. The script is written here, at
 # configure time, because the token and the data directory are known only here.
 #
 # The version is PROJECT_VERSION, always: the version these programs were built as. The
-# engine takes it for the copy's own build whichever program asks (src/katana_update/state.cpp,
-# packageBuild): the helper that reads an install may be a later release's, and its own
-# version is then not the install's. It is also the floor a stale installed.json cannot
-# lower, where a newer zip was unpacked by hand over a copy that had updated itself.
+# engine takes it for the copy's own build whichever program asks (katana_update's
+# install.rs, package_build): the helper that reads an install may be a later release's, and
+# its own version is then not the install's. It is also the floor a stale installed.json
+# cannot lower, where a newer zip was unpacked by hand over a copy that had updated itself.
 #
 # The sequence is a RELEASE's, and a package built by hand belongs to none: the release
 # workflow settles one number for a run before anything is built, and every update manifest
@@ -522,9 +532,9 @@ set(KATANA_UPDATE_SEQUENCE "" CACHE STRING
 # sequence that is one and for the empty text, which names none. The rule is the one a
 # manifest is held to - UTC epoch seconds from 1 to 4102444800, the first second of 2100, by
 # the producer (tools/update_make_manifest.py, MAX_SEQUENCE) and by the engine that reads it
-# (src/katana_update/manifest.cpp) - so that a package cannot name a sequence no manifest
-# could carry, above every release of its own version for good. Digits alone, because the
-# text goes into the record as a JSON number as it is: a sign, a fraction, an exponent or a
+# (katana_update's manifest.rs) - so that a package cannot name a sequence no manifest could
+# carry, above every release of its own version for good. Digits alone, because the text
+# goes into the record as a JSON number as it is: a sign, a fraction, an exponent or a
 # leading zero would be a record that does not read, or a number other than the manifests'.
 function(katana_update_sequence_problem sequence out)
     set(_problem "")
@@ -544,7 +554,7 @@ endfunction()
 # none). A function, so that the tests below read back records made with and without a
 # sequence whatever this configure was given.
 function(katana_write_install_record_script output target version sequence datadir)
-    # 2 to 4 components of digits, as update::parseVersion reads a version (version.hpp):
+    # 2 to 4 components of digits, as the engine reads a version (katana_update's version.rs):
     # project(VERSION) cannot give a fifth, and could give one alone.
     if(NOT "${version}" MATCHES "^[0-9]+[.][0-9]+([.][0-9]+)?([.][0-9]+)?$")
         message(FATAL_ERROR
@@ -594,8 +604,7 @@ if(KATANA_BUILD_TESTS)
     # The record, read back from a tree the script wrote it into, as CPack runs the script:
     # the real one of this build, and two made here with a fixed target and version - one of
     # a release, one of none - so that both shapes are read in every build. The expected
-    # texts are the two shapes drawn under "install.json" above, written out by hand, and
-    # the example of src/katana_update/state.cpp (packageBuild) for the one of a release.
+    # texts are the two shapes drawn under "install.json" above, written out by hand.
     #
     # The reader is written to the build directory, as the record script is: the staged
     # folder is emptied first, so a record left by an earlier run cannot stand for one the
@@ -662,7 +671,7 @@ message(STATUS "The record as written: <${_text}>")
     # greatest a manifest may carry (1 and 4102444800) and one between; and what is refused -
     # nought, a leading zero, a sign, a fraction, an exponent, a word, two numbers, the first
     # number above the greatest, and one beyond 64 bits. Worked out at configure time, which
-    # is when the rule is applied, and reported by an echo test as the link closure is.
+    # is when the rule is applied, and reported by an echo test.
     set(_katana_sequences_taken "")
     set(_katana_sequences_refused "")
     foreach(_sequence IN ITEMS 1 1792312800 4102444800

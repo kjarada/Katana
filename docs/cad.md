@@ -21,7 +21,7 @@ as `docs/cad.md`; this table says where each one went:
 `katana_cad` holds everything an interactive CAD session needs that is not a
 widget: the open document, selection and picking, snapping, the view transform
 and the command-line interpreter. All of it is unit tested without a GUI, and
-the Qt application and the CLI drive exactly the same objects. That split is
+the desktop window and the CLI drive exactly the same objects. That split is
 what lets the engine be exercised, scripted and regression-tested with no
 display attached — and it is what will let an application API expose the
 same operations without duplicating logic (Rule 2).
@@ -33,47 +33,47 @@ selection, the current layer, the current style and the project metadata - and,
 as session data outside the model, the loaded style library and survey map
 (decision D1; `docs/survey_coding.md`).
 
-* The CURRENT STYLE (decision D9, `setCurrentStyle`) is what new work is drawn
+* The CURRENT STYLE (decision D9, `set_current_style`) is what new work is drawn
   in - a CAD program's current linetype, or a current point style - so a symbol or a library
   linestyle can be drawn WITH, not only applied afterwards. Empty means
-  ByLayer and is the default. `currentAttributes()` hands the current layer
+  ByLayer and is the default. `current_attributes()` hands the current layer
   and style to every drawing tool and verb. It is refused for a style the
   model lacks, and like the current layer it is session state, not a
   command. After any command, undo or redo that leaves it naming no style -
   a delete, a merge, a rename - it is CLEARED, not followed: no command event
   carries a rename's new name, and falling back to ByLayer can never put new
   work in the wrong style. PURGE keeps it although nothing wears it yet.
-* `setStyleLibrary` and `setSurveyMap` replace the library or the map whole,
-  notify, and bump `libraryGeneration()` or `surveyMapGeneration()`. A cache
+* `setStyleLibrary` and `set_survey_map` replace the library or the map whole,
+  notify, and bump `library_generation()` or `survey_map_generation()`. A cache
   of flattened definitions, thumbnails or code lookups keys on those counters
   - never on a `LineStyle*` or `SurveyRule*`, which dangle when the whole is
   replaced, and never on "a listener fired", which a selection click also
   does. Both are an EDIT of the session's customisation: its origin becomes
   `edited` and it is no longer kept.
 * The rest of what a session knows of its customisation is
-  `customisationState()` (`include/katana/cad/customisation_state.hpp`): its
+  `customisation_state()` (`rust/crates/katana_cad/src/customisation_state.rs`): its
   name and origin, the sources that went into it, its colour table, linework
   codes and automation switches, whether it is kept, which names the open
   project recorded that are not loaded, and what its start found - a kept
   file or a built-in that did not read (`docs/customisation.md`, "The
-  replies": `start`). `installCustomisation` installs a
-  whole `entity::Customisation` and `customisation()` gives the session back
+  replies": `start`). `install_customisation` installs a
+  whole `katana_entity::Customisation` and `customisation()` gives the session back
   as one. `DocumentChange::Customisation` is its change bit - outside
-  `kDrawing`, and no part of a Replaced drawing - and
-  `customisationGeneration()` its counter; a colour table also bumps
-  `libraryGeneration()`, since what is baked from a definition holds the
+  `DRAWING`, and no part of a Replaced drawing - and
+  `customisation_generation()` its counter; a colour table also bumps
+  `library_generation()`, since what is baked from a definition holds the
   colours its pens resolved to. `open` works out the missing names, and a save
   writes the record of the customisation into what it saves instead of
-  through `setMetadata`, so a save that cannot go ahead marks nothing
+  through `set_metadata`, so a save that cannot go ahead marks nothing
   modified. A default Document has no customisation and installs none
   (`docs/survey_coding.md`, "The customisation on the Document").
 
 * `execute`/`undo`/`redo` delegate to the command stack. `execute` wraps each
-  command with the associative update (`cad/annotation/associative.hpp`):
+  command with the associative update (`rust/crates/katana_cad/src/annotation/associative.rs`):
   when the command moves or reshapes an entity that a dimension, label or
   leader follows, the annotation is brought up to date by the SAME undo
   step, so an undo puts both back together.
-* The ANNOTATION SCALE (`annotationScale`, `setAnnotationScale`) is the scale
+* The ANNOTATION SCALE (`annotation_scale`, `set_annotation_scale`) is the scale
   the plan view draws paper-sized annotation at, 1 : 1000 until one is set
   (`docs/annotation.md`). Setting it is one undoable step, and it is kept in
   the project's metadata under `annotation_scale`, a key the storage layer
@@ -81,7 +81,7 @@ as session data outside the model, the loaded style library and survey map
 * Listeners are notified after anything observable changes — model, selection,
   current layer, project. Views rebuild from the document rather than tracking
   deltas.
-* `modelRevision()` counts up by one for every command executed, undone or
+* `model_revision()` counts up by one for every command executed, undone or
   redone and for every new or opened drawing, and never for anything else - a
   selection, the current layer or style, a save, the metadata, or the library
   and map, which have their generations. So "has the drawing changed since I
@@ -94,8 +94,8 @@ as session data outside the model, the loaded style library and survey map
   still exist and falls back to layer `"0"` if the current one has gone.
 * `open` validates the loaded project before touching the model, so a failed
   open leaves the current drawing exactly as it was. `save` takes a backup
-  first. `saveAs` creates a new project directory.
-* `isModified` combines the command stack's save-point state with metadata
+  first. `save_as` creates a new project directory.
+* `is_modified` combines the command stack's save-point state with metadata
   edits.
 
 ## Selection and picking
@@ -104,16 +104,16 @@ as session data outside the model, the loaded style library and survey map
 `remove`, `toggle` and `prune`.
 
 Two visibility predicates express the difference the UI cares about:
-`isDrawn` (visible entity on a visible layer — locked layers still draw) and
-`isSelectable` (the same, but the layer must also be unlocked).
+`is_drawn` (visible entity on a visible layer — locked layers still draw) and
+`is_selectable` (the same, but the layer must also be unlocked).
 
-* `pickEntity` returns the nearest selectable entity whose *geometry* lies within
+* `pick_entity` returns the nearest selectable entity whose *geometry* lies within
   a tolerance of the point — the tolerance is a pixel aperture converted to model
   units, so picking behaves identically at any zoom. Distance is to the drawn
   curve, not to a filled area: clicking the middle of a circle selects nothing,
   which is what a drafter expects. Ties go to the higher id, i.e. the entity
   drawn last, i.e. the one on top.
-* `pickInBox` implements the two standard modes: `Window` selects only entities
+* `pick_in_box` implements the two standard modes: `Window` selects only entities
   entirely inside the box, `Crossing` also takes entities the box touches. The
   crossing test is a real geometric test against the box edges, not a bounding
   box overlap — a large circle whose bounding box covers the selection box but
@@ -129,7 +129,7 @@ screen.x = w/2 + (world.x - centre.x) · scale
 screen.y = h/2 - (world.y - centre.y) · scale
 ```
 
-`zoomAt` keeps the model point under the cursor fixed, which is the behaviour
+`zoom_at` keeps the model point under the cursor fixed, which is the behaviour
 that makes zooming feel correct. Scale is clamped to [1e-7, 1e7] px per model
 unit: beyond that a `double` can no longer resolve a pixel at survey coordinate
 magnitudes, so panning and picking would become erratic rather than merely
@@ -143,7 +143,7 @@ binary64, not of the implementation, and is documented rather than papered over.
 at scale 1, and a single point centres without changing zoom (a point has no
 extent to fit).
 
-`gridSpacing` returns a 1-2-5 sequence value such that adjacent lines are at
+`grid_spacing` returns a 1-2-5 sequence value such that adjacent lines are at
 least a minimum number of pixels apart, so the grid stays legible at every zoom.
 
 ## Snapping
@@ -181,7 +181,7 @@ validated, atomic and undoable, and nothing bypasses the model.
 
 * Points: absolute `12.5,40`, relative `@3,4`, polar `@5<30` (distance < angle
   in degrees). Angles are degrees at the interface, radians internally.
-* Numbers are parsed with `std::from_chars`, which is locale-independent: `1.5`
+* Numbers are parsed by `katana_core::text::parse_finite_double`, which is locale-independent: `1.5`
   never becomes `1,5` on a machine with a comma decimal separator. Trailing junk
   and non-finite values are rejected rather than silently truncated.
 * Quoted strings carry spaces; an unterminated quote is a parse error.
@@ -214,12 +214,12 @@ dialog used it as one - and it now refuses them with its usage
 done: `LIST` is among the verbs that still act on their own arguments.
 
 The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
-`TITLEBLOCK`, and `HELP SHEETS`) are handed to `plotting::runSheetVerb`;
+`TITLEBLOCK`, and `HELP SHEETS`) are handed to `katana_cad::plotting::sheet_verbs::run_sheet_verb`;
 `docs/plotting.md`, "Sheets on the command line", describes them.
 
 The AS 5488 subsurface utility verbs (`UTILITY REPORT`, `VERIFY`,
 `CLEARANCE`, `CHECK`, `DRAW`, `REGRADE`, `SCHEDULE`, and `HELP UTILITY`) are
-handed to `utilities::runUtilityVerb` (`include/katana/cad/utilities/`);
+handed to `katana_cad::utilities::utility_verbs::run_utility_verb` (`rust/crates/katana_cad/src/utilities/`);
 `docs/subsurface_utilities.md`, "UTILITY on the command line", describes
 them. They were `katana_cli`'s own until 2026-09-25; in the interpreter the
 window's command line, `katana_cli` and `katana_mcp` all have them. `DRAW`,
@@ -227,7 +227,7 @@ window's command line, `katana_cli` and `katana_mcp` all have them. `DRAW`,
 drawn, by the shared scope words ("Scope and filter", below); `REGRADE` and
 `SCHEDULE` only what is drawn. For `DRAW`, what is drawn is the lines,
 polylines and points a survey or an import left, which it draws as services
-(`utilities::readGeometryServices`); for the others, the services `DRAW` drew.
+(`katana_cad::utilities::utility_data::read_geometry_services`); for the others, the services `DRAW` drew.
 The reports never touch the drawing. `UTILITY
 DRAW` adds the graded services - layers by type and quality level, a
 linetype per level, a polyline per run at one level, a point per located
@@ -236,13 +236,13 @@ draws what is drawn again from its points as one, and the first reply record
 of each carries the `bounds=` a front end frames.
 
 Added on 2026-09-23 for the style, linetype and symbol managers (fixing audit
-CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
+CAD-06) and the Survey menu; `CommandInterpreter::help_text` is the reference:
 
 | Verb | What it does |
 |---|---|
 | `STYLE SET <s> linetype <name>` | takes a model linetype, a loaded library linestyle or `ByLayer` (the layer's; decision D2) - it used to refuse library names the viewport draws |
 | `STYLE SYMBOLS [filter]` | the symbols a style may name: the built-in shapes and the library's symbols (D3), filtered with case folded |
-| `STYLE USAGE [name]` | how many entities wear each style, or who uses one, flagging a name worn but not in the table (`entity::tableUsage`) |
+| `STYLE USAGE [name]` | how many entities wear each style, or who uses one, flagging a name worn but not in the table (`katana_entity::table_usage::table_usage`) |
 | `STYLE MERGE <from> <into>` | moves everything wearing `from` onto `into` and deletes `from`, one undo step |
 | `STYLE CURRENT [name\|-\|ByLayer]` | the style new work is drawn in (D9); `-` or `ByLayer` clears it |
 | `LINETYPE MERGE <from> <into>` | repoints every layer and style, then deletes `from`; `into` must be a model linetype |
@@ -266,18 +266,18 @@ may name another entity's (`#12.end`, `#12.inside`, `#12@x,y` for the place on
 it nearest x,y), and what is made from it follows that entity. They take
 `key=value` options and reply in `key=value` lines, so a script or an agent
 reads what happened; each edit is one undo step.
-`CommandInterpreter::annotationHelpText` is their reference, and `HELP`
+`CommandInterpreter::annotation_help_text` is their reference, and `HELP`
 prints it after the rest. The plain `TEXT p height "text"` and `DIM p p
 offset` are unchanged.
 
 The survey-code verbs (`CODE [scope] [WHERE ...] [PROPERTY name] [PREVIEW]`,
 `CODE CENSUS [scope] ...`, `CODE EXPLAIN code`, `CODE LIST [filter]`, `CODE
 CHECK`; `docs/customisation.md`, "The verbs", and `docs/survey_coding.md`)
-are handed to `runSurveyCodeVerb` (`include/katana/cad/survey_code_verbs.hpp`)
+are handed to `run_survey_code_verb` (`rust/crates/katana_cad/src/survey_code_verbs.rs`)
 since 2026-09-26; they were `katana_cli`'s own, and the window refused them.
 `CODE` is one undo step, and `CODE CHECK` is refused - its whole lint in
 the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
-(`codeCheckReply`). `CODE` and `CODE CENSUS` take the shared scope and filter
+(`code_check_reply`). `CODE` and `CODE CENSUS` take the shared scope and filter
 since 2026-10-06 and say what it took; with no scope word theirs is the whole
 DRAWING, under a bare `WHERE` too, where every other verb's is the selection,
 because `CODE` was the whole drawing before it took a scope. `CODE LIST` and
@@ -286,28 +286,28 @@ that verb was named after another program's file, which no longer loads, and
 is an unknown command now.
 
 The colour names they need are resolved through the Document
-(`cad::resolveColour`, `include/katana/cad/colour_lookup.hpp`: the
+(`katana_cad::colour_lookup::resolve_colour`, `rust/crates/katana_cad/src/colour_lookup.rs`: the
 customisation's own table, then the standard names of
-`include/katana/entity/colour_names.hpp`). The standard names were once a
+`rust/crates/katana_entity/src/colour_names.rs`). The standard names were once a
 table cad could not see, so each front end passed it with
 a colour-lookup setter on the interpreter. No front end passes one any more, and
 the setter went with the last that did (2026-10-07). So did the parameter
-`runSurveyCodeVerb` took for a caller's own names, asked after the Document:
+`run_survey_code_verb` took for a caller's own names, asked after the Document:
 only its tests reached it, and a second way to resolve a colour that no
 program uses is one more thing to keep true. The verb asks the Document and
 nobody else
-(`SurveyCodeVerbs.AColourNameNothingKnowsIsLeftAloneRatherThanGuessedAt`,
-`SurveyCodeVerbs.AColourTheCustomisationNamesItselfIsResolvedFromItsOwnTable`).
+(`survey_code_verbs::a_colour_name_nothing_knows_is_left_alone_rather_than_guessed_at`,
+`survey_code_verbs::a_colour_the_customisation_names_itself_is_resolved_from_its_own_table`).
 
-`CUSTOMISE` is the interpreter's too (`runCustomisationVerb`,
-`include/katana/cad/customisation_verbs.hpp`): the report, `JSON`, a load
+`CUSTOMISE` is the interpreter's too (`run_customisation_verb`,
+`rust/crates/katana_cad/src/customisation_verbs.rs`): the report, `JSON`, a load
 merged or in place, `EXPORT`, `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`,
 with what `RESET`, `KEEP` and `REVERT` need handed over by the front end
-(`CommandInterpreter::setCustomisationHost`). `docs/customisation.md`, "The
+(`CommandInterpreter::set_customisation_host`). `docs/customisation.md`, "The
 verbs", has the grammar, the replies and the decisions. Every front end runs
 it and none takes a `CUSTOMISE` line of its own: the session of `katana_cli`
 and `katana_mcp` hands the interpreter its host
-(`src/katana_app/session.cpp`), and so does the desktop window
+(`rust/crates/katana_app/src/session.rs`), and so does the desktop window
 (`docs/desktop.md`, "How the window starts").
 
 ### STATUS
@@ -316,39 +316,39 @@ and `katana_mcp` hands the interpreter its host
 changes, how many entities, layers and alignments, the current layer and
 style, the selection, the undo and redo depth and the customisation counts -
 and `STATUS JSON` the same as one JSON object, its keys in alphabetical order
-and indented by two. Both come from `cad::documentStatus`
-(`include/katana/cad/document_status.hpp`), with `cad::formatStatus` and
-`cad::statusJson`. Until 2026-09-26 this was `katana_mcp`'s alone, built in
-`mcp_server.cpp` as `katana_status` and `katana://status`; the window showed
+and indented by two. Both come from `katana_cad::document_status::document_status`
+(`rust/crates/katana_cad/src/document_status.rs`), with `katana_cad::document_status::format_status` and
+`katana_cad::document_status::status_json`. Until 2026-09-26 this was `katana_mcp`'s alone, built in
+the C++ MCP server as `katana_status` and `katana://status`; the window showed
 pieces of it and nothing could ask for it from the window or `katana_cli`.
 The MCP tool and resource now call the same functions, and their text is
 unchanged: the resource, the tool's text and its structured content were
 compared byte for byte with the previous `katana_mcp` over one session
-(`McpServer.TheStatusToolAndResourceSayWhatTheStatusVerbSays` pins them with
+(`mcp_server::the_status_tool_and_resource_say_what_the_status_verb_says` pins them with
 the text written out by hand). Asking changes nothing and is no undo step. A
 name that is not UTF-8 is written with U+FFFD rather than thrown. File >
 Drawing Summary copies `STATUS JSON` (`docs/desktop.md`).
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
-(`MainWindow::runCommandLine`, whose `dispatchLine` the window's dialogs run
+(`MainWindow::run_command_line`, whose `dispatch_line` the window's dialogs run
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC` (the geoprocessing executor's, which `katana_cli` and `katana_mcp` run
 too - `docs/interop.md`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
 `SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
-`HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
+`HELP` adds them to the interpreter's list (`window_help_text`, `docs/desktop.md`,
 "The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
 same interoperability verbs - its `--help` lists them. Neither adds
 `CUSTOMISE`, which is the interpreter's own in both (above); and
 the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read an `IMPORT` line's
-path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
-with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)
+path and `LOCAL` with `CommandInterpreter::import_argument`, and hand `INFO`
+with an entity id (`CommandInterpreter::is_entity_id`, a whole number or `#n`)
 to the interpreter unless a file of that name exists.
 Both front ends add IFC's `IMPORT`, `EXPORT` and `INFO` of a .ifc and
 `IFC RULES`, with one grammar and one set of replies
-(`include/katana/ifc/front_end.hpp`, `docs/ifc.md`).
+(`rust/crates/katana_ifc/src/front_end.rs`, `docs/ifc.md`).
 
 In the application a typed line is routed before the interpreter sees it
 (`docs/tools.md`, "The tool host"): while a tool runs, the whole line is that tool's
@@ -359,7 +359,7 @@ drawing.
 
 ### Properties as a tree: PROP TREE
 
-An entity has one flat map of properties (`include/katana/entity/entity.hpp`).
+An entity has one flat map of properties (`rust/crates/katana_entity/src/entity.rs`).
 An archive import flattens its attribute groups into it with '/' -
 `Asset/Dimensions/Size` - and a string's per-vertex attributes as
 `vertex/3/QualityLevel`, so a surveyed string of a thousand vertices with
@@ -368,7 +368,7 @@ them on one line; the Properties panel listed all of them as rows, made
 before it could show the first. The owner's request of 2026-09-26 was a tree,
 and "a smart way to load all these information".
 
-`cad::propertyOutline` (`include/katana/cad/property_outline.hpp`) reads the
+`katana_cad::property_outline::property_outline` (`rust/crates/katana_cad/src/property_outline.rs`) reads the
 names as the tree their slashes make, ONE LEVEL at a time: the entries
 directly beneath a path, each with how many names are beneath it
 (`children`) and how many values (`values`), and its own value when one is
@@ -381,14 +381,14 @@ where every entity holds the same one, and one that only some hold, or that
 they hold differently, `varies` - showing the first entity's value would put
 words in the others' mouths.
 
-**Entries are in natural order** (`cad::naturalLess`): digits compare as
+**Entries are in natural order** (`katana_cad::property_outline::natural_less`): digits compare as
 whole numbers, so vertex 2 comes before vertex 10, where the map's own order
 puts 10 to 19 between 1 and 2; letters without regard to case, a tie then
 broken by case, so the order is total.
 
 `PROP TREE [scope] [WHERE k=v ...] [UNDER path] [FROM n] [LIMIT n]` replies
 with it, a record for the level and one per entry, a page at a time
-(`cad::kPropertyTreePage`, 200 entries, unless `LIMIT` says):
+(`katana_cad::property_outline::PROPERTY_TREE_PAGE`, 200 entries, unless `LIMIT` says):
 
 ```
 scope=selection matched=1 under="" entries=3 from=0 shown=3
@@ -403,7 +403,7 @@ the other `PROP` words stay on the selection. `UNDER`, `FROM` and `LIMIT`
 are words of their own rather than a bare path because a property may be
 named anything, a scope word included. A scope that takes nothing is a reply
 (`matched=0 entries=0`); `FROM` past the end is an empty page. Tested in
-`tests/cad/test_property_outline.cpp` and by
+`rust/crates/katana_cad/tests/top_verbs/property_outline.rs` and by
 `cli.prop_tree_reads_the_attributes_one_level_at_a_time`; the panel's use of
 it is `docs/desktop.md`, "The Properties panel: a tree read a level at a
 time".
@@ -411,17 +411,17 @@ time".
 ## The project's coordinate system
 
 A project keeps its coordinate system as text in its metadata
-(`storage::ProjectMetadata::coordinateSystem`): `EPSG:7856`, or WKT or a PROJ
+(`ProjectMetadata::coordinate_system`): `EPSG:7856`, or WKT or a PROJ
 string for a system with no code, or nothing for local coordinates. GIS >
 Online Data needs it to know where a web map goes, GIS imports reproject into
 it, and the sheets print it in the title block, so it is set in one place:
 
-- `Document::setCoordinateSystem` sets it as ONE undo step (`SET_CRS`). It
-  reads anything PROJ reads, through `geodesy::CoordinateReferenceSystem`, and
+- `Document::set_coordinate_system` sets it as ONE undo step (`SET_CRS`). It
+  reads anything PROJ reads, through `katana_geodesy::coordinate_reference_system::CoordinateReferenceSystem`, and
   stores `EPSG:<code>` whenever the system has a code, so `7856`, `epsg:7856`
   and the system's WKT are one value. Text that names no system is refused
   (`InvalidCRS`) and changes nothing; the value it already has is no step.
-- `include/katana/cad/project_crs.hpp` describes a system (its registered
+- `rust/crates/katana_cad/src/project_crs.rs` describes a system (its registered
   name, kind, units and area of use), lists the common ones (the GDA2020 and
   GDA94 MGA zones 49 to 56, the national Albers and geographic systems, WGS 84
   and its UTM zones, Web Mercator, New Zealand's and Great Britain's grids)
@@ -433,7 +433,7 @@ it, and the sheets print it in the title block, so it is set in one place:
   for a place. Replies are one fact per line: `crs id=EPSG:7856 name="GDA2020
   / MGA zone 56" kind="projected" units=metre`.
 - In the window, File > Project Coordinate System
-  (`src/katana_qt/project_crs_dialog.hpp`) lists the common systems grouped,
+  (`rust/crates/katana_window/src/project_crs_dialog.rs`) lists the common systems grouped,
   searches them, checks a typed one as it is typed, and sets it; the status
   bar shows the system and opens the dialog when clicked; and GIS > Online
   Data's Set Project CRS opens it with the systems for the typed box first.
@@ -441,12 +441,12 @@ it, and the sheets print it in the title block, so it is set in one place:
   what `CRS SUGGEST lon,lat` lists, first, for a longitude and latitude
   typed there; when the project has a system and the drawing has extents,
   the drawing's centre is filled in (taken to WGS 84 by
-  `gis::transformPoint`). The drawing's centre rather than the view's: the
+  `katana_gis::reproject::transform_point`). The drawing's centre rather than the view's: the
   dialog is given the document, not a view, and where the drawing is is the
   better answer to "which zone is this project in". Until 2026-09-26 the
   suggestions came only from Online Data, and File > Project Coordinate
   System could not suggest anything.
-- The dialog is non-modal (`MainWindow::showProjectCrs`, object name
+- The dialog is non-modal (`MainWindow::show_project_crs`, control name
   `projectCrsDialog`, the File item's data), made afresh each time it is
   opened from closed. Until 2026-09-26 the File item and the status bar button
   ran it with `exec()`, so `--dialog fileProjectCrs` hung a headless run. That
@@ -466,21 +466,21 @@ it, and the sheets print it in the title block, so it is set in one place:
   coordinate system`, from the command line, `katana_cli` and `katana_mcp`
   alike, although the verb's help offers WKT; an ESRI `.prj`, whose names
   have underscores, happened to survive. The dialog did not fail, because it
-  called `Document::setCoordinateSystem` itself with the text as typed - the
+  called `Document::set_coordinate_system` itself with the text as typed - the
   second path that let the fault go unseen, and which the documents of the
   time defended on the ground that a WKT's quotes "no command line can
   carry". The fix is in the verb: `CRS SET` reads its system from the line
-  after its two words, verbatim (`textAfterTokens` in
-  `src/katana_cad/command_interpreter.cpp`), and a text that opens with a
+  after its two words, verbatim (`text_after_tokens` in
+  `rust/crates/katana_cad/src/command_interpreter.rs`), and a text that opens with a
   quote is still the grammar's quoted argument (`CRS SET "GDA2020 / MGA zone
   56"`). Rejected: an escape for quotes in the tokenizer, which every other
   verb would then have to be read against, for one verb whose argument is by
   nature the whole rest of the line. A refusal now carries PROJ's own reason
-  in its context. Tests: `ProjectCrs.TheCrsVerbTakesAWktWithItsQuotesAsTyped`
+  in its context. Tests: `project_crs::the_crs_verb_takes_a_wkt_with_its_quotes_as_typed`
   (it fails with the old argument, the owner's message and all),
-  `ProjectCrsDialog.SetRunsTheCrsVerbAndAPastedWktKeepsItsQuotes`,
+  `project_crs_dialog::set_runs_the_crs_verb_and_a_pasted_wkt_keeps_its_quotes`,
   `cli.crs_set_takes_a_wkt_with_its_quotes` and
-  `McpServer.AnAgentImportsAFieldFileAndSetsTheSystemByItsWkt`.
+  `mcp_server::an_agent_imports_a_field_file_and_sets_the_system_by_its_wkt`.
 - Kept open, it follows the drawing (`ProjectCrsDialog::follow`): a system set
   elsewhere - a typed `CRS SET`, an undo, which says only that the history
   moved - is shown in `projectCrsCurrent`, and in `projectCrsText` unless
@@ -488,10 +488,10 @@ it, and the sheets print it in the title block, so it is set in one place:
   its own system and place, the opener's place dropped. Made non-modal, it
   once showed the last project's system across an `OPEN`, and Set put that
   system on the project just opened
-  (`ProjectCrsDialog.ANewDrawingIsShownAfreshAndSetCarriesNothingOver`).
+  (`project_crs_dialog::a_new_drawing_is_shown_afresh_and_set_carries_nothing_over`).
 
-The tests are `tests/cad/test_project_crs.cpp`,
-`tests/qt_widgets/test_project_crs_dialog.cpp` and, through the real
+The tests are `rust/crates/katana_cad/tests/top_verbs/project_crs.rs`,
+`rust/crates/katana_window/tests/utilities/project_crs_dialog.rs` and, through the real
 window, `qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless`.
 
 ## Threading and ownership
@@ -521,8 +521,9 @@ approximation: every candidate is accepted only within `aperture` of the cursor
 and lies on the curve that produced it, so a segment whose bounding box misses
 the reach box cannot carry a point that would have been accepted.
 
-Measured on a 16-thread 2.5 GHz x86-64, Release, one `snap()` call over the
-middle of a polyline (`benchmarks/bench_cad.cpp`):
+Measured on the C++, on a 16-thread 2.5 GHz x86-64, Release, one `snap()` call
+over the middle of a polyline (the C++ benchmark `bench_cad.cpp`, which went
+with the C++; the Rust port has no benchmark of its own yet):
 
 | Polyline vertices | Before | After |
 |---|---|---|
@@ -553,7 +554,7 @@ Measured in Release, 4-vertex strings scattered over a 1 km square:
 | 500 000 | 23.9 ms | over budget, before anything is drawn |
 
 A quarter-million-entity as-built is ordinary, so the scan ran out before the
-drawings did. `katana::geometry::SpatialIndex` is a sparse spatial hash grid
+drawings did. `katana_geometry::spatial_index::SpatialIndex` is a sparse spatial hash grid
 over bounding boxes, used as a broad phase: it returns a superset and every
 exact test still runs, so it can make queries faster and cannot make them
 different.
@@ -574,17 +575,17 @@ candidates inside the aperture; that is inherent to the mode.
 pathological size distributions better, but its insertion, splitting and
 rebalancing are much more code and every one of those paths must stay correct
 under the constant incremental edits a CAD document makes. The grid is O(1) on
-insert, remove and update. `oversizedCount()` is exposed so the case where an
+insert, remove and update. `oversized_count()` is exposed so the case where an
 R-tree would win can be seen rather than guessed; that is the upgrade trigger.
 
 **The indexed box is not always the bounding box.** Snapping an arc offers its
 centre, and the centre of a shallow arc is far outside the arc's own bounding
 box. Indexing plain bounding boxes would have made the broad phase reject the
 arc and centre snap would have silently stopped working the moment the index
-was switched on. `detail::queryExtents` therefore indexes the full circle for
+was switched on. `katana_cad::spatial_query::query_extents` therefore indexes the full circle for
 an arc and the bounding box for everything else — while picking still tests the
 true bounding box, so clicking an arc's centre does not select it. Both are
-asserted in `tests/cad/test_indexed_queries.cpp`.
+asserted in `rust/crates/katana_cad/tests/document/indexed_queries.rs`.
 
 ### Staying in step
 
@@ -619,9 +620,9 @@ than walking the model once**: it gathers every id, sorts them, then looks each
 one up again, against a single ordered traversal. A zoom-extents repaint is
 exactly that case, and it is common.
 
-So `forEachCandidate` chooses. Below ~35% of the indexed area it queries the
+So `for_each_candidate` chooses. Below ~35% of the indexed area it queries the
 index; above it, it scans. The threshold is the measured crossover, not a
-guess, and the table above is in the header next to it. After the change a
+guess, and the table above is in the module beside it (`spatial_query.rs`). After the change a
 zoomed-out repaint costs 4360 µs against the scan's 4337 µs — the same, within
 noise — while the zoomed-in case keeps its full win:
 
@@ -630,7 +631,7 @@ noise — while the zoomed-in case keeps its full win:
 | Collect visible | 22.3 ms | **0.090 ms** (248×) |
 
 Both paths are required to return identical results, including across the
-threshold: `BothSidesOfTheScanCrossoverGiveTheSameAnswer` sweeps window sizes
+threshold: `indexed_queries::both_sides_of_the_scan_crossover_give_the_same_answer` sweeps window sizes
 from far below it to far above and compares.
 
 ## Alignments in the command line and the window
@@ -658,17 +659,17 @@ And changes nothing in the history either: a `PIS` or a `DESIGN` that sets
 what is there already replies `alignment <name> unchanged` and takes no undo
 step, as `STYLE SET` and `HATCH SET` do - the Alignment Manager's Apply on an
 unedited grid was once a step and a drawing to save each time
-(`AlignVerb.PisAndDesignThatChangeNothingAreNoUndoStep`).
+(`align_verb::pis_and_design_that_change_nothing_are_no_undo_step`).
 
 **The station table always includes the key stations.** An interval table
 that skipped the TS, SC, CS and ST would be useless in the field, because
-those are the points that get pegged. `cad::settingOutStations`
-(`include/katana/cad/alignment_report.hpp`) merges the key stations with the
+those are the points that get pegged. `katana_cad::alignment_report::setting_out_stations`
+(`rust/crates/katana_cad/src/alignment_report.rs`) merges the key stations with the
 interval stations (each `start + k * interval`, multiplied rather than summed
 so the hundredth is not off by a hundred roundings), sorts them and merges any
-two within `tolerance::kGeometric`, so a key station that lands on the interval
+two within `katana_math::numerics::GEOMETRIC`, so a key station that lands on the interval
 is one row - carrying its key. (The first version merged to a nanometre, a
-local epsilon of the kind `include/katana/math/numerics.hpp` rules out, and
+local epsilon of the kind `rust/crates/katana_math/src/numerics.rs` rules out, and
 skipped without a word any station it could not find a position for. The last
 key station is the sum of the element lengths, which can differ from the end
 station in the last bit, so the end could have been skipped that way. It is
@@ -678,15 +679,15 @@ error.) Each row is named where the geometry changes character:
 `CT` either side of a simple one; `PI` at a corner with no curve; the letters
 of the elements met (`SS`, `CC`) where curves run back to back. `ALIGN
 STATIONS` prints a `station= x= y= direction= azimuth= radius= [turn=] [key=]`
-record per row (`cad::formatSettingOut`), the azimuth in degrees, minutes and
+record per row (`katana_cad::alignment_report::format_setting_out`), the azimuth in degrees, minutes and
 whole seconds clockwise from grid north and one within half a second of a turn
-written 0; the manager's table and its CSV (`cad::settingOutCsv`) are the same
+written 0; the manager's table and its CSV (`katana_cad::alignment_report::setting_out_csv`) are the same
 rows. More than 100 000 rows is refused before one is made.
 
 ## The Alignment Manager
 
 Terrain > Alignment Manager... (`AlignmentManagerDialog`,
-`src/katana_qt/alignment_manager.hpp`) is the window's way to every `ALIGN`
+`rust/crates/katana_window/src/alignment_manager.rs`) is the window's way to every `ALIGN`
 verb, where before the window had none and told a person to type `ALIGN NEW`.
 It follows the rules every manager does (`docs/desktop.md`, "The rules a
 dialog or panel follows"):
@@ -694,27 +695,27 @@ dialog or panel follows"):
 - **It changes nothing itself.** Each button writes the `ALIGN` line - `NEW`,
   `DELETE`, `PIS`, `START`, `DESIGN`, `CLEARPROFILE`, or `LABEL ALIGN` for
   chainage labels - and runs it through the window's one executor
-  (`MainWindow::runVerbLine`), so it is echoed, kept in the history and one
+  (`MainWindow::run_verb_line`), so it is echoed, kept in the history and one
   undo step; an agent types the same line.
 - **The grids are buffers.** The PI grid (easting, northing, radius, spirals)
   and the PVI grid (chainage, level, curve length) are edited in place and
   applied by one line - `ALIGN PIS`, `ALIGN DESIGN` - with Revert beside it; no
-  line runs from a table's own signal. They show the stored numbers exactly,
+  line runs from a table's own edit. They show the stored numbers exactly,
   so applying an edit to one easting writes every other number back
   unchanged. Unapplied edits survive a reload that did not change what they
   were made to, and a refused Apply keeps them for correcting. A cell holds
-  one number, read by `core::parseFiniteDouble` and written back exactly;
+  one number, read by `katana_core::text::parse_finite_double` and written back exactly;
   anything else is refused naming its row and column before a line runs. The
   cells were once joined into the line as typed, so a decimal comma
   (`100,5`) or an `x,y` pasted into one cell moved every number after it
   into the next field - `100,5` in an easting made the PI x=100 y=5 with the
   northing for its radius - and the verb took it
-  (`AlignmentManager.ACellThatIsNotOneNumberIsRefusedNamingItBeforeAnythingRuns`).
+  (`alignment_manager::a_cell_that_is_not_one_number_is_refused_naming_it_before_anything_runs`).
 - **What it shows is the verbs' own.** The setting-out table is
-  `cad::settingOutStations`, as `ALIGN STATIONS` prints it; the profile's
-  elements, grades, K values (`cad::curveK`: the curve's length over its
+  `katana_cad::alignment_report::setting_out_stations`, as `ALIGN STATIONS` prints it; the profile's
+  elements, grades, K values (`katana_cad::alignment_report::curve_k`: the curve's length over its
   change of grade in percent) and high and low points are what `ALIGN
-  PROFILE` prints (`cad::formatProfileReport`); a small preview draws the
+  PROFILE` prints (`katana_cad::alignment_report::format_profile_report`); a small preview draws the
   profile over its tangent polygon. The interval is applied as it is typed,
   with its own note line, so a half-typed interval never hides the last
   line's reply.
@@ -727,13 +728,13 @@ Manager and open it - except in a headless run. (The two corridor dialogs say
 it only while the drawing has no corridor either: with one they open, whatever
 became of its alignment, to show what is wrong with it.) The Terrain menu is in
 sections - Alignments, Surfaces, Sections, Corridors - and its section items
-carry object names (`terrainSectionAlongAlignment`,
+carry control names (`terrainSectionAlongAlignment`,
 `terrainSectionAlongSelection`), so `--trigger` reaches them; its Corridors
 section shows the BIM menu's `bimCorridors` and `bimCorridorQuantities`
 (`docs/road_design.md`, "Where the old corridor commands went").
 
-Tested by `tests/cad/test_alignment_report.cpp` (the table worked by hand from
-the circle, `PIS`), `tests/qt_widgets/test_alignment_manager.cpp` (every
+Tested by `rust/crates/katana_cad/tests/top_verbs/alignment_report.rs` (the table worked by hand from
+the circle, `PIS`), `rust/crates/katana_window/tests/roads/alignment_manager.rs` (every
 button's line, one undo step each, the grids' buffering) and, through the
 window, `qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless` and
 `qt_terrain_commands_point_to_the_alignment_manager_headless`.
@@ -752,15 +753,15 @@ dimension formatter avoids it.
 **The overlay solves each alignment per repaint.** A document has a handful
 of alignments and a solve is a few spiral end-points; caching would need
 invalidation on every edit for no gain anyone has measured. The comment in
-`drawAlignments` says to measure before changing that.
+`draw_alignments` says to measure before changing that.
 
 **One section routine for both callers.** "Cut Section Along Selection" and
-"Cut Section Along Alignment..." share `cutSectionAlong`, which cuts with
-`cad::cutDrawingSection` (`cad/terrain/section_cut.hpp`: the visible surfaces,
+"Cut Section Along Alignment..." share `cut_section_along`, which cuts with
+`katana_cad::terrain::section_cut::cut_drawing_section` (`rust/crates/katana_cad/src/terrain/section_cut.rs`: the visible surfaces,
 `max(length / 2000, 0.1 m)` between stations, the design profile beside them
 when there is one) and shows. The open section view is cut again with the same
 function from the alignment and design it kept, when the drawing's surfaces
-change (`MainWindow::recutSections`; `docs/terrain.md`, "Hidden is a matter of
+change (`Executor::recut_sections`; `docs/terrain.md`, "Hidden is a matter of
 the picture"), so there is still one routine. The alignment path chords the
 centreline at 10 mm: the section samples at most every 100 mm along it, so a
 finer polyline would cost time and change nothing the section reports.
@@ -781,7 +782,7 @@ least two PVIs, in one command, and `PVI` appends to one that exists. The
 alternative - letting the model hold a partial profile - would have broken
 the invariant that everything stored can be drawn.
 
-**The design rides into the section as a series.** `cad::appendDesignProfile`
+**The design rides into the section as a series.** `katana_cad::section::append_design_profile`
 adds the profile to a `Section` as one more `SectionSurface`, sampled at
 every station any ground series already has - so design and ground can be
 read against each other at the same stations - plus the profile's key
@@ -790,11 +791,11 @@ needed no change: it already draws every series in its palette, breaks a
 line at every gap, and lists each series in its legend. A design shorter
 than the section shows as a gap beyond its end rather than an invented
 grade. Cut Section Along Alignment... passes the profile through
-`cutSectionAlong` when the alignment has one.
+`cut_section_along` when the alignment has one.
 
 ## Corridor quantities
 
-`cad::corridorQuantities` (`include/katana/cad/corridor.hpp`) sets a template
+`katana_cad::corridor::corridor_quantities` (`rust/crates/katana_cad/src/corridor.rs`) sets a template
 across an alignment at the design elevation at every station, carries its
 edges to the ground by batter slopes, and sums the cut and fill between the
 finished shape and the ground along the alignment.
@@ -803,7 +804,7 @@ finished shape and the ground along the alignment.
 one-carriageway assembly this section describes is the simple case of a road
 template - kerbs, verges, benches, pavement courses and superelevation are
 there - and these functions are that one engine run on
-`road::templateFromAssembly`, their behaviour and their tests unchanged but
+`katana_cad::road::road_template::template_from_assembly`, their behaviour and their tests unchanged but
 for one thing: their stations include the alignment's key stations as well
 as the profile's. The window reaches corridors through the BIM menu and the
 `CORRIDOR` verbs; what follows is the record of the decisions the engine
@@ -822,7 +823,7 @@ over them could not be checked against the design.
 
 **Ground is queried, not sectioned.** Each cross section asks the TIN for
 its elevation at a set of offsets directly rather than cutting a section with
-`extractSection`. A section carries breaks and crossings this does not need,
+`extract_section`. A section carries breaks and crossings this does not need,
 and the daylight search wants the ground at arbitrary offsets rather than at
 a fixed set of samples. Ground is sampled at every design vertex and every
 half metre between, so an undulation between two template vertices is not
@@ -852,7 +853,7 @@ gives area times length exactly whatever the interval, which the end-area
 method must.
 
 **The corridor as a surface, and the check it makes possible.**
-`cad::corridorSurface` triangulates the template strings of every complete
+`katana_cad::corridor::corridor_surface` triangulates the template strings of every complete
 section - both daylights, both edges, the centreline - as breaklines, with
 the daylight lines as the boundary so nothing is hulled across the inside of
 a curve. `CORRIDOR SURFACE` (`docs/road_design.md`) puts a corridor's into
@@ -866,7 +867,7 @@ curve tighter than the corridor is wide, the crossing takes the mean of
 their elevations rather than refusing the whole surface for it.
 
 The surface makes an independent check of the quantities possible, and the
-tests make it: `compareSurfaces` of the built corridor against the ground is
+tests make it: `compare_surfaces` of the built corridor against the ground is
 an exact overlay, the end-area total is a different method entirely, and on
 a straight with a level design both are exact and agree on 2000 m^3 to 1e-6.
 Two implementations that share nothing agreeing on the same number is the
@@ -879,13 +880,13 @@ instead (`docs/road_design.md`, "Where the old corridor commands went").
 
 ## Parcels
 
-`cad::parcelReport` (`include/katana/cad/parcel.hpp`) turns any closed
+`katana_cad::parcel::parcel_report` (`rust/crates/katana_cad/src/parcel.rs`) turns any closed
 polyline into its courses as bearings and distances, its area, perimeter and
-centroid; `legalDescription` writes the deed wording; `parcelLabels` makes
+centroid; `legal_description` writes the deed wording; `parcel_labels` makes
 the text entities. `PARCEL id`, `PARCEL id LEGAL [name]` and
 `PARCEL id LABEL [height]` drive them, and so does Survey > Parcel Report
-(`docs/survey.md`): `formatParcelReport` is the report both print and
-`formatParcelSummary` its last line, so the dialog and the verb cannot come
+(`docs/survey.md`): `format_parcel_report` is the report both print and
+`format_parcel_summary` its last line, so the dialog and the verb cannot come
 to differ. `PARCEL id LABEL` says which layer the labels went on - "5 labels
 created on layer 0, the current layer" - since a person labelling from a
 dialog has not been looking at the layer control.
@@ -899,7 +900,7 @@ nobody wants to undo a parcel's labels one bearing at a time.
 
 **Built on the survey layer, not beside it.** Azimuths, quadrant bearings,
 DMS formatting, the inverse between two points, the signed area and the
-centroid all already existed in `katana::survey`. The one thing this code
+centroid all already existed in `katana_survey`. The one thing this code
 does that could be wrong is the conversion from the drawing's (x, y) to the
 survey layer's (northing, easting), and it happens in exactly one function.
 That is why the rectangle test checks the bearing of every course and not
@@ -926,7 +927,7 @@ ninja's exit code.
 
 ## Grading: the batter belongs to the edge, not to the bisector
 
-`cad::gradeToSurface` runs a batter outward from a feature line to the ground
+`katana_cad::grading::grade_to_surface` runs a batter outward from a feature line to the ground
 using the corridor's daylight search - march in half-metre steps until the
 batter and the ground change order, bisect to a millimetre - pointed
 perpendicular to each edge and along the bisector at each vertex. The one
@@ -949,20 +950,22 @@ the rounded corner exists to look nicer on a drawing.
 
 ## Plotting to PDF
 
-File > Plot to PDF... paints the drawing onto a sheet. `cad/plot.hpp` holds
+File > Plot to PDF... paints the drawing onto a sheet. `rust/crates/katana_cad/src/plot.rs` holds
 the arithmetic - paper sizes, the scale ladder, the sheet transform and the
-fit rule - and is tested as arithmetic; `ViewportWidget::plotToPdf` holds the
-`QPdfWriter` and the painter.
+fit rule - and is tested as arithmetic; `PlanView::plot_to_pdf` hands the
+view to `plot_plan_to_pdf` (`rust/crates/katana_window/src/plan_painter.rs`),
+which paints it onto the window canvas's PDF document
+(`rust/crates/katana_window/src/canvas/pdf.rs`).
 
-**One drawing code, two surfaces.** The plot calls the same `drawEntities`
-and `drawAlignments` the screen uses, with the widget's `ViewTransform`
+**One drawing code, two surfaces.** The plot calls the same `draw_entities`
+and `draw_alignments` the screen uses, with the widget's `ViewTransform`
 temporarily replaced by the sheet's - device pixels of the PDF at its
 resolution - and put back afterwards. There is no second renderer for paper,
 so the plot and the screen cannot disagree about anything but the paper.
 That is Rule 3 applied to output: the renderer is never a second source of
 truth, and neither is the plotter.
 
-**Line weights finally mean what they say.** `Layer::lineWeight` has been
+**Line weights finally mean what they say.** `Layer::line_weight` has been
 documented as "millimetres on paper" since the layer table was built,
 validated, persisted,
 and read by nothing that draws, because there was no paper. On screen every
@@ -992,9 +995,9 @@ point by point would take minutes. Both are a later slice with their own
 decisions about resolution. The grid, the snap marker and the selection are
 screen furniture and are not drawn either.
 
-**The PDF itself is tested, not only the arithmetic.** The PDF writing runs
-inside the Qt widget and needs an application, which the unit-test suites do
-not create - so the application grew a `--plot` switch: `katana
+**The PDF itself is tested, not only the arithmetic.** The PDF writing ran
+inside the C++'s Qt widget and needed an application, which the unit-test
+suites did not create - so the application grew a `--plot` switch: `katana
 <project> --plot out.pdf [--fit | --scale N] [--paper A3] [--portrait]
 [--dpi N]` plots and exits without showing a window. The `qt_plot_headless`
 test runs it under `QT_QPA_PLATFORM=offscreen` on the sample project and
@@ -1005,7 +1008,7 @@ directory and a test must never change repository data. And it compares the
 header as hex: CMake's plain `file(READ ... LIMIT 4)` on this platform
 returned `%PDF` plus a newline - five characters - and failed a perfectly
 good PDF, while the `HEX` read is byte-exact. The dialog, the window's
-`PLOT` verb and the switch share one `plotDrawingToPdf`, so the test
+`PLOT` verb and the switch share one `plot_drawing_to_pdf`, so the test
 exercises the same code the menu does; since 2026-09-26 the dialog writes a
 `PLOT` line with the colour mode and the line weight scale `--plot` always
 took (`docs/desktop.md`, "Plot to PDF and view images"), and the same test
@@ -1015,12 +1018,12 @@ holds each style's inks to what it means.
 
 A point is drawn with the symbol its *style* names - `Style::symbol`. Since
 the survey coding work that is any name, resolved at draw time against the loaded style
-library first and against the sixteen built-in shapes of `entity::symbolNames()`
+library first and against the sixteen built-in shapes of `katana_entity::tables::symbol_names()`
 (circle, square, triangle, diamond, cross, plus, tick, star, dot, ring, tree,
-pole, manhole, arrow, flag, target) after, `builtInSymbolFor` guessing a shape
+pole, manhole, arrow, flag, target) after, `built_in_symbol_for` guessing a shape
 from a descriptive name last - at
-`Style::symbolSize`, which is the symbol's width in model units, or 0 for the
-viewport's own mark. `cad::symbolStrokes(name, centre, halfWidth, rotation)`
+`Style::symbol_size`, which is the symbol's width in model units, or 0 for the
+viewport's own mark. `katana_cad::symbols::symbol_strokes(name, centre, half_width, rotation)`
 is the one definition of what each shape looks like: plain polylines in
 model units, so the viewport, a plotter and a preview paint the same thing.
 A circle is 24 chords, fixed: a symbol is small on any output and the eye
@@ -1045,13 +1048,13 @@ visible mark and not a dot of no extent, and draws a library definition at
 its own scale.
 
 Since the managers' foundations (2026-09-23) the question "which shape" is
-`cad::resolveSymbol` - the library definition of the name, of either kind,
+`katana_cad::style_resolver::resolve_symbol` - the library definition of the name, of either kind,
 else the built-in shape of that name, else the shape the name suggests
 (`SymbolKind::BuiltInFallback`, which a picker marks as a stand-in) - and
-`cad::pointSymbolDrawing` gives the strokes whichever answers, the built-in
+`katana_cad::style_resolver::point_symbol_drawing` gives the strokes whichever answers, the built-in
 shapes wrapped as `StyleStrokes` in the entity's own pen, so the viewport, the
 plot and a thumbnail cannot disagree. A symbol whose drawn extent is under
-`kMinimumSymbolPixels` (3) on screen is drawn as a dot (`belowSymbolDetail`):
+`MINIMUM_SYMBOL_PIXELS` (3) on screen is drawn as a dot (`below_symbol_detail`):
 its strokes would be one smudge anyway, and ten thousand coded points zoomed
 out would otherwise lay out every stroke of every one.
 
@@ -1059,11 +1062,11 @@ out would otherwise lay out every stroke of every one.
 drawn, by decision rather than omission: a symbol on the vertices of a line",
 while the 12da import's comment said the opposite and meant it. It was
 decided for what a survey drawing shows: a line whose style names a symbol draws it at
-EVERY vertex (`cad::symbolVertices`: every vertex of a polyline, both ends of
+EVERY vertex (`katana_cad::style_resolver::symbol_vertices`: every vertex of a polyline, both ends of
 a segment or an arc, a point's own position; a circle has none and a text or
 dimension is not a line), as a survey drawing shows a fence's posts or a
 string of drill holes. The symbol's name is never also used as a pattern along the line
-(`resolveLinePattern`), so a style whose linetype names its own symbol - what
+(`resolve_line_pattern`), so a style whose linetype names its own symbol - what
 the 12da import writes - is a plain line with the symbols on it. Still not
 drawn: a point symbol's rotation, since `Style` has no field for one and a new
 field is a storage migration, deferred (decision D6); and symbols and library
@@ -1071,10 +1074,10 @@ linestyles in the 3D view, which draws neither.
 
 ## A mesh is not a surface
 
-`geometry::TriangleMesh` is a list of points and a
+`katana_geometry::mesh::TriangleMesh` is a list of points and a
 list of triangles naming three of them each: what an archive's `primitive_3d`
 carries, and what an IFC solid or an OBJ would. It is a separate type from
-`terrain::TinSurface` on purpose. A surface is a function of x and y -
+`katana_terrain::tin_surface::TinSurface` on purpose. A surface is a function of x and y -
 single-valued, sampled for a height, the thing a profile and a volume are
 computed against. A mesh may be closed, may overhang, and may have several
 sheets above one point; a pipe, a pit and a fence post are meshes. Giving
@@ -1089,8 +1092,8 @@ What follows from that:
   drawing each shared edge once, which it can because it knows its
   neighbours. A bag of triangles does not, and computing adjacency would
   cost more than the lines save - so `SceneMesh` defaults to `Shaded`. The
-  numbers are in `scene.hpp` beside the default.
-- **In plan it is a footprint.** `TriangleMesh::planHull()` is the convex
+  numbers are in `scene.rs` beside the default.
+- **In plan it is a footprint.** `TriangleMesh::plan_hull()` is the convex
   hull of the vertices: exact and cheap whatever the topology, unlike a
   silhouette. It is a HULL and says so - a horseshoe-shaped mesh's hull
   covers ground the mesh does not. A degenerate footprint comes back as it
@@ -1109,24 +1112,24 @@ The owner asked on 2026-09-25 for "a global modification tool that can act on
 data on a selected view, layers, selected features, etc., that can change
 styles, symbols, layers, colour, etc." - 12d's Change panel, and AutoCAD's
 Quick Select followed by the Properties palette. It is
-`include/katana/cad/global_modify.hpp`, in three plain values, so the
+`rust/crates/katana_cad/src/global_modify.rs`, in three plain values, so the
 window's dialog (`docs/desktop.md`, "Global Modify"), the command line's
 `MODIFY` and the tests state a request the same way:
 
 | Part | Type | Says |
 |---|---|---|
 | Where | `ModifyScope` | the selection; what one view draws (its own hidden layers, and optionally only what overlaps its visible area); named layers, with or without their sublayers; or the whole drawing |
-| Which | `ModifyFilter` | types, layer and style patterns, the entity's own colour, a property and its value, a text's words, drawn only - `*` and `?` wildcards, case folded (`matchesPattern`) |
+| Which | `ModifyFilter` | types, layer and style patterns, the entity's own colour, a property and its value, a text's words, drawn only - `*` and `?` wildcards, case folded (`matches_pattern`) |
 | What | `GlobalModify` | the entities' own attributes (`EntityModify`: layer, colour, style, shown, properties, text height, the symbol a point draws), the layers they sit on (`LayerModify`) and the styles they wear (`StyleModify`) |
 
-`planGlobalModify` turns them into ONE command (a `commands::Transaction`
+`plan_global_modify` turns them into ONE command (a `katana_commands::command_stack::Transaction`
 named `GLOBAL_MODIFY`), so one Undo puts back every entity, layer and style
 (Rule 2), and a report, `GlobalModifyPlan`, worked out before anything runs:
 what matched, which entities, layers and styles change, and what is left
 alone and why. `summary()` is what the dialog shows as its preview and
 `MODIFY` prints. Decisions worth knowing:
 
-- **Absent is left alone.** Every field is a `std::optional`; one whose value
+- **Absent is left alone.** Every field is an `Option`; one whose value
   may be ByLayer is an optional of an optional, the inner nullopt being
   ByLayer - the reading `Entity::color` already has. Asking for no change at
   all is refused as a mistake; matching nothing, or matching only what is
@@ -1139,20 +1142,20 @@ alone and why. `summary()` is what the dialog shows as its preview and
   runs; moving onto a layer the drawing lacks makes it, and only when
   something actually moves.
 - **A symbol goes through a style**, found or made by
-  `cad::assignSymbolToPoints` (`include/katana/cad/symbol_assign.hpp`), because
+  `katana_cad::symbol_assign::assign_symbol_to_points` (`rust/crates/katana_cad/src/symbol_assign.rs`), because
   a point carries no symbol of its own. Other entities in scope are counted,
   not moved; a point given a style and a symbol ends in the symbol's style.
 - **A style is shared.** Changing the styles the matched entities wear
   redraws everything wearing them, in the scope or not; the plan counts those
-  (`styleReachesOthers`) and the summary says so, so no front end can hide
+  (`style_reaches_others`) and the summary says so, so no front end can hide
   it.
-- **Symbol sizes scale by a factor** (`StyleModify::symbolScale`,
+- **Symbol sizes scale by a factor** (`StyleModify::symbol_scale`,
   `MODIFY ... SET STYLE.SYMBOLSCALE=2`, Global Modify's "Scale symbol size
   by"; the owner's "change the symbols size", 2026-11-03): each style the
   scope reaches has its symbol size multiplied, so the archive's 0.3 m
   symbols become 0.6 m in one undo step. A style drawing its symbol at its
   own size (0) has no number to multiply: it is left as it is and counted
-  (`symbolsAtOwnSize`, "1 style with a symbol at its own size left as it is").
+  (`symbols_at_own_size`, "1 style with a symbol at its own size left as it is").
   The factor must be above 0 - 0 would turn every size into "own size",
   which is the other request, `STYLE.SYMBOLSIZE=0` - and a size and a scale
   in one change are refused, having no one meaning. A product too large for
@@ -1166,10 +1169,10 @@ alone and why. `summary()` is what the dialog shows as its preview and
   Layers scope, to the scope's layers themselves, entities or not.
 - **One rule for linetype names.** The command line's check that a name is a
   model linetype or a library linestyle, and not a vertex symbol, moved from
-  the interpreter to `cad::checkLinetypeName`
-  (`include/katana/cad/style_catalogue.hpp`), which Global Modify asks too.
+  the interpreter to `katana_cad::style_catalogue::check_linetype_name`
+  (`rust/crates/katana_cad/src/style_catalogue.rs`), which Global Modify asks too.
 
-Tested in `tests/cad/customisation/test_global_modify.cpp`, each expectation
+Tested in `rust/crates/katana_cad/tests/customisation_verbs/global_modify.rs`, each expectation
 worked out by hand from the drawing its fixture lays out.
 
 ## Scope and filter: one grammar for every verb on drawing data
@@ -1177,16 +1180,16 @@ worked out by hand from the drawing its fixture lays out.
 On 2026-09-26 the owner asked for the utility tools to act "on data on view,
 layer/s, elements, filtered elements, like global change", and for every
 tool to be able to act that way. Global Modify's scope and filter became the
-one mechanism for it (`include/katana/cad/scope_verbs.hpp`): one set of
+one mechanism for it (`rust/crates/katana_cad/src/scope_verbs.rs`): one set of
 words, read by one parser and resolved by the one matcher,
-`cad::matchEntities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
+`katana_cad::global_modify::match_entities`. Today `MODIFY`, the `UTILITY` verbs, `ZOOM`, `PROP TREE`
 and (since 2026-10-06) `CODE`, `CODE CENSUS` and `LINEWORK` take them, and
 the leader verbs (since 2026-10-15: `LEADER LIST`, `VALUES`, `SET`, `FREEZE`,
 `DETACH`, `PROP`, `ALIGN`, `FOR`, `BALLOON FOR`, `BALLOON RENUMBER`:
 `docs/annotation.md`, "Scope and filter"), and
 `ROADOBJECT LIST`, `QUANTITIES` and `DELETE` for objects that are definitions
-and not entities (`cad::road::matchRoadObjects`, built from the pieces
-`matchEntities` shares - `docs/road_objects.md`, "Scope and filter"); the
+and not entities (`katana_cad::road::road_object_scope::match_road_objects`, built from the pieces
+`match_entities` shares - `docs/road_objects.md`, "Scope and filter"); the
 standing rule is that every verb that reads or changes drawing data
 is to take them too, and the others - `ERASE`, `CHLAYER` and the rest -
 still act on the selection or their own arguments until they do. `SELECT`
@@ -1220,19 +1223,19 @@ say with the property left empty; before it had a form the utilities dialog
 refused a filter Global Modify applied. After `WHERE`, a word holding `=` (or `DRAWN`) is a
 condition and the first that is neither ends the filter, which is where a
 verb's own words begin (`SET`, `MINCOVER`, `SCHEMA` ...). A verb that also
-reads a file asks `cad::isScopeWord` of its first word: a scope word or
+reads a file asks `katana_cad::scope_verbs::is_scope_word` of its first word: a scope word or
 `WHERE` is the drawing, anything else a path.
 
 It is read in two steps, each tested alone
-(`tests/cad/test_scope_verbs.cpp`):
+(`rust/crates/katana_cad/tests/top_verbs/scope_verbs.rs`):
 
-- `cad::parseScopeWords` turns words into `ScopeWords`, plain data with
+- `katana_cad::scope_verbs::parse_scope_words` turns words into `ScopeWords`, plain data with
   nothing looked up, and refuses by the word what does not read: two scope
   words, `LAYERS` with no list, `ONLY` other than after one, an `AREA` that
   is not four finite numbers (its corners may come in either order), a view
   id of 0, `EXTENTS` other than after `VIEW`, a `WHERE` word whose key or
   value does not read.
-  `cad::formatScopeWords` writes `ScopeWords` back as words the parser reads
+  `katana_cad::scope_verbs::format_scope_words` writes `ScopeWords` back as words the parser reads
   as the same - what the window's scope and filter controls give a dialog to
   put in the line it runs - and refuses what a line cannot say: a double
   quote inside a word, a comma inside a layer name, a `:` inside a
@@ -1241,16 +1244,16 @@ It is read in two steps, each tested alone
   imports copy such names in as they are), a value of a property whose name
   is empty. Refused rather than written, so the line a dialog runs never
   takes other entities than its controls show.
-- `cad::resolveScope` turns them into the `ModifyScope` and `ModifyFilter`
-  `matchEntities` takes. Only `VIEW` looks anything up.
+- `katana_cad::scope_verbs::resolve_scope` turns them into the `ModifyScope` and `ModifyFilter`
+  `match_entities` takes. Only `VIEW` looks anything up.
 
 **`VIEW` is the window's.** The Document holds no views, so
-`CommandInterpreter::setScopeContext` takes a `cad::ScopeViewProvider`, as
-`setSheetContext` takes the sheet verbs' context: given no id it answers the
+`CommandInterpreter::set_scope_context` takes a `katana_cad::scope_verbs::ScopeViewProvider`, as
+`set_sheet_context` takes the sheet verbs' context: given no id it answers the
 active plan view, given an id that view, as its own hidden layers and its
-visible area (`ViewTransform::visibleWorldBounds`). The window's answer is
-`cad::scopeViewOf(ViewSet&, id)`, here beside the grammar rather than in a
-widget so it is tested without one: no id is `ViewSet::mostRecent(Plan)`,
+visible area (`ViewTransform::visible_world_bounds`). The window's answer is
+`katana_cad::scope_verbs::scope_view_of`, here beside the grammar rather than in a
+widget so it is tested without one: no id is `ViewSet::most_recent(Plan)`,
 the plan view Plot and the Standard Views act on; an id is that open view,
 of any kind, a view with no plan extent (3D, a section) answering its hidden
 layers alone. NotFound for an id no view has, InvalidState when no plan view
@@ -1271,7 +1274,7 @@ record says which: `scope=view view=3 area=x0,y0,x1,y1 matched=40` when the
 view's area was taken - where "on screen" was when the line ran, since the
 view moves - and `scope=view view=3 extents=yes matched=52` when not. **A
 view's id is not the number in its title**: "Plan 2" is numbered among the
-plan views, the id (`cad::ViewId`) among all views, so with Plan 1, 3D 1 and
+plan views, the id (`katana_cad::view_set::ViewId`) among all views, so with Plan 1, 3D 1 and
 Plan 2 open, `VIEW 2` is the 3D view. So the id is shown where a view is
 chosen - the "Apply to" list reads "Plan 2 (VIEW 3)" - and every reply on
 `VIEW` says it (`view=`); `VIEW` alone, the plan view in use, needs none.
@@ -1279,12 +1282,12 @@ Headless there is no
 provider, and `VIEW` is refused naming `AREA`: **`AREA x0,y0,x1,y1` is the
 same scope with the window typed in**, a view hiding nothing of its own
 looking at that box. That is why it is a `ScopeKind::View` scope with an
-area and no view layers rather than a kind of its own - `matchEntities`
+area and no view layers rather than a kind of its own - `match_entities`
 already reads a View scope exactly so, and a kind of its own would be a
 second reading of the same thing. Like a view, it takes only what is drawn.
 
 **Every reply says what the scope took**, as Global Modify's preview does:
-`cad::scopeRecord` is a `key=value` record -
+`katana_cad::scope_verbs::scope_record` is a `key=value` record -
 `scope=layers layers=utilities/water sublayers=yes where="TYPE=point" matched=9`
 - that a verb extends with its own keys. A scope that takes nothing is an
 answer, not a refusal. `MODIFY` keeps its own summary, which already begins
@@ -1300,16 +1303,16 @@ they always could: `PREVIEW` anywhere, a second `SET` going on setting, a
 next word whatever it says (a layer named `preview` or `set`), and a word in
 the filter that is no condition named as one ("a WHERE condition is
 key=value"). So `MODIFY` gathers the words that are not its fields and hands
-them to the one parser (`cad::parseWhereCondition` reads one condition for
+them to the one parser (`katana_cad::scope_verbs::parse_where_condition` reads one condition for
 it), rather than the parser learning `SET`
-(`ScopeVerbsTest.ModifyTakesItsOwnWordsWhereverTheyStoodBeforeTheSharedParser`).
+(`scope_verbs_test::modify_takes_its_own_words_wherever_they_stood_before_the_shared_parser`).
 The `UTILITY` verbs are the second user (`docs/subsurface_utilities.md`,
 "Drawing data"); `PROP TREE` is the third (below, "Properties as a tree").
 The window's side is `ScopeFilterWidget`
-(`src/katana_qt/customisation/scope_filter_widget.*`): Global Modify's "Apply
+(`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`): Global Modify's "Apply
 to" and "Only those that match" as one widget every dialog shares, whose
-`verbWords()` are these words (`docs/desktop.md`, "Global Modify"), and the
-window answering `VIEW` through `scopeViewOf`.
+`verb_words()` are these words (`docs/desktop.md`, "Global Modify"), and the
+window answering `VIEW` through `scope_view_of`.
 
 ### Select by kind: `SELECT` takes the scope and filter
 
@@ -1325,13 +1328,13 @@ scope=drawing where="TYPE=leader" matched=774 selected=774 types=leader:774
 ```
 
 - **What a click could take.** As every other `SELECT` form, it selects only
-  what `isSelectable` allows: an entity that is hidden, or on a hidden or
+  what `is_selectable` allows: an entity that is hidden, or on a hidden or
   locked layer, is matched and counted but not selected, and the reply adds
   `unselectable=N`. Selecting it would let the next verb change what the
   person cannot see or has locked; Global Modify's own Apply still reaches
   them, because its plan counts locked entities and says so.
 - **`types=`** is what was matched, by kind, in the kind byte's order
-  (`cad::countByType`, `cad::typeTally` in `scope_verbs.hpp`) - the same
+  (`katana_cad::scope_verbs::count_by_type`, `katana_cad::scope_verbs::type_tally` in `scope_verbs.rs`) - the same
   count the Global Modify dialog shows beside each type box, so an agent
   reads what a person sees. Empty, it is left out.
 - **The old forms keep their meaning.** `ALL` and `LAYER` are scope words
@@ -1343,16 +1346,16 @@ scope=drawing where="TYPE=leader" matched=774 selected=774 types=leader:774
 - **A scope that takes nothing is an answer**, not a refusal, and leaves
   nothing selected. `WHERE` alone filters the selection, as for every verb.
 
-Tested in `tests/cad/test_scope_verbs.cpp` (`SelectTakes...`,
+Tested in `rust/crates/katana_cad/tests/top_verbs/scope_verbs.rs` (`SelectTakes...`,
 `SelectCounts...`, `TheTypeTally...`), the `cli.select_takes_a_kind_...` test
-and `McpServer.AnAgentSelectsTheLeadersByKindAndRecoloursOnlyThem`.
+and `mcp_server::an_agent_selects_the_leaders_by_kind_and_recolours_only_them`.
 
 ## The window's views: VIEWS and ZOOM
 
 The owner asked on 2026-09-30 for views that pan and zoom together - "zoom in
 a design view and the as-built view zooms in too" - with the controls on each
-view's own bar. The views are the window's (`cad::ViewSet`, held by the
-workspace), so two verbs reach them (`include/katana/cad/view_verbs.hpp`):
+view's own bar. The views are the window's (`katana_cad::view_set::ViewSet`, held by the
+workspace), so two verbs reach them (`rust/crates/katana_cad/src/view_verbs.rs`):
 
 ```
 VIEWS [LIST]                          a record per open view, then views=N linked=M
@@ -1384,15 +1387,15 @@ factor always is here); `2XP`, relative to paper space, is refused, since a
 plan view has none. `'ZOOM` and `'Z`, AutoCAD's transparent form, are `ZOOM`
 at the prompt as well as inside a tool; only a view verb takes an apostrophe
 (`'VIEWS` is `VIEWS`; `'LINE` is no command)
-(`ViewVerbsTest.ZoomAllAndTheApostropheFormsAreTheExtentsAsInEveryCadProgram`,
-`ViewVerbsTest.AFactorWithAutoCadsXIsRelativeToTheView`). Rejected: taking
+(`view_verbs_test::zoom_all_and_the_apostrophe_forms_are_the_extents_as_in_every_cad_program`,
+`view_verbs_test::a_factor_with_auto_cads_x_is_relative_to_the_view`). Rejected: taking
 `ALL` alone as the scope word, which frames the entities and not what the
 view draws - its alignments left out - so `ZOOM ALL` and `ZOOM` framed two
 different boxes. The refusals and the degenerate lines - no view open, a
 `CENTRE` with no point, an `UNLINK` naming nothing, an `OPEN` or `ACTIVATE`
 with the wrong number of words, the selection one point - have their tests
-(`ViewVerbsTest.DegenerateZoomAndViewsLinesAreRefusedNamingWhatIsMissing`,
-`ViewVerbsTest.ZoomSelectionOfOnePointCentresOnItAndKeepsTheScale`).
+(`view_verbs_test::degenerate_zoom_and_views_lines_are_refused_naming_what_is_missing`,
+`view_verbs_test::zoom_selection_of_one_point_centres_on_it_and_keeps_the_scale`).
 
 An id is the `ViewId` a record's `view=` gives, as for the scope word `VIEW`,
 never the number in the title. `view=` may stand anywhere on a `ZOOM` line and
@@ -1400,7 +1403,7 @@ is taken off before anything else is read - after `WHERE` it would otherwise
 be read as a condition and refused. `EXTENTS` frames what the view draws, in
 any kind of view; `IN` and `OUT` (by 2 unless a factor is given) and a bare
 factor zoom any view about its middle - a plan view about its centre, a
-section about the middle of its plot (`SectionViewWidget::zoomAt`), a 3D or
+section about the middle of its plot (`SectionView::zoom_at`), a 3D or
 elevation view as its wheel zooms, turned that many notches over its middle
 pixel (`docs/desktop.md`, "In a 3D or elevation view"); `WINDOW` frames a
 box as Zoom Extents frames the drawing - the margin is the widget's - and
@@ -1408,13 +1411,13 @@ box as Zoom Extents frames the drawing - the margin is the widget's - and
 both in a plan view. A request a view's kind does not take is refused naming
 the kinds that take it (`ZOOM WINDOW frames a plan view: view 3 is 3D`,
 `ZOOM on a scope frames a plan, 3D or elevation view: view 4 is Section`).
-Which kind takes which zoom is ONE rule, `cad::zoomTakes`: the verb refuses
+Which kind takes which zoom is ONE rule, `katana_cad::view_verbs::zoom_takes`: the verb refuses
 by it, the refusal names its kinds from it, and a view's bar, the View
 menu's zoom items and the Zoom To dialog's list of views offer only what it
 allows. It was written twice - the verb's and the bar's - and widening the
 verb's alone for 3D would have left the bar without In and Out; widened
 once, for 3D and elevation, the four followed together
-(`ViewZoom.TheKindsEachZoomTakesAreTheVerbsOneRule`). A view that has not
+(`view_zoom::the_kinds_each_zoom_takes_are_the_verbs_one_rule`). A view that has not
 framed anything yet frames what it draws before a zoom, as its first paint
 would: a script's `VIEWS OPEN plan` then `ZOOM IN`, with no paint between,
 zoomed about the origin (`docs/desktop.md`, "A view not yet painted"). `WINDOW` is a box of the
@@ -1423,23 +1426,23 @@ it is not the word here. `SCALE` outside `ViewTransform`'s limits is refused,
 not clamped, because a scale the view cannot show is not the one asked for.
 
 **`ZOOM` takes the shared scope** (above, "Scope and filter"): the scope
-words, read by the one parser and resolved by `matchScope`. `ZOOM` alone is
+words, read by the one parser and resolved by `match_scope`. `ZOOM` alone is
 still `EXTENTS`, where no scope word elsewhere means the selection, so the
 decision is made before the parser is called. The reply begins with the
 scope's record (`scope=selection matched=1`, then the view moved and the
 views that followed); a scope that takes nothing moves no view and says
 `matched=0`, which is an answer, not a refusal
-(`ViewVerbsTest.AScopeThatMatchesNothingMovesNoViewAndSaysSo`).
+(`view_verbs_test::a_scope_that_matches_nothing_moves_no_view_and_says_so`).
 
 **A view frames what it SHOWS of what the scope took**, in every kind of
-view, by one rule (`shownOf`, `view_verbs.cpp`): the entities it draws - by
-its own hidden layers as well as the drawing's (`isDrawn`) - and, with its
-ghosts on, the selected ones it ghosts (`isGhost`; a plan view ghosts no
+view, by one rule (`shown_of`, `view_verbs.rs`): the entities it draws - by
+its own hidden layers as well as the drawing's (`is_drawn`) - and, with its
+ghosts on, the selected ones it ghosts (`is_ghost`; a plan view ghosts no
 label, which it places among the others). A plan view frames their box by
-`cad::extentOf` - measured as `drawnExtent` measures one, construction lines
+`katana_cad::selection::extent_of` - measured as `drawn_extent` measures one, construction lines
 left out; a 3D or elevation view the entities themselves where its scene
 draws them, so the request carries them (`ZoomRequest::ids`, ascending;
-`cad::SceneBuilder::overlayBounds`). The framed view's record ends
+`SceneBuilder::overlay_bounds`). The framed view's record ends
 `shown=N`, how many of what matched it shows. A view that shows none of them
 does not move, and its record after the scope's says so:
 
@@ -1453,17 +1456,17 @@ hid the selection's layer with its ghosts off, or with the drawing hiding
 it, the plan view - and its link - went to empty ground while a 3D view
 stayed put for the same line, and the scope's record alone had said nothing
 of a view that did not move
-(`ViewVerbsTest.APlanViewFramesWhatItShowsOfTheSelectionAndSaysHowManyThatIs`,
-`ViewVerbsTest.AViewThatShowsNoneOfWhatTheScopeTookMovesNothingAndSaysSo`,
-`ViewVerbsTest.AThreeDViewAndAPlanViewFrameTheSelectionByOneRule`). Select by
+(`view_verbs_test::a_plan_view_frames_what_it_shows_of_the_selection_and_says_how_many_that_is`,
+`view_verbs_test::a_view_that_shows_none_of_what_the_scope_took_moves_nothing_and_says_so`,
+`view_verbs_test::a_three_d_view_and_a_plan_view_frame_the_selection_by_one_rule`). Select by
 ID's zoom and the Format managers' Select Users run `ZOOM SELECTION` for the
 active plan view, so they frame by the same rule. Rejected: keeping the plan
 view's frame of everything matched and saying so in its tip - one line would
 then follow two rules by the kind of view it named. A section frames no
 scope: it shows where entities cross it, which is no box of them
-(`ViewVerbsTest.AScopeZoomOnA3DViewCarriesWhatTheScopeTookAndASectionRefusesIt`).
+(`view_verbs_test::a_scope_zoom_on_a3_d_view_carries_what_the_scope_took_and_a_section_refuses_it`).
 
-Records, one per line, `key=value`, reals by `core::formatExactReal` and
+Records, one per line, `key=value`, reals by `katana_core::text::format_exact_real` and
 angles in degrees:
 
 ```
@@ -1476,18 +1479,18 @@ Every record carries `ghosts=on|off`, the view's switch for the selection's
 ghosts (below), and ends with `hidden=a,b` when its view hides layers of its
 own - left out when it hides none - so `VIEWS` says which view is the design
 view and which the as-built one. `framed=no` follows the place of a plan, 3D
-or elevation view that has framed nothing yet (`ViewState::planFramed`,
-`cameraFramed`): it frames what it draws at its first paint, and until then
+or elevation view that has framed nothing yet (`ViewState::plan_framed`,
+`camera_framed`): it frames what it draws at its first paint, and until then
 its centre and scale, or target and distance, are the place every new view
 starts at, which `VIEWS OPEN`'s record gave as though the view looked there
-(`ViewVerbsTest.TheRecordOfAViewThatHasFramedNothingYetSaysSo`). Left out
+(`view_verbs_test::the_record_of_a_view_that_has_framed_nothing_yet_says_so`). Left out
 once it has framed, as `hidden=` is when there is nothing to say.
 
 **`HIDE`, `SHOW` and `ISOLATE` are a view's own layer filter**, what its
-Layers button sets (`cad::LayerOverrides`; `docs/desktop.md`, "The
+Layers button sets (`katana_cad::layer_overrides::LayerOverrides`; `docs/desktop.md`, "The
 workspace"): subtractive, so a view never shows what the document hides; view
 state, so not saved, not undoable and no document change - the window redraws
-that one view (`ViewVerbHost::settingsChanged`). Without them an agent could not
+that one view (`ViewVerbHost::settings_changed`). Without them an agent could not
 set up a design view beside an as-built view, and no test could either: the
 popup edited the state directly. A layer is a layer of the drawing or a node
 of the tree above one (`design` when only `design/road` is a layer), as the
@@ -1495,45 +1498,45 @@ popup lists them; one the drawing lacks is refused naming it
 (`no layer 'roads' in the drawing (LAYER LIST lists them)`), and a list with
 one such is refused whole, and so is a list of commas alone (`VIEWS HIDE 1
 ,`), which named no layer and replied the unchanged record as though it had
-worked (`ViewVerbsTest.HideOrShowOfCommasAloneIsRefusedAndChangesNothing`).
+worked (`view_verbs_test::hide_or_show_of_commas_alone_is_refused_and_changes_nothing`).
 `ISOLATE` keeps one layer, its parents and what lies beneath it; `SHOW ALL`
 shows everything the document shows
-(`ViewVerbsTest.ViewsHideShowIsolateChangeOnlyThatView`). `SHOW` of a layer
+(`view_verbs_test::views_hide_show_isolate_change_only_that_view`). `SHOW` of a layer
 beneath one the view hides is refused, naming what holds it (`view 1 hides
 'design', which holds 'design/road': show 'design' (VIEWS SHOW 1 design)`),
 before any layer of the line is shown: `LayerOverrides::show` removes only
 an exact entry, so the layer stayed hidden and the reply was the unchanged
 record, a silent failure
-(`ViewVerbsTest.ShowingALayerBeneathOneTheViewHidesIsRefusedNamingWhatHoldsIt`).
+(`view_verbs_test::showing_a_layer_beneath_one_the_view_hides_is_refused_naming_what_holds_it`).
 The Layers popup runs these lines for every box and button
 (`docs/desktop.md`, "The workspace"). Two words were added for it. `LAYER`,
 first and with a word after it, takes every word after it whole: a comma is a
 legal character in a layer's name, and a comma list cannot say one
-(`ViewVerbsTest.LayerTakesEveryWordAfterItWholeSoALayerWhoseNameHoldsACommaCanBeNamed`,
-`LayerThatNamesNoLayerOrTwoToIsolateIsRefusedAndChangesNothing`); a line whose
+(`view_verbs_test::layer_takes_every_word_after_it_whole_so_a_layer_whose_name_holds_a_comma_can_be_named`,
+`view_verbs_test::layer_that_names_no_layer_or_two_to_isolate_is_refused_and_changes_nothing`); a line whose
 only word is `LAYER` or `REFERENCE` still names the layer called that
-(`ALineWhoseOnlyWordIsLayerOrReferenceNamesTheLayerCalledThat`). `REFERENCE`
+(`view_verbs_test::a_line_whose_only_word_is_layer_or_reference_names_the_layer_called_that`). `REFERENCE`
 names the reference layers a view hides, by the id the Reference Data panel and
 the `RASTER` and `CLOUD` words use: cad cannot read Reference Data, so it keeps
-the ids a view hides (`ViewState::hiddenReferences`) and asks the host whether
-one is the window's (`ViewVerbHost::hasReference`; the default answers no, so
+the ids a view hides (`ViewState::hidden_references`) and asks the host whether
+one is the window's (`ViewVerbHost::has_reference`; the default answers no, so
 `katana_cli`, which has no views, and a bare test host refuse every reference).
 An id the window lacks, a word that is not a whole number from 1, and commas
 alone are refused whole, and `ISOLATE` takes no reference
-(`ReferenceHidesAndShowsTheReferenceLayersAViewHidesOfItsOwn`,
-`AReferenceTheWindowLacksOrANumberThatIsNoneIsRefusedWhole`,
-`ADriverThatHasNoReferenceDataRefusesEveryReference`). A record lists them as
+(`view_verbs_test::reference_hides_and_shows_the_reference_layers_a_view_hides_of_its_own`,
+`view_verbs_test::a_reference_the_window_lacks_or_a_number_that_is_none_is_refused_whole`,
+`view_verbs_test::a_driver_that_has_no_reference_data_refuses_every_reference`). A record lists them as
 `hiddenrefs=7,9` after `hidden=`, and `SHOW ALL` shows them with the layers.
 
 **`SET <id> ghosts=on|off` is a view's switch for the selection's ghosts**
-(`ViewState::selectionGhosts`, on when a view opens): a selected entity the
-document draws and that view hides (`cad::isGhost`) is drawn there faint,
+(`ViewState::selection_ghosts`, on when a view opens): a selected entity the
+document draws and that view hides (`katana_cad::selection::is_ghost`) is drawn there faint,
 never picked, snapped to, given grips or plotted (`docs/desktop.md`, "The
 selection in every view"). The Layers popup's box and View > Show the
 Selection on Hidden Layers run this line. Every word is read before any
 is applied, so `ghosts=off ghosts=maybe` changes nothing; a key other than
 `ghosts`, or a value other than on and off, is refused naming it
-(`ViewVerbsTest.ViewsSetRefusesWhatItDoesNotTakeAndChangesNothing`). `SET`
+(`view_verbs_test::views_set_refuses_what_it_does_not_take_and_changes_nothing`). `SET`
 and not a word of its own, so the next switch a view gains is a key, not a
 verb.
 
@@ -1549,22 +1552,22 @@ naming it with the usage. An `UNLINK` lists every view that left: an unlink
 that leaves one member dissolves the link (a link of one follows nothing),
 and that member left too.
 
-**The window's side is a `cad::ViewVerbHost`**, handed over by
-`CommandInterpreter::setViewHost` as `setScopeContext` hands over `VIEW`: the
+**The window's side is a `katana_cad::view_verbs::ViewVerbHost`**, handed over by
+`CommandInterpreter::set_view_host` as `set_scope_context` hands over `VIEW`: the
 open views, and opening, activating and zooming one through its widget,
 which frames at its own size. The plan zoom's arithmetic that needs no
-widget - `IN`, `OUT`, a factor and `CENTRE` - is `cad::applyPlanZoom`, here
+widget - `IN`, `OUT`, a factor and `CENTRE` - is `katana_cad::view_verbs::apply_plan_zoom`, here
 and tested, and the window's host applies it and then tells the link. A
 test's host does the same with a `ViewSet` of its own, so the grammar, the
-records and the refusals are tested without Qt
-(`tests/cad/test_view_verbs.cpp`). With no host - `katana_cli`, `katana_mcp`
+records and the refusals are tested without a window
+(`rust/crates/katana_cad/tests/top_verbs/view_verbs.rs`). With no host - `katana_cli`, `katana_mcp`
 - both verbs are refused by name, "VIEWS is the desktop window's", never as
-unknown commands (`ViewVerbsTest.ViewsAndZoomAreRefusedByNameWithoutAWindow`,
-and a `cli.` test for each in `src/katana_app/CMakeLists.txt`).
+unknown commands (`view_verbs_test::views_and_zoom_are_refused_by_name_without_a_window`,
+and a `cli.` test for each).
 
 **The link is `ViewSet`'s** (`link`, `unlink`, `follow`; `ViewState::linked`
-and `lastMoved`), and the rule for one pair of views is
-`include/katana/cad/view_link.hpp`: plan to plan, the follower takes the
+and `last_moved`), and the rule for one pair of views is
+`rust/crates/katana_cad/src/view_link.rs`: plan to plan, the follower takes the
 centre and the scale in pixels per unit, EXACTLY, and keeps its own size,
 hidden layers and reference layers - a wider view shows more of the same
 place. Every other pair of kinds returns false, and only plan views may join
@@ -1572,14 +1575,14 @@ for now (`only plan views link: view 3 is 3D`). Plain data like the rest of
 a view's state: not saved, not undoable, never a document notification - a
 notification repaints every plan view's whole kept drawing. The leader rule,
 the resize rule and the rejected alternatives are `docs/desktop.md`'s
-"Linked views"; the tests are `tests/cad/test_view_set.cpp`
-(`ViewSet.LinkedPlanViewsTakeTheCentreAndScaleOfTheViewThatMovedAndKeepTheirOwnSize`
+"Linked views"; the tests are `rust/crates/katana_cad/tests/styles/view_set.rs`
+(`view_set::linked_plan_views_take_the_centre_and_scale_of_the_view_that_moved_and_keep_their_own_size`
 and the tests after it).
 
 ## What the managers stand on
 
 
-What was merged on 2026-09-23 is the tested logic below Qt that the managers
+What was merged on 2026-09-23 is the tested logic below the window that the managers
 above need, each piece reachable from the command line too; the dialogs of
 2026-09-24 (`docs/desktop.md`, "The Format menu") render it and decide
 nothing of their own. The managers of professional CAD and survey packages
@@ -1588,11 +1591,11 @@ usage counts, purge, merge, duplicate, a current style, pickers that browse a
 library with pictures - and each item here is one of those, in the layer that
 can test it.
 
-- **Who uses what, in one pass** (`entity::tableUsage`,
-  `include/katana/entity/table_usage.hpp`). Every style, linetype name,
+- **Who uses what, in one pass** (`katana_entity::table_usage::table_usage`,
+  `rust/crates/katana_entity/src/table_usage.rs`). Every style, linetype name,
   symbol name, hatch pattern and layer, with the layers, styles and entities
-  that reach it. "Reaches" is `resolveDisplay`'s chain, read through the same
-  two functions it reads (`resolvedLinetype`, `resolvedHatchPattern`), so an
+  that reach it. "Reaches" is `resolve_display`'s chain, read through the same
+  two functions it reads (`resolved_linetype`, `resolved_hatch_pattern`), so an
   entity is counted against exactly the linetype it is drawn with. Names are
   kept whether or not a table defines them: a library linestyle a style names is
   not in the model, and a name nothing defines is exactly what a manager has
@@ -1603,54 +1606,54 @@ can test it.
   `Users::describe()`: "used by 1 layer, 1 style and 3 entities, e.g.
   layer=survey" - a layer first, since that is what a person fixes first,
   then a style, then the lowest entity id.
-- **Merge, duplicate, purge** (`commands`, `entity_commands.hpp`).
-  `mergeStyle` moves every entity wearing one style onto another and deletes
-  it; `mergeLinetype` repoints every layer and style and deletes the linetype;
+- **Merge, duplicate, purge** (`commands`, `entity_commands.rs`).
+  `merge_style` moves every entity wearing one style onto another and deletes
+  it; `merge_linetype` repoints every layer and style and deletes the linetype;
   both are one undo step and restore the holders they moved from before-images,
   not by moving everything back - so a holder that already named the target
-  stays on it. `duplicateStyle`/`duplicateLinetype` copy under a new name.
-  `purgeTableItems` deletes a set as ONE step and judges it as a set (a
+  stays on it. `duplicate_style`/`duplicate_linetype` copy under a new name.
+  `purge_table_items` deletes a set as ONE step and judges it as a set (a
   linetype named only by styles the same purge removes is free); it refuses an
   empty set, since an empty undo step is the shape of audit QT-01.
-  `cad::planPurge` finds the set and iterates to a fixpoint, so purging a
+  `katana_cad::purge::plan_purge` finds the set and iterates to a fixpoint, so purging a
   style frees the linetype only it named in the same purge; `continuous` and
   `none` are never in it, and the current style is kept. A merge INTO a
   library linestyle is not possible: `commands` cannot see the library, so
   `into` must be a model linetype (a rename onto the library name is the way,
   and its undo is now exact too).
-- **Saving an unedited form is not an edit.** `updateStyleIfChanged` and
-  `updateLinetypeIfChanged` return nullptr when nothing changed, so no undo
+- **Saving an unedited form is not an edit.** `update_style_if_changed` and
+  `update_linetype_if_changed` return `None` when nothing changed, so no undo
   step is pushed and the project is not marked modified; a Command cannot
   decline to be pushed, which is why it is the caller's helper.
-- **ByLayer is a word** (`entity/display.hpp`). A linetype had no empty value
+- **ByLayer is a word** (`rust/crates/katana_entity/src/display.rs`). A linetype had no empty value
   to say "ByLayer" with - `""` is a name like any other - so a symbol-only or
   colour-only style overrode the layer's linetype with continuous whether it
   meant to or not. A `Style::linetype` of `ByLayer` (any case, since DXF
   reserves it and `validate(Linetype)` already refused it as a name) now
   inherits the layer's; `LAYER LTYPE` refuses it, because a layer is what
   ByLayer inherits from.
-- **Pickers never drop a value** (`cad/style_catalogue.hpp`, decision D3).
-  `linetypeChoices` offers ByLayer (for a style), the model's linetypes and
+- **Pickers never drop a value** (`rust/crates/katana_cad/src/style_catalogue.rs`, decision D3).
+  `linetype_choices` offers ByLayer (for a style), the model's linetypes and
   every library definition offered as a linestyle - one entry per name, a
-  collision marked; `symbolChoices` the built-in shapes and every library
-  definition offered as a symbol (D3's four signals, `classifyDefinition`),
+  collision marked; `symbol_choices` the built-in shapes and every library
+  definition offered as a symbol (D3's four signals, `classify_definition`),
   a library definition hiding a built-in of the same name as it does when
   drawn. Each entry says its source (model, library, built-in, undefined), its
-  file, group and units, and its users. `keepCurrent` puts the value being
+  file, group and units, and its users. `keep_current` puts the value being
   edited back, MARKED, when the list lacks it - that, not a more complete
   list, is what stops an editor rewriting a name it could not show, which is
-  QT-02. Names are case-sensitive; `filterChoices` folds case.
-- **What is wrong, listed, by one rule.** `cad::linetypeStatus` and
-  `cad::symbolStatus` say what a name a Style or Layer gives draws as, worked
-  out through `resolveLinePattern` and `resolveSymbol` - the viewport's own
+  QT-02. Names are case-sensitive; `filter_choices` folds case.
+- **What is wrong, listed, by one rule.** `katana_cad::style_catalogue::linetype_status` and
+  `katana_cad::style_catalogue::symbol_status` say what a name a Style or Layer gives draws as, worked
+  out through `resolve_line_pattern` and `resolve_symbol` - the viewport's own
   answers - as a `NameStatus`: Plain (`""`, ByLayer, and the plain lines
   `continuous`, `0` and `1` in any case, D4), OwnSymbol, Library, Katana (a
   model linetype or a built-in shape), NotALinestyle or Undefined. A name is
-  missing (`isMissing`) exactly when what is drawn is a fallback: Undefined,
+  missing (`is_missing`) exactly when what is drawn is a fallback: Undefined,
   defined nowhere; or NotALinestyle, a linetype that names only a `mode
   vertex` definition, which the viewport draws solid and a linetype picker
   does not offer (D2, D3) - the library DOES define it, as a symbol, so the
-  fix is to pick a linestyle, not to load a library. `missingNames` gives
+  fix is to pick a linestyle, not to load a library. `missing_names` gives
   every Style or Layer linetype and Style symbol that is missing, with its
   users, what is drawn instead and `MissingName::status`, linetypes first.
   Never a built-in symbol name (audit CAD-17, whose fix this rule
@@ -1658,7 +1661,7 @@ can test it.
   symbol's name - what the 12da import writes for every symbol string, a
   plain line under the symbol (D8). Every list of the DRAWING's missing
   names reads this rule: the style manager's Missing chip and Diagnostics,
-  the symbol library, `customisationCoverage` (which keeps its two reasons
+  the symbol library, `customisation_coverage` (which keeps its two reasons
   apart; `docs/survey_coding.md`, "Saying whether it is working") and so
   CUSTOMISE and the window's customisation log. Each once had a rule of its
   own, and they disagreed. The names a survey code file's rules give are judged apart
@@ -1666,20 +1669,20 @@ can test it.
   load's "names the survey codes ask for" line - since a rule is not a style and
   has no style's own symbol. `NamePicker` marks the same
   names, with one exception: an own-symbol linetype is marked "(not
-  defined)" there although `missingNames` leaves it out.
-  `linetypeCollisions` gives the names both a model Linetype and a
+  defined)" there although `missing_names` leaves it out.
+  `linetype_collisions` gives the names both a model Linetype and a
   non-vertex library definition hold (D2's collisions; the library wins).
-- **A current style** (D9): `Document::setCurrentStyle`, above.
+- **A current style** (D9): `Document::set_current_style`, above.
 
 All of it has command-line verbs (`STYLE USAGE`, `STYLE MERGE`,
 `LINETYPE MERGE`, `STYLE SYMBOLS`, `STYLE CURRENT`, `PURGE`; "Command
 interpreter" above). The layer halves of audits MOD-08, MOD-09 and MOD-12
 are fixed as well (2026-09-24; `docs/model.md`, "Named tables"). Not yet: a
 layer manager reading the per-layer counts in `TableUsage::layers` (it counts
-with `countOnLayer`); a current style that FOLLOWS a rename; a cad-level merge
+with `count_on_layer`); a current style that FOLLOWS a rename; a cad-level merge
 of a model linetype into a library linestyle (to settle a D2 collision); and
-the code manager's own `linestyleState` in `code_manager_support.cpp`, a
-plain / defined / wrong-kind rule that does not read `linetypeStatus`.
+the code manager's own `linestyle_state` in `code_manager_support.rs`, a
+plain / defined / wrong-kind rule that does not read `linetype_status`.
 
 ## What a style draws: one resolver, one painter
 
@@ -1688,41 +1691,41 @@ A name reaches the drawing from `Style::linetype`, `Layer::linetype` or
 dashes, saved in the project) and the session's style library (strokes,
 texts and pens). Until 2026-09-23 the viewport looked in both with no rule for
 which won, the preview looked in one, and the 3D view in the other.
-`include/katana/cad/style_resolver.hpp` is now the one answer, for the
+`rust/crates/katana_cad/src/style_resolver.rs` is now the one answer, for the
 viewport, the plot and every preview and thumbnail:
 
 - **A linetype name (decision D2).** A NON-vertex library definition of the
   name wins and is drawn by its own strokes, with NO Katana dash applied to
   them; otherwise a model Linetype gives dashes; otherwise the line is solid.
   A name both hold is a COLLISION: flagged (`ResolvedLinetype::collision`,
-  listed by `linetypeCollisions`) and never an error - a project can meet a
+  listed by `linetype_collisions`) and never an error - a project can meet a
   library that happens to reuse one of its names. `ByLayer` on a style is
   resolved to the layer's linetype before this is asked.
 - **A symbol name.** The library definition, of either kind (most symbols the
   reference survey code file uses are not `mode vertex`), else a built-in shape - its
   own name's, or the one its words suggest, and the caller is told which.
 - **Symbols on lines (decision D8)**: at every vertex, and the symbol's name
-  never laid as a pattern - `resolveLinePattern`, "Point symbols" above.
+  never laid as a pattern - `resolve_line_pattern`, "Point symbols" above.
 
 **Nothing keeps a `LineStyle*` past the call.** A pointer into the library
 dangles as soon as `setStyleLibrary` replaces it. What is kept across frames
 is a `FlatDefinition` - a definition's strokes flattened once into runs, with
 `factor` and the origin applied and its texts COPIED - in a `DefinitionCache`
-keyed by name and `libraryGeneration()`: the first question at a new
+keyed by name and `library_generation()`: the first question at a new
 generation empties it. A name the library lacks is remembered too, as an empty
 answer, since the built-in fallback asks for it on every point of every
 frame.
 
-**Laying a linestyle for a view** (`layLinestyle`, `LinestyleOptions`; audit
-CAD-04). The old `linestyleDrawing` laid a pattern along the WHOLE line and
+**Laying a linestyle for a view** (`lay_linestyle`, `LinestyleOptions`; audit
+CAD-04). The old `linestyle_drawing` laid a pattern along the WHOLE line and
 cut it off at 20,000 repeats with no flag, so the tail of a long line vanished
 and the viewport, having been told a definition applied, drew no plain line
 either. Now:
 
-- the budget is all-or-nothing, as `forEachDash`'s is: over
-  `maximumInstances` nothing is laid (`OverBudget`) and the caller draws the
+- the budget is all-or-nothing, as `for_each_dash`'s is: over
+  `maximum_instances` nothing is laid (`OverBudget`) and the caller draws the
   plain line - a truncated pattern is a wrong drawing with no error anywhere;
-- a period under `minimumPeriodPixels` (2) on screen is `TooFine`, and the
+- a period under `minimum_period_pixels` (2) on screen is `TooFine`, and the
   plain line is drawn: below two pixels the repeats merge into a smudge the
   colour of the line, which is what the eye sees anyway, thousands of times
   cheaper;
@@ -1731,7 +1734,7 @@ either. Now:
   each is laid where it falls on the WHOLE line, so the pattern keeps its
   phase from the first vertex and does not crawl as the view pans. Which
   repeats can reach the box is measured by where the MARKS reach
-  (`drawnLowX`/`drawnHighX`: every run point, an arc's chords, a text's
+  (`drawn_low_x`/`drawn_high_x`: every run point, an arc's chords, a text's
   anchor), not by the pen's travel: an arc is written as a move to its
   centre, so a scallop's pen stands at the middle of a half-circle whose ends
   are a radius either side, and measured by the pen the last repeat at the
@@ -1742,27 +1745,27 @@ either. Now:
 The reference libraries write some arcs with a negative radius; the sign is not a side, and a
 radius is taken as `|r|` (`docs/survey_coding.md`, "The grammar").
 
-**One painter** (`src/katana_qt/customisation/style_painter.*`). The
-viewport's private painting members became `paintStyleDrawing`,
-`paintStyleText` and `stylePenFor`, because a preview could not reach them and
+**One painter** (`rust/crates/katana_window/src/customisation/style_painter.rs`). The
+viewport's private painting members became `paint_style_drawing`,
+`paint_style_text` and `style_pen_for`, because a preview could not reach them and
 so drew something else. Everything the caller decides comes in a
 `StylePaintTarget`: the model-to-device transform, the ENTITY PEN (its colour,
 width and cap - a preview that guessed its own pen showed dashes one pen-width
 shorter than the plot, whose square caps grow every dash), whether this is
-paper, and `entityPenOnly` for the selection highlight, which must read as one
+paper, and `entity_pen_only` for the selection highlight, which must read as one
 colour whatever the definition's pens say. A library pen changes only the
-colour; a name `archive12d::standardColour` does not know leaves the entity
+colour; a name `katana_entity::colour_names::standard_colour` does not know leaves the entity
 pen as it is rather than guessing. A one-point stroke is a library `dot`, painted
 round whatever the cap (a flat cap draws a zero-length line as nothing). Style
 texts are clamped at 2000 px, the plain-text ceiling in
-`PlanPainter::drawText` (a font asked for at hundreds of thousands of
+`PlanPainter::draw_text` (a font asked for at hundreds of thousands of
 pixels makes the raster engine allocate glyphs larger than any screen), and
 not drawn under 3 px. The screen and the plot reach the painter through the
-same `paintPlan` (`src/katana_qt/plan_painter.hpp`, docs/plan_view.md); a
-plot calls it from `plotPlanToPdf`, which needs no widget.
+same `paint_plan` (`rust/crates/katana_window/src/plan_painter.rs`, docs/plan_view.md); a
+plot calls it from `plot_plan_to_pdf`, which needs no widget.
 
-**White prints black (decision D7).** `PlotSettings::whiteToBlack`, on by
-default, and `cad::paperColour`: a pen whose every channel is at least 230 of
+**White prints black (decision D7).** `PlotSettings::white_to_black`, on by
+default, and `katana_cad::plot::paper_colour`: a pen whose every channel is at least 230 of
 255 prints black, alpha kept, as colour 7 conventionally does in CAD. White is what a new
 layer draws in on the dark screen and what 130 of the reference survey code file's 457
 `map_data` rules ask for, and on white paper every such feature would vanish.
@@ -1770,7 +1773,7 @@ layer draws in on the dark screen and what 130 of the reference survey code file
 applies to the entity's colour and to a library pen alike, and never on screen.
 
 **Thumbnails** (`customisation/definition_thumbnails.*`). Small pictures of a
-name as a symbol or as a linestyle along `styleSamplePath` - a straight run, a
+name as a symbol or as a linestyle along `style_sample_path` - a straight run, a
 sharp corner and a half-circle arc, so a pattern is seen turning and bending
 - painted by the same painter from the same resolver, so a picker shows what
 the viewport would draw. Each says when it is a STAND-IN (a symbol's built-in
@@ -1779,10 +1782,10 @@ so a picker can mark such a name rather than drop it (D3). On a light ground a
 picture is "on paper" - black entity pen, D7 applies - and on a dark one it is
 the screen. Cached by kind, name, size and ground for ONE library generation
 at a time, at most 4,096 pictures; painted on the GUI thread. Fitted to what
-is actually painted (`paintedExtent`, which measures texts in their font),
-not to `cad::drawnExtent`, whose deliberate over-estimate is right for culling
+is actually painted (`painted_extent`, which measures texts in their font),
+not to `katana_cad::selection::drawn_extent`, whose deliberate over-estimate is right for culling
 and shrank labelled symbols to a third of the picture. A linestyle picture
-does not go through `styleSampleDrawing` (it needs a Model, and a project's
+does not go through `style_sample_drawing` (it needs a Model, and a project's
 linetype must not enter a cache keyed on the library), and it is four periods
 or eight reaches across, whichever is larger, so the pattern can be
 recognised. The caller passes DEVICE pixels, so a HiDPI picker must multiply
@@ -1792,7 +1795,7 @@ The managers are built on it: `StylePreview` (the style manager's and the
 symbol library's preview) paints through this painter from this resolver,
 and every `NamePicker` entry and the symbol library's grid are these
 thumbnails; the style manager's Diagnostics tab lists the collision flags
-(`cad::styleDiagnostics`). Not yet: the 3D view draws neither symbols nor library
+(`katana_cad::style_manager_rows::style_diagnostics`). Not yet: the 3D view draws neither symbols nor library
 linestyles; and `NamePicker` paints every picture as it is built, the
 drawing's own linetypes' uncached on every rebuild, so the code manager, whose
 two pickers list about 800 definitions, takes about 2.4 s to build in a Debug
@@ -1806,41 +1809,42 @@ listed here so a later change can find the code that carries each one.
 
 | | Decision | Where it is implemented |
 |---|---|---|
-| D1 | The style library, the survey map and the rest of the session's customisation (its colour table, linework codes, automation) are SESSION data on `cad::Document`: not undoable, not in the project - the project records only the customisations' NAMES. Edits are made in an editor buffer and committed with `setStyleLibrary`/`setSurveyMap` (Apply/Revert) or by a verb, and are KEPT by `CUSTOMISE KEEP`, which writes the session to the user's own customisation file (the previous one as `.bak`; refused when the file changed on disk since it was read, and retired when the session equals the built-in), or EXPORTED by `CUSTOMISE EXPORT`. A load MERGES by default; Replace is explicit. *Rejected: the customisation as a table in the project beside Layer and Linetype* (one real customisation is 792 definitions and 35,000 strokes, written into every project that used it, and two projects could then disagree about what a linestyle looks like); *rejected: an undoable customisation* (a library is shared by every project of a site, and an undo of one drawing must not change another's lines); *rejected: edits that persist when the project is saved* (a project would then carry a customisation the user never kept, and open differently elsewhere). | `Document::setStyleLibrary`/`setSurveyMap`, `installCustomisation` and the generation counters; `cad::mergeCustomisation` and `LoadMode` (`customisation_merge.hpp`), which every front end reaches through the one `CUSTOMISE [REPLACE]` verb (QT-21 fixed); `CUSTOMISE KEEP`/`REVERT`/`RESET` and `startCustomisation` (`customisation_host.hpp`); the Survey Code Manager's buffer, Apply and Revert, and its Export Codes... (the session's customisation cut down to the buffer's rules by `entity::customisationToJson`); the symbol library's Export Selected... (the same cut, to the selected definitions). `docs/customisation.md`, `docs/survey_coding.md` |
-| D2 | A linetype name: a non-vertex library definition wins (no dash on its strokes), else a model Linetype, else solid. `ByLayer` as a Style linetype inherits the layer's. | `cad::resolveLinetype`; `entity::isByLayer`, `resolvedLinetype`; `linetypeChoices`, `linetypeCollisions`; `STYLE SET ... linetype`; 12da export's `linestyleOf` |
-| D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its customisation lists it as a symbol (`LineStyle::symbol`; until 2026-10-06 the sign was its file's name containing "symbol", which one customisation holding both kinds under one name can no longer give). Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `cad::classifyDefinition` (`DefinitionKind::listedAsSymbol`), `symbolChoices`, `keepCurrent`, `filterChoices`; `LineStyle::symbol`; `codeTableRowMatches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
-| D4 | Survey coding chooses a code's style by appearance and reuses one that draws alike; new names follow from the rules. | `cad::applySurveyCodes` (`Appearance`, `drawsAs`, `existingStyleFor`, `nameFor`) |
-| D5 | A code only the bare `*` answers is "fallback-only", not matched. | `entity::SurveyMatchKind`, `SurveyMatch::matched()`; `SurveyCodingReport::fallbackOnly`; `cad::splitStringName` |
+| D1 | The style library, the survey map and the rest of the session's customisation (its colour table, linework codes, automation) are SESSION data on `katana_cad::document::Document`: not undoable, not in the project - the project records only the customisations' NAMES. Edits are made in an editor buffer and committed with `setStyleLibrary`/`set_survey_map` (Apply/Revert) or by a verb, and are KEPT by `CUSTOMISE KEEP`, which writes the session to the user's own customisation file (the previous one as `.bak`; refused when the file changed on disk since it was read, and retired when the session equals the built-in), or EXPORTED by `CUSTOMISE EXPORT`. A load MERGES by default; Replace is explicit. *Rejected: the customisation as a table in the project beside Layer and Linetype* (one real customisation is 792 definitions and 35,000 strokes, written into every project that used it, and two projects could then disagree about what a linestyle looks like); *rejected: an undoable customisation* (a library is shared by every project of a site, and an undo of one drawing must not change another's lines); *rejected: edits that persist when the project is saved* (a project would then carry a customisation the user never kept, and open differently elsewhere). | `Document::set_style_library`/`set_survey_map`, `install_customisation` and the generation counters; `katana_cad::customisation_merge::merge_customisation` and `LoadMode` (`customisation_merge.rs`), which every front end reaches through the one `CUSTOMISE [REPLACE]` verb (QT-21 fixed); `CUSTOMISE KEEP`/`REVERT`/`RESET` and `startCustomisation` (`customisation_host.rs`); the Survey Code Manager's buffer, Apply and Revert, and its Export Codes... (the session's customisation cut down to the buffer's rules by `katana_entity::customisation::customisation_to_json`); the symbol library's Export Selected... (the same cut, to the selected definitions). `docs/customisation.md`, `docs/survey_coding.md` |
+| D2 | A linetype name: a non-vertex library definition wins (no dash on its strokes), else a model Linetype, else solid. `ByLayer` as a Style linetype inherits the layer's. | `katana_cad::style_resolver::resolve_linetype`; `katana_entity::display::is_by_layer`, `resolved_linetype`; `linetype_choices`, `linetype_collisions`; `STYLE SET ... linetype`; 12da export's `linestyle_of` |
+| D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its customisation lists it as a symbol (`LineStyle::symbol`; until 2026-10-06 the sign was its file's name containing "symbol", which one customisation holding both kinds under one name can no longer give). Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `katana_cad::style_catalogue::classify_definition` (`DefinitionKind::listed_as_symbol`), `symbol_choices`, `keep_current`, `filter_choices`; `LineStyle::symbol`; `code_table_row_matches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
+| D4 | Survey coding chooses a code's style by appearance and reuses one that draws alike; new names follow from the rules. | `katana_cad::survey_coding::apply_survey_codes` (`Appearance`, `draws_as`, `existing_style_for`, `name_for`) |
+| D5 | A code only the bare `*` answers is "fallback-only", not matched. | `katana_entity::survey_map::SurveyMatchKind`, `SurveyMatch::matched()`; `SurveyCodingReport::fallback_only`; `katana_cad::linework::split_string_name` |
 | D6 | No storage schema migrations this round. | Why symbol rotation, a linetype scale and true arcs in linework wait; the metadata change is a key, not a column |
-| D7 | White prints black on paper. | `cad::paperColour`, `PlotSettings::whiteToBlack`; `stylePenFor`; light-ground thumbnails |
-| D8 | A line whose style names a symbol draws it at every vertex. | `cad::symbolVertices`, `resolveLinePattern`; the viewport's `drawEntities`; `styleSampleDrawing` |
-| D9 | `Document::setCurrentStyle` feeds new work. | `Document::currentAttributes`; `STYLE CURRENT`; the Properties toolbar's current style; `PurgeOptions::keepStyles`, which Purge Unused fills |
+| D7 | White prints black on paper. | `katana_cad::plot::paper_colour`, `PlotSettings::white_to_black`; `style_pen_for`; light-ground thumbnails |
+| D8 | A line whose style names a symbol draws it at every vertex. | `katana_cad::style_resolver::symbol_vertices`, `resolve_line_pattern`; the viewport's `draw_entities`; `style_sample_drawing` |
+| D9 | `Document::set_current_style` feeds new work. | `Document::current_attributes`; `STYLE CURRENT`; the Properties toolbar's current style; `PurgeOptions::keep_styles`, which Purge Unused fills |
 
 ## A listener lives exactly as long as the thing it notifies
 
-`Document::addListener` used to return nothing and offer no removal. A
-`ViewportWidget` registered `[this] { update(); }` in its constructor; when an
+`Document::add_listener` used to return nothing and offer no removal. In the
+C++, a plan view widget registered `[this] { update(); }` in its constructor; when an
 imported archive brought a surface, the layout switched to a split view, the plan
 viewport was destroyed, and its registration stayed in the document. The
 next command - a click on a layer's visibility box - called `update()` on
 freed memory: a crash five runs in six, and a clean run the sixth time.
 
-`addListener` now returns a `ListenerHandle` that owns the registration and
-ends it when destroyed; `[[nodiscard]]`, so a registration cannot be made
-without something owning it. The widget keeps the handle as a member declared
-after the document reference, so it is the first thing destroyed. The handle
-holds the registry through a `weak_ptr` because of a Qt ordering that is easy
-to forget: child widgets are deleted in `~QWidget`, which runs AFTER the
-window's own members - the `Document` among them - have been destroyed, so
-the viewport's handle dies after the document it points to and must find
-nothing there rather than something freed. `notify()` walks a copy of the ids
-so that a listener may end a registration while notifications run.
+`add_listener` now returns a `ListenerHandle` that owns the registration and
+ends it when dropped (`rust/crates/katana_cad/src/document.rs`); it is
+`#[must_use]`, so a registration cannot be made without something owning it.
+The handle holds the registry weakly (`Weak`), because the C++ met an
+ordering that is easy to forget: Qt deleted child widgets in `~QWidget`,
+which ran AFTER the window's own members - the `Document` among them - had
+been destroyed, so the viewport's handle died after the document it pointed
+to and had to find nothing there rather than something freed. The Rust keeps
+the weak hold, so a handle that outlives its document is still harmless
+whatever the order of drops. `notify()` walks a copy of the ids so that a
+listener may end a registration while notifications run.
 
-**Rejected:** `QPointer` or a Qt signal in place of the std::function. The
-Document is in `katana_cad`, which does not see Qt (Rule 4), and the fix
+**Rejected:** `QPointer` or a Qt signal in place of the C++ std::function. The
+Document is in `katana_cad`, which never saw Qt (Rule 4), and the fix
 belongs where the defect is - a registry that hands out an obligation should
 hand out the means to discharge it.
 
 `qt_import_12da_then_toggle_headless` runs the scenario; the proof that the
-mechanism works is in `test_cad.cpp`, since a run that survives by luck
+mechanism works is in `cad.rs`, since a run that survives by luck
 still passes the headless test.

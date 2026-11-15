@@ -1,140 +1,34 @@
-# The update engine's tests (src/katana_update, docs/update.md), the two executables
-# the end-to-end tests drive, and the checks of the build's own promises about the
-# update system: the pinned keys and the helper's imports.
-#
-# The suite is ONE target, katana_update_tests, so that a task adds a file and no list.
-# Every source below is the real thing now: the placeholders the skeleton put here (a
-# skipped case each) have all been replaced.
-
-katana_add_test_suite(update
-    LIBS katana_update
-    SOURCES
-        # What the skeleton promises (T1): the version reaches the library, the test keys,
-        # the seams a fake can implement.
-        test_skeleton.cpp
-        # The pure functions of the contract the skeleton finished itself (src/katana_update/
-        # contract.cpp, feed.cpp's addresses, arguments.cpp), and the constants of the headers.
-        # No later task replaces this file.
-        test_contract.cpp
-        # The test trust root (RFC 8032 vectors 1 and 2). In three executables, never installed.
-        test_key.cpp
-        # T4: versions, the manifest, the path rules.
-        test_version.cpp
-        test_manifest.cpp
-        test_paths.cpp
-        # T5: Ed25519, the trust gate.
-        test_signature.cpp
-        test_trust.cpp
-        # T6: the planner, inflate, the range merger, the records.
-        test_plan.cpp
-        test_inflate.cpp
-        test_ranges.cpp
-        test_state.cpp
-        # T7: the journal, the swap, recovery, the three crash loops.
-        test_journal.cpp
-        test_apply.cpp
-        test_recover.cpp
-        test_fault_loops.cpp
-        # T13: the credential stores.
-        test_credential.cpp
-        # T8: the feed, check, stage and preflight.
-        test_feed.cpp
-        test_check.cpp
-        test_stage.cpp
-        # T9: the helper program's process scan, registry and command line, and the swap driven
-        # through the real katana_updater_test (updater_stub.cpp stands in for Katana). Windows
-        # only; the other platforms' seams are T18's.
-        test_helper.cpp
-)
-# src/katana_update/credential_detail.hpp, the seams test_credential.cpp holds the stores to.
-target_include_directories(katana_update_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/katana_update")
-target_compile_definitions(katana_update_tests PRIVATE
-    # The version the project declares, to hold the library's KATANA_VERSION to.
-    KATANA_EXPECTED_VERSION="${PROJECT_VERSION}"
-    # The release trees, manifests and signed fixtures of tools/update_make_manifest.py (T3).
-    KATANA_UPDATE_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-
-# ---- the two executables the end-to-end tests drive (tests/update/update_e2e.py) -----------
-#
-# Neither is installed (tools/check_install_rules.cmake refuses them by name), and each
-# exists because the production programs cannot be given another trust root: the engine and
-# the helper take their keys as a PARAMETER, and only these pass a test key.
-#
-#   katana_update_e2e   the engine from a command line: check, plan, stage, preflight, launch
-#                       (e2e_main.cpp, T12)
-#   katana_updater_test the helper's own main.cpp, the same source, compiled with
-#                       KATANA_UPDATER_TEST_BUILD: the test key instead of the pinned ones, and
-#                       --die-at N (a FaultFs). The same link options, so what the tests run
-#                       is what ships, less the keys.
-add_executable(katana_update_e2e e2e_main.cpp test_key.cpp)
-katana_target_defaults(katana_update_e2e)
-target_link_libraries(katana_update_e2e PRIVATE katana_update katana_core)
-set_target_properties(katana_update_e2e PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
-
-get_property(_katana_updater_main GLOBAL PROPERTY KATANA_UPDATER_MAIN)
-get_property(_katana_updater_link_options GLOBAL PROPERTY KATANA_UPDATER_LINK_OPTIONS)
-if(_katana_updater_main)
-    add_executable(katana_updater_test "${_katana_updater_main}" test_key.cpp)
-    katana_target_defaults(katana_updater_test)
-    target_compile_definitions(katana_updater_test PRIVATE KATANA_UPDATER_TEST_BUILD=1)
-    target_link_libraries(katana_updater_test PRIVATE katana_update katana_core)
-    target_link_options(katana_updater_test PRIVATE ${_katana_updater_link_options})
-    set_target_properties(katana_updater_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
-endif()
-
-# ---- what test_helper.cpp runs (T9) -----------------------------------------------------------------
-#
-# The shipped helper, the helper with the test key, and a stand-in for Katana that the helper starts
-# for its health check and its relaunch (updater_stub.cpp). test_helper.cpp is part of
-# katana_update_tests, so the three are built before it. The stub is static like the helper, so
-# that it runs from an install with no toolchain on PATH. Never installed.
-#
-# The stub is a REAL program because a test must never start a file that is not one: Windows
-# answers a text file named .exe with a message box somebody has to click. Where a release's own
-# katana is such a file (the T3 fixtures'), the test helper is told to start the stub in its place
-# (--stand-in, src/katana_updater/main.cpp). And the test helper has no way to the machine's own
-# registry keys: its RunOnce entry goes under a key of the test's own, or nowhere.
-if(WIN32 AND TARGET katana_updater_test)
-    add_executable(katana_updater_stub updater_stub.cpp)
-    katana_target_defaults(katana_updater_stub)
-    target_link_options(katana_updater_stub PRIVATE ${_katana_updater_link_options})
-    set_target_properties(katana_updater_stub PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
-    target_compile_definitions(katana_update_tests PRIVATE
-        KATANA_UPDATER_EXE="$<TARGET_FILE:katana_updater>"
-        KATANA_UPDATER_TEST_EXE="$<TARGET_FILE:katana_updater_test>"
-        KATANA_UPDATER_STUB_EXE="$<TARGET_FILE:katana_updater_stub>")
-    add_dependencies(katana_update_tests katana_updater katana_updater_test katana_updater_stub)
-endif()
+# The update programs' tests (docs/update.md), and the checks of the promises the build makes
+# about the update system: the pinned keys, the helper's imports, no test key in a program that
+# ships, the Windows installer's script and the release tools. The programs are cargo's: the
+# four that ship and the three test programs of rust/crates/katana_updater - katana_updater_test
+# (the helper with the test key and the test options), katana_updater_stub (the stand-in for
+# Katana that the helper starts) and katana_update_e2e (the engine from a command line) - named
+# KATANA_PROGRAM_<name> (the top CMakeLists.txt). The engine's and the helper's own cases are
+# cargo's (rust/crates/katana_update/tests, rust/crates/katana_updater/tests).
 
 # ---- where a copy of Katana does not replace its own files (PX) -------------------------------------
 #
-# Linux, until its apply back end is written (task T18: src/katana_update/fsops_posix.cpp and
-# spawn_posix.cpp), and macOS for good, where a file changed inside Katana.app breaks the seal of
-# the bundle. UPDATE CHECK and UPDATE STATUS work there; a download, a preflight and the helper
-# refuse FOR THE PLATFORM and write nothing. Two things hold that, on those systems only (Windows
-# compiles neither: its seams are the real ones, with test_journal.cpp and test_helper.cpp):
+# Linux, until its apply back end is written (task T18), and macOS for good, where a file changed
+# inside Katana.app breaks the seal of the bundle. UPDATE CHECK and UPDATE STATUS work there; a
+# download, a preflight and the helper refuse FOR THE PLATFORM and write nothing. The engine's
+# side of that is cargo's (rust/crates/katana_update/tests); this is the helper's, on those
+# systems only (Windows has the real seams):
 #
-#   test_platform.cpp              the engine and its seams, as cases of katana_update_tests
 #   check_platform_refusal.cmake   the helper that ships and the helper with the test key, each
 #                                  RUN with its swap line and with --recover: exit 13,
 #                                  reason=platform, and the test's folder listed afterwards
 #
-# When T18 writes the Linux back end the two script tests stay for macOS (if(APPLE)), and
-# test_platform.cpp says which of its cases do.
+# When T18 writes the Linux back end the two script tests stay for macOS (if(APPLE)).
 if(NOT WIN32)
-    target_sources(katana_update_tests PRIVATE test_platform.cpp)
     foreach(_program IN ITEMS katana_updater katana_updater_test)
-        if(TARGET ${_program})
-            add_test(NAME ${_program}_refuses_for_the_platform_and_writes_nothing
-                COMMAND ${CMAKE_COMMAND} "-DHELPER=$<TARGET_FILE:${_program}>"
-                        "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/platform_refusal/${_program}"
-                        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_platform_refusal.cmake")
-            set_tests_properties(${_program}_refuses_for_the_platform_and_writes_nothing PROPERTIES
-                PASS_REGULAR_EXPRESSION "refused a swap and a recovery for the platform, and wrote nothing"
-                FAIL_REGULAR_EXPRESSION "CMake Error")
-        endif()
+        add_test(NAME ${_program}_refuses_for_the_platform_and_writes_nothing
+            COMMAND ${CMAKE_COMMAND} "-DHELPER=${KATANA_PROGRAM_${_program}}"
+                    "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/platform_refusal/${_program}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_platform_refusal.cmake")
+        set_tests_properties(${_program}_refuses_for_the_platform_and_writes_nothing PROPERTIES
+            PASS_REGULAR_EXPRESSION "refused a swap and a recovery for the platform, and wrote nothing"
+            FAIL_REGULAR_EXPRESSION "CMake Error")
     endforeach()
 endif()
 
@@ -253,58 +147,32 @@ add_test(NAME updater_import_check_names_the_gcc_runtime
 katana_phrase(_phrase "not the operating system's: libgcc_s_seh-1[.]dll, libstdc[+][+]-6[.]dll, libwinpthread-1[.]dll")
 set_tests_properties(updater_import_check_names_the_gcc_runtime PROPERTIES
     PASS_REGULAR_EXPRESSION "${_phrase}")
-if(WIN32 AND CMAKE_OBJDUMP)
+# objdump is looked for where the C++ build found it beside the compiler: with the runtime's
+# programs (MSYS2's bin), else on PATH.
+if(WIN32)
+    find_program(KATANA_OBJDUMP NAMES objdump HINTS "${KATANA_RUNTIME_BIN}"
+        DOC "objdump, which reads the programs' import tables")
+endif()
+if(WIN32 AND KATANA_OBJDUMP)
     foreach(_program IN ITEMS katana_updater katana_updater_test)
-        if(TARGET ${_program})
-            add_test(NAME ${_program}_imports_only_os_dlls
-                COMMAND ${CMAKE_COMMAND} "-DOBJDUMP=${CMAKE_OBJDUMP}" "-DPROGRAM=$<TARGET_FILE:${_program}>"
-                        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
-            set_tests_properties(${_program}_imports_only_os_dlls PROPERTIES
-                PASS_REGULAR_EXPRESSION "all of them the operating system's"
-                FAIL_REGULAR_EXPRESSION "CMake Error")
-        endif()
+        add_test(NAME ${_program}_imports_only_os_dlls
+            COMMAND ${CMAKE_COMMAND} "-DOBJDUMP=${KATANA_OBJDUMP}" "-DPROGRAM=${KATANA_PROGRAM_${_program}}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
+        set_tests_properties(${_program}_imports_only_os_dlls PROPERTIES
+            PASS_REGULAR_EXPRESSION "all of them the operating system's"
+            FAIL_REGULAR_EXPRESSION "CMake Error")
     endforeach()
-endif()
-
-# ---- the link, proved (tests/update/link_probe.cpp) --------------------------------------
-#
-# The import check above speaks for what katana_updater CARRIES, and of the two libraries that
-# is OpenSSL alone: the helper checks signatures and never inflates (a release is inflated
-# when it is staged, by the program that downloads it), so the linker takes nothing of zlib
-# into it and its check would pass on a link line that named zlib's DLL. This executable uses
-# what the engine uses - Ed25519 through EVP, raw inflate - and zlib's crc32 as well (the
-# engine's own CRC-32 is the journal's, and it calls none of zlib's), through the same third-party
-# target and the same link options as the helper, so the import check on IT is a check of the
-# whole link line (a static OpenSSL and a static zlib, nothing of the toolchain's DLLs), and
-# running it is a check that the static libraries work. Never installed.
-add_executable(katana_update_link_probe link_probe.cpp)
-katana_target_defaults(katana_update_link_probe)
-target_link_libraries(katana_update_link_probe PRIVATE katana_update_third_party)
-if(_katana_updater_link_options)
-    target_link_options(katana_update_link_probe PRIVATE ${_katana_updater_link_options})
-endif()
-set_target_properties(katana_update_link_probe PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
-add_test(NAME update_link_probe_verifies_ed25519_inflates_and_checksums
-    COMMAND katana_update_link_probe)
-if(WIN32 AND CMAKE_OBJDUMP)
-    add_test(NAME katana_update_link_probe_imports_only_os_dlls
-        COMMAND ${CMAKE_COMMAND} "-DOBJDUMP=${CMAKE_OBJDUMP}"
-                "-DPROGRAM=$<TARGET_FILE:katana_update_link_probe>"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_updater_imports.cmake")
-    set_tests_properties(katana_update_link_probe_imports_only_os_dlls PROPERTIES
-        PASS_REGULAR_EXPRESSION "all of them the operating system's"
-        FAIL_REGULAR_EXPRESSION "CMake Error")
 endif()
 
 # ---- no shipped program carries a test key (tests/update/check_no_test_keys.cmake) ---------
 #
-# trust.hpp promises that the trust root is a parameter and only the test executables pass a
-# test key. This looks at the bytes: the four programs that ship must contain none of the
-# RFC 8032 keys of test_key.hpp, and the two test executables that DO link them are the
-# controls, which fail the check unless it sees the keys - so "absent" is not a scan that
-# cannot see. The key list is read from test_key.hpp, so there is one.
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/test_key.hpp" _katana_test_key_header)
+# trust.rs promises that the trust root is a parameter and only the test programs pass a test
+# key. This looks at the bytes: the four programs that ship must contain none of the RFC 8032
+# keys of test_keys.txt, and the two test programs that DO carry them are the controls, which
+# fail the check unless it sees the keys - so "absent" is not a scan that cannot see. The key
+# list is read from test_keys.txt, as rust/crates/katana_updater/tests/shipped.rs reads it, so
+# there is one.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/test_keys.txt" _katana_test_key_header)
 string(REGEX MATCHALL "\"[0-9a-f]+\"" _katana_quoted_hex "${_katana_test_key_header}")
 set(_katana_test_keys "")
 foreach(_quoted IN LISTS _katana_quoted_hex)
@@ -316,7 +184,7 @@ foreach(_quoted IN LISTS _katana_quoted_hex)
 endforeach()
 list(LENGTH _katana_test_keys _katana_test_key_count)
 if(NOT _katana_test_key_count EQUAL 4)
-    message(FATAL_ERROR "tests/update/test_key.hpp should hold four 64-digit keys (two seeds, "
+    message(FATAL_ERROR "tests/update/test_keys.txt should hold four 64-digit keys (two seeds, "
         "two public keys); found ${_katana_test_key_count}. check_no_test_keys.cmake reads them from there.")
 endif()
 list(JOIN _katana_test_keys "," _katana_test_keys_argument)
@@ -325,9 +193,7 @@ list(JOIN _katana_test_keys "," _katana_test_keys_argument)
 # this one only reads bytes (tools/check_program_tests.cmake explains).
 set(_katana_shipped_programs "")
 foreach(_program IN ITEMS katana katana_cli katana_mcp katana_updater)
-    if(TARGET ${_program})
-        string(APPEND _katana_shipped_programs "$<TARGET_FILE:${_program}>\n")
-    endif()
+    string(APPEND _katana_shipped_programs "${KATANA_PROGRAM_${_program}}\n")
 endforeach()
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/shipped_programs_$<CONFIG>.txt"
     CONTENT "${_katana_shipped_programs}")
@@ -339,33 +205,29 @@ add_test(NAME update_test_keys_are_in_no_shipped_program
 set_tests_properties(update_test_keys_are_in_no_shipped_program PROPERTIES
     PASS_REGULAR_EXPRESSION "No test key in" FAIL_REGULAR_EXPRESSION "CMake Error")
 # And the check on a list that DOES hold a program with the keys: it must refuse, naming it.
-if(TARGET katana_updater_test)
-    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/a_program_with_test_keys_$<CONFIG>.txt"
-        CONTENT "$<TARGET_FILE:katana_updater_test>\n")
-    add_test(NAME update_test_keys_check_refuses_a_list_holding_a_program_that_has_them
-        COMMAND ${CMAKE_COMMAND}
-                "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/a_program_with_test_keys_$<CONFIG>.txt"
-                "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=absent
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
-    katana_phrase(_phrase "A shipped program contains a test key")
-    set_tests_properties(update_test_keys_check_refuses_a_list_holding_a_program_that_has_them
-        PROPERTIES PASS_REGULAR_EXPRESSION "${_phrase}")
-endif()
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/a_program_with_test_keys_$<CONFIG>.txt"
+    CONTENT "${KATANA_PROGRAM_katana_updater_test}\n")
+add_test(NAME update_test_keys_check_refuses_a_list_holding_a_program_that_has_them
+    COMMAND ${CMAKE_COMMAND}
+            "-DPROGRAM_LIST=${CMAKE_CURRENT_BINARY_DIR}/a_program_with_test_keys_$<CONFIG>.txt"
+            "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=absent
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
+katana_phrase(_phrase "A shipped program contains a test key")
+set_tests_properties(update_test_keys_check_refuses_a_list_holding_a_program_that_has_them
+    PROPERTIES PASS_REGULAR_EXPRESSION "${_phrase}")
 foreach(_control IN ITEMS katana_update_e2e katana_updater_test)
-    if(TARGET ${_control})
-        add_test(NAME update_test_keys_control_is_found_in_${_control}
-            COMMAND ${CMAKE_COMMAND} "-DPROGRAM=$<TARGET_FILE:${_control}>"
-                    "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=present
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
-        set_tests_properties(update_test_keys_control_is_found_in_${_control} PROPERTIES
-            PASS_REGULAR_EXPRESSION "Control: [0-9]+ of 8 forms found" FAIL_REGULAR_EXPRESSION "CMake Error")
-    endif()
+    add_test(NAME update_test_keys_control_is_found_in_${_control}
+        COMMAND ${CMAKE_COMMAND} "-DPROGRAM=${KATANA_PROGRAM_${_control}}"
+                "-DKEYS=${_katana_test_keys_argument}" -DEXPECT=present
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_no_test_keys.cmake")
+    set_tests_properties(update_test_keys_control_is_found_in_${_control} PROPERTIES
+        PASS_REGULAR_EXPRESSION "Control: [0-9]+ of 8 forms found" FAIL_REGULAR_EXPRESSION "CMake Error")
 endforeach()
 
 # ---- the end-to-end tests, and the loopback fake feed (T12) --------------------------------
 #
 # update_e2e.py drives tools/update_fake_feed.py (stdlib http.server, port 0, proxies off)
-# and the two executables above; CLAUDE.md, section 4, says a test may start its own server
+# and the update programs; CLAUDE.md, section 4, says a test may start its own server
 # on 127.0.0.1. Registered by e2e.cmake, beside this file, so that task adds them without
 # editing this one (it needs Python, which is optional: Python3_Interpreter_FOUND).
 file(GLOB _katana_update_e2e_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/e2e*.cmake")
@@ -492,11 +354,6 @@ endif()
 #                                           passes as quietly as one that finds none. The last
 #                                           case is CPack's own stock template, which asks for
 #                                           administrator rights and writes machine-wide
-#   packaging_nsis_installer_builds_from_the_real_configuration
-#                                           the build's real CPackConfig.cmake over a small tree,
-#                                           makensis included: the script CPack generated is
-#                                           checked and the installer is compiled (Windows with
-#                                           NSIS, which is where `package` makes an installer)
 #
 # and tests/update/run_nsis_uninstaller.cmake RUNS the part of the uninstaller that the text
 # cannot vouch for, the reader of the installed manifest and the filter in front of each delete:
@@ -523,11 +380,12 @@ endif()
 # docs/release.md, "The Windows installer".
 set(_katana_nsis_template "${PROJECT_SOURCE_DIR}/cmake/NSIS.template.in")
 set(_katana_nsis_check "${CMAKE_CURRENT_SOURCE_DIR}/check_nsis_script.cmake")
-# Where the helper names its RunOnce value, which the uninstaller must remove under that name.
-set(_katana_nsis_registry_header "${PROJECT_SOURCE_DIR}/include/katana/update/registry.hpp")
+# Where the helper names its RunOnce value, which the uninstaller must remove under that name
+# (RUN_ONCE_NAME).
+set(_katana_nsis_registry_source "${PROJECT_SOURCE_DIR}/rust/crates/katana_update/src/registry.rs")
 add_test(NAME packaging_nsis_template_is_per_user
     COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}"
-            "-DREGISTRY_HEADER=${_katana_nsis_registry_header}" -P "${_katana_nsis_check}")
+            "-DREGISTRY_SOURCE=${_katana_nsis_registry_source}" -P "${_katana_nsis_check}")
 set_tests_properties(packaging_nsis_template_is_per_user PROPERTIES
     PASS_REGULAR_EXPRESSION "Installer script [(]the template with sample values[)]: per user"
     FAIL_REGULAR_EXPRESSION "CMake Error")
@@ -535,7 +393,7 @@ function(katana_add_nsis_mutation mutation phrase)
     katana_phrase(_regex "${phrase}")
     add_test(NAME packaging_nsis_check_catches_${mutation}
         COMMAND ${CMAKE_COMMAND} "-DTEMPLATE=${_katana_nsis_template}"
-                "-DREGISTRY_HEADER=${_katana_nsis_registry_header}" -DMUTATE=${mutation}
+                "-DREGISTRY_SOURCE=${_katana_nsis_registry_source}" -DMUTATE=${mutation}
                 -P "${_katana_nsis_check}")
     set_tests_properties(packaging_nsis_check_catches_${mutation} PROPERTIES
         PASS_REGULAR_EXPRESSION "${_regex}")
@@ -622,26 +480,10 @@ if(EXISTS "${_katana_cpack_stock_template}")
         PASS_REGULAR_EXPRESSION "${_regex}")
 endif()
 if(WIN32)
-    # The search cmake/KatanaPackaging.cmake makes, made here too: that file is included after
-    # the tests are added, so on a first configure its answer is not in the cache yet, and the
-    # tests below would be missing from that configure without a word.
+    # makensis, looked for with the runtime's programs (MSYS2's bin) and on PATH.
     find_program(KATANA_MAKENSIS NAMES makensis HINTS "${KATANA_RUNTIME_BIN}")
 endif()
 if(WIN32 AND KATANA_MAKENSIS)
-    add_test(NAME packaging_nsis_installer_builds_from_the_real_configuration
-        COMMAND ${CMAKE_COMMAND}
-                "-DCPACK_COMMAND=${CMAKE_CPACK_COMMAND}"
-                "-DCPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
-                "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/nsis_package"
-                "-DCHECK=${_katana_nsis_check}"
-                "-DREGISTRY_HEADER=${_katana_nsis_registry_header}"
-                "-DEXPECT_VERSION=${PROJECT_VERSION}"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/build_nsis_package.cmake")
-    set_tests_properties(packaging_nsis_installer_builds_from_the_real_configuration PROPERTIES
-        PASS_REGULAR_EXPRESSION "Installer built from the real configuration"
-        FAIL_REGULAR_EXPRESSION "CMake Error"
-        TIMEOUT 300)
-
     # The uninstaller's file removal, run. Each test has a folder of its own (they run side by
     # side) and names no folder outside it. NSIS takes the folder as the unquoted end of a
     # command line, which CMake cannot give it when the path has a space

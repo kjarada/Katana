@@ -10,7 +10,7 @@
 # first hidden. Both are drawn in the default style, Standard.
 add_test(NAME qt_the_surfaces_panel_copies_the_picked_surface_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=>SURFACE FROM RASTER 1 NAME ground|*terrainSurfacesPanel|%SurfacesDock|surfacesTable=ground|!surfacesCopy|>SURFACE HIDE ground|>SURFACE LIST"

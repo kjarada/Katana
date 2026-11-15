@@ -1,8 +1,8 @@
 # Mathematics and geometry
 
-`katana_math` (header-only) and `katana_geometry` (static library). These are
-the foundation every other module computes on, and they depend on nothing but
-the standard library.
+The crates `katana_math` and `katana_geometry` (`rust/crates/katana_math/`,
+`rust/crates/katana_geometry/`). These are the foundation every other module
+computes on, and they depend on nothing but the standard library.
 
 ## Purpose
 
@@ -13,21 +13,21 @@ polygon algorithms and the curve-editing operations behind the CAD commands.
 
 ## Data model
 
-All types are plain values with public data, default construction and
-`constexpr` operations where possible. They are small enough to pass by value,
+All types are plain values with public data, a `Default` and `const`
+operations where possible. They are small enough to pass by value,
 and nothing in either module allocates except the containers that obviously do
 (`Polyline2::vertices`, triangulation output).
 
 | Type | Notes |
 |---|---|
-| `Vec2`, `Vec3`, `Vec4` | `operator==` is exact; use `nearlyEqual` for tolerance |
+| `Vec2`, `Vec3`, `Vec4` | `==` is exact; use `nearly_equal` for tolerance |
 | `Mat2`, `Mat3`, `Mat4` | row-major, acting on column vectors: `v' = M * v` |
 | `Quaternion` | `(x, y, z, w)`, Hamilton convention, `w` scalar |
 | `Transform` | translation × rotation × scale, applied as `T(R(S(p)))` |
 | `Plane`, `Ray`, `AABB` | `AABB` default-constructs empty (inverted infinite bounds) so it can be grown |
 | `Point2`, `Line2`, `Segment2`, `Circle2`, `Arc2`, `Polyline2`, `Rectangle2`, `Triangle2`, `Box2` | 2D drafting primitives |
 | `Segment3`, `Triangle3` | 3D, used by terrain and picking |
-| `Curve2` | `variant<Segment2, Arc2, Circle2>`, the editable curve types |
+| `Curve2` | an enum of `Segment2`, `Arc2` and `Circle2`, the editable curve types |
 
 Conventions, applied everywhere:
 
@@ -41,22 +41,22 @@ Conventions, applied everywhere:
 
 ## Numerical assumptions
 
-All tolerances come from `math::tolerance` — see
+All tolerances come from `katana_math::numerics::tolerance` — see
 [architecture.md](architecture.md) for the table and its justification. Within
 these two modules specifically:
 
 * **Parallelism** is decided on the sine of the angle between directions
-  (`|u × v| ≤ kAngular · |u| · |v|`), which is scale-invariant. Lines meeting at
-  less than `kAngular` are reported parallel rather than producing an
+  (`|u × v| ≤ ANGULAR · |u| · |v|`), which is scale-invariant. Lines meeting at
+  less than `ANGULAR` are reported parallel rather than producing an
   intersection point millions of units away that no user could have intended.
 * **Singularity** of a matrix is decided by comparing `|det|` against
-  `kAbsolute` times the product of the row norms (a Hadamard-style bound), so
+  `ABSOLUTE` times the product of the row norms (a Hadamard-style bound), so
   the test is invariant to overall scale: a well-conditioned matrix scaled by
   1e-9 is still invertible.
-* **Lengths** of `Vec2` and `Vec3` use `std::hypot`, which does not overflow or
+* **Lengths** of `Vec2` and `Vec3` use `f64::hypot`, which does not overflow or
   underflow for extreme components; `Vec2(3e200, 4e200).length()` is exactly
   `5e200`. `Vec4` and `Quaternion` use the square root of the squared length
-  (this said every length used `std::hypot`).
+  (this said every length used `hypot`).
 * **Chord accuracy** near tangency uses the factored form
   `sqrt((r - d)(r + d))` rather than `sqrt(r² - d²)`, which loses precision when
   `d ≈ r` — exactly the case that matters for a near-tangent line.
@@ -86,28 +86,28 @@ The cases that make this code non-trivial are all covered by tests: parallel,
 collinear-overlapping, collinear-touching, collinear-with-a-gap, zero-length
 operands, shared endpoints, T-junctions, external and internal tangency,
 concentric and coincident circles, arcs that share a supporting circle, and
-nearly parallel lines at the `kAngular` boundary.
+nearly parallel lines at the `ANGULAR` boundary.
 
 ### Polygons
 
-`orientation`, `isConvex`, `isSimple`, `convexHull` (Andrew's monotone chain),
+`orientation`, `is_convex`, `is_simple`, `convex_hull` (Andrew's monotone chain),
 `simplify` (Douglas–Peucker), `clip` of a segment to a box (Liang–Barsky),
-`clipPolygon` against a convex region (Sutherland–Hodgman), and `triangulate`
+`clip_polygon` against a convex region (Sutherland–Hodgman), and `triangulate`
 (ear clipping).
 
 `triangulate` returns counter-clockwise index triples regardless of input
 winding, and fails with `TriangulationFailure` — naming the number of remaining
 vertices — when no ear can be found, which usually means the polygon is not
 simple (a polygon that crosses itself can still be cut, one triangle of it wound
-clockwise: `isSimple` is the check for a caller that cannot rule it out). It
+clockwise: `is_simple` is the check for a caller that cannot rule it out). It
 also fails, in either mode, for a polygon that is open, has fewer than three
 vertices, has no area, or has a vertex that is not finite — a NaN made every
 comparison false, which read as "convex and unblocked". It is O(n²); that is
 adequate for drafting polygons and is documented rather than hidden. Polygons
-with holes and boolean set operations are **not** implemented; `clipPolygon`
+with holes and boolean set operations are **not** implemented; `clip_polygon`
 requires a convex clip region and says so.
 
-A vertex whose two edges run straight on (a turn within `kAngular`, the one test
+A vertex whose two edges run straight on (a turn within `ANGULAR`, the one test
 of collinearity here) is handled by a mode, `CollinearVertices`. The default,
 `Skip`, drops it when the ear search meets it before any ear is cut round it —
 all a flat fill needs; the triangles still cover the polygon, and a vertex that
@@ -120,7 +120,7 @@ quads of a swept or extruded side at every corner they use — the solids of the
 road objects, `docs/road_objects.md` — where a corner dropped from the cap is a
 T-junction and the solid is open. Where no corner is straight the two modes cut
 the same ears in the same order. *Rejected: a second ear clipper beside this
-one* in `cad::road`, which the road objects first had: it decided a straight
+one* in `katana_cad::road`, which the road objects first had: it decided a straight
 corner by an exact zero where this one uses the angular tolerance, answered a
 polygon it could not fill with an empty list where this one says why, and the
 two would have drifted.
@@ -154,17 +154,18 @@ distinct arguments. Callers own all inputs and outputs.
 
 ## Performance
 
-Operations are O(1) except where noted: `triangulate` and `isSimple` are O(n²),
-`convexHull` is O(n log n), `simplify` is O(n log n) typical. Arc bounding boxes
+Operations are O(1) except where noted: `triangulate` and `is_simple` are O(n²),
+`convex_hull` is O(n log n), `simplify` is O(n log n) typical. Arc bounding boxes
 check the four cardinal directions rather than sampling.
 
-Measured on a 16-thread 2.5 GHz x86-64, Release, single-threaded
-(`benchmarks/bench_math.cpp` and `bench_geometry.cpp`; run them with
-`cmake --build <dir> --target run-benchmarks`):
+Measured on a 16-thread 2.5 GHz x86-64, Release, single-threaded, in the C++
+build (its `bench_math` and `bench_geometry` benchmarks, removed with the C++
+tree; the Rust port carries the same algorithms and has not been re-measured,
+`docs/performance.md`):
 
 | Operation | Throughput / time |
 |---|---|
-| `transformPoint` through a `Mat4` | 600–730 M points/s |
+| `transform_point` through a `Mat4` | 600–730 M points/s |
 | `Quaternion::rotate` | 437 M points/s |
 | `Mat4::inverse` | 17 ns |
 | segment/segment intersection | 26–29 M pairs/s |
@@ -172,14 +173,15 @@ Measured on a 16-thread 2.5 GHz x86-64, Release, single-threaded
 | `Polyline2::area` | 390–410 M vertices/s |
 | point-in-polygon, 1024-vertex ring | 11.6 µs per probe |
 | `triangulate`, 256 / 1024 vertices | 133 µs / 1.76 ms |
-| `convexHull`, 65 536 points | 5.6 ms |
+| `convex_hull`, 65 536 points | 5.6 ms |
 | `simplify`, 4096 vertices | 565 µs |
 | polyline `offset`, 4096 vertices | 283 µs |
 | `fillet` | 92 ns |
 
 Two numbers set expectations for later phases. `triangulate` grows quadratically
-— 13× the time for 4× the vertices — so terrain-scale triangulation uses CGAL's
-constrained Delaunay rather than this routine, which exists for drafting-scale
+— 13× the time for 4× the vertices — so terrain-scale triangulation uses the terrain
+layer's constrained Delaunay (spade, behind
+`rust/crates/katana_terrain/src/cdt_backend.rs`) rather than this routine, which exists for drafting-scale
 polygons. And point-in-polygon is O(n) twice over (a boundary-distance pass and
 a crossing-number pass); at 11.6 µs against a 1024-vertex ring it is comfortably
 inside the 16 ms selection target (`docs/architecture.md`, "Performance
@@ -188,7 +190,7 @@ was the call a spatial index should accelerate first; the spatial index is a
 broad phase for picking, snapping, box selection and repaint and does not touch
 `Polyline2::classify`, which is still the O(n) pair.)
 
-`isSimple`, `clipPolygon` and `Rectangle2::closestPoint` were optimised on
+`is_simple`, `clip_polygon` and `Rectangle2::closest_point` were optimised on
 2026-09-23, measured, below; nothing else here has been, per Rules 5
 and 6 (`docs/architecture.md`) — tests first, profile before optimising.
 
@@ -196,19 +198,19 @@ and 6 (`docs/architecture.md`) — tests first, profile before optimising.
 
 | Condition | Result |
 |---|---|
-| Singular matrix | `inverse()` returns `nullopt` |
-| Zero-length direction | `normalized()` returns the zero vector; `Line2::through` returns `nullopt` |
-| Collinear points | `Plane::fromPoints`, `Triangle2::circumcircle`, `Arc2::throughPoints` return `nullopt` |
-| Degenerate triangle | `barycentric` returns `nullopt` |
+| Singular matrix | `inverse()` returns `None` |
+| Zero-length direction | `normalized()` returns the zero vector; `Line2::through` returns `None` |
+| Collinear points | `Plane::from_points`, `Triangle2::circumcircle`, `Arc2::through_points` return `None` |
+| Degenerate triangle | `barycentric` returns `None` |
 | Non-simple polygon | `triangulate` returns `TriangulationFailure` |
-| Non-convex clip region | `clipPolygon` returns `InvalidGeometry` |
-| Offset distance too large for a circle/arc | `nullopt` or `InvalidGeometry` |
+| Non-convex clip region | `clip_polygon` returns `InvalidGeometry` |
+| Offset distance too large for a circle/arc | `None` or `InvalidGeometry` |
 | Fillet radius too large for the segments | `InvalidGeometry` |
 | Parallel segments filleted | `InvalidGeometry` — no corner exists |
 
 ## The clothoid (`Spiral2`)
 
-`include/katana/geometry/spiral2.hpp` is the transition curve every road and
+`rust/crates/katana_geometry/src/spiral2.rs` is the transition curve every road and
 railway standard uses: curvature changes linearly with distance, which is the
 path a vehicle follows when the wheel is turned at a steady rate. It is the
 first slice of the civil work (alignments, profiles, corridors), and the only
@@ -221,7 +223,7 @@ already exist.
 spiral from a straight into a curve of radius R. A real alignment also needs
 the transition between two curves of different radius, and the reverse spiral
 that leaves a curve. All three are one object with a start and an end
-curvature; `fromStraightToRadius` is a named constructor for the common case,
+curvature; `from_straight_to_radius` is a named constructor for the common case,
 not a separate type.
 
 **Quadrature, not the power series.** The texts give x and y as series in the
@@ -249,14 +251,14 @@ to credit evaluating symmetric Gauss-Legendre node pairs together; a sequential
 sum gives the same result, so the pairing is not what the test protects, and a
 libm whose `sin(-t)` is not exactly `-sin(t)` is what would break it.
 
-**`asArc()` exists so the constant-curvature case is not integrated.** A
+**`as_arc()` exists so the constant-curvature case is not integrated.** A
 spiral with `k0 == k1` is a circular arc, and the section and stationing code
 already has closed-form arc arithmetic. Reporting it as an `Arc2` lets that
 code use it. The quadrature would get the same answer; it would just be doing
 work for nothing.
 
-**Chords by the sagitta rule at the tightest radius.** `chordCountFor` applies
-the rule `cad::chordArc` uses, at `max(|k0|, |k1|)`, so every chord along the
+**Chords by the sagitta rule at the tightest radius.** `chord_count_for` applies
+the rule `katana_geometry::chording::chord_arc` uses, at `max(|k0|, |k1|)`, so every chord along the
 spiral is within tolerance and not only the average one.
 
 ### How it was tested
@@ -279,7 +281,7 @@ every digit quoted:
 
 Plus the closed forms: constant curvature lands on the circular arc's own
 points to 1e-12, zero curvature is a straight line, and a central difference
-of `pointAt` matches `tangentAt` to 1e-7 at four stations - which would fail
+of `point_at` matches `tangent_at` to 1e-7 at four stations - which would fail
 for a quadrature integrating the wrong function whatever the tables said.
 
 One expectation in the first draft of the tests was wrong: the chord count for
@@ -297,35 +299,35 @@ alignments that contain them, and `ALIGN` prints setting-out tables through
 them. (This section said nothing drew or stationed along a spiral, from before
 the alignment slice of the civil work.)
 
-## Chording curves (`chording.hpp`)
+## Chording curves (`chording.rs`)
 
 The sagitta rule - chords sized so none departs from the curve by more than a
-stated tolerance - lived in `cad::scene` as `chordArc` and `chordCircle`.
-When `Spiral2::chordCountFor` was written it grew its own copy of the same
+stated tolerance - lived in the C++ cad layer's scene builder as chordArc and
+chordCircle. When `Spiral2::chord_count_for` was written it grew its own copy of the same
 arithmetic, which is the second way of doing something that the working rules
-call a defect (`docs/architecture.md`, "One way of doing a thing"). The rule now lives in `geometry::chording`, the lowest layer
+call a defect (`docs/architecture.md`, "One way of doing a thing"). The rule now lives in `katana_geometry::chording`, the lowest layer
 that can see `Arc2`, and the scene builder, the spiral and the horizontal
 alignment all call it.
 
-**Why the `cad` names were deleted rather than kept as forwarders.** The first
-attempt kept `cad::chordArc` forwarding to `geometry::chordArc`. That does not
-compile: the argument is an `Arc2` in `katana::geometry`, so argument-dependent
-lookup finds the geometry function from any call site in `katana::cad`, and an
-unqualified call becomes ambiguous between the two identical signatures. Two
-functions with the same name and signature in two namespaces of the same
-program are a trap for every future caller, not a convenience for the current
-ones, so the `cad` pair went and their three tests moved to `tests/geometry`
-with the code. `sagittaChordCount` is exposed alongside, so that a caller which
+**Why the `cad` names were deleted rather than kept as forwarders** (a
+decision of the C++ build, kept by the port). The first attempt kept the cad
+layer's chordArc forwarding to the geometry layer's. That did not compile in
+C++: argument-dependent lookup found the geometry function from any call site
+in the cad namespace, and an unqualified call became ambiguous between the two
+identical signatures. Two functions with the same name and signature in two
+modules of the same program are a trap for every future caller, not a
+convenience for the current ones, so the `cad` pair went and their three tests
+moved to the geometry layer's tests with the code. `sagitta_chord_count` is exposed alongside, so that a caller which
 only needs the number - the spiral - uses the same clamps (a 1e-12 floor on
 tolerance / radius, a 0.5 cap, at most 8192 chords) as one that needs the
 points.
 
-A fourth test pins the two callers to each other: `chordArc` on a 300 m arc
-sweeping 0.3 rad at 1 mm yields exactly `sagittaChordCount(300, 0.3, 0.001) + 1`
+A fourth test pins the two callers to each other: `chord_arc` on a 300 m arc
+sweeping 0.3 rad at 1 mm yields exactly `sagitta_chord_count(300, 0.3, 0.001) + 1`
 points, and that count is 59 - the same 59 the spiral test derives for 90 m
 on the same radius, because 90 m on r = 300 *is* a 0.3 rad sweep.
 
-## The horizontal alignment (`alignment.hpp`)
+## The horizontal alignment (`alignment.rs`)
 
 The plan centreline of a road, railway, pipe or channel: the second slice of
 the civil work, built on the clothoid and the shared chording rule.
@@ -335,7 +337,7 @@ the civil work, built on the clothoid and the shared chording rule.
 **Defined by PIs, with the elements derived.** An alignment is a sequence of
 points of intersection - the corners of the tangent polygon - each carrying
 the radius that rounds it and the lengths of the spirals into and out of the
-curve. `solveAlignment` derives the tangents, spirals and arcs. The
+curve. `solve_alignment` derives the tangents, spirals and arcs. The
 alternative, storing the element list directly, was rejected because a list
 can be edited into one with a gap or a kink between two elements, after which
 every stationing and section query has to decide what that means. A PI cannot
@@ -372,7 +374,7 @@ every station query at its joint ambiguous, so it is skipped, and a test
 asserts that a reverse curve solves with no such element.
 
 **The central arc is built as a constant-curvature `Spiral2` and converted
-with `asArc()`.** The arc's centre and start angle then follow exactly the
+with `as_arc()`.** The arc's centre and start angle then follow exactly the
 conventions the spirals on either side use, instead of a second piece of
 centre arithmetic that could disagree with them by a sign.
 
@@ -380,7 +382,7 @@ centre arithmetic that could disagree with them by a sign.
 surveyed polyline has no curves at all; it must solve and station.
 
 **The station of a point is the foot of its nearest perpendicular**
-(`SolvedAlignment::stationOffset`, 2026-10-15, for the leaders that read a
+(`SolvedAlignment::station_offset`, 2026-10-15, for the leaders that read a
 station - `docs/annotation.md`). Each element is sampled every eighth of a
 turn of its curvature (one sample on a tangent), and each stretch where the
 point's distance AHEAD of the foot falls through zero is bisected to the last
@@ -391,16 +393,16 @@ nearest foot wins; two as near, the lower station. Outside a kink no
 perpendicular reaches the point, which is then at the PI, its offset the
 distance to it. Beyond either end there is no station at all: clamping to
 the end would make one up. Offset is positive LEFT, as
-`pointAtStationOffset` takes it. Rejected: projecting onto the chorded
+`point_at_station_offset` takes it. Rejected: projecting onto the chorded
 polyline (its station along a chord is short of the arc's), and Newton's
 method from a guess (it converges to the far side or off the element as
 readily as to the foot). Tested on hand-worked points of a straight line, a
-curve and a kink, and by undoing `pointAtStationOffset` inside every element
+curve and a kink, and by undoing `point_at_station_offset` inside every element
 of the spiralled alignments to 1e-8 m.
 
 ### What is refused, and why each names its PI
 
-Fewer than two PIs; consecutive PIs closer than `kCoordinate` (no tangent
+Fewer than two PIs; consecutive PIs closer than `COORDINATE` (no tangent
 direction); a reversal through 180 degrees at a PI with a radius (nothing can
 round it); spirals whose angles exceed the deflection (no central arc left);
 neighbouring curves whose tangent lengths overlap (the tangent between them
@@ -410,7 +412,7 @@ is which corner to move.
 
 ### In the application
 
-`entity::Alignment` is the third `NamedTable` (`docs/model.md`), holding the
+`katana_entity::Alignment` is the third `NamedTable` (`docs/model.md`), holding the
 PI definition and nothing else; the elements are derived on demand, so a
 stored alignment cannot be discontinuous, and `add()` solves the definition
 so one that cannot be built is refused naming its PI - including one arriving
@@ -425,10 +427,10 @@ rather than duplicating it. Details in `docs/cad.md`.
 ### Built on it since
 
 Profiles, corridor quantities and the corridor surface, and parcels are built;
-grading has an engine (`cad::gradeToSurface`) without a GUI route or a verb.
+grading has an engine (`katana_cad::grading::grade_to_surface`) without a GUI route or a verb.
 Corridors (`Corridor::alignment`) and road objects
 (`RoadObjectPlacement::alignment`) name an alignment BY NAME, and
-`deleteAlignment` still has no in-use guard: what names an alignment that is
+`delete_alignment` still has no in-use guard: what names an alignment that is
 gone is left out of the road model and its problem listed
 (`docs/road_objects.md`, "The drawing's record"). A leader's template may name
 one too (`{station.NAME}`), and its lines then say nothing once the alignment
@@ -438,7 +440,7 @@ alignment, so deleting the alignment leaves the section as it was cut. (This
 section listed profiles, corridors and parcels as not done, and then cited a
 dead name reference in the retired tiled viewport.)
 
-## The vertical alignment (`profile.hpp`)
+## The vertical alignment (`profile.rs`)
 
 Elevation against station along a horizontal alignment: the design grade line.
 Built the same way as the horizontal alignment and for the same reasons.
@@ -496,7 +498,7 @@ Every number is exact in decimal, so the tolerances are rounding only.
 
 ### In the application
 
-`entity::Alignment::vertical` holds the profile as an `optional`, because an
+`katana_entity::Alignment::vertical` holds the profile as an `optional`, because an
 alignment traced only to cut a section has no design and should not pretend
 to an empty one; `validate` solves it, so an unbuildable profile is refused
 naming its PVI, including one arriving from a file. Schema 8 stores
@@ -504,7 +506,7 @@ naming its PVI, including one arriving from a file. Schema 8 stores
 alignment with none comes back without one - a test proves that, because an
 empty profile would fail to solve and refuse the whole load. `ALIGN DESIGN`
 defines a profile, `PVI` appends, `PROFILE` prints it with its high and low
-points, and `cad::appendDesignProfile` adds it to a section as a series
+points, and `katana_cad::section::append_design_profile` adds it to a section as a series
 sampled at every ground station plus the profile's own key stations, so the
 section view draws design against ground and the low point of a sag lands
 where the water will. Details in `docs/cad.md`.
@@ -512,36 +514,36 @@ where the water will. Details in `docs/cad.md`.
 ### Built on it since
 
 Corridor cut and fill quantities between design and ground are integrated along
-the alignment (`cad::corridorQuantities`), which is what this section said was
+the alignment (`katana_cad::corridor::corridor_quantities`), which is what this section said was
 missing.
 
-## Rejecting early without changing the answer (`polygon.hpp`, `primitives2d.hpp`)
+## Rejecting early without changing the answer (`polygon.rs`, `primitives2d.rs`)
 
-`isSimple` is O(n^2) and runs on validation, so its constant matters: a
+`is_simple` is O(n^2) and runs on validation, so its constant matters: a
 512-vertex boundary took 3.2 ms and takes 0.80 ms. The saving is a bounding-box
 reject before the segment-segment intersection, with a margin of `4 *
 kGeometric` - **derived, not chosen**: `intersect()` reports a hit when the
-segments come within `2 * kGeometric` of each other, so two boxes further apart
+segments come within `2 * GEOMETRIC` of each other, so two boxes further apart
 than twice that cannot contain a reported intersection. Removing the margin
 fails two polygon tests, which was checked by removing it.
 
-`clipPolygon` swaps its two vertex buffers rather than move-assigning them, so
+`clip_polygon` swaps its two vertex buffers rather than move-assigning them, so
 Sutherland-Hodgman's per-clip-edge lists are allocated once instead of once per
-edge. `Rectangle2::closestPoint` walks a stack `std::array<Point2, 4>` instead
+edge. `Rectangle2::closest_point` walks a stack `std::array<Point2, 4>` instead
 of building a `std::vector` of corners on every call, and is 2.8x faster for
 it. This said it is called once per candidate entity on every pick and snap; it
 is not - `Rectangle2` is not an entity geometry, and in production it is only
-built by `fromCorners()` and turned into a polyline - so the saving is real but
+built by `from_corners()` and turned into a polyline - so the saving is real but
 lands nowhere hot.
 
-The benchmarks for all three are in `benchmarks/bench_geometry.cpp`; they did
-not exist when the changes were made, which is recorded in
+The benchmarks for all three were in the C++ build's `bench_geometry` (removed
+with the C++ tree); they did not exist when the changes were made, which is recorded in
 `docs/performance.md` as a process failure rather than a footnote.
 
-## The drawing curves (`curves2d.hpp`) and vertex editing (`polyline_vertices.hpp`)
+## The drawing curves (`curves2d.rs`) and vertex editing (`polyline_vertices.rs`)
 
 The owner asked on 2026-09-25 for "a professional drawing system, with full
-vertex control". Three shapes that `primitives2d.hpp` cannot hold came with
+vertex control". Three shapes that `primitives2d.rs` cannot hold came with
 it, each added as its own type rather than by widening one that exists
 (`docs/drawing.md` says which kind a polyline is stored as, and why):
 
@@ -573,10 +575,10 @@ it, each added as its own type rather than by widening one that exists
 Ellipses and splines are tessellated by adaptive subdivision that tests the
 midpoint AND both quarter points of each chord, since an S-shaped piece can
 pass through its own chord's middle; arcs keep the sagitta rule above.
-`kCurveChordTolerance` (1 mm) is the tolerance for callers with no view to
+`CURVE_CHORD_TOLERANCE` (1 mm) is the tolerance for callers with no view to
 ask - hit testing, sections, exports without curves.
 
-`polyline_vertices.hpp` is the arithmetic of vertex control: insert, delete,
+`polyline_vertices.rs` is the arithmetic of vertex control: insert, delete,
 move, heights, bulges, segment to arc and back, straighten, grade,
 interpolate, Douglas-Peucker weeding, densifying, merging, snapping to a
 grid, close and open, change of start, and filleting or chamfering one
@@ -596,5 +598,5 @@ ends on one implementation. Two decisions in it:
   end has none, because an invented height on a survey string is worse than
   a missing one.
 
-Tested in `tests/geometry/test_curves2d.cpp` and
-`tests/geometry/test_polyline_vertices.cpp`.
+Tested in `rust/crates/katana_geometry/tests/cases/curves2d.rs` and
+`rust/crates/katana_geometry/tests/cases/polyline_vertices.rs`.

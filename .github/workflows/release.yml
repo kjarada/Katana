@@ -8,8 +8,16 @@
 # tag (vX.Y.Z, matching project(Katana VERSION)) it publishes that release;
 # without one it builds and tests the packages and publishes nothing.
 #
-# Each job runs the same commands a person runs on that platform
-# (docs/building.md); nothing here is a second way of building.
+# Katana is Rust (docs/rust.md): each build job builds the cargo workspace,
+# runs cargo's tests and the test runner's (the root CMakeLists.txt, which
+# compiles nothing and runs the programs cargo built), and packages the four
+# programs with the packaging project (packaging/CMakeLists.txt, CPack). Each
+# job runs the same commands a person runs on that platform
+# (docs/building.md, docs/release.md "Packaging"); nothing here is a second way
+# of building. Until 2026-11-15 the jobs built the C++ with CMake; the steps,
+# their checks and the packages are the same, re-pointed at cargo's programs.
+# This workflow as it now stands has not been run (docs/release.md, "Not
+# done"): nothing of the port runs on Windows before the owner says so.
 #
 # Every action is named by the 40 digits of a commit, with the tag that
 # commit was read from as a comment on the line. A tag is whatever its
@@ -42,8 +50,8 @@ on:
 permissions:
   contents: read
 
-# A newer run waits for the running one rather than cancelling it: the
-# Windows build is most of an hour, and a cancelled one proves nothing.
+# A newer run waits for the running one rather than cancelling it: a build
+# job is most of an hour, and a cancelled one proves nothing.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -75,9 +83,11 @@ jobs:
       sequence: ${{ steps.version.outputs.sequence }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      # One place a version is written: project(Katana VERSION ...). A tag
-      # that disagrees with it would publish packages named for another
-      # version, so it fails here, before an hour of building.
+      # One place a version is written: project(Katana VERSION ...) of the
+      # root CMakeLists.txt, which katana_update's build.rs compiles into the
+      # programs and the packaging names the packages by. A tag that disagrees
+      # with it would publish packages named for another version, so it fails
+      # here, before an hour of building.
       - id: version
         env:
           INPUT_TAG: ${{ inputs.tag }}
@@ -93,8 +103,9 @@ jobs:
           fi
           # Where the release is published is where an installed copy looks
           # for the next one, so it is settled here, once: compiled into every
-          # program below (KATANA_UPDATE_REPO) and written into every update
-          # manifest. This repository unless the run names another.
+          # program below (KATANA_UPDATE_REPO in cargo's environment) and
+          # written into every update manifest. This repository unless the run
+          # names another.
           repo="${INPUT_PUBLISH_REPO:-$GITHUB_REPOSITORY}"
           if ! printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then
             echo "::error::publish_repo must be owner/name of a GitHub repository"
@@ -128,32 +139,34 @@ jobs:
           echo "elsewhere=$elsewhere" >> "$GITHUB_OUTPUT"
           echo "sequence=$sequence" >> "$GITHUB_OUTPUT"
           echo "Katana $version${tag:+, publishing $tag in $repo}, sequence $sequence"
-      # Every job below configures with KATANA_REQUIRE_UPDATE_KEYS=ON, which
-      # refuses the placeholder update keys: a program built with them can
-      # never be updated. This is that refusal asked for in the first
-      # minute, rather than after each toolchain is installed.
+      # Every build job below runs cargo with KATANA_REQUIRE_UPDATE_KEYS=ON,
+      # under which katana_update's build.rs refuses the placeholder update
+      # keys - a program built with them can never be updated - and packages
+      # with the same setting, which refuses programs not built with real
+      # ones. This is that refusal asked for in the first minute, rather than
+      # after each toolchain is installed.
       #
       # cmake/KatanaUpdateKeys.cmake is run as a script, but through a
       # script of two lines. The file is written for a configure, where the
-      # root CMakeLists.txt has set the policies of its minimum CMake before
-      # including it; a script starts with none set, and a CMake older than
-      # 4.0 - this runner's own is, the build jobs install a newer one - did
-      # not know the file's `if(... IN_LIST ...)`. The file now says the one
-      # policy that needs (CMP0057) itself, so it would run bare here too,
-      # but that was not tried under this runner's CMake and the two lines
-      # are what the run of 2026-10-14 passed through: they state the
-      # minimum the root CMakeLists.txt states and include the file (a
-      # relative path: a script's source directory is the one it is run
-      # from). Dropping them is for a run that can show it.
+      # including CMakeLists.txt has set the policies of its minimum CMake
+      # before including it; a script starts with none set, and a CMake older
+      # than 4.0 - this runner's own is - did not know the file's
+      # `if(... IN_LIST ...)`. The file now says the one policy that needs
+      # (CMP0057) itself, so it would run bare here too, but that was not
+      # tried under this runner's CMake and the two lines are what the run of
+      # 2026-10-14 passed through: they state the minimum the root
+      # CMakeLists.txt states and include the file (a relative path: a
+      # script's source directory is the one it is run from). Dropping them
+      # is for a run that can show it.
       #
       # Only a refusal the keys file itself states stops the run: CMake
       # reports those as `KatanaUpdateKeys.cmake:<line> (message)`. Anything
       # else - a CMake too old for that minimum, say - is this check failing
-      # to run, not the keys failing it, and each job's configure decides.
+      # to run, not the keys failing it, and each job's build decides.
       - name: Update keys
         run: |
           if ! command -v cmake > /dev/null; then
-            echo "::notice::no cmake on this runner: the update keys are first checked by each job's configure"
+            echo "::notice::no cmake on this runner: the update keys are first checked by each job's build"
             exit 0
           fi
           cmake --version | head -1
@@ -170,7 +183,7 @@ jobs:
             echo "::error::cmake/KatanaUpdateKeys.cmake does not hold update keys a release can be built with; its own words are above. The owner's key steps: docs/release.md, Update signing."
             exit 1
           fi
-          echo "::warning::The update keys could not be checked in this job: cmake stopped for a reason of its own, shown above. Each job's configure checks them."
+          echo "::warning::The update keys could not be checked in this job: cmake stopped for a reason of its own, shown above. Each job's build checks them."
 
   windows:
     name: ${{ matrix.name }}
@@ -181,27 +194,48 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # MSYS2 UCRT64 and GCC, as on the owner's machine (docs/building.md).
+          # MSYS2 UCRT64: its Rust (x86_64-pc-windows-gnu against UCRT) and
+          # GCC, which compiles the native shims, as on the owner's machine
+          # (docs/rust.md, "Windows, once the port works").
           - name: Windows x86-64
             runner: windows-2025
             msystem: UCRT64
-            compiler: g++.exe
             packages: gcc:p nsis:p
+            cc: gcc
+            cxx: g++
             package: win64
             nsis: msys2
-          # MSYS2 has no GCC for ARM64; its CLANGARM64 environment is clang
-          # and libc++, built for ARM64 Windows.
+          # MSYS2 has no GCC for ARM64; its CLANGARM64 environment is clang,
+          # libc++ and a Rust built for them (aarch64-pc-windows-gnullvm).
           - name: Windows ARM64
             runner: windows-11-arm
             msystem: CLANGARM64
-            compiler: clang++.exe
             packages: clang:p
+            cc: clang
+            cxx: clang++
             package: win-arm64
             # NSIS's own x86 build, which Windows on ARM runs emulated; the
             # installer it makes installs the ARM64 programs.
             nsis: chocolatey
+    # What a RELEASE is built with, for every cargo of the job alike - a
+    # setting given to one cargo and not the next would rebuild the workspace,
+    # and the tests would run against other programs than are packaged:
+    # warnings as errors; the update keys required to be real (katana_update's
+    # build.rs refuses the placeholders); the built-in customisation required
+    # to be there (katana_cad's build.rs refuses a build without it); and the
+    # repository an installed copy asks for the next version, the one this
+    # run publishes in. The packaging checks that all of it reached the
+    # programs (the Package step). The native shims are compiled by the
+    # environment's own compilers, so the C++ ABI is that of the GDAL and
+    # PDAL it links.
     env:
       HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      RUSTFLAGS: "-D warnings"
+      KATANA_REQUIRE_UPDATE_KEYS: "ON"
+      KATANA_REQUIRE_BUILTIN_CUSTOMISATION: "ON"
+      KATANA_UPDATE_REPO: ${{ needs.version.outputs.repo }}
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
     defaults:
       run:
         shell: msys2 {0}
@@ -213,12 +247,13 @@ jobs:
           update: true
           install: unzip
           pacboy: >-
-            ${{ matrix.packages }} cmake:p ninja:p python:p
-            qt6-base:p qt6-tools:p cgal:p eigen3:p boost:p gmp:p mpfr:p
-            proj:p gdal:p pdal:p nlohmann-json:p sqlite3:p
+            ${{ matrix.packages }} rust:p cmake:p ninja:p python:p
+            proj:p gdal:p pdal:p sqlite3:p curl:p
       - name: Toolchain
         run: |
-          "${{ matrix.compiler }}" --version | head -1
+          rustc --version
+          cargo --version
+          "$CXX" --version | head -1
           cmake --version | head -1
       - name: NSIS
         if: matrix.nsis == 'chocolatey'
@@ -228,71 +263,24 @@ jobs:
           if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress }
           if (-not (Test-Path $makensis)) { throw "makensis.exe is not at $makensis after installing NSIS" }
           "KATANA_MAKENSIS=$($makensis -replace '\\','/')" >> $env:GITHUB_ENV
-      # The release preset, with the compiler and prefix of the environment
-      # the action installed (the preset names C:/msys64/ucrt64, a
-      # developer's default). What makes it a RELEASE and not a developer's
-      # build: the update keys must be real ones, the repository an
-      # installed copy asks for the next version is the one this run
-      # publishes in, and the package says which build of its version it
-      # is - the run's sequence, which CPack writes beside the version into
-      # share/katana/install.json (cmake/KatanaPackaging.cmake,
-      # "install.json") and the Publish job into the release's update
-      # manifests.
-      #
-      # All three settings must have reached the project, not only its
-      # command line: CMake takes a -D the project has no use for with a
-      # warning and builds without it, and no program says which repository
-      # it asks. So the cache must hold each as the option the project
-      # declares (a -D nothing declares stays there as UNINITIALIZED), and
-      # the repository must be on the update library's compile line; the
-      # sequence is read again where it ends up, in the package (the smoke
-      # test). Through tr, and grep without -q: on Windows CMake writes
-      # these files with CR LF, and this shell runs with pipefail, which a
-      # grep leaving early would trip. The two files are read as bytes
-      # (LC_ALL=C): macOS's sed and tr stop at a byte that is no character
-      # of the locale.
-      - name: Configure
-        env:
-          UPDATE_REPO: ${{ needs.version.outputs.repo }}
-          UPDATE_SEQUENCE: ${{ needs.version.outputs.sequence }}
-        run: |
-          # An empty sequence would configure, and package a Katana that
-          # names its version alone, as a build outside this workflow does.
-          case "$UPDATE_SEQUENCE" in
-            '' | *[!0-9]*)
-              echo "::error::the Version job gave no sequence for the package's install record (got '$UPDATE_SEQUENCE')"
-              exit 1
-              ;;
-          esac
-          prefix=$(cygpath -m "$MINGW_PREFIX")
-          cmake --preset release \
-            -DCMAKE_CXX_COMPILER="$prefix/bin/${{ matrix.compiler }}" -DCMAKE_PREFIX_PATH="$prefix" \
-            ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} \
-            -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
-            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
-            -DKATANA_UPDATE_SEQUENCE="$UPDATE_SEQUENCE"
-          export LC_ALL=C
-          cache=build/release/CMakeCache.txt
-          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO" \
-            "KATANA_UPDATE_SEQUENCE:STRING=$UPDATE_SEQUENCE"; do
-            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
-              echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
-              exit 1
-            }
-          done
-          compiled=$(sed -n 's/.*-DKATANA_UPDATE_REPO=[^A-Za-z0-9 ]*\([A-Za-z0-9._/-]*\).*/\1/p' build/release/build.ninja | sort -u)
-          if [ "$compiled" != "$UPDATE_REPO" ]; then
-            echo "::error::the update library is compiled with KATANA_UPDATE_REPO '$compiled', not '$UPDATE_REPO': the programs would ask another repository for the next version"
-            exit 1
-          fi
+      # The workspace, the four programs among it, into rust/target/release.
+      # --locked: the committed rust/Cargo.lock is what is built.
       - name: Build
-        run: cmake --build build/release --parallel
+        run: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
       # The whole suite, on the machine the package is for: nothing is
-      # packaged from a build with a failing test (docs/testing.md).
+      # packaged from a build with a failing test (docs/testing.md). cargo's
+      # tests, then the runner's against the programs just built; the
+      # runner's after a failed cargo test too, so that one run gives both
+      # answers.
       - name: Test
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build/release --parallel "$(nproc)" --output-on-failure --timeout 900
+        run: |
+          status=0
+          cargo test --manifest-path rust/Cargo.toml --locked --workspace --release --no-fail-fast || status=$?
+          programs=$(cygpath -m "$PWD/rust/target/release")
+          cmake -S . -B build/tests -G Ninja -DKATANA_PROGRAMS="$programs" \
+            -DKATANA_RUNTIME_BIN="$(cygpath -m "$MINGW_PREFIX/bin")" || exit 1
+          ctest --test-dir build/tests --parallel "$(nproc)" --output-on-failure --timeout 900 || status=1
+          exit "$status"
       # Signing as the publisher (cmake/KatanaSign.cmake) when the repository
       # holds a code-signing certificate: WINDOWS_CERTIFICATE (the .pfx,
       # base64) and WINDOWS_CERTIFICATE_PASSWORD.
@@ -306,12 +294,62 @@ jobs:
           echo "$CERTIFICATE" | base64 -d > "$RUNNER_TEMP/katana.pfx"
           echo "KATANA_SIGN_PFX=$(cygpath -m "$RUNNER_TEMP/katana.pfx")" >> "$GITHUB_ENV"
           echo "KATANA_SIGN_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+      # The packaging project (packaging/CMakeLists.txt) with its preset, given
+      # the programs, the environment whose DLLs they load, the target the
+      # package is named for, and what makes it a RELEASE and not a
+      # developer's package: the update keys must be real ones, the programs
+      # must have been built for the repository this run publishes in, and the
+      # package says which build of its version it is - the run's sequence,
+      # which CPack writes beside the version into share/katana/install.json
+      # (cmake/KatanaPackaging.cmake, "install.json") and the Publish job into
+      # the release's update manifests. The configure reads back what
+      # katana_update's build script was given, and refuses programs built
+      # with placeholder keys, for another version or for another repository.
+      #
+      # All three settings must have reached the project, not only its
+      # command line: CMake takes a -D the project has no use for with a
+      # warning and goes on without it. So the cache must hold each as the
+      # option the project declares (a -D nothing declares stays there as
+      # UNINITIALIZED); the sequence is read again where it ends up, in the
+      # package (the smoke test). Through tr, and grep without -q: on Windows
+      # CMake writes the cache with CR LF, and this shell runs with pipefail,
+      # which a grep leaving early would trip. Read as bytes (LC_ALL=C), as
+      # the Unix job reads it.
       - name: Package
-        run: cmake --build build/release --target package
+        working-directory: packaging
+        env:
+          UPDATE_REPO: ${{ needs.version.outputs.repo }}
+          UPDATE_SEQUENCE: ${{ needs.version.outputs.sequence }}
+          PACKAGE_TARGET: ${{ matrix.package }}
+        run: |
+          # An empty sequence would configure, and package a Katana that
+          # names its version alone, as a package made outside this workflow does.
+          case "$UPDATE_SEQUENCE" in
+            '' | *[!0-9]*)
+              echo "::error::the Version job gave no sequence for the package's install record (got '$UPDATE_SEQUENCE')"
+              exit 1
+              ;;
+          esac
+          prefix=$(cygpath -m "$MINGW_PREFIX")
+          programs=$(cygpath -m "$(cd .. && pwd)/rust/target/release")
+          cmake --preset package -DKATANA_PROGRAMS="$programs" -DKATANA_RUNTIME_BIN="$prefix/bin" \
+            ${KATANA_MAKENSIS:+-DKATANA_MAKENSIS="$KATANA_MAKENSIS"} -DKATANA_PACKAGE_TARGET="$PACKAGE_TARGET" \
+            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
+            -DKATANA_UPDATE_SEQUENCE="$UPDATE_SEQUENCE"
+          export LC_ALL=C
+          cache=../build/package/CMakeCache.txt
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO" \
+            "KATANA_UPDATE_SEQUENCE:STRING=$UPDATE_SEQUENCE"; do
+            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
+              echo "::error::$cache does not hold $setting: the packaging did not take -D${setting%%:*}, and the package would be made without it"
+              exit 1
+            }
+          done
+          cmake --build ../build/package --target package
       # The zip is what a user downloads: unpacked with nothing of MSYS2 on
       # PATH, the command line must draw and save a drawing, read a CRS from
       # PROJ's database, import through PDAL and GDAL, and the window must
-      # build itself headless.
+      # draw itself headless.
       #
       # First what the package says of itself, in share/katana/install.json:
       # the target it is named for, the version, and this run's sequence -
@@ -354,7 +392,7 @@ jobs:
           sequence="${{ needs.version.outputs.sequence }}"
           package="Katana-$version-${{ matrix.package }}"
           rm -rf smoke && mkdir smoke
-          unzip -q "build/release/$package.zip" -d smoke
+          unzip -q "build/package/$package.zip" -d smoke
           root="smoke/$package"
           records "$root/share/katana/install.json" "\"target\":\"${{ matrix.package }}\""
           records "$root/share/katana/install.json" "\"version\":\"$version\""
@@ -394,13 +432,13 @@ jobs:
           said smoke/status.txt "kind=archive"
           # /usr/bin's timeout, by path: with PATH cut to the Windows
           # directories, `timeout` is Windows' own TIMEOUT.EXE, a pause.
-          QT_QPA_PLATFORM=offscreen /usr/bin/timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
+          /usr/bin/timeout 300 "$root/bin/katana.exe" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       # The installer, as a deployment script runs it: silently into a folder
       # of its own, where the installed command line must read a CRS through
       # GDAL and PROJ and must know it is an INSTALLED copy of this target -
       # the installer records its folder under HKCU, which is how the updater
-      # tells it from an unpacked zip (include/katana/update/registry.hpp);
+      # tells it from an unpacked zip (rust/crates/katana_update/src/registry.rs);
       # then its uninstaller, which must remove it. /D takes the rest of the
       # line unquoted, so the folder has no space for Start-Process to quote.
       # `_?=` keeps the uninstaller in place, so -Wait waits for it rather
@@ -410,7 +448,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $installer = (Resolve-Path "build/release/Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}.exe").Path
+          $installer = (Resolve-Path "build/package/Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}.exe").Path
           $target = Join-Path $env:RUNNER_TEMP "KatanaInstalled"
           $install = Start-Process -FilePath $installer -ArgumentList "/S", "/D=$target" -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "the installer exited with $($install.ExitCode)" }
@@ -466,8 +504,8 @@ jobs:
         with:
           name: katana-${{ matrix.package }}
           path: |
-            build/release/Katana-*-${{ matrix.package }}.zip
-            build/release/Katana-*-${{ matrix.package }}.exe
+            build/package/Katana-*-${{ matrix.package }}.zip
+            build/package/Katana-*-${{ matrix.package }}.exe
           if-no-files-found: error
 
   unix:
@@ -481,90 +519,89 @@ jobs:
         include:
           # The whole suite runs on each before packaging. On the ARM machines
           # that includes every SIMD kernel suite at the scalar and NEON
-          # levels on real hardware (elsewhere NEON runs only under qemu); on
-          # Apple silicon the gpu. suite proves the Metal renderer against the
-          # software one on a real device.
+          # levels on real hardware; on Apple silicon the GPU suite runs the
+          # renderer through Metal on a real device.
           - name: Linux x86-64
             runner: ubuntu-24.04
-            preset: linux-release
             package: linux-x86_64
             archive: tar.gz
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
-            preset: linux-release
             package: linux-aarch64
             archive: tar.gz
           - name: macOS arm64
             runner: macos-15
-            preset: macos-release
             package: macos-arm64
             archive: dmg
+    # What a release is built with, for every cargo of the job alike (see the
+    # Windows job): the update keys and the built-in customisation required,
+    # and the repository this run publishes in. RUSTFLAGS and the compilers
+    # name the toolchain prefix, so the Toolchain step sets them.
     env:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
+      KATANA_REQUIRE_UPDATE_KEYS: "ON"
+      KATANA_REQUIRE_BUILTIN_CUSTOMISATION: "ON"
+      KATANA_UPDATE_REPO: ${{ needs.version.outputs.repo }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: echo "KATANA_TOOLCHAIN=$HOME/katana-toolchain" >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      # The conda-forge prefix of docs/building.md, "Linux" and "macOS". Its
-      # versions are frozen by the script's SNAPSHOT and SPECS, so the script
-      # is the whole cache key.
+      # The conda-forge prefix of docs/building.md, "Linux" and "macOS": Rust,
+      # GDAL, PDAL, PROJ, SQLite, the compilers of the native shims, CMake.
+      # Its versions are frozen by the script's SNAPSHOT and SPECS, so the
+      # script is the whole cache key.
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/katana-toolchain
           key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/setup_linux_toolchain.py') }}
+      # Only the build tools on PATH, not the whole prefix: its bin/ also
+      # holds a python3 that would shadow the runner's. cargo links with the
+      # prefix's compiler (GCC and the glibc 2.28 sysroot on Linux, clang and
+      # libc++ on macOS), as tools/build_visible.sh has it link in WSL, and
+      # writes the prefix's lib/ into each program's run-time path, so the
+      # tests find GDAL without LD_LIBRARY_PATH; the packaging replaces that
+      # path with the package's own lib/ (cmake/KatanaDeployUnix.cmake.in).
+      # On macOS the shims are compiled by the prefix's clang, whose libc++
+      # is the one PDAL and GDAL were built against, against the SDK of the
+      # runner's Xcode.
       - name: Toolchain
         run: |
           python3 tools/setup_linux_toolchain.py
           echo "$KATANA_TOOLCHAIN/bin-tools" >> "$GITHUB_PATH"
           mkdir -p "$KATANA_TOOLCHAIN/bin-tools"
-          # Only the build tools on PATH, not the whole prefix: its bin/ also
-          # holds a python3 that would shadow the runner's.
-          for tool in cmake ctest cpack ninja; do
+          for tool in cmake ctest cpack ninja cargo rustc rustdoc cargo-clippy clippy-driver rustfmt cargo-fmt; do
             ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$KATANA_TOOLCHAIN/bin-tools/$tool"
           done
-      # A release, not a developer's build: real update keys, the repository
-      # this run publishes in as the one an installed copy asks for the next
-      # version, and the run's sequence for the package's install record -
-      # and all three must have reached the project, in its cache and, the
-      # repository, on the update library's compile line (see the Windows
-      # job, whose check this is).
-      - name: Configure
-        env:
-          UPDATE_REPO: ${{ needs.version.outputs.repo }}
-          UPDATE_SEQUENCE: ${{ needs.version.outputs.sequence }}
-        run: |
-          case "$UPDATE_SEQUENCE" in
-            '' | *[!0-9]*)
-              echo "::error::the Version job gave no sequence for the package's install record (got '$UPDATE_SEQUENCE')"
-              exit 1
-              ;;
-          esac
-          cmake --preset ${{ matrix.preset }} -DKATANA_BUILD_TESTS=ON -DKATANA_BUILD_BENCHMARKS=OFF \
-            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
-            -DKATANA_UPDATE_SEQUENCE="$UPDATE_SEQUENCE"
-          export LC_ALL=C
-          cache=build/${{ matrix.preset }}/CMakeCache.txt
-          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO" \
-            "KATANA_UPDATE_SEQUENCE:STRING=$UPDATE_SEQUENCE"; do
-            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
-              echo "::error::$cache does not hold $setting: the project did not take -D${setting%%:*}, and the programs would be built without it"
-              exit 1
-            }
-          done
-          compiled=$(sed -n 's/.*-DKATANA_UPDATE_REPO=[^A-Za-z0-9 ]*\([A-Za-z0-9._/-]*\).*/\1/p' build/${{ matrix.preset }}/build.ninja | sort -u)
-          if [ "$compiled" != "$UPDATE_REPO" ]; then
-            echo "::error::the update library is compiled with KATANA_UPDATE_REPO '$compiled', not '$UPDATE_REPO': the programs would ask another repository for the next version"
-            exit 1
+          prefix="$KATANA_TOOLCHAIN"
+          if [ "$RUNNER_OS" = Linux ]; then
+            machine=$(uname -m)
+            upper=$(printf '%s' "$machine" | tr '[:lower:]' '[:upper:]')
+            echo "CARGO_TARGET_${upper}_UNKNOWN_LINUX_GNU_LINKER=$prefix/bin/$machine-conda-linux-gnu-gcc" >> "$GITHUB_ENV"
+          else
+            echo "CC=$prefix/bin/arm64-apple-darwin20.0.0-clang" >> "$GITHUB_ENV"
+            echo "CXX=$prefix/bin/arm64-apple-darwin20.0.0-clang++" >> "$GITHUB_ENV"
+            echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$prefix/bin/arm64-apple-darwin20.0.0-clang" >> "$GITHUB_ENV"
+            # libc++'s availability markup refuses library functions the SYSTEM libc++ of the
+            # deployment target lacks; the programs load conda-forge's, which the package
+            # carries, so the markup does not apply (conda-forge's documented remedy,
+            # "Newer C++ features with old SDK").
+            echo "CXXFLAGS=-D_LIBCPP_DISABLE_AVAILABILITY" >> "$GITHUB_ENV"
+            echo "MACOSX_DEPLOYMENT_TARGET=13.0" >> "$GITHUB_ENV"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
           fi
+          echo "RUSTFLAGS=-D warnings -C link-arg=-Wl,-rpath,$prefix/lib" >> "$GITHUB_ENV"
+          "$prefix/bin/rustc" --version
+          "$prefix/bin/cargo" --version
       - name: Build
-        run: cmake --build build/${{ matrix.preset }} --parallel
+        run: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
       # What the Linux tests need of the machine and a CI image lacks: the
       # graphics driver's GL and EGL loaders, which the package leaves to the
       # system (docs/release.md), and an X server with Mesa's software Vulkan
-      # driver, on which the gpu. suite runs the Vulkan renderer.
+      # driver, on which the window and GPU suites draw through Vulkan, as in
+      # WSL (docs/rust.md, "WSL").
       - name: System libraries
         if: runner.os == 'Linux'
         run: |
@@ -573,17 +610,20 @@ jobs:
             xvfb mesa-vulkan-drivers libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
             libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0
       # The whole suite, on the machine the package is for: nothing is
-      # packaged from a build with a failing test (docs/testing.md).
+      # packaged from a build with a failing test (docs/testing.md). cargo's
+      # tests, then the runner's, under an X server on Linux.
       - name: Test
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
+          status=0
+          cargo test --manifest-path rust/Cargo.toml --locked --workspace --release --no-fail-fast || status=$?
+          cmake -S . -B build/tests -G Ninja -DKATANA_PROGRAMS="$PWD/rust/target/release" || exit 1
           jobs=$(getconf _NPROCESSORS_ONLN)
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a ctest --test-dir build/${{ matrix.preset }} --parallel "$jobs" --output-on-failure --timeout 900
+            xvfb-run -a ctest --test-dir build/tests --parallel "$jobs" --output-on-failure --timeout 900 || status=1
           else
-            ctest --test-dir build/${{ matrix.preset }} --parallel "$jobs" --output-on-failure --timeout 900
+            ctest --test-dir build/tests --parallel "$jobs" --output-on-failure --timeout 900 || status=1
           fi
+          exit "$status"
       # A Developer ID for the publisher, when the repository holds one:
       # MACOS_CERTIFICATE (the .p12, base64), MACOS_CERTIFICATE_PASSWORD and
       # MACOS_SIGN_IDENTITY ("Developer ID Application: <name> (<team>)").
@@ -605,8 +645,37 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
           security list-keychain -d user -s "$keychain"
           echo "KATANA_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      # The packaging project, as in the Windows job (whose comment says what
+      # each setting is and why the cache is read back), given the toolchain
+      # prefix the libraries are copied from.
       - name: Package
-        run: cmake --build build/${{ matrix.preset }} --target package
+        working-directory: packaging
+        env:
+          UPDATE_REPO: ${{ needs.version.outputs.repo }}
+          UPDATE_SEQUENCE: ${{ needs.version.outputs.sequence }}
+          PACKAGE_TARGET: ${{ matrix.package }}
+        run: |
+          case "$UPDATE_SEQUENCE" in
+            '' | *[!0-9]*)
+              echo "::error::the Version job gave no sequence for the package's install record (got '$UPDATE_SEQUENCE')"
+              exit 1
+              ;;
+          esac
+          programs="$(cd .. && pwd)/rust/target/release"
+          cmake --preset package -DKATANA_PROGRAMS="$programs" -DKATANA_TOOLCHAIN="$KATANA_TOOLCHAIN" \
+            -DKATANA_PACKAGE_TARGET="$PACKAGE_TARGET" \
+            -DKATANA_REQUIRE_UPDATE_KEYS=ON -DKATANA_UPDATE_REPO="$UPDATE_REPO" \
+            -DKATANA_UPDATE_SEQUENCE="$UPDATE_SEQUENCE"
+          export LC_ALL=C
+          cache=../build/package/CMakeCache.txt
+          for setting in "KATANA_REQUIRE_UPDATE_KEYS:BOOL=ON" "KATANA_UPDATE_REPO:STRING=$UPDATE_REPO" \
+            "KATANA_UPDATE_SEQUENCE:STRING=$UPDATE_SEQUENCE"; do
+            tr -d '\r' < "$cache" | grep -xF -- "$setting" || {
+              echo "::error::$cache does not hold $setting: the packaging did not take -D${setting%%:*}, and the package would be made without it"
+              exit 1
+            }
+          done
+          cmake --build ../build/package --target package
       # Apple's notary service checks the signed disk image and everything
       # in it, and the ticket it issues is stapled to the image, so
       # Gatekeeper opens Katana without a warning, even offline. APPLE_ID,
@@ -618,7 +687,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          dmg="build/${{ matrix.preset }}/Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}.dmg"
+          dmg="build/package/Katana-${{ needs.version.outputs.version }}-${{ matrix.package }}.dmg"
           xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
           xcrun stapler staple "$dmg"
@@ -628,7 +697,7 @@ jobs:
       # The disk image is mounted and Katana.app dragged out of it, as a user
       # installs it, and the app's seal is checked before it runs.
       # macOS has no timeout(1); the step's own limit stands in for it, so a
-      # window that waits on a dialog fails the job instead of holding it.
+      # window that waits on something fails the job instead of holding it.
       #
       # First what the package says of itself in its install record, as in
       # the Windows job: its target, its version and this run's sequence. In
@@ -665,7 +734,7 @@ jobs:
           rm -rf smoke && mkdir smoke
           if [ "${{ matrix.archive }}" = dmg ]; then
             volume="$RUNNER_TEMP/katana-volume"
-            hdiutil attach -nobrowse -readonly -mountpoint "$volume" "build/${{ matrix.preset }}/$package.dmg"
+            hdiutil attach -nobrowse -readonly -mountpoint "$volume" "build/package/$package.dmg"
             test -L "$volume/Applications"
             ditto "$volume/Katana.app" smoke/Katana.app
             hdiutil detach "$volume"
@@ -675,7 +744,7 @@ jobs:
             bin="smoke/Katana.app/Contents/MacOS"
             record="smoke/Katana.app/Contents/Resources/share/katana/install.json"
           else
-            tar -xzf "build/${{ matrix.preset }}/$package.tar.gz" -C smoke
+            tar -xzf "build/package/$package.tar.gz" -C smoke
             bin="smoke/$package/bin"
             record="smoke/$package/share/katana/install.json"
           fi
@@ -720,13 +789,7 @@ jobs:
           said smoke/status.txt "installed=$version"
           said smoke/status.txt "target=${{ matrix.package }}"
           said smoke/status.txt "kind=archive"
-          # Where Qt looks for its plugins, in the log: the first macOS package
-          # found no platform plugin (2026-10-15), and that is the line that
-          # says why.
-          if [ "${{ matrix.archive }}" = dmg ]; then
-            cat smoke/Katana.app/Contents/Resources/qt.conf
-          fi
-          QT_DEBUG_PLUGINS=1 QT_QPA_PLATFORM=offscreen "$bin/katana" smoke/project --screenshot smoke/window.png
+          "$bin/katana" smoke/project --screenshot smoke/window.png
           test -s smoke/window.png
       # What the window drew, to look at; not part of the release.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -738,7 +801,7 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: katana-${{ matrix.package }}
-          path: build/${{ matrix.preset }}/Katana-*-${{ matrix.package }}.${{ matrix.archive }}
+          path: build/package/Katana-*-${{ matrix.package }}.${{ matrix.archive }}
           if-no-files-found: error
 
   publish:

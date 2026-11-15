@@ -69,11 +69,11 @@ monthly Windows update and a swap of 3 to 6 seconds.
 
 | Piece | Where | What it is |
 |---|---|---|
-| the engine | `include/katana/update/`, `src/katana_update/` | layer `update`, which sees `core` and nothing else: versions, the manifest and its path rules, the signature and the trust gate, the plan, the staged download, the journalled swap, rollback and recovery, the per-user records. It links no HTTP library, no Qt and no GDAL |
-| the helper | `src/katana_updater/` | `katana_updater`, the fourth program: the swap as a process of its own, static, linked to the engine and `katana_core` alone |
-| the verbs | `src/katana_app/update_verbs.hpp`, `update_verbs.cpp` beside it | the `UPDATE` family, one function that runs a line for the context it is handed: `katana_cli`, the window and the agent's tool all run it |
-| the transport | `src/katana_app/update_transport.cpp` | the engine's `Fetch`, made of the engine's own rules (`update::makeFetch`) over one request of the project's HTTP stack (`gis::httpExchange`) |
-| the window | `src/katana_qt/update_dialog.hpp`, `src/katana_qt/update_workbench.hpp`, the Updates page of `src/katana_qt/customisation/settings_dialog.hpp` | the menu item, the status-bar button, the dialog, the automatic check, the close that lets the helper run |
+| the engine | `rust/crates/katana_update/src/` | layer `update`, which sees `core` and nothing else: versions, the manifest and its path rules, the signature and the trust gate, the plan, the staged download, the journalled swap, rollback and recovery, the per-user records. It links no HTTP library, no GUI toolkit and no GDAL |
+| the helper | `rust/crates/katana_updater/src/` | `katana_updater`, the fourth program: the swap as a process of its own, static, linked to the engine and `katana_core` alone |
+| the verbs | `rust/crates/katana_app/src/update_verbs.rs`, and the session's part, `rust/crates/katana_app/src/session/update_part.rs` | the `UPDATE` family, one function that runs a line for the context it is handed: `katana_cli`, the window and the agent's tool all run it |
+| the transport | `rust/crates/katana_app/src/update_transport.rs` | the engine's `Fetch`, made of the engine's own rules (`katana_update::feed::make_fetch`) over one request of the project's HTTP stack (`katana_gis::web_access::http_exchange`) |
+| the window | `rust/crates/katana_window/src/update_dialog.rs`, `rust/crates/katana_window/src/update_workbench.rs`, the Updates page of `rust/crates/katana_window/src/customisation/settings_dialog.rs` | the menu item, the status-bar button, the dialog, the automatic check, the close that lets the helper run |
 | the release tools | `tools/update_make_manifest.py`, `tools/update_verify_release.py`, `tools/update_release_sign.py`, `tools/update_keytool.py` | the producer of a release's update assets, an independent recheck of them, the offline signer, and the owner's key step |
 | the pinned keys | `cmake/KatanaUpdateKeys.cmake` | the two public keys every program verifies with |
 | the installer | `cmake/NSIS.template.in` | per user, so that an update needs no administrator (`docs/release.md`, "The Windows installer") |
@@ -87,12 +87,22 @@ tests, their fake feed (`tools/update_fake_feed.py`) and the generator of
 their signed fixtures (`tools/update_make_fixtures.py`) are `docs/testing.md`,
 "The update system's tests".
 
+The manifest fixture comparison rebuilds the committed tree's bytes through
+the release-tool tests' ordinary temporary-tree helper before running the
+producer. Git records those fixture files as mode `100644`; WSL can see
+them as `777` on a Windows-mounted checkout, which otherwise marks DLLs
+and data executable. Recreating the input in the native temporary directory
+keeps the fixture's intended mode without changing the producer's executable
+bit policy or the committed manifest expectation. The WSL suite exposed
+this on 2026-11-05; the direct-source version failed and the temporary-tree
+version passed.
+
 ## What is an install
 
 The unit of everything below is the **install root R**, the folder that
 holds `bin/` and `share/` - on macOS `Katana.app/Contents/Resources`, which
-holds `share/` (`update::installRootOfExecutable` knows both layouts). Four
-records beside the programs say what R is (`include/katana/update/install.hpp`):
+holds `share/` (`katana_update::install::install_root_of_executable` knows both layouts). Four
+records beside the programs say what R is (`rust/crates/katana_update/src/install.rs`):
 
 | Record | Written by | Says |
 |---|---|---|
@@ -107,10 +117,10 @@ carry them.
 ### The installed version
 
 The installed build of a copy - what a release must be above to be an
-update - is the HIGHER of two (`update::readInstall`): the build the helper
+update - is the HIGHER of two (`katana_update::install::read_install`): the build the helper
 recorded in `installed.json` when an update committed, and THE COPY'S OWN,
 which is what its package says of itself in `install.json`. The two are
-compared as a release is compared with an install (`update::isNewerThan`):
+compared as a release is compared with an install (`katana_update::trust::is_newer_than`):
 by version, number by number, and within one version by sequence.
 
 The helper's record alone cannot be the answer, because nothing else keeps
@@ -122,8 +132,8 @@ installed over the programs that are there. The zip brings its own
 `install.json`, and with it its floor: a record can raise the installed
 build and never lower it.
 
-**What a package says of itself** (`packageBuild` in
-`src/katana_update/state.cpp`). `version` is the version the package was
+**What a package says of itself** (`package_build` in
+`rust/crates/katana_update/src/state.rs`). `version` is the version the package was
 built as: CPack's script writes `project(Katana VERSION ...)` there, always.
 `sequence` is that of the release the package belongs to, the number that
 release's manifests carry. The release workflow settles it before anything
@@ -183,27 +193,27 @@ reads it, its own where it is the newer program; with the package's
 version in the record that is the version the update installed, whoever
 settles it.
 
-The answers are the rule worked by hand through `detail::readInstallAs` -
+The answers are the rule worked by hand through `katana_update::install::read_install_as` -
 the same reading with the program's version handed in - so that they do not
 rest on the version the suite was built as; the few that read with this
 build's own version place their record by it. For a package that names its
 build: a fresh install read by a program below, of and above it
 (`AFreshInstallThatNamesItsVersionIsThatVersionWhicheverProgramReadsIt`),
 the helper's record against the package's in both orders and within one
-version (`OfTheHelpersRecordAndThePackagesOwnBuildTheHigherIsTheInstalledOne`),
+version (`install_records::of_the_helpers_record_and_the_packages_own_build_the_higher_is_the_installed_one`),
 a release's own helper
 (`AReleasesOwnHelperFindsItsReleaseNewerWhereThePackageNamesItsVersion`),
 and a build that does not read
-(`AnInstallJsonWhoseOwnBuildDoesNotReadIsRefused`). For a record that says
+(`install_records::an_install_json_whose_own_build_does_not_read_is_refused`). For a record that says
 its target alone: a program below, at and above the helper's record
-(`OfARecordAndAProgramTheHigherVersionIsTheInstalledOneInBothOrders`), this
+(`install_records::of_a_record_and_a_program_the_higher_version_is_the_installed_one_in_both_orders`), this
 build's own version
 (`ARecordBelowTheProgramsOwnVersionDoesNotLowerTheInstalledVersion`) and
 the order itself
 (`AStaleRecordUnderNewerProgramsLetsNoReleaseBetweenTheTwoBackIn`). At the
 verbs, one of each
-(`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords`,
-`TheContextOfAnInstallWhoseRecordIsBelowThisProgramSaysThisProgramsVersion`).
+(`update_verbs::the_context_of_a_program_in_an_install_is_that_installs_own_records`,
+`update_verbs::the_context_of_an_install_whose_record_is_below_this_program_says_this_programs_version`).
 What CPack's script writes is read back from a staged tree by the
 `packaging_install_record_*` tests, for a package of a release and for one
 of none.
@@ -252,12 +262,12 @@ there, `reason=elevated`, before the copy is made; the download stays, and
 Katana started the ordinary way applies it ("The verbs"). A machine with
 that protection turned off, and the built-in administrator account, have
 one token and no unelevated half that could interfere, and are not refused
-(`update::processIsElevated`, `include/katana/update/process.hpp`: Windows'
+(`katana_update::process_is_elevated`, `rust/crates/katana_update/src/process.rs`: Windows'
 `TokenElevationType` is `TokenElevationTypeFull`; a process that cannot ask,
 and every system but Windows, is "not elevated").
 
 **Nor does such a Katana recover from that folder.** Recovery is the other
-way to a helper in U, and it is closed the same way. `update::recover`, the
+way to a helper in U, and it is closed the same way. `katana_update::recover`, the
 first act of every program ("Recovery"), puts an interrupted update back by
 running a helper, and by preference the copy `U/run-<tx>/katana_updater`
 the update ran from. All that sends it there can be written by the same
@@ -265,7 +275,7 @@ person's programs WITHOUT administrator rights: a journal under
 `R/.update/<tx>`, whose check is no key's, and a file named
 `katana_updater` in `U/run-<tx>`. So
 in a program that was started as administrator - the same question,
-`update::processIsElevated` - `update::recover` does not look for the copy.
+`katana_update::process_is_elevated` - `katana_update::recover` does not look for the copy.
 It runs `R/bin/katana_updater`, the install's own, which lies beside the
 very program that holds those rights and is no new risk; NEVER the copy in
 U. Where the install's own helper is not there either - a commit cut off
@@ -277,7 +287,7 @@ run `katana_updater --recover` by hand
 ### The per-user folder
 
 What belongs to the person and not to the install is in the **update state
-folder U** (`include/katana/update/state.hpp`): `%LOCALAPPDATA%\Katana\update`
+folder U** (`rust/crates/katana_update/src/state.rs`): `%LOCALAPPDATA%\Katana\update`
 on Windows, `$XDG_STATE_HOME/katana/update` elsewhere
 (`~/.local/state/katana/update` when that variable is not set). The
 environment variable `KATANA_UPDATE_STATE_DIR` names another folder - how
@@ -291,7 +301,7 @@ trust: nothing in U is believed without a signature check.
 | `stage-<sequence>/` | the downloaded files of one release at their root-relative paths, and last of all `manifest.json` and `manifest.json.sig`, whose presence means "complete"; `stage-<sequence>.lock` beside it |
 | `run-<tx>/` | the copy of the helper that runs the swap. A swap that ends puts the folder on `cleanup.list` itself. The copy of a swap that was interrupted and recovered is listed there by the next start of an interactive window of that install, which learns of it from `R/.update/recovery.log` ("Recovery"). The copy of a helper that died during the health check is deleted by whoever settles that update with the right to write here - the window that confirms it, or the next swap - and listed like a recovered one after `katana_updater --recover` settled it |
 | `healthy-<tx>` | the marker a new version writes to say it starts: by the health run the helper starts, or - when that helper died first - by a window of the new version at its first idle turn ("An update whose helper died during the health check") |
-| `cleanup.list` | what is to be deleted and could not be at the time: what a held lock kept the helper from deleting, the helper copy of a request that nobody started (`app::abandonApply`, the one way a prepared apply is given up: `katana_cli`'s session, the window after Later or a close that was cancelled, and `main()` when the helper could not be started), and the helper copy of a recovered swap, which the window's start lists itself. An interactive window of an installed copy removes what it names at its next start; nothing else reads the list |
+| `cleanup.list` | what is to be deleted and could not be at the time: what a held lock kept the helper from deleting, the helper copy of a request that nobody started (`katana_app::update_verbs::abandon_apply`, the one way a prepared apply is given up: `katana_cli`'s session, the window after Later or a close that was cancelled, and `main()` when the helper could not be started), and the helper copy of a recovered swap, which the window's start lists itself. An interactive window of an installed copy removes what it names at its next start; nothing else reads the list |
 
 A headless run and `katana_mcp` are given no state folder: they read and
 write none of this ("The three surfaces").
@@ -301,7 +311,7 @@ write none of this ("The three surfaces").
 The latest release of the repository IS the feed. No index, no mutable tag
 and no API call: an installed copy reads two files of fixed names from
 whichever release is marked latest, and then the update zip of the release
-the manifest names (`include/katana/update/feed.hpp`):
+the manifest names (`rust/crates/katana_update/src/feed.rs`):
 
 ```
 https://github.com/<repo>/releases/latest/download/Katana-update-<target>.json.sig
@@ -332,7 +342,7 @@ assets".
 
 One signed manifest per release and target says what every file of the
 install must hash to, and where each file's bytes are in the update zip
-(`include/katana/update/manifest.hpp`). The unit of an update is the FILE,
+(`rust/crates/katana_update/src/manifest.rs`). The unit of an update is the FILE,
 decided by its SHA-256, never the version: a copy fetches the files whose
 hash differs from what it has, whichever versions lie between.
 
@@ -394,7 +404,7 @@ nesting deeper than 16 levels.
 ### The path rules
 
 A path from a manifest is written under only if it passes one rule set
-(`include/katana/update/paths.hpp`), used by the engine when it verifies a
+(`rust/crates/katana_update/src/paths.rs`), used by the engine when it verifies a
 manifest and again by the helper before it touches the install - and
 enforced by the producer too, so that a release no install would accept
 cannot be made. A path is relative, uses `/`, and begins with `bin`, `share`,
@@ -414,25 +424,25 @@ ships has an ASCII name, and the producer refuses one that does not.
 
 **The scheme.** Ed25519 (RFC 8032) over the manifest's exact bytes, verified
 in the process by OpenSSL's EVP interface, never by running a program
-(`include/katana/update/signature.hpp`). The signature file is one line,
+(`rust/crates/katana_update/src/signature.rs`). The signature file is one line,
 `ed25519 <key id> <base64>`; the key id is the first 16 hexadecimal digits of
 the public key.
 
 **Two keys are pinned** at build time in `cmake/KatanaUpdateKeys.cmake`: the
 ACTIVE key, whose private half signs releases, and a SPARE, which stays
 offline. Either verifies. The keys reach one source file,
-`src/katana_update/trust.cpp`, as compile definitions and nothing else can
+`rust/crates/katana_update/src/trust.rs`, as compile definitions and nothing else can
 read them.
 
-**The gate** is one function, `update::verifyManifest`
-(`include/katana/update/trust.hpp`), and nothing that reads a network answer
+**The gate** is one function, `katana_update::trust::verify_manifest`
+(`rust/crates/katana_update/src/trust.rs`), and nothing that reads a network answer
 may parse a manifest any other way. In this order, stopping at the first
 failure: the manifest is not empty and not over 8 MiB; the signature line
 parses; this build's keys are not placeholders; the line's key id names a
 pinned key; the signature verifies over the exact bytes; only now is the
 manifest parsed; and its signed product, target and channel are this
 install's. "Newer than what is installed" is decided after it, by
-`update::isNewerThan`, which the check and the helper both call.
+`katana_update::trust::is_newer_than`, which the check and the helper both call.
 
 **The helper trusts nobody's answer.** It verifies the staged manifest again
 with its own pinned keys before it touches a file, repeats the "newer" test
@@ -441,22 +451,23 @@ never read as less than the build the package names ("The installed
 version") - and hashes every file it is about to put in place. A stage
 folder that somebody altered is found there.
 
-**The trust root is a parameter, never a global.** `update::productionTrust`
+**The trust root is a parameter, never a global.** `katana_update::trust::production_trust`
 is what the four programs pass. Only test executables pass a test key, the
 published RFC 8032 vectors, and none of them is installed:
-`katana_update_tests`, `katana_update_e2e` and `katana_updater_test`, which
-link the test trust root (`tests/update/test_key.cpp`), and
-`katana_app_tests`, which builds the same trust from the two public keys for
-the verbs' tests (`tests/app/test_update_verbs.cpp`). So no
+the tests of `katana_update`, and `katana_update_e2e` and `katana_updater_test`
+(test programs of the `katana_updater` crate), which link the test trust root
+(`rust/crates/katana_update/tests/test_key/mod.rs`), and the tests of
+`katana_app`, which build the same trust from the two public keys for
+the verbs' tests (`rust/crates/katana_app/tests/session/update_verbs.rs`). So no
 variable, file or switch at run time changes whose signature counts, and the
 test `update_test_keys_are_in_no_shipped_program` reads the bytes of the four
 programs to see that no test key is in them.
 
 **Nothing in the environment changes what "verified" means.** The helper's
-first act is `update::hardenOpenSslEnvironment`: `OPENSSL_CONF`,
+first act is `katana_update::signature::harden_open_ssl_environment`: `OPENSSL_CONF`,
 `OPENSSL_MODULES` and `OPENSSL_ENGINES` are removed from its process and
 libcrypto is started without a configuration file
-(`TheSelfTestPassesUnderAHostileOpenSslConfModulesOrEnginesAndSaysWhatItRemoved`).
+(`helper_program::the_self_test_passes_under_a_hostile_open_ssl_conf_modules_or_engines_and_says_what_it_removed`).
 It lends the person's own values back to the programs it starts.
 
 **What the verifier refuses beyond OpenSSL.** Measured while the signature
@@ -531,7 +542,8 @@ No script and no agent makes or sees a private key. These are the steps
 ### At each release
 
 1. Set the version in the root `CMakeLists.txt`, `project(Katana VERSION
-   X.Y.Z)`, and merge it.
+   X.Y.Z)` (the one place it is written: `katana_update`'s build script reads
+   it there), and merge it.
 2. Actions > Release > Run workflow, on `main`, with the tag `vX.Y.Z`. The
    Publish job runs in the environment `release`; approve it on the run's
    page when the environment names reviewers. Once the environment is
@@ -552,10 +564,10 @@ hand and installed copies are not told of it.
 
 ## Check and download
 
-**The check** (`update::check`, `include/katana/update/check.hpp`) fetches
+**The check** (`katana_update::check`, `rust/crates/katana_update/src/check.rs`) fetches
 the signature, then the manifest, each bounded by the engine and not by the
 server (1024 bytes and 8 MiB), and believes neither until
-`update::verifyManifest` has passed. Every way of not learning the answer is
+`katana_update::trust::verify_manifest` has passed. Every way of not learning the answer is
 the STATUS `unreachable` with a reason token, never an error: a check that
 nobody asked for then says nothing, and a typed one says one sentence. What a
 check sends about the copy is its user agent, `Katana/<version> (<target>)`,
@@ -575,13 +587,13 @@ an update beside it, it counts as the release it was made from, and only a
 higher VERSION is newer for it - whatever sequence its package names ("The
 installed version").
 
-**The plan** (`update::plan`) hashes every installed file the manifest
+**The plan** (`katana_update::plan`) hashes every installed file the manifest
 lists, FRESH each time - never from a cache, which would skip a file that
 had changed and ship a mixed tree. A file is fetched when it is absent or
 its hash differs; a `seed` only when it is absent. The reply's
 `files=<changed>/<total>` and `download_bytes=` are this plan's.
 
-**The download** (`update::stage`, `include/katana/update/stage.hpp`)
+**The download** (`katana_update::stage`, `rust/crates/katana_update/src/stage.rs`)
 fetches only the changed files, by `Range` requests into the one update zip:
 
 - The producer orders the zip's members `program`, `lib`, `data`, `seed`, so
@@ -672,7 +684,7 @@ window shows that at its next start.
 
 ### The swap
 
-`update::apply` (`include/katana/update/apply.hpp`). Every step is a test,
+`katana_update::apply` (`rust/crates/katana_update/src/apply.rs`). Every step is a test,
 and the fault loops break it before each of its file operations
 (`docs/testing.md`).
 
@@ -724,7 +736,7 @@ and the fault loops break it before each of its file operations
    answer, so that nothing is done between the two in which a program could
    start unseen
    (`AProgramStartedWhileThePlanWasMadeBlocksTheUpdateAndTheInstallAndTheDownloadAreAsBefore`,
-   `TheSecondLookIsTheLastThingBeforeTheJournalSaysCommitting`,
+   `apply_wait::the_second_look_is_the_last_thing_before_the_journal_says_committing`,
    `AScanThatFailsAtTheSecondLookIsARefusalTooAndNothingIsTouched`). On
    Windows a `RunOnce` value, `KatanaUpdateRecover`, is then registered for
    `<run copy>\katana_updater --recover R`: a machine that loses power now
@@ -767,7 +779,7 @@ and the fault loops break it before each of its file operations
    and the marker; remove the `RunOnce` value; write `last.json`; and start
    Katana again as a person would. The folder and the marker go only once
    `HEALTHY` is on disk: until then they are what the update is settled by
-   (`AnUpdateWhoseHealthyRecordCannotBeWrittenKeepsItsFolderAndItsMarkerAndIsSettledByThem`).
+   (`apply_health::an_update_whose_healthy_record_cannot_be_written_keeps_its_folder_and_its_marker_and_is_settled_by_them`).
    What a lock keeps from being deleted - the helper's own running copy
    among it - goes on `U/cleanup.list` for the next start.
 
@@ -782,19 +794,19 @@ If THE HELPER DIES in step 7 - between its `COMMITTED_PENDING_HEALTH`
 record and its `HEALTHY` one: power, a shutdown, the process ended - the
 tree is a whole new version that nobody has said starts. The `RunOnce`
 entry is still registered, the helper's copy is still in `U/run-<tx>`, and
-no `last.json` was written. No program's `update::recover` touches such an
+no `last.json` was written. No program's `katana_update::recover` touches such an
 update: it may be a live helper's, waiting for that very program. It is
 settled under the update lock by `katana_updater --recover`, by a window of
 the new version, or by step 1 of the next swap ("An update whose helper
 died during the health check", under "Recovery").
 
-The steps are numbered as `include/katana/update/apply.hpp` numbers them,
+The steps are numbered as `rust/crates/katana_update/src/apply.rs` numbers them,
 which is how the code and the other documents cite them.
 
 ### The journal
 
 `R/.update/<tx>/journal` is append-only text, one record a line
-(`include/katana/update/journal.hpp`):
+(`rust/crates/katana_update/src/journal.rs`):
 
 ```
 <n> <OP> <arg>... <crc>
@@ -816,7 +828,7 @@ the update lock, by whoever settles the transaction - `HEALTHY` by
 `katana_updater --recover`, by a window of the new version or by the next
 swap, each on the marker; `ROLLING_BACK` and `ROLLED_BACK` by
 `katana_updater --recover` alone. So a journal reads the same way whoever
-finished it, and `update::needsRecovery` is as it was: `PLAN`, `COMMITTING`
+finished it, and `katana_update::journal::needs_recovery` is as it was: `PLAN`, `COMMITTING`
 and `ROLLING_BACK` are what a crash left; `COMMITTED_PENDING_HEALTH` is not.
 And while a journal says `COMMITTED_PENDING_HEALTH` it is TRUE of the disk.
 The tree is the whole new version, because a rollback from that state moves
@@ -836,7 +848,7 @@ less; it cannot reach outside R's `bin`, `share`, `etc` and `lib`
 
 ### Recovery
 
-`update::recover(R)` (`include/katana/update/recover.hpp`) is the FIRST thing
+`katana_update::recover()` (`rust/crates/katana_update/src/recover.rs`) is the FIRST thing
 `main()` does in `katana`, `katana_cli` and `katana_mcp`: a machine that lost
 power, or a helper that was killed in the middle of a swap, is put right the
 next time anything starts. With nothing interrupted - every start but that
@@ -862,7 +874,7 @@ update's marker `U/healthy-<tx>` is there, and its helper copy `U/run-<tx>`
 (below). Its one record is a line in `R/.update/recovery.log` for each run
 that found something to put right.
 
-`update::recover` keeps the same rule in the program that called it. It
+`katana_update::recover` keeps the same rule in the program that called it. It
 READS U, to find the helper copy `U/run-<tx>/katana_updater` (a program
 started as administrator does not look for it), and that is all it does
 there: it makes, changes and deletes nothing in U, whichever program calls
@@ -870,7 +882,7 @@ it. No `cleanup.list` is begun for what a lock kept in
 `R/.update` - the next start of any program finds that folder again and
 deletes what is left of it - and the helper copy it ran is left by recovery:
 the window's next start removes it.
-`RecoveryStartedTheWayAHeadlessProgramStartsItWritesTheRecoveryLogAndNoPerUserState`
+`helper_swap::recovery_started_the_way_a_headless_program_starts_it_writes_the_recovery_log_and_no_per_user_state`
 compares U before and after, entry by entry and byte by byte.
 
 **The copy a recovery ran from** is removed by the one program that sweeps
@@ -903,15 +915,15 @@ when it is whole, ended by its line feed, and has that form as far as
 `result=`, after which nothing is read - the same file quotes the journal
 records a rollback refused, whose text is anybody's - and an id counts only
 when it is a transaction id
-(`update::isValidTransactionId`), so a line names no place but `U/run-<id>`.
-Which transactions a log names is `updateRecoveredTransactions`
-(`src/katana_qt/update_dialog.hpp`), a function of the log's text and of
+(`katana_update::apply::is_valid_transaction_id`), so a line names no place but `U/run-<id>`.
+Which transactions a log names is `update_recovered_transactions`
+(`rust/crates/katana_window/src/update_dialog.rs`), a function of the log's text and of
 which folders are gone
-(`TheHelperCopyOfARecoveredUpdateIsListedOnlyOnceItsTransactionIsOver`,
-`OnlyAWholeLineThatARecoveryWroteNamesATransaction`,
-`WhatIsNoTransactionIdInARecoveryLineNamesNoFolder`). Reading the file - not
+(`update_decisions::the_helper_copy_of_a_recovered_update_is_listed_only_once_its_transaction_is_over`,
+`update_decisions::only_a_whole_line_that_a_recovery_wrote_names_a_transaction`,
+`update_decisions::what_is_no_transaction_id_in_a_recovery_line_names_no_folder`). Reading the file - not
 through a link, and not one longer than 1 MiB - and listing the copies are
-the workbench's (`src/katana_qt/update_workbench.cpp`), which no test builds
+the workbench's (`rust/crates/katana_window/src/update_workbench.rs`), which no test builds
 ("Not done").
 
 *Rejected: sweeping every `run-<tx>` in U that no transaction of this
@@ -935,7 +947,7 @@ goes through under it: Windows lets the file of a running program be
 renamed, and renames are all the commit does. That program runs on as old
 code until it is closed. A per-user install is a folder of one profile, so
 this takes an archive unpacked where several accounts reach it
-(`src/katana_updater/process_scan_win.cpp` gives the reasons the file's
+(`rust/crates/katana_update/src/process_scan_win.rs` gives the reasons the file's
 name alone is not held on).
 
 ### An update whose helper died during the health check
@@ -958,7 +970,7 @@ else settled it but a later update that proved healthy: `--recover` and the
 stayed installed until the person reinstalled. It is settled now, by
 evidence and never by assumption.
 
-**One rule** (`detail::settlePending`, `src/katana_update/recover_internal.hpp`)
+**One rule** (`katana_update::recover::settle_pending`, `rust/crates/katana_update/src/recover_internal.rs`)
 for every transaction whose journal says `COMMITTED_PENDING_HEALTH`. Its
 caller holds the update lock. A helper holds that lock from its first step
 to its last and it goes with the process, so holding it is how a settler
@@ -967,7 +979,7 @@ knows that no helper is alive and waiting on the transaction.
 | Settled as | When | What is done |
 |---|---|---|
 | `HEALTHY` | `U/healthy-<tx>` is a file: the proof the swap itself accepts, whoever wrote it | for an installer-kind install the version shown in Settings > Apps is rewritten, to the installed version as the settler reads it (the swap writes it only once the proof is there, and may have died before); `HEALTHY` is appended, one flushed record; then the folder is deleted, its journal last |
-| `ROLLED_BACK` | only for the one caller that may put back, and only when ALL of these hold: there is no marker; U holds `run-<tx>`, the dead helper's copy, so U is the folder the update was applied from and the one the marker would be in; every file the PLAN's `REPLACE` and `REMOVE` records moved aside is still a file under `old/`; the tree is still that release (`detail::treeIsRelease`: `installed.manifest.json` verifies with the settler's own keys, its sequence is the PLAN's, and every file it lists that is no seed hashes as listed); and the process scan - asked before the hashing, and again as the last thing - answers and names nobody but the settler itself | `update::rollback`, as step 6 does it |
+| `ROLLED_BACK` | only for the one caller that may put back, and only when ALL of these hold: there is no marker; U holds `run-<tx>`, the dead helper's copy, so U is the folder the update was applied from and the one the marker would be in; every file the PLAN's `REPLACE` and `REMOVE` records moved aside is still a file under `old/`; the tree is still that release (`katana_update::apply::tree_is_release`: `installed.manifest.json` verifies with the settler's own keys, its sequence is the PLAN's, and every file it lists that is no seed hashes as listed); and the process scan - asked before the hashing, and again as the last thing - answers and names nobody but the settler itself | `katana_update::apply::rollback`, as step 6 does it |
 | left as it is | every other case: a marker that cannot be looked for, a scan that fails, a tree somebody changed, old files that are not all kept, another per-user folder, a program of the install running | the rule writes NOTHING: no journal record, no file, no registry value. One case writes a value: the marker IS there and the `HEALTHY` record cannot be appended. The version in Settings > Apps was rewritten before the append, and it names what is installed either way |
 
 "No marker" and "put back" are claims too, which is why the rule looks
@@ -978,8 +990,8 @@ started (`AMarkerMissingFromAnotherPerUserFolderIsNotProofThatTheReleaseNeverSta
 A rollback puts back what is under `old/`, so with one of those files gone
 it would leave a mix and call it the old version. And nothing is ever put
 back under a running program, or over files that are no longer that release
-(`NothingIsPutBackUnderARunningProgramOrOverFilesThatAreNoLongerThatRelease`,
-`TheProgramsAreAskedForBeforeTheReleaseInTheTreeIsReadAndAgainAfterItAndNothingChangesUntilThen`).
+(`settle_unproved::nothing_is_put_back_under_a_running_program_or_over_files_that_are_no_longer_that_release`,
+`settle_unproved::the_programs_are_asked_for_before_the_release_in_the_tree_is_read_and_again_after_it_and_nothing_changes_until_then`).
 
 **"Could not look" is never "there is none".** The rule is for a journal
 that was READ and says `COMMITTED_PENDING_HEALTH`. A transaction's folder
@@ -1006,12 +1018,12 @@ start - after which nothing could put the earlier one back, the tree being
 no longer its release.
 
 **Three callers**, which differ only in what they may do
-(`include/katana/update/recover.hpp`):
+(`rust/crates/katana_update/src/recover.rs`):
 
 1. **`katana_updater --recover R`** - the `RunOnce` entry at the next logon,
    or a person. It first does what it always did, unchanged
-   (`update::recoverInProcess`), and when that is OK calls
-   `update::settleUnproved`. With no such update - where that can be SEEN -
+   (`katana_update::recover::recover_in_process`), and when that is OK calls
+   `katana_update::recover::settle_unproved`. With no such update - where that can be SEEN -
    nothing, and no lock is asked for. Otherwise the lock is polled as
    recovery polls it, up to 20 s; a lock that stays held is a live helper's
    health run, which is not this run's to judge: `busy`, with nothing of
@@ -1021,7 +1033,7 @@ no longer its release.
    the swap registered, when it was that entry which started the run:
    Windows removes an entry before it runs it, so a run that lost power in
    the next lines would otherwise leave no logon to come back at
-   (`TheLogonNetIsPutBackFirstAndTheVersionIsRewrittenBeforeTheRecordIsWritten`).
+   (`settle_unproved::the_logon_net_is_put_back_first_and_the_version_is_rewritten_before_the_record_is_written`).
    Then the rule, putting back allowed. Then the entry is removed when no
    transaction folder is left under `R/.update`; an update that was left, or
    a putting back that did not finish, keeps it. (A lock that cannot be
@@ -1035,7 +1047,7 @@ no longer its release.
    who is running - nothing is judged of what was not read - and the entry
    stays
    (`AJournalThatCannotBeReadIsAnUpdateThatMayBeThereItIsLeftAndTheLogonEntryIsPutBack`,
-   `AnUpdateFolderThatCannotBeListedAtTheFirstLookIsNotAnInstallWithNothingToSettle`).
+   `settle_unproved::an_update_folder_that_cannot_be_listed_at_the_first_look_is_not_an_install_with_nothing_to_settle`).
    A journal that a scanner held for the first look alone is read under
    the lock, and the update is settled by what it says
    (`AJournalHeldOnlyAtTheFirstLookIsReadUnderTheLockAndTheUpdateIsSettled`).
@@ -1043,7 +1055,7 @@ no longer its release.
    FIRST half looks fails the run there, before any entry is registered
    ("Not done"). U is only READ - the marker stays where it is - so the
    headless rule above holds for this too
-   (`AnUpdateWhoseMarkerIsThereIsSettledHealthyAndThePerUserFolderIsOnlyRead`).
+   (`settle_unproved::an_update_whose_marker_is_there_is_settled_healthy_and_the_per_user_folder_is_only_read`).
    The run prints `recover=ok`, exit 0, and a `detail=` that begins with
    what became of the update - `confirmed:`, `put back:`, `left:` or `busy:`
    - or `recover=failed`, exit 12, when the putting back did not finish or
@@ -1051,7 +1063,7 @@ no longer its release.
    `R/.update/recovery.log`, as every `--recover` that found a transaction
    folder does: a run that answers `left:` or `busy:` changes nothing of the
    update and still writes that line, the update's id after `left=`
-   (`RecoverPutsNothingBackUnderARunningProgramAndPutsTheLogonEntryBackForTheNextTry`).
+   (`helper_swap::recover_puts_nothing_back_under_a_running_program_and_puts_the_logon_entry_back_for_the_next_try`).
 
    What such a run cannot record is NOT recorded: a putting back made here
    writes no `last.json` and does not add the release to `blocked`, so the
@@ -1065,14 +1077,14 @@ no longer its release.
    is that version. The call is made only in an interactive window (it
    writes per-user state), on Windows, of an installed copy that has an
    install record and whose installed version is the program's own
-   (`updateStartMayConfirm`, with the record read again at that moment).
+   (`update_start_may_confirm`, with the record read again at that moment).
    What that refuses is a window of the OLD files that was started during
    the commit of an update to a HIGHER VERSION: the record then names a
    version above its own, and its start proves nothing about the release.
    It does not refuse that window when the update is to a second build of
    the SAME version, which the sequences allow ("The installed version"):
    the record's version is then the old window's too, and it confirms a
-   build it is not ("Not done"). `update::confirmStarted` then: with no
+   build it is not ("Not done"). `katana_update::recover::confirm_started` then: with no
    such update, nothing - a listing of one folder. One attempt at the lock,
    since a window does not wait; while it is held the window asks again
    every 5 s, 12 times - the minute a helper waits at most - and then leaves
@@ -1095,20 +1107,20 @@ no longer its release.
    Settled: the marker and `U/run-<tx>` go, and the dead helper's `RunOnce`
    entry with them. Left: `interrupted_update`, and nothing is touched. So an
    install holds ONE such update at most
-   (`AnEarlierUpdateWhoseMarkerIsThereIsSettledFirstWhateverBecomesOfTheNextOne`,
-   `AnEarlierUpdateThatWasNeverSaidToStartStopsTheNextOneBeforeItTouchesAnything`).
+   (`recover_superseded::an_earlier_update_whose_marker_is_there_is_settled_first_whatever_becomes_of_the_next_one`,
+   `recover_superseded::an_earlier_update_that_was_never_said_to_start_stops_the_next_one_before_it_touches_anything`).
    The refusal is the same where the folder could not be read through -
    `R/.update` not listed, or a journal in it that would not be read - and
    its `detail` then says that it is not known whether an earlier update is
    still to be put back or confirmed. That covers the putting back of the
    line before as well: recovery passes over a folder whose journal it
    cannot read, and such a folder may be a half swap
-   (`AnUpdateFolderThatCannotBeReadThroughStopsTheNextUpdateAsAnUnsettledOneDoes`,
-   `AnEarlierUpdateWhoseJournalCannotBeReadStopsTheNextUpdateAsAnUnsettledOneDoes`).
+   (`recover_superseded::an_update_folder_that_cannot_be_read_through_stops_the_next_update_as_an_unsettled_one_does`,
+   `recover_superseded::an_earlier_update_whose_journal_cannot_be_read_stops_the_next_update_as_an_unsettled_one_does`).
 
-`update::recover` itself - the first act of every program, the health run
+`katana_update::recover` itself - the first act of every program, the health run
 included - is unchanged and asks for no lock over such an update
-(`AnUpdateThatWasNeverSaidToStartIsLeftExactlyAsItIsWithNoLockAndNoHelper`):
+(`recover_with::an_update_that_was_never_said_to_start_is_left_exactly_as_it_is_with_no_lock_and_no_helper`):
 that is what keeps the health run's own recovery from waiting on, or
 starting again, the helper that started it. And none of the three settlers
 starts a program.
@@ -1124,7 +1136,7 @@ starts a program.
   require the whole tree to be one version's afterwards ("The update
   system's tests" in `docs/testing.md`).
 - *The window, `katana_cli` and `katana_mcp` are started together.* Each
-  one's `update::recover` returns at once, and the window confirms.
+  one's `katana_update::recover` returns at once, and the window confirms.
 - *A helper is alive, in its own health run.* It holds the lock: `--recover`
   answers `busy` and a window asks again; the helper settles its own update.
 - *Katana is started at a logon before the `RunOnce` entry runs.* Its window
@@ -1143,7 +1155,7 @@ What this leaves open is under "Not done".
 
 ## The three surfaces
 
-One grammar, one implementation (`app::runUpdateLine`): a dialog builds the
+One grammar, one implementation (`katana_app::update_verbs::run_update_line`): a dialog builds the
 line a person would type, and `HELP UPDATE` prints the family.
 
 ### The verbs
@@ -1164,12 +1176,12 @@ one that was carried out. What a line could not do but did not stop for
 follows its record as `warning text="..."`.
 
 A v1 install asking about the tests' second release, and then downloading it
-(the expectations of `tests/app/test_update_verbs.cpp`, worked out there from
+(the expectations of `rust/crates/katana_app/tests/session/update_verbs.rs`, worked out there from
 the fixtures; `installed=0.9.0` is the fixtures' first release, which the
 tests hand to the lines. Read by a program from an install's records it is
 the helper's record of 0.9.0 above a package that names 0.8.0, and so the
 same whatever version that program was built as:
-`TheContextOfAProgramInAnInstallIsThatInstallsOwnRecords`, "The installed
+`update_verbs::the_context_of_a_program_in_an_install_is_that_installs_own_records`, "The installed
 version"):
 
 ```
@@ -1203,7 +1215,7 @@ unchanged files between them.)
   `malformed`, `platform` where this version does not install, or the
   transport's own token: `offline`, `http_<n>`, `html_page`,
   `partial_downloads`, `bad_range`, `bad_redirect`, `too_many_redirects`,
-  `cancelled` (`include/katana/update/stage.hpp` lists the engine's). What
+  `cancelled` (`rust/crates/katana_update/src/stage.rs` lists the engine's). What
   was staged before the failure stays, and the next download does not ask
   for it again.
 - **`APPLY CONFIRM` changes nothing in the install.** It finds the newest
@@ -1222,16 +1234,16 @@ unchanged files between them.)
   BEFORE the preflight, so no helper copy is made and nothing is started;
   the sentence says to start Katana the ordinary way and update again, and
   that the release stays downloaded
-  (`ApplyIsRefusedInAKatanaStartedAsAdministratorBeforeAnyHelperIsCopied`).
+  (`update_verbs::apply_is_refused_in_a_katana_started_as_administrator_before_any_helper_is_copied`).
   Being the last, it hides no other reason: a build tree says
   `development_tree` from an administrator's prompt as from any other
-  (`TheOtherRefusalsOfApplyAreSaidBeforeTheOneForAnAdministratorsSession`).
+  (`update_verbs::the_other_refusals_of_apply_are_said_before_the_one_for_an_administrators_session`).
   `UPDATE CHECK` and `UPDATE DOWNLOAD CONFIRM` are not refused
   (`AKatanaStartedAsAdministratorStillChecksAndDownloads`). How the process
   was started is the context's last member, `UpdateContext::elevated`,
-  which `app::makeUpdateContext` fills from `update::processIsElevated` for
+  which `katana_app::update_verbs::make_update_context` fills from `katana_update::process_is_elevated` for
   every surface; a test sets the member, and no test depends on how the
-  suite itself was started (`OnlyTheElevatedHalfOfASplitTokenIsAYes` puts
+  suite itself was started (`process_is_elevated::only_the_elevated_half_of_a_split_token_is_a_yes` puts
   each kind of token to the one decision).
 - **A release that was put back is tried again when a person says so, and
   not before.** One start too slow for the health check - a virus scanner
@@ -1248,11 +1260,11 @@ unchanged files between them.)
   name the line, and Settings > Updates in the window. `UPDATE STATUS`
   does not say what is blocked: `CHECK` does, for the release the feed
   offers. Nothing clears the list by itself
-  (`BlockedClearEmptiesTheListAndTheNextCheckOffersTheReleaseAgain`,
-  `AfterBlockedClearApplyConfirmReturnsTheRequestForTheReleaseThatWasPutBack`,
-  `BlockedClearWithNoUpdateFolderSaysSoAndWritesNoFile`,
-  `BlockedClearIsRefusedWhenTheStateFileDoesNotReadAndLeavesTheFileAsItIs`,
-  `UpdateBlockedTakesClearAndNoOtherWordAndSaysTheOneLineThereIs`).
+  (`update_verbs::blocked_clear_empties_the_list_and_the_next_check_offers_the_release_again`,
+  `update_verbs::after_blocked_clear_apply_confirm_returns_the_request_for_the_release_that_was_put_back`,
+  `update_verbs::blocked_clear_with_no_update_folder_says_so_and_writes_no_file`,
+  `update_verbs::blocked_clear_is_refused_when_the_state_file_does_not_read_and_leaves_the_file_as_it_is`,
+  `update_verbs::update_blocked_takes_clear_and_no_other_word_and_says_the_one_line_there_is`).
 - **`last=`** is how the last swap ended: `committed`, `blocked`,
   `rolled_back`, `refused` or `rollback_incomplete`, with the helper's reason
   after a colon (`last=rolled_back:health_exit`).
@@ -1272,10 +1284,10 @@ piped on standard input, where the next line cannot be looked at without
 waiting for it, the session ends with the line and says so. How the swap
 ended is `last=` of `UPDATE STATUS` in the next run. A helper that cannot be
 started is said on stderr and fails the run, and its copy goes to the sweep
-(`app::abandonApply`).
+(`katana_app::update_verbs::abandon_apply`).
 
 `UPDATE BLOCKED CLEAR` is run in the real program too
-(`src/katana_app/update_blocked.cmake`): against a state file written by
+(`tests/cli/update_blocked.cmake`): against a state file written by
 hand with two releases blocked it prints `blocked=none`, the file is read
 back with an empty list, and the skipped version, the switch and the time of
 the last check are as they were
@@ -1303,18 +1315,18 @@ self-test - run as background jobs.
   once an hour whether one has come due. It is quiet when it learns nothing.
 - **One click.** Update is `UPDATE DOWNLOAD CONFIRM`, then `UPDATE APPLY
   CONFIRM`, then the window's ordinary `close()`. ONLY when that close
-  succeeded does `MainWindow::takePendingUpdate` hand `main()` the request,
+  succeeded does `MainWindow::take_pending_update` hand `main()` the request,
   after the event loop has ended, and `main()` starts the helper as its last
   act. A close that was cancelled, or a window the person closes themselves,
   installs nothing, and the release stays downloaded.
 - **A helper that cannot be started** is said by `main()`, the window being
   gone by then: on stderr ALWAYS ("the update could not be started: ..."),
-  with exit 1, the helper's copy listed for the sweep (`app::abandonApply`)
+  with exit 1, the helper's copy listed for the sweep (`katana_app::update_verbs::abandon_apply`)
   and the release still downloaded. It is said in a message box as well only
   when the run was given no line to run - no `--command`, `--enter` or
   `--run-line`: such a run is a window all the same, and may have nobody at
-  it to close a box (`updateFailureIsBoxed`,
-  `AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`).
+  it to close a box (`update_failure_is_boxed`,
+  `update_decisions::an_update_that_could_not_be_started_is_boxed_only_in_a_window_nobody_drove`).
 - **Settings > Updates** (`settingsUpdates`): "Check for updates
   automatically" (`settingsUpdateAuto`, which runs `UPDATE SET AUTO ON` or
   `OFF`), what a check sends (`settingsUpdateSends`), the access token
@@ -1326,12 +1338,12 @@ self-test - run as background jobs.
   Each of the two buttons is off when its list is known to be empty, and ON
   when nobody can say - a headless run, a state file that does not read - so
   that the verb answers
-  (`OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse`,
+  (`settings_updates::offer_the_version_that_was_put_back_again_builds_exactly_its_line_and_nothing_else`,
   `qt_settings_offers_again_a_version_that_was_put_back_by_its_line_headless`).
   Of the builds that were put back the page is told only of one that can
   still be offered to THIS install: a build made after the one installed
   here, or the one the dialog is telling of when the page asks
-  (`updatePutBackOfState`, `updateTellsOfSetAside`;
+  (`update_put_back_of_state`, `update_tells_of_set_aside`;
   `AVersionThatWasPutBackIsToldOfOnlyWhileItCanStillBeOfferedHere`). The
   list itself is shortened by `UPDATE BLOCKED CLEAR` alone.
 - **The dialog says where that button is.** Both sentences that tell of a
@@ -1340,7 +1352,7 @@ self-test - run as background jobs.
   "A later release will be offered, and Settings > Updates offers this one
   again." Once the line was carried out, a dialog that still said "not
   offered again" goes back to knowing nothing, and the next check offers
-  the release (`updateEffectOfLine`). The dialog's words for a reason now
+  the release (`update_effect_of_line`). The dialog's words for a reason now
   include `platform`, `elevated` ("Katana was started as administrator;
   start it the ordinary way, not as administrator, and update again - the
   download is kept") and `interrupted_update` as "an earlier update is not
@@ -1350,12 +1362,12 @@ self-test - run as background jobs.
   with the install's folder as the platform writes it. Update again FIRST,
   because the start that shows the sentence is what settles most such
   updates
-  (`AnUpdateRefusedOverAnEarlierOneThatIsNotSettledNamesTheCommandThatSettlesIt`).
+  (`update_decisions::an_update_refused_over_an_earlier_one_that_is_not_settled_names_the_command_that_settles_it`).
   The sentence is in the command log too; `UPDATE STATUS` gives the token
   alone, `last=refused:interrupted_update`.
 - **The Command Reference** (Help) has an Updates section, which is
-  `app::updateHelpText` - what `HELP UPDATE` prints - and its Window list
-  names `UPDATE` (`TheUpdatesSectionIsTheUpdateVerbsOwnHelp`).
+  `katana_app::update_verbs::update_help_text` - what `HELP UPDATE` prints - and its Window list
+  names `UPDATE` (`command_reference::the_updates_section_is_the_update_verbs_own_help`).
 - **At a start** an interactive window lists in `cleanup.list` the helper
   copy of each update of its install that a recovery put right
   ("Recovery"), removes what the list names, shows and clears `last.json`,
@@ -1396,7 +1408,7 @@ what it is spared is the message box when its helper cannot be started
 
 - no automatic check, and no dialog unless `--dialog` asks for it;
 - no per-user state read or written: its verbs' context
-  (`app::makeUpdateContext` for `UpdateSurface::HeadlessWindow`) has no
+  (`katana_app::update_verbs::make_update_context` for `UpdateSurface::HeadlessWindow`) has no
   state folder, and for a credential store the ENVIRONMENT'S alone - the
   variable `KATANA_UPDATE_TOKEN` of its own run, never the system's store,
   as `katana_mcp`'s has (`AHeadlessContextHasNoTokenWithoutTheVariable`).
@@ -1412,7 +1424,7 @@ what it is spared is the message box when its helper cannot be started
   per-user state, so a headless window never does it - the health run
   included, which is the question and not the answer.
 
-Two things every run does, headless or not: `update::recover` first, and the
+Two things every run does, headless or not: `katana_update::recover` first, and the
 switch `--update-health <tx>`, which is the helper's question and no
 person's.
 
@@ -1421,7 +1433,7 @@ person's.
 Not needed: `kjarada/Katana` is public, and the default feed is read without
 one. The token exists for a release repository that is PRIVATE, where a
 person who holds a read-only token can still update. It is the one secret
-the update system can hold (`include/katana/update/credential.hpp`).
+the update system can hold (`rust/crates/katana_update/src/credential.rs`).
 
 - **Where it is kept.** On Windows in the Credential Manager, as a generic
   credential named `Katana/update-token`. Everywhere, the environment
@@ -1453,10 +1465,10 @@ the update system can hold (`include/katana/update/credential.hpp`).
   transport follows it, re-sends `Range`, and sends NO token there - nor to
   any other address a server answered with, `api.github.com` itself
   included
-  (`TheTokenReachesTheApiHostOnTheFirstHopAndNotTheStorageHostItRedirectsTo`,
+  (`transport::the_token_reaches_the_api_host_on_the_first_hop_and_not_the_storage_host_it_redirects_to`,
   `ARedirectNeverCarriesTheTokenNotEvenBackToTheApiHost`).
 - **It is in nothing that is said.** Every reply, error and progress line
-  passes through `update::redactToken`, and an error names a token as
+  passes through `katana_update::credential::redact_token`, and an error names a token as
   "token" and nothing else.
 - **What a token may be**: one word of at most 2560 bytes - what the
   Credential Manager holds - with no control character and no space inside.
@@ -1466,9 +1478,9 @@ the update system can hold (`include/katana/update/credential.hpp`).
 
 | Target | Gets | Why |
 |---|---|---|
-| Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.cpp`, `spawn_win.cpp` in `src/katana_update/`; `process_scan_win.cpp`, `registry_win.cpp` in `src/katana_updater/`) |
+| Windows x86-64 | everything: check, download, swap, rollback, recovery | the file system, the launcher, the process scan and the registry are written for Windows (`fsops_win.rs`, `spawn_win.rs` in `rust/crates/katana_update/src/`; `process_scan_win.rs`, `registry_win.rs` in `rust/crates/katana_updater/src/`) |
 | Windows on ARM64 | the same code | it was written on a machine with no ARM64 toolchain. The release workflow's ARM64 job built it and ran the helper's `--selftest` and `UPDATE STATUS` of the installed copy (run 38580778852: `selftest=ok`, `kind=installer`); no update has been applied there ("To verify on first release") |
-| Linux x86-64, aarch64 | check and notify: `UPDATE CHECK` and `UPDATE STATUS` work, and the dialog says "This copy cannot update itself: the release notes say where to download it." | the apply's file system and launcher are not written for Linux (`src/katana_update/fsops_posix.cpp`, `spawn_posix.cpp`: every operation is one refusal). `UPDATE DOWNLOAD` and `UPDATE APPLY` are refused, `reason=platform`, before a request is sent; the helper, which the package carries, refuses a swap and a recovery the same way (exit 13) and writes nothing. The manifests and update zips are published all the same |
+| Linux x86-64, aarch64 | check and notify: `UPDATE CHECK` and `UPDATE STATUS` work, and the dialog says "This copy cannot update itself: the release notes say where to download it." | the apply's file system and launcher are not written for Linux (`rust/crates/katana_update/src/fsops_posix.rs`, `spawn_posix.rs`: every operation is one refusal). `UPDATE DOWNLOAD` and `UPDATE APPLY` are refused, `reason=platform`, before a request is sent; the helper, which the package carries, refuses a swap and a recovery the same way (exit 13) and writes nothing. The manifests and update zips are published all the same |
 | macOS on Apple silicon | check and notify, from a notify-only manifest: `update=available reason=notify_only` | a file changed inside `Katana.app` breaks the seal of the bundle, so nothing is ever replaced there: the package holds no helper, and the refusal stands for good, whatever is later written for Linux |
 
 ## To verify on first release
@@ -1495,8 +1507,8 @@ first live update waits for a second release.
   `curl` (with which single ranges were measured on 2026-10-08, and
   multi-range requests answered 501).
 - **The shipped transport itself.** The programs fetch through
-  `app::makeUpdateFetch`: the engine's rules over libcurl
-  (`gis::httpExchange`). The rules are tested to the letter and end to end,
+  `katana_app::update_transport::make_update_fetch`: the engine's rules over libcurl
+  (`katana_gis::web_access::http_exchange`). The rules are tested to the letter and end to end,
   but the end-to-end tests fetch with a client of their own on plain
   sockets, which is what keeps them on the machine; the libcurl half meets
   a server only in two tests that need `KATANA_ONLINE_TESTS=1` (a redirect
@@ -1531,7 +1543,7 @@ first live update waits for a second release.
 - **A Katana really started as administrator.** Which kind of token is
   refused is tested for every kind, and that the answer is never "yes" for
   a token Windows calls not elevated; a "yes" itself - that
-  `update::processIsElevated` hands the decision the kind Windows gave - is
+  `katana_update::process_is_elevated` hands the decision the kind Windows gave - is
   seen only by a run that holds the elevated half of a split token, and the
   suite is not started that way.
 - **A window that confirms.** That the window of an installed copy, started
@@ -1617,7 +1629,7 @@ And the engineering decisions, each with what was rejected:
   *Rejected: letting the HTTP library follow them*: it re-sends the
   request's headers wherever it is sent, and GDAL's fetch has no switch to
   stop it. So the project's HTTP layer gained one request that follows
-  nothing (`gis::httpExchange`), on the same libcurl GDAL loads. It is set
+  nothing (`katana_gis::web_access::http_exchange`), on the same libcurl GDAL loads. It is set
   up by GDAL too (`CPLHTTPSetOptions`), so it trusts what GDAL's requests
   trust: the package's bundle and, on Windows, the certificate store a company
   proxy's root is in (`docs/gis_online.md`, "Which certificates are trusted").
@@ -1696,7 +1708,7 @@ GitHub's own limits bound what a release may hold: "Up to 1000 release
 assets may be associated with a single release" and "Each file included in a
 release must be under 2 GiB" (GitHub Docs, "About releases", "Storage and
 bandwidth quotas", read 2026-10-13). The reader of a release's asset list
-(`update::parseReleaseAssets`) takes at most twice the thousand. An update
+(`katana_update::feed::parse_release_assets`) takes at most twice the thousand. An update
 zip is one file of a release, so on GitHub it is bounded by the 2 GiB,
 whatever more the manifest's parser allows (4 GiB).
 
@@ -1757,13 +1769,13 @@ whatever more the manifest's parser allows (4 GiB).
   never reach - the window's `main()` saying that a helper could not be
   started (stderr, exit 1, the box), and the few lines of `katana_cli`'s
   `main()` that start the helper (`docs/mcp.md`). What each of them DECIDES
-  is a function with tests of its own (`updateStartMayConfirm`,
-  `updateFailureIsBoxed`, `updateRecoveredTransactions`), and what
+  is a function with tests of its own (`update_start_may_confirm`,
+  `update_failure_is_boxed`, `update_recovered_transactions`), and what
   confirming does is the engine's and tested there.
   The shipped programs cannot be given a test key, which is the point of
   them.
 - **No test in the ordinary run puts the shipped transport in front of a
-  server** (`src/katana_app/update_transport.cpp` over libcurl): "To verify
+  server** (`rust/crates/katana_app/src/update_transport.rs` over libcurl): "To verify
   on first release". A test that ran it against the fake feed would have to
   link `katana_app` and be held to the loopback by something other than its
   own construction.
@@ -1775,7 +1787,7 @@ whatever more the manifest's parser allows (4 GiB).
   only ever added to, so the page tells only of a build made AFTER the one
   installed here - a sequence above the install record's, or any build
   where the install has no record - or of the one the update dialog is
-  telling of at that moment (`updatePutBackOfState`; `docs/desktop.md`,
+  telling of at that moment (`update_put_back_of_state`; `docs/desktop.md`,
   "The Updates page"). A build made before the installed one and yet of a
   higher version is therefore told of only once a check has met it. A
   check that meets a blocked release names it.
@@ -1813,33 +1825,33 @@ What the hardening pass of 2026-10-14 left open, by its rulings:
   the token alone, `last=refused:interrupted_update`, on every surface.
 - **H1: the logon net is ONE registry value for every copy of Katana a
   person runs.** The `RunOnce` entry has one name, `KatanaUpdateRecover`,
-  whatever R is (`update::kRunOnceName`). A person who runs two copies -
+  whatever R is (`katana_update::registry::RUN_ONCE_NAME`). A person who runs two copies -
   an installed one and a zip unpacked beside it - has one entry for both.
   A swap in the other copy replaces it with its own command when it
   commits, and that swap's ending, the other copy's window when it
   confirms and the other copy's `--recover` when it finishes remove the
   value, THIS copy's entry with it. This copy's net is then gone until a
   `--recover` of its own registers it again. What it keeps is what holds
-  without the entry: `update::recover` at the next start of any of its
+  without the entry: `katana_update::recover` at the next start of any of its
   programs, and a window that confirms. Known, and not changed: the
   uninstaller removes the value by that name (`cmake/NSIS.template.in`).
 - **H1: a `--recover` at logon that fails leaves no entry.** Windows
   removes a `RunOnce` entry before it runs it, and the run registers it
   again only on its way to settling an update that was never said to
-  start (`update::settleUnproved`) - which it reaches only when its first
-  half, putting back what a crash left (`update::recoverInProcess`), was
+  start (`katana_update::recover::settle_unproved`) - which it reaches only when its first
+  half, putting back what a crash left (`katana_update::recover::recover_in_process`), was
   OK. A logon's run that FAILS there - a half-swapped tree whose putting
   back does not finish or whose lock cannot be opened, an `R/.update`
   that will not be listed - prints `recover=failed`, exit 12, writes its
   line in `recovery.log` where it can, and leaves no entry: no later
   logon tries again by itself. The swap whose own rollback failed did
   keep its entry ("The swap"), so this is the second failure in a row.
-  What remains is `update::recover` at the next start of any program of
+  What remains is `katana_update::recover` at the next start of any program of
   the install, which runs the same command and, where that fails, says on
   stderr the command to run by hand; and that command.
 - **H1: a window of the old files can confirm a second build of its own
   version.** The window confirms when the install record's version is its
-  own (`updateStartMayConfirm`). A window of the old files that was started
+  own (`update_start_may_confirm`). A window of the old files that was started
   during the commit is refused by that only when the update raised the
   VERSION. Where the update is to a later build of the same version, the
   two versions are equal, and such a window - once the helper has died,

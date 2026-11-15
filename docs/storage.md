@@ -10,14 +10,15 @@ something we write ourselves?
 
 ## What was measured
 
-`benchmarks/bench_storage.cpp`, Release, GCC 15.2 UCRT64, 16 × 2496 MHz,
+The C++ build's storage benchmark (removed with the C++ tree, 2026-11-15; not
+ported to Rust), Release, GCC 15.2 UCRT64, 16 × 2496 MHz,
 L3 18 MiB. The model is shaped like real survey data: 8-vertex polylines on
 four nested layers, two attributes each.
 
 | Operation (50 000 entities) | Time |
 |---|---|
 | `ProjectStore::save` — whole project | **445 ms** |
-| `ProjectStore::open` + `load` + `applyToModel` | **891 ms** |
+| `ProjectStore::open` + `load` + `apply_to_model` | **891 ms** |
 | Geometry → JSON only (no database) | **172 ms** |
 | JSON → geometry only (no database) | **602 ms** |
 
@@ -106,18 +107,18 @@ installed** in this toolchain as GDAL dependencies, and PDAL can write Parquet,
 so the cheap first step is to store bulk point data as Parquet and query it
 with Arrow, adding DuckDB only if the queries outgrow that.
 
-Whatever is chosen there, it goes **behind a Katana interface in `src/`**, with
-no third-party type in a public header (Rule 4) — the same isolation GDAL and
-PDAL already have.
+Whatever is chosen there, it goes **behind a Katana interface in its own
+crate under `rust/crates/`**, with no third-party type in a public signature
+(Rule 4) — the same isolation GDAL and PDAL already have.
 
 ## The result
 
 Schema version 3 stores geometry as a versioned little-endian blob
-(`include/katana/entity/geometry_blob.hpp`). Same machine, same benchmark:
+(`rust/crates/katana_entity/src/geometry_blob.rs`). Same machine, same benchmark:
 
 | 50 000 entities | Before | After | |
 |---|---|---|---|
-| `open` + `load` + `applyToModel` | 891 ms | **195 ms** | 4.6× |
+| `open` + `load` + `apply_to_model` | 891 ms | **195 ms** | 4.6× |
 | `save` | 445 ms | **206 ms** | 2.2× |
 
 Measuring the two encodings head to head, on the same 50 000 geometries with
@@ -134,7 +135,7 @@ to lexing text and converting decimal to binary.
 
 **The load saved 696 ms, of which decoding accounts for 583 ms.** The remaining
 ~113 ms is most likely the string handling that went with the JSON: that path
-pulled each geometry out of `columnText` as a `std::string` and then allocated
+pulled each geometry out of `column_text` as a `std::string` and then allocated
 again while parsing, where the blob is read into one buffer and decoded in
 place. The arithmetic is consistent with that, but the 113 ms has not been
 measured directly — treat it as an explanation, not a result.
@@ -168,7 +169,7 @@ and silently get NULL.
 
 SQLite now accounts for the majority of what remains (195 ms for 50 000
 entities). Before reopening the engine question, note that the remaining time
-includes `applyToModel` — validating and inserting every entity into the model —
+includes `apply_to_model` — validating and inserting every entity into the model —
 which no database change would touch. Measure that split first.
 
 ## Reproducing
@@ -185,40 +186,40 @@ without its measurement is an opinion.
 ## Loading a project without copying it twice
 
 Opening a 50 000-entity project allocated 1.38 million times, and 287 563 of
-those - 22.6% - were `applyToModel` duplicating every `Entity` on its way from
+those - 22.6% - were `apply_to_model` duplicating every `Entity` on its way from
 the loaded `ProjectContents` into the model. The contents are thrown away on the
 next line.
 
-`applyToModel` therefore has two overloads, a copying one and a consuming one,
+`apply_to_model` therefore has two overloads, a copying one and a consuming one,
 sharing a single templated body so that the insertion order and the built-in
 name rules cannot drift apart between them. `Document::open` uses the consuming
 one, taking the metadata out **before** the call and installing it only after
 the apply succeeds - a failed open must leave the document exactly as it was,
-and that promise is what the staging in `applyToModel` exists to keep.
+and that promise is what the staging in `apply_to_model` exists to keep.
 
-`ConsumingTheContentsBuildsExactlyTheModelCopyingThemDoes` builds a project with
-something in every table `applyToModel` fills, applies one copy of it each way
+`project_store_round_trip::consuming_the_contents_builds_exactly_the_model_copying_them_does` builds a project with
+something in every table `apply_to_model` fills, applies one copy of it each way
 and compares the two models value for value - not by id, because the failure a
 move introduces is a field left behind, not a missing record. Rewriting the
 layer loop as the plausible "add, and fall back to update if it is already
 there" - which reads a layer after moving from it - fails that test; that was
 checked by writing it.
 
-`SqliteStatement::columnTextView` and `columnBlobSpan` borrow SQLite's own row
-buffer for values parsed and discarded within the row. `columnText` and
-`columnBlob` are now those plus a copy, so one place knows how SQLite hands a
+`SqliteStatement::column_text_view` and `column_blob_span` borrow SQLite's own row
+buffer for values parsed and discarded within the row. `column_text` and
+`column_blob` are now those plus a copy, so one place knows how SQLite hands a
 value over. The lifetime rule is on the declarations, and it is sharp: a view
 dies at the next `step()`, `reset()` or `run()`, and at a second read of the
 same column through a different accessor, because SQLite converts in place.
 
 The entity vector is sized from `SELECT COUNT(*)` rather than from
-`nextEntityId`. The counter is free but is only an upper bound, and a drawing
+`next_entity_id`. The counter is free but is only an upper bound, and a drawing
 that has had most of its entities deleted would reserve for its ids instead of
 its rows.
 
 ## Large values in the database, not beside it
 
-Schema 13 keeps the drawing's TIN surfaces (`storage::SurfaceRecord`,
+Schema 13 keeps the drawing's TIN surfaces (`katana_storage::project_store::SurfaceRecord`,
 `docs/terrain.md`, "Surfaces in the drawing") in the database, a BLOB a
 surface - tens of megabytes for one at SURFACE FROM's cap - as schema 10 keeps
 a survey job's field files. The project directory has a `terrain/` folder for
@@ -228,7 +229,7 @@ crash between the two leaves the database naming surfaces whose files are
 older, newer or gone, which is the corruption the rollback journal exists to
 prevent. The cost is a save that rewrites every surface (`save()` rewrites the
 whole model already) and the SQLite length limit, which
-`ProjectStore::checkSurfaceSize` guards as `checkSurveyJobSize` does: a row over
+`ProjectStore::check_surface_size` guards as `check_survey_job_size` does: a row over
 900 MB is refused before a byte is written. A surface is read straight from
-SQLite's row buffer (`columnBlobSpan`), one copy, and its bytes are freed as
+SQLite's row buffer (`column_blob_span`), one copy, and its bytes are freed as
 soon as the Document has decoded them.

@@ -9,12 +9,12 @@ is exact where it says it is, says which method it is in every reply, and is
 held in the tests to a solid whose volume is known in closed form or to an
 independent method.
 
-The terrain layer does the arithmetic (`include/katana/terrain/overlay.hpp`,
-`include/katana/terrain/volume.hpp`, `include/katana/terrain/section_volume.hpp`);
-the verbs are `katana_cad`'s (`include/katana/cad/terrain/volume_verbs.hpp`),
+The terrain layer does the arithmetic (`rust/crates/katana_terrain/src/overlay.rs`,
+`rust/crates/katana_terrain/src/volume.rs`, `rust/crates/katana_terrain/src/section_volume.rs`);
+the verbs are `katana_cad`'s (`rust/crates/katana_cad/src/terrain/volume_verbs.rs`),
 so the window, `katana_cli` and `katana_mcp` run the same code; the window's
 Terrain > Volumes only builds their lines
-(`src/katana_qt/terrain/volumes_dialog.hpp`).
+(`rust/crates/katana_window/src/terrain/volumes_dialog.rs`).
 
 ## The verbs
 
@@ -33,7 +33,7 @@ SURFACE ENVELOPE <a> <b> MAX|MIN [NAME <new>] [PREVIEW]
 <polygon> := #id [#id ...] | x,y[,z] x,y[,z] x,y[,z] ... | FROM <scope> [WHERE k=v ...]
 ```
 
-`HELP VOLUME` prints the same (`volumeVerbHelp`), and the window's Command
+`HELP VOLUME` prints the same (`volume_verb_help`), and the window's Command
 Reference has it as its Volumes section. Words are case-insensitive; a
 surface or alignment name with a blank is quoted. The `key=value` options
 are read wherever they stand - none is a WHERE key, so one may follow a
@@ -43,10 +43,10 @@ ignored.
 **Cut and fill are read one way everywhere.** The first surface named is the
 existing one (the base), the second the design (the top): fill is where the
 top is above the base, cut where it is below, and `net = fill - cut`
-(positive: material to bring in) in every record. That is `compareSurfaces`'
+(positive: material to bring in) in every record. That is `compare_surfaces`'
 reading, which the corridor quantities share. A level is the design for
 DATUM, so what stands above it is cut and what lies below is fill
-(`volumeToDatum`'s "level design" reading); for STOCKPILE the level, or the
+(`volume_to_datum`'s "level design" reading); for STOCKPILE the level, or the
 base made from the toe, is the reference, so a pile is cut - the volume that
 removes it - and a pit is fill. DATUM and STOCKPILE add `above=` and
 `below=`, which say the same without the earthworks reading.
@@ -115,17 +115,17 @@ When the scope takes no polygon nothing runs and nothing is written, whatever
 OVERWRITE says, and the reply says so (`csv file=<f> written=no reason=...`)
 where it used to say nothing, so a file an earlier run left is known to be as
 it was
-(`VolumeVerbs.ACsvWithAScopeThatTakesNoPolygonWritesNothingAndSaysSo`,
-`VolumeVerbs.ATableNamesItsMethodAndInputsAndCarriesTheAreasLevelsAndCellsOfTheReply`,
-`VolumeVerbs.ASectionTableSaysWhetherItsVolumesAreEndAreaOrPrismoidalAndWhatMadeThem`). SURFACE DIFFERENCE and ENVELOPE add a surface to the drawing
-through `Document::setSurfaces`: one undo step, named after the verb; with
+(`volume_verbs::a_csv_with_a_scope_that_takes_no_polygon_writes_nothing_and_says_so`,
+`volume_verbs::a_table_names_its_method_and_inputs_and_carries_the_areas_levels_and_cells_of_the_reply`,
+`volume_verbs::a_section_table_says_whether_its_volumes_are_end_area_or_prismoidal_and_what_made_them`). SURFACE DIFFERENCE and ENVELOPE add a surface to the drawing
+through `Document::set_surfaces`: one undo step, named after the verb; with
 PREVIEW they say what they would add and add nothing.
 
 **Refused, saying why:** a surface or an alignment the drawing has not got
 (NotFound); surfaces with no ground in common, or polygons with nothing of
 it inside (InvalidGeometry, naming each surface and the extent it covers,
 whether their boxes do not meet or meet over triangles that do not -
-`VolumeVerbs.ARefusalThatTwoSurfacesShareNoGroundNamesWhatEachCovers` runs
+`volume_verbs::a_refusal_that_two_surfaces_share_no_ground_names_what_each_covers` runs
 every form; SECTIONS also when no section of the range reaches ground both
 have); sections that cross one another, or stretches of the alignment that run
 side by side (InvalidArgument, below); `curvature=` that is neither on nor off; an
@@ -141,30 +141,30 @@ refused (`docs/cad.md`, "Scope and filter").
 
 Every volume between two surfaces integrates their difference, and the
 difference is linear only where both surfaces are: inside one triangle of
-each. `terrain::visitOverlay` cuts the common ground into such pieces - each
+each. `katana_terrain::overlay::visit_overlay` cuts the common ground into such pieces - each
 the intersection of a triangle of each surface, a convex polygon of at most
 six corners, fanned from its first corner - and hands each to a visitor with
 both surfaces' heights at its corners. It is the pair clipping
-`compareSurfaces` already did (`docs/terrain.md`, "The fix: clip triangle
+`compare_surfaces` already did (`docs/terrain.md`, "The fix: clip triangle
 pairs"), moved out so the volumes inside a polygon, the stockpiles and the
 difference and envelope surfaces cut the ground the same way.
-`compareSurfaces` is now a visitor of it, with the same arithmetic in the
+`compare_surfaces` is now a visitor of it, with the same arithmetic in the
 same order: its results are the bits they were. Nor did it slow down:
-`BM_CompareSurfaces` (`benchmarks/bench_terrain.cpp`) in Release on the
+`BM_CompareSurfaces` (the C++ build's `bench_terrain` benchmark) in Release on the
 24-thread development machine, five repetitions each, the two builds run
 alternately twice on 2026-10-15, gave a median of 51.5 and 51.9 ms before
 and 50.0 and 50.6 ms after, and `BM_CompareSurfacesSerial` 491 and 508 ms
 before and 504 and 507 ms after - each within the spread of its own runs.
 
 **The same bits at any thread count.** The base surface's triangles are cut
-into blocks of a fixed `kOverlayBlockTriangles` (256), and a block's pieces
+into blocks of a fixed `OVERLAY_BLOCK_TRIANGLES` (256), and a block's pieces
 arrive on one thread in a fixed order: base triangle ascending, the top
 triangles it meets ascending, then a region's triangles ascending, then the
 fan. A visitor that sums each block into its own slot and combines the slots
-in block order is deterministic, which `compareSurfaces`, the region
+in block order is deterministic, which `compare_surfaces`, the region
 comparison and the difference surface are held to
-(`VolumeInsidePolygon.GivesTheSameBitsOnOneThreadAsOnMany`,
-`DifferenceSurface.IsTheSameSurfaceAtAnyThreadCount`).
+(`volume_inside_polygon::gives_the_same_bits_on_one_thread_as_on_many`,
+`difference_surface::is_the_same_surface_at_any_thread_count`).
 
 **Coincident ground is neither cut nor fill.** `cut.area=` and `fill.area=`
 are the plan area where the top is below and above the base, and a piece's
@@ -178,19 +178,19 @@ inside a skewed polygon of a surface at its own level, 750 m2 and 9 m2 on one
 plane in two triangulations (100 m2 the other way round), 700 m2 of cut and 75 of
 fill round a toe of 400. A pay item measured by area would have been paid on
 rounding. The areas are now sorted with every corner difference within
-`kGeometric` (0.1 micrometre) of zero taken as zero - the one tolerance of the
+`GEOMETRIC` (0.1 micrometre) of zero taken as zero - the one tolerance of the
 policy, not a second for heights - and a piece whose corners are all within it
 is neither. The volumes are summed from the differences as they are, so their
 bits are unchanged, and a coincidence within 0.1 micrometre keeps the (at most
-that times the area) volume it holds: `compareSurfaces` of a 5e-8 rise over
+that times the area) volume it holds: `compare_surfaces` of a 5e-8 rise over
 10 000 m2 is 5e-4 m3 of fill and no fill area, a rise of 1 mm is 10 m3 and all
 10 000 m2
-(`CompareSurfaces.OnePlaneTriangulatedTwoWaysHasNoCutAreaAndNoFillAreaInEitherOrder`,
-`VolumeToLevelInsidePolygon.AFlatSurfaceAgainstItsOwnLevelHasNeitherCutAreaNorFillArea`,
-`Stockpile.OnSlopingGroundWithAPolygonWiderThanTheToeOnlyTheToeIsCutArea`).
+(`compare_surfaces::one_plane_triangulated_two_ways_has_no_cut_area_and_no_fill_area_in_either_order`,
+`volume_to_level_inside_polygon::a_flat_surface_against_its_own_level_has_neither_cut_area_nor_fill_area`,
+`stockpile::on_sloping_ground_with_a_polygon_wider_than_the_toe_only_the_toe_is_cut_area`).
 Rejected: a tolerance relative to the heights (a few ulps of the largest), which
 a sliver triangle's weights, off by the triangle's aspect ratio times that,
-would have overrun, and which would be a second constant beside `kGeometric`.
+would have overrun, and which would be a second constant beside `GEOMETRIC`.
 Heights are in metres; a model in millimetres would need the tolerance scaled.
 
 **Joining the pieces into a surface.** A difference or an envelope is a TIN
@@ -206,43 +206,43 @@ pieces overlapping by a sliver, which `create` refuses as two triangles along
 one edge in the same direction, the same vertices and every piece edge go to
 the constrained triangulation instead, whose exact predicates settle it, and
 the triangles outside every piece are left out again (`retriangulated=yes`
-in the reply). `DifferenceSurface.MadeThroughTheTriangulationItMeasuresTheSame`
+in the reply). `difference_surface::made_through_the_triangulation_it_measures_the_same`
 asks for that path and holds its volumes to the direct one's.
 
 ## Inside a polygon
 
-`terrain::OverlayRegion` is a polygon and its holes triangulated once - a
+`katana_terrain::OverlayRegion` is a polygon and its holes triangulated once - a
 constrained Delaunay triangulation of its own vertices, so its triangles tile
 it exactly and add no point - and the overlay's pieces are cut again by those
 triangles. The polygon's edges are therefore followed exactly, through the
 middle of triangles, not by whole triangles: a 1 m slab under a triangle
 whose edges cross both surfaces' diagonals measures the triangle's shoelace
 area, 2088.635 m3
-(`VolumeInsidePolygon.TheEdgesOfAPolygonCutTrianglesWhereTheyLieNotByWholeTriangles`).
+(`volume_inside_polygon::the_edges_of_a_polygon_cut_triangles_where_they_lie_not_by_whole_triangles`).
 
 - **The polygon** is an `#id`, typed corners, or what a scope takes, read
   by the one reader of the drawing's polygons that the surface edits use too
-  (`include/katana/cad/terrain/drawing_shapes.hpp`, which says what each kind
-  of entity gives); `readVolumePolygons` only words its refusals. A closed
+  (`rust/crates/katana_cad/src/terrain/drawing_shapes.rs`, which says what each kind
+  of entity gives); `read_volume_polygons` only words its refusals. A closed
   polyline or curve polyline, one drawn back to its first vertex without
   being closed, a circle, a full ellipse and a closed spline are polygons,
   each at its heights; lines, arcs, elliptical arcs, open polylines and
   outlines of fewer than three corners are counted as `skipped.open` (they
   bound no area), and points, text and splines that do not return to their
   start as `skipped.other`. An arc, a circle, an ellipse and a spline are
-  chorded within `geometry::kCurveChordTolerance` (1 mm sagitta), and the
+  chorded within `katana_geometry::curves2d::CURVE_CHORD_TOLERANCE` (1 mm sagitta), and the
   record says `chorded=yes`.
 - **A spline that returns to its start is a polygon.** `Spline2` has no closed
-  flag, so a spline whose end is within `kGeometric` (0.1 micrometre) of its
-  start (`Spline2::isClosedShape`) is a closed outline, flattened by
+  flag, so a spline whose end is within `GEOMETRIC` (0.1 micrometre) of its
+  start (`Spline2::is_closed_shape`) is a closed outline, flattened by
   `Spline2::tessellate` within the same 1 mm sagitta as the circle and the
   ellipse, its repeated end taken off, every corner at the entity's elevation
   property when it has one (a spline holds no height of its own; the ellipse's
   and the circle's are read the same way, so the three agree). One that does
   not return to its start is no outline, `skipped.other` as it always was
-  (`DrawingShapes.AClosedSplineIsAPolygonChordedWithinTheToleranceAtTheEntitysElevation`,
-  `DrawingShapes.ASplineIsClosedWhenItsEndIsWithinTheGeometricToleranceOfItsStartAndNotOtherwise`,
-  `VolumeVerbs.ASplineDrawnBackToItsStartIsAVolumePolygonAndAnOpenOneIsCountedAsOther`).
+  (`drawing_shapes::a_closed_spline_is_a_polygon_chorded_within_the_tolerance_at_the_entitys_elevation`,
+  `drawing_shapes::a_spline_is_closed_when_its_end_is_within_the_geometric_tolerance_of_its_start_and_not_otherwise`,
+  `volume_verbs::a_spline_drawn_back_to_its_start_is_a_volume_polygon_and_an_open_one_is_counted_as_other`).
   A spline of 5e-8 between its ends is closed and one of 5e-7 is not. Rejected:
   closing an open spline with a chord when its ends are near: a spline is not a
   polyline that was meant to close, and a chord is a guess at the outline.
@@ -252,15 +252,15 @@ area, 2088.635 m3
   inside another is a polygon of its own (a building in a lot is not a hole in
   the lot). A ring is a hole only when it says so - `source.ring=hole`, which
   IMPORT writes into an entity's metadata, or `gis.ring=hole`, which a
-  geoprocessing result writes into its properties (`entity/ring_tags.hpp`) -
+  geoprocessing result writes into its properties (`rust/crates/katana_entity/src/ring_tags.rs`) -
   and then it joins the polygon it lies in, as the GIS conversion joins it
-  (`DrawingDataset.ATaggedHoleJoinsItsExterior`): the polygon whose part
+  (`drawing_dataset::a_tagged_hole_joins_its_exterior`): the polygon whose part
   (`source.part` or `gis.part`) it shares, else the smallest that holds every
   vertex of it, else the one made nearest before it. The rule is one function,
-  `entity::HoleJoiner`, which the conversion (`interop::drawingDataset`) calls
+  `katana_entity::HoleJoiner`, which the conversion (`katana_interop::geo::drawing_dataset::drawing_dataset`) calls
   as well, so a lot with a hole has the same area whichever reads it; it lives
   in the entity layer because interop may not see cad and cad may not see
-  interop. The polygon is then `OverlayRegion::fromPolygon(ring, holes)`: its
+  interop. The polygon is then `OverlayRegion::from_polygon(ring, holes)`: its
   area is the ring's less the holes', the overlay is cut by it, the grid and
   the volume to a level take it, and a stockpile is measured round the holes
   (`StockpileOptions::holes`: their edges count as boundary for
@@ -268,14 +268,14 @@ area, 2088.635 m3
   heights - a hole has none of its own, and one with a vertex off the surface
   is refused naming it). A 50 x 50 lot with a 10 x 10 hole under a 1 m slab holds
   2400 m3, by every method that takes a polygon
-  (`VolumeVerbs.ALotWithATaggedHoleIsMeasuredLessTheHoleByEveryMethodThatTakesAPolygon`,
+  (`volume_verbs::a_lot_with_a_tagged_hole_is_measured_less_the_hole_by_every_method_that_takes_a_polygon`,
   `cli.volume_inside_a_lot_with_a_tagged_hole_measures_the_lot_less_the_hole`).
   The rings are read together, in the one call that reads the polygons (an
   `#id` list or a scope): a hole named before its lot joins it all the same, and
   a tagged ring that no polygon of the call holds is measured as a polygon of
   its own and said (`warning holes.alone=`), as the conversion keeps it. A ring
   not tagged is a polygon, and a building in a lot overlaps it
-  (`VolumeVerbs.ARingNotTaggedAsAHoleIsAPolygonOfItsOwnAndOverlapsTheLot`).
+  (`volume_verbs::a_ring_not_tagged_as_a_hole_is_a_polygon_of_its_own_and_overlaps_the_lot`).
   Rejected: reading a ring inside another as a hole by its position alone (a
   building in a lot is not one), and a copy of the conversion's rule in cad
   beside the one in interop (two rules for the same words would drift, and the
@@ -288,13 +288,13 @@ area, 2088.635 m3
   Where they differed the shared rule is the one that takes more, since each
   refusal was an accident of which reader was written, not a reason: so a
   polygon here may now be an ellipse or a polyline drawn back to its start
-  (`VolumeVerbs.AFullEllipseAndAPolylineDrawnBackToItsStartAreVolumePolygons`).
+  (`volume_verbs::a_full_ellipse_and_a_polyline_drawn_back_to_its_start_are_volume_polygons`).
   A closed outline of fewer than three corners, which used to be taken and
   then refused by the overlay, is now counted with what bounds no area.
   Rejected: keeping `VolumePolygon` as a thin adapter over the shared shape,
   which would have kept a second representation of the same polygon.
 - **A volume to a level inside a polygon** compares the surface with the
-  region made flat at the level (`OverlayRegion::atLevel`): the same
+  region made flat at the level (`OverlayRegion::at_level`): the same
   overlay, so the same exactness.
 - **Several polygons** are measured one at a time and summed. Two that
   overlap would count the ground they share twice: without EACH that is
@@ -308,11 +308,11 @@ area, 2088.635 m3
   no EACH.
 - **A polygon partly off the ground** measures the ground under it, and
   `area=` against `polygon.area=` says how much that was
-  (`VolumeToLevelInsidePolygon.APolygonPartlyOffTheSurfaceMeasuresTheGroundUnderIt`).
+  (`volume_to_level_inside_polygon::a_polygon_partly_off_the_surface_measures_the_ground_under_it`).
 
 ## Stockpiles and pits
 
-`terrain::stockpileVolume` measures a surface inside a boundary against a
+`katana_terrain::volume::stockpile_volume` measures a surface inside a boundary against a
 base made from the boundary:
 
 - **`base=boundary`** (the default): the boundary's heights triangulated
@@ -327,7 +327,7 @@ base made from the boundary:
   surface, and its own height is not used: the boundary's own heights are used
   only when every vertex has one, and vertex 1 has none`), and not that it has
   no height of its own, which was untrue and sent a person to the wrong vertex
-  (`Stockpile.AnOffSurfaceVertexWithItsOwnHeightIsRefusedNamingTheVertexThatHasNone`).
+  (`stockpile::an_off_surface_vertex_with_its_own_height_is_refused_naming_the_vertex_that_has_none`).
   Rejected: a per-vertex fallback (own where present, the surface's elsewhere),
   which would change the documented rule and the `heights=` it reports.
 - **`base=lowest`**: a level plane at the lowest point of the surface along
@@ -341,20 +341,20 @@ height: twelve faces on a toe of radius 20 hold (12/2) 20^2 sin 30 deg x 9 /
 answer does not move, because a pyramid's volume is its plan area times its
 height plumb from the base plane. 360 faces come within 0.19 m3 of the cone's
 pi r^2 h / 3, the circle's area beyond the polygon's
-(`Stockpile.ManyFacetsApproachTheConeFormula`).
+(`stockpile::many_facets_approach_the_cone_formula`).
 
 ## Along an alignment
 
-`terrain::volumesAlongAlignment` cuts cross sections square to an alignment
+`katana_terrain::section_volume::volumes_along_alignment` cuts cross sections square to an alignment
 and takes the volume between consecutive ones from their areas, the way a
 road job is measured and paid.
 
 - **Stations:** every whole multiple of `interval=` (10, 20, 30 ... for 10,
   whatever the start), the range's ends and the alignment's key stations (TS,
-  SC, CS, ST - `SolvedAlignment::keyStations`), where the geometry changes
-  and a section is always cut. Two closer than `kCoordinate` (0.1 mm) are
+  SC, CS, ST - `SolvedAlignment::key_stations`), where the geometry changes
+  and a section is always cut. Two closer than `COORDINATE` (0.1 mm) are
   one. More than 100 000 sections is a unit mistake and refused, the cap
-  `terrain::contours` puts on its levels.
+  `katana_terrain::contours` puts on its levels.
 - **Reach:** `left=` and `right=` from the centreline; absent, the diagonal
   of the ground the two surfaces share, so a section reaches across all of
   it wherever it is cut. That is right on a straight run and wrong anywhere
@@ -376,10 +376,10 @@ road job is measured and paid.
   and measure nothing. `left=15 right=15` over the same curve gives
   30 x (240 + 20 pi) = 9084.956 m3, the band's width times its centreline's
   length
-  (`VolumesAlongAlignment.SectionsAcrossACurveDeeperThanItsRadiusAreRefusedNotCountedTwice`).
+  (`volumes_along_alignment::sections_across_a_curve_deeper_than_its_radius_are_refused_not_counted_twice`).
   Sections that only meet at their ends (a reach equal to the radius, which
   ends every section of the curve on its centre) are not crossing; the test
-  is a proper crossing by more than `kGeometric` at both ends. In the window
+  is a proper crossing by more than `GEOMETRIC` at both ends. In the window
   the Left and Right fields are blank for "across the common ground", so a
   person on a curve gets the refusal in the status line and types a reach.
 - **Stretches side by side are refused too.** Two parts of an alignment that
@@ -391,7 +391,7 @@ road job is measured and paid.
   the diagonal that lies inside it because a panel across a corner can be
   concave - is tested against that of every panel but its neighbours (which
   share a section and touch along it), by the separating axis test: two panels
-  overlap when their shadows overlap by more than `kGeometric` on every normal
+  overlap when their shadows overlap by more than `GEOMETRIC` on every normal
   of every edge, which is the shortest way one would have to move to clear the
   other, so strips that only touch, or that overlap by less than 0.1
   micrometre, are measured. The pairs come from the same kind of box index as
@@ -405,9 +405,9 @@ road job is measured and paid.
   ("from station 0.000 to 100.000 runs side by side with the stretch from station
   120.000 to 215.000"); 7 each way is measured, 7.5 each way touches along one
   line and is measured, 7.5 + 1e-6 is refused and 7.5 + 1e-8 is not
-  (`VolumesAlongAlignment.TwoLegsOfAUTurnCloserThanTwiceTheReachAreRefusedNamingTheStretches`,
-  `VolumesAlongAlignment.StripsThatOnlyTouchOrClearOneAnotherAreMeasured`,
-  `VolumesAlongAlignment.LegsWhoseStripsAreAsymmetricAreRefusedOnlyWhenTheStripsMeet`,
+  (`volumes_along_alignment::two_legs_of_au_turn_closer_than_twice_the_reach_are_refused_naming_the_stretches`,
+  `volumes_along_alignment::strips_that_only_touch_or_clear_one_another_are_measured`,
+  `volumes_along_alignment::legs_whose_strips_are_asymmetric_are_refused_only_when_the_strips_meet`,
   `cli.volume_sections_along_two_legs_side_by_side_are_refused_naming_the_stretches`).
   A curve cannot do it (the legs either side of a curve of radius R are 2R
   apart, and a reach over R crosses at its centre), so the test costs a curve
@@ -421,25 +421,25 @@ road job is measured and paid.
   from the bearing, so on a north-going alignment they are tilted by
   cos(pi/2) = 6e-17 of the reach, 9e-15 m at 141 m, and an exact test keeps
   whichever half of the segment the tilt leaves inside the edge. Both ends of a
-  segment within `kGeometric` (0.1 micrometre) of an edge's line put it ON the
+  segment within `GEOMETRIC` (0.1 micrometre) of an edge's line put it ON the
   edge: inside, as the exactly parallel case always was. A 1 m slab holding
   10 000 m3 measured 9500 along north, south and west alignments (500 m3 gone
   from a paid quantity, with nothing in the reply to say so) and 10 000 along
   east, where sin 0 = 0 exactly
-  (`VolumesAlongAlignment.ASlabMeasuredAlongAnyCardinalAlignmentIsWholeWhereItsEndSectionsLieOnItsBoundary`,
+  (`volumes_along_alignment::a_slab_measured_along_any_cardinal_alignment_is_whole_where_its_end_sections_lie_on_its_boundary`,
   and at every fifteenth degree with the slab's corners cut by the alignment
   itself, as a corridor's are). Rejected: cutting the end sections a hair inside
   the range, which fixes the ends only, to within that hair, and not a boundary
   that runs along the range.
 - **The section areas are exact.** A section is a straight segment; each
   surface along it is the run of pieces where the segment crosses one of its
-  triangles (`terrain::SegmentProfiler`, Cyrus-Beck clipping against each
+  triangles (`katana_terrain::section_volume::SegmentProfiler`, Cyrus-Beck clipping against each
   triangle the segment's box meets), and where a piece of one meets a piece
   of the other the difference is linear, so each span is a trapezoid - two
   triangles of opposite sign where the surfaces cross in it
-  (`terrain::signedTrapezoid`). An edge's crossing and its height are
+  (`katana_terrain::section_volume::signed_trapezoid`). An edge's crossing and its height are
   computed from the edge's own vertices, so neighbouring pieces meet at the
-  same bits (`SegmentProfiler.APlaneReadAlongASegmentIsThePlaneOnEveryPieceAndThePiecesMeetExactly`).
+  same bits (`segment_profiler::a_plane_read_along_a_segment_is_the_plane_on_every_piece_and_the_pieces_meet_exactly`).
   A section's `width=` is the length on which both surfaces had a height.
   When no section of the range has any, the surfaces share no ground there
   (their boxes may meet over triangles that do not) and the verb is refused
@@ -473,7 +473,7 @@ road job is measured and paid.
   In the section engine, so every consumer gets it (the verbs, the window,
   katana_mcp): each section has the first moment M of its cut and of its fill
   about the centreline - the integral of the depth times the offset, in closed
-  form on every strip of the section (`signedTrapezoidMoments`), the same
+  form on every strip of the section (`signed_trapezoid_moments`), the same
   strips the areas are cut into - and the volume between two normals is the
   integral of A(s) - k(s) M(s), each section's cut and fill on their own,
   since each has its own centroid. The average end area is then L ((A1 + A2) - k
@@ -494,16 +494,16 @@ road job is measured and paid.
   against 2435.398 uncorrected, the corrected sum within 0.0215 h^2 of it at
   every interval - 0.086 at 2 m, 0.0215 at 1 m, 0.0013 at 0.25 m - while the
   uncorrected stays 121.9 away
-  (`VolumesAlongAlignment.ASlopingSurfaceOnACurveIsCorrectedToItsExactVolumeAsTheIntervalShrinks`).
+  (`volumes_along_alignment::a_sloping_surface_on_a_curve_is_corrected_to_its_exact_volume_as_the_interval_shrinks`).
   The standing tests are the strips above
-  (`VolumesAlongAlignment.AStripOnTheInsideOfAQuarterCircleIsTheAnnulusBetweenItsRadiiNotTheCentrelineArc`,
-  `VolumesAlongAlignment.AStripOnTheOutsideOfAQuarterCircleIsLongerThanItsCentrelineArc`),
+  (`volumes_along_alignment::a_strip_on_the_inside_of_a_quarter_circle_is_the_annulus_between_its_radii_not_the_centreline_arc`,
+  `volumes_along_alignment::a_strip_on_the_outside_of_a_quarter_circle_is_longer_than_its_centreline_arc`),
   the same way back, turning right, where the inside is the right side
-  (`VolumesAlongAlignment.TheSameStripOnAWayThatTurnsRightHasItsInsideOnTheRight`), a
+  (`volumes_along_alignment::the_same_strip_on_a_way_that_turns_right_has_its_inside_on_the_right`), a
   strip symmetric about the centreline, 20 m2 and M = 0, 2000 + 500 pi =
-  3570.796 either way (`VolumesAlongAlignment.AStripSymmetricAboutTheCentrelineIsTheSameWithOrWithoutTheCorrection`),
+  3570.796 either way (`volumes_along_alignment::a_strip_symmetric_about_the_centreline_is_the_same_with_or_without_the_correction`),
   and a straight, where nothing changes by a bit
-  (`VolumesAlongAlignment.OnAStraightTheCorrectionChangesNoBitOfAnAsymmetricSection`).
+  (`volumes_along_alignment::on_a_straight_the_correction_changes_no_bit_of_an_asymmetric_section`).
   **The default changed the figures of a curved alignment with asymmetric
   sections**; a straight and a symmetric section did not move.
   `curvature=off` gives the plain end area along the centreline (1785.398 above,
@@ -530,11 +530,11 @@ m3, which the exact overlay also gives (0.1 x the triangle's 1000 m2 x its
 centroid's x of 200/3). On sections 10 m apart the prismoidal formula gives
 it exactly and the average end area 6700, over by the trapezoid rule's
 (b - a) h^2 A'' / 12 = 33.333
-(`VolumesAlongAlignment.OnAWedgeThePrismoidalFormulaIsExactAndTheEndAreaOverstatesIt`).
+(`volumes_along_alignment::on_a_wedge_the_prismoidal_formula_is_exact_and_the_end_area_overstates_it`).
 
 ## The grid method
 
-`terrain::gridVolume`: square cells on lines at whole multiples of the cell
+`katana_terrain::volume::grid_volume`: square cells on lines at whole multiples of the cell
 (so grids of one cell size line up, as RASTER GRID's do), each counted when
 its centre is on both surfaces - and inside the polygon, when there is one -
 as a prism of the cell's area and the difference at its centre: the midpoint
@@ -545,7 +545,7 @@ ridges run through, and there the larger of two uniform offsets averages c/6
 more than at the centre, so each such cell's prism stands 0.1 c too high
 (for the 30 m pyramid on 100 m) - over the 200 / c ridge cells, 20 c^2 in
 all, which the test holds to 1e-6 m3 on 5, 2, 1 and 0.5 m cells
-(`GridVolume.TheMidpointRuleOverstatesAPyramidByATenthOfACellCubedInEachCellOnARidge`).
+(`grid_volume::the_midpoint_rule_overstates_a_pyramid_by_a_tenth_of_a_cell_cubed_in_each_cell_on_a_ridge`).
 More than 25 million cells is refused, naming the cell that fits, as a
 surface's raster export caps its grid.
 
@@ -557,10 +557,10 @@ under lots [5, 25.5] x [5, 45] and [25.5, 45] x [5, 45] on 1 m cells gave
 840 + 800 = 1640 cells where their union [5, 45]^2 holds 40 x 40 = 1600 (and
 the exact method 1600 m3): the 40 centres on x = 25.5 twice, +432 m3 of cut on
 a site of four quadrants. Each polygon is now measured with the regions of the
-polygons before it as `claimed` (`gridVolume`), and a cell any of them holds is
+polygons before it as `claimed` (`grid_volume`), and a cell any of them holds is
 left to the first, so the cells counted, summed, are those of the union
-(`GridVolume.LotsSharingAnEdgeOnALineOfCentresCountItsCellsOnceNotTwice`,
-`VolumeVerbs.LotsThatShareAnEdgeOnAGridLineAreCountedOnceByTheGridAsByTheExactMethod`).
+(`grid_volume::lots_sharing_an_edge_on_a_line_of_centres_count_its_cells_once_not_twice`,
+`volume_verbs::lots_that_share_an_edge_on_a_grid_line_are_counted_once_by_the_grid_as_by_the_exact_method`).
 Because the grid never counts a cell twice it has no use for the refusal the
 exact forms need: overlapping polygons are taken, `area=` is the union's,
 `polygon.area=` is the polygons' own summed (so it counts an overlap twice, and
@@ -574,7 +574,7 @@ The DEM tools' RASTER DIFFERENCE (`docs/terrain.md`, "The DEM tools") is
 the same midpoint rule on rasters, but NOT on the same cells, so the two
 agree only where the cells coincide. VOLUME GRID puts its cells on lines at
 whole multiples of the cell. A `SURFACE <name> CELL <m>` source of RASTER
-DIFFERENCE is sampled by `surfaceGrid` on the surface's own lattice, anchored
+DIFFERENCE is sampled by `surface_grid` on the surface's own lattice, anchored
 at its (min x, max y) corner, `ceil(width / cell)` by `ceil(height / cell)`
 cells whose last column and row reach up to half a cell past the surface; and
 where the two rasters' lattices differ RASTER DIFFERENCE resamples the second
@@ -586,7 +586,7 @@ DIFFERENCE 3078.654). They agree exactly where both surfaces' rasters happen to
 start on whole multiples of the cell - two surfaces over [0, 100]^2 with a cell
 of 1 m give 10 000 cells each - so set them side by side only there, and take
 the exact method as the reference. Not made to agree by snapping the surface
-raster to whole multiples (a new option on `surfaceGrid`): that would change the
+raster to whole multiples (a new option on `surface_grid`): that would change the
 grid RASTER EXPORT writes, for a cross-check nobody asked to be exact.
 
 ## Factors
@@ -600,33 +600,33 @@ is the person's: the program does not decide it.
 ## The difference and envelope surfaces
 
 SURFACE DIFFERENCE makes the top minus the base over their common ground
-(`terrain::differenceSurface`): an isopach, linear on every overlay piece,
+(`katana_terrain::overlay::difference_surface`): an isopach, linear on every overlay piece,
 so exact. Positive is fill, negative cut, and it is given the built-in "Cut
 Fill" style (blue cut below 0, red fill above) when the drawing still has
 it, so it draws as the cut/fill map. Integrated against 0 its above and below
 are the comparison's fill and cut
-(`DifferenceSurface.ItIntegratesToWhatCompareSurfacesMeasures`). Its default
+(`difference_surface::it_integrates_to_what_compare_surfaces_measures`). Its default
 name is `<top>-<base>`, made unique; NAME must be free.
 
 SURFACE ENVELOPE makes the higher (MAX) or lower (MIN) of two surfaces over
-their common ground (`terrain::envelopeSurface`): a piece on which the two
+their common ground (`katana_terrain::overlay::envelope_surface`): a piece on which the two
 cross is split along the line where they meet - a vertex per edge it crosses,
 placed from the edge's ends in a fixed order so the pieces either side share
 it - and each part is one surface's plane. It is drawn in the drawing's
 default style, NOT Cut Fill: an envelope holds real levels (24 to 39 m on the
 sample terrain), and the Cut Fill ramp ends at +2, so every face would be
 painted the one colour of fill, a uniform red sheet whose legend read -2 to 2
-(`VolumeVerbs.TheEnvelopeIsDrawnInTheDefaultStyleNotTheCutFillMapOfADifference`).
-The style is the caller's choice in `addMadeSurface`: the difference passes
+(`volume_verbs::the_envelope_is_drawn_in_the_default_style_not_the_cut_fill_map_of_a_difference`).
+The style is the caller's choice in `add_made_surface`: the difference passes
 "Cut Fill", the envelope none.
 
 Both reply with the first record of what they made (`difference` or
 `envelope`) and then the surface as every reply that names one writes it,
-`cad::surfaceRecord` (the same keys and values SURFACE INFO gives, `visible=`
+`katana_cad::surface_record` (the same keys and values SURFACE INFO gives, `visible=`
 among them, and a `style=` that names a style: the drawing's default once
 Cut Fill has been deleted, where the reply used to say `style=default`, which
 names none), with `preview=yes` appended under PREVIEW
-(`VolumeVerbs.ASurfaceTheseVerbsMakeIsReportedAsSurfaceInfoReportsItWithOrWithoutCutFill`).
+(`volume_verbs::a_surface_these_verbs_make_is_reported_as_surface_info_reports_it_with_or_without_cut_fill`).
 
 ## In the window
 
@@ -636,14 +636,14 @@ drawing while it is open (a `DocumentWatcher` reads the surfaces, alignments
 and layers again from the event loop on every execute, undo, redo, New and
 Open, keeping what is chosen where it is still there - an UNDO of the map the
 dialog made no longer leaves it offered, nor a Measure refused NotFound on it
-(`VolumesDialog.TheListsFollowTheDrawingWhileTheDialogStaysOpen`)): a page per method,
+(`volumes_dialog::the_lists_follow_the_drawing_while_the_dialog_stays_open`)): a page per method,
 the boundary - Everywhere, the polygons the shared "Apply to" and "Only
 those that match" controls take (`ScopeFilterWidget`, prefix `volumes`), or
 typed corners - with EACH, the bulk and shrink factors, and the line the
 fields make in `volumesCommand`. The Along Alignment page has a "Correct for
 curvature" box (`volumesCurvature`, checked, the verb's default): unchecked, the
 line gets `curvature=off`
-(`VolumesDialog.TheCurvatureBoxIsOnByDefaultSaysNothingThenAndCurvatureOffWhenUnchecked`).
+(`volumes_dialog::the_curvature_box_is_on_by_default_says_nothing_then_and_curvature_off_when_unchecked`).
 Measure runs it through the window's one
 executor; the reply's records fill `volumesResults` (a column per key, in
 the order first met) and, along an alignment, the mass haul diagram
@@ -652,13 +652,13 @@ same line with `csv=` and OVERWRITE (the file dialog asks before choosing a
 file) and says "Saved the table to ..." only when the reply carries the `csv`
 record with its rows - a scope that takes no polygon writes nothing, and the
 status says the file was not written
-(`VolumesDialog.SaveCsvOfAScopeThatTakesNoPolygonSaysNothingWasSavedAndLeavesTheFile`); Make Cut/Fill Map (`CutFillMap` icon) runs SURFACE DIFFERENCE of the
+(`volumes_dialog::save_csv_of_a_scope_that_takes_no_polygon_says_nothing_was_saved_and_leaves_the_file`); Make Cut/Fill Map (`CutFillMap` icon) runs SURFACE DIFFERENCE of the
 page's two surfaces and offers the new surface at once; Make Envelope
 (`volumesEnvelope`, beside `volumesEnvelopeSide`, Higher or Lower of the two,
 and `volumesEnvelopeName`) runs SURFACE ENVELOPE of the same two the same way.
 Until the review of 2026-10-15 SURFACE ENVELOPE was typed on the command line
 only, with no window control, and docs/terrain.md said it had a dialog. Every
-widget's object name is listed in `src/katana_qt/terrain/volumes_dialog.hpp`.
+widget's object name is listed in `rust/crates/katana_window/src/terrain/volumes_dialog.rs`.
 
 ## Through katana_mcp
 
@@ -670,11 +670,11 @@ records do not carry.
 
 ## Tests
 
-- Terrain (`tests/terrain/test_overlay.cpp`,
-  `tests/terrain/test_volume_methods.cpp`,
-  `tests/terrain/test_section_volume.cpp`): the region; the overlay's pieces;
+- Terrain (`rust/crates/katana_terrain/tests/overlay.rs`,
+  `rust/crates/katana_terrain/tests/volume_methods.rs`,
+  `rust/crates/katana_terrain/tests/section_volume.rs`): the region; the overlay's pieces;
   the difference and envelope surfaces against crossing planes and against
-  `compareSurfaces`; two parallel planes 1 m apart over a 10 x 10 polygon,
+  `compare_surfaces`; two parallel planes 1 m apart over a 10 x 10 polygon,
   100 m3; a tilted plane against a level inside a square; a prism under a
   non-convex polygon; the stockpile pyramid on level and sloping ground and
   against each base; the grid's 20 c^2; the wedge; parallel planes along a
@@ -686,22 +686,22 @@ records do not carry.
   along spirals and on a sloping design, against the annulus and the exact
   integral; two legs side by side, touching and a hair over; every refusal; and
   the same bits at any thread count.
-- The tagged rings (`tests/entity/test_ring_tags.cpp`): what makes a hole, the
+- The tagged rings (`rust/crates/katana_entity/tests/ring_tags.rs`): what makes a hole, the
   part, and which exterior a hole joins - held by all of it, the part's, the
   smallest, the nearest before.
-- The verbs (`tests/cad/terrain/test_volume_verbs.cpp`, the `VolumeVerbs`
+- The verbs (`rust/crates/katana_cad/tests/terrain_utility_verbs/volume_verbs.rs`, the `VolumeVerbs`
   suite): every form through `CommandInterpreter::run`, EACH per polygon with
   an open line skipped, an ellipse and a polyline drawn back to its start as
   polygons, a lot with a tagged hole by every method that takes a polygon, a
   spline drawn back to its start, overlapping polygons, the factors, the CSV,
   the curvature correction and its words, two legs side by side, the
   difference as one undo step, the envelope, the refusals.
-- The polygons' reader (`tests/cad/terrain/test_drawing_shapes.cpp`, the
+- The polygons' reader (`rust/crates/katana_cad/tests/terrainverbs/drawing_shapes.rs`, the
   `DrawingShapes` suites, shared with the surface edits): what each kind of
   entity gives and why one gives none, a closed spline, typed corners with and
   without heights, the words, a scope that takes nothing, and the tagged rings
   joined to their polygons and left alone.
-- The window (`tests/qt_widgets/terrain/test_volumes_dialog.cpp`): each
+- The window (`rust/crates/katana_window/tests/surfaces/volumes_dialog.rs`): each
   page's line by object name, the curvature box included; Measure with the
   interpreter as the executor, filling the table and the mass haul diagram;
   Make Cut/Fill Map; Make Envelope; Save CSV.
@@ -709,7 +709,7 @@ records do not carry.
   `qt_volumes_dialog_measures_inside_typed_corners_and_makes_the_cut_fill_map_headless`
   draws the two surfaces, opens Terrain > Volumes, measures inside typed
   corners (16 m3), makes the cut/fill map and makes the envelope.
-- `katana_cli` (`src/katana_app/geo/cli/volumes.cmake`):
+- `katana_cli` (`tests/cli/geo/volumes.cmake`):
   `cli.volume_between_two_surfaces_is_the_slab_whole_and_inside_a_square`,
   `cli.volume_to_a_level_reads_what_lies_below_it_as_fill`,
   `cli.volume_sections_along_an_alignment_give_the_end_area_total`,
@@ -725,10 +725,11 @@ records do not carry.
   `cli.volume_stockpile_total_names_the_level_it_was_measured_against`,
   `cli.surface_difference_keeps_the_cut_fill_map_as_a_surface`,
   `cli.volume_of_a_surface_that_is_not_there_is_refused`.
-- `katana_mcp`: `McpServer.AVolumeBetweenTwoSurfacesIsMeasuredThroughTheCommandTool`,
-  `McpServer.SectionsRoundACurveSayWhetherTheyWereCorrectedForCurvatureAndByHowMuch`.
-- Benchmarks (`benchmarks/bench_volumes.cpp`): the refusal tests on a long run
-  and the difference surface's join; see "Not done".
+- `katana_mcp`: `mcp_server::a_volume_between_two_surfaces_is_measured_through_the_command_tool`,
+  `mcp_server::sections_round_a_curve_say_whether_they_were_corrected_for_curvature_and_by_how_much`.
+- Benchmarks: the C++ build's `bench_volumes` timed the refusal tests on a long
+  run and the difference surface's join (see "Not done"); it went with the
+  C++ tree and has no Rust twin yet.
 
 ## Decided
 
@@ -737,16 +738,16 @@ records do not carry.
   (`docs/terrain.md`, "Where the time actually goes"), and the pieces a pair
   clip gives are the partition it built. The region is a third cut of the
   same clipper rather than a polygon boolean: the geometry layer has no
-  polygon booleans (`include/katana/geometry/polygon.hpp`), and a triangle is
+  polygon booleans (`rust/crates/katana_geometry/src/polygon.rs`), and a triangle is
   convex, so the clipper already does it.
 - **The difference surface joins the pieces directly, with the constrained
   triangulation as the fallback.** Re-triangulating every time would be
   exact too, but it is the cost the overlay was rid of; joining by name is
   linear in the pieces. Rejected: welding corners by distance, which merges
   two crossings a hair apart into one and tears the surface somewhere else.
-- **The section areas are cut by segment clipping, not by `extractSection`.**
-  The section view's sampler (`cad/section.hpp`) finds a surface's breaks by
-  bisection to `kGeometric` between interval samples: right for a drawing,
+- **The section areas are cut by segment clipping, not by `extract_section`.**
+  The section view's sampler (`rust/crates/katana_cad/src/section.rs`) finds a surface's breaks by
+  bisection to `GEOMETRIC` between interval samples: right for a drawing,
   but an area integrated from it is exact only to the bisection, and it is
   in `cad`, where the terrain layer cannot reach. The clipper is closed form.
 - **Sections that cross are refused, not cut short at the crossing.** Cutting
@@ -757,8 +758,8 @@ records do not carry.
   refusing the default reach on any alignment that has a curve, which would
   also refuse an almost straight one whose sections cross nowhere within
   reach; the test is the crossing itself, so it follows the geometry.
-- **A section on a boundary is on the surface within `kGeometric`.** The one
-  tolerance of the policy (`include/katana/math/numerics.hpp`) is used, not a
+- **A section on a boundary is on the surface within `GEOMETRIC`.** The one
+  tolerance of the policy (`rust/crates/katana_math/src/numerics.rs`) is used, not a
   second one for sections; 0.1 micrometre is four orders above the rounding
   of a bearing at survey coordinates (9e-15 m at a 141 m reach, 1e-9 at the
   ulp of 6 000 000) and far below any ground that could be measured.
@@ -796,7 +797,7 @@ records do not carry.
 - **A tagged hole joins by one rule, in the entity layer.** The GIS conversion
   had the rule and cad could not reach it, and a second copy in cad would have
   made the area of a lot depend on which verb asked. Off by default in the
-  shared reader (`ShapeOptions::joinTaggedHoles`) so the surface edits, whose
+  shared reader (`ShapeOptions::join_tagged_holes`) so the surface edits, whose
   polygons are rings, read what they always read; the volume verbs ask for it.
 
 ## Not done
@@ -812,7 +813,7 @@ records do not carry.
   overlap; on a diagonal one each section pairs with every section within a
   reach of it. Measured on 2026-10-16 (Release, a 24-thread machine,
   `BM_VolumeSectionsAlongAnAxis` and `BM_VolumeSectionsAlongADiagonal`,
-  `benchmarks/bench_volumes.cpp`, the whole VOLUME SECTIONS run): along an
+  the C++ build's `bench_volumes` benchmark, the whole VOLUME SECTIONS run): along an
   axis 1250 / 2500 / 5000 / 10 000 sections take 2.6 / 7.7 / 27 / 99 ms; along
   a diagonal 23 / 94 / 360 / 1566 ms. Both grow as n^2 (the fitted
   coefficients: 1.0 ns and 15.6 ns times n^2), so a diagonal alignment cut
@@ -824,18 +825,18 @@ records do not carry.
   the dearer of the two per pair; a cheaper whole-strip reject before the four
   would be the first thing to try if the figure is large.
 - **The difference surface's join, measured.** The overlay it is made of is
-  (`compareSurfaces`, "One overlay" above); on two scatters of 100 000 points,
-  about 200 000 triangles each, that cross (`benchmarks/bench_volumes.cpp`,
+  (`compare_surfaces`, "One overlay" above); on two scatters of 100 000 points,
+  about 200 000 triangles each, that cross (the C++ build's `bench_volumes` benchmark,
   2026-10-16, Release) the overlay takes 66 ms and the whole difference
   surface 1.45 s, of 1.87 million pieces: the join of the pieces into one
   surface is about 1.4 s, twenty times the measuring. It runs on the thread
   that runs the line, as the background-job item above says.
 - **The corridor quantities do not take the curvature correction.** The road
-  engine's end areas (`docs/road_design.md`, `road::roadSection`) are sections
+  engine's end areas (`docs/road_design.md`, `katana_cad::road::road_section::road_section`) are sections
   cut by a template, not by a pair of surfaces, so they do not go through
-  `volumesAlongAlignment` and are not corrected; on a curve they have the same
+  `volumes_along_alignment` and are not corrected; on a curve they have the same
   fixed factor of the centroid's offset over the radius for an asymmetric
-  section. A corridor's `compareSurfaces` of its built surface against the
+  section. A corridor's `compare_surfaces` of its built surface against the
   ground is exact and has none of it.
 - **A PI with no radius is not looked at by the correction.** The curvature
   there is 0 on each side and the ground in the wedge between the two legs'

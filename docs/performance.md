@@ -1,8 +1,20 @@
 # Performance: the standard, the measurements, and what actually moved
 
-`PLAN.MD` §32 sets the targets and `CLAUDE.md` §4 sets the rules: measure in
+The removed plan's §32 sets the targets (`docs/architecture.md`, "Performance
+targets") and the contributor instructions' §4 sets the rules: measure in
 Release, record both numbers, and never claim a speed-up that was not
 measured. This file is where the numbers live.
+
+**Every figure below is the C++ build's.** Katana was C++ until the owner had
+the C++ removed on 2026-11-15 (`docs/rust.md`); the benchmarks (benchmarks/,
+Google Benchmark programs) and the scripts that compared them
+(compare_benchmarks.py) went with it, and none has a Rust twin yet. The Rust
+ports the same algorithms, the same culls and the same SIMD kernels
+(bit-identical to their scalar references, `docs/rust.md`, "SIMD"), so the
+decisions recorded here stand; the Rust has not been measured against them.
+Where a passage names a C++ file, flag or check, it is the record of the C++
+build. Not done: Rust benchmarks (criterion or the like) for the measurements
+below, so that a claim can be measured again.
 
 Machine for every figure below: Windows 11, 16 logical cores, GCC 16.2
 (MSYS2 UCRT64), Ninja, `-O3 -DNDEBUG`, `-ffp-contract=off -fno-fast-math`.
@@ -47,33 +59,33 @@ the only intended difference.
 ## What was optimised, and why
 
 The work below came from a read-only analysis of the hot paths, done by
-parallel agents (`CLAUDE.md` §5.3), and each item was checked against the
+parallel agents (the contributor instructions' §5.3), and each item was checked against the
 code before it was acted on. Where the analysis was wrong, that is recorded
 too - a rejected finding is as useful as an accepted one.
 
-### Per-frame drawing (`viewport_widget.cpp`, `scene.cpp`)
+### Per-frame drawing (`viewport_widget.rs`, `scene.rs`)
 
-Every entity drawn was resolved through `resolveDisplay` **twice** a frame:
-once by the caller and once inside `resolveHatchPattern`. A resolution walks
+Every entity drawn was resolved through `resolve_display` **twice** a frame:
+once by the caller and once inside `resolve_hatch_pattern`. A resolution walks
 the layer table and the style table and builds three `std::string`s. On top
-of that the layer was looked up twice (once inside `isDrawn`, once for its
+of that the layer was looked up twice (once inside `is_drawn`, once for its
 colour), the dimension style was resolved for every entity although only a
 dimension can use one, and the dash pattern was rebuilt - with two container
 allocations - for every entity carrying a linetype.
 
 Changed:
 
-- `resolveHatchPattern` and `colorOf` take a display the caller already has.
-- `isDrawn` has an overload taking the layer the caller already found.
+- `resolve_hatch_pattern` and `color_of` take a display the caller already has.
+- `is_drawn` has an overload taking the layer the caller already found.
 - The dimension style is resolved only for `DimensionGeometry`.
 - Dash patterns are cached for the duration of one frame, keyed by linetype
-  and pen width. The cache is cleared at the top of every `drawEntities`,
+  and pen width. The cache is cleared at the top of every `draw_entities`,
   because a pattern is a function of the **view scale** too and that changes
   between frames.
 
-**Not changed, and deliberately:** the bounding-box test in `drawEntities`
-looks redundant against the one `forEachCandidate` already did, and is not.
-`queryExtents` is documented as deliberately wider than the geometry - an arc
+**Not changed, and deliberately:** the bounding-box test in `draw_entities`
+looks redundant against the one `for_each_candidate` already did, and is not.
+`query_extents` is documented as deliberately wider than the geometry - an arc
 offers its centre so it can be snapped to - so the viewport's own test is the
 tighter, drawing-specific filter. Removing it would paint entities that are
 off screen.
@@ -86,7 +98,7 @@ frame. A scene-building benchmark is the obvious next step.
 ## The optimisation pass of 2026-09-23
 
 Five hot paths were analysed and changed at once, by parallel agents working on
-disjoint directories (`CLAUDE.md` §5.3). **Every figure below was re-measured
+disjoint directories (the contributor instructions' §5.3). **Every figure below was re-measured
 centrally afterwards**, not taken from an agent's report, and two of the
 agents' own numbers turned out to be wrong in opposite directions - one badly
 understated, one unmeasurable. That is the reason for the rule.
@@ -110,7 +122,7 @@ these were interleaved for exactly that reason.
 | `BM_RectangleClosestPoint` 1024 probes | 79.5 / 81.6 us | 28.2 / 28.5 us | **2.8x** |
 | `BM_ClipPolygon` 512-vertex subject | 10.25 / 10.31 us | 9.02 / 8.81 us | 1.15x |
 
-`combineSurfaces` is the headline: a 12d super tin of two real surfaces took
+`combine_surfaces` is the headline: a 12d super tin of two real surfaces took
 **thirty-one seconds** and now takes a quarter of one. The output is identical -
 402 719 triangles before and after, and `SuperSurface.TheIndexedVertexTestKeeps
 ExactlyTheTrianglesTheExhaustiveScanKept` asserts that equality rather than
@@ -140,10 +152,10 @@ figure on the shape that reaches the code is twenty times larger than that.
 
 ### Five of these had no benchmark at all
 
-`isSimple`, `clipPolygon`, `Rectangle2::closestPoint`, `elevationsAt` and
-`buildAll` were optimised against a scratch harness that lived in a temporary
-directory and is now gone. `CLAUDE.md` §4 says a measurement lives in
-`benchmarks/` so that it can be repeated; these five could not be. They now have
+`is_simple`, `clip_polygon`, `Rectangle2::closest_point`, `elevations_at` and
+`build_all` were optimised against a scratch harness that lived in a temporary
+directory and is now gone. The contributor instructions' §4 said a
+measurement lives in the C++ build's benchmarks so that it can be repeated; these five could not be. They now have
 benchmarks in `bench_terrain.cpp` and `bench_geometry.cpp`, which is how the
 numbers above were taken and how the next contributor will notice a regression.
 
@@ -176,13 +188,13 @@ Three separate copies of every entity were removed:
   put it back. It does not need to: `EntityDatabase::remove()` *returns* the
   entity it removes, and `undo()` always runs before `redo()`, so the image is
   free at undo time.
-- **`applyToModel` copied the whole project into the model.** Opening a drawing
+- **`apply_to_model` copied the whole project into the model.** Opening a drawing
   loads a `ProjectContents`, applies it and throws it away, and every `Entity`
   in it - two `std::map`s and a geometry variant holding vectors - was
   duplicated on the way in. It was 22.6% of every allocation the open made.
   There is now a consuming overload, and `Document::open` uses it.
 
-One copy was measured and **kept**: `createEntities` copies its captured
+One copy was measured and **kept**: `create_entities` copies its captured
 entities into the change set. A builder is documented as a pure function of the
 model and `Transaction` really does call `validate()` twice on its first
 command, so a builder that moved its entities out would hand the second call an
@@ -190,9 +202,9 @@ empty set and the command would be rejected as one that changes nothing. With
 the cache above, that copy now happens once per command instead of once per
 call. The reasoning is recorded at `entity_commands.cpp:233`.
 
-`SqliteStatement` gained `columnTextView`/`columnBlobSpan`, borrowing views into
+`SqliteStatement` gained `column_text_view`/`column_blob_span`, borrowing views into
 SQLite's own row buffer for values that are parsed and discarded within the row.
-The owning `columnText`/`columnBlob` are now implemented as "the borrowing one
+The owning `column_text`/`column_blob` are now implemented as "the borrowing one
 plus a copy", so one place knows how SQLite hands a value over. The lifetime
 rule is on the declarations: a view dies at the next `step()`.
 
@@ -225,7 +237,7 @@ spill on every token - produces the same output again.
 
 ### Rejected, with the measurement that rejected it
 
-- **Reserving the value vectors in `readNumberBlock`.** Measured: reserving 1M
+- **Reserving the value vectors in `read_number_block`.** Measured: reserving 1M
   values made the TIN-heavy read *slower*, 72 ms to 96-105 ms, because both
   callers also run for the many small blocks and each then takes an 8 MB
   allocation. With a growth factor of 2 the total copied is about 2n, so a
@@ -235,15 +247,15 @@ spill on every token - produces the same output again.
   the count without a second pass, and a byte-based estimate either falls far
   short or wastes 30 MB on a 15 MB file. Recorded as a known cost rather than
   bought with a guessed constant.
-- **Removing the bounding-box test in `drawEntities`.** It looks redundant
-  against the one `forEachCandidate` already did, and is not: `queryExtents` is
+- **Removing the bounding-box test in `draw_entities`.** It looks redundant
+  against the one `for_each_candidate` already did, and is not: `query_extents` is
   deliberately wider than the geometry, so the viewport's own test is the
   tighter filter and removing it would paint entities that are off screen.
 
 ### The rasteriser's clipping rewrite (2026-09-23)
 
 The software rasteriser had pixel tests and no timing. Its clipping was
-rewritten to fix a correctness defect (PLAN.MD Phase 15: primitives crossing
+rewritten to fix a correctness defect (the plan's Phase 15: primitives crossing
 the eye plane were dropped whole), and the new clipping does work on every
 triangle, so `bench_render.cpp` was written first and run on the old code.
 Ground grids at 1920x1080: `Framed` has every vertex in view (the pass-through
@@ -285,7 +297,7 @@ know it can pass through and an AND to know it cannot be seen.
   viewport work earlier in this file still quotes no figure. The software
   rasteriser has one now (`bench_render.cpp`, above).
 - No benchmark covers a 12da read.
-- `Importer::tallyFor` (`domain_import.cpp`) is a linear scan per element, the
+- `Importer::tally_for` (`domain_import.rs`) is a linear scan per element, the
   third instance of that shape. About 1% of an import, left alone.
 
 ## SIMD: kernels chosen at run time (2026-09-24)
@@ -320,13 +332,13 @@ have their own section below ("SIMD: NEON on 64-bit ARM").
 
 ### Dispatch
 
-`include/katana/core/cpu_features.hpp`:
+`rust/crates/katana_core/src/cpu_features.rs`:
 
-- `detectedSimdLevel()` uses `__builtin_cpu_supports("avx2")` and `("fma")`.
+- `detected_simd_level()` uses `__builtin_cpu_supports("avx2")` and `("fma")`.
   libgcc sets these only when XGETBV shows that the operating system saves
   the YMM registers. So the answer means "this process may execute AVX2",
   not just "the chip has it".
-- `activeSimdLevel()` is what every kernel family asks. After the first call
+- `active_simd_level()` is what every kernel family asks. After the first call
   it costs one relaxed atomic load.
 - **`KATANA_SIMD=scalar|avx2|neon`** is read once, on first use. `scalar` is how a
   machine that has AVX2 proves the path a machine without it would take.
@@ -334,7 +346,7 @@ have their own section below ("SIMD: NEON on 64-bit ARM").
   a level, is refused and not acted on. The refusal is written once to
   stderr and kept in `simdSelection().note`. The program does not fault, and
   it does not quietly run scalar under an AVX2 label.
-- `setSimdLevel()` is the in-process form of the override, used by tests and
+- `set_simd_level()` is the in-process form of the override, used by tests and
   benchmarks. Switching is legitimate at any time only because the levels
   are bit-identical.
 
@@ -343,20 +355,20 @@ Each caller dispatches in a baseline file with
 and the thresholds are measured, not guessed (see "Measured" below; the first
 guesses were wrong in both places):
 
-- `boundsOf` below `kBoundsBatchMinimum` (16 points) is the `expand()` loop,
-  inline in `point_batch.hpp`, so a drawing's strings (about six vertices
+- `bounds_of` below `BOUNDS_BATCH_MINIMUM` (16 points) is the `expand()` loop,
+  inline in `point_batch.rs`, so a drawing's strings (about six vertices
   each) cost no call at all. From 16 points it calls the batch code, which
   takes the kernel. The kernel with its call and its zero-sign fix-up breaks
   even with the loop at about 12-16 points.
-- `isValidUtf8` takes the kernel from 64 bytes (`kValidateMinimum` in
-  `text_encoding.cpp`). The kernel ends on a whole 32-byte block that begins
+- `is_valid_utf8` takes the kernel from 64 bytes (`kValidateMinimum` in
+  `text_encoding.rs`). The kernel ends on a whole 32-byte block that begins
   inside the text, so it needs 64. A padded copy for shorter texts was
   measured and does not pay: slower than the byte loop up to about 24
   bytes, and at most 15 ns faster up to 63. So names and labels take main's
   byte loop at every level, with no extra call.
-- `transformPoints` takes the kernel from 8 points (two kernel steps). It has
+- `transform_points` takes the kernel from 8 points (two kernel steps). It has
   no caller in the program yet, so its break-even has not been measured.
-- `packDrawList` takes the vertex kernel for any list with a vertex in it.
+- `pack_draw_list` takes the vertex kernel for any list with a vertex in it.
   A probe build with a minimum of 1 packed four vertices, one tail and no
   whole step, as fast as the loop, and 16 or more faster (`docs/gpu.md`,
   "Packing"), so there is no minimum to keep.
@@ -401,13 +413,14 @@ not a guarantee.
 So a kernel file follows these rules:
 
 1. It is named `*_avx2.cpp` and added with
-   `katana_add_simd_sources(<target> AVX2 <files>)` (`cmake/KatanaSimd.cmake`).
+   `katana_add_simd_sources(<target> AVX2 <files>)` (the C++ build's
+   KatanaSimd.cmake).
    The helper compiles it into an OBJECT library with `-mavx2 -mfma` added to
    the project's own flags, and links the objects into the target. The
    helper refuses any other name. The option `KATANA_SIMD_KERNELS=OFF`, or
    any architecture other than x86-64, leaves only the scalar references.
 2. It includes only `<immintrin.h>`, `<cstddef>`, `<cstdint>` and its own
-   `*_kernels.hpp`, which holds declarations only. GCC's intrinsics are
+   `*_kernels.rs`, which holds declarations only. GCC's intrinsics are
    `gnu_inline` and `always_inline`, so they are never emitted out of line.
 3. It uses raw pointers at the boundary. Everything except the entry points
    sits in an anonymous namespace. The entry points have C linkage and a
@@ -417,10 +430,14 @@ So a kernel file follows these rules:
 
 ### The guard
 
-Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`:
+Every C++ `ctest` run included three checks, all in its
+check_simd_kernels.cmake. The Rust needs none of them: `#[target_feature]`
+confines AVX2 to the kernel function itself, so no other code can be compiled
+with it, and Rust never fuses a multiply and an add unless asked
+(`docs/rust.md`, "SIMD"). The checks were:
 
 - **`simd_kernel_sources`** reads source files, like `layering` does. It
-  checks rule 2 for each `src/**/*_avx2.cpp` and for its declarations header,
+  checks rule 2 for each `*_avx2.cpp` and for its declarations header,
   which may contain no braces other than `extern "C"` and namespace blocks.
   It also enforces the OpenMP rule below.
 - **`simd_kernel_objects`** reads the objects this build actually produced,
@@ -429,7 +446,7 @@ Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`
   object. `objdump -h` must find no `.ctors` or `.init_array` section.
   `objdump -d` must find no `vfmadd`, `vfmsub`, `vfnmadd` or `vfnmsub`
   (on AArch64: no `fmla`, `fmls`, `fmadd`, `fmsub`, `fnmadd` or `fnmsub`).
-- **`simd_kernel_objects_under_asan`** runs the same object check on the
+- **simd_kernel_objects_under_asan** runs the same object check on the
   kernels compiled a second time with `-fsanitize=address`, as the
   `linux-sanitize` preset compiles them. They are only compiled, never
   linked, so it runs on MinGW too, which has no ASan runtime. It exists
@@ -457,10 +474,10 @@ objects and rejected each one, giving the reason:
 The source check was run on a tree built to break the rules. It rejected
 `<vector>`, a `katana/` header, a function body in a declarations header,
 `-fopenmp` in a CMakeLists, and `#pragma omp parallel for`. One ordinary test,
-`SimdLevel.OrdinaryCodeIsCompiledForTheBaselineSoTheProgramStartsOnAnyX64Machine`,
+`simd_level::ordinary_code_is_compiled_for_the_baseline_so_the_program_starts_on_any_x64_machine`,
 fails if the files every target compiles are ever built with AVX enabled.
 
-### The facade, `core/simd.hpp`
+### The facade, `rust/crates/katana_core/src/simd.rs`
 
 The facade is `std::simd` where libstdc++ sets `__glibcxx_simd` (GCC 16 in
 C++26 mode; `__cpp_lib_simd` is deliberately undefined there), and
@@ -472,7 +489,7 @@ vector is 2 doubles, 4 floats or 16 bytes. It is portable, needs no dispatch
 and carries no hazard. It is not for kernel files: the `-O0` probe above is
 why, and the source check refuses it there.
 
-`minOf` and `maxOf` are written as compare-and-select, which is `std::min` and
+`min_of` and `max_of` are written as compare-and-select, which is `std::min` and
 `std::max` lane by lane. The TS's own `min` and `max` are marked
 `finite-math-only,no-signed-zeros`, which leaves the result for NaNs and
 zeros up to the optimiser. No production code uses the facade yet. It exists
@@ -483,7 +500,7 @@ written as a kernel file.
 
 ### OpenMP: no threading, `-fopenmp-simd` only as a hint
 
-`core::TaskPool` is the only thread pool. OpenMP would add nothing it lacks.
+`katana_core::TaskPool` is the only thread pool. OpenMP would add nothing it lacks.
 libgomp already ships, because GDAL and PDAL use it, and an OpenMP region run
 straight after a TaskPool job showed no conflict. But OpenMP reductions
 combine in no fixed order, which breaks the bit-identical rule. Running both
@@ -498,16 +515,16 @@ any `#pragma omp` other than `omp simd`.
 
 | kernel | called from | one AVX2 step | scalar reference |
 |---|---|---|---|
-| UTF-16 to UTF-8, ASCII runs | `decodeText`, both byte orders | 32 units: two loads, one test, pack, permute, one store | the unit loop, which takes over at the first non-ASCII unit and reports errors at the same byte as before |
-| UTF-8 validation | `isValidUtf8`, for texts of 64 bytes or more | 32 bytes: three nibble-table lookups (VPSHUFB) on each byte and the one before it, two saturating subtractions for leads two and three back, one XOR; a 64-byte step of pure ASCII is one OR and one movemask | main's byte loop, unchanged |
-| `geometry::transformPoints` (Mat4 with Vec3, Mat3 with Point2, in place) | the batch API | 4 points: 3 loads, 6 permutes or blends, 9 multiplies and 9 adds, 6 permutes back (2D: no transpose) | `math::transformPoint` on each point |
-| `geometry::boundsOf` (Point2, Vec3) | `Polyline2::boundingBox`, `TriangleMesh::bounds`, for 16 points or more | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
-| `geometry::projectToPixels` (float offsets to pixels) | the plan view's cloud splat, 512 points a call, from 4 points | 4 points: two float-to-double widenings, 2 subtractions, 2 multiplies, an add and a subtraction, 4 range compares, 2 truncating conversions blended with "no pixel" | the loop in `point_splat.cpp`; see "Point clouds in the plan view" below |
-| `gpu::packDrawList`'s vertices (double positions to float offsets) | every layer the 3D view hands the GPU, any length | 4 vertices: 3 loads, 3 subtractions and 3 double-to-float conversions, 3 byte rotations, 4 colour blends, 4 stores | the loop in `gpu_scene.cpp`; see `docs/gpu.md`, "Packing" |
+| UTF-16 to UTF-8, ASCII runs | `decode_text`, both byte orders | 32 units: two loads, one test, pack, permute, one store | the unit loop, which takes over at the first non-ASCII unit and reports errors at the same byte as before |
+| UTF-8 validation | `is_valid_utf8`, for texts of 64 bytes or more | 32 bytes: three nibble-table lookups (VPSHUFB) on each byte and the one before it, two saturating subtractions for leads two and three back, one XOR; a 64-byte step of pure ASCII is one OR and one movemask | main's byte loop, unchanged |
+| `katana_geometry::point_batch::transform_points` (Mat4 with Vec3, Mat3 with Point2, in place) | the batch API | 4 points: 3 loads, 6 permutes or blends, 9 multiplies and 9 adds, 6 permutes back (2D: no transpose) | `katana_math::transform_point` on each point |
+| `katana_geometry::point_batch::bounds_of` (Point2, Vec3) | `Polyline2::bounding_box`, `TriangleMesh::bounds`, for 16 points or more | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
+| `katana_geometry::project_to_pixels` (float offsets to pixels) | the plan view's cloud splat, 512 points a call, from 4 points | 4 points: two float-to-double widenings, 2 subtractions, 2 multiplies, an add and a subtraction, 4 range compares, 2 truncating conversions blended with "no pixel" | the loop in `point_splat.rs`; see "Point clouds in the plan view" below |
+| `katana_gpu::gpu_scene::pack_draw_list`'s vertices (double positions to float offsets) | every layer the 3D view hands the GPU, any length | 4 vertices: 3 loads, 3 subtractions and 3 double-to-float conversions, 3 byte rotations, 4 colour blends, 4 stores | the loop in `gpu_scene.rs`; see `docs/gpu.md`, "Packing" |
 
 Both text kernels are on the real import path. The interop archive import
-decodes the file and then calls `readArchive`, which validates the whole
-decoded text again. `decodeText` also validates the whole of a file that has
+decodes the file and then calls `read_archive`, which validates the whole
+decoded text again. `decode_text` also validates the whole of a file that has
 no byte order mark, to tell UTF-8 from Windows-1252.
 
 **Why validation is a whole validator, not an ASCII fast path.** The first
@@ -537,7 +554,7 @@ Keeping the results bit-identical required three details:
   passes over it.
 - **Which zero is kept.** When the extreme is zero, the loop keeps the first
   zero it met (`-0 < +0` is false). The kernel folds its lanes in a different
-  order, so `boundsOf` takes the value from the kernel and the sign from the
+  order, so `bounds_of` takes the value from the kernel and the sign from the
   first zero in the array. One test places its zeros so that a kernel that
   merely folded its lanes would fail it. With the fix-up disabled, that test
   and the random property test both fail.
@@ -547,8 +564,8 @@ Keeping the results bit-identical required three details:
   even in the scalar reference.
 
 The tests hold every kernel to its reference through the public function,
-running at each level in one process (`tests/core/test_simd_text.cpp`,
-`tests/geometry/test_point_batch.cpp`). This covers 3000 generated UTF-16
+running at each level in one process (`rust/crates/katana_core/tests/simd_text.rs`,
+`rust/crates/katana_geometry/tests/cases/point_batch.rs`). This covers 3000 generated UTF-16
 inputs, every position of a bad byte across the first three 64-byte steps,
 text dense with accented letters at every ASCII run length from 0 to 40 and
 every cut near its end, and for the validator: sixteen kinds of error worked
@@ -558,10 +575,10 @@ each, counted by hand), every lead C0-FF with sixteen kinds of follower, and
 validator with main's loop on 225 million texts at `-O3` and `-O0`, with no
 difference. There are also 300 transforms and 600 bounds over arrays of
 every length up to 70 with zeros, NaN and infinities. The hand-worked bounds
-cases are 17-20 points long and assert that they reach `kBoundsBatchMinimum`,
+cases are 17-20 points long and assert that they reach `BOUNDS_BATCH_MINIMUM`,
 so that at the AVX2 level they test the kernel and not the inline loop; with
 the minimum set to 24 they fail on that assertion.
-`PointBatch.AnArrayShorterThanTheBatchMinimumIsBoundedInlineWithoutACall`
+`point_batch::an_array_shorter_than_the_batch_minimum_is_bounded_inline_without_a_call`
 bounds three points in `static_assert`s, which compile only while the short
 path is inline. ctest also runs the whole core and geometry suites
 a second time under `KATANA_SIMD=scalar` and under `KATANA_SIMD=avx2`
@@ -580,7 +597,7 @@ The machine was an i7-1270P on AC power, with other agents' builds running
 throughout. Only the ratios and the A/A spreads below mean anything; the
 absolute times do not.
 
-**Benchmarks** (`benchmarks/bench_simd.cpp`). Every benchmark is run twice,
+**Benchmarks** (the C++ build's `bench_simd` benchmark). Every benchmark is run twice,
 once per level: `BM_x/scalar` and `BM_x/avx2`. The comparison ran three
 binaries in alternating rounds:
 
@@ -590,7 +607,7 @@ binaries in alternating rounds:
 - `new again`: a byte-identical copy of `new`, as the A/A control.
 
 The command was
-`python tools/compare_benchmarks.py --alternate 6 "BM_(DecodeUtf16|IsValidUtf8|TransformPoints[23]Batch|BoundsOfPoints|PolylineBoundingBoxes)" main=... new=... new_again=...`,
+`python compare_benchmarks.py --alternate 6 "BM_(DecodeUtf16|IsValidUtf8|TransformPoints[23]Batch|BoundsOfPoints|PolylineBoundingBoxes)" main=... new=... new_again=...`,
 giving 18 samples per cell. Each cell is min / median in ms.
 
 | benchmark | main | new, scalar | new, avx2 | new again, avx2 (A/A) |
@@ -639,7 +656,7 @@ How to read the table:
   large one.
 
 **Real archives.** A scratch harness, not committed, timed three of the
-owner's real archives. It compiled main's `text_encoding.cpp` into a renamed
+owner's real archives. It compiled main's `text_encoding.rs` into a renamed
 namespace and linked it beside the new one. It then ran five arms in
 alternating order, 7 rounds each: main's code, new scalar, new AVX2, and a
 second new scalar and new AVX2 as A/A controls. All five arms produced
@@ -654,14 +671,14 @@ Each cell is min / median in ms.
 
 Decoding the largest real archive fell from about 141-169 ms to 9-12 ms,
 14-15x. That is close to the ~15 ms estimated before the work. Its second
-full pass, the UTF-8 validation that `readArchive` runs on the decoded text,
+full pass, the UTF-8 validation that `read_archive` runs on the decoded text,
 fell 7-8x. Together that is about 150-190 ms of every large import down to
 about 11-15 ms. A processor without AVX2 still gets the scalar column, which
 is 4-6x faster than main.
 
 ### Not done, and where next
 
-- **The archive lexer** (`lexer.cpp`) is the other flat loop on the import
+- **The archive lexer** (`lexer.rs`) is the other flat loop on the import
   path. It is not a kernel candidate, because it works one token at a time
   and a token is a number or a short run of spaces. A kernel call per token
   cannot pay for itself. What would pay is classifying 64 bytes at a time
@@ -671,7 +688,7 @@ is 4-6x faster than main.
   measured candidates in files other work owns now. Both would be kernel
   files under the rules above.
 - **Surfacing the level.** A command-line or About line saying which level
-  is in force would let a person see it; today only `simdSelection()` and a
+  is in force would let a person see it; today only `simd_selection()` and a
   refused override's stderr line do.
 
 ## SIMD: NEON on 64-bit ARM (2026-09-26)
@@ -686,9 +703,9 @@ scalar reference, and the level switchable at any moment.
 `SimdLevel` is `{Scalar, Avx2, Neon}`. Scalar runs everywhere; each other
 level belongs to one architecture, so a processor runs Scalar and at most
 one more, and the levels are no longer ordered: "can this processor run it"
-is `level == Scalar || level == detected`. `chooseSimdLevel` used to refuse
+is `level == Scalar || level == detected`. `choose_simd_level` used to refuse
 `level > detected`, which would have let an ARM processor that detected Neon
-accept `KATANA_SIMD=avx2`; `SimdLevel.Avx2IsRefusedOnANeonProcessorAlthoughItComesFirstInTheEnumeration`
+accept `KATANA_SIMD=avx2`; `simd_level::avx2_is_refused_on_a_neon_processor_although_it_comes_first_in_the_enumeration`
 holds it (and fails with the old comparison put back).
 
 There is no run-time probe on ARM. Advanced SIMD is part of the AArch64
@@ -711,7 +728,7 @@ build gets the target's set. Only that set is compiled, into
 `kKernelLevel`/`kernelActive()` pair where the call is long.
 
 NEON needs no `-m` flag, and so has no inline-copy hazard: an inline
-function compiled beside a NEON kernel is baseline code. The `*_neon.cpp`
+function compiled beside a NEON kernel is baseline code. The `*_neon.rs`
 files keep the AVX2 files' discipline all the same - their own OBJECT
 library, `<arm_neon.h>` in place of `<immintrin.h>` and nothing else,
 C-linkage `katana_neon_` entries - because one set of rules is easier to
@@ -719,15 +736,14 @@ hold than two, and because the object check's third rule matters more on
 AArch64, not less: `fmla` and `fmadd` are baseline instructions there, and
 both compilers fuse by default - `a * b + c` at `-O2`, without the flag,
 comes out as one `fmadd` from GCC 16 and from clang 21, in C++26 mode too -
-so ordinary code would be fused the moment `-ffp-contract=off` were lost. `tools/check_simd_kernels.cmake`
-now reads `*_neon.cpp` sources (their own intrinsics header only), expects
-`katana_neon_` entries in a `*_neon.cpp` object (Mach-O's leading underscore
+so ordinary code would be fused the moment `-ffp-contract=off` were lost. The C++ check_simd_kernels.cmake
+then read `*_neon.rs` sources (their own intrinsics header only), expects
+`katana_neon_` entries in a `*_neon.rs` object (Mach-O's leading underscore
 allowed), refuses Mach-O's `__mod_init_func` as it refuses `.init_array`, and
 refuses `fmla`, `fmls`, `fmadd`, `fmsub`, `fnmadd` and `fnmsub` in either
 objdump's spelling (GNU's `fmla v0.2d, ...`, LLVM's `fmla.2d v0, ...`).
-`simd_kernel_objects_catches_a_fused_multiply_add` compiles a fixture kernel
-of the build's own set that fuses (`tests/simd_kernel_fixtures/`), and
-passes only when the check refuses it, so a pattern that could not see an
+simd_kernel_objects_catches_a_fused_multiply_add compiled a fixture kernel
+of the build's own set that fuses, and passed only when the check refuses it, so a pattern that could not see an
 AArch64 FMLA would fail the suite rather than pass it quietly. Before the
 LLVM spelling was added, that fixture compiled for macOS passed the check.
 
@@ -755,14 +771,14 @@ LLVM spelling was added, that fixture compiled for macOS passed the check.
   Windows) divides by the largest magnitude, libc++ (macOS) from LLVM 19
   scales by `2^-532` when the largest passes `2^512` (and by `2^532` below
   `2^-512`) and takes `sqrt(x x + y y + z z) / scale`, its largest found with
-  `fmax` - which `FMAXNM` is. `scene_neon.cpp` picks by `_LIBCPP_VERSION`
+  `fmax` - which `FMAXNM` is. `scene_neon.rs` picks by `_LIBCPP_VERSION`
   (libc++ before LLVM 19: the plain formula). A scratch harness, not
   committed, compared the kernel's lighting with `std::hypot` over 32,768
   normals of magnitudes from 1e-320 to 1.7e308, under qemu-aarch64: no
   difference with GCC 16 and libstdc++, none with clang 21 and libc++, and
   2,048 differences when a kernel compiled for libstdc++ was linked against
   the libc++ reference - so the choice is real. The macOS build itself has
-  not been run here. `SceneKernels.NormalsTooLongToSquareLightTheSameAtEveryLevel`
+  not been run here. `scene_kernels::normals_too_long_to_square_light_the_same_at_every_level`
   puts normals of 1e201 through the surface and mesh kernels, where a naive
   `sqrt` of the squares overflows.
 - **No masked load or store.** The fill's last block of a span may run
@@ -794,13 +810,13 @@ the reasoning written beside it, not on a measurement:
 
 | minimum | value | why it is kept for NEON |
 |---|---|---|
-| `kValidateMinimum` (`text_encoding.cpp`) | 64 bytes | the kernel's contract, not only its break-even: it works in the same 64-byte steps and needs one before its final window; with four 16-byte registers a step, its break-even is not expected earlier |
-| `kBoundsBatchMinimum` (`point_batch.hpp`) | 16 points | the fixed cost it repays - the call and the zero-sign fix-up - is the same whichever kernel follows |
-| `kTransformMinimum` (`point_batch.cpp`) | 8 points | two kernel steps, of four points, for both |
-| `kProjectMinimum` (`point_splat.cpp`) | 4 points | one kernel step for both |
-| `kTransformBatchMinimum` (`rasterizer.cpp`) | 16 vertices | four kernel steps for both |
-| `kSurfaceKernelMinimum`, `kMeshKernelMinimum`, `kFadeKernelMinimum` (`scene.cpp`) | 16, 2, 8 | a whole number of NEON steps each; the parameter block and the call they repay are the same |
-| the pack kernel (`gpu_scene.cpp`) | any length | no set-up to repay |
+| `kValidateMinimum` (`text_encoding.rs`) | 64 bytes | the kernel's contract, not only its break-even: it works in the same 64-byte steps and needs one before its final window; with four 16-byte registers a step, its break-even is not expected earlier |
+| `BOUNDS_BATCH_MINIMUM` (`point_batch.rs`) | 16 points | the fixed cost it repays - the call and the zero-sign fix-up - is the same whichever kernel follows |
+| `TRANSFORM_MINIMUM` (`point_batch.rs`) | 8 points | two kernel steps, of four points, for both |
+| `PROJECT_MINIMUM` (`point_splat.rs`) | 4 points | one kernel step for both |
+| `TRANSFORM_BATCH_MINIMUM` (`rasterizer.rs`) | 16 vertices | four kernel steps for both |
+| `SURFACE_KERNEL_MINIMUM`, `MESH_KERNEL_MINIMUM`, `FADE_KERNEL_MINIMUM` (`scene.rs`) | 16, 2, 8 | a whole number of NEON steps each; the parameter block and the call they repay are the same |
+| the pack kernel (`gpu_scene.rs`) | any length | no set-up to repay |
 
 ### Checked
 
@@ -814,16 +830,16 @@ On 2026-09-26:
 - `simd_scalar.*` and `simd_neon.*` for core, geometry, render and cad all
   passed: 88, 204, 74 and 45 (the cad suite's scene tests) cases at each
   level, none skipped. `simd_kernel_sources`, `simd_kernel_objects` (read
-  with the aarch64 `nm` and `objdump`), `simd_kernel_objects_under_asan` and
-  `simd_kernel_objects_catches_a_fused_multiply_add` passed.
+  with the aarch64 `nm` and `objdump`), simd_kernel_objects_under_asan and
+  simd_kernel_objects_catches_a_fused_multiply_add passed.
 - The whole cross-built suite: 3,863 of 3,922 passed. The 59 that failed
   are every `cli.*` test, which runs `katana_cli` through `cmake -E env`
   rather than through `CMAKE_CROSSCOMPILING_EMULATOR`, so the host tried to
   execute an aarch64 program ("Exec format error"); run under qemu by hand,
   `katana_cli` works.
 - The GPU pack kernel's tests need `katana_gpu`, which needs Qt, so its
-  equivalence tests (`tests/gpu/test_gpu_scene.cpp`, all seven, with
-  `gpu_scene.cpp`, `scene_origin.cpp` and the kernel) were compiled by hand
+  equivalence tests (`rust/crates/katana_gpu/tests/gpu/test_gpu_scene.rs`, all seven, with
+  `gpu_scene.rs`, `scene_origin.rs` and the kernel) were compiled by hand
   against the cross-built libraries and gtest and run under qemu at both
   levels: all passed.
 - Each test reaches the kernel: with one lane of a kernel broken, its tests
@@ -832,7 +848,7 @@ On 2026-09-26:
   fourth lane moved one pixel (six rasteriser tests), the UTF-8 validator's
   four-byte-lead rule dropped (three validator tests), the splat letting a
   NaN x through (two projection tests), the scene's `hypot` replaced by the
-  naive formula (`SceneKernels.NormalsTooLongToSquareLightTheSameAtEveryLevel`)
+  naive formula (`scene_kernels::normals_too_long_to_square_light_the_same_at_every_level`)
   and the pack kernel's third vertex offset by the wrong origin (two packing
   tests). Each was restored and the suites passed again.
 
@@ -844,7 +860,7 @@ object checks, `layering` and `docs` pass as before.
 - **Nothing was measured on ARM.** The thresholds above and the claim that
   the kernels are faster at all are inferred from the AVX2 measurements and
   register widths. The benchmarks name their kernel member `avx2` and ask
-  for level 1 (`benchmarks/bench_simd.cpp`, `bench_scene.cpp`); on ARM that
+  for level 1 (the C++ build's `bench_simd` benchmark, `bench_scene.cpp`); on ARM that
   member is refused and skipped, saying so. A `/neon` member and a run on an
   Apple-silicon or Graviton machine are the next step, and any threshold
   that moves should be written down here with both numbers.
@@ -864,8 +880,8 @@ object checks, `layering` and `docs` pass as before.
 ## SIMD: the software rasteriser (2026-09-24)
 
 The CPU rasteriser draws every headless frame and every 3D view without a
-GPU. Four changes, all in `src/katana_render/rasterizer.cpp` and the kernel
-file `src/katana_render/simd/raster_avx2.cpp`. None of them changes a pixel.
+GPU. Four changes, all in `rust/crates/katana_render/src/rasterizer.rs` and the kernel
+file (the C++ raster_avx2.cpp; `rust/crates/katana_render/src/simd/avx2.rs` is its port). None of them changes a pixel.
 
 - **Tiles a triangle cannot reach are not binned.** A triangle whose box
   spans several 64 px tiles is tested at each tile's corners and left out of
@@ -890,9 +906,9 @@ vertex-to-pixel distance. The float error can be bounded at about
 55 u R^2 (the derivation is at "conservative coverage" in the source). So a
 pixel is skipped only where the float test would reject it, and the edge
 tests are dropped only where it would accept it. The frames were also
-checked directly. The ten frames of `test_rasterizer_simd.cpp`, including
+checked directly. The ten frames of `rasterizer_simd.rs`, including
 3,000 triangles of every size from a fixed seed, hash the same, colour and
-depth, as main's `rasterizer.cpp` compiled from `git show main:`, at both
+depth, as main's `rasterizer.rs` compiled from `git show main:`, at both
 levels. The tests compare the scalar and AVX2 levels on 0, 1, 3 and 7
 workers, and `simd_scalar.render` / `simd_avx2.render` run the whole suite
 at each level.
@@ -912,14 +928,14 @@ which floored its box a second time: four `floorf` calls, which are real
 calls on baseline x86-64, for every triangle. Second, the bounded fill,
 inlined into the tile loop, slowed the loop that every small box takes. Now
 the one-tile case pushes its bin entry directly, the pixel is one
-always-inline `shadePixel` shared by both loops, and the bounded fill is out
+always-inline `shade_pixel` shared by both loops, and the bounded fill is out
 of line.
 
 **Measured** on the i7-1270P, Release, 16 threads unless serial. Main and a
 copy of main (A/A) were interleaved with this branch at each level, 4 rounds
 x 3 repetitions (6 for the second archive). The figures are real time in ms,
 min / median. The archives are the owner's, at 1600 x 1000 through
-`cad::renderLayers` (`BM_ArchiveFrame`, `KATANA_BENCH_FRAME_12DA`).
+`katana_cad::scene::render_layers` (`BM_ArchiveFrame`, `KATANA_BENCH_FRAME_12DA`).
 
 | benchmark | main | main (A/A) | AVX2 | scalar |
 |---|---|---|---|---|
@@ -946,11 +962,11 @@ the synthetic scene frame are unchanged within the A/A spread, which is 2-5%.
   spread.
 - **Dense TINs.** The frame is capped by setup and binning, as the earlier
   measurement said. The remaining lever there is the scene representation,
-  which is in `scene.cpp`, not the rasteriser.
+  which is in `scene.rs`, not the rasteriser.
 
-### The 3D scene build (`scene.cpp`, 2026-09-24)
+### The 3D scene build (`scene.rs`, 2026-09-24)
 
-`cad::SceneBuilder` rebuilds the 3D view's draw lists on every document
+`katana_cad::scene::SceneBuilder` rebuilds the 3D view's draw lists on every document
 change, so its time is paid on every edit with a 3D view open. It was
 profiled stage by stage (temporary timers, not committed) on the owner's three
 archives, before any change:
@@ -968,7 +984,7 @@ archives, before any change:
 
 What changed:
 
-- **Kernels** (`src/katana_cad/simd/scene_avx2.cpp`): the lift, the summed
+- **Kernels** (`rust/crates/katana_cad/src/simd/scene_avx2.rs`): the lift, the summed
   per-vertex TIN normals (one triangle per step, the three corner sums in
   order, so a repeated corner adds twice as the loop did), the per-vertex
   ramp colour and hillshade, per-face mesh shading, and the edge fade.
@@ -981,7 +997,7 @@ What changed:
   `(8 lo + (hi - lo) e + 4) >> 3`. A test runs all 65,536 channel pairs at
   every eighth against the scalar blend.
 - **Mesh corner order.** The scalar code added a face's three vertices as
-  the arguments of `addTriangle`, so their order was the compiler's: GCC
+  the arguments of `add_triangle`, so their order was the compiler's: GCC
   evaluates them right to left, c first. That is now written out as three
   statements, so the lists are the same as before on GCC and no longer
   depend on the compiler, and the kernel writes c, b, a to match.
@@ -989,7 +1005,7 @@ What changed:
   `reserve` of exactly one surface's worth (which copies the list once per
   surface) is replaced by geometric growth; an ordinary edge's ink is shaded
   once per vertex, not once per edge end.
-- **Bounds.** `SceneLayers::terrainBounds` keeps the terrain's box, so a
+- **Bounds.** `SceneLayers::terrain_bounds` keeps the terrain's box, so a
   rebuild of the drawing alone does not walk the terrain again. The walk
   visits each vertex once rather than once per primitive using it, and falls
   back to `DrawList::bounds()` when an extreme is a zero, the one case where
@@ -1007,7 +1023,7 @@ kernel, so their minimums are 2 faces and 8 vertices.
 
 Measured with `tools/compare_benchmarks.py --alternate 4
 "BM_Scene(TerrainShaded|TerrainEdges|Meshes|Archive|FadeEdges/.*/128)"
-main=... new=... new_again=...` (`benchmarks/bench_scene.cpp`; the
+main=... new=... new_again=...` (the C++ build's `bench_scene` benchmark; the
 archives through `KATANA_BENCH_SCENE_12DA`). `main` is the benchmark file
 built against main, where both members time the old code; `new again` is a
 byte-copy of `new`, the A/A control. Other builds ran throughout, so the
@@ -1054,7 +1070,7 @@ The plan view draws a cloud by writing pixels into an image, which is then
 composited over the drawing. Before this change the splat read x and y from
 the stored 40-byte point structs, one point after another, and allocated and
 filled a new window-sized image for each cloud on every frame. It now draws
-from a display copy (`geometry/point_splat.hpp`, `point_splat.cpp`), and the
+from a display copy (`rust/crates/katana_geometry/src/point_splat.rs`, `point_splat.rs`), and the
 stored cloud is not changed.
 
 - **The display copy.** Float offsets from a double origin in the middle of
@@ -1079,8 +1095,8 @@ stored cloud is not changed.
 - **The layer image** is kept between frames and reallocated only when the
   view is resized. Only the rows the cloud can reach are cleared, drawn and
   composited.
-- **A point budget.** `PlanPaintOptions::cloudPointBudget` defaults to
-  `kSplatPointBudget`, 4 million points. When more points than that lie in
+- **A point budget.** `PlanPaintOptions::cloud_point_budget` defaults to
+  `SPLAT_POINT_BUDGET`, 4 million points. When more points than that lie in
   tiles on the view, each tile draws the same share of its points. Within a
   tile the points are ordered coarse to fine: the first point in each cell of
   a 1x1 grid, then 2x2, then 4x4 and so on, then the rest. So a tile's share
@@ -1094,8 +1110,8 @@ the display copy is on top. That order is tile by tile, finer levels over
 coarser within a tile, and within a level the file's order. Each band visits
 points in that order, so every pixel sees the same sequence of writes at
 every thread count. The splat's image is the same at 1, 2, 3 and 16 threads
-and at both SIMD levels (`SplatCloud.TheImageIsTheSameAtEveryThreadCountAndSimdLevel`,
-`PlanPainterCloud.AFrameIsTheSameAtBothSimdLevels`).
+and at both SIMD levels (`splat_cloud::the_image_is_the_same_at_every_thread_count_and_simd_level`,
+`plan_painter_cloud::a_frame_is_the_same_at_both_simd_levels`).
 
 **What changes against the old all-double splat:**
 
@@ -1103,7 +1119,7 @@ and at both SIMD levels (`SplatCloud.TheImageIsTheSameAtEveryThreadCountAndSimdL
   float's spacing. For a 1.5 km cloud that is 0.03 mm. A point changes pixel
   only when it lies that close to a pixel edge, and then by one pixel. On
   300,000 points at a 1.9 m pixel, 3 of 200,639 lit pixels differed. The test
-  (`PlanPainterCloud.FloatOffsetsMoveAFewPointsOnPixelEdgesByOnePixelAndNoneFurther`)
+  (`plan_painter_cloud::float_offsets_move_a_few_points_on_pixel_edges_by_one_pixel_and_none_further`)
   requires every difference to be within one pixel of a point the old splat
   drew, and allows at most 1 in 10,000 lit pixels to differ. A point 1 km
   from the origin can be off by 0.06 mm. That would show against the
@@ -1117,7 +1133,7 @@ and at both SIMD levels (`SplatCloud.TheImageIsTheSameAtEveryThreadCountAndSimdL
   are now left out of the copy.
 
 **Measured**, Release, 1600 x 1000, 16 threads (i7-1270P), `bench_plan_cloud.cpp`,
-interleaved with `tools/compare_benchmarks.py --alternate 3` against main's
+interleaved with `compare_benchmarks.py --alternate 3` against main's
 painter built from the same benchmark source, with a second copy of each
 binary as the A/A control. The table gives the minimum in ms, and the A/A
 spread is the difference between the two copies.

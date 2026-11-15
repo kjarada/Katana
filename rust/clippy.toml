@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "std::string::ToString::to_string", reason = "KATANA_REAL_FORMATTER_REQUIRED: use katana_core::text number formatters for reals; format integers explicitly" },
+]

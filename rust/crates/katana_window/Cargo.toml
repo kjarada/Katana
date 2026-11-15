@@ -1,0 +1,73 @@
+[package]
+name = "katana_window"
+description = "The qt layer: the desktop window, in egui and wgpu."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The window, katana, named as the C++ program was: the headless window tests of the test runner
+# run it by that name (tools/check_screenshot.cmake).
+[[bin]]
+name = "katana"
+path = "src/bin/katana/main.rs"
+
+# The developer tools that render the icons to files (src/katana_qt/make_icons.cpp and
+# tool_icon_sheet.cpp), named as the C++ programs are; not part of the product.
+[[bin]]
+name = "katana_make_icons"
+path = "src/bin/katana_make_icons/main.rs"
+
+[[bin]]
+name = "katana_tool_icon_sheet"
+path = "src/bin/katana_tool_icon_sheet/main.rs"
+
+[dependencies]
+katana_app.workspace = true
+katana_archive12d.workspace = true
+katana_cad.workspace = true
+katana_commands.workspace = true
+katana_core.workspace = true
+katana_dxf.workspace = true
+katana_entity.workspace = true
+katana_geodesy.workspace = true
+katana_geometry.workspace = true
+katana_gis.workspace = true
+katana_gpu.workspace = true
+katana_ifc.workspace = true
+katana_interop.workspace = true
+katana_math.workspace = true
+katana_pointcloud.workspace = true
+katana_render.workspace = true
+katana_storage.workspace = true
+katana_survey.workspace = true
+katana_surveyio.workspace = true
+katana_terrain.workspace = true
+katana_update.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+# The window (step 7; docs/rust.md, "Third-party libraries"). egui 0.36, not 0.37: egui_dock has
+# no release for 0.37 yet. eframe is the desktop runner only (src/bin/katana): its defaults would
+# turn on the WebAssembly screen reader and its own persistence, and the window keeps its own
+# settings.
+egui = "0.36.2"
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "x11", "wayland", "links"] }
+egui_dock = "0.21.1"
+egui_extras = { version = "0.36.2", default-features = false }
+# The raster canvas, the text drawn in a drawing, and PDF plots and sheets (one Canvas trait).
+tiny-skia = "0.12.0"
+cosmic-text = "0.19.0"
+krilla = "0.8.2"
+# Images a drawing or sheet holds, in the formats Qt's image plugins read, and PNG written.
+png = "0.18.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "ico"] }
+# The desktop's clipboard, text and image, and its file dialogs: never opened headless.
+arboard = "3.7.0"
+rfd = "0.17.2"
+# Deflate for the TIFF writer (plotting/tiff_writer), at qCompress's level 6; already in the
+# lock through katana_update and png.
+miniz_oxide = "0.8"
+
+[lints]
+workspace = true

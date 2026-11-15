@@ -6,10 +6,11 @@ AS 5488 subsurface utility investigation as an IFC 4.3 file (IFC4X3_ADD2), and r
 IFC2X3, IFC4 and IFC4X3 files back into the drawing. It needs no third-party
 library, like `katana_dxf` and `katana_archive12d`: IFC is ISO 10303-21 text,
 and what matters is the mapping, not a model library
-(`include/katana/ifc/export.hpp`, "Why a writer of our own"). It sits beside
-the other exchange modules in the layering (`tools/check_layering.cmake`): it
-may see `core`, `math`, `geometry`, `terrain`, `entity`, `commands` and
-`survey`, and `katana_app` and `katana_qt` may see it.
+(`rust/crates/katana_ifc/src/export.rs`, "Why a writer of our own"). It sits beside
+the other exchange modules in the layering (its crate's dependencies,
+`rust/crates/katana_ifc/Cargo.toml`): it may see `core`, `math`, `geometry`,
+`terrain`, `entity`, `commands` and `survey`, and `katana_app` and
+`katana_window` may see it.
 
 The one decision the export exists to get right is **which IFC class each
 thing becomes**. A file whose every object is an `IfcBuildingElementProxy`
@@ -45,9 +46,9 @@ katana_cli -c "INFO site.ifc" -c "IMPORT site.ifc TAKECRS" -c "ALIGN LIST"
 ```
 
 The grammar is one function both front ends call
-(`ifc::parseExportArguments`, `ifc::parseImportArguments` in
-`include/katana/ifc/front_end.hpp`), as are reading the files an export names
-(`ifc::readExportFiles`), the GlobalId namespace and the replies, so the same
+(`katana_ifc::front_end::parse_export_arguments`, `katana_ifc::front_end::parse_import_arguments` in
+`rust/crates/katana_ifc/src/front_end.rs`), as are reading the files an export names
+(`katana_ifc::front_end::read_export_files`), the GlobalId namespace and the replies, so the same
 line writes the same file and answers alike in either. A path is quoted, or
 read up to the first ".ifc" that ends a word, so that one with blanks may be
 typed as it is; a path that holds ".ifc " before its end is quoted, and a
@@ -73,28 +74,28 @@ undoable step; NOALIGNMENTS, NOELEMENTS and NOSURFACES leave those out, and
 all three together are refused. LOCAL moves them to sit at the origin, as the
 other importers' LOCAL does - by the corner of everything the file brings,
 alignments and surfaces included (`IfcImport::bounds`). TOLERANCE is how far
-a chorded curve may stand from the true one (`ImportOptions::curveTolerance`,
+a chorded curve may stand from the true one (`ImportOptions::curve_tolerance`,
 1 mm by default). TAKECRS gives a project with no coordinate system the
 file's, as its own undoable step; KEEPCRS does not; with neither, the line
 says how (`CRS SET`), and File > Import asks. TAKECRS with LOCAL is refused:
 data moved to the origin is in no system. A terrain in the file joins the
 drawing's surfaces in the import's one undo step, on every front end
-(`cad::importSurfaces`; `docs/terrain.md`, "Surfaces in the drawing"), and
+(`katana_cad::terrain::surface_verbs::import_surfaces`; `docs/terrain.md`, "Surfaces in the drawing"), and
 EXPORT writes the drawing's surfaces unless NOSURFACES.
 INFO describes a file without importing it; IFC RULES writes the default
 classification rules, for a project to edit into its own.
-`src/katana_app/ifc_verbs.cpp` is the whole of `katana_cli`'s side.
+`rust/crates/katana_app/src/ifc_verbs.rs` is the whole of `katana_cli`'s side.
 
 ### Replies
 
 Every reply is `key=value` records, one a line, as the interpreter's verbs
 answer (`docs/cad.md`), so that a script or an agent reads what happened
-without parsing sentences. Text values are quoted (`core::replyQuoted`) and
-read back by `core::readReplyRecord`; the formats are written in one place
-(`ifc::formatExportReply`, `ifc::formatImportReply`,
-`ifc::formatDescription`) and File > Export IFC's table is read from them by
-`ifc::readExportObjects`, so the writer and its one reader are kept in step
-(`IfcReplies.AnExportsObjectRecordsReadBackAsItsTally`):
+without parsing sentences. Text values are quoted (`katana_core::text::reply_quoted`) and
+read back by `katana_core::text::read_reply_record`; the formats are written in one place
+(`katana_ifc::front_end::format_export_reply`, `katana_ifc::front_end::format_import_reply`,
+`katana_ifc::front_end::format_description`) and File > Export IFC's table is read from them by
+`katana_ifc::front_end::read_export_objects`, so the writer and its one reader are kept in step
+(`ifc_replies::an_exports_object_records_read_back_as_its_tally`):
 
 ```
 ifc exported file="site.ifc" schema=IFC4X3_ADD2 instances=1097 bytes=82906
@@ -123,11 +124,11 @@ one with no class, its `why` saying why. A front end adds `note`
 records of its own after the reply - the coordinate system taken or how to
 take it, a shift - and an import's reply is written after the undoable
 command, whose renames of an alignment the file shares a name with are among
-its warnings. `IfcFrontEnd.EveryChoiceOfTheDialogsIsAWordOfTheLine`,
-`IfcFrontEnd.ContradictoryOrRepeatedWordsAreRefused`,
-`IfcFrontEnd.TheLineADialogWritesReadsBackAsItsArguments` and
+its warnings. `ifc_front_end::every_choice_of_the_dialogs_is_a_word_of_the_line`,
+`ifc_front_end::contradictory_or_repeated_words_are_refused`,
+`ifc_front_end::the_line_a_dialog_writes_reads_back_as_its_arguments` and
 `cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line` pin the grammar,
-`IfcFrontEnd.NoRoadModelIsAWordAndNoDrawingLeavesTheRoadModelOutToo`,
+`ifc_front_end::no_road_model_is_a_word_and_no_drawing_leaves_the_road_model_out_too`,
 `cli.ifc_noroadmodel_is_a_word_of_the_export_line` (the word is taken, on a
 drawing with no corridor, so the reply has no road record either way) and
 `cli.ifc_noroadmodel_given_twice_is_refused` its road model word; what the word
@@ -137,14 +138,14 @@ without one nothing could tell a word honoured from a word ignored:
 `cli.ifc_noroadmodel_leaves_a_corridors_road_model_out` for `katana_cli`,
 `qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless` for the
 window's own wiring, and
-`McpServer.AnAgentLeavesTheRoadModelOutOfAnIfcExportByItsWord` for an agent
+`mcp_server::an_agent_leaves_the_road_model_out_of_an_ifc_export_by_its_word` for an agent
 doing it through `katana_mcp` (as is
-`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` for
+`mcp_server::an_agent_previews_exports_describes_and_imports_ifc_by_the_dialogs_lines` for
 the rest of the grammar).
 
 ### In the window
 
-File > Export IFC is a dialog (`src/katana_qt/ifc_dialogs.hpp`, `docs/desktop.md`)
+File > Export IFC is a dialog (`rust/crates/katana_window/src/ifc_dialogs.rs`, `docs/desktop.md`)
 of the verb's choices, with what the window knows beside them: the file; the
 drawing's entities (or only the selected ones), its alignments, its surfaces
 and its road model (`ifcExportRoadModel`, "Road model (N objects)"; unticked,
@@ -156,7 +157,7 @@ mean, shows it (`ifcExportCommand`), and runs it on the window's command line,
 as a person or an agent could type it. Its table previews the file: for each
 layer, service, alignment and surface, how many objects become which class,
 in which system, and why. It is read from the reply of the same line with
-PREVIEW added - the writer's own account (`ifc::IfcExport::tally`, filled as
+PREVIEW added - the writer's own account (`katana_ifc::IfcExport::tally`, filled as
 each object is written, by writing the file in memory) - so what a person
 checks before writing is exactly what is written, and what an agent asking
 PREVIEW reads. Four of its rows for the scenario with the sample schedule
@@ -171,9 +172,9 @@ PREVIEW reads. Four of its rows for the scenario with the sample schedule
 
 What is not written is accounted for too: a label is "not written", "a
 label: labels are not exported". Every product the report counts is in the
-table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`;
+table once (`ifc_export_tally::every_product_the_report_counts_is_accounted_for_once`;
 a road model's `IfcRoad` and `IfcRoadPart` are rows too, "a corridor" and "a
-part of road Main", `IfcExportRoad.EveryRoadAndPartTheReportCountsIsInTheAccountOnce`).
+part of road Main", `ifc_export_road::every_road_and_part_the_report_counts_is_in_the_account_once`).
 
 The table is the file the choices made when Preview was pressed: changing any
 of them but the file's name clears it, and a problem found since replaces the
@@ -217,7 +218,7 @@ When the project's coordinate system has an EPSG code, it is written as an
 coordinates are written relative to a **local origin**: the south-west corner
 of everything exported, rounded down to 100 m in plan, at height 0. On the
 scenario MC01's first PI is furthest west and south, so the origin is
-333900, 6249900 (`IfcExport.IsGeoreferencedByAMapConversionFromALocalOriginNearTheWork`).
+333900, 6249900 (`ifc_export::is_georeferenced_by_a_map_conversion_from_a_local_origin_near_the_work`).
 The file is then both georeferenced and drawable: a viewer holding MGA
 coordinates in single precision would resolve them to about a metre.
 
@@ -262,7 +263,7 @@ right, R 60 turning left - the tests work each parameter out from the PIs by
 hand: the tangent bearings are atan2(70, 100) and −atan2(30, 100), the
 deflection 0.9021827588 rad, the first arc 80 × (0.9021827588 − 40/160) =
 52.1746 m, the second 60 × 0.9021827588 = 54.1310 m
-(`tests/ifc/test_export.cpp`).
+(`rust/crates/katana_ifc/tests/export.rs`).
 
 ### Subsurface utilities (AS 5488, and the delivery schema they were written to)
 
@@ -271,7 +272,7 @@ its **graded segments** - the standard grades segments, not services - one
 element, grouped by the system. Every **located point** is an `IfcAnnotation`
 SURVEY carrying its evidence, a member of its service's system. The class comes from the service's type and the
 words of its feature, subtype, configuration, material and description
-(`ifc::classifyUtilityRun`, `include/katana/ifc/classification.hpp`):
+(`katana_ifc::classification::classify_utility_run`, `rust/crates/katana_ifc/src/classification.rs`):
 
 | The service | Segment class | System |
 |---|---|---|
@@ -286,7 +287,7 @@ words of its feature, subtype, configuration, material and description
 What a service is laid in decides before what it carries: the sample's E1 is
 "4 x 100 mm conduits", and its segments are cable carriers. A service
 recorded at a single point is the feature its words name
-(`ifc::classifyUtilityPoint`): a manhole, valve or meter pit, sump, chamber or
+(`katana_ifc::classification::classify_utility_point`): a manhole, valve or meter pit, sump, chamber or
 pit (`IfcDistributionChamberElement`), a hydrant (`IfcFireSuppressionTerminal`
 FIREHYDRANT), a valve (`IfcValve`: STOPCOCK, AIRRELEASE, FLUSHING, ISOLATING), a
 marker post (`IfcSign` MARKER), a pillar or cabinet (`IfcJunctionBox`); a point
@@ -322,7 +323,7 @@ the schema's label; a value from one of its lists is an
 list, a number a number, and a value the list does not hold - E-0001's "In
 service" - plain text, since an enumerated value outside its enumeration is a
 schema error and the value must not be lost
-(`IfcExportUtilities.TheDeliverySchemasAttributesAreWrittenAsTheScheduleWroteThem`).
+(`ifc_export_utilities::the_delivery_schemas_attributes_are_written_as_the_schedule_wrote_them`).
 
 **Geometry is never guessed.** A segment has an `Axis` in 3D - and a `Body`,
 a swept disk of its size - only when both of its ends give the level of the
@@ -330,7 +331,7 @@ service's centre: a level recorded on the centre, or on the top or invert
 with a size to bring it there. Otherwise it has a 2D `FootPrint` and nothing
 else: a pipe drawn at a depth nobody measured would be taken for one
 somebody had. On the sample schedule that is 6 of 10 segments - W1-2 to W1-4
-and all of E1 (`IfcExportUtilities.EveryGradedSegmentIsOneElementAndOnlyThoseWithLevelsAreIn3d`).
+and all of E1 (`ifc_export_utilities::every_graded_segment_is_one_element_and_only_those_with_levels_are_in3d`).
 
 **A services plan drawn from a schedule** (`UTILITY DRAW`,
 `docs/subsurface_utilities.md`, "Drawing the services") is in the drawing,
@@ -340,7 +341,7 @@ properties. Exported by its layers' words it would be one system per level,
 and E1's conduits a cable; so an entity with `utility.line` and
 `utility.type` is written as the service it belongs to. Each run is the
 class the schedule's own export gives the service, from the attributes the
-run carries (`ifc::classifyUtilityRun`: E1's "4 x 100 mm conduits" an
+run carries (`katana_ifc::classification::classify_utility_run`: E1's "4 x 100 mm conduits" an
 `IfcCableCarrierSegment` CONDUITSEGMENT); a line an EXPLODE made of a run is
 still a run of it. A service is the runs of one line id, drawn under one
 `<prefix>/<type>`, with the same attributes: two schedules drawn under one
@@ -352,7 +353,7 @@ kept one, as the schedule's export places its points. A project's own rules
 (a RULES file) still name the class of what it drew; only the defaults give
 way to the service's class. Each service is one `IfcDistributionSystem`
 named by its line, with the schedule export's description and LongName
-(`serviceLongName`); each run and point is classified by its level in
+(`service_long_name`); each run and point is classified by its level in
 AS 5488.1 - the classification the schedule's services use, written once for
 both - and carries what the drawing kept of its grade in the same sets, a
 run's `AS5488_QualityLevel` and a point's `AS5488_LocatedPoint`. What the
@@ -364,11 +365,11 @@ The drawn plan together with its schedule (UTILITIES) is each service twice,
 drawn and graded: written, as asked, and said. A drawn run is one per stretch
 of one level, not one per segment, so the sample drawn gives W1 three pipes
 where the schedule gives five segments
-(`IfcExportDrawing.ADrawnServicesPlanGoesOutByServiceAsTheScheduleWouldClassIt`,
-`IfcExportDrawing.TwoServicesDrawnWithOneLineIdStayTwoServices`,
-`IfcExportDrawing.AnExplodedRunStaysInItsService`,
-`IfcExportDrawing.APointMovedToAnotherLayerStaysWithTheRunItStandsOn`,
-`IfcExportDrawing.AProjectsRuleStillClassesADrawnRun`,
+(`ifc_export_drawing::a_drawn_services_plan_goes_out_by_service_as_the_schedule_would_class_it`,
+`ifc_export_drawing::two_services_drawn_with_one_line_id_stay_two_services`,
+`ifc_export_drawing::an_exploded_run_stays_in_its_service`,
+`ifc_export_drawing::a_point_moved_to_another_layer_stays_with_the_run_it_stands_on`,
+`ifc_export_drawing::a_projects_rule_still_classes_a_drawn_run`,
 `cli.ifc_a_drawn_services_plan_goes_out_by_service`). The drawing is plan
 only, so the runs have their `FootPrint`; the schedule export is the one that
 draws a service in 3D where its levels allow.
@@ -377,8 +378,8 @@ draws a service in 3D where its levels allow.
 
 An entity becomes the class of the first rule whose words its layer path,
 survey code or string name (from a .12da archive) holds - whole words, any case, a trailing `*`
-a prefix - among the rules that apply to its kind (`ifc::classifyEntity`,
-`ifc::defaultClassificationRules`):
+a prefix - among the rules that apply to its kind (`katana_ifc::classification::classify_entity`,
+`katana_ifc::classification::default_classification_rules`):
 
 | Words (examples) | Kinds | Class |
 |---|---|---|
@@ -399,14 +400,14 @@ a prefix - among the rules that apply to its kind (`ifc::classifyEntity`,
 
 Services come first - linework on a service's layer is the service - and a
 pit on a "STORMWATER PITS" layer is in STORMWATER without a rule per service
-(`ifc::serviceSystemFor`). What no rule names is an `IfcAnnotation` of its
+(`katana_ifc::classification::service_system_for`). What no rule names is an `IfcAnnotation` of its
 kind: SURVEY for a point, or a line with heights or a survey code; TEXT,
 DIMENSION, LEADER; NOTDEFINED for other linework. The rules are data: a
 caller that sets `ExportOptions::rules` replaces the defaults with them, and
 a project whose layers are named otherwise gives a RULES file ("Classification
 rules" below), whose rules both front ends try before the defaults, which
 still classify everything the file does not name
-(`ifc::readExportFiles`). A rule naming a class the export does not write, or
+(`katana_ifc::front_end::read_export_files`). A rule naming a class the export does not write, or
 USERDEFINED without saying what, is refused.
 `IfcBuildingElementProxy` is written only when such a rule asks for it.
 
@@ -428,19 +429,19 @@ a run to the default rules, so a kerb drawn with an arc is still an `IfcKerb`,
 and a rules file's `kinds` may name `CurvePolyline`, `Ellipse` and `Spline`.
 Text is `IfcTextLiteralWithExtent` (plain
 `IfcTextLiteral` is deprecated in 4.3). A leader is its curve and the NOTE it
-says (`entity::leaderNote`), not its `text`: a smart leader's `text` is a
+says (`katana_entity::leader_values::leader_note`), not its `text`: a smart leader's `text` is a
 template (`RL {rl:.3f}`) and one made from a label style has none, so a
 template written as it stands, or no words at all, would say what the plan,
 `LIST` and the DXF do not. The note reads the entity the tip is on and, for
 `{dsurface.ground}` or `{station.MC01}`, the drawing's surfaces and
 alignments, which this layer cannot see, so both front ends hand them over
-(`ExportOptions::leaderContext` and `codeProperties`, set by
-`app::setLeaderNotes` from `cad::annotation::leaderContext` and
-`cad::codePropertyCandidates`, as every other consumer of a leader does). A
+(`ExportOptions::leader_context` and `code_properties`, set by
+`katana_app::ifc_verbs::set_leader_notes` from `katana_cad::annotation::leader_presets::leader_context` and
+`katana_cad::survey_coding::code_property_candidates`, as every other consumer of a leader does). A
 writer given none (a library caller) reads a note off its target alone, and a
 line that names a surface or an alignment is dropped from it, as the DXF
 writer's own fallback drops it: absent is not a made-up figure
-(`IfcExportLeaders.ASmartLeaderIsWrittenAsTheNoteItSaysNotItsTemplate`,
+(`ifc_export_leaders::a_smart_leader_is_written_as_the_note_it_says_not_its_template`,
 `cli.ifc_a_leader_is_exported_as_the_note_it_says_not_its_template`). Each
 entity keeps its layer as an
 `IfcPresentationLayerAssignment`, its colour as a curve style, its properties
@@ -461,7 +462,7 @@ a house connection an `IfcPipeFitting` JUNCTION; all in one
 
 A project whose layers are named otherwise than the defaults expect writes
 its own rules - a CSV file, a rule a row, the columns found by name
-(`ifc::parseClassificationRules`):
+(`katana_ifc::classification::parse_classification_rules`):
 
 ```
 rule,words,kinds,class,predefined_type,object_type,system
@@ -484,11 +485,11 @@ its line: a class the export does not write, a predefined type the class does
 not have, USERDEFINED without an object type. The predefined types are the
 schema's own, generated from IfcOpenShell's IFC4X3_ADD2
 (`tools/ifc_product_classes.py --predefined`,
-`src/katana_ifc/predefined_types.inc`), and every default rule and service
+`rust/crates/katana_ifc/src/predefined_types.rs`), and every default rule and service
 class is checked against them
-(`IfcRulesFile.EveryClassTheExportChoosesIsOneTheSchemaHas`). Save Default
+(`ifc_rules_file::every_class_the_export_chooses_is_one_the_schema_has`). Save Default
 Rules in the export dialog, and `IFC RULES <file.csv>` on any command line,
-write the defaults (`ifc::writeDefaultRules`, `ifc::formatClassificationRules`)
+write the defaults (`katana_ifc::front_end::write_default_rules`, `katana_ifc::classification::format_classification_rules`)
 as a starting point.
 
 ### Surfaces
@@ -502,19 +503,19 @@ drawing's surfaces (`Document::surfaces`), unless NOSURFACES.
 Horizontal BIM: the 3D objects of the drawing's corridors - pavement courses,
 kerbs, footpaths, verges, batters - and of the road objects placed along an
 alignment or a line - barriers, guide posts, signs, light poles, culverts,
-walls, fences, line markings - which `cad::bim::bimModel` makes from their
-definitions every time (`include/katana/cad/bim/bim_object.hpp`; the road
+walls, fences, line markings - which `katana_cad::bim::bim_object::bim_model` makes from their
+definitions every time (`rust/crates/katana_cad/src/bim/bim_object.rs`; the road
 design and road objects documents say how). The export writes them unless the
 line says NOROADMODEL (the window's "Road model" box). Section numbers below
 are those of buildingSMART's IFC 4.3.2.0 documentation, the IFC4X3_ADD2
 schema the file declares.
 
 **How it reaches the writer.** `katana_ifc` may not see `katana_cad`, so the
-model comes in as plain data: `ifc::RoadElement`, field for field what
-`cad::bim::BimObject` is, in an `ifc::RoadModelInput` with the model's
-problems. `app::roadModelInput` (`src/katana_app/ifc_verbs.hpp`) converts one
+model comes in as plain data: `katana_ifc::export::RoadElement`, field for field what
+`katana_cad::bim::BimObject` is, in an `katana_ifc::export::RoadModelInput` with the model's
+problems. `katana_app::ifc_verbs::road_model_input` (`rust/crates/katana_app/src/ifc_verbs.rs`) converts one
 into the other, and both front ends call it - `katana_cli`'s EXPORT and the
-window's (`src/katana_qt/main_window_ifc.cpp`) - so a corridor's elements are
+window's (`rust/crates/katana_window/src/main_window_ifc.rs`) - so a corridor's elements are
 the same objects whichever wrote the file. Three of an object's properties
 say what its fields cannot, matched in any letter case: `ObjectType`, what a
 USERDEFINED class is (without it, the object's kind in capitals, since every
@@ -533,7 +534,7 @@ it, match **ignoring letter case**, as Katana finds a corridor by its name
 (`facility=main` is on the corridor Main): they are written under the
 spelling of the first element of the model that names them, so one road is
 one `IfcRoad` and a line marking of it finds the pavement under it
-(`IfcExportRoad.AFacilityAndPartMatchIgnoringCaseAsACorridorsNameDoes`).
+(`ifc_export_road::a_facility_and_part_match_ignoring_case_as_a_corridors_name_does`).
 **Rejected:** matching them exactly, which made `main` a second `IfcRoad`
 and its marking "on no course of its road", left out. The road is an ELEMENT and its
 parts PARTIAL: between facilities IfcRoad asks for a COMPLEX parent over an
@@ -552,7 +553,7 @@ host. All are unmoved: the coordinates are the drawing's, from the file's
 local origin, which takes the road model into account.
 
 **Which class each object is.** What the builders are asked to write, and
-why; the export writes any class in its list (`src/katana_ifc/product_layout.hpp`)
+why; the export writes any class in its list (`rust/crates/katana_ifc/src/product_layout.rs`)
 whose predefined type the schema has:
 
 | Object | Class and predefined type | Why |
@@ -582,7 +583,7 @@ The classes these need were added to the export's list - `IfcCourse`,
 had - each an IfcElement of nine attributes, the Tag eighth and the optional
 PredefinedType ninth (checked against each class's page). A project's rules
 file may name the new element classes too; not the two features
-(`IfcRulesFile.ARuleMayNotNameAFeatureClass`), since a line on a layer has
+(`ifc_rules_file::a_rule_may_not_name_a_feature_class`), since a line on a layer has
 nothing to be a feature of.
 
 **The body** is an `IfcTriangulatedFaceSet` (8.8.3.47) in the `Body` context,
@@ -599,7 +600,7 @@ each corner for each face is still closed, a face naming one place twice is
 dropped, and what is still not closed is written open, the count of those
 said once. A closed mesh wound inwards (its signed volume negative) is
 written wound outwards. None of that moves a coordinate. Its colour is a
-surface style (`Builder::colourSurface`), its layer the object's. **Rejected:** `IfcPolygonalFaceSet` - the meshes are
+surface style (`Builder::colour_surface`), its layer the object's. **Rejected:** `IfcPolygonalFaceSet` - the meshes are
 triangles already, merging coplanar ones would only save bytes, and the
 triangulated set is the one the surfaces write, inside the Alignment-based
 view the file declares; and a profile swept along the alignment (a course's
@@ -651,7 +652,7 @@ course's volume where it looks, and nothing is claimed to be a base quantity
 its template does not define. The road model names its quantities by one
 scheme for every object (GrossVolume for any solid's volume, Depth for a
 course's thickness), and the writer writes four of them under the class's name
-for them (`kQuantityAliases`): an `IfcCourse`'s Depth as Thickness, an
+for them (`QUANTITY_ALIASES`): an `IfcCourse`'s Depth as Thickness, an
 `IfcKerb`'s GrossVolume as Volume, an `IfcEarthworksCut`'s as UndisturbedVolume
 and an `IfcEarthworksFill`'s as CompactedVolume - only where the element has no
 quantity of that name already, and the road model's own names stay in its
@@ -663,12 +664,12 @@ one name on an element (UniqueQuantityNames) are left out, each kind said
 once. **A count is an INTEGER**: `IfcQuantityCount`'s `CountValue` is an
 `IfcCountMeasure`, a NUMBER in IFC4 but `TYPE IfcCountMeasure = INTEGER` in
 IFC4X3_ADD2, the schema the file declares, so `28.` is not valid there and
-`28` is. A count that is not a whole number (within 1e-9, `math::tolerance::kRelative`)
+`28` is. A count that is not a whole number (within 1e-9, `tolerance::RELATIVE`)
 or is above 2147483647 has no spelling and is left out, said once: the
 bound is the largest 32-bit signed integer because IfcOpenShell 0.8.5 reads a
 larger STEP INTEGER as that number, without a word (3000000000 came back as
 2147483647), which would be worse than absent
-(`IfcExportRoad.ACountIsAnIntegerAndOneThatCannotBeIsLeftOutAndSaid`).
+(`ifc_export_road::a_count_is_an_integer_and_one_that_cannot_be_is_left_out_and_said`).
 
 **Properties.** `Katana_RoadElement`: the object's id, kind, facility, part,
 layer, material and whether its body is a closed solid. `Katana_RoadProperties`:
@@ -688,53 +689,53 @@ must say why.
 **GlobalIds** are made from the object's id ("road/element/<id>"), a road's
 from its name ("road/facility/Main"), a part's from both, so an object keeps
 its GlobalId when others are added before it
-(`IfcExportRoad.GlobalIdsComeFromTheIdsAndAreStableAcrossExports`).
+(`ifc_export_road::global_ids_come_from_the_ids_and_are_stable_across_exports`).
 
 The tests export a synthetic corridor of boxes whose volumes are worked out by
 hand - two courses, a kerb, a fill and a cut batter, a marking, a sign, a
 noise wall - and read the file back instance by instance
-(`tests/ifc/test_road.cpp`): the structure and its placements
-(`IfcExportRoad.EveryElementIsContainedInItsPartItsRoadOrTheSiteAndPlacedRelativeToIt`),
+(`rust/crates/katana_ifc/tests/road.rs`): the structure and its placements
+(`ifc_export_road::every_element_is_contained_in_its_part_its_road_or_the_site_and_placed_relative_to_it`),
 closed face sets enclosing 17.5 m3 and 4.5 m3
-(`IfcExportRoad.ABodyIsAClosedTriangulatedFaceSetEnclosingTheMeshesVolume`),
+(`ifc_export_road::a_body_is_a_closed_triangulated_face_set_enclosing_the_meshes_volume`),
 the features on their hosts
-(`IfcExportRoad.ACutVoidsTheGroundItIsTakenFromAndIsContainedNowhere`,
-`IfcExportRoad.AMarkingAdheresToTheHighestCourseUnderItAndIsContainedNowhere`),
+(`ifc_export_road::a_cut_voids_the_ground_it_is_taken_from_and_is_contained_nowhere`,
+`ifc_export_road::a_marking_adheres_to_the_highest_course_under_it_and_is_contained_nowhere`),
 the base quantities against their templates
-(`IfcExportRoad.QuantitiesTheTemplateNamesAreBaseQuantitiesAndTheRestKatanas`)
-and every refusal (`IfcExportRoad.WhatWouldMakeAnInvalidFileIsLeftOutAndSaid`);
-`tests/app/test_ifc_verbs.cpp` the conversion
-(`IfcRoadModelInput.EveryFieldOfABimObjectReachesTheElement`); and the window's
-box `qt_widgets.IfcExportDialog.TheRoadModelBoxCountsItsObjectsAndUntickedTheLineSaysNoRoadModel`
+(`ifc_export_road::quantities_the_template_names_are_base_quantities_and_the_rest_katanas`)
+and every refusal (`ifc_export_road::what_would_make_an_invalid_file_is_left_out_and_said`);
+`rust/crates/katana_app/tests/file_verbs/ifc.rs` the conversion
+(`ifc_road_model_input::every_field_of_a_bim_object_reaches_the_element`); and the window's
+box `ifc_export_dialog::the_road_model_box_counts_its_objects_and_unticked_the_line_says_no_road_model`
 and `qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless`.
 
 ### GlobalIds, and the same file every time
 
 Every GlobalId is made from a key that names the object - "entity/41",
 "alignment/MC01/horizontal/3" - within a namespace that names the project
-(`ExportOptions::guidNamespace`; both front ends pass the project's name and
-creation time, `ifc::guidNamespaceFor`), by two 64-bit FNV-1a hashes mixed and encoded in IFC's base
-64 (`ifc::guidFor`). The same project exported twice gives each object the
+(`ExportOptions::guid_namespace`; both front ends pass the project's name and
+creation time, `katana_ifc::front_end::guid_namespace_for`), by two 64-bit FNV-1a hashes mixed and encoded in IFC's base
+64 (`katana_ifc::step::guid_for`). The same project exported twice gives each object the
 same GlobalId, so a consumer can track an object across issues; two projects
 give different ones. The writer reads no clock and no random source: the same
 input is the same file, byte for byte (Rule 7,
-`IfcExport.TheSameInputIsTheSameFileAndGlobalIdsBelongToTheProject`); the
+`ifc_export::the_same_input_is_the_same_file_and_global_ids_belong_to_the_project`); the
 timestamp in the header is the caller's.
 
 ## Import: what comes in, and as what
 
-`ifc::readIfc` parses any ISO 10303-21 file whose schema is an IFC one
-(`src/katana_ifc/step_reader.cpp`: complex instances are counted and passed
+`katana_ifc::import::read_ifc` parses any ISO 10303-21 file whose schema is an IFC one
+(`rust/crates/katana_ifc/src/step_reader.rs`: complex instances are counted and passed
 over, lists deeper than 64 are refused, an error names its line), and
-`ifc::importCommand` makes the result one undoable step. The product classes
+`katana_ifc::import::import_command` makes the result one undoable step. The product classes
 of IFC2X3, IFC4 and IFC4X3_ADD2, and which are drawn, spatial or positioning,
 are generated from IfcOpenShell's schemas (`tools/ifc_product_classes.py`,
-`src/katana_ifc/product_classes.inc`).
+`rust/crates/katana_ifc/src/product_classes.rs`).
 
 | In the file | In the drawing |
 |---|---|
 | `IfcAlignment` | a named alignment, its PIs and PVIs **reconstructed** from the business logic and **checked** (below); else a 3D polyline of its exact geometry on "IFC/Alignments", and a warning saying why |
-| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid), or none at all (the stand-in ground of a cut whose surface is not in the file), a point at its placement, counted and said. An `IfcEarthworksCut` is an element like the others and comes back as its `FootPrint` outline (`IfcExportRoad.ACutBatterIsReadBackFromItsFileAsItsFootPrintOutline`); the other feature elements (openings and the like) are not drawn |
+| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid), or none at all (the stand-in ground of a cut whose surface is not in the file), a point at its placement, counted and said. An `IfcEarthworksCut` is an element like the others and comes back as its `FootPrint` outline (`ifc_export_road::a_cut_batter_is_read_back_from_its_file_as_its_foot_print_outline`); the other feature elements (openings and the like) are not drawn |
 | a terrain (`IfcGeographicElement` TERRAIN, a TIN) | a surface, for a caller that keeps surfaces |
 | property sets and quantities | properties "Set/Property", lengths, areas, volumes and angles in Katana's units |
 | classifications, the system served | "Classification/<system>", "System" |
@@ -757,11 +758,11 @@ CIRCULARARC [CLOTHOID] between two LINEs is one PI at the intersection of
 those lines, with the arc's radius and the transitions' lengths; each
 PARABOLICARC one PVI at the intersection of its grades. Katana then solves
 the reconstruction, and every segment the file states must start within
-`ifc::kAlignmentTolerance` (10 mm, the .12da import's tolerance) of
+`katana_ifc::import::ALIGNMENT_TOLERANCE` (10 mm, the .12da import's tolerance) of
 where the solution puts it. Where the check fails, or the geometry has no PI
 form - it starts or ends on a curve, compounds two arcs, or uses a transition
 other than the clothoid (Katana has the clothoid) - the alignment comes in as
-a 3D polyline of its exact geometry, chorded to `ImportOptions::curveTolerance`
+a 3D polyline of its exact geometry, chorded to `ImportOptions::curve_tolerance`
 (transitions integrated from their curvature, which is what defines them),
 and the warning says why. A vertical of circular arcs is not a Katana design
 profile: its levels come in on a polyline beside the alignment. Cant is not
@@ -797,12 +798,12 @@ mistake in the writer and the same mistake in the reader cannot agree:
   too - 1097, 1097 and 58 instances - and
   `qt_ifc_the_windows_export_is_valid_to_ifcopenshell` checks the first where
   IfcOpenShell is installed.
-- **The road model's file** - the synthetic corridor of `tests/ifc/test_road.cpp`
+- **The road model's file** - the synthetic corridor of `rust/crates/katana_ifc/tests/road.rs`
   with its ground, georeferenced - is written by
-  `IfcExportRoad.TheRoadModelIsWrittenForTheValidator` and judged by
-  `tools/check_ifc.py` in `ifc.the_road_model_export_is_valid_to_ifcopenshell`,
-  registered beside the others where IfcOpenShell is installed
-  (`tests/ifc/CMakeLists.txt`). Its first run (2026-10-15, by the review that
+  `ifc_export_road::the_road_model_is_written_for_the_validator` (to the file
+  `KATANA_IFC_ROAD_FILE` names) and was judged by `tools/check_ifc.py` in the
+  C++ suite's `ifc.the_road_model_export_is_valid_to_ifcopenshell`, which
+  went with the gtest registrations (see "Not done"). Its first run (2026-10-15, by the review that
   followed the road model's merge) found one finding on a corridor with a
   barrier (IfcOpenShell 0.8.5 and 0.9.0 alike) and 18 on one with a sign,
   lights, walls, guide posts, a fence, a marking and a barrier (0.9.0),
@@ -841,6 +842,12 @@ mistake in the writer and the same mistake in the reader cannot agree:
 
 ## Not done
 
+- **The road model's file is no longer judged by a registered test.** The C++
+  suite ran `tools/check_ifc.py` on the file its road case wrote; the CMake
+  test runner registers the three `cli.ifc_*_is_valid_to_ifcopenshell` checks
+  and the window's, not that one. Registering it again needs a test that runs
+  the Rust case with `KATANA_IFC_ROAD_FILE` set and the checker after it.
+
 - **Scope and filter as Global Modify's** (the project's rule that every tool
   acts on the selection, a view, layers, the drawing or an area, and on the
   entities that match). EXPORT takes the selection (`SELECTED`) or the whole
@@ -848,10 +855,10 @@ mistake in the writer and the same mistake in the reader cannot agree:
   take `VIEW`, `AREA`, `LAYERS a,b [ONLY]` or `WHERE k=v`, nor does the
   export dialog carry the "Apply to" and "Only those that match" controls.
   When this was written (2026-09-26) the shared scope parser and "Apply to"
-  widget did not exist; both do now (`include/katana/cad/scope_verbs.hpp`,
-  `src/katana_qt/customisation/scope_filter_widget.hpp`), so what remains is
+  widget did not exist; both do now (`rust/crates/katana_cad/src/scope_verbs.rs`,
+  `rust/crates/katana_window/src/customisation/scope_filter_widget.rs`), so what remains is
   the wiring: both front ends read the words with the shared parser, resolve
-  the scope with `cad::matchEntities` and pass the entities as
+  the scope with `katana_cad::global_modify::match_entities` and pass the entities as
   `ExportOptions::entities`, which the writer already takes, and the reply
   says what the scope took. The road model is not an entity and would be
   scoped by its own objects' layers, which no scope reads yet.

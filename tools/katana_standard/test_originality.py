@@ -658,17 +658,18 @@ class CommandLine(unittest.TestCase):
 
 class StandardColours(unittest.TestCase):
     def test_the_table_is_the_one_the_reader_compiles_in(self):
-        """The 27 values against src/katana_entity/colour_names.cpp, read as text; skipped outside a checkout."""
+        """The 27 values against rust/crates/katana_entity/src/colour_names.rs, read as text; skipped outside a
+        checkout. (Until 2026-11-15 it read the C++ table, colour_names.cpp, which held the same 27.)"""
         import re
-        source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "katana_entity",
-                              "colour_names.cpp")
+        source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "rust", "crates",
+                              "katana_entity", "src", "colour_names.rs")
         if not os.path.exists(source):
-            self.skipTest("no colour_names.cpp beside this script's checkout")
+            self.skipTest("no colour_names.rs beside this script's checkout")
         with open(source, encoding="utf-8") as handle:
             text = handle.read()
-        # An entry of the table, however it is laid out: {"dark red", {139, 0, 0, 255}}.
+        # An entry of the table, however rustfmt lays it out: named("dark red", 139, 0, 0).
         number = r"\s*(\d+)\s*"
-        entry = r'\{\s*"([a-z ]+)"\s*,\s*\{' + number + "," + number + "," + number + r",\s*255\s*\}\s*\}"
+        entry = r'\bnamed\(\s*"([a-z ]+)"\s*,' + number + "," + number + "," + number + r",?\s*\)"
         compiled = {m.group(1): "#%02x%02x%02x" % tuple(int(v) for v in m.group(2, 3, 4))
                     for m in re.finditer(entry, text)}
         self.assertEqual(len(compiled), 27)

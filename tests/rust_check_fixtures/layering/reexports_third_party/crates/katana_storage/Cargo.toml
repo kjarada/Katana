@@ -1,0 +1,8 @@
+[package]
+name = "katana_storage"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+katana_core = { path = "../katana_core" }
+rusqlite = "0.37"

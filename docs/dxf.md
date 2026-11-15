@@ -1,6 +1,6 @@
 # DXF - native import and export
 
-`katana_dxf` (`include/katana/dxf/`, `src/katana_dxf/`) reads and writes DXF
+`katana_dxf` (`rust/crates/katana_dxf/src/`) reads and writes DXF
 drawings itself, with no third-party library. Both front ends send every
 `.dxf` to it: File > Import > Import Any File, File > Export > Export Drawing, a path given to
 `katana.exe`, and the `IMPORT` and `EXPORT` verbs of the window's command line
@@ -29,13 +29,13 @@ core < math < geometry < entity < commands
                                      |
                                     dxf        (like archive12d: no GDAL)
                                      |
-                           app (katana_cli), qt (katana)
+                           app (katana_cli), window (katana)
 ```
 
-`dxf` may see core, math, geometry, entity and commands
-(`tools/check_layering.cmake`). It needs no third-party library, so it builds
-with `-DKATANA_BUILD_IO=OFF` and a sanitizer build runs its parser of untrusted
-text. `commands` is there for one thing: `dxf::importCommand`, the import as
+`dxf` may see core, math, geometry, entity and commands (its crate's
+dependencies, `rust/crates/katana_dxf/Cargo.toml`). It needs no third-party
+library, so it builds without GDAL and its parser of untrusted text is plain
+safe Rust. `commands` is there for one thing: `katana_dxf::import_command::import_command`, the import as
 the single undoable step both front ends execute, so they cannot differ about
 it.
 
@@ -43,17 +43,17 @@ The public interface:
 
 | Header | What |
 | --- | --- |
-| `dxf/reader.hpp` | `readDxf(bytes)`, `readDxfFile(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `isDxfPath`. |
-| `dxf/writer.hpp` | `writeDxf(model)`, `writeDxfFile(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layerNameFor`. |
-| `dxf/import_command.hpp` | `importCommand(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
-| `dxf/codes.hpp` | The indexed colours, lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
+| `rust/crates/katana_dxf/src/reader.rs` | `read_dxf(bytes)`, `read_dxf_file(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `is_dxf_path`. |
+| `rust/crates/katana_dxf/src/writer.rs` | `write_dxf(model)`, `write_dxf_file(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layer_name_for`. |
+| `rust/crates/katana_dxf/src/import_command.rs` | `import_command(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
+| `rust/crates/katana_dxf/src/codes.rs` | The indexed colours, lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
 
 ## Reading
 
 Any ASCII DXF from R12 to R2018 (`$ACADVER` AC1009 to AC1032). Group codes are
 read as pairs straight out of the file - a value is a view into it, a number is
-parsed with `std::from_chars` only when an entity needs it - and every entity
-of one import goes into the drawing in one `createEntities` transaction.
+parsed (the shared locale-independent parser) only when an entity needs it - and every entity
+of one import goes into the drawing in one `create_entities` transaction.
 
 | DXF | Becomes |
 | --- | --- |
@@ -76,11 +76,11 @@ What is kept, and how:
 
 - **Arcs inside polylines.** A Katana polyline has no arc segments yet, so a
   bulge is replaced by chords that stand off the true arc by at most
-  `ImportOptions::curveTolerance`, 1 mm by default. The vertices of the file
+  `ImportOptions::curve_tolerance`, 1 mm by default. The vertices of the file
   are kept exactly; only points between them are added. Every arc chorded is
   counted and the import says so ("N polyline arc segments chorded to within
   0.001").
-- **Heights.** Through `entity::setHeights`, the one writer of the
+- **Heights.** Through `katana_entity::entity::set_heights`, the one writer of the
   `elevation` / `elevations` properties the surface builder reads. A 3D
   polyline keeps every vertex's Z, zero included - zero is data there. A 2D
   polyline's elevation, a point's Z, a line's two Z values, a circle's, arc's,
@@ -155,16 +155,16 @@ What is not read, and is said - every kind the file held is in the tally
 
 ### When the file is damaged
 
-`readDxf` fails only when the text is not a DXF at all (no `SECTION`), is a
+`read_dxf` fails only when the text is not a DXF at all (no `SECTION`), is a
 binary DXF, or a group code line is not a number - past that point the pairs
 cannot be told apart, and the error names the line. Everything else is a
 warning, and costs only the entity it is in: a coordinate that is not a
 number, an insert of a block the file does not define, a file that ends
 without `EOF` (what was read is imported, and the truncation said). Every
-entity is checked with `entity::validate` before it is kept. A block that
+entity is checked with `katana_entity::validate` before it is kept. A block that
 inserts itself, nesting deeper than 16 blocks, an array of more than 100 000
 copies and an import of more than 20 million entities are each stopped and
-said. `tests/dxf/test_robustness.cpp` reads 3 000 damaged copies of the two
+said. `rust/crates/katana_dxf/tests/robustness.rs` reads 3 000 damaged copies of the two
 fixtures - bytes changed, lines cut out and repeated, the file cut short - and
 checks that none crashes and that every success holds only valid geometry.
 
@@ -239,11 +239,12 @@ that afternoon.
 
 ### The committed benchmark
 
-`benchmarks/bench_dxf.cpp` (Release) writes and reads a generated survey
+The C++ build's `bench_dxf` benchmark (Release; removed with the C++ tree)
+wrote and read a generated survey
 drawing - half points with heights, a quarter 3D strings of six vertices,
 labels, arcs, circles and lines on twenty layers - through a file, with the
 native module and with GDAL's driver. Run with
-`tools/compare_benchmarks.py --alternate 3 Dxf A=<exe> B=<copy of exe>`: the
+the C++ build's `compare_benchmarks.py --alternate 3 Dxf A=<exe> B=<copy of exe>`: the
 same binary twice, so that the gap between A and B is the noise the ratios
 are read against.
 
@@ -294,8 +295,9 @@ independent DXF library, and GDAL's driver reads all 27 886 of its entities.
   drawing written by hand (the R12 one with CRLF line ends, as that release's
   writers made them). Every value the tests expect of them is worked out in
   the test beside the check.
-- `tests/dxf/test_reader.cpp`, `test_writer.cpp`, `test_codes.cpp`,
-  `test_import_command.cpp`, `test_robustness.cpp`: `katana_dxf_tests`.
+- `rust/crates/katana_dxf/tests/reader.rs`, `writer.rs`, `codes.rs`,
+  `import_command.rs`, `robustness.rs`: `cargo test -p katana_dxf`.
 - `cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer`:
   the command line both ways.
-- `benchmarks/bench_dxf.cpp`: native against GDAL, write and read.
+- the C++ build's `bench_dxf` benchmark measured native against GDAL, write
+  and read; it went with the C++ tree and has no Rust twin yet.

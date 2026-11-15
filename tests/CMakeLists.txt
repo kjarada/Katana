@@ -1,304 +1,28 @@
-# One test executable per module keeps link dependencies honest: the math tests
-# cannot accidentally rely on SQLite, the geometry tests cannot rely on Qt.
+# The process-level tests and the repository's checks (the top CMakeLists.txt says why CMake is
+# a test runner and nothing else). Every test here runs a program cargo built - named
+# ${KATANA_PROGRAM_<name>}, in KATANA_PROGRAMS - or a check that reads the repository and no
+# build: what a test expects is the specification, unchanged from the C++ programs it held.
 #
-#   katana_add_test_suite(<module> LIBS <targets...> SOURCES <files...>)
+#   cli/        the cli.* lines through katana_cli and katana_mcp
+#   this file   the window's headless checks (tools/check_screenshot.cmake and the scripts
+#               beside it), the checks of the program tests themselves, the documents, Katana
+#               Standard and the packaging checks' own fixtures
+#   interop/    the window's ONLINE checks, on a catalogue of local files
+#   update/     the update programs, the pinned keys, the installer script and the release tools
+#
+# The unit tests are cargo's (rust/crates/*/tests), not CTest's. The families the C++ build
+# registered here and this runner does not - the unit suites, and the checks that needed the C++
+# build or read its sources - went with the C++ (the commit that removed it names each family).
 
-function(katana_add_test_suite module)
-    cmake_parse_arguments(ARG "" "" "LIBS;SOURCES" ${ARGN})
-    set(_target katana_${module}_tests)
-    add_executable(${_target} ${ARG_SOURCES})
-    target_link_libraries(${_target} PRIVATE ${ARG_LIBS} GTest::gtest_main)
-    target_include_directories(${_target} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
-    katana_target_defaults(${_target})
-    # Beside the application, not among it: bin/ holds what ships.
-    set_target_properties(${_target} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
-    katana_register_tests(${_target})
-endfunction()
-
-add_test(NAME layering
-    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
-            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
-# The check itself, on a tree that breaks the rule: a check that cannot see a
-# violation passes as quietly as one that finds none. A module name with
-# digits in it (archive12d) was exactly that until the include pattern allowed
-# them.
-add_test(NAME layering_catches_a_cad_file_including_archive12d
-    COMMAND ${CMAKE_COMMAND}
-            -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/cad_includes_archive
-            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
-set_tests_properties(layering_catches_a_cad_file_including_archive12d PROPERTIES
-    PASS_REGULAR_EXPRESSION "reads_an_archive[.]cpp: layer 'cad' must not depend on 'archive12d'")
-# The update layer's rules, each on a fixture that breaks it (the real tree passes
-# `layering` above): the engine sees core and nothing else; the helper program in
-# src/katana_updater is the same layer, so it can reach nothing but that (and a
-# directory the table did not name would itself be a violation); and a public header of
-# the layer names neither OpenSSL, zlib nor libcurl, which stay behind src/. The
-# fixtures are outside src/ and include/, where the real check never looks, and are
-# never compiled.
-add_test(NAME layering_catches_the_update_layer_including_cad
-    COMMAND ${CMAKE_COMMAND}
-            -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/update_includes_cad
-            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
-set_tests_properties(layering_catches_the_update_layer_including_cad PROPERTIES
-    PASS_REGULAR_EXPRESSION "reads_a_document[.]cpp: layer 'update' must not depend on 'cad'")
-add_test(NAME layering_catches_the_updater_program_including_gis
-    COMMAND ${CMAKE_COMMAND}
-            -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/updater_includes_gis
-            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
-set_tests_properties(layering_catches_the_updater_program_including_gis PROPERTIES
-    PASS_REGULAR_EXPRESSION "reads_the_network[.]cpp: layer 'update' must not depend on 'gis'")
-foreach(_library IN ITEMS openssl zlib curl)
-    add_test(NAME layering_catches_an_update_header_exposing_${_library}
-        COMMAND ${CMAKE_COMMAND}
-                -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/update_header_exposes_${_library}
-                -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
-    set_tests_properties(layering_catches_an_update_header_exposing_${_library} PROPERTIES
-        PASS_REGULAR_EXPRESSION "exposes_${_library}[.]hpp: public header exposes a third-party header")
-endforeach()
-
-# What `cmake --install`, the bundle and the package will copy from the
-# sources: every file present, and nothing from the build's third-party inputs
-# (tools/check_install_rules.cmake says why each matters).
-add_test(NAME packaging_installs_only_present_first_party_files
-    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR} -DKATANA_BINARY=${CMAKE_BINARY_DIR}
-            -DKATANA_REQUIRE_CPACK=ON
-            -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
-
-# The Windows installer shows the licence, and the package carries the notices the
-# licence points to (tests/packaging_licence.cmake, tools/check_installer_licence.cmake).
+# The Windows installer shows the licence, and the package carries the notices the licence
+# points to (tests/packaging_licence.cmake, tools/check_installer_licence.cmake): the check on its
+# fixtures.
 include(${CMAKE_CURRENT_LIST_DIR}/packaging_licence.cmake)
 
-if(WIN32 AND NOT MSVC)
-    function(katana_runtime_deployment_test name case)
-        add_test(NAME runtime_deployment_${name}
-            COMMAND ${CMAKE_COMMAND} "-DKATANA_ROOT=${PROJECT_SOURCE_DIR}"
-                "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/windows runtime/${case}"
-                "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DGENERATOR=${CMAKE_GENERATOR}"
-                "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DCASE=${case}"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_runtime_deployment.cmake")
-        set_tests_properties(runtime_deployment_${name} PROPERTIES TIMEOUT 240)
-    endfunction()
-    katana_runtime_deployment_test(individual_targets_deploy_transitive_dlls individual_targets)
-    katana_runtime_deployment_test(missing_dlls_fail_without_a_success_stamp missing_dll)
-    katana_runtime_deployment_test(missing_qt_tools_fail_without_a_success_stamp missing_qt)
-endif()
-
-# The cache entry KATANA_BUILTIN_CUSTOMISATION, which keeps what an earlier
-# configure gave it: a build directory made when NSW was the default would offer
-# Katana Standard nowhere, and the suite would stay green while testing none of
-# it. cmake/KatanaBuiltInDefault.cmake moves that entry once; this proves it, and
-# that a choice made with -D is never moved, on small projects with the real
-# CMake (tools/check_builtin_default.cmake).
-add_test(NAME builtin_default_moves_the_earlier_nsw_default_once_and_keeps_a_choice
-    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
-            -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/builtin_default
-            -P ${PROJECT_SOURCE_DIR}/tools/check_builtin_default.cmake)
-
-# The programs do not hold the older customisation formats. Their readers and
-# writers (src/katana_archive12d/legacy) are the converter's, and the program
-# reads one format, the Katana customisation; a reader that found its way back
-# into katana, katana_cli, katana_mcp or katana_updater would be a second way to load a file
-# that nobody had decided to keep. Two checks, each proved on a fixture below.
-#
-#   the link closure   every library a program links, however far down and
-#                      however it is linked (PUBLIC, PRIVATE, through an
-#                      INTERFACE library), holds no katana_legacy_customisation.
-#                      Walked at configure time, which is when CMake knows it,
-#                      and reported by an echo test as the headless scan is.
-#   the install rules  tools/check_install_rules.cmake: the only programs
-#                      installed are katana, katana_cli, katana_mcp and the
-#                      update helper katana_updater, so the converter is never
-#                      handed on, nor the two update test executables that carry
-#                      a test key.
-#
-# What a target links is its LINK_LIBRARIES (everything it was given, private
-# included) and its INTERFACE_LINK_LIBRARIES (what it hands on, and where a
-# static library's private links appear, as $<LINK_ONLY:...>): both are read for
-# every target, and an entry is searched for names of targets rather than parsed,
-# since a generator expression wraps them. Over-approximate on purpose - a name
-# that is a target is followed, wherever it sits - because the check is only
-# useful if it errs towards finding one.
-function(katana_link_closure target out)
-    set(_todo "${target}")
-    set(_seen "")
-    while(_todo)
-        list(POP_FRONT _todo _current)
-        if(_current IN_LIST _seen)
-            continue()
-        endif()
-        list(APPEND _seen "${_current}")
-        foreach(_property IN ITEMS LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-            get_target_property(_value ${_current} ${_property})
-            if(NOT _value)
-                continue()
-            endif()
-            foreach(_entry IN LISTS _value)
-                string(REGEX MATCHALL "[A-Za-z_][A-Za-z0-9_:.+-]*" _words "${_entry}")
-                foreach(_word IN LISTS _words)
-                    if(TARGET ${_word})
-                        list(APPEND _todo ${_word})
-                    endif()
-                endforeach()
-            endforeach()
-        endforeach()
-    endwhile()
-    set(${out} "${_seen}" PARENT_SCOPE)
-endfunction()
-
-# The programs of `programs` whose closure holds `forbidden`, as
-# "<program> (<library>)" entries, and the ones whose walk did not reach
-# katana_core or that are not targets at all - a walk that found nothing
-# because it saw nothing.
-function(katana_programs_holding programs forbidden holding blind)
-    set(_holding "")
-    set(_blind "")
-    foreach(_program IN LISTS programs)
-        if(NOT TARGET ${_program})
-            # A program that is not there walked nothing, and a check that
-            # walked nothing passes: say so rather than skip it.
-            list(APPEND _blind "${_program} (not a target)")
-            continue()
-        endif()
-        katana_link_closure(${_program} _closure)
-        foreach(_library IN LISTS forbidden)
-            if(_library IN_LIST _closure)
-                list(APPEND _holding "${_program} (${_library})")
-            endif()
-        endforeach()
-        if(NOT "katana_core" IN_LIST _closure)
-            list(APPEND _blind "${_program}")
-        endif()
-    endforeach()
-    set(${holding} "${_holding}" PARENT_SCOPE)
-    set(${blind} "${_blind}" PARENT_SCOPE)
-endfunction()
-
-# Every target below `directory`, however deep.
-function(katana_all_targets directory out)
-    set(_targets "")
-    get_property(_here DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
-    list(APPEND _targets ${_here})
-    get_property(_subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
-    foreach(_subdirectory IN LISTS _subdirectories)
-        katana_all_targets("${_subdirectory}" _below)
-        list(APPEND _targets ${_below})
-    endforeach()
-    set(${out} "${_targets}" PARENT_SCOPE)
-endfunction()
-
-# The targets of `targets`, other than those named in `allowed`, that compile a
-# source file of the older customisation readers (src/katana_archive12d/legacy)
-# directly: the link walk sees a library by its name, so a program that listed
-# the .cpp files among its own sources would bypass it.
-function(katana_targets_compiling_legacy_sources targets allowed out)
-    set(_found "")
-    foreach(_target IN LISTS targets)
-        if(_target IN_LIST allowed)
-            continue()
-        endif()
-        get_target_property(_type ${_target} TYPE)
-        if(_type STREQUAL "INTERFACE_LIBRARY")
-            continue()
-        endif()
-        get_target_property(_sources ${_target} SOURCES)
-        get_target_property(_directory ${_target} SOURCE_DIR)
-        if(NOT _sources)
-            continue()
-        endif()
-        foreach(_source IN LISTS _sources)
-            if(_source MATCHES "^[$]<")
-                continue()
-            endif()
-            cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${_directory}" NORMALIZE OUTPUT_VARIABLE _full)
-            if(_full MATCHES "/src/katana_archive12d/legacy/[^/]*[.]cpp$")
-                list(APPEND _found "${_target}")
-                break()
-            endif()
-        endforeach()
-    endforeach()
-    set(${out} "${_found}" PARENT_SCOPE)
-endfunction()
-
-function(katana_register_link_closure_checks)
-    if(NOT TARGET katana_legacy_customisation)
-        return()
-    endif()
-    set(_forbidden katana_legacy_customisation)
-    katana_programs_holding("katana;katana_cli;katana_mcp;katana_updater" "${_forbidden}" _holding _blind)
-    foreach(_list IN ITEMS _holding _blind)
-        if(${_list})
-            string(JOIN ", " ${_list}_text ${${_list}})
-        else()
-            set(${_list}_text "none")
-        endif()
-    endforeach()
-    katana_all_targets("${PROJECT_SOURCE_DIR}" _all_targets)
-    katana_targets_compiling_legacy_sources("${_all_targets}"
-        "katana_legacy_customisation;katana_customisation_convert" _compiling)
-    if(_compiling)
-        string(JOIN ", " _compiling_text ${_compiling})
-    else()
-        set(_compiling_text "none")
-    endif()
-    add_test(NAME the_programs_link_none_of_the_legacy_customisation_readers
-        COMMAND ${CMAKE_COMMAND} -E echo
-            "Programs whose link closure holds the legacy customisation readers: ${_holding_text}. Programs whose walk did not reach katana_core or are absent: ${_blind_text}. Other targets compiling a legacy source: ${_compiling_text}.")
-    set_tests_properties(the_programs_link_none_of_the_legacy_customisation_readers PROPERTIES
-        PASS_REGULAR_EXPRESSION
-            "readers: none[.] Programs whose walk did not reach katana_core or are absent: none[.] Other targets compiling a legacy source: none[.]")
-
-    # The check on a closure that holds one, and on one that does not. The
-    # library under test is linked two targets down and PRIVATELY, which is
-    # how katana_app links katana_archive12d: an INTERFACE library hands on
-    # what a static library keeps to itself only as $<LINK_ONLY:...>, and a
-    # walk that read INTERFACE_LINK_LIBRARIES of the outer target alone, or
-    # looked for the name only at the first level, would not see it. The
-    # fixtures are never built (EXCLUDE_FROM_ALL).
-    add_library(katana_link_closure_fixture_middle STATIC EXCLUDE_FROM_ALL
-        "${CMAKE_CURRENT_SOURCE_DIR}/link_closure_fixtures/empty.cpp")
-    target_link_libraries(katana_link_closure_fixture_middle PRIVATE katana_legacy_customisation)
-    add_library(katana_link_closure_fixture_outer INTERFACE)
-    target_link_libraries(katana_link_closure_fixture_outer INTERFACE katana_link_closure_fixture_middle)
-    add_library(katana_link_closure_fixture_clean INTERFACE)
-    target_link_libraries(katana_link_closure_fixture_clean INTERFACE katana_archive12d)
-    katana_programs_holding("katana_link_closure_fixture_outer;katana_link_closure_fixture_clean"
-        "${_forbidden}" _fixture_holding _fixture_blind)
-    string(JOIN ", " _fixture_text ${_fixture_holding})
-    # The scan for a legacy source compiled directly, on a target that lists one
-    # (never built) and on one that does not; and the absent program, on a name
-    # that is no target.
-    add_library(katana_link_closure_fixture_direct STATIC EXCLUDE_FROM_ALL
-        "${PROJECT_SOURCE_DIR}/src/katana_archive12d/legacy/map_file.cpp")
-    katana_targets_compiling_legacy_sources(
-        "katana_link_closure_fixture_direct;katana_link_closure_fixture_middle;katana_link_closure_fixture_clean"
-        "" _fixture_direct)
-    string(JOIN ", " _fixture_direct_text ${_fixture_direct})
-    katana_programs_holding("katana_link_closure_fixture_no_such_program" "${_forbidden}"
-        _absent_holding _absent_blind)
-    string(JOIN ", " _absent_text ${_absent_blind})
-    add_test(NAME the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there
-        COMMAND ${CMAKE_COMMAND} -E echo
-            "Fixture programs whose link closure holds the legacy customisation readers: ${_fixture_text}.")
-    set_tests_properties(the_link_closure_check_finds_a_legacy_library_two_targets_down_and_only_there
-        PROPERTIES PASS_REGULAR_EXPRESSION
-            "readers: katana_link_closure_fixture_outer [(]katana_legacy_customisation[)][.]")
-    add_test(NAME the_closure_check_finds_a_legacy_source_compiled_directly_and_only_that
-        COMMAND ${CMAKE_COMMAND} -E echo
-            "Fixture targets compiling a legacy source: ${_fixture_direct_text}.")
-    set_tests_properties(the_closure_check_finds_a_legacy_source_compiled_directly_and_only_that
-        PROPERTIES PASS_REGULAR_EXPRESSION
-            "source: katana_link_closure_fixture_direct[.]")
-    add_test(NAME the_closure_check_refuses_a_program_that_is_not_a_target
-        COMMAND ${CMAKE_COMMAND} -E echo
-            "Fixture programs not walked: ${_absent_text}.")
-    set_tests_properties(the_closure_check_refuses_a_program_that_is_not_a_target
-        PROPERTIES PASS_REGULAR_EXPRESSION
-            "walked: katana_link_closure_fixture_no_such_program [(]not a target[)][.]")
-endfunction()
-cmake_language(DEFER CALL katana_register_link_closure_checks)
-
-# ... and the install rules, on install scripts written here, each as CMake writes one:
+# The install rules check (tools/check_install_rules.cmake), on install scripts written here, each
+# as CMake writes one. It is the check of what a package may carry - the four programs and never a
+# test program that holds a test key - and is proved here on its fixtures alone: this runner
+# installs nothing. The fixtures:
 # a build's programs and nothing else; those and the converter installed from a
 # directory below (the check follows the scripts the top one includes); no program at
 # all, which would make the check pass with nothing to check; and what the update
@@ -521,132 +245,39 @@ if(Python3_Interpreter_FOUND)
     # `katana_standard_pictures_script` is the test of how `katana_standard_current` holds the catalogue's pictures
     # (test_pictures.py), on one-pixel pictures it writes itself in a scratch folder.
     add_test(NAME katana_standard_pictures_script COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_pictures.py")
-endif()
 
-# tests/<name>/ holds the suite of module katana_<name>; it is configured only
-# when that module is.
-file(GLOB _suites LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/*")
-foreach(_suite IN LISTS _suites)
-    get_filename_component(_name "${_suite}" NAME)
-    if(EXISTS "${_suite}/CMakeLists.txt" AND TARGET katana_${_name})
-        add_subdirectory("${_suite}")
-    endif()
-endforeach()
-
-# The saved plan-view paper scales are shared by CLI and MCP sessions.
-if(TARGET katana_app_tests)
-    target_sources(katana_app_tests PRIVATE app/test_view_scale.cpp)
-endif()
-
-# The geoprocessing suite (tests/geo/, docs/geoprocessing.md) belongs to no
-# single module: the bridge, the bindings and the executor are three, so it is
-# configured whenever the session that runs them is, with GDAL.
-if(TARGET katana_app AND TARGET katana_interop)
-    add_subdirectory(geo)
-endif()
-
-# The SIMD kernel guard (cmake/KatanaSimd.cmake, tools/check_simd_kernels.cmake).
-# The sources check reads files, like `layering`; the objects check reads what
-# the compiler produced for each *_avx2.cpp (or, on 64-bit ARM, *_neon.cpp) in
-# THIS build's configuration, which is where the inline-copy hazard would
-# actually show.
-add_test(NAME simd_kernel_sources
-    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
-            -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
-get_property(_simd_object_libraries GLOBAL PROPERTY KATANA_SIMD_OBJECT_LIBRARIES)
-# The target's own nm and objdump, which CMake finds beside the compiler - a
-# cross build's aarch64 ones. Apple's toolchain may have no objdump, so there
-# LLVM's is looked for; it reads Mach-O as the check needs.
-set(_simd_nm "${CMAKE_NM}")
-set(_simd_objdump "${CMAKE_OBJDUMP}")
-if(APPLE AND NOT _simd_objdump)
-    find_program(KATANA_LLVM_OBJDUMP NAMES llvm-objdump DOC "objdump for the SIMD kernel object check")
-    find_program(KATANA_LLVM_NM NAMES llvm-nm DOC "nm for the SIMD kernel object check")
-    if(KATANA_LLVM_OBJDUMP AND KATANA_LLVM_NM)
-        set(_simd_objdump "${KATANA_LLVM_OBJDUMP}")
-        set(_simd_nm "${KATANA_LLVM_NM}")
-    endif()
-endif()
-if(_simd_object_libraries AND NOT MSVC)
-    set(_simd_objects "")
-    foreach(_library IN LISTS _simd_object_libraries)
-        list(APPEND _simd_objects "$<JOIN:$<TARGET_OBJECTS:${_library}>,|>")
+    # `rust_layering`: each crate of rust/crates is a layer's, and depends only on what tools/check_layering.cmake
+    # (the layer table) allows that layer, and re-exports no third-party crate. It is shown, on a fixture that breaks
+    # each rule, to see the breach: a check that cannot see a violation passes as quietly as one that finds none.
+    set(_rust_fixtures "${CMAKE_CURRENT_SOURCE_DIR}/rust_check_fixtures")
+    add_test(NAME rust_layering
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py" "${PROJECT_SOURCE_DIR}")
+    foreach(_case IN ITEMS core_depends_on_math reexports_third_party not_a_layer)
+        add_test(NAME rust_layering_catches_${_case}
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py" --partial
+                    --crates "${_rust_fixtures}/layering/${_case}/crates" "${PROJECT_SOURCE_DIR}")
     endforeach()
-    list(JOIN _simd_objects "|" _simd_objects)
-    add_test(NAME simd_kernel_objects
-        COMMAND ${CMAKE_COMMAND} "-DOBJECTS=${_simd_objects}" "-DNM=${_simd_nm}"
-                "-DOBJDUMP=${_simd_objdump}"
-                -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
-
-    # The same kernels compiled as the linux-sanitize preset compiles them, with
-    # AddressSanitizer, in EVERY build: that preset is not run on the owner's
-    # Windows machine, and without katana_simd_kernel_options keeping ASan's
-    # module constructor out, its simd_kernel_objects failed every time. Only
-    # compiled, never linked, so a toolchain without the ASan runtime (MinGW)
-    # still checks it.
-    get_property(_simd_kernel_sources GLOBAL PROPERTY KATANA_SIMD_KERNEL_SOURCES)
-    add_library(katana_simd_kernels_under_asan OBJECT ${_simd_kernel_sources})
-    katana_target_defaults(katana_simd_kernels_under_asan)
-    target_compile_options(katana_simd_kernels_under_asan PRIVATE -fsanitize=address)
-    katana_simd_kernel_options(katana_simd_kernels_under_asan)
-    add_test(NAME simd_kernel_objects_under_asan
-        COMMAND ${CMAKE_COMMAND}
-                "-DOBJECTS=$<JOIN:$<TARGET_OBJECTS:katana_simd_kernels_under_asan>,|>"
-                "-DNM=${_simd_nm}" "-DOBJDUMP=${_simd_objdump}"
-                -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
-
-    # The check itself, on a kernel of this build's set that fuses a multiply
-    # and an add: a check that cannot see the instruction - an AArch64 FMLA
-    # its pattern does not name, say - passes as quietly as one that finds
-    # none. Compiled with the kernels' own options, never linked.
-    add_library(katana_simd_fused_fixture OBJECT
-        simd_kernel_fixtures/fused_${KATANA_SIMD_KERNEL_SET}.cpp)
-    katana_target_defaults(katana_simd_fused_fixture)
-    katana_simd_kernel_options(katana_simd_fused_fixture)
-    add_test(NAME simd_kernel_objects_catches_a_fused_multiply_add
-        COMMAND ${CMAKE_COMMAND}
-                "-DOBJECTS=$<JOIN:$<TARGET_OBJECTS:katana_simd_fused_fixture>,|>"
-                "-DNM=${_simd_nm}" "-DOBJDUMP=${_simd_objdump}"
-                -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
-    set_tests_properties(simd_kernel_objects_catches_a_fused_multiply_add PROPERTIES
-        PASS_REGULAR_EXPRESSION "fused_${KATANA_SIMD_KERNEL_SET}[.]cpp[.]o[a-z]*: contains [a-z0-9]+ - a fused multiply-add")
-endif()
-
-# The suites with kernels in them, run again with the level forced through the
-# KATANA_SIMD override. `scalar` is what a processor without the kernels runs,
-# proved here on one that has them; `avx2` (x86-64) or `neon` (64-bit ARM) -
-# the set this build compiled, KATANA_SIMD_KERNEL_SET - runs every public
-# caller of a kernel on the kernel path. (Where an x86-64 processor has no
-# AVX2, the avx2 run is refused by the override, says so, and runs scalar.)
-set(_simd_levels scalar ${KATANA_SIMD_KERNEL_SET})
-foreach(_suite core geometry render)
-    if(TARGET katana_${_suite}_tests)
-        foreach(_level IN LISTS _simd_levels)
-            add_test(NAME simd_${_level}.${_suite} COMMAND katana_${_suite}_tests)
-            set_tests_properties(simd_${_level}.${_suite} PROPERTIES
-                ENVIRONMENT_MODIFICATION
-                    "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};KATANA_SIMD=set:${_level}")
-        endforeach()
-    endif()
-endforeach()
-# The cad suite is large and its kernels are the scene build's alone, so only
-# the scene tests are run again at each level.
-if(TARGET katana_cad_tests)
-    foreach(_level IN LISTS _simd_levels)
-        add_test(NAME simd_${_level}.cad
-                 COMMAND katana_cad_tests "--gtest_filter=CadScene*:Scene*")
-        set_tests_properties(simd_${_level}.cad PROPERTIES
-            ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};KATANA_SIMD=set:${_level}")
-    endforeach()
-endif()
-
-# The view widgets on their own, headlessly (tests/qt_widgets/). Not found by
-# the loop above: the suite links the application's objects (katana_qt_ui,
-# src/katana_qt/CMakeLists.txt) rather than a module library, and is
-# configured whenever the application is.
-if(TARGET katana)
-    add_subdirectory(qt_widgets)
+    set_tests_properties(rust_layering_catches_core_depends_on_math PROPERTIES
+        PASS_REGULAR_EXPRESSION "katana_core/Cargo.toml: layer 'core' must not depend on 'math'")
+    set_tests_properties(rust_layering_catches_reexports_third_party PROPERTIES
+        PASS_REGULAR_EXPRESSION "lib[.]rs: re-exports the third-party crate 'rusqlite'")
+    set_tests_properties(rust_layering_catches_not_a_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "katana_plotting: is not a layer of tools/check_layering[.]cmake")
+    add_test(NAME rust_layering_catches_missing_layer
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py"
+                --crates "${_rust_fixtures}/layering/missing_layer/crates" "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(rust_layering_catches_missing_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "layer 'math' has no crate in rust/crates")
+    # Step 3's round-trip gate (rust/crates/katana_app/tests/round_trip.rs) compares the projects
+    # the two programs save through tools/project_dump.py, a dump made with Python's own sqlite3
+    # so that the judge is neither program. `project_dump_self_test` is the dump's own test, on
+    # projects it builds in a scratch folder: two saves of the same content dump the same whatever
+    # their stamps, line ends, backup names and insertion order, and each kind of real difference
+    # is seen.
+    add_test(NAME project_dump_self_test
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/project_dump.py" --self-test)
+    set_tests_properties(project_dump_self_test PROPERTIES
+        PASS_REGULAR_EXPRESSION "project_dump self-test: [0-9]+ checks passed")
 endif()
 
 # Every headless check in this file runs the application offscreen, with the
@@ -685,7 +316,7 @@ function(katana_name_headless_checks_without_their_environment)
     set_tests_properties(qt_every_headless_check_runs_offscreen_with_the_runtime_first_on_its_path
         PROPERTIES PASS_REGULAR_EXPRESSION "or a timeout: none[.]")
 endfunction()
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     cmake_language(DEFER CALL katana_name_headless_checks_without_their_environment)
 endif()
 
@@ -729,7 +360,7 @@ endif()
 # They were one function once, which set the variable on its list of tests and
 # then named those of that same list without it: nothing the scan missed could
 # be named, so the test could not fail - a program test registered under
-# another name, or in a directory configured after this one (benchmarks is),
+# another name, or in a directory configured after this one (one was),
 # ran with whatever its machine had, and the test said "none". And until
 # 2026-10-07 the check asked about the built-in's variable alone: the scan's
 # unsetting of KATANA_CUSTOMISATION could be dropped with nothing failing, and
@@ -749,7 +380,7 @@ endif()
 # is then deferred to the end of THIS directory and gives the variables to
 # the program tests it can reach from here - those of tests/ itself, which are
 # most of the window's checks - and neither check is registered, since each
-# would name the `cli.` tests (src/katana_app) and the window checks of the
+# would name the `cli.` tests (tests/cli) and the window checks of the
 # directories below that do not say for themselves, at every run, for a
 # reason nobody running it can mend.
 # Those tests then start with whatever the build compiled in and the caller's
@@ -825,7 +456,7 @@ else()
 endif()
 
 # The check, once for each variable. The programs are handed over in a file -
-# written when the build system is, so it holds each one's real path - and not
+# written when the build system is, from KATANA_PROGRAMS - and not
 # on the command line, where they would make this test one that names a
 # program. Not registered where the scan could not reach every directory (an
 # older CMake, above).
@@ -837,11 +468,9 @@ endif()
 # the cli tests that write it themselves.
 set(_program_files "")
 foreach(_program katana katana_cli katana_mcp)
-    if(TARGET ${_program})
-        string(APPEND _program_files "$<TARGET_FILE:${_program}>\n")
-    endif()
+    string(APPEND _program_files "${KATANA_PROGRAM_${_program}}\n")
 endforeach()
-if(_program_files AND _katana_scan_reaches_every_directory)
+if(_katana_scan_reaches_every_directory)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/program_files_$<CONFIG>.txt"
         CONTENT "${_program_files}")
     add_test(NAME every_program_test_says_which_built_in_customisation_it_starts_with
@@ -914,7 +543,7 @@ set_tests_properties(the_program_test_check_names_a_test_left_to_the_callers_kep
 # geoprocessing plan (tests/geo/headless/*.cmake), so the lanes add checks
 # without editing this file. Included here, in this directory's scope, so the
 # check above sees their environment.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     file(GLOB _geo_headless_checks CONFIGURE_DEPENDS
          "${CMAKE_CURRENT_SOURCE_DIR}/geo/headless/*.cmake")
     foreach(_geo_headless_check IN LISTS _geo_headless_checks)
@@ -927,7 +556,7 @@ endif()
 # without editing this one. Included here, in this directory's scope, for the same
 # reason as the geoprocessing checks above: the scan that says what every program test
 # starts with must see their environment.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     file(GLOB _update_headless_checks CONFIGURE_DEPENDS
          "${CMAKE_CURRENT_SOURCE_DIR}/update/headless/*.cmake")
     foreach(_update_headless_check IN LISTS _update_headless_checks)
@@ -938,10 +567,10 @@ endif()
 # A plot produced headlessly, so the PDF writing inside the Qt widget is
 # exercised by ctest and not only by hand (PLAN.MD Phase 22). The script
 # copies the sample project first: a test must never touch repository data.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_plot_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_headless.pdf"
             -P "${PROJECT_SOURCE_DIR}/tools/check_plot.cmake")
@@ -954,7 +583,7 @@ if(TARGET katana)
     # sheet verbs and PLOTSHEETS, then --sheets-json and --plot-sheets.
     add_test(NAME qt_sheets_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/sheets_headless.json"
             -P "${PROJECT_SOURCE_DIR}/tools/check_sheets_headless.cmake")
@@ -968,7 +597,7 @@ if(TARGET katana)
     # and PLOTSHEETS to PNGs, then --plot-sheets, in one headless run.
     add_test(NAME qt_sheets_agent_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/sheets_agent.pdf"
             -P "${PROJECT_SOURCE_DIR}/tools/check_sheets_agent_headless.cmake")
@@ -983,7 +612,7 @@ if(TARGET katana)
     # The dialog goes when it closes, so the grab is of the editor's toolbar.
     add_test(NAME qt_generate_sheets_runs_the_line_it_shows_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>ALIGN NEW ROAD 0,0 1000,0|*fileSheets|@sheetGenerate|sheetGenerateLayout=Plan strips along an alignment|sheetGenerateScale=1:500|sheetGenerateFrom=100|sheetGenerateTo=900|sheetGeneratePaper=A1|?sheetGenerateLine|!sheetGenerateOk|%sheetToolBar|>SHEETS|>UNDO|>SHEETS"
             "-DEXPECT=sheetGenerateLine: GENERATE strips paper=A1 landscape frame=on alignment=\"ROAD\" scale=500 overlap=10 keyplan=on from=100 to=900[\r\n].*generated [0-9]+ sheets: 1 to [0-9]+.*sheet 1 id=s1 name=[^\r\n]* paper=A1 orientation=landscape.*[\r\n]0 sheets"
@@ -1001,7 +630,7 @@ if(TARGET katana)
     # its verb; and UNDO takes the page setup back.
     add_test(NAME qt_sheet_set_menu_runs_its_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SHEET NEW PLAN|*fileSheets|*sheetCopySetJson|@sheetPageSetup|plotColourMode=Greyscale|plotDpi=150|pageSetupFilePerSheet=on|?plotPatternPreview|!pageSetupSave|%sheetToolBar|>SHEETS PAGESETUP|*sheetSaveSet|>UNDO|>SHEETS PAGESETUP"
             "-DEXPECT=\"format\":\"katana-sheets\".*plotPatternPreview: First file: 01 PLAN\\.pdf.*pagesetup style=greyscale lineweight=1 dpi=150 pattern=\"[^\"]*\" filepersheet=on.*type SHEETS SAVE \"path\" instead.*pagesetup style=colour lineweight=1 dpi=300 pattern=\"[^\"]*\" filepersheet=off"
@@ -1017,7 +646,7 @@ if(TARGET katana)
     # icon, the viewport with the sample in it. See tools/check_screenshot.cmake.
     add_test(NAME qt_screenshot_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -1036,10 +665,10 @@ endif()
 # (on the interval), the PI at 100 (on it) and the end at 200 (not): nine rows,
 # three of them key; every 150 m is 0 and 150, so the table is the start, the
 # PI - where the northward tangent begins, so azimuth 0 - 150 and the end.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@terrainAlignmentManager|alignmentName=main road|alignmentPoints=0,0 100,0 100,100|!alignmentNew|?alignmentStatus|alignmentInterval=25|?alignmentStationsNote|?alignmentList|>ALIGN PI \"main road\" 200,100|?alignmentList|>UNDO|?alignmentList|>ALIGN STATIONS \"main road\" 150|?commandLog"
             "-DEXPECT=--dialog terrainAlignmentManager opened alignmentManagerDialog \"Alignment Manager\".*alignmentStatus: alignment main road created with 3 PIs.*alignmentStationsNote: 9 stations, 3 of them key stations[.].*alignmentList: main road [|] 3 [|] 0[.]000 [|] 200[.]000 [|] 200[.]000 [|] none.*alignmentList: main road [|] 4 [|] 0[.]000 [|] 300[.]000 [|] 300[.]000 [|] none.*alignmentList: main road [|] 3 [|] 0[.]000 [|] 200[.]000.*station=0[.]000 x=0[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^0-9]+00'00\" radius=straight key=start[\r\n]+station=100[.]000 x=100[.]000 y=0[.]000 direction=90[.]000 azimuth=0[^0-9]+00'00\" radius=straight key=PI[\r\n]+station=150[.]000 x=100[.]000 y=50[.]000 direction=90[.]000 azimuth=0[^0-9]+00'00\" radius=straight[\r\n]+station=200[.]000 x=100[.]000 y=100[.]000 [^\r\n]* key=end.*commandLog: .*> ALIGN NEW \"main road\" 0,0 100,0 100,100 alignment main road created with 3 PIs"
@@ -1053,7 +682,7 @@ if(TARGET katana)
     # Corridors section shows too (docs/road_design.md).
     add_test(NAME qt_terrain_commands_point_to_the_alignment_manager_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=*terrainSectionAlongAlignment|*bimCorridorQuantities|*bimCorridors|*terrainSectionAlongSelection|?terrainMenu"
             "-DEXPECT=Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW.*No alignment has a design profile[.] Define one in Terrain > Alignment Manager [(]Vertical[)].*No alignment has a design profile.*Select exactly one line or polyline to cut along.*terrainMenu: Terrain: Alignment Manager[.][.][.] [[]Define and edit alignments"
@@ -1067,7 +696,7 @@ if(TARGET katana)
     # labels and the area - and a headless Save opens no file dialog.
     add_test(NAME qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>PLINE 0,0 100,0 100,50 0,50 CLOSE|>SELECT ALL|@surveyParcelReport|!useSelection|!compute|?parcelSummary|?parcelCourses|labelHeight=2|!label|?message|parcelName=Lot 7|?parcelLegalText|!parcelCsv|?message|?commandLog"
             "-DEXPECT=--dialog surveyParcelReport opened surveyParcelReportDialog \"Parcel Report\".*parcelSummary: area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m, centroid 50[.]000,25[.]000, drawn counter-clockwise.*parcelCourses: 1 [|] 0[.]000 [|] 0[.]000 [|] N 90[^|]+ E [|] 100[.]000 ; 2 [|] 100[.]000 [|] 0[.]000 [|] N 0[^|]+ E [|] 50[.]000.*message: 5 labels created on layer 0, the current layer.*parcelLegalText: Lot 7: Beginning at E 0[.]000 N 0[.]000; thence N 90[^;]+, 100[.]000 m;.*Containing 5000[.]000 m[^ ]+ [(]0[.]5000 ha[)][.].*message: a headless session opens no file dialog.*commandLog: .*> PARCEL 1 LABEL 2 5 labels created on layer 0"
@@ -1080,7 +709,7 @@ if(TARGET katana)
     # names "none" outright, so even "none" is used by a layer.
     add_test(NAME qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>HATCH NEW brick 45 0.25|>LAYER NEW site|>LAYER HATCH site brick|@formatStyles|managerTabs=Hatch Patterns|hatchPatternTable=brick|?hatchPatternTable|?hatchPatternFamilies|hatchPatternName=brick paving|!hatchPatternNewStyle|?hatchPatternStatus|!hatchPatternDelete|?hatchPatternStatus|hatchPatternName=fill|!hatchPatternNewSolid|!hatchPatternPurge|?hatchPatternStatus|>HATCH SET brick 45 0.5 135 0.5|?hatchPatternTable|?commandLog"
             "-DEXPECT=hatchPatternTable: brick [|] 1 family [|] used by 1 layer[^;]* ; none [|] draws nothing [|] used by 1 layer, e[.]g[.] +layer=0.*hatchPatternFamilies: 45 [|] 0[.]25.*hatchPatternStatus: style brick paving created.*hatchPatternStatus: [^\r\n]*used by 1 layer and 1 style.*hatchPatternStatus: purged 0 styles, 0 linetypes and 1 hatch pattern.*hatchPatternTable: brick [|] 2 families [|] used by 1 layer and 1 style.*commandLog: .*> STYLE NEW \"brick paving\" HATCH brick style brick paving created"
@@ -1097,7 +726,7 @@ if(TARGET katana)
     # 10 courses in all.
     add_test(NAME qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>ALIGN NEW road 0,0 100,0|>ALIGN DESIGN road 0,10 100,10|@bimRoadTemplates|!roadTemplateDefaults|?roadTemplateList|@bimCorridors|corridorName=Main|corridorAlignment=road|corridorTemplate=urban street|!corridorNew|?corridorList|?corridorProblems|>ROADMODEL|?bimMenu|?commandLog"
             "-DEXPECT=--dialog bimRoadTemplates opened roadTemplateManagerDialog \"Road Template Manager\".*roadTemplateList: rural two-lane [|] 4 [|] 4 [|] 10 [|].*urban street.*divided road.*--dialog bimCorridors opened corridorDialog \"Corridors\".*corridorList: Main [|] road [|] urban street.*corridorProblems: no target surface.*object id=corridor/Main/left/kerb/1 kind=kerb.*bimMenu: BIM: Road Template Manager[.][.][.] [[]Road templates.*Corridors[.][.][.] [[]Corridors.*Show Road Model [[].*Corridor Quantities[.][.][.] [[].*commandLog: .*> ROADTEMPLATE DEFAULTS added=3.*> CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\" interval=10 corridor name=Main"
@@ -1115,7 +744,7 @@ if(TARGET katana)
     # prints a station to the millimetre, "50.000".
     add_test(NAME qt_the_road_objects_dialogs_place_list_and_delete_by_scope_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>ALIGN NEW Main 0,0 100,0|>ALIGN DESIGN Main 0,10 100,10|@bimRoadSign|roadObjectStation=50|roadObjectOffset=4|?roadObjectLine|!roadObjectAdd|?roadObjectStatus|@bimRoadBarrier|roadObjectStation=0|roadObjectTo=20|!roadObjectAdd|@bimRoadObjects|?roadObjectCount|?roadObjectTable|roadObjectManagerFilterLayer=road/objects/s*|!roadObjectSelectMatching|?roadObjectManagerStatus|!roadObjectQuantities|?roadObjectInfo|!roadObjectDeleteMatching|?roadObjectCount|?commandLog"
             "-DEXPECT=--dialog bimRoadSign opened roadObjectDialog \"Road Objects\".*roadObjectLine: ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4.*added id=sign-1 kind=sign.*roadObjectStatus: Added - one undo step[.].*--dialog bimRoadBarrier opened roadObjectDialog \"Road Objects\".*added id=barrier-2 kind=barrier.*--dialog bimRoadObjects opened roadObjectManagerDialog \"Road Objects\".*roadObjectCount: 2 road objects, 0 problems.*roadObjectTable: sign-1 [|] Sign [|] [|] Main [|] 50[.]000 [|] [|] 4[.]000 [|] road/objects/sign [|].* ; barrier-2 [|] Safety barrier [|] [|] Main [|] 0[.]000 [|] 20[.]000 [|] 4[.]000 [|] road/objects/barrier.*roadObjectManagerStatus: 1 chosen - scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1.*roadObjectInfo: scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1 quantity object=sign-1.*total kind=sign objects=1 count=1.*roadObjectCount: 1 road objects, 0 problems.*commandLog: .*> ROADOBJECT ADD sign ALIGNMENT Main station=50 offset=4.*> ROADOBJECT ADD barrier ALIGNMENT Main station=0 to=20 offset=4.*> ROADOBJECT LIST DRAWING WHERE LAYER=road/objects/s[*].*> ROADOBJECT QUANTITIES DRAWING WHERE LAYER=road/objects/s[*].*> ROADOBJECT DELETE DRAWING WHERE LAYER=road/objects/s[*] scope=drawing where=\"LAYER=road/objects/s[*]\" matched=1 deleted count=1 ids=sign-1"
@@ -1146,13 +775,13 @@ endif()
 # nothing wherever that folder was absent, and proved only that the switch
 # did no harm. "J" below is the suffix, and the quote a record puts round a
 # path that holds a blank.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     set(_twins "${PROJECT_SOURCE_DIR}/tests/data/customisation")
     set(_J "\\.customisation\\.json\"?")
     set(_nothing_else "colours_added=0 colours_replaced=0 linework=no automation=no")
     add_test(NAME qt_customisation_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_headless.png"
             "-DCUSTOMISE_DIR=${_twins}"
@@ -1168,10 +797,10 @@ endif()
 # crashed the application when the panel was rebuilt inside its own itemChanged
 # signal; the check is in MainWindow::toggleLayerThroughPanel. BUILDING is a
 # layer of the sample with entities on it.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_toggle_layer_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toggle_layer_headless.png"
             "-DTOGGLE_LAYER=BUILDING"
@@ -1188,7 +817,7 @@ if(TARGET katana)
     # which is why the unit tests in test_cad.cpp carry the proof.
     add_test(NAME qt_import_12da_then_toggle_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/all_geometries.12daz"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_toggle_headless.png"
@@ -1201,7 +830,7 @@ if(TARGET katana)
 
     add_test(NAME qt_archive_palette_and_drafting_leaders_are_imported_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${PROJECT_SOURCE_DIR}/tests/archive12d/data"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/drafting_leaders.12da"
@@ -1225,7 +854,7 @@ if(TARGET katana)
     # transaction to pass. Each tin is 9 points and 8 triangles (the file).
     add_test(NAME qt_import_tin_only_archive_adds_its_surfaces_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
             "-DEXPECT=imported file=\"?[^ ]*/multiple_tins[.]12da\"? kind=archive entities=0 alignments=0 surfaces=4 .*surface name=\"TIN SOUTH WEST\" triangles=8 points=9 "
@@ -1237,7 +866,7 @@ if(TARGET katana)
         TIMEOUT 180)
     add_test(NAME qt_import_cloud_only_archive_adds_its_clouds_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/las_point_cloud.12da"
             "-DEXPECT=imported file=\"?[^ ]*/las_point_cloud[.]12da\"? kind=archive entities=0 [^\r\n]*clouds=2 .*reference id=1 kind=pointcloud name=\"SITE SCAN\".*reference id=2 kind=pointcloud name=\"ROAD SCAN\""
@@ -1253,7 +882,7 @@ if(TARGET katana)
     # a headless run is a hang the TIMEOUT below catches.
     add_test(NAME qt_import_symbols_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/symbols.12da"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_symbols_headless.png"
@@ -1270,7 +899,7 @@ if(TARGET katana)
     # person opening the menu.
     add_test(NAME qt_style_manager_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/symbols.12da"
             "-DSTYLE_MANAGER=ON"
@@ -1288,7 +917,7 @@ if(TARGET katana)
     # first entity of the sample, which has no 12d attributes at all.
     add_test(NAME qt_attribute_manager_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/all_geometries.12da"
             "-DATTRIBUTES=1"
@@ -1316,7 +945,7 @@ if(TARGET katana)
     set(_qt_env "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen")
     add_test(NAME qt_surface_from_raster_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${_gis}/terrain.asc"
             "-DDRIVE=@surfaceFromRaster|!surfaceFromRun"
@@ -1330,7 +959,7 @@ if(TARGET katana)
     # (audit QT-10): the input record's points, ground=yes and excluded.
     add_test(NAME qt_surface_from_cloud_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${_gis}/survey_scan.las"
             "-DDRIVE=@surfaceFromPointCloud|!surfaceFromRun"
@@ -1349,7 +978,7 @@ if(TARGET katana)
     # out - and where its camera is.
     add_test(NAME qt_the_3d_views_wheel_keeps_zooming_into_the_ground_under_the_cursor_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\"|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 10|?RenderView2|~RenderView2 160,330 -30|?RenderView2|%View2"
             "-DEXPECT=RenderView2: painted=[1-9][0-9]* target=[^\r\n]* projection=perspective[^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: 10 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* [^\r\n]*[\r\n]+--wheel RenderView2: -30 notches at 160,330[\r\n]+RenderView2: painted=[1-9][0-9]* "
@@ -1363,7 +992,7 @@ if(TARGET katana)
     # surface can be made from.
     add_test(NAME qt_new_drops_reference_data_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DIMPORT=${_gis}/terrain.asc"
             "-DDRIVE=*fileNew|<SURFACE LIST"
@@ -1380,7 +1009,7 @@ if(TARGET katana)
     # LEGEND then lists. The grab is the plan view in bands.
     add_test(NAME qt_a_surface_is_drawn_in_plan_in_its_style_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>ZOOM EXTENTS view=1|?PlanView1|>SURFACE STYLE ground Triangles|?PlanView1|>SURFACE STYLE ground \"Elevation Bands\"|?PlanView1|>SURFACE LEGEND ground|%View1"
             "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=0 labels=0 covered=0 legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=[0-9]+ tinted=[0-9]+ contours=0 labels=0 covered=[0-9]+ legends=0[\r\n]+.*PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=0 contours=[0-9]+ labels=[0-9]+ covered=[1-9][0-9]* legends=1.*kind=bands entries=10"
@@ -1401,7 +1030,7 @@ if(TARGET katana)
     file(MAKE_DIRECTORY "${_fine_out}")
     add_test(NAME qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACESTYLE NEW Fine FROM Contours interval=0.0005|>SURFACE STYLE ground Fine|>PLOT \"${_fine_out}/fine_plot.pdf\" paper=A3"
             "-DEXPECT=Plotted to [^\r\n]*fine_plot\\.pdf[^\r\n]*[\r\n]+warning surface=\"ground\" style=\"Fine\" reason=\"contours: an interval of 0\\.000500 crosses this surface's triangles more than 4000000 times; not drawn - set a larger interval\"[\r\n]+file=\"[^\"]*fine_plot\\.pdf\""
@@ -1419,7 +1048,7 @@ if(TARGET katana)
     # in drawing order. The first was the only one shown.
     add_test(NAME qt_the_3d_view_stacks_a_legend_for_each_styled_surface_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME second|>SURFACESTYLE NEW Few FROM \"Elevation Bands\" bands=4|>SURFACE STYLE ground Few|>SURFACE STYLE second \"Slope Bands\"|?RenderView2"
             "-DEXPECT=RenderView2: painted=[1-9][0-9]* [^\r\n]*projection=perspective legends=2 legend=\"ground - Few\" legend=\"second - Slope Bands\""
@@ -1441,7 +1070,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_surface_edit_project}")
     add_test(NAME cli.surface_project_for_the_window_edit_check_is_made
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
-                $<TARGET_FILE:katana_cli>
+                ${KATANA_PROGRAM_katana_cli}
                 -c "SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground"
                 -c "SAVE \"${_surface_edit_project}\"")
     set_tests_properties(cli.surface_project_for_the_window_edit_check_is_cleared PROPERTIES
@@ -1451,7 +1080,7 @@ if(TARGET katana)
         FIXTURES_SETUP surface_edit_window_project)
     add_test(NAME qt_editing_a_surface_and_undoing_it_open_no_3d_view_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${_surface_edit_project}"
             "-DDRIVE=>VIEWS|>SURFACE EDIT ground RAISE 1|>VIEWS|>UNDO|>VIEWS"
             "-DEXPECT=views=1 linked=0[\r\n]+.*operation=raise.*views=1 linked=0[\r\n]+.*1 undone.*views=1 linked=0"
@@ -1472,7 +1101,7 @@ if(TARGET katana)
     # are the view's, three digits or fewer, not the default frame's four.
     add_test(NAME qt_surface_plan_of_the_view_says_what_the_plan_view_drew_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_surface_view"
             "-DDRIVE=>SURFACE FROM FILE \"${_gis}/terrain.asc\" NAME ground|>SURFACE STYLE ground Triangles|>ZOOM EXTENTS view=1|?PlanView1|>SURFACE PLAN ground VIEW"
             "-DEXPECT=PlanView1: drawn=[0-9]+ ghosts=0 grips=0 surfaces=1 triangles=[1-9][0-9]* edges=0 tinted=[1-9][0-9]* .*plan surface=\"ground\" style=\"Triangles\" visible=yes pixels=[0-9][0-9]?[0-9]?,[0-9][0-9]?[0-9]? unitsPerPixel=[0-9.e-]+ triangles=[1-9][0-9]* inView=[1-9][0-9]* edges=0 tinted=[1-9][0-9]* "
@@ -1488,7 +1117,7 @@ if(TARGET katana)
     # window's executor, and the list then holding the copy.
     add_test(NAME qt_the_surface_style_manager_runs_its_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=@terrainSurfaceStyles|surfaceStyleList=Contours|surfaceStyleInterval=0.5|?surfaceStyleLine|!surfaceStyleApply|?surfaceStyleStatus|surfaceStyleName=Fine Contours|!surfaceStyleCopy|?surfaceStyleList"
             "-DEXPECT=surfaceStyleLine: SURFACESTYLE SET Contours interval=0[.]5.*surfaceStyleList: [^\r\n]*Fine Contours"
@@ -1504,7 +1133,7 @@ if(TARGET katana)
     # the window's one executor, so what they said is in the log.
     add_test(NAME qt_dataset_info_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDATASET_INFO=${_gis}/terrain.asc"
             "-DEXPECT=dataset file=[^ ]*/terrain\\.asc kind=raster driver=AAIGrid "
@@ -1512,7 +1141,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_import_options_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT_OPTIONS=${_gis}/survey_scan.las"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_options_headless.png"
@@ -1522,7 +1151,7 @@ if(TARGET katana)
     # by hand: A and B are kind=lot, C kind=corridor - two of three match.
     add_test(NAME qt_vector_import_dialog_previews_its_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT_OPTIONS=${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson"
             "-DDRIVE=vectorImportWhere=kind = 'lot'|?vectorImportCommand|!vectorImportPreview|?vectorImportMatchCount"
@@ -1534,7 +1163,7 @@ if(TARGET katana)
     # object names, so a headless run could preview but never import.
     add_test(NAME qt_vector_import_dialog_imports_what_its_filter_takes_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT_OPTIONS=${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson"
             "-DDRIVE=vectorImportWhere=kind = 'lot'|!vectorImportRun|>LIST"
@@ -1548,7 +1177,7 @@ if(TARGET katana)
     # given.
     add_test(NAME qt_vector_export_dialog_writes_what_its_filter_takes_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>IMPORT \"${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson\" crs=adopt|>LAYER NEW other|>IMPORT \"${PROJECT_SOURCE_DIR}/tests/geo/data/lots.geojson\" target=other where=\"kind = 'lot'\"|^${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.gpkg|vectorExportFilterLayer=other|vectorExportLayerName=lots_only|?vectorExportCommand|!vectorExportPreview|?vectorExportStatus|!vectorExportRun|?vectorExportStatus|>INFO \"${CMAKE_CURRENT_BINARY_DIR}/vector_export_dialog_headless.gpkg\""
             "-DEXPECT=vectorExportCommand: EXPORT \"[^\"]*vector_export_dialog_headless\\.gpkg\" DRAWING WHERE LAYER=other layername=lots_only.*vectorExportStatus: Preview: 2 entities would be written; nothing was\\..*vectorExportStatus: Wrote 2 features to .*layer name=lots_only features=2 "
@@ -1574,7 +1203,7 @@ if(TARGET katana)
     # layers have colours, linetypes and entities to count.
     add_test(NAME qt_layer_manager_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DLAYER_MANAGER=ON"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/layer_manager_headless.png"
@@ -1595,7 +1224,7 @@ if(TARGET katana)
     # 52.19386', 0.19386 * 60 = 11.63").
     add_test(NAME qt_survey_inverse_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSURVEY_DIALOG=surveyInverse"
             "-DFILL=from=1000,5000|to=1003,5004"
@@ -1615,7 +1244,7 @@ if(TARGET katana)
     # the three control points have no area and are skipped, and said to be.
     add_test(NAME qt_survey_area_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/parcels.geojson"
             "-DSELECT_ALL=ON"
@@ -1628,7 +1257,7 @@ if(TARGET katana)
     # added as a point named P7 on the current layer.
     add_test(NAME qt_survey_forward_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSURVEY_DIALOG=surveyForward"
             "-DFILL=from=1000,5000,20|direction=N 36d52m11.63s E|distance=5|heightDifference=-1|name=P7"
@@ -1639,7 +1268,7 @@ if(TARGET katana)
     # A right angle is 100 gon: 400 gon to the circle, by definition.
     add_test(NAME qt_survey_angle_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSURVEY_DIALOG=surveyAngleCalculator"
             "-DFILL=angle=90|unit=Degrees"
@@ -1656,7 +1285,7 @@ if(TARGET katana)
     # hangs on) and the traverse line - 4 entities.
     add_test(NAME qt_survey_traverse_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSURVEY_DIALOG=surveyTraverse"
             "-DFILL=name=Block|start=1000,5000|startMark=1000,5100|legs=A 270 100\\nB 270 200.1\\nC 270 100\\nD 270 200"
@@ -1671,7 +1300,7 @@ if(TARGET katana)
     # sqrt(0.250 km) = 6 mm, which the 10 mm misclosure exceeds.
     add_test(NAME qt_survey_level_book_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSURVEY_DIALOG=surveyLevelBook"
             "-DFILL=startLevel=100|closingLevel=100|book=BM1 1.500 - -\\nA - 2.000 -\\nCP1 2.250 - 0.500 100\\nB - 1.250 -\\nBM2 - - 3.260 150|adjustment=By distance levelled"
@@ -1684,7 +1313,7 @@ if(TARGET katana)
     # scale on the central meridian 0.9996 - so (0, -3) is E 500 000, N 0.
     add_test(NAME qt_survey_converter_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSURVEY_DIALOG=surveyCoordinateConverter"
             "-DFILL=source=4326|target=32630|points=origin 0 -3"
@@ -1706,7 +1335,7 @@ if(TARGET katana)
     # description holds "cp").
     add_test(NAME qt_survey_import_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|#surveyPointManager|filter=CP"
             "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
@@ -1728,7 +1357,7 @@ if(TARGET katana)
     # between any two words of a phrase.
     add_test(NAME qt_the_import_wizards_options_note_names_the_customise_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|?finishNote"
             "-DEXPECT=finishNote: [^\r\n]*Survey codes: the session has none.*Katana customisation file.*load one in File[ \r\n]+>[ \r\n]+Settings[ \r\n]+>[ \r\n]+Import.*type[ \r\n]+CUSTOMISE[ \r\n]+<file>[ \r\n]+on"
@@ -1741,7 +1370,7 @@ if(TARGET katana)
     # has them.
     add_test(NAME qt_survey_verb_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SURVEY IMPORT \"${_survey_data}/fld/setup.fld\"|>STATUS"
             "-DEXPECT=survey file=setup\\.fld format=opcode-field-file .*imported job=job-1 entities=4 layer=survey/points.*Entities: 4 "
@@ -1751,7 +1380,7 @@ if(TARGET katana)
     # tests/data/field_codes/test_field_codes, named as the built-in of the
     # run through the seam, and the RTK job gnss.fld - the pair
     # cli.survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step
-    # works by hand (src/katana_app/CMakeLists.txt), which is the same import
+    # works by hand (tests/cli/CMakeLists.txt), which is the same import
     # from a line. The customisation is one linestyle and three rules, and
     # says nothing of its switches, so both are on: the Options step shows
     # both boxes ticked. Import draws the 5 points; codes the 4 that carry KB
@@ -1767,7 +1396,7 @@ if(TARGET katana)
         "${PROJECT_SOURCE_DIR}/tests/data/field_codes/test_field_codes.customisation.json")
     add_test(NAME qt_survey_import_codes_and_strings_by_the_built_in_customisation_as_one_undo_step_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/fld/gnss.fld|!next|!next|!next|!next|!next|?applyCodes|?drawLinework|layer=fieldwork|!next|!import|>LIST|>UNDO|>STATUS"
             "-DEXPECT=Customisation: test_field_codes, 1 definition [^\r\n]*and 3 survey code rules, built in\\..*applyCodes: Apply survey codes to the imported points, checked[\r\n]+drawLinework: Draw linework through the imported points, checked[\r\n].*Imported survey job job-1 from gnss\\.fld [^\r\n]*point\\(s\\) on fieldwork[^\r\n]*[\r\n]+Survey codes were applied to the 5 point\\(s\\) drawn: 4 carry a code and 4 of those have a rule; 1 layer\\(s\\) and 1 style\\(s\\) were created\\.[\r\n]+Linework: 1 line\\(s\\) drawn\\.[\r\n].*6 entities[\r\n]+[^\r\n]*Point +layer=fieldwork +at 500000,6200000[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040[\r\n]+[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50[\r\n].*Entities: 0 "
@@ -1783,7 +1412,7 @@ if(TARGET katana)
     # points import.
     add_test(NAME qt_survey_import_uncertain_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless.txt|!next|${_survey_format}|!next|columns=P,N,E,Z|delimiter=whitespace|headerLines=0|!next|confirmOrder=on|!next|unit=metres|!next|!next|!import"
             "-DEXPECT=could not tell the order of the columns.*Imported 3 point\\(s\\) from survey_points_headerless\\.txt"
@@ -1801,7 +1430,7 @@ if(TARGET katana)
     # northings the 6 250 000s.
     add_test(NAME qt_survey_import_role_boxes_swap_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless_penz.txt|!next|${_survey_format}|!next|role2=ignored|role2=easting|role3=northing|confirmOrder=on|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt|columns=P,N,E,Z|delimiter=whitespace|header=off|decimals=3|!export"
             "-DCOMPARE=${_survey_data}/survey_points_headerless.txt|${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt"
@@ -1814,7 +1443,7 @@ if(TARGET katana)
     # fixture again.
     add_test(NAME qt_survey_export_round_trip_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|columns=P,N,E,Z,C,D|decimals=3|!export|@surveyImport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|existing=replace the drawing's point|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv|!export"
             "-DCOMPARE=${_survey_data}/survey_points_pnezd.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv"
@@ -1828,7 +1457,7 @@ if(TARGET katana)
     # else changed - not the eastings, not the heights.
     add_test(NAME qt_survey_import_transform_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|declared=32630|target=32730|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_transform.csv|columns=P,N,E,Z,C,D|decimals=3|!export"
             "-DCOMPARE=${_survey_data}/survey_points_pnezd_utm30s.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_transform.csv"
@@ -1840,7 +1469,7 @@ if(TARGET katana)
     # settings are left as they were found.
     add_test(NAME qt_survey_point_report_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest survey layout|!saveTemplate|template=ctest survey layout|!deleteTemplate|!next|unit=metres|!next|!next|!import|@surveyPointReport"
             "-DEXPECT=Saved the survey layout template \"ctest survey layout\": P,N,E,Z,C,D.delimiter=comma.header=1.quote=double.*Deleted the survey layout template.*Point Report: 12 point\\(s\\)"
@@ -1857,7 +1486,7 @@ if(TARGET katana)
     # only logs that there is none.
     add_test(NAME qt_survey_templates_reach_export_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyExport|@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest shared layout|!deleteTemplate|!saveTemplate|@surveyExport|template=ctest shared layout|@surveyImport|!deleteTemplate|@surveyExport|template=ctest shared layout"
             "-DREFUSED=Saved the survey layout template \"ctest shared layout\".*Deleted the survey layout template \"ctest shared layout\".*--fill: template has no choice 'ctest shared layout'"
@@ -1872,7 +1501,7 @@ if(TARGET katana)
     set(_utility_samples "${PROJECT_SOURCE_DIR}/samples/utilities")
     add_test(NAME qt_utility_dialog_writes_the_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@utilityClearance|utilitySchedule=${_utility_samples}/schedule.csv|utilityDesign=${_utility_samples}/design.csv|utilityWidth=0.375|?utilityCommand|utilityTabs=Verify|?utilityCommand"
             "-DEXPECT=--dialog utilityClearance opened utilityDialog \"Subsurface Utilities \\(AS 5488\\)\".*utilityCommand: UTILITY CLEARANCE [^\r\n]*/samples/utilities/schedule\\.csv\"? \"?[^\r\n]*/samples/utilities/design\\.csv\"? WIDTH 0\\.375[\r\n]+utilityCommand: UTILITY VERIFY [^\r\n]*/samples/utilities/schedule\\.csv\"?[\r\n]"
@@ -1895,7 +1524,7 @@ if(TARGET katana)
     # unknown command, and this test fails there.
     add_test(NAME qt_utility_dialog_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@utilityDraw|utilitySchedule=${_utility_samples}/schedule.csv|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
             "-DEXPECT=--dialog utilityDraw opened utilityDialog.*utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=[0-9]+ bounds=334000(\\.0*)?,6250000(\\.0*)?,334040(\\.0*)?,6250007\\.20*[\r\n].*line id=W1 type=water length=30\\.02[0-9]* ql_a=1\\.42[0-9]* ql_b=16\\.10[0-9]* ql_c=12\\.50[0-9]* ql_d=0(\\.0*)?[\r\n].*utilityStatus: Drawn as one undo step.*utilityOutput: utilities drawn lines=4 vertices=14 segments=10 entities=21 [^\r\n]*line id=G1 type=gas length=40(\\.0*)? ql_a=0(\\.0*)? ql_b=0(\\.0*)? ql_c=0(\\.0*)? ql_d=40(\\.0*)?.*FrameStatsLabel: Plan +21 drawn"
@@ -1911,7 +1540,7 @@ if(TARGET katana)
     # a blank in its name is still one word.
     add_test(NAME qt_utility_draw_typed_frames_the_views_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\" MINCOVER 0.6|?FrameStatsLabel"
             "-DEXPECT=utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200[\r\n]+line id=W1 type=water .*FrameStatsLabel: Plan +21 drawn"
@@ -1924,7 +1553,7 @@ if(TARGET katana)
     # would have made it the text's first line and "Utility pit" its second.
     add_test(NAME qt_utility_line_leaves_a_text_to_the_tool_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>TEXT|>0,0|>|>|@utilityDraw|utilitySchedule=${_utility_samples}/schedule.csv|!utilityRun|?utilityStatus|>Utility pit|>"
             "-DEXPECT=utilityStatus: Drawn as one undo step.*1 line of text"
@@ -1942,7 +1571,7 @@ if(TARGET katana)
     # says which view and where it looked.
     add_test(NAME qt_utility_dialog_reports_what_is_drawn_and_what_the_view_shows_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityReport|!utilitySourceDrawing|?utilityCommand|!utilityRun|?utilityOutput|!utilityScopeView|utilityView=Plan 1 (VIEW 1)|utilityOnScreen=on|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput"
             "-DEXPECT=utilityCommand: UTILITY REPORT DRAWING[\r\n]+.*utilityOutput: scope=drawing matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*utilityCommand: UTILITY REPORT VIEW 1[\r\n]+.*utilityStatus: Done\\. The report is below.*utilityOutput: scope=view view=[0-9]+ area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices"
@@ -1954,7 +1583,7 @@ if(TARGET katana)
     # status - and the views are framed on what was graded, as after a draw.
     add_test(NAME qt_utility_dialog_regrades_what_is_drawn_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityRegrade|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
             "-DEXPECT=utilityCommand: UTILITY REGRADE DRAWING[\r\n]+.*utilityStatus: Nothing needed regrading.*utilityOutput: utilities regraded changed=0 lines=4 vertices=14 segments=10 entities=21 layers=[0-9]+ bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200 scope=drawing matched=21 lines=4 completed=0 ignored=0 line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502.*FrameStatsLabel: Plan +21 drawn"
@@ -1969,27 +1598,25 @@ if(TARGET katana)
     # of what the scope took follows the draw's: the 4 strings and 14 points
     # the import made (cli.utility_draw_takes_the_services_an_import_left_in_the_drawing).
     # The plan view is framed on the 18 imported and the 21 drawn.
-    if(TARGET katana_interop)
-        add_test(NAME qt_utility_dialog_draws_what_an_import_left_headless
-            COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
-                "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-                "-DDRIVE=>IMPORT \"${_utility_samples}/located_services.geojson\"|@utilityDraw|!utilitySourceDrawing|utilityFields=line=ASSET_ID,point=PT_ID,type=ASSET_TYPE,owner=OWNER,material=MATERIAL,diameter_mm=DIA_MM,status=STATUS,config=CONFIG,description=DESC,method=METHOD,h_unc=H_UNC,v_unc=V_UNC,ql=QL,level=LEVEL,level_ref=LEVEL_REF,path=PATH,verifies=VERIFIES|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
-                "-DEXPECT=utilityCommand: UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID,[^\r\n]*verifies=VERIFIES[\r\n]+.*utilityStatus: Drawn as one undo step.*utilityOutput: utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200 scope=drawing matched=18 lines=4 points=14 loose=0 drawn=0 ignored=0 line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*FrameStatsLabel: Plan +39 drawn"
-                "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_import_headless.png"
-                -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-        set_tests_properties(qt_utility_dialog_draws_what_an_import_left_headless
-            PROPERTIES ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
-            TIMEOUT 180)
-    endif()
+    add_test(NAME qt_utility_dialog_draws_what_an_import_left_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>IMPORT \"${_utility_samples}/located_services.geojson\"|@utilityDraw|!utilitySourceDrawing|utilityFields=line=ASSET_ID,point=PT_ID,type=ASSET_TYPE,owner=OWNER,material=MATERIAL,diameter_mm=DIA_MM,status=STATUS,config=CONFIG,description=DESC,method=METHOD,h_unc=H_UNC,v_unc=V_UNC,ql=QL,level=LEVEL,level_ref=LEVEL_REF,path=PATH,verifies=VERIFIES|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
+            "-DEXPECT=utilityCommand: UTILITY DRAW DRAWING FIELDS line=ASSET_ID,point=PT_ID,[^\r\n]*verifies=VERIFIES[\r\n]+.*utilityStatus: Drawn as one undo step.*utilityOutput: utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200 scope=drawing matched=18 lines=4 points=14 loose=0 drawn=0 ignored=0 line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*FrameStatsLabel: Plan +39 drawn"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_import_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_utility_dialog_draws_what_an_import_left_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # The drawing written back as a schedule from the Schedule tab, and that
     # schedule read by a typed REPORT as the sample is: 4 lines, 14 vertices,
     # and the over-claim the sample carries.
     set(_dialog_scheduled "${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_scheduled.csv")
     add_test(NAME qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityWriteSchedule|utilityScheduleOut=${_dialog_scheduled}|!utilityRun|?utilityStatus|?utilityOutput|>UTILITY REPORT \"${_dialog_scheduled}\" MINCOVER 0.6"
             "-DEXPECT=utilityStatus: Written\\..*utilityOutput: utilities scheduled path=[^ ]*utility_dialog_scheduled\\.csv\"? lines=4 vertices=14 scope=drawing matched=21 lines=4 completed=0 ignored=0.*AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C"
@@ -2002,7 +1629,7 @@ if(TARGET katana)
     # area and takes the same 14, the view hiding no layer of its own.
     add_test(NAME qt_modify_view_takes_what_the_plan_view_shows_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|>MODIFY VIEW WHERE TYPE=point SET COLOUR=#FF0000|>MODIFY VIEW EXTENTS WHERE TYPE=point SET COLOUR=#00FF00 PREVIEW"
             "-DEXPECT=scope=view view=1 area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ where=.TYPE=point. matched=14[\r\n]+14 entities matched; changing 14 entities\\. One UNDO restores it\\..*scope=view view=1 extents=yes where=.TYPE=point. matched=14[\r\n]+preview: 14 entities matched; changing 14 entities\\."
@@ -2035,7 +1662,7 @@ if(TARGET katana)
     # TEST Missing Symbol, which no file defines.
     add_test(NAME qt_customisation_merges_and_keeps_the_map_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE REPLACE \"${_twins}/test_survey.customisation.json\"|>CUSTOMISE \"${_twins}/test_symbols.customisation.json\""
             "-DEXPECT=loaded file=[^\r\n]*test_symbols${_J} name=test_symbols definitions_added=4 definitions_replaced=0 codes_added=0 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=3[\r\n]+undefined name=\"TEST Dashed Kerb\"[\r\n]+undefined name=\"TEST Missing Symbol\"[\r\n]+undefined name=\"TEST Water Main\"[\r\n]+customisation name=test_survey origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0"
@@ -2050,7 +1677,7 @@ if(TARGET katana)
     # that defines any of the five names its rules ask for.
     add_test(NAME qt_a_file_named_twice_in_one_load_is_read_once_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE REPLACE \"${_twins}/test_survey.customisation.json\" \"${_twins}/../customisation/test_survey.customisation.json\""
             "-DEXPECT=repeated file=[^\r\n]*test_survey${_J}[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=5[\r\n]+.*customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0"
@@ -2071,7 +1698,7 @@ if(TARGET katana)
     # refused, naming the variable.
     add_test(NAME qt_the_window_starts_with_its_built_in_customisation_and_reset_returns_to_it_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE|>CUSTOMISE REPLACE \"${_twins}/test_linestyles.customisation.json\"|>CUSTOMISE RESET|>CUSTOMISE KEEP"
             "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*customisation name=test_symbols origin=builtIn kept=yes definitions=4 codes=0 rules=0 colours=0[\r\n]+source name=test_symbols definitions=yes rules=no[\r\n].*loaded file=[^\r\n]*test_linestyles${_J} name=test_linestyles definitions_added=3 definitions_replaced=0 codes_added=0 codes_replaced=0 ${_nothing_else}[\r\n]+removed definitions=4 codes=0[\r\n].*customisation name=test_symbols origin=loaded kept=no definitions=3 codes=0 rules=0 colours=0[\r\n]+reset name=test_symbols definitions=4 codes=0 rules=0 kept=yes[\r\n]+! InvalidState: CUSTOMISE KEEP needs a kept customisation file, and this session has none; the environment variable KATANA_CUSTOMISATION names one"
@@ -2092,7 +1719,7 @@ if(TARGET katana)
     add_test(NAME qt_kept_customisation_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_kept}")
     add_test(NAME qt_a_customisation_is_kept_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE \"${_twins}/test_survey.customisation.json\"|>CUSTOMISE KEEP"
             "-DEXPECT=kept file=[^\r\n]*qt_kept_customisation/customisation\\.json\"? written=yes name=test_survey definitions=0 codes=8 rules=11 backup=none"
@@ -2100,7 +1727,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_a_kept_customisation_is_what_the_next_window_starts_with_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE"
             "-DEXPECT=Customisation: test_survey, 0 definitions \\(0 symbols\\) and 11 survey code rules, kept\\..*11 survey code rules over 8 distinct codes[\r\n]+customisation name=test_survey origin=kept kept=yes definitions=0 codes=8 rules=11 colours=0[\r\n]+source name=test_survey definitions=no rules=yes"
@@ -2127,7 +1754,7 @@ if(TARGET katana)
     file(WRITE "${_not_one}" "{\"format\": \"another-format\", \"version\": 1, \"name\": \"x\"}\n")
     add_test(NAME qt_a_kept_customisation_that_does_not_read_is_said_and_the_built_in_stands_in_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE"
             "-DEXPECT=! Customisation: the kept customisation is not read, so the built-in customisation is used: [^\r\n]*not a Katana customisation file[^\r\n]*[\r\n]+Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*customisation name=test_symbols origin=builtIn "
@@ -2147,7 +1774,7 @@ if(TARGET katana)
     # line) shows each line echoed and answered where it ran.
     add_test(NAME qt_apply_survey_codes_runs_the_code_line_on_the_selection_or_the_drawing_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE \"${_twins}/test_survey.customisation.json\"|>POINT 1,1|>POINT 2,2|>SELECT ALL|>PROP SET code WM01|>SELECT 1|*applySurveyCodes|>SELECT NONE|*applySurveyCodes|?commandLog"
             "-DEXPECT=scope=selection matched=1[\r\n]+1 entity carries a code in \"code\": 1 matched, 0 fallback-only[^\r\n]*[\r\n].*scope=drawing matched=2[\r\n]+2 entities carry a code in \"code\": 2 matched, 0 fallback-only.*commandLog: [^\r\n]*> CODE SELECTION scope=selection matched=1 [^\r\n]*> CODE DRAWING scope=drawing matched=2 "
@@ -2163,7 +1790,7 @@ if(TARGET katana)
     # box could have shown whatever the window did.)
     add_test(NAME qt_apply_survey_codes_with_no_codes_loaded_is_refused_in_the_verbs_words_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>POINT 1,1|*applySurveyCodes|?commandLog"
             "-DEXPECT=! InvalidState: no survey codes are loaded; CUSTOMISE <file> loads a Katana customisation file[\r\n]+commandLog: [^\r\n]*> CODE DRAWING "
@@ -2191,7 +1818,7 @@ if(TARGET katana)
     # to no such line, the tab reading the Document itself now.)
     add_test(NAME qt_the_linework_tab_strings_with_the_customisations_control_codes_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=>POINT 0,0|>POINT 10,0|>POINT 20,0|>POINT 30,0|>SELECT ALL|>PROP SET code WM1|>SELECT 3|>PROP SET code \"WM1 GO\"|>SELECT NONE|@formatSurveyCodes|lineworkOrder=In the order observed|?lineworkStart|?lineworkCommand|!lineworkPreview|?lineworkSummary|>CUSTOMISE SET linework.start=GO|?lineworkStart|!lineworkPreview|?lineworkSummary|!lineworkExecute|?lineworkSummary|?commandLog"
@@ -2217,7 +1844,7 @@ if(TARGET katana)
 ")
     add_test(NAME qt_a_kept_customisation_made_from_another_built_in_is_installed_and_said_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE"
             "-DEXPECT=Customisation: mine, 1 definition \\(1 symbol\\) and 1 survey code rule, kept\\.[\r\n]+The kept customisation was made from another built-in customisation than this program has; CUSTOMISE RESET gives this program's and CUSTOMISE BUILTIN lists the built-in customisations it has\\.[\r\n].*customisation name=mine origin=kept kept=yes definitions=1 codes=1 rules=1 colours=0"
@@ -2252,7 +1879,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E rm -f "${_settings_out}")
     add_test(NAME qt_settings_imports_sets_and_exports_by_the_customise_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileSettings|settingsImportPath=${_twins}/test_survey.customisation.json|!settingsImport|?settingsActiveName|?settingsActiveRules|settingsAutoCodes=off|>CUSTOMISE JSON|settingsExportPath=${_settings_out}|!settingsExport|?settingsStatus"
             "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=5[\r\n].*customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0[\r\n]+settingsActiveName: test_survey[\r\n]+settingsActiveRules: 11 over 8 codes[\r\n]+set auto\\.codes=off[\r\n].*\"automation\": {[\r\n]+ +\"codesOnSurveyImport\": false,[\r\n]+ +\"lineworkOnSurveyImport\": true[\r\n].*exported file=[^\r\n]*qt_settings_exported${_J} name=test_survey definitions=0 codes=8 rules=11 replaced=no[\r\n]+settingsStatus: > CUSTOMISE EXPORT \"[^\"]*qt_settings_exported\\.customisation\\.json\" exported file="
@@ -2260,7 +1887,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_what_settings_exported_loads_again_with_the_same_counts_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE REPLACE \"${_settings_out}\"|>CUSTOMISE"
             "-DEXPECT=loaded file=[^\r\n]*qt_settings_exported${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 colours_added=0 colours_replaced=0 linework=yes automation=yes[\r\n]+undefined names=5[\r\n].*customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0[\r\n].*automation auto\\.codes=off auto\\.linework=on"
@@ -2306,7 +1933,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_settings_kept}")
     add_test(NAME qt_an_import_made_in_settings_is_kept_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileSettings|?settingsActiveKept|settingsImportPath=${_twins}/test_survey.customisation.json|!settingsImport|?settingsStatus|?settingsActiveKept"
             "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*settingsActiveKept: Kept: the next start gives this customisation\\. Kept file: [^\r\n]*qt_settings_kept/customisation\\.json[\r\n]+loaded file=[^\r\n]*test_survey${_J} name=test_survey definitions_added=0 definitions_replaced=0 codes_added=11 codes_replaced=0 ${_nothing_else}[\r\n]+undefined names=3[\r\n].*customisation name=test_symbols origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0[\r\n]+kept file=[^\r\n]*qt_settings_kept/customisation\\.json\"? written=yes name=test_symbols definitions=4 codes=8 rules=11 backup=none[\r\n]+settingsStatus: > CUSTOMISE \"[^\"]*test_survey\\.customisation\\.json\" loaded file=[^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
@@ -2314,7 +1941,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_what_settings_kept_is_what_the_next_window_starts_with_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileSettings|?settingsActiveOrigin|?settingsActiveRules|?settingsActiveKept"
             "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 11 survey code rules, kept\\..*settingsActiveOrigin: Kept by you[\r\n]+settingsActiveRules: 11 over 8 codes[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
@@ -2323,7 +1950,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_a_reset_made_in_settings_retires_the_kept_file_and_revert_has_none_to_read_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileSettings|!settingsReset|?settingsStatus|?settingsActiveOrigin|!settingsRevert|?settingsStatus"
             "-DEXPECT=and 11 survey code rules, kept\\..*reset name=test_symbols definitions=4 codes=0 rules=0 kept=no[\r\n]+kept file=[^\r\n]*qt_settings_kept/customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*qt_settings_kept/customisation\\.json\\.bak\"?[\r\n]+settingsStatus: > CUSTOMISE RESET reset name=test_symbols [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=no reason=the-session-is-the-built-in [^\r\n]*[\r\n]+settingsActiveOrigin: Built in[\r\n]+! NotFound: CUSTOMISE REVERT: no customisation is kept[^\r\n]*[\r\n]+settingsStatus: > CUSTOMISE REVERT Refused: NotFound: CUSTOMISE REVERT: no customisation is kept"
@@ -2331,7 +1958,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_after_a_reset_made_in_settings_the_next_window_starts_with_the_built_in_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE REPLACE \"${_settings_kept}/customisation.json.bak\""
             "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*loaded file=[^\r\n]*qt_settings_kept/customisation\\.json\\.bak\"? name=test_symbols [^\r\n]*[\r\n].*customisation name=test_symbols origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0"
@@ -2396,7 +2023,7 @@ if(TARGET katana)
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_kept}")
         add_test(NAME qt_an_alternate_built_in_chosen_in_settings_is_kept_headless
             COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
+                "-DAPP=${KATANA_PROGRAM_katana}"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|settingsBuiltIn=NSW|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveName|?settingsActiveKept"
                 "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1${_group}103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=yes name=NSW definitions=792 codes=632 rules=1624 backup=none[\r\n]+settingsStatus: > CUSTOMISE BUILTIN NSW used name=NSW [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=yes [^\r\n]*[\r\n]+settingsActiveBuiltIn: NSW[\r\n]+settingsActiveName: NSW[\r\n]+settingsActiveKept: Kept: the next start gives this customisation\\."
@@ -2404,7 +2031,7 @@ if(TARGET katana)
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_the_window_after_a_kept_alternate_starts_with_it_headless
             COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
+                "-DAPP=${KATANA_PROGRAM_katana}"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveOrigin|?settingsActiveBuiltIn|?settingsActiveName"
                 "-DEXPECT=Customisation: NSW, 792 definitions \\([0-9,]+ symbols\\) and 1${_group}624 survey code rules, kept\\..*settingsActiveOrigin: Kept by you[\r\n]+settingsActiveBuiltIn: Based on NSW[\r\n]+settingsActiveName: NSW"
@@ -2413,7 +2040,7 @@ if(TARGET katana)
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_choosing_the_default_in_settings_sets_the_kept_alternate_aside_headless
             COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
+                "-DAPP=${KATANA_PROGRAM_katana}"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|settingsBuiltIn=Katana Standard (default)|!settingsBuiltInUse|?settingsStatus|?settingsActiveBuiltIn|?settingsActiveOrigin"
                 "-DEXPECT=used name=\"Katana Standard\" default=yes definitions=221 codes=632 rules=1103 kept=no[\r\n]+kept file=[^\r\n]*qt_built_in_kept/customisation\\.json\"? written=no reason=the-session-is-the-built-in backup=[^\r\n]*qt_built_in_kept/customisation\\.json\\.bak\"?[\r\n]+settingsStatus: > CUSTOMISE BUILTIN \"Katana Standard\" used name=\"Katana Standard\" [^\r\n]* > CUSTOMISE KEEP kept file=[^\r\n]* written=no reason=the-session-is-the-built-in [^\r\n]*[\r\n]+settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
@@ -2421,7 +2048,7 @@ if(TARGET katana)
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_after_the_default_is_chosen_in_settings_the_next_window_starts_with_it_headless
             COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
+                "-DAPP=${KATANA_PROGRAM_katana}"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=@fileSettings|?settingsActiveBuiltIn|?settingsActiveOrigin"
                 "-DEXPECT=Customisation: Katana Standard, 221 definitions \\([0-9,]+ symbols\\) and 1${_group}103 survey code rules, built in\\..*settingsActiveBuiltIn: Katana Standard \\(default\\)[\r\n]+settingsActiveOrigin: Built in"
@@ -2456,7 +2083,7 @@ if(TARGET katana)
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${_built_in_project}")
         add_test(NAME qt_a_project_saved_with_an_alternate_built_in_records_its_name_headless
             COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
+                "-DAPP=${KATANA_PROGRAM_katana}"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=>CUSTOMISE BUILTIN NSW|>LINE 0,0 10,0|>SAVE ${_built_in_project}"
                 "-DEXPECT=used name=NSW .*saved to "
@@ -2464,7 +2091,7 @@ if(TARGET katana)
                 -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
         add_test(NAME qt_opening_it_under_the_default_names_the_built_in_and_the_verb_headless
             COMMAND ${CMAKE_COMMAND}
-                "-DAPP=$<TARGET_FILE:katana>"
+                "-DAPP=${KATANA_PROGRAM_katana}"
                 "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
                 "-DDRIVE=>OPEN ${_built_in_project}"
                 "-DEXPECT=opened .*Warning: this project was drawn with customisations that are not loaded: \"NSW\"\\. CUSTOMISE <file> loads a Katana customisation file\\. CUSTOMISE BUILTIN NSW makes the built-in \"NSW\" the session\\."
@@ -2488,7 +2115,7 @@ if(TARGET katana)
     # there is one, else on the drawing, the scope word written so that the
     # echoed line says which. The data and every number are those worked by
     # hand for cli.linework_strings_points_by_their_control_codes_as_one_undo_step
-    # (src/katana_app/CMakeLists.txt): no survey codes; points 1 and 2, ten
+    # (tests/cli/CMakeLists.txt): no survey codes; points 1 and 2, ten
     # metres apart, coded "KB ST" and "KB END". With both selected the line
     # is LINEWORK SELECTION: 2 taken, both points, one line of two - entity
     # 3 - noted as unstyled. With nothing selected it is LINEWORK DRAWING
@@ -2497,7 +2124,7 @@ if(TARGET katana)
     # line) shows each line echoed and answered where it ran.
     add_test(NAME qt_process_linework_runs_the_linework_line_on_the_selection_or_the_drawing_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>POINT 0,0|>POINT 10,0|>SELECT 1|>PROP SET code \"KB ST\" text|>PROP SET point 1 text|>SELECT 2|>PROP SET code \"KB END\" text|>PROP SET point 2 text|>SELECT ALL|*surveyLinework|>SELECT NONE|*surveyLinework|?commandLog"
             "-DEXPECT=linework scope=selection matched=2 considered=2 lines=1 unplaced=0 notes=1[\r\n]+string name=KB key=\"\" number=\"\" points=2 vertices=2 closed=no layer=0 entity=3[\r\n].*linework scope=drawing matched=3 considered=2 lines=0 unplaced=0 notes=1[\r\n]+left_out=2 reason=already-drawn lines=1[\r\n].*commandLog: [^\r\n]*> LINEWORK SELECTION linework scope=selection matched=2 [^\r\n]*> LINEWORK DRAWING linework scope=drawing matched=3 "
@@ -2519,7 +2146,7 @@ if(TARGET katana)
     # customisation comes first: it is loaded before anything is opened.
     add_test(NAME qt_a_customisation_folder_and_an_import_file_are_both_taken_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
@@ -2539,7 +2166,7 @@ if(TARGET katana)
         "{\"format\": \"another-format\", \"version\": 1, \"name\": \"x\"}\n")
     add_test(NAME qt_a_refused_customise_switch_leaves_a_screenshot_run_going_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_refused_folder}"
             "-DDRIVE=>LIST"
@@ -2561,7 +2188,7 @@ if(TARGET katana)
     # marked it modified.
     add_test(NAME qt_a_save_that_cannot_go_ahead_leaves_the_drawing_unmodified_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SAVE|>NEW"
             "-DEXPECT=the drawing has not been saved to a project yet.*new drawing"
@@ -2572,7 +2199,7 @@ if(TARGET katana)
     # counts the one line - rather than waiting on a box no one can see.
     add_test(NAME qt_a_headless_new_after_an_edit_is_refused_rather_than_asked_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LINE 0,0 10,0|>NEW|>LIST"
             "-DEXPECT=Unsaved Changes: the drawing has unsaved changes.*1 entities"
@@ -2591,7 +2218,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}" "${_resaved}")
     add_test(NAME qt_a_project_records_its_customisation_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE \"${_twins}/test_symbols.customisation.json\"|>LINE 0,0 10,0|>SAVE ${_recorded}"
             "-DEXPECT=saved to "
@@ -2599,7 +2226,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_opening_names_the_customisation_not_loaded_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>OPEN ${_recorded}"
             "-DEXPECT=opened .*Warning: this project was drawn with customisations that are not loaded: \"test_symbols\"\\. CUSTOMISE <file> loads a Katana customisation file\\."
@@ -2613,7 +2240,7 @@ if(TARGET katana)
     # cannot pass for it.
     add_test(NAME qt_saving_where_a_file_is_missing_keeps_it_recorded_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>OPEN ${_recorded}|>SAVE ${_resaved}|>NEW|>OPEN ${_resaved}"
             "-DEXPECT=not loaded: \"test_symbols\"\\..*saved to .*new drawing.*opened .*not loaded: \"test_symbols\"\\."
@@ -2635,7 +2262,7 @@ if(TARGET katana)
     # takes it back to 1, and REDO to 3 again.
     add_test(NAME qt_current_style_and_the_style_row_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>STYLE NEW Kerb|%PropertiesToolBar|CurrentStyleCombo=Kerb|>LINE 0,9 10,9|>STYLE USAGE Kerb|CurrentStyleCombo=ByLayer|>LINE 0,0 10,0|>LINE 0,5 10,5|>SELECT ALL|%PropertiesDock|PropertyStyle=Kerb|!PropertyStyleApply|>STYLE USAGE Kerb|>UNDO|>STYLE USAGE Kerb|>REDO|>STYLE USAGE Kerb"
             "-DEXPECT=New work is drawn in Kerb.*style Kerb: used by 1 entity, e.g. id=1.*New work is drawn in ByLayer.*Style Kerb given to 2 entities.*style Kerb: used by 3 entities.*style Kerb: used by 1 entity.*style Kerb: used by 3 entities"
@@ -2668,7 +2295,7 @@ if(TARGET katana)
     # Styles: two styles made on the command line, so the table lists them.
     add_test(NAME qt_format_menu_opens_the_style_manager_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=>STYLE NEW Kerb|>STYLE NEW Water|@formatStyles|?styleTable"
@@ -2685,7 +2312,7 @@ if(TARGET katana)
     # read from.
     add_test(NAME qt_the_style_manager_lists_a_library_group_s_linestyles_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatStyles|managerTabs=Linetypes|linetypeGroup=Test/Lines|linetypeTable=TEST Dashed Kerb|?linetypeTable|?libraryDetails"
@@ -2700,7 +2327,7 @@ if(TARGET katana)
     # the five come together.
     add_test(NAME qt_format_menu_opens_the_symbol_library_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatSymbols|filterText=TEST|?symbolGrid"
@@ -2724,7 +2351,7 @@ if(TARGET katana)
     # the flag lost.
     add_test(NAME qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|?definitionHeading|%symbolLibraryDialog|symbolGrid=TEST Post|?detailName|?detailSource|?detailContent"
             "-DEXPECT=Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n]+definitionHeading: Symbol \"TEST Post\"[\r\n]+detailName: TEST Post[\r\n]+detailSource: Made in this session[\r\n]+detailContent: 2 strokes, 0 texts, 0 pen changes"
@@ -2739,7 +2366,7 @@ if(TARGET katana)
     # press was accepted, and ran the FORCE line.
     add_test(NAME qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|!definitionDeleteAnyway"
             "-DREFUSED=Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n]+.*--press: definitionEditorDialog's button definitionDeleteAnyway is disabled"
@@ -2768,7 +2395,7 @@ if(TARGET katana)
     # The refusal's ";" is passed over with [^\r\n]*: nothing else is.
     add_test(NAME qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatSymbols|symbolGrid=TEST Survey Mark|!symbolEdit|%definitionEditorDialog|!definitionDelete|?definitionIssues|!definitionDeleteAnyway|?definitionHeading|?definitionIssues"
@@ -2815,7 +2442,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_editor_kept}")
     add_test(NAME qt_a_save_in_the_definition_editor_keeps_a_kept_session_in_its_kept_file_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|>CUSTOMISE"
             "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*kept file=[^\r\n]*qt_editor_kept_customisation/customisation\\.json\"? written=yes name=test_symbols definitions=5 codes=0 rules=0 backup=none[\r\n].*Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n].*customisation name=test_symbols origin=edited kept=yes definitions=5 codes=0 rules=0 colours=0"
@@ -2823,7 +2450,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_a_save_in_the_definition_editor_runs_no_keep_where_the_window_has_no_kept_file_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatSymbols|!symbolNew|%definitionEditorDialog|definitionName=TEST Post|definitionStrokes=[\"move\", 0, 0],\\n[\"draw\", 0, 2]|!definitionSave|>CUSTOMISE"
             "-DEXPECT=Customisation: test_symbols, 4 definitions \\(4 symbols\\) and 0 survey code rules, built in\\..*Symbol \"TEST Post\" added to the library: 2 strokes, 0 texts\\.[\r\n].*customisation name=test_symbols origin=edited kept=no definitions=5 codes=0 rules=0 colours=0"
@@ -2852,7 +2479,7 @@ if(TARGET katana)
     # words a rule is shown by" in docs/customisation.md, not from a run.
     add_test(NAME qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@formatSurveyCodes|testCode=WM01|?explainHeading|?explainFields"
@@ -2869,7 +2496,7 @@ if(TARGET katana)
     # widget tests walk the managers' own texts (qt_widgets.GeneralTexts.*).
     add_test(NAME qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=?formatMenu|@formatStyles|@formatSymbols|@formatSurveyCodes"
@@ -2883,7 +2510,7 @@ if(TARGET katana)
     # work might be: the log prints that path (EXPECT), and the check passes.
     add_test(NAME qt_a_forbidden_word_in_the_run_s_own_paths_is_not_held_against_it_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%CommandLineDock"
             "-DEXPECT=Open Failed[^\r\n]*worktree_12da_export"
@@ -2895,7 +2522,7 @@ if(TARGET katana)
     # failure names them (PASS_REGULAR_EXPRESSION, set below).
     add_test(NAME qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%CommandLineDock"
             "-DFORBID=Open Failed"
@@ -2910,7 +2537,7 @@ if(TARGET katana)
     # grid and Assign pressed - one new style of that name holds all 12.
     add_test(NAME qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|>SELECT ALL|@formatSymbols|symbolGrid=TEST Survey Mark|?detailName|!assignToPoints|>STYLE USAGE TEST Survey Mark"
@@ -2923,7 +2550,7 @@ if(TARGET katana)
     # and one UNDO brings it back. The grab is the command line, showing it.
     add_test(NAME qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=>STYLE NEW Spare|>STYLE NEW Kerb|%PropertiesToolBar|CurrentStyleCombo=Kerb|>LINE 0,0 10,0|*formatPurge|>STYLE USAGE Spare|>UNDO|>STYLE USAGE Spare|%CommandLineDock"
@@ -2937,7 +2564,7 @@ if(TARGET katana)
     # has the one layer "0"; LAYER NEW survey adds "survey", after it by name.
     add_test(NAME qt_format_layers_opens_beside_the_drawing_and_follows_it_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatLayers|?layerTable|>LAYER NEW survey|?layerTable"
             "-DEXPECT=--dialog formatLayers opened formatLayersDialog \"Layers\"[\r\n]+layerTable: 0 \\|[^;\r\n]*[\r\n].*layerTable: 0 \\|[^;\r\n]* ; survey \\|"
@@ -2952,7 +2579,7 @@ if(TARGET katana)
     # Select again once it has ended.
     add_test(NAME qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LINE|?draw.line|?toolSelect|>0,0|>10,0|>|>|?draw.line|?toolSelect|>LIST"
             "-DEXPECT=draw.line: Line, checked[\r\n]+toolSelect: Select, unchecked[\r\n]+1 line[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked[\r\n]+1 entities[\r\n]+1  Line  layer=0  0,0 -> 10,0  length=10"
@@ -2964,7 +2591,7 @@ if(TARGET katana)
     # refusal changes no tool, so nothing else would put the marks right.
     add_test(NAME qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=*viewShowsSection|*draw.line|?draw.line|?toolSelect"
             "-DEXPECT=there is no plan view to draw in[^\r\n]*[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked"
@@ -2980,7 +2607,7 @@ if(TARGET katana)
     # name, its counts (no definitions, so no symbols) and that it is built in.
     add_test(NAME qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatSurveyCodes|!ruleDuplicate|?dirtyIndicator|>QUIT"
             "-DEXPECT=Customisation: test_survey, 0 definitions \\(0 symbols\\) and 11 survey code rules, built in\\..*dirtyIndicator: Unapplied edits:[^\r\n]* 12 rules[.][\r\n]+! Unapplied Edits: the Survey Code Manager has rule edits that are not on the drawing"
@@ -2993,7 +2620,7 @@ if(TARGET katana)
     # menu is opened for its screenshot and read back item by item.
     add_test(NAME qt_the_tools_menu_holds_the_inquiry_and_select_tools_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%toolsMenu|?toolsMenu"
             "-DEXPECT=toolsMenu: Tools: Distance .*; Area .*; ID Point .*; Angle .*; List .*; Select Similar .*; Quick Select "
@@ -3001,7 +2628,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_the_draw_menu_offers_divide_and_measure_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%drawMenu|?drawMenu"
             "-DEXPECT=drawMenu: Draw: Point .*; Arc \\[Arc: [^]]*\\] ; .*Divide .*; Measure "
@@ -3009,7 +2636,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=%modifyMenu|?modifyMenu"
             "-DEXPECT=modifyMenu: Modify: Move .*; Explode .*; Lengthen .*; Reverse .*; Match Properties "
@@ -3030,7 +2657,7 @@ if(TARGET katana)
     # apart - hence the record, and the refusals forbidden.
     add_test(NAME qt_dist_typed_at_the_command_line_reports_the_inverse_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4|?commandLog"
             "-DEXPECT=view=1 kind=plan[^\r\n]*.*Horizontal distance 5[.]000.*commandLog: .*> ZOOM view=1 view=1 kind=plan"
@@ -3043,7 +2670,7 @@ if(TARGET katana)
     # for no condition. One line drawn, one selected.
     add_test(NAME qt_quick_select_is_answered_at_the_command_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LINE 0,0 10,0|>CIRCLE 5,5 2|>SELECT NONE|>QSELECT|>Line|>|>"
             "-DEXPECT=1 entity selected: Lines on any layer, in the drawing"
@@ -3057,7 +2684,7 @@ if(TARGET katana)
     set_tests_properties(qt_view_scale_project_prepare PROPERTIES FIXTURES_SETUP view_scale_clean)
     add_test(NAME qt_paper_style_scale_dialog_uses_the_shared_command_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LINE 0,0 10,0|>ZOOM CENTRE 5,0 SCALE 20 view=1|@viewPaperScale|viewScaleMode=Fixed 1:N|viewScaleDenominator=500|?viewScaleLine|!viewScaleApply|?viewScaleStatus|>VIEWS|>UNDO|>VIEWS SCALE 1|>REDO|>SAVE \"${_view_scale_project}\""
             "-DEXPECT=viewScaleLine: VIEWS SCALE 1 500.*view=1 kind=plan paper_scale=500 changed=yes.*viewScaleStatus: .*paper_scale=500.*view=1 kind=plan title=\"Plan 1\" active=yes linked=no centre=5,0 scale=20 .*paper_scale=500.*view=1 kind=plan paper_scale=auto"
@@ -3068,7 +2695,7 @@ if(TARGET katana)
         FIXTURES_REQUIRED view_scale_clean FIXTURES_SETUP view_scale_saved)
     add_test(NAME qt_paper_style_scale_is_restored_with_the_project_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${_view_scale_project}"
             "-DDRIVE=>VIEWS SCALE 1|@viewPaperScale|?viewScaleLine|?viewScaleDenominator"
             "-DEXPECT=view=1 kind=plan paper_scale=500.*viewScaleLine: VIEWS SCALE 1 500.*viewScaleDenominator: 500"
@@ -3078,7 +2705,7 @@ if(TARGET katana)
         FIXTURES_REQUIRED view_scale_saved)
     add_test(NAME qt_paper_style_scale_is_disabled_for_a_model_view_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN 3d|*viewPaperScale"
             "-DREFUSED=--trigger viewPaperScale failed: [^\r\n]*that menu item is disabled"
@@ -3090,19 +2717,17 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
-    if(TARGET katana_cli)
-        add_test(NAME cli.a_saved_plan_views_paper_scale_is_editable_and_undoable
-            COMMAND $<TARGET_FILE:katana_cli>
-                -c "OPEN \"${_view_scale_project}\"" -c "VIEWS SCALE LIST"
-                -c "VIEWS SCALE 1 250" -c "UNDO" -c "VIEWS SCALE 1"
-                -c "VIEWS SCALE 1 AUTO")
-        set_tests_properties(cli.a_saved_plan_views_paper_scale_is_editable_and_undoable PROPERTIES
-            FIXTURES_REQUIRED view_scale_saved
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
-            PASS_REGULAR_EXPRESSION
-                "view=1 kind=plan paper_scale=500[\r\n]+views=1.*view=1 kind=plan paper_scale=250 changed=yes.*view=1 kind=plan paper_scale=500.*view=1 kind=plan paper_scale=auto changed=yes"
-            FAIL_REGULAR_EXPRESSION "error")
-    endif()
+    add_test(NAME cli.a_saved_plan_views_paper_scale_is_editable_and_undoable
+        COMMAND ${KATANA_PROGRAM_katana_cli}
+            -c "OPEN \"${_view_scale_project}\"" -c "VIEWS SCALE LIST"
+            -c "VIEWS SCALE 1 250" -c "UNDO" -c "VIEWS SCALE 1"
+            -c "VIEWS SCALE 1 AUTO")
+    set_tests_properties(cli.a_saved_plan_views_paper_scale_is_editable_and_undoable PROPERTIES
+        FIXTURES_REQUIRED view_scale_saved
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
+        PASS_REGULAR_EXPRESSION
+            "view=1 kind=plan paper_scale=500[\r\n]+views=1.*view=1 kind=plan paper_scale=250 changed=yes.*view=1 kind=plan paper_scale=500.*view=1 kind=plan paper_scale=auto changed=yes"
+        FAIL_REGULAR_EXPRESSION "error")
     add_test(NAME qt_view_scale_project_cleanup
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_view_scale_project}")
     set_tests_properties(qt_view_scale_project_cleanup PROPERTIES FIXTURES_CLEANUP view_scale_saved)
@@ -3115,7 +2740,7 @@ if(TARGET katana)
     # that view's dock, bar and all.
     add_test(NAME qt_linked_plan_views_zoom_together_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>ZOOM CENTRE 50,40 SCALE 8 view=1|>VIEWS|%View2|?ViewLinkButton"
             "-DEXPECT=leader=1 linked=1,2 moved=2.*view=1 kind=plan centre=50,40 scale=8[^\r\n]*[\r\n]+view=2 kind=plan followed=1 centre=50,40 scale=8.*view=2 kind=plan title=\"Plan 2\" active=[a-z]+ linked=yes centre=50,40 scale=8.*ViewLinkButton: Linked, checked"
@@ -3127,7 +2752,7 @@ if(TARGET katana)
     # the open chain.
     add_test(NAME qt_unlinking_one_of_two_views_unlinks_both_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>VIEWS UNLINK 2|>ZOOM IN view=1|%View2|?ViewLinkButton"
             "-DEXPECT=unlinked=1,2 linked=none.*view=1 kind=plan centre=.*ViewLinkButton: Link this view, unchecked"
@@ -3141,7 +2766,7 @@ if(TARGET katana)
     # and the as-built line alone on the right, both at the one scale.
     add_test(NAME qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS"
             "-DEXPECT=view=1 kind=plan title=\"Plan 1\"[^\r\n]*linked=yes[^\r\n]*hidden=asbuilt[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]*linked=yes[^\r\n]*hidden=design[\r\n]+views=2 linked=2"
@@ -3157,7 +2782,7 @@ if(TARGET katana)
     # view, where the as-built line crosses it.
     add_test(NAME qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS|?PlanView1|?PlanView2"
             "-DEXPECT=view=1 kind=plan[^\r\n]*ghosts=on hidden=asbuilt[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on hidden=design[\r\n]+views=2.*PlanView1: drawn=1 ghosts=0 grips=3[\r\n]+PlanView2: drawn=1 ghosts=1 grips=0"
@@ -3170,7 +2795,7 @@ if(TARGET katana)
     # the as-built line alone.
     add_test(NAME qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS LINK 1,2|>ZOOM WINDOW 0,0,50,40 view=1|>SELECT LAYER design|>VIEWS SET 2 ghosts=off|?PlanView2"
             "-DEXPECT=view=2 kind=plan[^\r\n]*ghosts=off hidden=design.*PlanView2: drawn=1 ghosts=0 grips=0"
@@ -3182,7 +2807,7 @@ if(TARGET katana)
     # whose reply is view 2's record with its ghosts off.
     add_test(NAME qt_the_layers_popups_box_turns_a_views_ghosts_off_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 10,30 40,10|>VIEWS OPEN plan|>VIEWS HIDE 2 design|>SELECT LAYER design|%View2|!ViewLayersButton|%ViewLayersPopup|?ViewLayersShowSelection|!ViewLayersShowSelection|?ViewLayersShowSelection|?PlanView2"
             "-DEXPECT=ViewLayersShowSelection: Show the selection on hidden layers, checked[\r\n]+view=2 kind=plan[^\r\n]*ghosts=off hidden=design[\r\n]+ViewLayersShowSelection: Show the selection on hidden layers, unchecked[\r\n]+PlanView2: drawn=1 ghosts=0 grips=0"
@@ -3195,7 +2820,7 @@ if(TARGET katana)
     # reply is the record with nothing hidden; the listing after says the same.
     add_test(NAME qt_the_layers_popups_show_all_button_runs_the_views_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>VIEWS OPEN plan|>VIEWS HIDE 2 design|%View2|!ViewLayersButton|%ViewLayersPopup|!ViewLayersShowAll|>VIEWS"
             "-DEXPECT=ghosts=on hidden=design[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+view=1 kind=plan[^\r\n]*[\r\n]+view=2 kind=plan[^\r\n]*ghosts=on[\r\n]+views=2"
@@ -3207,7 +2832,7 @@ if(TARGET katana)
     # item's check set from the view, and view 1 untouched.
     add_test(NAME qt_the_view_menu_turns_the_active_views_ghosts_off_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN plan|?viewSelectionGhosts|*viewSelectionGhosts|?viewSelectionGhosts|>VIEWS"
             "-DEXPECT=viewSelectionGhosts: Show the Selection on Hidden Layers, checked[\r\n]+view=2 kind=plan[^\r\n]*ghosts=off[\r\n]+viewSelectionGhosts: Show the Selection on Hidden Layers, unchecked[\r\n]+view=1 kind=plan[^\r\n]*ghosts=on[\r\n]+view=2 kind=plan[^\r\n]*ghosts=off[\r\n]+views=2"
@@ -3220,7 +2845,7 @@ if(TARGET katana)
     # offered and ZOOM refuse it.
     add_test(NAME qt_the_view_menus_zoom_to_selection_is_disabled_for_a_section_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN section|*viewZoomSelection"
             "-DREFUSED=view=2 kind=section[^\r\n]*[\r\n]+.*--trigger viewZoomSelection failed: [^\r\n]*that menu item is disabled"
@@ -3236,7 +2861,7 @@ if(TARGET katana)
     # middle on the datum, (25, 20, 0).
     add_test(NAME qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LINE 10,10 40,30|>ZOOM|>SELECT ALL|*viewZoomIn|*viewZoomOut|*viewZoomSelection|%View1|!ViewZoomInButton|!ViewZoomOutButton|>VIEWS OPEN 3d|*viewZoomIn|*viewZoomSelection|%View2|!ViewZoomOutButton|?commandLog"
             "-DEXPECT=commandLog: .*> ZOOM IN view=1 kind=plan centre=25,20 scale=[^ ]+ area=[^ ]+ > ZOOM OUT view=1 kind=plan centre=25,20 [^>]*> ZOOM SELECTION scope=selection matched=1 view=1 kind=plan centre=25,20 [^>]*> ZOOM IN view=1 view=1 kind=plan centre=25,20 [^>]*> ZOOM OUT view=1 view=1 kind=plan centre=25,20 [^>]*> VIEWS OPEN 3d view=2 kind=3d [^>]*> ZOOM IN view=2 kind=3d target=[^>]*> ZOOM SELECTION scope=selection matched=1 view=2 kind=3d target=25,20,0 [^>]*> ZOOM OUT view=2 view=2 kind=3d target="
@@ -3249,7 +2874,7 @@ if(TARGET katana)
     # joining it; then View > Unlink All Views takes both out.
     add_test(NAME qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN plan|*viewLinkActive|?viewLinkActive|>VIEWS ACTIVATE 1|?viewLinkActive|*viewLinkActive|?viewLinkActive|*viewUnlinkAll|?viewLinkActive|?commandLog"
             "-DEXPECT=leader=2 linked=2 moved=none[\r\n]+viewLinkActive: Link This View, checked[\r\n]+view=1 kind=plan[^\r\n]*[\r\n]+viewLinkActive: Link This View, unchecked[\r\n]+leader=2 linked=1,2 moved=1[\r\n]+viewLinkActive: Link This View, checked[\r\n]+unlinked=1,2 linked=none[\r\n]+viewLinkActive: Link This View, unchecked[\r\n]+commandLog: .*> VIEWS LINK 2 TO 2 leader=2 linked=2 moved=none .*> VIEWS LINK 1 TO 2 leader=2 linked=1,2 moved=1 > VIEWS UNLINK ALL unlinked=1,2 linked=none"
@@ -3261,7 +2886,7 @@ if(TARGET katana)
     # itself checked for the 3D view.
     add_test(NAME qt_link_this_view_is_disabled_while_a_3d_view_is_active_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN 3d|*viewLinkActive"
             "-DREFUSED=view=2 kind=3d[^\r\n]*[\r\n]+.*--trigger viewLinkActive failed: [^\r\n]*that menu item is disabled"
@@ -3272,7 +2897,7 @@ if(TARGET katana)
     # it. A 3D view's bar hides Link, which its kind has none of.
     add_test(NAME qt_a_press_of_a_hidden_bar_tool_is_refused_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN 3d|%View2|!ViewLinkButton"
             "-DREFUSED=view=2 kind=3d[^\r\n]*[\r\n]+.*--press: View2's button ViewLinkButton is hidden"
@@ -3284,7 +2909,7 @@ if(TARGET katana)
     # the one that followed.
     add_test(NAME qt_zoom_to_selection_moves_the_linked_views_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN plan|>VIEWS LINK 1,2|>LINE 10,10 40,30|>SELECT ALL|>ZOOM SELECTION view=2|>VIEWS"
             "-DEXPECT=scope=selection matched=1[\r\n]+view=2 kind=plan centre=25,20[^\r\n]*[\r\n]+view=1 kind=plan followed=2 centre=25,20"
@@ -3300,7 +2925,7 @@ if(TARGET katana)
     # them; the PNG is view 2 still showing the as-built line.
     add_test(NAME qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW asbuilt|>LAYER SET asbuilt|>LINE 60,30 90,10|>VIEWS OPEN plan|>VIEWS HIDE 1 asbuilt|>VIEWS HIDE 2 design|>VIEWS SET 2 ghosts=off|>VIEWS LINK 1,2|>ZOOM WINDOW 40,0,100,40 view=2|>SELECT LAYER design|%View2|!ViewZoomSelectionButton|>VIEWS"
             "-DEXPECT=scope=selection matched=1[\r\n]+view=2 kind=plan shown=0 moved=no[\r\n]+.*view=1 kind=plan title=\"Plan 1\"[^\r\n]* linked=yes centre=70,20 [^\r\n]*[\r\n]+view=2 kind=plan title=\"Plan 2\"[^\r\n]* linked=yes centre=70,20 "
@@ -3313,7 +2938,7 @@ if(TARGET katana)
     # to the design layer.
     add_test(NAME qt_zoom_to_dialog_runs_its_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW other|>LAYER SET other|>CIRCLE 100,100 5|@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|?zoomToLine|!zoomToRun|?zoomToStatus"
             "-DEXPECT=zoomToLine: ZOOM DRAWING WHERE LAYER=design[\r\n]+scope=drawing where=\"LAYER=design\" matched=1[\r\n]+view=1 kind=plan centre=25,20 [^\r\n]*[\r\n]+zoomToStatus: 1 matched, framed in view 1[.]"
@@ -3326,7 +2951,7 @@ if(TARGET katana)
     # as a sentence.
     add_test(NAME qt_zoom_to_frames_the_scope_in_the_view_chosen_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LAYER NEW design|>LAYER SET design|>LINE 10,10 40,30|>LAYER NEW other|>LAYER SET other|>CIRCLE 100,100 5|>VIEWS OPEN plan|>VIEWS OPEN 3d|@viewZoomTo|!zoomToScopeDrawing|zoomToFilterLayer=design|zoomToView=Plan 2 (view 2)|?zoomToLine|!zoomToRun|?zoomToStatus|zoomToView=3D 1 (view 3)|?zoomToLine|!zoomToRun|?zoomToStatus"
             "-DEXPECT=zoomToLine: ZOOM DRAWING WHERE LAYER=design view=2[\r\n]+scope=drawing where=\"LAYER=design\" matched=1[\r\n]+view=2 kind=plan centre=25,20 [^\r\n]*[\r\n]+zoomToStatus: 1 matched, framed in view 2[.][\r\n]+zoomToLine: ZOOM DRAWING WHERE LAYER=design view=3[\r\n]+scope=drawing where=\"LAYER=design\" matched=1[\r\n]+view=3 kind=3d target=25,20,0 [^\r\n]*[\r\n]+zoomToStatus: 1 matched, framed in view 3[.]"
@@ -3339,7 +2964,7 @@ if(TARGET katana)
     # letter is one item's (--check-shortcuts).
     add_test(NAME qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCHECK_SHORTCUTS=ON"
             "-DEXPECT=shortcuts: [0-9]+ key sequences, each reaching one thing"
@@ -3351,7 +2976,7 @@ if(TARGET katana)
     # A headless run saves none of it (restoreSession is never called).
     add_test(NAME qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=*viewTextSizeLarge|?viewTextSizeLarge|?viewTextSizeStandard|*viewToolBarIconsLarge|?viewToolBarIconsLarge|*viewToolBarNames|?viewToolBarNames|*viewPanelLayers|*viewResetLayout|?viewPanelLayers|?viewMenu"
             "-DEXPECT=Text size: large\\..*viewTextSizeLarge: Large, checked.*viewTextSizeStandard: Standard, unchecked.*viewToolBarIconsLarge: Large Icons, checked.*viewToolBarNames: Show Toolbar Names, unchecked.*The panels and toolbars are back where a new window has them\\..*viewPanelLayers: Layers, checked.*viewMenu: View: .*Toolbars \\[.*Text Size \\[.*Reset Window Layout \\["
@@ -3362,7 +2987,7 @@ if(TARGET katana)
     # until 2026-09-26 sixty of them had neither or one.
     add_test(NAME qt_every_menu_item_has_an_icon_and_a_status_tip_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCHECK_MENUS=ON"
             "-DEXPECT=menus: [0-9]+ items, each with an icon and a status tip"
@@ -3395,7 +3020,7 @@ if(TARGET katana)
     set(_toolbar_fit "[0-9]+ toolbars along the top in 3 rows, none with an action behind its extension button")
     add_test(NAME qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCHECK_TOOLBAR_FIT=1366x768,1632x918,1920x1080"
             "-DEXPECT=toolbar fit 1366x768: ${_toolbar_fit}.*toolbar fit 1632x918: ${_toolbar_fit}.*toolbar fit 1920x1080: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout with Surface Edit and BIM on the second row: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout saved before Surface Edit and BIM existed: ${_toolbar_fit}.*toolbar fit 1366x768 after restoring a layout of this version with BIM hidden: [0-9]+ toolbars along the top in 3 rows, none.*toolbar fit 1366x768 after restoring an older layout with Surface Edit hidden: [0-9]+ toolbars along the top in 3 rows, none"
@@ -3416,7 +3041,7 @@ if(TARGET katana)
     # toolbar does.
     add_test(NAME qt_a_layout_saved_maximised_by_an_older_build_restores_before_the_window_is_shown_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCHECK_SESSION_RESTORE=ON"
             "-DEXPECT=session restore: an older build's layout restored into a maximised window before it was shown; [0-9]+ toolbars, none lost"
@@ -3434,7 +3059,7 @@ if(TARGET katana)
     # RAISE 2 moves every one by exactly 2.
     add_test(NAME qt_the_surface_heights_dialog_raises_the_surface_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|@terrainSurfaceHeights|surfaceHeightsValue=2|!surfaceHeightsRun|?surfaceHeightsReply"
             "-DEXPECT=surface name=ground operation=raise .*moved=10800 .*largest_change=2 changed=yes"
@@ -3453,7 +3078,7 @@ if(TARGET katana)
     # from the event loop, once for what a command changed).
     add_test(NAME qt_an_open_section_is_cut_again_when_the_surfaces_change_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>SURFACE COPY ground design|>LINE 0,60 170,60|>SELECT ALL|*terrainSectionAlongSelection|>SURFACE EDIT design RAISE 3|>SURFACE HIDE design|>SURFACE HIDE ground|>SURFACE SHOW design"
             "-DEXPECT=Section cut along the selection: length 170[.]000.*surface name=design operation=raise.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ cut again: the drawing's surfaces changed[.].*Section in view [0-9]+ is of surfaces that have changed and was not cut again: Every surface is hidden.*Section in view [0-9]+ cut again: the drawing's surfaces changed[.]"
@@ -3472,7 +3097,7 @@ if(TARGET katana)
     # Each dialog's line is run through the window's one executor.
     add_test(NAME qt_the_surface_data_dialogs_edit_the_surface_by_a_scope_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc NAME ground|>PLINE 10,10 60,10 60,40 10,40 CLOSE|>PLINE 100,20 140,20 140,60 100,60 CLOSE|>PLINE3D 20.3,20.3,50 25.3,25.3,50|@terrainSurfaceAddPoints|!surfaceAddPointsScopeDrawing|!surfaceAddPointsRun|?surfaceAddPointsReply|@terrainSurfaceDeletePoints|!surfaceDeletePointsScopeDrawing|!surfaceDeletePointsRun|?surfaceDeletePointsReply|@terrainSurfaceDeleteTriangles|!surfaceDeleteTrianglesScopeDrawing|surfaceDeleteTrianglesSide=Outside the polygons (keep what is inside)|!surfaceDeleteTrianglesRun|?surfaceDeleteTrianglesReply"
             "-DEXPECT=operation=add_points .*points_added=2 .*changed=yes.*operation=delete_points_inside .*changed=yes.*operation=delete_triangles_outside .*changed=yes"
@@ -3532,11 +3157,11 @@ if(TARGET katana)
         set(_undo_sign "sign x 32[.][.]39 y 14[.][.]18")
         set(_undo_sign_large "sign x 40[.][.]47 y 18[.][.]22")
         set(_kind_sign "sign x 22[.][.]30 y 9[.][.]13")
-        set(_kind_sign_125 "sign x 28[.][.]38 y 11[.][.]17")
+        set(_kind_sign_125 "sign x 28[.][.]38 y 11[.][.]16")
     endif()
     add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DCHECK_TOOLBARS=ON"
             "-DDRIVE=%DrawToolBar"
@@ -3559,7 +3184,7 @@ if(TARGET katana)
     # lit, and what its menu adds is the mark alone.
     add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DCHECK_TOOLBARS=ON"
             "-DDRIVE=*viewToolBarIconsLarge|>DELETEVERTEX|?draw.vertex.delete|?draw.vertex.insert|%DrawToolBar"
@@ -3577,15 +3202,17 @@ if(TARGET katana)
     #  - the kind switcher's 14 px icon at 4 spans 5 to 22.5, drawn over
     #    5..22; its arrow's box, 20..32 x 5..17, is device 25..41.25 x
     #    6.25..22.5, and Fusion's arrow, 22.5..30.5 x 9.5..13.5, is
-    #    28.125..38.125 x 11.875..16.875 - columns 28..38, and rows 11..17,
-    #    the cached arrow set at the box's quarter pixel spreading into one
-    #    more row.
+    #    28.125..38.125 x 11.875..16.875 - columns 28..38, and rows 11..16.
+    #    (The C++ window inked rows 11..17: Fusion drew the arrow into a
+    #    cached pixmap and scaled it, spreading it into one more row. The
+    #    Rust window draws the shape at the device's scale, whose exact edges
+    #    ink 11..16 - the owner's choice, 2026-11-16, over imitating the blur.)
     # Until 2026-09-30 the check took each box back to the widget's pixels,
     # rounded outwards; both reached pixel 26, and the run failed with all
     # four families "drawn over" icons nothing was drawn over.
     add_test(NAME qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_at_125_percent_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DCHECK_TOOLBARS=ON"
             "-DDRIVE=%DrawToolBar"
@@ -3669,10 +3296,10 @@ endif()
 # the hand-written R2000 fixture imported (9 entities - see
 # tests/dxf/test_reader.cpp) and the drawing exported from the command line,
 # each reported in the records every build writes (docs/interop.md).
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_dxf_import_and_export_go_through_the_native_module_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_dxf"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf"
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_dxf_export.dxf"
@@ -3701,7 +3328,7 @@ if(TARGET katana)
     set(_ifc_typed "${CMAKE_CURRENT_BINARY_DIR}/qt ifc typed.ifc")
     add_test(NAME qt_ifc_typed_export_and_import_are_the_command_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=${_ifc_scenario}>EXPORT ${_ifc_typed} UTILITIES ${_ifc_schedule}|>INFO ${_ifc_typed}|>IMPORT ${_ifc_typed}|>ALIGN LIST"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_typed_headless.png"
@@ -3715,7 +3342,7 @@ if(TARGET katana)
     set(_ifc_dialog "${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_dialog.ifc")
     add_test(NAME qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=${_ifc_scenario}@fileExportIfc|ifcExportSchedule=${_ifc_schedule}|!ifcExportPreview|?ifcExportClasses|ifcExportFile=${_ifc_dialog}|!ifcExportExport|?ifcExportCheck"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_export_dialog_headless.png"
@@ -3734,7 +3361,7 @@ if(TARGET katana)
     # katana_cli's tests do not reach.
     add_test(NAME qt_ifc_export_dialog_leaves_the_road_model_out_by_its_box_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=>ALIGN NEW road 0,0 100,0|>ALIGN DESIGN road 0,10 100,10|>ROADTEMPLATE DEFAULTS|>CORRIDOR NEW Main ALIGNMENT road TEMPLATE \"urban street\"|@fileExportIfc|?ifcExportRoadModel|!ifcExportPreview|ifcExportRoadModel=off|ifcExportFile=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless.ifc|?ifcExportCommand|!ifcExportExport|?ifcExportCheck"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_roadless_headless.png"
@@ -3753,7 +3380,7 @@ if(TARGET katana)
     set(_ifc_leaders "${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_leaders.ifc")
     add_test(NAME qt_ifc_export_writes_a_leaders_note_not_its_template_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=>PLINE3D 0,0,10 100,0,10 100,100,10 0,100,10 CLOSE|>SURFACE FROM DRAWING NAME ground|>POINT 50,50|>SELECT 2|>PROP SET elevation 12 real|>SELECT NONE|>LEADER #2 60,60 preset=level|>LEADER #2 40,60 preset=surface|>EXPORT ${_ifc_leaders} NOSURFACES|>NEW|>IMPORT ${_ifc_leaders}|>LIST"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_leaders_headless.png"
@@ -3769,7 +3396,7 @@ if(TARGET katana)
     # (the dialog's default), as its own undoable step.
     add_test(NAME qt_ifc_import_dialog_describes_imports_and_takes_the_files_system_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=@fileImportIfc|ifcImportFile=${_ifc_dialog}|!ifcImportDescribe|?ifcImportSummary|!ifcImportImport|>ALIGN LIST"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_import_dialog_headless.png"
@@ -3784,7 +3411,7 @@ if(TARGET katana)
     # triangles and 9 points: TIN SOUTH WEST in the archive, unchanged.
     add_test(NAME qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc"
@@ -3800,7 +3427,7 @@ if(TARGET katana)
     # these are the words.
     add_test(NAME qt_ifc_dialogs_call_the_surfaces_the_drawings_own_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=>SURFACE FROM FILE ${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc max=500 NAME ground|@fileExportIfc|?ifcExportSurfaces|@fileImportIfc|ifcImportFile=${_ifc_dialog}|?ifcImportCheck"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_words_headless.png"
@@ -3815,7 +3442,7 @@ if(TARGET katana)
     # line's own words.
     add_test(NAME qt_ifc_menu_items_and_the_verbs_refusals_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=%fileMenu|?fileImportMenu|?fileExportMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_menu_headless.png"
@@ -3824,7 +3451,7 @@ if(TARGET katana)
     # --import-options on a .ifc builds File > Import IFC's dialog for it.
     add_test(NAME qt_ifc_import_options_are_the_import_dialog_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DIMPORT_OPTIONS=${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_import_options_headless.png"
@@ -3833,7 +3460,7 @@ if(TARGET katana)
     # headless session is told how to take the file's system, not asked.
     add_test(NAME qt_ifc_a_path_given_to_the_window_is_imported_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DIMPORT=${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_path_headless.png"
@@ -3844,7 +3471,7 @@ if(TARGET katana)
     # headless keeps the survey coordinates and says so.
     add_test(NAME qt_ifc_a_file_far_from_the_drawings_alignment_is_questioned_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=>ALIGN NEW A1 0,0 100,50 200,0|>IMPORT ${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_far_headless.png"
@@ -3855,14 +3482,14 @@ if(TARGET katana)
     # the GIS formats.
     add_test(NAME qt_ifc_dataset_information_describes_the_file_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDATASET_INFO=${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_dataset_info_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_ifc_a_missing_file_has_no_description_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDATASET_INFO=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_no_such_file.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_missing_info_headless.png"
@@ -3870,7 +3497,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_ifc_a_missing_file_has_no_import_options_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DIMPORT_OPTIONS=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_no_such_file.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_missing_options_headless.png"
@@ -3903,7 +3530,7 @@ if(TARGET katana)
             TIMEOUT 180)
     # The window's file judged by IfcOpenShell (tools/check_ifc.py), where the
     # configuring Python has it - as the command line's files are
-    # (src/katana_app/CMakeLists.txt).
+    # (tests/cli/CMakeLists.txt).
     if(Python3_Interpreter_FOUND)
         execute_process(COMMAND "${KATANA_PYTHON}" -c "import ifcopenshell"
             RESULT_VARIABLE _ifcopenshell_missing OUTPUT_QUIET ERROR_QUIET)
@@ -3916,57 +3543,13 @@ if(TARGET katana)
     endif()
 endif()
 
-# The 3D view at the owner's display scale, 125%: the framebuffer must be in
-# device pixels (500 x 375 for a 400 x 300 view), not the logical size scaled
-# up, which beaded every 1 px line (docs/render.md, HiDPI). The widget suite
-# runs this test at ratio 1, where it cannot tell the two apart.
-if(TARGET katana_qt_widget_tests)
-    add_test(NAME qt_render_view_at_125_percent
-        COMMAND katana_qt_widget_tests
-            --gtest_filter=RenderView.TheFramebufferIsTheViewsSizeInDevicePixels)
-    set_tests_properties(qt_render_view_at_125_percent PROPERTIES
-        ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
-        TIMEOUT 120)
-    # The menu signs of the toolbars and title bars at the same 125%
-    # (docs/desktop.md, "Tool families on the toolbars"), every case of their
-    # five suites, a process a suite: the mark, the arrows and the icons
-    # measured in device pixels - where a family's mark meets its icon's
-    # square without overlapping it, and where rounded outwards to the
-    # widget's pixels the two met - the mark the same whole staircase on
-    # every button, the overflow arrow whole pixels. At ratio 1, where the
-    # suite runs them, a widget pixel is a device pixel: until 2026-09-30
-    # six of these cases held only there, comparing widget rectangles with
-    # device grabs.
-    foreach(_suite IN ITEMS ToolFamilyButtons SplitButtons TitleBarButtons ToolBarSigns
-                            ToolBarOverflow)
-        add_test(NAME qt_toolbar_signs_at_125_percent.${_suite}
-            COMMAND katana_qt_widget_tests "--gtest_filter=${_suite}.*")
-        set_tests_properties(qt_toolbar_signs_at_125_percent.${_suite} PROPERTIES
-            ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
-            TIMEOUT 120)
-    endforeach()
-    # The wheel at 125%: the cursor comes in logical pixels and the camera
-    # counts in device ones, so the zoom must pick at the cursor times 1.25 -
-    # at ratio 1 a missing scale would pass unseen (docs/render.md,
-    # "Zooming towards the cursor").
-    add_test(NAME qt_render_view_zoom_at_125_percent
-        COMMAND katana_qt_widget_tests
-            --gtest_filter=RenderView.EveryWheelNotchMagnifiesTheGroundUnderTheCursorByTheSameFactor)
-    set_tests_properties(qt_render_view_zoom_at_125_percent PROPERTIES
-        ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
-        TIMEOUT 120)
-endif()
-
 # The session verbs on the window's command line and the window's one
 # executor (docs/desktop.md, "One executor: the command runner"). Typed with
 # --command as an agent types them: INFO with an entity's id, CODE CENSUS,
 # CODE CHECK, CUSTOMISE alone, COPC and IMPORT ... LOCAL, each of which the
 # window once refused or misread. Run with --run-line as a dialog runs its
 # line: never a running tool's answer, with what it logged coming back.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
     # A 10 x 5 rectangle: perimeter 30, area 50, described by INFO 1 and
     # again by INFO #1 (a typed line's echo is not printed). The fixture of
@@ -3979,7 +3562,7 @@ if(TARGET katana)
     # control codes at their defaults).
     add_test(NAME qt_the_session_verbs_run_on_the_windows_command_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_twins}/test_survey.customisation.json\"|>CODE CENSUS|>CODE CHECK|>CUSTOMISE"
             "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50[\r\n]+1  Polyline  layer=0  vertices=4  closed  length=30  area=50.*0 entities carry a code in \"[^\"]*\", 0 distinct codes.*11 rules checked: 0 errors, [0-9]+ warnings?.*11 survey code rules over 8 distinct codes[\r\n]+customisation name=test_survey origin=loaded kept=no definitions=0 codes=8 rules=11 colours=0[\r\n]+source name=test_survey definitions=no rules=yes[\r\n]+automation auto\\.codes=on auto\\.linework=on[\r\n]+linework linework\\.start=ST linework\\.end=END linework\\.close=CL linework\\.arcstart=BC linework\\.arcend=EC linework\\.join=JPN linework\\.rectangle=RECT"
@@ -3994,7 +3577,7 @@ if(TARGET katana)
     file(WRITE "${_info_dir}/#1" "")
     add_test(NAME qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>RECT 0,0 10,5|>INFO #1"
             "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
@@ -4014,7 +3597,7 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/qt copc")
     add_test(NAME qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>COPC \"${_gis}/survey_scan.las\" \"${_window_copc}\"|>INFO \"${_window_copc}\"|>COPC \"${_gis}/survey_scan.las\"|*convertCopc"
             "-DEXPECT=converted source=\"?[^ ]*/survey_scan\\.las\"? file=\"[^\"]*/qt copc/window scan\\.copc\\.laz\" format=copc.*pointcloud points=40000 [^\r\n]*copc=yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
@@ -4031,7 +3614,7 @@ if(TARGET katana)
     # LOCAL is refused by name, as katana_cli refuses it.
     add_test(NAME qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>IMPORT \"${_gis}/parcels.geojson\" LOCAL|>IMPORT ${_gis}/terrain.asc local"
             "-DEXPECT=imported file=\"?[^ ]*/parcels\\.geojson\"? kind=vector entities=9 [^\r\n]*bounds=0,0,185,165[^\r\n]*[\r\n]+placed placement=local east=-180 north=0 text=\"LOCAL: moved as one piece by -180\\.000,0\\.000, so its lower-left corner sits at 0,0\\.\".*LOCAL is not supported for rasters and point clouds"
@@ -4044,7 +3627,7 @@ if(TARGET katana)
     # offset refused before anything is read.
     add_test(NAME qt_import_placement_typed_on_the_windows_command_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>RECT 1000,2000 1010,2005|>IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE|>UNDO|>IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5|>IMPORT \"${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf\" local|>IMPORT ${_gis}/terrain.asc ALONGSIDE|>IMPORT ${_gis}/parcels.geojson OFFSET=ten,0"
             "-DEXPECT=bounds=1000,2000,1185,2165[^\r\n]*[\r\n]+placed placement=alongside east=820 north=2000 text=\"ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.\".*bounds=190,-20\\.5,375,144\\.5[^\r\n]*[\r\n]+placed placement=offset east=10 north=-20\\.5 text=\"OFFSET: moved as one piece by 10\\.000,-20\\.500\\.\".*imported file=\"?[^ ]*/r2000_site\\.dxf\"? kind=dxf format=\"DXF R2000\" entities=9 [^\r\n]*[\r\n]+placed placement=local [^\r\n]*text=\"LOCAL: moved as one piece by [^\r\n]*, so its lower-left corner sits at 0,0\\.\".*ALONGSIDE is not supported for rasters and point clouds.*OFFSET= takes the east and north"
@@ -4058,7 +3641,7 @@ if(TARGET katana)
     # comes back not ok, with why.
     add_test(NAME qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LINE|<CIRCLE 5,5 2|>0,0|>10,0|>|>|<CIRCLE 0,0 -1|>LIST"
             "-DEXPECT=--run-line CIRCLE 5,5 2: ok=yes[\r\n]+  reply: circle created.*--run-line CIRCLE 0,0 -1: ok=no[\r\n]+  error: InvalidGeometry: [^\r\n]*radius.*2 entities[\r\n]+1  Circle  layer=0  centre 5,5  radius=2 [^\r\n]*[\r\n]+2  Line  layer=0  0,0 -> 10,0  length=10"
@@ -4081,12 +3664,12 @@ endif()
 # its lines 4, 6 and 8; bad.kcs's second command, on line 5, is a circle of
 # radius -1, which the interpreter refuses. A headless run prints what each
 # line logged (not its echo), and the run ends with its record.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     set(_scripts "${CMAKE_CURRENT_SOURCE_DIR}/qt_widgets/data/scripts")
     # --script as a step, then LIST: every command ran, in order.
     add_test(NAME qt_script_switch_runs_every_line_of_a_script_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSCRIPT=${_scripts}/good.kcs"
             "-DDRIVE=>LIST"
@@ -4098,7 +3681,7 @@ if(TARGET katana)
     # never run (ran=2).
     add_test(NAME qt_script_switch_stops_at_the_first_refused_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSCRIPT=${_scripts}/bad.kcs"
             "-DREFUSED=rectangle created[\r\n]+[^!]*! InvalidGeometry: circle radius must be positive \\[-1\\][\r\n]+script=\"[^\"]*/bad\\.kcs\" lines=3 ran=2 failed=1 stopped_at=5[\r\n]+! bad\\.kcs stopped at line 5, which was refused: CIRCLE 0,0 -1[\r\n]+--script [^\r\n]*bad\\.kcs stopped at a line that was refused"
@@ -4110,7 +3693,7 @@ if(TARGET katana)
     # SCRIPT alone is its usage, and a missing file is NotFound by its path.
     add_test(NAME qt_typed_script_continue_runs_every_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SCRIPT \"${_scripts}/bad.kcs\" continue|># a note, not a command|>LIST|>SCRIPT|>SCRIPT \"${_scripts}/no_such_script.kcs\""
             "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+line created[\r\n]+script=\"[^\"]*/bad\\.kcs\" lines=3 ran=3 failed=1[\r\n]+! bad\\.kcs: 1 of the 3 lines run were refused\\.[\r\n]+2 entities.*! InvalidArgument: usage: SCRIPT <file\\.kcs> \\[CONTINUE\\][\r\n]+! NotFound: no such script \\[[^\r\n]*no_such_script\\.kcs\\]"
@@ -4124,7 +3707,7 @@ if(TARGET katana)
     file(WRITE "${_runs_itself}" "RECT 0,0 1,1\nSCRIPT \"${_runs_itself}\"\nLINE 0,0 1,0\n")
     add_test(NAME qt_a_script_may_not_run_itself_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SCRIPT \"${_runs_itself}\"|>LIST"
             "-DEXPECT=rectangle created[\r\n]+! SCRIPT: runs_itself\\.kcs is already running; a script may not run itself\\.[\r\n]+script=\"[^\"]*/runs_itself\\.kcs\" lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! runs_itself\\.kcs stopped at line 2, which was refused: SCRIPT [^\r\n]*[\r\n]+1 entities"
@@ -4136,7 +3719,7 @@ if(TARGET katana)
     # through the one executor and says how it ended.
     add_test(NAME qt_run_script_dialog_runs_the_line_it_shows_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileRunScript|scriptPath=${_scripts}/good.kcs|scriptContinueOnError=on|?scriptPreview|?scriptCommand|!scriptBrowse|?scriptStatus|!scriptRun|?scriptStatus|>LIST"
             "-DEXPECT=opened fileRunScriptDialog \"Run Script\"[\r\n]+scriptPreview: 4 RECT 0,0 10,5 6 CIRCLE 5,5 2 8 LINE 0,0 10,0[\r\n]+scriptCommand: SCRIPT \"[^\"]*/good\\.kcs\" CONTINUE[\r\n]+scriptStatus: A headless session opens no file dialog: fill scriptPath with the path instead\\.[\r\n]+rectangle created[\r\n]+circle created[\r\n]+line created[\r\n]+script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+scriptStatus: Done: script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities"
@@ -4147,7 +3730,7 @@ if(TARGET katana)
     # to both captures. A script that stops is not ok, with its refusal.
     add_test(NAME qt_a_dialogs_script_line_gets_back_what_every_line_said_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=<SCRIPT \"${_scripts}/good.kcs\"|<SCRIPT \"${_scripts}/bad.kcs\""
             "-DEXPECT=--run-line SCRIPT \"[^\"]*/good\\.kcs\": ok=yes[\r\n]+  reply: rectangle created[\r\n]+  reply: circle created[\r\n]+  reply: line created[\r\n]+  reply: script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+.*--run-line SCRIPT \"[^\"]*/bad\\.kcs\": ok=no[\r\n]+  reply: rectangle created[\r\n]+  reply: script=[^\r\n]*stopped_at=5[\r\n]+  error: InvalidGeometry: circle radius must be positive \\[-1\\][\r\n]+  error: bad\\.kcs stopped at line 5, which was refused: CIRCLE 0,0 -1"
@@ -4158,7 +3741,7 @@ if(TARGET katana)
     # -1 stops it, and the LINE after it is never run.
     add_test(NAME qt_several_lines_on_the_command_line_run_as_a_script_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>RECT 0,0 10,5\nCIRCLE 0,0 -1\nLINE 0,0 10,0|>LIST"
             "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+script=pasted lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! The pasted lines stopped at line 2, which was refused: CIRCLE 0,0 -1[\r\n]+1 entities"
@@ -4170,7 +3753,7 @@ if(TARGET katana)
     # was drawn and the second line refused as an unknown command.
     add_test(NAME qt_lines_pasted_at_a_text_prompt_are_the_texts_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>DT|>0,0|>2.5|>0|>RECT 0,0 5,5\n\nsecond line|>"
             "-DEXPECT=2 lines of text"
@@ -4186,7 +3769,7 @@ if(TARGET katana)
         "RECT 0,0 10,10\nSELECT ALL\nERASE\nLIST\nCIRCLE 0,0 5\nMOVE\n")
     add_test(NAME qt_a_scripts_bare_tool_word_runs_as_katana_cli_runs_it_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SCRIPT \"${_bare_words}\" CONTINUE|>LIST"
             "-DEXPECT=1 erased[\r\n]+0 entities[\r\n]+circle created[\r\n]+! InvalidState: nothing is selected[^\r\n]*[\r\n]+script=\"[^\"]*/bare_tool_words\\.kcs\" lines=6 ran=6 failed=1[\r\n]+.*1 entities[\r\n]+2  Circle"
@@ -4200,7 +3783,7 @@ if(TARGET katana)
     # VIEWS OPEN's record says the view has not framed yet (framed=no).
     add_test(NAME qt_a_script_that_opens_a_view_and_zooms_it_zooms_about_what_it_draws_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DSCRIPT=${_scripts}/open_and_zoom.kcs"
             "-DDRIVE=?PlanView2|>VIEWS"
@@ -4212,11 +3795,11 @@ if(TARGET katana)
     # shown, over when its steps are, 0 when every line ran and 1 at the first
     # refused.
     add_test(NAME qt_script_batch_run_exits_when_the_script_is_done_headless
-        COMMAND katana --script "${_scripts}/good.kcs" --command LIST)
+        COMMAND ${KATANA_PROGRAM_katana} --script "${_scripts}/good.kcs" --command LIST)
     set_tests_properties(qt_script_batch_run_exits_when_the_script_is_done_headless PROPERTIES
         PASS_REGULAR_EXPRESSION "script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities")
     add_test(NAME qt_script_batch_run_fails_at_a_refused_line_headless
-        COMMAND katana --script "${_scripts}/bad.kcs")
+        COMMAND ${KATANA_PROGRAM_katana} --script "${_scripts}/bad.kcs")
     set_tests_properties(qt_script_batch_run_fails_at_a_refused_line_headless PROPERTIES
         WILL_FAIL TRUE)
     # A --customise that is refused fails a batch run, as a refused --command
@@ -4227,13 +3810,13 @@ if(TARGET katana)
     # tests of one run, as the pair above is: a PASS expression sets the exit
     # code aside, so the second holds the run to failing.
     add_test(NAME qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless
-        COMMAND katana --customise "${_not_one}" --script "${_scripts}/good.kcs")
+        COMMAND ${KATANA_PROGRAM_katana} --customise "${_not_one}" --script "${_scripts}/good.kcs")
     set_tests_properties(qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless
         PROPERTIES
         PASS_REGULAR_EXPRESSION "! ParseFailure: not a Katana customisation file[^\r\n]*[\r\n]+--customise [^\r\n]*qt_not_a_customisation[.]json was refused"
         FAIL_REGULAR_EXPRESSION "rectangle created")
     add_test(NAME qt_a_refused_customise_switch_fails_a_batch_run_headless
-        COMMAND katana --customise "${_not_one}" --script "${_scripts}/good.kcs")
+        COMMAND ${KATANA_PROGRAM_katana} --customise "${_not_one}" --script "${_scripts}/good.kcs")
     set_tests_properties(qt_a_refused_customise_switch_fails_a_batch_run_headless PROPERTIES
         WILL_FAIL TRUE)
     set_tests_properties(qt_a_refused_customise_switch_stops_a_batch_run_before_its_script_headless
@@ -4266,10 +3849,10 @@ endif()
 # Format > Layers and no key reaching two commands. The table shows a key as
 # the platform writes it, so on macOS Ctrl+L is "⌘L"; the search for Ctrl+L
 # finds it either way.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_the_help_menu_finds_a_verb_and_lists_every_key_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>HELP|@helpCommandReference|commandReferenceSearch=COPC|?commandReferenceTree|?commandReferenceCount|@helpSheetCommands|?commandReferenceDetail|@helpKeyboardShortcuts|?keyboardShortcutsTable|keyboardShortcutsSearch=Ctrl+L|?keyboardShortcutsCount|?keyboardShortcutsClashes"
             "-DEXPECT=History   UNDO \\[n\\].*PLOTSHEETS path\\.pdf [^\r\n]*the desktop window's alone.*Script    SCRIPT <file\\.kcs> \\[CONTINUE\\].*opened commandReferenceDialog \"Command Reference\"[\r\n]+commandReferenceTree: Commands \\| 0 of [0-9]+ ; .*Window \\| [1-9][0-9]* of [0-9]+ ; .*Draw tools \\| 0 of [0-9]+[^\r\n]*[\r\n]+commandReferenceCount: [1-9][0-9]* of [0-9]+ entries[\r\n]+[^\r\n]*opened commandReferenceDialog[^\r\n]*[\r\n]+commandReferenceDetail: Sheets on the command line.*opened keyboardShortcutsDialog \"Keyboard Shortcuts\"[\r\n]+keyboardShortcutsTable: [^\r\n]*(Ctrl\\+|⌘)L \\| Layers \\| Format \\|[^\r\n]*[\r\n]+keyboardShortcutsCount: 1 of [0-9]+ keys[\r\n]+keyboardShortcutsClashes: Every key reaches one command\\."
@@ -4297,10 +3880,10 @@ endif()
 # test_linestyles; the second replaced the definitions, so test_linestyles,
 # which brought only those, is no source any more - test_survey (rules) and
 # test_symbols (definitions) are, in load order.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_drawing_summary_and_status_json_describe_the_drawing_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE REPLACE \"${_twins}/test_linestyles.customisation.json\" \"${_twins}/test_survey.customisation.json\"|>STYLE NEW kerb|>STYLE NEW other|>STYLE SET kerb linetype \"TEST Dashed Kerb\"|>CUSTOMISE REPLACE \"${_twins}/test_symbols.customisation.json\"|>RECT 0,0 10,5|>SELECT ALL|>STATUS|>STATUS JSON|?statusSelectionCount|@fileDrawingSummary|?drawingSummaryDrawing|?drawingSummaryCurrent|?drawingSummarySelection|?drawingSummaryHistory|?drawingSummaryUnresolved|drawingSummaryUnresolved=TEST Dashed Kerb|!drawingSummaryShowMissing|?drawingSummaryStatus|!drawingSummaryCopyJson|?drawingSummaryStatus|@formatStyles|?styleTable|?drawingSummaryCustomisation"
             "-DEXPECT=Entities: 1  Layers: 1  Alignments: 0[\r\n]+Current layer: 0[\r\n]+Selected: 1  Undo steps: 4  Redo steps: 0[\r\n]+Customisation: 4 linestyles and symbols, 11 survey code rules[\r\n]+{[\r\n]+  \"alignments\": 0,[\r\n]+  \"currentLayer\": \"0\",[\r\n]+  \"currentStyle\": \"\",[\r\n]+  \"entities\": 1,.*  \"undoSteps\": 4[\r\n]+}[\r\n]+statusSelectionCount: 1 selected / 1 entities[\r\n]+[^\r\n]*opened drawingSummaryDialog \"Drawing Summary\"[\r\n]+drawingSummaryDrawing: 1 entity, 1 layer, 0 alignments, 0 sheets[\r\n]+drawingSummaryCurrent: layer 0, style ByLayer, annotation scale 1:[0-9]+, no coordinate system[\r\n]+drawingSummarySelection: 1 entity selected[\r\n]+drawingSummaryHistory: 4 steps to undo \\(next: [^)]+\\), 0 steps to redo[\r\n]+drawingSummaryUnresolved: TEST Dashed Kerb[\r\n]+drawingSummaryStatus: Styles and Linetypes shows the styles that name TEST Dashed Kerb\\.[\r\n]+{.*}[\r\n]+drawingSummaryStatus: Copied the drawing's state as JSON \\(STATUS JSON\\)\\.[\r\n]+[^\r\n]*opened styleManagerDialog[^\r\n]*[\r\n]+styleTable: kerb \\| [^;\r\n]*TEST Dashed Kerb[^;\r\n]*[\r\n].*drawingSummaryCustomisation: [^\r\n]*11 survey code rules over 8 distinct codes customisation name=test_linestyles origin=loaded kept=no definitions=4 codes=8 rules=11 colours=0 source name=test_survey definitions=no rules=yes source name=test_symbols definitions=yes rules=no automation auto\\.codes=on auto\\.linework=on "
@@ -4321,12 +3904,12 @@ endif()
 # read from its header; the 3D view is grabbed once the active view shows 3D.
 # The inks each plot style prints are checked by qt_plot_headless
 # (tools/check_plot.cmake).
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     set(_out "${CMAKE_CURRENT_BINARY_DIR}/qt_output")
     file(MAKE_DIRECTORY "${_out}")
     add_test(NAME qt_plot_and_view_image_dialogs_run_their_verbs_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=@filePlot|plotDrawingPath=${_out}/dialog_plot.pdf|plotDrawingPaper=A4|plotDrawingOrientation=Portrait|plotDrawingFit=off|plotDrawingScale=250|plotDrawingDpi=150|plotDrawingColourMode=Greyscale|plotDrawingLineWeightScale=0.7|plotDrawingMargin=5|?plotDrawingCommand|!plotDrawingPlot|?plotDrawingStatus|@fileExportViewImage|viewImagePath=${_out}/dialog_view.png|viewImageSize=Custom size|viewImageWidth=300|viewImageHeight=150|viewImageBackground=White|?viewImageCommand|!viewImageExport|?viewImageStatus|*editCopyViewImage|>SNAPSHOT \"${_out}/typed_view.png\" width=320 height=200 bg=none|>SNAPSHOT \"${_out}/view.bmp\"|>PLOT|*viewShows3D|>SNAPSHOT \"${_out}/view_3d.png\" view=3d width=200 height=100"
             "-DEXPECT=opened plotDrawingDialog \"Plot to PDF\"[\r\n]+plotDrawingCommand: PLOT \"[^\"]*/dialog_plot\\.pdf\" paper=A4 portrait scale=250 dpi=150 style=greyscale lineweight=0\\.7 margin=5[\r\n]+Plotted to [^\r\n]*dialog_plot\\.pdf: A4 portrait at 1 : 250, 150 dpi[^\r\n]*[\r\n]+file=\"[^\"]*dialog_plot\\.pdf\" paper=A4 orientation=portrait scale=250 dpi=150 style=greyscale lineweight=0\\.7[\r\n]+plotDrawingStatus: Plotted: file=[^\r\n]*dialog_plot\\.pdf[^\r\n]*[\r\n]+[^\r\n]*opened viewImageDialog \"Export View as Image\"[\r\n]+viewImageCommand: SNAPSHOT \"[^\"]*/dialog_view\\.png\" width=300 height=150 bg=white[\r\n]+file=\"[^\"]*dialog_view\\.png\" view=plan width=300 height=150[\r\n]+viewImageStatus: Exported: file=[^\r\n]*dialog_view\\.png[^\r\n]*[\r\n]+clipboard=yes view=plan width=[1-9][0-9]* height=[1-9][0-9]*[\r\n]+file=\"[^\"]*typed_view\\.png\" view=plan width=320 height=200[\r\n]+! InvalidArgument: the file's extension names its format[^\r\n]*[\r\n]+! InvalidArgument: usage: PLOT <file\\.pdf>.*file=\"[^\"]*view_3d\\.png\" view=3d width=200 height=100"
@@ -4341,7 +3924,7 @@ if(TARGET katana)
     set(_follow "${CMAKE_CURRENT_BINARY_DIR}/plot_file_follows_headless_project")
     add_test(NAME qt_the_plot_dialogs_file_follows_the_drawing_opened_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>RECT 0,0 10,10|>SAVE \"${_follow}/projB\"|>NEW|>RECT 0,0 5,5|>SAVE \"${_follow}/projA\"|@filePlot|?plotDrawingPath|>OPEN \"${_follow}/projB\"|?plotDrawingPath|@fileExportViewImage|?viewImagePath"
             "-DEXPECT=plotDrawingPath: [^\r\n]*.projA.projA\\.pdf[\r\n]+opened [^\r\n]*projB[^\r\n]*[\r\n]+plotDrawingPath: [^\r\n]*.projB.projB\\.pdf[\r\n]+.*viewImagePath: [^\r\n]*.projB.projB\\.png"
@@ -4359,10 +3942,10 @@ endif()
 # first; its third entry runs UNDO 3 and leaves one point; the Redo list then
 # holds three, and its second entry runs REDO 2, leaving three points and one
 # step still to redo.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_the_undo_and_redo_lists_step_through_the_history_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>POINT 1,1|>POINT 2,2|>POINT 3,3|>RECT 0,0 4,4|?editUndoMenu|*undoStep3|>LIST|?editRedoMenu|*redoStep2|>LIST|?editRedoMenu"
             "-DEXPECT=editUndoMenu: : 1 CREATE_POLYLINE \\[UNDO 1: CREATE_POLYLINE\\] ; 2 CREATE_POINT \\[UNDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POINT \\[UNDO 3: the last 3 steps, down to CREATE_POINT\\] ; 4 CREATE_POINT \\[UNDO 4: the last 4 steps, down to CREATE_POINT\\][\r\n]+3 undone[\r\n]+1 entities[\r\n]+1  Point [^\r\n]*[\r\n]+editRedoMenu: : 1 CREATE_POINT \\[REDO 1: CREATE_POINT\\] ; 2 CREATE_POINT \\[REDO 2: the next 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POLYLINE \\[REDO 3: the next 3 steps, down to CREATE_POLYLINE\\][\r\n]+2 redone[\r\n]+3 entities[\r\n]+.*editRedoMenu: : 1 CREATE_POLYLINE \\[REDO 1: CREATE_POLYLINE\\][\r\n]"
@@ -4384,10 +3967,10 @@ endif()
 # and Replace Loaded Customisation were triggered here too, and named their
 # CUSTOMISE lines: the two items are gone, which the pair of tests after this
 # one holds the window to.)
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_the_file_items_name_their_verbs_in_a_headless_run_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=*fileOpen|*fileSaveAs|*fileImport|*fileExportVector|>RECT 0,0 1,1|*fileExportVector|*fileSave"
             "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL \\| ALONGSIDE \\| OFFSET=dE,dN\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
@@ -4407,7 +3990,7 @@ if(TARGET katana)
     # and INFO for Dataset Information.
     add_test(NAME qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=*importVectorData|*importRaster|*importPointCloud|*datasetInformation"
             "-DEXPECT=type IMPORT <file> \\[layers=a,b\\] \\[where=\"<filter>\"\\] \\[target=<layer>\\] instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[band=N\\] \\[maxpixels=N\\] \\[name=<n>\\] instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[budget=N\\] \\[class=N\\] \\[resolution=<m>\\] instead\\.[\r\n]+[^\r\n]*type INFO <file> instead\\."
@@ -4428,7 +4011,7 @@ if(TARGET katana)
     set(_tip "\\[[^]]+\\]")
     add_test(NAME qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=?commandLog|?fileMenu|?fileImportMenu|?fileExportMenu|?surveyMenu|?editMenu|?viewMenu|?drawMenu|?modifyMenu|?annotateMenu|?formatMenu|?terrainMenu|?gisMenu|?helpMenu"
             "-DEXPECT=fileMenu: File: New ${_tip} ; Open Project\\.\\.\\. ${_tip} ; Save ${_tip} ; Save As\\.\\.\\. ${_tip} ; Import ${_tip} ; Export ${_tip} ; Run Script\\.\\.\\. ${_tip} ; Recent Scripts ${_tip} ; Plot to PDF\\.\\.\\. ${_tip} ; Sheets\\.\\.\\. ${_tip} ; Plot Sheets to PDF\\.\\.\\. ${_tip} ; Start Screen\\.\\.\\. ${_tip} ; Project Coordinate System\\.\\.\\. ${_tip} ; Drawing Summary\\.\\.\\. ${_tip} ; Settings\\.\\.\\. ${_tip} ; Quit ${_tip}[\r\n]+fileImportMenu: Import: Import Any File\\.\\.\\. ${_tip} ; Import IFC\\.\\.\\. ${_tip} ; Import Survey Points\\.\\.\\. ${_tip} ; Import Vector Data\\.\\.\\. ${_tip} ; Import Raster\\.\\.\\. ${_tip} ; Import Point Cloud\\.\\.\\. ${_tip} ; Online Data\\.\\.\\. ${_tip}[\r\n]+fileExportMenu: Export: Export Drawing\\.\\.\\. ${_tip} ; Export IFC\\.\\.\\. ${_tip} ; Export View as Image\\.\\.\\. ${_tip} ; Export Survey Points\\.\\.\\. ${_tip} ; Export Surface as DEM\\.\\.\\. ${_tip} ; Export Point Cloud\\.\\.\\. ${_tip}[\r\n]+surveyMenu: Survey: [^\r\n]*Coordinate Converter\\.\\.\\. ${_tip} ; Survey Code Manager\\.\\.\\. ${_tip} ; Apply Survey Codes ${_tip} ; Process Linework ${_tip} ; Draw Utility Schedule\\.\\.\\. [^\r\n]*[\r\n].*helpMenu: Help: "
@@ -4448,7 +4031,7 @@ if(TARGET katana)
     set(_loaded_first "customisation name=test_symbols origin=loaded kept=no definitions=4 codes=0 rules=0 colours=0")
     add_test(NAME qt_load_customisation_is_no_menu_item_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE \"${_twins}/test_symbols.customisation.json\"|*loadCustomisation"
             "-DREFUSED=${_loaded_first}.*--trigger loadCustomisation failed: [^\r\n]*no such menu item"
@@ -4456,7 +4039,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_replace_customisation_is_no_menu_item_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>CUSTOMISE \"${_twins}/test_symbols.customisation.json\"|*replaceCustomisation"
             "-DREFUSED=${_loaded_first}.*--trigger replaceCustomisation failed: [^\r\n]*no such menu item"
@@ -4477,10 +4060,10 @@ endif()
 # (20,20)-(40,40), so the view is centred on (30,30); Grid is reached by its
 # name and turned off; Erase by its name erases the two, and Undo by its name
 # brings them back.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_select_by_id_selects_and_frames_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>POINT 1,1|>POINT 20,20|>POINT 40,40|*editSelectAll|@editSelectById|selectByIdIds=#2, 3|!selectByIdSelect|?selectByIdStatus|*viewGrid|?viewGrid|*editErase|>LIST|*editUndo|>LIST"
             "-DEXPECT=3 selected.*--dialog editSelectById opened selectByIdDialog \"Select by ID\"[\r\n]+2 selected[\r\n]+scope=selection matched=2[\r\n]+view=1 kind=plan centre=30,30 [^\r\n]*[\r\n]+selectByIdStatus: 2 selected.*viewGrid: Grid, unchecked[\r\n]+2 erased[\r\n]+1 entities[\r\n]+1 +Point +layer=0 +at 1,1.*3 entities"
@@ -4496,7 +4079,7 @@ if(TARGET katana)
     # answer; a Panels toggle by name.
     add_test(NAME qt_every_view_menu_item_is_named_and_its_values_are_typed_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=?viewSnapModeEndpoint|*viewSnapModeEndpoint|?viewSnapModeEndpoint|>SNAP ENDPOINT ON|?viewSnapModeEndpoint|>SNAP CENTRE OFF|>SNAP ENDPOINT OFF|?viewSnap|>SNAP BOGUS|>GRID MAYBE|*viewLayoutQuad|*viewStandardIsoSouthWest|*viewTogglePerspective|>EXAGGERATION 2.5|>EXAGGERATION|>EXAGGERATION 0|*viewVerticalExaggeration|*viewPanelLayers|?viewPanelLayers"
             "-DEXPECT=viewSnapModeEndpoint: Endpoint, checked[\r\n]+viewSnapModeEndpoint: Endpoint, unchecked[\r\n]+snap_mode=endpoint state=on[\r\n]+viewSnapModeEndpoint: Endpoint, checked[\r\n]+snap_mode=center state=off[\r\n]+snap_mode=endpoint state=off[\r\n]+viewSnap: Object Snap, checked[\r\n]+! usage: SNAP [^\r\n]*[\r\n]+! usage: GRID [^\r\n]*[\r\n]+(Orthographic|Perspective) projection\\.[\r\n]+Vertical exaggeration x2\\.50\\.[\r\n]+vertical_exaggeration=2\\.5[\r\n]+! usage: EXAGGERATION [^\r\n]*[\r\n]+! A headless session opens no dialog: type EXAGGERATION <factor> instead\\.[\r\n]+viewPanelLayers: Layers, unchecked"
@@ -4512,7 +4095,7 @@ if(TARGET katana)
     # its own notes among them.
     add_test(NAME qt_the_object_snap_has_one_owner_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SNAP add=quadrant|?actionSnapQuadrant|*viewSnapModeEndpoint|?actionSnapQuadrant|?viewSnapModeEndpoint|>SNAP add=endpoint|?viewSnapModeEndpoint|>DRAFTING"
             "-DEXPECT=modes=[^\r\n]*quadrant.*actionSnapQuadrant: Quadrant, checked.*actionSnapQuadrant: Quadrant, checked.*viewSnapModeEndpoint: Endpoint, unchecked.*viewSnapModeEndpoint: Endpoint, checked.*modes=endpoint[^\r\n]*quadrant"
@@ -4538,10 +4121,10 @@ endif()
 # back from its pixel within a few units in the last place, so a coordinate
 # the view made from it is matched to ten decimals; a caption's middle dot is
 # matched as any characters, as a platform may pass it on in another encoding.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_pointer_steps_hover_and_click_the_plan_view_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>PLINE|+100,110|+110,110|~110,115|>|<LIST"
             "-DEXPECT=pointer: action=hover x=110 y=115 tool=draw.polyline expects=point.*vertices=2 +open +length=10"
@@ -4549,7 +4132,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_insert_vertex_shows_where_the_vertex_goes_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50"
             "-DEXPECT=pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert [^\r\n]*target=1 added=1 removed=0 enter=0 focus=4 refused=no caption=\"new vertex between 1 and 2 [^0-9\"]+ 15[.]000 from 1\" prompt=\"Insert Vertex: Click on polyline 2 where the new vertex goes\""
@@ -4557,7 +4140,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_insert_vertex_puts_it_on_the_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50|+110.3,50|<VERTEX LIST 2"
             "-DEXPECT=vertex 2 added to polyline 2 on segment 1 [(]5 vertices[)].*index=2 x=110 y=(50|49[.]9999999999[0-9]*|50[.]0000000000[0-9]*) z=none bulge=0 bearing=0 distance=(35|34[.]9999999999[0-9]*|35[.]0000000000[0-9]*)[\r\n]"
@@ -4565,7 +4148,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_insert_vertex_beside_the_vertex_clicked_first_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85|>INSERTVERTEX|~111,70|>|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=111 y=70 tool=draw.vertex.insert [^\r\n]*target=2 added=1 removed=0 enter=1 [^\r\n]*caption=\"new vertex between 1 and 2 [^0-9\"]+ 35[.]000 from 1\" prompt=\"Insert Vertex: Press Enter for a vertex at the marked middle of segment 2, or click beside vertex 2 of polyline 2\".*vertices=5.*index=3 x=75 y=85 "
@@ -4579,7 +4162,7 @@ if(TARGET katana)
     # 2 - the click is refused, and Enter then adds there.
     add_test(NAME qt_insert_vertex_beyond_a_chosen_corner_shows_enter_not_a_refusal_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85,shift|>INSERTVERTEX|~140,110|+140,110|>|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=140 y=110 tool=draw.vertex.insert [^\r\n]*enter=1 [^\r\n]*refused=no caption=\"Enter: new vertex between 2 and 3 [^0-9\"]+ 35[.]000 from 2\".*vertices=5 .*index=3 x=75 y=85 "
@@ -4590,7 +4173,7 @@ if(TARGET katana)
     # old edge, and the click is refused with it; the square keeps 4.
     add_test(NAME qt_insert_vertex_refuses_a_choice_edited_since_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85|>INSERTVERTEX|<VERTEX MOVE 2 1 125,30|~111,70|+111,70|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=111 y=70 tool=draw.vertex.insert [^\r\n]*target=0 added=0 [^\r\n]*refused=yes caption=\"polyline 2 changed since it was picked; pick it again\".*! polyline 2 changed since it was picked; pick it again.*vertices=4 "
@@ -4600,7 +4183,7 @@ if(TARGET katana)
     # says Enter deletes it, and Enter does, leaving the square's three others.
     add_test(NAME qt_delete_vertex_takes_the_chosen_vertex_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85,shift|>DELETEVERTEX|~110,85|>|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=110 y=85 tool=draw.vertex.delete [^\r\n]*removed=[1-9][^\r\n]*prompt=\"Delete Vertex: Press Enter to delete vertex 2 of polyline 2, or click another vertex\".*vertices=3 "
@@ -4613,7 +4196,7 @@ if(TARGET katana)
     # marked as Enter's (enter=1). The click leaves (110,35) (110,85) (40,85).
     add_test(NAME qt_delete_vertex_previews_the_click_not_the_chosen_vertex_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|+110,85,shift|>DELETEVERTEX|~40.2,35.2|+40.2,35.2|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=40[.]2 y=35[.]2 tool=draw.vertex.delete [^\r\n]*removed=3 enter=1 [^\r\n]*caption=\"delete vertex 0 [^\"]*\".*vertex 0 deleted.*vertices=3 .*index=0 x=110 y=35 .*index=1 x=110 y=85 .*index=2 x=40 y=85 "
@@ -4624,7 +4207,7 @@ if(TARGET katana)
     # what it did, not in red, until the pointer moves.
     add_test(NAME qt_insert_vertex_is_answered_with_what_it_did_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>INSERTVERTEX|~110.3,50|+110.3,50"
             "-DEXPECT=pointer: action=click x=110[.]3 y=50 tool=draw.vertex.insert [^\r\n]*refused=no caption=\"vertex 2 added to polyline 2 on segment 1 [(]5 vertices[)]\""
@@ -4636,7 +4219,7 @@ if(TARGET katana)
     # snap ON the line is taken, and the preview is there.
     add_test(NAME qt_insert_vertex_with_snaps_on_stays_on_the_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP ON|>ZOOM E|>LINE 60,89.5 60,100|>SELECT 2|>INSERTVERTEX|~60,85.2|+60,85.2|<VERTEX LIST 2"
             "-DEXPECT=pointer: action=hover x=60 y=85[.]2 tool=draw.vertex.insert [^\r\n]*target=1 added=1 [^\r\n]*refused=no .*vertices=5 "
@@ -4648,7 +4231,7 @@ if(TARGET katana)
     # and its two segments, the three removed marks.
     add_test(NAME qt_straighten_shows_what_goes_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 1|>STRAIGHTEN|+160,0|~80.5,129.5"
             "-DEXPECT=pointer: action=hover x=80[.]5 y=129[.]5 tool=draw.vertex.straighten [^\r\n]*target=2 added=0 removed=3 [^\r\n]*caption=\"straighten 1 to 3 [^0-9\"]+ removes 1 vertex\" prompt=\"Straighten: Click the other vertex to keep [[]Other side[]]\""
@@ -4659,7 +4242,7 @@ if(TARGET katana)
     # cx = 96.8 and the radius sqrt(799.24) = 28.271.
     add_test(NAME qt_segment_to_arc_shows_the_arc_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>SEGMENTARC|+110.2,60|~125,62"
             "-DEXPECT=pointer: action=hover x=125 y=62 tool=draw.vertex.arc expects=point shapes=1 [^\r\n]*target=1 [^\r\n]*caption=\"segment 1 [^0-9\"]+ radius 28[.]271\""
@@ -4669,7 +4252,7 @@ if(TARGET katana)
     # preview and at the click, and asks for no radius: still the pick.
     add_test(NAME qt_fillet_refuses_an_end_vertex_at_the_pick_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 3|>FILLETVERTEX|~60.2,35|+60.2,35"
             "-DEXPECT=pointer: action=hover x=60[.]2 y=35 tool=draw.vertex.fillet [^\r\n]*refused=yes caption=\"vertex 0 is an end of the polyline; a corner is where two segments meet\" prompt=\"Fillet Vertex: Click the corner vertex of polyline 3 to round\".*pointer: action=click x=60[.]2 y=35 tool=draw.vertex.fillet expects=entity [^\r\n]*prompt=\"Fillet Vertex: Click the corner vertex of polyline 3 to round\""
@@ -4681,7 +4264,7 @@ if(TARGET katana)
     # regex's "." is that backslash.
     add_test(NAME qt_pointer_record_quotes_a_bearing_as_a_reply_does_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SNAP OFF|>ZOOM E|>SELECT 2|>MOVEVERTEX|+110,85|~110,95"
             "-DEXPECT=pointer: action=hover x=110 y=95 tool=draw.vertex.move [^\r\n]*caption=\"vertex 2 [^0-9\"]+ moves 10[.]000 at 0[^0-9]+00'00.\"\" prompt=\"Move Vertex: Specify its new position\""
@@ -4691,7 +4274,7 @@ if(TARGET katana)
     # where nobody could see it. Now Enter says why, and it stays closed.
     add_test(NAME qt_close_or_open_leaves_a_selected_polyline_on_a_hidden_layer_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SELECT 2|<LAYER HIDE BUILDING|>CLOSEOPEN|>|<VERTEX LIST 2"
             "-DEXPECT=! the selected polylines are on hidden or locked layers; select others, then press Enter.*id=2 kind=polyline closed=yes vertices=4 "
@@ -4702,7 +4285,7 @@ if(TARGET katana)
     # line 4, (5,15)-(120,15), stayed where it was.
     add_test(NAME qt_move_takes_a_relative_point_with_a_dz_in_plan_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DDRIVE=>SELECT 4|>MOVE|>0,0|>@0,5,0|<INFO 4"
             "-DEXPECT=1 entity moved.*Line +layer=ROAD +5,20 -> 120,20"
@@ -4733,13 +4316,13 @@ endif()
 # the window"): each dialog builds the verb line and runs it through the
 # window's one executor, so its reply is logged as a typed line's is and one
 # typed UNDO takes its edit back.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     # Format > Dimension Styles...: a style named and made, three fields set
     # by one Apply and read back by INFO; one UNDO restores all three (the
     # defaults: 2.5, closed filled, model units - tables.hpp).
     add_test(NAME qt_the_dimension_styles_manager_runs_its_lines_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatDimensionStyles|dimStyleNewName=site|!dimStyleNew|dimStyleText=3.5|dimStyleHead=Tick|dimStylePaper=on|!dimStyleApply|?dimStylePreview|?dimStyleList|>DIMSTYLE INFO site|>UNDO|>DIMSTYLE INFO site"
             "-DEXPECT=dimension style site created.*dimension style site updated.*dimStylePreview: a dimension of 10 reads as 10\\.000.*dimStyleList: Standard \\| no layer \\(the default\\) ; site \\| no layer.*name=site text=3\\.5 [^\r\n]*head=Tick [^\r\n]*paper=on.*name=site text=2\\.5 [^\r\n]*head=ClosedFilled [^\r\n]*paper=off"
@@ -4751,7 +4334,7 @@ if(TARGET katana)
     # the form changed.
     add_test(NAME qt_multiline_text_and_edit_text_run_in_the_window_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>ANNOSCALE 500|>MT|>5,5|>|>PIT 12|>IL 10.50|>|>|>TEXT 0,0 2.5 old|>SELECT 2|@annotateEditText|?textEditStatus|textEditText=new words|textEditJustify=MC|!textEditApply|>LIST"
             "-DEXPECT=textEditStatus: Text 2.*updated text id=2.*1  Text  layer=0  \"PIT 12.nIL 10\\.50\"  height=1\\.25  style=Standard[\r\n]+2  Text  layer=0  \"new words\"  height=2\\.5  justify=MC"
@@ -4763,7 +4346,7 @@ if(TARGET katana)
     # back by the verbs.
     add_test(NAME qt_the_label_style_manager_runs_chosen_rules_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@formatLabelStyles|!labelStyleDefaults|labelStyleNewName=Lot areas|labelStyleNewKind=area|!labelStyleNew|labelStyleTabs=Auto-Label Rules|labelRuleName=lots|labelRuleStyle=Lot Area|labelRuleType=Polyline|!labelRuleAdd|>RECT 0,0 20,20|labelRuleTable=lots|!labelRulePreview|?labelRuleReport|?labelRuleTable|!labelRuleRun|>AUTOLABEL RULE LIST"
             "-DEXPECT=created label style name=\"Lot areas\" kind=area.*labelRuleReport: preview created=1 kept=0 removed=0 skipped=0.*labelRuleTable: lots \\| Lot Area \\| \\| \\| Polyline \\| \\| yes \\| 1.*autolabel created=1 kept=0 removed=0 skipped=0.*name=lots style=\"Lot Area\" layer=\"\" code=\"\" type=Polyline labellayer=\"\" enabled=on"
@@ -4784,10 +4367,10 @@ endif()
 # Edit Label unpins it and gives it its own words through the one executor,
 # naming only those two; the Label Layout Report finds the one label placed
 # and none without room; the Annotate menu offers the tool and both dialogs.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_labels_are_made_edited_and_reported_in_the_window_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>PLINE 0,0 30,0 30,40 0,40 CLOSE|>LABELSTYLE DEFAULTS|>SELECT 1|>LBL|>S|>Lot Area|>12,20|>|?annotate.label|>SELECT 2|?propertyTable|@annotateEditLabel|labelEditPinned=off|labelEditOverride=on|labelEditText=LOT 7|?labelEditCommand|!labelEditApply|?labelEditStatus|@annotateLabelLayout|?labelLayoutPlaced|?labelLayoutSuppressed|>LABEL LIST|?annotateMenu"
             "-DEXPECT=1 label in style Lot Area.*annotate\\.label: Label Objects, unchecked.*propertyTable: .*Text \\| 1200\\.0 m[^;]* ; Position \\| pinned at 12\\.0000, 20\\.0000.*labelEditCommand: LABEL SET 2 text=\"LOT 7\" at=none[\r\n]+.*labelEditStatus: updated label id=2.*labelLayoutPlaced: 1[\r\n]+labelLayoutSuppressed: 0.*id=2 style=\"Lot Area\" target=1 part=-1 layer=0 rule=\"\" text=\"LOT 7\".*annotateMenu: Annotate: .*Label Objects .*Edit Label\\.\\.\\. .*Label Layout Report\\.\\.\\."
@@ -4805,7 +4388,7 @@ if(TARGET katana)
     # first. LEADER's Callout option boxes the next leader's note.
     add_test(NAME qt_existing_leader_positions_and_box_are_edited_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>LEADER 0,0 5,5 10,5 text=NOTE|>SELECT 1|>ZOOM WINDOW -5,-5,30,20|@annotateLeaders|leaderPositionPoint=Bend 1|leaderPositionX=7.125|leaderPositionY=8.5|leaderCallout=box|leaderLandingAngle=180|!leaderApply|?leaderLine|>LEADER LIST 1 JSON|>UNDO|>LEADER LIST 1 JSON|>REDO"
             "-DEXPECT=leaderLine: LEADER SET 1 callout=box landingangle=180 vertex=1 at=7.125,8.5.*\"callout\":[ \t\r\n]*\"box\".*\"points\":[ \t\r\n]*\\[[ \t\r\n]*\\[[ \t\r\n]*0\\.0,[ \t\r\n]*0\\.0[ \t\r\n]*\\],[ \t\r\n]*\\[[ \t\r\n]*7\\.125,[ \t\r\n]*8\\.5[ \t\r\n]*\\],[ \t\r\n]*\\[[ \t\r\n]*10\\.0,[ \t\r\n]*5\\.0[ \t\r\n]*\\][ \t\r\n]*\\].*\"callout\":[ \t\r\n]*\"none\""
@@ -4819,7 +4402,7 @@ if(TARGET katana)
 
     add_test(NAME qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>DIM LINEAR 0,0 10,0 at=5,5|>DBA|?annotate.dimbaseline|>20,0|>|>|>BALLOON|>30,0|>35,5|>|>|>LE|>C|>B|>40,0|>45,5|>|>NOTE|>|>|>LIST"
             "-DEXPECT=annotate\\.dimbaseline: Baseline Dimension, checked[\r\n]+1 baseline dimension.*balloon 1.*leader with 1 line of text.*4 entities[\r\n]+1  Dimension  layer=0  linear  measures 10[\r\n]+2  Dimension  layer=0  linear  measures 20[\r\n]+3  Leader  layer=0  vertices=2  tip 30,0  \"1\"  callout=circle[\r\n]+4  Leader  layer=0  vertices=2  tip 40,0  \"NOTE\"  callout=box"
@@ -4839,10 +4422,10 @@ endif()
 # Set runs CRS SET through the window's command runner (since 2026-09-29), so
 # its reply is logged as a typed line's is: the first "crs id" line is Set's,
 # the second the >CRS step's.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileProjectCrs|?projectCrsCurrent|projectCrsPlace=115.86,-31.95|!projectCrsSuggest|?projectCrsList|projectCrsText=EPSG:7850|?projectCrsCheck|!projectCrsApply|>CRS|>UNDO|>CRS"
             "-DEXPECT=--dialog fileProjectCrs opened projectCrsDialog \"Project Coordinate System\"[\r\n]+projectCrsCurrent: Now: no coordinate system[\r\n]+projectCrsList: Suggested for this place [^\r\n]*[\r\n]+projectCrsCheck: EPSG:7850 GDA2020 / MGA zone 50 - projected, metre[^\r\n]*[\r\n]+crs id=EPSG:7850 name=\"GDA2020 / MGA zone 50\"[^\r\n]*[\r\n]+crs id=EPSG:7850 name=\"GDA2020 / MGA zone 50\"[^\r\n]*[\r\n]+1 undone[\r\n]+crs id=none"
@@ -4861,10 +4444,10 @@ endif()
 # it is logged and is one step that UNDO takes back. Non-modal, as the CRS
 # dialog is, so the run fills it by its object names. A headless run reads
 # and writes no settings, so the screen's own memory is not touched.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_the_start_screen_sets_the_coordinate_system_through_the_executor_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@fileStartScreen|?startLine|startCrs=EPSG:7856|?startCrsCheck|?startLine|!startOk|>CRS|>UNDO|>CRS"
             "-DEXPECT=--dialog fileStartScreen opened startDialog \"Start\"[\r\n]+startLine: Nothing to change: the session starts as it is\\.[\r\n]+startCrsCheck: EPSG:7856 GDA2020 / MGA zone 56 - projected, metre[^\r\n]*[\r\n]+startLine: CRS SET EPSG:7856[\r\n]+.*crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\"[^\r\n]*[\r\n]+crs id=EPSG:7856 name=\"GDA2020 / MGA zone 56\"[^\r\n]*[\r\n]+1 undone[\r\n]+crs id=none"
@@ -4883,10 +4466,10 @@ endif()
 # step that still wants the dialog is refused naming it. The driver once kept
 # a raw pointer to the dialog, and such a run crashed at the grab (exit
 # 0xC0000005) after every step had passed.
-if(TARGET katana)
+if(KATANA_TEST_WINDOW)
     add_test(NAME qt_a_dialog_that_deletes_itself_on_close_leaves_the_window_the_target_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SHEET NEW PLAN|*fileSheets|@sheetPageSetup|plotDpi=150|!pageSetupSave|>SHEETS PAGESETUP"
             "-DEXPECT=pagesetup style=colour lineweight=1 dpi=150 pattern=\"[^\"]*\" filepersheet=off.*sheetPageSetup has closed: the window is grabbed"
@@ -4894,7 +4477,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_a_step_for_a_dialog_that_has_closed_is_refused_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana>"
+            "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>SHEET NEW PLAN|*fileSheets|@sheetPageSetup|!pageSetupSave|plotDpi=300"
             "-DREFUSED=pagesetup style=colour[^\r\n]*[\r\n]+.*--fill plotDpi=300: sheetPageSetup has closed"
@@ -4906,3 +4489,8 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# The directories of their own (the top of this file lists them).
+add_subdirectory(cli)
+add_subdirectory(interop)
+add_subdirectory(update)

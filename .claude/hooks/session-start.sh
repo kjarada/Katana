@@ -21,9 +21,8 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 export KATANA_TOOLCHAIN="${KATANA_TOOLCHAIN:-/opt/katana-toolchain}"
 if ! python3 tools/setup_linux_toolchain.py --prefix "$KATANA_TOOLCHAIN" --check 2> /dev/null; then
     python3 tools/setup_linux_toolchain.py --prefix "$KATANA_TOOLCHAIN" >&2
-    # A new toolchain invalidates what the configure found out about the old
-    # one: when the sysroot moved from glibc 2.39 to 2.28, a kept cache still
-    # said pthread_create was in libc, and every program failed to link.
+    # A new toolchain invalidates what the test runner's configure found out
+    # about the old one.
     rm -f build/linux-release/CMakeCache.txt
 fi
 
@@ -31,7 +30,7 @@ fi
 # python3 that would shadow the system one.
 tools_bin="$KATANA_TOOLCHAIN/katana-bin"
 mkdir -p "$tools_bin"
-for tool in cmake ctest cpack ninja clang-format; do
+for tool in cargo rustc cmake ctest cpack ninja; do
     ln -sf "$KATANA_TOOLCHAIN/bin/$tool" "$tools_bin/$tool"
 done
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
@@ -54,18 +53,29 @@ if ! command -v xvfb-run > /dev/null || [ ! -e /usr/share/vulkan/icd.d/lvp_icd.j
     fi
 fi
 
-# Configure (seconds), not build (minutes of four cores): the first `cmake
-# --build` of the session does that, incrementally from here on.
-cmake --preset linux-release > /dev/null
+# The programs are built with cargo (target/ under rust/ unless
+# CARGO_TARGET_DIR says otherwise); CMake only runs the process-level tests
+# against them. Configure that runner (seconds); the first cargo build of the
+# session is the long step.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/rust/target}"
+export RUSTFLAGS="${RUSTFLAGS:--C link-arg=-Wl,-rpath,$KATANA_TOOLCHAIN/lib}"
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    {
+        echo "export CARGO_TARGET_DIR=\"$CARGO_TARGET_DIR\""
+        echo "export RUSTFLAGS=\"$RUSTFLAGS\""
+    } >> "$CLAUDE_ENV_FILE"
+fi
+cmake --preset linux-release -DKATANA_PROGRAMS="$CARGO_TARGET_DIR/release" > /dev/null
 
 cat <<'MSG'
-Katana cloud session: the Linux toolchain is installed and build/linux-release is configured.
+Katana cloud session: the Linux toolchain is installed and the test runner (build/linux-release) is configured.
 
-- Toolchain: GCC 16.2, Qt 6, CGAL 6, PROJ, GDAL, PDAL, GoogleTest and Benchmark from conda-forge, in $KATANA_TOOLCHAIN (tools/setup_linux_toolchain.py). cmake, ctest, ninja and clang-format from it are on PATH. The system g++ is too old for this code; never build with it.
-- Build: cmake --build --preset linux-release   (all targets take about 10 minutes on this machine; name a target, e.g. --target katana_render_tests, when one suite will do)
-- Test:  ctest --preset linux-release -j 4       (or one suite: build/linux-release/bin/tests/katana_<module>_tests --gtest_filter=...)
-- Other presets: linux-debug, linux-relwithdebinfo, linux-sanitize. Format: cmake --build --preset linux-release --target format-check
-- github.com downloads are blocked here: never add a FetchContent/URL download to the Linux path; the toolchain file finds GoogleTest and Benchmark in the prefix.
-- The GPU renderer (src/katana_qt/gpu) is built here too, on Vulkan (docs/gpu.md). Its tests run on xcb under Xvfb, on Mesa's lavapipe: this hook installs both (xvfb, mesa-vulkan-drivers); without them those cases skip. Offscreen, the 3D view uses the software rasteriser.
-- How work is done in this repository - measuring before claiming, derived test expectations, the SIMD kernel rules - is docs/architecture.md, "Working rules", and docs/performance.md. Read those before changing code.
+- Katana is Rust: one Cargo workspace in rust/ (rust/crates/katana_<layer>), the window in egui and wgpu. There is no C++ but three small shims inside rust/crates that GDAL's algorithm framework and PDAL need.
+- Toolchain: rustc, cargo, GCC (for the shims), PROJ, GDAL and PDAL from conda-forge, in $KATANA_TOOLCHAIN (tools/setup_linux_toolchain.py); cargo, cmake and ctest from it are on PATH.
+- Build: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release
+- Lint:  cargo clippy --manifest-path rust/Cargo.toml --locked --workspace --all-targets --release -- -D warnings
+- Test:  cargo test --manifest-path rust/Cargo.toml --locked --workspace --release   (one crate: -p katana_<layer>)
+- Process tests (the cli.* and headless window tests, against the built programs): xvfb-run -a ctest --test-dir build/linux-release -j 4 --output-on-failure
+- github.com downloads are blocked here; crates come through crates.io as Cargo.lock pins them.
+- How work is done in this repository: CLAUDE.md, docs/rust.md and docs/architecture.md, "Working rules". Read those before changing code.
 MSG

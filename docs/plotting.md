@@ -1,7 +1,7 @@
 # Sheets: the plot frame, sheet sets and the sheet generators
 
 A drawing is handed over on paper, or as PDF pages that stand in for paper.
-Katana's single-page plot (`include/katana/cad/plot.hpp`, `docs/cad.md`) puts
+Katana's single-page plot (`rust/crates/katana_cad/src/plot.rs`, `docs/cad.md`) puts
 one plan view on one page. This document describes what a whole SET of sheets
 is made of: several sheets, each with a title block and several views, all
 numbered and filled in automatically.
@@ -16,21 +16,21 @@ The owner asked for three things:
   packed with cross sections.
 
 This part is the **model**: the data, the frame, the generators and the
-undoable edits. It lives in `katana_cad` and uses no Qt. The painter that
+undoable edits. It lives in `katana_cad` and draws nothing itself. The painter that
 draws a sheet and the editor for sheets come next ("Not yet", at the end).
 
-| Header (`include/katana/cad/plotting/`) | What it holds |
+| Module (`rust/crates/katana_cad/src/plotting/`) | What it holds |
 |---|---|
-| `frame.hpp` | the frame: paper, margins, drawing area, lines, texts, cells, field slots, the logo slot; uniform scaling to other sizes |
-| `sheet_set.hpp` | `SheetSet`, `Sheet`, `Viewport`; fields and their automatic values |
-| `layout.hpp` | the eight tiling presets, the tiling rank of every viewport kind, snapping |
-| `generators.hpp` | fit, grid, strips, cross sections, sheets from plot frames, the smart layout |
-| `sheet_json.hpp` | the versioned JSON a project stores its sheets in |
-| `sheet_commands.hpp` | the undoable edits, the logo import, the project's field values |
+| `frame.rs` | the frame: paper, margins, drawing area, lines, texts, cells, field slots, the logo slot; uniform scaling to other sizes |
+| `sheet_set.rs` | `SheetSet`, `Sheet`, `Viewport`; fields and their automatic values |
+| `layout.rs` | the eight tiling presets, the tiling rank of every viewport kind, snapping |
+| `generators.rs` | fit, grid, strips, cross sections, sheets from plot frames, the smart layout |
+| `sheet_json.rs` | the versioned JSON a project stores its sheets in |
+| `sheet_commands.rs` | the undoable edits, the logo import, the project's field values |
 
-`include/katana/cad/document.hpp` gains `sheetSet()`, `sheetSetStatus()` and
-`setSheetSet()`, and `plot.hpp` gains the finer sheet scale ladder
-`kSheetScales` and `sheetScaleAtLeast`. The tests are in `tests/cad/plotting/`.
+`rust/crates/katana_cad/src/document.rs` gains `sheet_set()`, `sheet_set_status()` and
+`set_sheet_set()`, and `plot.rs` gains the finer sheet scale ladder
+`SHEET_SCALES` and `sheet_scale_at_least`. The tests are in `tests/cad/plotting/`.
 
 ## Paper coordinates
 
@@ -54,9 +54,9 @@ furniture.
 | `client` | a field for a frame that has a client cell |
 | `locator`, `surveyor`, `compiler`, `reviewer`, `approver` | a name and a date each (`SignOff`); a missing date prints the plot date |
 | `notes` | the notes cell (the other slot the user fills) |
-| `heightDatum`, `coordinateSystem`, `modelName` | text for the survey-details cells; an empty coordinate system is the project's |
-| `setNumber` | the drawing-set number |
-| `logoAsset` | the logo's file name in the project's `assets/` directory |
+| `height_datum`, `coordinateSystem`, `model_name` | text for the survey-details cells; an empty coordinate system is the project's |
+| `set_number` | the drawing-set number |
+| `logo_asset` | the logo's file name in the project's `assets/` directory |
 
 | `Sheet` | |
 |---|---|
@@ -64,7 +64,7 @@ furniture.
 | `name` | what the sheet shows (`PLAN TILE 3`, `ROAD CH 0.000 TO 172.500`) |
 | `paper`, `landscape` | ISO A0 to A4 |
 | `frame` | `a3_landscape` (the built-in frame, scaled to the paper) or empty for no frame |
-| `frameLegend` | whether the frame's legend block is drawn |
+| `frame_legend` | whether the frame's legend block is drawn |
 | `fields` | the title-block values this sheet overrides, by field name; an override always wins |
 | `viewports` | back to front |
 
@@ -73,19 +73,19 @@ furniture.
 | `id` | `vp1`, `vp2`...: unique across the set |
 | `kind` | `Plan`, `LongSection`, `CrossSections`, `Model3D` (a snapshot of the 3D view), `Legend`, `Notes`, `Image`, `KeyPlan`, `SheetIndex` (the drawing register), `Revisions` (the revision table) |
 | `rect` | the rectangle on the paper, mm; empty until the viewport is placed |
-| `scale`, `autoScale` | 1 : `scale`; with `autoScale` the painter chooses the largest standard scale at which the content fits |
-| `centre`, `autoCentre` | the world point at the rectangle's centre: for a plan (easting, northing); for a long section (chainage, level); for a cross section (offset, level), offset 0 being the centreline. `autoCentre` asks the painter to centre what it draws and keep the scale |
+| `scale`, `auto_scale` | 1 : `scale`; with `auto_scale` the painter chooses the largest standard scale at which the content fits |
+| `centre`, `auto_centre` | the world point at the rectangle's centre: for a plan (easting, northing); for a long section (chainage, level); for a cross section (offset, level), offset 0 being the centreline. `auto_centre` asks the painter to centre what it draws and keep the scale |
 | `rotation` | radians counter-clockwise: the world direction that runs left to right across the paper |
-| `verticalExaggeration` | sections only |
-| `tiltDegrees` | a 3D snapshot's camera height angle |
+| `vertical_exaggeration` | sections only |
+| `tilt_degrees` | a 3D snapshot's camera height angle |
 | `source` | the alignment, the chainage range, and the section interval or stations |
-| `hiddenLayers` | a `cad::LayerOverrides`, the same value a plan view uses to hide layers |
-| `title` | empty: `automaticTitle` (`PLAN 1:500`, `LONG SECTION H 1:500 V 1:50`, `CROSS SECTION CH 120.000`) |
-| `northArrow`, `scaleBar` | furniture flags for the painter |
+| `hidden_layers` | a `katana_cad::layer_overrides::LayerOverrides`, the same value a plan view uses to hide layers |
+| `title` | empty: `automatic_title` (`PLAN 1:500`, `LONG SECTION H 1:500 V 1:50`, `CROSS SECTION CH 120.000`) |
+| `north_arrow`, `scale_bar` | furniture flags for the painter |
 | `locked` | tiling and snapping leave the viewport alone |
 | `text` | a Notes panel's text; an Image panel's asset file name |
 | `marks` | world lines drawn over the view: match lines and a key plan's sheet outlines (`WorldMark`) |
-| `revisionLimit` | a Revisions table's newest so many revisions; 0 for every one |
+| `revision_limit` | a Revisions table's newest so many revisions; 0 for every one |
 
 Everything is a plain value with `operator==`, so a test, an undo step and
 the JSON round trip can each compare whole sets.
@@ -98,10 +98,10 @@ The frame is the owner's cross-section app's A3 landscape frame. It was
 measured item by item from the app's own parser and renderer, and the
 renders were compared with the app's page. The result is committed as data:
 `resources/plot_frames/a3_landscape.json`. The build compiles that file in
-with C++26 `#embed` (`src/katana_cad/plotting/frame.cpp`, with
-`--embed-dir` set in `src/katana_cad/CMakeLists.txt`). The dependency file
-names the JSON, so editing it rebuilds the frame, and a missing file is a
-build error rather than a blank title block.
+with `include_bytes!` (`rust/crates/katana_cad/src/plotting/frame.rs`; the C++
+used C++26 `#embed` of the same file). Cargo tracks the included file, so
+editing it rebuilds the frame, and a missing file is a build error rather than
+a blank title block.
 
 The measured frame had 179 items (85 lines, 80 texts, 14 symbols) and 18
 fields. The 34 items of the original organisation's branding were removed
@@ -112,7 +112,7 @@ occupied are now **empty slots the user fills**:
 
 | Slot | Cell (mm, bottom-left origin) | Size | Filled with |
 |---|---|---|---|
-| logo | 167.265..220.229 x 22.625..34.625 | 52.964 x 12.0 | the user's own logo image (`fitImage`: the largest size that fits inside the cell less 1 mm of padding all round, aspect ratio kept, centred; a 4:1 logo prints 40 x 10 mm) |
+| logo | 167.265..220.229 x 22.625..34.625 | 52.964 x 12.0 | the user's own logo image (`fit_image`: the largest size that fits inside the cell less 1 mm of padding all round, aspect ratio kept, centred; a 4:1 logo prints 40 x 10 mm) |
 | organisation | 297.117..401.843 x 28.865..34.625 | 104.726 x 5.76 | `{organisation}`, centred, at the removed header's 3.738 mm cap height |
 | notes | 220.229..297.117 x 12.0..34.625 | 76.888 x 22.625 | `{notes}`, from the removed text's first-line anchor (220.918, 32.961), 0.85 mm caps |
 
@@ -141,18 +141,18 @@ occupied are now **empty slots the user fills**:
   - The height is the **cap height**, not the em.
   - Nearly every label has an x factor of 0.82. A painter applies it as a
     horizontal painter scale, never as a font stretch: on Arial the painter
-    scale gives exactly Arial Narrow's width, while `QFont::setStretch(82)`
-    measures 89%.
+    scale gives exactly Arial Narrow's width, while a font stretch of 82
+    (Qt's, measured in the C++) gave 89%.
   - A multi-line text anchors on its first line, and later lines step down by
     1.5 x the cap height whatever the justification.
   - Justification is vertical (bottom, middle, top) by horizontal (left,
     centre, right). The angle is in degrees counter-clockwise; the filename
     up the left margin is at 90.
 - **Centred values.** The scale, the sheet number and the sheet count are
-  centred in their ruled cells (`FrameText::centredIn`), as the app
+  centred in their ruled cells (`FrameText::centred_in`), as the app
   re-centres them.
 - **Legend symbols.** The 14 legend symbols are kept by the name of their
-  style (`FrameSymbol`). `Sheet::frameLegend` turns the legend block off.
+  style (`FrameSymbol`). `Sheet::frame_legend` turns the legend block off.
 
 The cells are `drawing_area`, `legend`, `scale`, `coord_system`,
 `height_datum`, `file_model`, `logo`, `signoff`, `notes`, `manager`,
@@ -179,7 +179,7 @@ The cells are `drawing_area`, `legend`, `scale`, `coord_system`,
 
 Only the A3 frame exists, so the other A sizes use it **scaled uniformly**.
 The factor is `min(paper width / 420, paper height / 297)`, the largest that
-fits (`frameScaleFor`):
+fits (`frame_scale_for`):
 
 | Paper (landscape) | Factor | Why |
 |---|---|---|
@@ -200,7 +200,7 @@ paper's real edge, not the scaled frame's.
 laid out for landscape paper. Scaled to fit across a portrait page it would
 print 0.7 mm labels on A3. A portrait sheet (and a sheet whose `frame` is
 empty) gets the paper less 10 mm all round as its drawing area: the
-single-page plot's default margin, so the two agree. `frameFor` refuses a
+single-page plot's default margin, so the two agree. `frame_for` refuses a
 portrait sheet with `InvalidArgument` rather than hand back a frame that
 does not fit.
 
@@ -208,10 +208,10 @@ does not fit.
 
 `resolveFields(set, sheetIndex, context)` gives every field of a sheet. The
 order of precedence is: the sheet's own override, then the set's value, then
-the automatic value. `expandTemplate` fills a frame text's `{field}`
+the automatic value. `expand_template` fills a frame text's `{field}`
 placeholders, and `{{` is a literal brace. The `FieldContext` is what the
 project contributes; `fieldContextFor(document, plotDate)` builds it, so
-`resolveFields` stays a pure function.
+`resolve_fields` stays a pure function.
 
 | Field | Automatic value |
 |---|---|
@@ -219,7 +219,7 @@ project contributes; `fieldContextFor(document, plotDate)` builds it, so
 | `sheet_count` | **the number of sheets in the set**. The app left this as typed, so a set that grew to twelve sheets still said "of 1" |
 | `scale` | the main viewport's scale; see below |
 | `sheet_name`, `paper` | the sheet's |
-| `plot_date` | the date the sheet is plotted, as `dd/mm/yy` (`frameDate`) |
+| `plot_date` | the date the sheet is plotted, as `dd/mm/yy` (`frame_date`) |
 | `locator_name/_date` ... `approver_name/_date` | the set's sign-offs, each with its own date; a missing date is the plot date |
 | `project_line_1`, `project_line_2` | the set's, else the project's name and description |
 | `project_line_3`, `project_line_4`, `organisation`, `client`, `notes`, `height_datum`, `model_name`, `set_number` | the set's (the project records no height datum or organisation) |
@@ -242,11 +242,11 @@ viewports drawn to scale (plans and sections).
 
 **Match lines and key-plan outlines** name the sheet they lead to by its id
 (`WorldMark::sheet`). The number is looked up when the mark is drawn
-(`markLabel`: `MATCH LINE CH 250.000 - SEE SHEET 3`), so reordering the
+(`mark_label`: `MATCH LINE CH 250.000 - SEE SHEET 3`), so reordering the
 sheets cannot make a mark lie.
 
 Removing a sheet cannot make one lie either. The marks that led to it still
-name its id, and `newSheetIds` counts every id a mark names as taken, so the
+name its id, and `new_sheet_ids` counts every id a mark names as taken, so the
 next sheet added gets a new one. A mark whose sheet is gone prints its label
 alone (`MATCH LINE`), not `SEE SHEET` and the number of a stranger. Example:
 a key plan and three tiles, `s1` to `s4`. Remove `s4` and add a legend: the
@@ -260,10 +260,10 @@ no id is given out twice.
 
 ## The sheet scale ladder
 
-The single-page plot's `kStandardScales` starts at 1:100. It is unchanged,
+The single-page plot's `STANDARD_SCALES` starts at 1:100. It is unchanged,
 along with its tests. Sheets hold details and sections too: a cross section
 at 1:100 on a 120 mm cell is only 12 m wide. So sheets use their own ladder,
-`kSheetScales`:
+`SHEET_SCALES`:
 
 1:1, 2, 5, 10, 20, 25, 50, 75, 100, 125, 150, 200, 250, 500, 750, 1000, 1250,
 2000, 2500, 5000, 10 000, 20 000, 25 000, 50 000.
@@ -271,13 +271,13 @@ at 1:100 on a 120 mm cell is only 12 m wide. So sheets use their own ladder,
 It contains every step of the plot ladder. `sheetScaleAtLeast(needed)` gives
 the first step at or above `needed`: the largest standard scale at which
 something needing 1:`needed` still fits. Beyond 1:50 000 it returns `needed`
-itself, as `fitScale` does.
+itself, as `fit_scale` does.
 
 ## Layout: the presets, the ranks, snapping
 
 `tileViewports(sheet, preset)` lays a sheet's viewports into one of the
 app's eight presets. It uses the app's 3 mm gutter, inside the drawing area
-inset by 1 mm (`tilingArea`). Each cell is its share of that area less half
+inset by 1 mm (`tiling_area`). Each cell is its share of that area less half
 the gutter on every side:
 
 | Preset | Id (stored, never renamed) | Cells |
@@ -330,9 +330,9 @@ off.
 Each generator returns sheets. None touches a document. Each is
 deterministic: the same request gives the same sheets, compared whole in a
 test. `addSheets(document, sheets)` adds a generator's output as ONE undo
-step. It gives every sheet and viewport a new id (`newSheetIds`,
-`newViewportIds`) and moves the marks' sheet references with them
-(`prepareForAppend`). The paper is A3 landscape with the built-in frame
+step. It gives every sheet and viewport a new id (`new_sheet_ids`,
+`new_viewport_ids`) and moves the marks' sheet references with them
+(`prepare_for_append`). The paper is A3 landscape with the built-in frame
 unless a `SheetTemplate` says otherwise.
 
 **Fit to one sheet: `fitToSheet(extent)`.** This gives one plan filling the
@@ -351,7 +351,7 @@ its length. A single point has nothing to scale to and is refused.
 - Each tile's plan carries a match line down the middle of every overlap it
   shares with a tile kept, leading to the sheet across it. There is none
   towards a tile left out, which has no sheet to lead to.
-- With `keyPlan`, sheet 1 shows every kept tile's outline, numbered, at the
+- With `key_plan`, sheet 1 shows every kept tile's outline, numbered, at the
   scale that holds them all.
 - Not one tile with anything drawn in it is refused (`NotFound`). Without
   `drawn`, every tile is kept.
@@ -367,18 +367,18 @@ Example: 400 x 200 m at 1:500 with 10 m of overlap.
 
 **What counts as drawn in a tile.** The tile's whole ground counts, overlaps
 included, since its plan shows them.
-- Headless, it is `drawsIn(model, view, box)` (`arrange.hpp`), what a plan of
+- Headless, it is `drawsIn(model, view, box)` (`arrange.rs`), what a plan of
   the drawing draws:
   - an entity by its geometry as a crossing box takes it
-    (`cad::touchesBox`, the rule `pickInBox` selects by);
+    (`katana_cad::selection::touches_box`, the rule `pick_in_box` selects by);
   - a hatched closed boundary by its fill as well;
   - every alignment;
-  - construction lines left out, as `drawnExtent` leaves them.
-- In the window, it is `planDrawsIn` (`plan_painter.hpp`), which adds what
+  - construction lines left out, as `drawn_extent` leaves them.
+- In the window, it is `plan_draws_in` (`plan_painter.rs`), which adds what
   only the window holds:
-  - the road model's outlines, as `drawRoadModel` draws them;
+  - the road model's outlines, as `draw_road_model` draws them;
   - a visible surface, by its triangles;
-  - imagery, point clouds and meshes, by their extents, as `planDrawnBounds`
+  - imagery, point clouds and meshes, by their extents, as `plan_drawn_bounds`
     counts them.
 
 Why the geometry and not the bounding boxes: one diagonal road's box covers
@@ -406,11 +406,11 @@ alignment's bearing. The first strip's match line crosses at CH 172.500.
 
 **Cross sections: `crossSectionSheets(alignment, name, {interval or stations,
 halfWidth, rows, columns, scale, exaggeration, surfaces})`.**
-- The stations follow the rule of `cad::sectionStations`: every interval
+- The stations follow the rule of `katana_cad::section::section_stations`: every interval
   from the start, and the end.
 - Each section is cut square to the alignment itself at its true chainage
-  (`pointAtStationOffset` either side), left to right looking along it, as
-  `crossSectionLine` draws one. It is not cut at a distance along the
+  (`point_at_station_offset` either side), left to right looking along it, as
+  `cross_section_line` draws one. It is not cut at a distance along the
   alignment's chorded polyline. That polyline is shorter than the alignment
   on every curve, so the end chainage fell past its end and was refused.
 - Example: east 300 m, a 100 m radius curve, then north 300 m. The road ends
@@ -529,7 +529,7 @@ Examples:
 
 **No schema change.** The set is stored as versioned JSON under the
 project's metadata key `sheets`. The storage layer keeps any metadata key it
-does not read and writes it back unchanged (`ProjectMetadata::unknownKeys`).
+does not read and writes it back unchanged (`ProjectMetadata::unknown_keys`).
 So sheets reach a project's file without a migration, and a build older than
 this one keeps them intact.
 
@@ -557,14 +557,14 @@ this one keeps them intact.
 - **An unplaced viewport's** empty rectangle is the default, so it is left
   out. Any other number that is not finite is refused when the set is
   written, because JSON has no form for it that reads back.
-- **A newer version** than this build's (`kSheetSetVersion` = 1) is refused
+- **A newer version** than this build's (`SHEET_SET_VERSION` = 1) is refused
   (`Unsupported`), not read wrongly. The document then refuses to overwrite
   those sheets (`CommandRejected`) and keeps the text as it was. A new member
   that must survive being saved by an older build also needs a version
   increase.
 
 **Undo.**
-- `Document::setSheetSet(set, stepName)` is the one way in. It records the
+- `Document::set_sheet_set(set, step_name)` is the one way in. It records the
   state before and after (the JSON and the set parsed from it) as a single
   command on the document's history, so undo and redo are exact and parse
   nothing.
@@ -572,25 +572,25 @@ this one keeps them intact.
   at all.
 - An edit that changes nothing records no step. A refused edit changes
   nothing.
-- `Document::sheetSet()` parses the stored JSON once per change. It compares
-  the text rather than a revision counter, because `setMetadata` replaces the
+- `Document::sheet_set()` parses the stored JSON once per change. It compares
+  the text rather than a revision counter, because `set_metadata` replaces the
   whole metadata and must be seen.
 
-The helpers in `sheet_commands.hpp` are each one step:
+The helpers in `sheet_commands.rs` are each one step:
 
 | Edit | |
 |---|---|
-| `addSheets` / `addSheet(sheet, at)` | append a generator's output, or insert one sheet, with fresh ids |
-| `removeSheet` | the last sheet can go too: an empty set is valid |
+| `add_sheets` / `addSheet(sheet, at)` | append a generator's output, or insert one sheet, with fresh ids |
+| `remove_sheet` | the last sheet can go too: an empty set is valid |
 | `moveSheet(from, to)` | reorder; marks follow their sheet by id |
-| `duplicateSheet` | a deep copy after the original, `<name> (copy)`, new ids, without the original's typed sheet number |
-| `editSheet`, `editViewport(id)`, `editSheetSet` | apply a function to a copy and store the result; a function that returns an error changes nothing |
+| `duplicate_sheet` | a deep copy after the original, `<name> (copy)`, new ids, without the original's typed sheet number |
+| `edit_sheet`, `editViewport(id)`, `edit_sheet_set` | apply a function to a copy and store the result; a function that returns an error changes nothing |
 
 **The logo.** `importLogo(document, image)` copies the image into the
-project's `assets/` directory and sets `logoAsset`, as one step.
+project's `assets/` directory and sets `logo_asset`, as one step.
 - The image must be PNG, JPEG, GIF or BMP, recognised by its first bytes,
   not by its extension.
-- It may be at most 4 MiB (`kMaximumLogoBytes`). The logo prints
+- It may be at most 4 MiB (`MAXIMUM_LOGO_BYTES`). The logo prints
   53 x 12 mm, which is 1250 x 283 pixels at 600 dpi, so a bigger file is a
   photograph that would ride along in every PDF of the set.
 - The stored name is the source's stem made safe for any file system.
@@ -607,9 +607,11 @@ state before and after, each as the text together with the set parsed from
 it, so an undo or redo swaps them back without parsing anything. Only
 members that differ from their type's defaults are written.
 
-`benchmarks/bench_sheets.cpp` measures a large set: a 10 km road drawn
+The C++ benchmark `bench_sheets.cpp` measured a large set (it went with the
+C++, and the Rust port has none of its own yet; every number below is the
+C++'s): a 10 km road drawn
 plan-and-profile at 1:500 with cross sections every 20 m, which is 116
-sheets and 607 viewports. It was run with `tools/compare_benchmarks.py
+sheets and 607 viewports. It was run with the C++'s `compare_benchmarks.py
 --alternate 4` against the first version of this code, with a second copy of
 that version as the A/A control. Medians of 12 samples each, release build:
 
@@ -627,7 +629,7 @@ every mouse move.
 
 The review fixes changed how the generators append their output and cut
 cross sections. The smart layout no longer copies the sheets made so far
-into a set for each append, `prepareForAppend` no longer copies the set once
+into a set for each append, `prepare_for_append` no longer copies the set once
 per sheet it numbers, and each cross section is built on the alignment. The
 same benchmarks were run again, twice, the fixed build against two copies of
 the build before it (`--alternate 4`, then `--alternate 6`). Ratios of
@@ -646,8 +648,8 @@ are at the edge of the A/A spread, and no claim is made for them either way.
 
 ## The sheet painter
 
-`src/katana_qt/sheet_painter.hpp` draws one sheet onto any QPainter: the
-editor's canvas and every PDF page go through the same `paintSheet`, so the
+`rust/crates/katana_window/src/sheet_painter.rs` draws one sheet onto any `Canvas` (`rust/crates/katana_window/src/canvas/painter.rs`): the
+editor's canvas and every PDF page go through the same `paint_sheet`, so the
 editor shows exactly what plots. It reads no widget and keeps its caches
 (frames, cut sections, 3D snapshots, images, the plan painter's) in a
 `SheetPaintCache` the caller owns.
@@ -657,24 +659,24 @@ editor shows exactly what plots. It reads no widget and keeps its caches
 - **The frame.** Lines at their measured weights, dashes in paper
   millimetres (flat caps, so a 2.2 mm dash is 2.2 mm). Text in Arial set by
   cap height at a 200 px reference size and scaled, with the 0.82 x factor
-  as a painter scale. Field values come from `resolveFields`; `centredIn`
+  as a painter scale. Field values come from `resolve_fields`; `centred_in`
   values are centred in their cells. A single-line field wider than the room
   to its cell's right edge is squeezed, as the app did. The notes slot wraps
   to its cell. The 14 legend glyphs are the app's procedural glyphs, redrawn
-  in a -1..1 box at a 0.18 mm stroke. The logo is `fitImage` in the logo
+  in a -1..1 box at a 0.18 mm stroke. The logo is `fit_image` in the logo
   slot. The construction guide and faint "YOUR LOGO" / "ORGANISATION" hints
   are drawn only when the options ask (the editor).
-- **Plan and key plan.** `paintPlan` on paper through a `PlanFrame` sized to
+- **Plan and key plan.** `paint_plan` on paper through a `PlanFrame` sized to
   the viewport, rotated by minus the viewport's rotation (the world
-  direction that runs across the paper), clipped. `autoScale` picks the
-  first of `kSheetScales` at which the drawing - or the viewport's stretch
+  direction that runs across the paper), clipped. `auto_scale` picks the
+  first of `SHEET_SCALES` at which the drawing - or the viewport's stretch
   of its alignment - fits with 4% to spare; the title block reports the
   scale drawn. Match lines are dash-dot with their label along them; a key
   plan fades the drawing and outlines the other sheets, numbered.
 - **Imagery under the plan.** Rasters (an aerial photo, a GeoTIFF), point
   clouds and mesh footprints print beneath the linework, as the plan view
   shows them. A raster is cropped to what the viewport shows and averaged
-  down to at most `SheetPaintOptions::rasterDpiCap` (200 dpi in a PDF, 110 in
+  down to at most `SheetPaintOptions::raster_dpi_cap` (200 dpi in a PDF, 110 in
   the editor) and 16 megapixels, so a sheet over a 400-megapixel orthophoto
   embeds only its viewport's few megapixels; a cloud is splatted into an
   image of the viewport at the same cap; a footprint is a 0.13 mm dashed
@@ -712,16 +714,16 @@ editor shows exactly what plots. It reads no widget and keeps its caches
   as it is not for a finding of the checks; `plan.surface-style` finds it
   before the paper ("Preflight checks"). A sheet that was silently without
   its contours is what this replaces
-  (`SheetPainter.APlanDrawnWithoutASurfacesContoursSaysSoInTheSheetsProblemsAndStaysDrawn`).
+  (`sheet_painter::a_plan_drawn_without_a_surfaces_contours_says_so_in_the_sheets_problems_and_stays_drawn`).
 
-`plotSheetsToPdf` writes the whole set, or chosen sheets, to one vector PDF,
+`plot_sheets_to_pdf` writes the whole set, or chosen sheets, to one vector PDF,
 each page the size of its sheet's paper. File > Plot Sheets to PDF and
 `katana --plot-sheets out.pdf` use it; a project with no sheets plots one
 fitted to the drawing without adding it to the project.
 
 ## The sheet editor
 
-File > Sheets (Ctrl+Shift+P) opens `src/katana_qt/sheet_editor.hpp`, a window
+File > Sheets (Ctrl+Shift+P) opens `rust/crates/katana_window/src/sheet_editor.rs`, a window
 beside the drawing:
 
 - **Sheets** on the left, each with a picture of itself: add, duplicate,
@@ -751,27 +753,27 @@ beside the drawing:
 
 **The editor's lines.** Generate Sheets, Choose Paper and the view fields
 below do not edit the set themselves. Each builds the line a person would
-type and hands it to `SheetEditor::runLine`, which in the window is the
-window's one executor (`MainWindow::runVerbLine`, `desktop.md`, "One
+type and hands it to `SheetEditor::run_line`, which in the window is the
+window's one executor (`MainWindow::run_verb_line`, `desktop.md`, "One
 executor: the command runner"): the line is echoed in the command log, kept
 in the history, and undone as one step, exactly as if it had been typed. An
 editor made without a window (the tests make one) runs the line through the
-interpreter's own sheet verbs (`runSheetVerb`) and posts the line and its
-reply through `onMessage`. Either way the verb gets the same context
-(`sheetVerbContextFor`: what the plan view draws, the visible surfaces, what
+interpreter's own sheet verbs (`run_sheet_verb`) and posts the line and its
+reply through `on_message`. Either way the verb gets the same context
+(`sheet_verb_context_for`: what the plan view draws, the visible surfaces, what
 a view shows), which the window's command line is given too, so a line
 means the same typed or built. A refused line changes nothing, and the
 panel is redrawn to show what is stored. The fields that edit the set
 directly (title, scale, rotation, centre, north arrow, the grid) are older
-and still make their one `editViewport` step themselves.
+and still make their one `edit_viewport` step themselves.
 
 | In the editor | Object names | The line it runs |
 |---|---|---|
 | On the paper: Left, Bottom, Width, Height in mm | `sheetViewportX`, `sheetViewportY`, `sheetViewportW`, `sheetViewportH` | `VIEW SET id rect=x0,y0,x1,y1`, refused when it misses the paper; a field left as it was keeps its exact value and writes nothing |
 | Chainage from, to (long sections, plans on an alignment, and now cross sections) | `sheetChainageFrom`, `sheetChainageTo` | `VIEW SET id from=` / `to=` |
-| Cross sections: At chainages with the list, or Every with the interval | `sheetSectionsAtChainages`, `sheetSectionStations`, `sheetSectionsEvery`, `sheetSectionInterval` | `interval=0 stations=a,b,c`, or `stations="" interval=m`, and with no range yet `from=` and `to=` the alignment's whole length: the painter cuts a list when there is one and an interval only over a range (`viewportStations`) |
+| Cross sections: At chainages with the list, or Every with the interval | `sheetSectionsAtChainages`, `sheetSectionStations`, `sheetSectionsEvery`, `sheetSectionInterval` | `interval=0 stations=a,b,c`, or `stations="" interval=m`, and with no range yet `from=` and `to=` the alignment's whole length: the painter cuts a list when there is one and an interval only over a range (`viewport_stations`) |
 | Hidden layers... on plans, key plans, long sections and cross sections | `sheetViewportHiddenLayers`; its dialog `sheetHiddenLayersDialog`, `sheetHiddenLayersList`, `sheetHiddenLayersOk` | `VIEW SET id hide="a" show="b"`, only what the ticks changed, so an entry that is no layer of its own (a parent path) is kept |
-| An image view's Browse... | `sheetImageName`, `sheetImageBrowse` | `VIEW SET id file="path"`: copied into the project's assets (`importImageAsset`, up to 32 MB) and named in one step; a headless session opens no file dialog and names the verb |
+| An image view's Browse... | `sheetImageName`, `sheetImageBrowse` | `VIEW SET id file="path"`: copied into the project's assets (`import_image_asset`, up to 32 MB) and named in one step; a headless session opens no file dialog and names the verb |
 | Choose paper for this scale | `sheetChoosePaper`; its dialog below | `SHEET SUGGESTPAPER n scale=... apply=on` |
 | Generate Sheets... | `sheetGenerate`; its dialog below | `GENERATE kind ...` |
 
@@ -795,7 +797,7 @@ Generate (`sheetGenerateOk`) and says why there. The fields:
   the plot frames included (the frames take only `frame=`).
 - `sheetGenerateArea` for a fit and for tiles: the whole drawing, the
   current plan view (offered only when the window has one: what it shows,
-  `SheetEditor::planViewArea`), or a window typed in
+  `SheetEditor::plan_view_area`), or a window typed in
   `sheetGenerateAreaX0`, `Y0`, `X1`, `Y1`.
 - `sheetGenerateScale`; `sheetGenerateAlignment`, whose "(none)" is a fit
   of the area or, for a layout along an alignment, the drawing's only one
@@ -823,23 +825,23 @@ generators itself, always over the whole drawn extent, landscape, with the
 built-in frame, with no range for strips, no chainage list and no
 exaggeration for sections; through the verb it has all of them, and cannot
 come to lay out other sheets than the typed line. The toolbar opens it
-without waiting (`openGenerateDialog`), which is how a headless session
-fills it; `generateSheets` still runs it and waits.
+without waiting (`open_generate_dialog`), which is how a headless session
+fills it; `generate_sheets` still runs it and waits.
 
-The tests are `tests/qt_widgets/test_sheet_painter.cpp`,
-`test_sheet_editor.cpp`, `plotting/test_sheet_view_options.cpp` (each field
+The tests are `rust/crates/katana_window/tests/sheets/sheet_painter.rs`,
+`sheet_editor.rs`, `rust/crates/katana_window/tests/sheet_editor/sheet_view_options.rs` (each field
 above, its line, its one step and its refusal) and
-`plotting/test_generate_dialog.cpp` (each layout's choices, the line they
+`rust/crates/katana_window/tests/sheet_editor/generate_dialog.rs` (each layout's choices, the line they
 make, and the same sheets as that line typed into a second document with
 the window's context). `qt_generate_sheets_runs_the_line_it_shows_headless`
-fills the dialog in the window by its object names, presses Generate, and
+fills the dialog in the window by its control names, presses Generate, and
 undoes it as one step.
 
 ## Sheets on the command line
 
 Everything the editor does to sheets can be typed. The verbs are in
-`include/katana/cad/plotting/sheet_verbs.hpp`: `runSheetVerb(document,
-words)` runs one line and returns its reply, with no Qt and no window. The
+`rust/crates/katana_cad/src/plotting/sheet_verbs.rs`: `runSheetVerb(document,
+words)` runs one line and returns its reply, with no window. The
 `CommandInterpreter` hands them on, so they work in three places:
 - the window's command line;
 - `katana_cli` scripts and `-c`;
@@ -866,45 +868,45 @@ Only plotting needs the window, because it paints.
 | Verb | What it does | Undo step |
 |---|---|---|
 | `SHEETS [LIST]` | every sheet: number, id, name, paper, orientation, frame, legend block, its own fields, and each view's id, kind, scale and rectangle | |
-| `SHEETS JSON [path]` | the set's JSON (`sheet_json.hpp`), printed, or written to a file | |
+| `SHEETS JSON [path]` | the set's JSON (`sheet_json.rs`), printed, or written to a file | |
 | `SHEETS SAVE path` | the JSON written to a file | |
 | `SHEETS LOAD path` | the whole set replaced from a JSON file | `LOAD_SHEETS` |
-| `SHEETS APPEND path` | another set's sheets from its JSON file put after these, renumbered (`prepareForAppend`); this set keeps its own title block, revisions and page setup; an empty set is refused ("The Sheet Set menu and Page Setup") | `APPEND_SHEETS` |
-| `SHEETS CHECK [sheets=1,3-5] [json]` | the preflight checks ("Preflight checks"): `checked 2 sheets: 1 error, 3 warnings`, then a finding a line, `severity code sheet view message="..." fix="..." subject="..."` (`checkReplyLine`; `-` for the set or no view); `json` gives `findingsToJson` instead. In the window, with what the painter knows (`SheetVerbContext::check`) | |
-| `SHEETS PAGESETUP [style=colour\|grey\|mono] [lineweight=f] [dpi=n] [pattern=text] [filepersheet=on\|off]` | the set's page setup ("Plot styles and output"), printed as `pagesetup style=... lineweight=... dpi=... pattern="..." filepersheet=...`, or changed; refused whole by `validatePageSetup` | `PAGE_SETUP` |
+| `SHEETS APPEND path` | another set's sheets from its JSON file put after these, renumbered (`prepare_for_append`); this set keeps its own title block, revisions and page setup; an empty set is refused ("The Sheet Set menu and Page Setup") | `APPEND_SHEETS` |
+| `SHEETS CHECK [sheets=1,3-5] [json]` | the preflight checks ("Preflight checks"): `checked 2 sheets: 1 error, 3 warnings`, then a finding a line, `severity code sheet view message="..." fix="..." subject="..."` (`check_reply_line`; `-` for the set or no view); `json` gives `findings_to_json` instead. In the window, with what the painter knows (`SheetVerbContext::check`) | |
+| `SHEETS PAGESETUP [style=colour\|grey\|mono] [lineweight=f] [dpi=n] [pattern=text] [filepersheet=on\|off]` | the set's page setup ("Plot styles and output"), printed as `pagesetup style=... lineweight=... dpi=... pattern="..." filepersheet=...`, or changed; refused whole by `validate_page_setup` | `PAGE_SETUP` |
 | `SHEET NEW [name] [paper=A1] [portrait] [frame=off] [legendblock=off] [at=n]` | a blank sheet, at the end or at position n; no name numbers it | `ADD_SHEET` |
-| `SHEET REMOVE n` / `MOVE n to` / `COPY n` | `removeSheet`, `moveSheet`, `duplicateSheet` | `REMOVE_SHEET`, `MOVE_SHEET`, `DUPLICATE_SHEET` |
+| `SHEET REMOVE n` / `MOVE n to` / `COPY n` | `remove_sheet`, `move_sheet`, `duplicate_sheet` | `REMOVE_SHEET`, `MOVE_SHEET`, `DUPLICATE_SHEET` |
 | `SHEET RENAME n name` | | `RENAME_SHEET` |
 | `SHEET SET n [paper=] [orientation=] [frame=on\|off] [legendblock=on\|off] [name=]` | the sheet's paper and frame | `EDIT_SHEET` |
 | `SHEET FIELD n field [value]` | the sheet's own value for a field its frame prints (`sheet_number`, `scale`...); `""` clears it; no value prints it, marked `automatic` when the sheet has none | `SET_SHEET_FIELD` |
-| `SHEET SUGGESTPAPER n [scale=n\|auto] [apply=on]` | the smallest paper that holds what the sheet's main plan (`mainPlanOf`) shows at its drawn scale or `scale=` (`fitPaperToViewport`): `sheet 1 view=vp1 scale=500 paper=A0 orientation=landscape frame=a3_landscape fill=0.761`; `apply=on` puts the sheet on it (`choosePaperForScale`) | `CHOOSE_PAPER` with `apply=on` |
+| `SHEET SUGGESTPAPER n [scale=n\|auto] [apply=on]` | the smallest paper that holds what the sheet's main plan (`main_plan_of`) shows at its drawn scale or `scale=` (`fit_paper_to_viewport`): `sheet 1 view=vp1 scale=500 paper=A0 orientation=landscape frame=a3_landscape fill=0.761`; `apply=on` puts the sheet on it (`choose_paper_for_scale`) | `CHOOSE_PAPER` with `apply=on` |
 | `VIEW ADD n kind [option=value...]` | a view placed as the editor's Add View places one, then given the options | `ADD_VIEWPORT` |
 | `VIEW SET id option=value...` | | `EDIT_VIEWPORT` |
 | `VIEW REMOVE id` | | `REMOVE_VIEWPORT` |
 | `VIEW LIST [n]` | every view, with every option it has | |
-| `VIEW FIT id` | a plan's or key plan's rectangle fitted to what it shows (`fitViewportToContent`) | `FIT_VIEWPORT_TO_CONTENT` |
-| `VIEW BESTROTATE id` | a plan turned to the rotation that shows most of it, and scaled to fit (`rotateToBestFit`): `rotated vp1 rotation=deg scale=n` | `ROTATE_TO_BEST_FIT` |
-| `TILE n preset` | `tileViewports`, by the preset's id (`sectionR`) or its menu name (`Main and panel right`, no quotes needed) | `TILE_VIEWPORTS` |
-| `ARRANGE n` | `autoArrange`: no two views overlapping, the main view first; `arranged sheet n moved=... overlapping=... unplaced=... mainshrunk=on\|off` and the sheet | `AUTO_ARRANGE` |
-| `ARRANGE ALIGN left\|right\|top\|bottom\|hcentre\|vcentre id id ...` | `alignViewports` on the views' sheet (one sheet at a time) | `ALIGN_VIEWPORTS` |
-| `ARRANGE DISTRIBUTE across\|up id id id ...` | `distributeViewports`: equal gaps, the first and last staying | `DISTRIBUTE_VIEWPORTS` |
-| `ARRANGE MATCHSCALE from id id ...` | `matchScale`: the views take the scale `from` is drawn at (an automatic plan's as the painter resolves it) | `MATCH_SCALE` |
+| `VIEW FIT id` | a plan's or key plan's rectangle fitted to what it shows (`fit_viewport_to_content`) | `FIT_VIEWPORT_TO_CONTENT` |
+| `VIEW BESTROTATE id` | a plan turned to the rotation that shows most of it, and scaled to fit (`rotate_to_best_fit`): `rotated vp1 rotation=deg scale=n` | `ROTATE_TO_BEST_FIT` |
+| `TILE n preset` | `tile_viewports`, by the preset's id (`sectionR`) or its menu name (`Main and panel right`, no quotes needed) | `TILE_VIEWPORTS` |
+| `ARRANGE n` | `auto_arrange`: no two views overlapping, the main view first; `arranged sheet n moved=... overlapping=... unplaced=... mainshrunk=on\|off` and the sheet | `AUTO_ARRANGE` |
+| `ARRANGE ALIGN left\|right\|top\|bottom\|hcentre\|vcentre id id ...` | `align_viewports` on the views' sheet (one sheet at a time) | `ALIGN_VIEWPORTS` |
+| `ARRANGE DISTRIBUTE across\|up id id id ...` | `distribute_viewports`: equal gaps, the first and last staying | `DISTRIBUTE_VIEWPORTS` |
+| `ARRANGE MATCHSCALE from id id ...` | `match_scale`: the views take the scale `from` is drawn at (an automatic plan's as the painter resolves it) | `MATCH_SCALE` |
 | `GENERATE kind [option=value...] [replace=on]` | a generator's sheets, appended, or in place of every sheet | `GENERATE_SHEETS` |
-| `GENERATE register [paper=] [portrait] [frame=]` | the drawing register and the revision table on a cover put first (`addRegisterSheet`); refused when the set has one, and with `replace=on` | `ADD_REGISTER_SHEET` |
+| `GENERATE register [paper=] [portrait] [frame=]` | the drawing register and the revision table on a cover put first (`add_register_sheet`); refused when the set has one, and with `replace=on` | `ADD_REGISTER_SHEET` |
 | `TITLEBLOCK [LIST]` | every shared title-block value, the logo and the revisions | |
 | `TITLEBLOCK field [value]` | reads or sets one value | `EDIT_TITLE_BLOCK` |
 | `TITLEBLOCK REVISION [LIST]` | the revisions, one a line | |
 | `TITLEBLOCK REVISION ADD code date description [by]` | a revision; a code already used is refused | `ADD_REVISION` |
 | `TITLEBLOCK REVISION REMOVE code` | | `REMOVE_REVISION` |
-| `TITLEBLOCK LOGO path` | `importLogo`; `""` removes the logo | `SET_LOGO` |
-| `HELP SHEETS` | every verb and option (`sheetVerbHelp`) | |
-| `PLOTSHEETS [path] [format=pdf\|pdfs\|png\|tiff] [style=colour\|grey\|mono] [sheets=1,3-5] [dpi=n] [lineweight=f] [folder=path] [pattern=text]` | the window only: the sheets plotted as the Plot dialog and `--plot-sheets` plot them (`parsePlotSheets`, `plotRequestFor`), the page setup giving what is not said; one PDF unless `format=` says otherwise (`folder=` alone is a PDF a sheet); the summary, then `file="path"` a line for each file written | |
+| `TITLEBLOCK LOGO path` | `import_logo`; `""` removes the logo | `SET_LOGO` |
+| `HELP SHEETS` | every verb and option (`sheet_verb_help`) | |
+| `PLOTSHEETS [path] [format=pdf\|pdfs\|png\|tiff] [style=colour\|grey\|mono] [sheets=1,3-5] [dpi=n] [lineweight=f] [folder=path] [pattern=text]` | the window only: the sheets plotted as the Plot dialog and `--plot-sheets` plot them (`parse_plot_sheets`, `plot_request_for`), the page setup giving what is not said; one PDF unless `format=` says otherwise (`folder=` alone is a PDF a sheet); the summary, then `file="path"` a line for each file written | |
 
 **The view kinds** are the stored names (`plan`, `key_plan`, `long_section`,
 `cross_sections`, `model_3d`, `legend`, `notes`, `image`, `sheet_index`,
 `revisions`), plus some common words: `profile`, `xs`, `sections`, `3d`,
 `key`, `register`, `drawing_register`, `revision_table`. A new view is set up as Add
-View sets one up (`defaultViewport`):
+View sets one up (`default_viewport`):
 - On an empty sheet it fills the tiling area. Otherwise it gets its kind's
   own size, centred.
 - A plan is automatic in scale and centre, with a north arrow and a scale
@@ -915,13 +917,13 @@ View sets one up (`defaultViewport`):
   outlines the sheets' plans where they are when it is drawn, as the
   editor's Add View > Key Plan does ("The live key plan").
 - An image view needs `file=path`, which is copied into the project's
-  `assets/` as a logo is (`importImageAsset`, up to 32 MB), or
+  `assets/` as a logo is (`import_image_asset`, up to 32 MB), or
   `text=name` for a file already there.
 
 | View option | Views | |
 |---|---|---|
 | `rect=x0,y0,x1,y1` | all | refused when it misses the paper |
-| `scale=500\|1:500\|auto`, `centre=x,y\|auto` | plan, key plan, sections | `auto` sets `autoScale` / `autoCentre`; a section's automatic scale is `fitSection`'s ("The automatic section scale") |
+| `scale=500\|1:500\|auto`, `centre=x,y\|auto` | plan, key plan, sections | `auto` sets `auto_scale` / `auto_centre`; a section's automatic scale is `fit_section`'s ("The automatic section scale") |
 | `rotation=deg` | plan, key plan, 3D | the world direction across the paper, counter-clockwise |
 | `alignment=`, `from=`, `to=` | plan, key plan, sections | the alignment must exist |
 | `stations=a,b,c`, `interval=`, `halfwidth=` | cross sections | |
@@ -940,18 +942,18 @@ An option a kind does not have is refused by name (`scale= is for plan,
 key_plan, long_section and cross_sections views, not legend`). A view's kind
 is fixed: remove it and add another.
 
-**GENERATE** runs a generator and adds its sheets (`addSheets`), or with
+**GENERATE** runs a generator and adds its sheets (`add_sheets`), or with
 `replace=on` puts them in place of every sheet, as one step:
 
 | Kind | Generator | Options |
 |---|---|---|
-| `fit` | `smartLayout` of the drawing, `area=` or `alignment=`; with `rotate=on`, `smartLayoutRotated` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=`, `rotate=on\|off`, `empty=on\|off` |
-| `grid` | `gridSheets` over the drawing or `area=`, tiles with nothing drawn in them left out | `scale=500`, `overlap=m`, `keyplan=on\|off`, `empty=on\|off` |
-| `strips` | `stripSheets` at a fixed scale; on `auto`, the whole alignment fitted on one sheet (`smartLayout`) | `alignment=`, `scale=`, `overlap=`, `from=`, `to=`, `keyplan=` |
-| `profile` | `smartLayout`, plan and profile | `alignment=`, `scale=`, `interval=`, `halfwidth=`, `model3d=`, `legend=` |
-| `sections` | `crossSectionSheets` | `alignment=`, `interval=` or `stations=`, `halfwidth=`, `rows=`, `columns=`, `scale=`, `ve=auto\|n` |
-| `frames` | `sheetsFromPlotFrames`, and the frames skipped, with the reason | `frame=on\|off` |
-| `register` | `addRegisterSheet`: a cover first in the set, the drawing register beside the revision table | `paper=`, `portrait`, `frame=` |
+| `fit` | `smart_layout` of the drawing, `area=` or `alignment=`; with `rotate=on`, `smart_layout_rotated` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=`, `rotate=on\|off`, `empty=on\|off` |
+| `grid` | `grid_sheets` over the drawing or `area=`, tiles with nothing drawn in them left out | `scale=500`, `overlap=m`, `keyplan=on\|off`, `empty=on\|off` |
+| `strips` | `strip_sheets` at a fixed scale; on `auto`, the whole alignment fitted on one sheet (`smart_layout`) | `alignment=`, `scale=`, `overlap=`, `from=`, `to=`, `keyplan=` |
+| `profile` | `smart_layout`, plan and profile | `alignment=`, `scale=`, `interval=`, `halfwidth=`, `model3d=`, `legend=` |
+| `sections` | `cross_section_sheets` | `alignment=`, `interval=` or `stations=`, `halfwidth=`, `rows=`, `columns=`, `scale=`, `ve=auto\|n` |
+| `frames` | `sheets_from_plot_frames`, and the frames skipped, with the reason | `frame=on\|off` |
+| `register` | `add_register_sheet`: a cover first in the set, the drawing register beside the revision table | `paper=`, `portrait`, `frame=` |
 
 `GENERATE fit rotate=on` turns the plan to fill the sheet, as the Generate
 dialog's "Rotate the drawing to fill the sheet" always did (see "In the
@@ -962,7 +964,7 @@ corners, so a tall area on a wide sheet is turned when that holds it at a
 larger scale, and no further than it takes: 100 x 300 m on A3 is 1 : 1250
 square and 1 : 1000 turned 56.2 degrees. A plan
 along `alignment=` or with sections after it (`interval=`) is refused, as
-`smartLayoutRotated` refuses it: a strip already follows its alignment.
+`smart_layout_rotated` refuses it: a strip already follows its alignment.
 The option was added so the dialog's choice has a verb; before, it was the
 one Generate choice an agent could not make.
 
@@ -988,19 +990,19 @@ does. The document holds neither the surfaces a section samples nor
 the imagery a plan draws, so the front end supplies them
 (`SheetVerbContext`):
 - The window passes everything its plan view draws, as the extent `fit` and
-  `grid` cover and as what a tile must have in it to be kept (`drawsIn`,
-  `planDrawsIn`), and its visible surfaces for `sections`.
+  `grid` cover and as what a tile must have in it to be kept (`draws_in`,
+  `plan_draws_in`), and its visible surfaces for `sections`.
 - Headless, the extent is the drawing's entities, a tile is kept for what a
-  plan of the drawing draws in it (`plotting::drawsIn`, through the
+  plan of the drawing draws in it (`katana_cad::plotting::arrange::draws_in`, through the
   document's spatial index), and each section is centred when drawn at an
   exaggeration of 1.
 - `GENERATE` asks for the context once, however many of its choices need it.
-- The window also gives `SHEETS CHECK` its checker (`checkSheetsFor`: the
+- The window also gives `SHEETS CHECK` its checker (`check_sheets_for`: the
   imagery and meshes, the painter's rule for an automatic plan), and
   `ARRANGE MATCHSCALE`, `VIEW FIT`, `VIEW BESTROTATE` and
   `SHEET SUGGESTPAPER` what each view shows with its reference layers
-  (`viewportContent` in `plotting/sheet_arrange.hpp`). Headless they check
-  the document (`checkDocumentSheets`) and measure the drawing.
+  (`viewport_content` in `rust/crates/katana_window/src/plotting/sheet_arrange.rs`). Headless they check
+  the document (`check_document_sheets`) and measure the drawing.
 - The context is asked for only by the verbs that need it.
 
 **A whole round trip, headless.** The `--command` lines run before
@@ -1015,10 +1017,10 @@ katana <copy-of-project> --command "GENERATE fit legend=on" \
 
 The `qt_sheets_agent_headless` test (`tools/check_sheets_agent_headless.cmake`)
 runs such a line with every verb above, and the verbs themselves are tested
-in `tests/cad/plotting/test_sheet_agent_verbs.cpp`.
+in `rust/crates/katana_cad/tests/road_sheet_verbs/sheet_agent_verbs.rs`.
 
-**Title-block fields** are the set's shared values (`titleBlockValue`,
-`setTitleBlockValue`):
+**Title-block fields** are the set's shared values (`title_block_value`,
+`set_title_block_value`):
 - `organisation`, `project1` to `project4`, `client`, `setnumber`;
 - `numbering`, the sheet-number pattern, which must contain `{n}`;
 - `coordsys`, `datum`, `model`, `notes`;
@@ -1065,7 +1067,7 @@ SET`. An error names what was refused and why, with a code an agent can test:
   shows them as none nor an edit made on nothing replaces them. `SHEETS
   LOAD` replaces them on purpose, as one step `UNDO` takes back.
 
-**One step each.** Every edit goes through `sheet_commands.hpp`, so it is ONE
+**One step each.** Every edit goes through `sheet_commands.rs`, so it is ONE
 undo step. An edit that is refused, or has one bad option among good ones,
 changes nothing and records nothing: `VIEW SET vp1 scale=100 tilt=45` on a
 plan keeps neither. `VIEW ADD` and `VIEW SET` try every option before an image
@@ -1074,7 +1076,7 @@ is copied into the project. The same lines give the same set every time.
 **The window and the switches.**
 - `PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]` is read by the window with
   the interpreter's tokenizer (`CommandInterpreter::tokenize`) and
-  `parsePlotSheets`. It calls the same `MainWindow::plotSheetsToPdf` as
+  `parse_plot_sheets`. It calls the same `plot_sheets_to_pdf` (`sheet_painter.rs`) as
   File > Plot Sheets to PDF.
   - `sheets=` takes numbers, ids, ranges (`2-4`, `s2-s4`) and `all`, in the
     order given.
@@ -1087,14 +1089,14 @@ is copied into the project. The same lines give the same set every time.
   `katana project --command "GENERATE grid scale=500" --command SAVE
   --sheets-json - --plot-sheets out.pdf`.
 
-The tests are `tests/cad/plotting/test_sheet_verbs.cpp`, which types lines
+The tests are `rust/crates/katana_cad/tests/road_sheet_verbs/sheet_verbs.rs`, which types lines
 through the interpreter:
 - every verb, with its reply and its errors;
 - each edit undone and redone exactly, one step at a time
-  (`EveryEditIsOneUndoStepThatUndoesExactly`);
+  (`sheet_verbs::every_edit_is_one_undo_step_that_undoes_exactly`);
 - the JSON saved, loaded and compared whole
-  (`SheetsJsonSaveAndLoadRoundTripTheWholeSet`);
-- the same lines giving the same set (`TheSameLinesMakeTheSameSet`).
+  (`sheet_verbs::sheets_json_save_and_load_round_trip_the_whole_set`);
+- the same lines giving the same set (`sheet_verbs::the_same_lines_make_the_same_set`).
 
 `cli.sheet_verbs_lay_out_edit_and_list_the_sheets` runs the verbs in
 `katana_cli`. `qt_sheets_headless` runs them, `PLOTSHEETS` and both switches
@@ -1104,10 +1106,10 @@ in the window.
 
 A plot that comes out with a view under the title block, a plan over empty
 ground or a blank "Surveyed by" wastes the paper and the time of whoever
-reads it. `include/katana/cad/plotting/preflight.hpp` finds such things
+reads it. `rust/crates/katana_cad/src/plotting/preflight.rs` finds such things
 before the plot. `checkSheets(set, model, context, options)` reads the sheet
 set, the drawing and the project's field values and returns a list of
-`Finding`s. It changes nothing and needs no Qt, and the same input gives the
+`Finding`s. It changes nothing and needs no window, and the same input gives the
 same findings in the same order.
 
 A finding has:
@@ -1124,14 +1126,14 @@ A finding has:
 
 The order is fixed. The set's own findings come first. Then each sheet in
 turn: the sheet's own findings, then its viewports' from back to front, each
-viewport's in the order `preflightChecks()` lists them.
+viewport's in the order `preflight_checks()` lists them.
 
 | Code | Severity | Found when |
 |---|---|---|
 | `field.empty` | Warning (some Info) | a value the frame prints resolves to nothing: the organisation, a sign-off name, the height datum, the coordinate system... |
 | `logo.missing` | Info | the logo slot is empty |
 | `logo.unreadable` | Warning | the logo named is not in the project or cannot be read |
-| `pagesetup.invalid` | Error | the set's page setup would be refused by a plot: a resolution or line weight scale out of range, or a file-name pattern that cannot be expanded (`validatePageSetup`) |
+| `pagesetup.invalid` | Error | the set's page setup would be refused by a plot: a resolution or line weight scale out of range, or a file-name pattern that cannot be expanded (`validate_page_setup`) |
 | `sheet.duplicate-id` | Error | a sheet has no id, or an earlier sheet's |
 | `sheet.duplicate-name` | Warning | a sheet has an earlier sheet's name, ignoring case and spaces at the ends |
 | `frame.unknown` | Error | the sheet names a frame this build does not have |
@@ -1143,12 +1145,12 @@ viewport's in the order `preflightChecks()` lists them.
 | `viewport.overlap` | Warning or Info | a viewport covers part of an earlier one; a panel set wholly inside a view is an inset (Info) |
 | `viewport.too-small` | Info | smaller than its kind's minimum (the tiling table above) |
 | `scale.invalid` | Error | a fixed scale that is not a positive number; an automatic one with nothing to fit and no usable stored scale |
-| `scale.non-standard` | Info | a fixed scale not on `kSheetScales`; the fix names the steps either side |
+| `scale.non-standard` | Info | a fixed scale not on `SHEET_SCALES`; the fix names the steps either side |
 | `plan.alignment-missing` | Warning | a plan or key plan follows an alignment the drawing does not have |
 | `plan.empty` | Warning | nothing a plan or key plan draws is in its window |
-| `plan.surface-style` | Warning | a plan's window reaches a visible surface whose style cannot be drawn in whole: its contours are too fine to trace (`cad::surfaceStyleProblems`), so the plot would be without them; the subject is the surface, the message names it, its style and why |
+| `plan.surface-style` | Warning | a plan's window reaches a visible surface whose style cannot be drawn in whole: its contours are too fine to trace (`katana_cad::terrain::surface_plan::surface_style_problems`), so the plot would be without them; the subject is the surface, the message names it, its style and why |
 | `text.too-small` | Warning | drawing text in a plan prints under 1.8 mm at the plan's scale |
-| `grid.invalid` | Error | a plan's coordinate grid cannot be drawn at the window it is drawn at: its lines would be closer than `kGridMinimumSpacingMm` (`planGrid`) |
+| `grid.invalid` | Error | a plan's coordinate grid cannot be drawn at the window it is drawn at: its lines would be closer than `GRID_MINIMUM_SPACING_MM` (`plan_grid`) |
 | `grid.empty` | Info | a plan's grid interval is wider than its window, so no grid line prints |
 | `section.alignment-missing` | Error | a section has no alignment, or names one the drawing does not have |
 | `section.alignment-invalid` | Error | the alignment cannot be solved |
@@ -1157,15 +1159,15 @@ viewport's in the order `preflightChecks()` lists them.
 | `section.no-surface` | Error | no surface to cut, and for a long section no design profile either |
 | `image.missing` | Error | an image panel names no file, or one the project does not have |
 | `notes.empty` | Info | a notes panel has no text |
-| `legend.empty` | Info | a legend lists nothing: the plans it reads, at its scope, show nothing (`computeLegend`) |
-| `legend.overflow` | Warning | a legend has more entries than fit (`layoutLegend`, the labels measured by Arial's widths) and prints "+N more" |
+| `legend.empty` | Info | a legend lists nothing: the plans it reads, at its scope, show nothing (`compute_legend`) |
+| `legend.overflow` | Warning | a legend has more entries than fit (`layout_legend`, the labels measured by Arial's widths) and prints "+N more" |
 | `revisions.empty` | Info | a revision table on a set with no revisions prints its headings alone |
-| `table.overflow` | Warning | a drawing register or revision table has rows that do not fit, laid out as the painter lays it out (`layoutViewportTable`), and prints "+N more" or "+N earlier" |
+| `table.overflow` | Warning | a drawing register or revision table has rows that do not fit, laid out as the painter lays it out (`layout_viewport_table`), and prints "+N more" or "+N earlier" |
 | `matchline.dangling` | Warning | a match line or key-plan outline leads to a sheet that no longer exists |
 
 How the harder checks decide:
 - **Outside.** The limits are the paper, the frame's title-block box and the
-  drawing area (`drawingArea`). They are allowed 0.05 mm, a hand-drawn
+  drawing area (`drawing_area`). They are allowed 0.05 mm, a hand-drawn
   rectangle's rounding. A viewport filling the drawing area exactly is
   inside. A frameless sheet has no title block.
 - **Overlap.** Two rectangles overlap when they share more than 0.5 mm on
@@ -1182,13 +1184,13 @@ How the harder checks decide:
     buffer circle - there is nothing to see, so the plan is empty unless
     the outline crosses the window.
   - A dimension is seen by everything it draws (its line, arrows and
-    label, `queryExtents`), not only by the two points it measures.
+    label, `query_extents`), not only by the two points it measures.
   - Hidden layers (the view's own and the document's) are left out.
     Alignments count, and so do imagery, point clouds and meshes when the
-    caller passes their boxes (`otherContent`).
+    caller passes their boxes (`other_content`).
   - An automatic plan is checked where the painter will draw it:
-    `planWindow` applies the painter's rule to the model, and the editor
-    passes the painter's own `resolvePlanViewport`. A test compares the two,
+    `plan_window` applies the painter's rule to the model, and the editor
+    passes the painter's own `resolve_plan_viewport`. A test compares the two,
     turned, along an alignment, over a mesh alone and with a layer hidden.
   - A key plan is drawn as a plan is, so it is checked as one. Its sheet
     outlines and a plan's match lines count as what it shows. Its own small
@@ -1199,10 +1201,10 @@ How the harder checks decide:
   standard scale at which that text reaches the minimum, and the height text
   needs at this scale. Example: at 1:500 a 0.5 m text prints 1.0 mm, so the
   fix is "Plot the view at 1:250 or larger, or make the text at least 0.9 m
-  high". `minimumTextMm` changes the 1.8 mm.
+  high". `minimum_text_mm` changes the 1.8 mm.
 - **Sections** list their chainages as the painter does: the stations given,
   else every interval over the range. A cross section is off the alignment
-  when either end of its cut is: `pointAtStationOffset` at plus and minus
+  when either end of its cut is: `point_at_station_offset` at plus and minus
   its half width. The message names up to three such chainages and the
   alignment's own range.
 - **Blank title-block values** are listed once for the set, not once per
@@ -1219,20 +1221,20 @@ How the harder checks decide:
 `PreflightOptions` changes what is checked:
 - `sheets`: check only these sheets. The set's own checks then count only
   these sheets too.
-- `minimumTextMm`, `overlapToleranceMm`, `outsideToleranceMm`: the limits
+- `minimum_text_mm`, `overlap_tolerance_mm`, `outside_tolerance_mm`: the limits
   above.
 - `skip`: codes not to report.
-- What the model alone cannot know: `resolvePlan` and `otherContent` (above),
-  `sectionSurfaces` (how many surfaces sections are cut from), `logoReadable`
+- What the model alone cannot know: `resolve_plan` and `other_content` (above),
+  `section_surfaces` (how many surfaces sections are cut from), `logo_readable`
   and `assets`. Each one left unset leaves its check out: no surface finding
   when the surfaces are unknown, no missing-image finding when there is no
   assets folder to look in.
-- `surfaceProblems`: the visible surfaces whose styles cannot be drawn in
-  whole, each with its plan box (`cad::surfaceStyleProblems`). A plan whose
+- `surface_problems`: the visible surfaces whose styles cannot be drawn in
+  whole, each with its plan box (`katana_cad::terrain::surface_plan::surface_style_problems`). A plan whose
   window box meets one is warned (`plan.surface-style`), once for each such
   surface, in the store's order. Unset when not known (nothing is checked);
-  `checkDocumentSheets` fills it from the document, so `SHEETS CHECK` in
-  `katana_cli` and `katana_mcp` has it, and the editor's `preflightOptionsFor`
+  `check_document_sheets` fills it from the document, so `SHEETS CHECK` in
+  `katana_cli` and `katana_mcp` has it, and the editor's `preflight_options_for`
   from the painter's own source. The box is the window's bounding box against
   the surface's, as the painter culls: a surface the box misses is not drawn
   and says nothing.
@@ -1243,15 +1245,15 @@ For a caller with only a document, `checkDocumentSheets(document)` supplies
 the document's drawing, spatial index, fields, assets folder and whether its
 logo file is there. `findingsOnSheets(findings, indices)` keeps what
 concerns some sheets: their own findings and the set's. `summarize` counts
-each severity. `summaryText` writes the counts ("2 errors, 1 warning, 3
-notes"). `findingLine` writes one finding as a log line:
+each severity. `summary_text` writes the counts ("2 errors, 1 warning, 3
+notes"). `finding_line` writes one finding as a log line:
 
 ```
 ERROR viewport.outside [s2/vp3] PLAN 1:500 (vp3) runs 14.6 mm under the title block: the title block covers it. Fix: Drag it back inside the drawing area, or tile the sheet.
 ```
 
-`findingsToJson` writes the findings for an agent. Empty members are left
-out. `findingsFromJson` reads them back to the same findings and refuses
+`findings_to_json` writes the findings for an agent. Empty members are left
+out. `findings_from_json` reads them back to the same findings and refuses
 another format, another version, an unknown severity, or a sheet index that
 is not a whole number of zero or more.
 
@@ -1265,16 +1267,16 @@ is not a whole number of zero or more.
                "viewport": "vp3", "message": "...", "fix": "..."}]}
 ```
 
-**In the editor** (`src/katana_qt/plotting/sheet_checks.hpp`):
+**In the editor** (`rust/crates/katana_window/src/plotting/sheet_checks.rs`):
 - `preflightOptionsFor(source)` fills the options from the painter's
   `SheetSource`, and `checkSheetsFor(set, source, sheets)` runs the checks
   with them. The checks and the painter then agree about what prints empty:
-  - an automatic plan is resolved by `resolvePlanViewport`;
+  - an automatic plan is resolved by `resolve_plan_viewport`;
   - visible imagery, point clouds and meshes are content;
   - only visible surfaces are cut, so a section over a hidden one is
     reported;
   - the surfaces the painter draws are asked whether their styles can be
-    drawn in whole (`cad::surfaceStyleProblems`, the painter's own refusal
+    drawn in whole (`katana_cad::terrain::surface_plan::surface_style_problems`, the painter's own refusal
     of contours too fine to trace), so a plan the painter would draw without
     them is warned about before the plot (`plan.surface-style`);
   - a logo that did not decode is unreadable.
@@ -1286,8 +1288,8 @@ is not a whole number of zero or more.
   - Its title and summary line (`sheetChecksSummary`) give the counts.
   - Double-click a row (or press Enter on it) to go to the finding: its
     sheet is made current, its viewport selected, and the fix is shown on
-    the status bar (`SheetEditor::showFinding`).
-- The toolbar's **Check Sheets** (`sheetCheck`, `SheetEditor::checkSheets`)
+    the status bar (`SheetEditor::show_finding`).
+- The toolbar's **Check Sheets** (`sheetCheck`, `SheetEditor::check_sheets`)
   checks every sheet at once and shows the dock.
 - After every change to the document, undo and redo included, the checks
   run again once the edits have stopped for 400 ms
@@ -1299,25 +1301,25 @@ is not a whole number of zero or more.
   "The checks found 1 error on it: the Checks panel lists them". The plot
   goes ahead anyway, with no dialog in the way.
 - File > Plot Sheets to PDF and `--plot-sheets` log a summary line and each
-  error before plotting (`preflightLog`), and plot.
+  error before plotting (`preflight_log`), and plot.
 
-The tests are `tests/cad/plotting/test_preflight.cpp` (each check with the
+The tests are `rust/crates/katana_cad/tests/sheetverbs/preflight.rs` (each check with the
 smallest set that trips it and the nearest that does not, the order, the
 options, the JSON; `plan.surface-style` with a surface just inside and just
-outside the window), `tests/cad/plotting/test_sheet_agent_verbs.cpp`
+outside the window), `rust/crates/katana_cad/tests/road_sheet_verbs/sheet_agent_verbs.rs`
 (`SHEETS CHECK` on a document with a too-fine style: the record and the JSON,
 mended and hidden), `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`
-and `TheSheetChecksWarnOfASurfaceWhoseContoursAreTooFineToPlot` in
-`tests/app/test_mcp_server.cpp`, and
-`tests/qt_widgets/plotting/test_sheet_checks.cpp`.
+and `mcp_server::the_sheet_checks_warn_of_a_surface_whose_contours_are_too_fine_to_plot` in
+`rust/crates/katana_app/tests/mcp/mcp_server.rs`, and
+`rust/crates/katana_window/tests/sheet_editor/sheet_checks.rs`.
 
 ## Arranging a sheet
 
-Layout advice and tidying, headless first. `include/katana/cad/plotting/arrange.hpp`
+Layout advice and tidying, headless first. `rust/crates/katana_cad/src/plotting/arrange.rs`
 holds pure functions on world points and on `Sheet` and `SheetSet` values.
-`include/katana/cad/plotting/arrange_commands.hpp` makes each of them ONE
-undoable step on a document, through `editSheet`, `editViewport` or
-`editSheetSet`. The sheet editor's Arrange menu calls those steps, and an
+`rust/crates/katana_cad/src/plotting/arrange_commands.rs` makes each of them ONE
+undoable step on a document, through `edit_sheet`, `edit_viewport` or
+`edit_sheet_set`. The sheet editor's Arrange menu calls those steps, and an
 agent or a command-line verb calls the same ones.
 
 **Content** is a set of world points; only its convex hull matters.
@@ -1338,7 +1340,7 @@ the outlines it stored when it was made are stale and not counted. A
 chainage range wholly off the alignment shows none of it, and then, as the
 painter does, the drawing. The
 editor adds the window's reference layers and meshes
-(`src/katana_qt/plotting/sheet_arrange.hpp`, `drawingContent`).
+(`rust/crates/katana_window/src/plotting/sheet_arrange.rs`, `drawing_content`).
 
 ### The best rotation
 
@@ -1356,10 +1358,10 @@ fills a rectangle of that shape at the largest scale, exactly:
 - Of rotations that tie, the one nearest 0 wins (the positive one of two
   equally near).
 - A result within 1 degree of a multiple of 90 is snapped to it, at the scale
-  that costs (`kRotationSnapDegrees`).
+  that costs (`ROTATION_SNAP_DEGREES`).
 
 It returns a `RotationFit`: the rotation, the turned content's width, height
-and middle, the exact scale, and the first of `kSheetScales` at or above it.
+and middle, the exact scale, and the first of `SHEET_SCALES` at or above it.
 
 Examples, in the A3 tiling area (385 x 250 mm):
 - A 300 x 100 m rectangle lying along 30 degrees is turned back 30 degrees,
@@ -1381,8 +1383,8 @@ ladder:
   turned only 3.62 degrees, the least turn that reaches 1 : 1250.
 
 `rotateToBestFit(viewport, content)` turns a plan or key plan by
-`bestStandardRotation` inside its rectangle, less the painter's 4% to spare
-(`kAutoScaleSpare`). It centres the view on the content, gives it that scale
+`best_standard_rotation` inside its rectangle, less the painter's 4% to spare
+(`AUTO_SCALE_SPARE`). It centres the view on the content, gives it that scale
 and turns automatic scale and centring off. The painter's automatic fit
 measures the drawing's box, which a turned drawing overfills.
 
@@ -1412,7 +1414,7 @@ scale":
 - The sheet goes on the smallest paper that holds what the view shows at
   that scale, with the painter's 4% to spare, in the share of the tiling area
   the view takes now.
-- `applyPaper` then maps every placed view from the old tiling area onto the
+- `apply_paper` then maps every placed view from the old tiling area onto the
   new one, so the layout keeps its proportions.
 - The view keeps the scale and is centred on its content. Its automatic scale
   is turned off, so the larger paper does not choose another.
@@ -1459,18 +1461,18 @@ straight in:
 |---|---|
 | `alignViewports(sheet, ids, edge)` | lines the views up on the outermost of their `left`, `right`, `top` or `bottom` edges, or on the middle of the box round them (`hcentre`: one vertical line; `vcentre`: one horizontal line). One view alone aligns to the tiling area. A locked view counts where it is and does not move |
 | `distributeViewports(sheet, ids, axis)` | equal gaps `horizontal`ly or `vertical`ly: the first and last stay and the others move between them; needs three that can move. When the views between are wider together than the room between the first and the last, equal gaps would lay them over each other: that is refused (`InvalidArgument`, saying both sizes) and nothing moves |
-| `matchScale(set, ids, fromId)` | the views, on any sheet, take `fromId`'s scale and lose their automatic scale; a section matched to a section takes its exaggeration too; views with no scale are left out |
-| `fitViewportToContent(viewport, content, area)` | the rectangle grows or shrinks about its centre until the content, with 5% round it, just fits at the view's scale (`kFitSpare`), never below the kind's minimum and kept inside the drawing area; the view is centred on its content. A section measures (chainage or offset, level) points, the level exaggerated |
+| `matchScale(set, ids, fromId)` | the views, on any sheet, take `from_id`'s scale and lose their automatic scale; a section matched to a section takes its exaggeration too; views with no scale are left out |
+| `fitViewportToContent(viewport, content, area)` | the rectangle grows or shrinks about its centre until the content, with 5% round it, just fits at the view's scale (`FIT_SPARE`), never below the kind's minimum and kept inside the drawing area; the view is centred on its content. A section measures (chainage or offset, level) points, the level exaggerated |
 
-`AlignEdge` and `DistributeAxis` read and write those names (`alignEdgeFrom`,
-`distributeAxisFrom`), for a command line.
+`AlignEdge` and `DistributeAxis` read and write those names (`align_edge_from`,
+`distribute_axis_from`), for a command line.
 
 ### One step each, for the editor and for agents
 
-`arrange_commands.hpp` records each of these as one step. An edit that
+`arrange_commands.rs` records each of these as one step. An edit that
 changes nothing records none, and a refused one changes nothing. When the
 caller gives no content, it is gathered from the document's drawing with
-`viewportContent`.
+`viewport_content`.
 
 | Call | Step |
 |---|---|
@@ -1482,7 +1484,7 @@ caller gives no content, it is gathered from the document's drawing with
 | `rotateToBestFit(document, id, content)` | `ROTATE_TO_BEST_FIT` |
 | `choosePaperForScale(document, id, content, scale)` | `CHOOSE_PAPER` |
 
-An automatic view is measured at the scale it is drawn at. `drawnScale`
+An automatic view is measured at the scale it is drawn at. `drawn_scale`
 applies the painter's rule to the content: the first standard scale that
 holds it with 4% to spare, measured about the content's middle for an
 automatic centre and about the view's own centre otherwise. A view along an
@@ -1510,8 +1512,8 @@ context menu hold:
 
 The Match Scale list is filled when it opens: every view in the set drawn to
 a scale, but the selected one, with the scale it is drawn at. The ids come
-from `arrangeTargets`, the one place the selection is read: the whole group
-chosen on the canvas (`selectedIds`), whichever of it is the primary. Every command
+from `arrange_targets`, the one place the selection is read: the whole group
+chosen on the canvas (`selected_ids`), whichever of it is the primary. Every command
 reports what it did, or why it did nothing, in the status bar and the log.
 
 With nothing selected, the sheet's properties have a **Choose paper for this
@@ -1520,7 +1522,7 @@ and opens Choose Paper ("The sheet editor"): the scale, the advice at it,
 and Apply, which runs `SHEET SUGGESTPAPER n scale=... apply=on`.
 The Generate dialog's "The drawing, fitted" has **Rotate the drawing to fill
 the sheet** (`sheetGenerateRotate`), which writes `rotate=on` on its
-`GENERATE fit` line, and so calls `smartLayoutRotated`:
+`GENERATE fit` line, and so calls `smart_layout_rotated`:
 - On an automatic scale, the plan is turned when that buys a larger standard
   scale, and left square otherwise.
 - At a fixed scale that would need tiles, or a sheet of its own for the 3D
@@ -1530,9 +1532,9 @@ the sheet** (`sheetGenerateRotate`), which writes `rotate=on` on its
 The strip above, generated fitted, is one sheet at 1 : 2000 square and at
 1 : 1250 turned 3.62 degrees.
 
-The tests are `tests/cad/plotting/test_arrange.cpp`,
-`tests/cad/plotting/test_arrange_commands.cpp` and
-`tests/qt_widgets/plotting/test_sheet_arrange.cpp`. The last paints a turned
+The tests are `rust/crates/katana_cad/tests/sheetverbs/arrange.rs`,
+`rust/crates/katana_cad/tests/sheetverbs/arrange_commands.rs` and
+`rust/crates/katana_window/tests/sheet_editor/sheet_arrange.rs`. The last paints a turned
 plan at 4 px a millimetre and finds each corner of the strip inked where the
 view's rotation, centre and scale put it, so the rotation means to the
 painter what it means to the model.
@@ -1546,40 +1548,40 @@ ruled tables:
 | Kind (stored as) | Columns | Rows |
 |---|---|---|
 | `SheetIndex` (`sheet_index`), the drawing register | SHEET No. \| TITLE \| SCALE \| PAPER \| REV | a row per sheet, in the set's order; the sheet it is drawn on shaded light grey |
-| `Revisions` (`revisions`), the revision table | REV \| DATE \| DESCRIPTION \| BY | `SheetSet::revisions`, newest at the top - the newest is the last in the list, the order they were issued in, not the latest date or code; with `revisionLimit` N only the newest N (0: every one) |
+| `Revisions` (`revisions`), the revision table | REV \| DATE \| DESCRIPTION \| BY | `SheetSet::revisions`, newest at the top - the newest is the last in the list, the order they were issued in, not the latest date or code; with `revision_limit` N only the newest N (0: every one) |
 
 The heading across the top is the viewport's title, else `DRAWING REGISTER`
-or `REVISIONS` (`automaticTitle`). A table writes no title in the corner as
+or `REVISIONS` (`automatic_title`). A table writes no title in the corner as
 the views do. Both kinds tile (rank 8 and 9, after Notes, so the register
 takes the big cell) and need at least 70 x 30 and 50 x 20 mm. Neither is
 drawn to scale, so a sheet of tables is `N.T.S.`.
 
 **The rows are the title blocks'.** `drawingRegister(set)` reads each sheet's
-fields through `resolveFields`, so the register cannot disagree with the
+fields through `resolve_fields`, so the register cannot disagree with the
 sheets:
 - the number is the one the numbering pattern gives the sheet where it is
-  now (`formatSheetNumber`), or the one typed on it. Move a sheet and its row
+  now (`format_sheet_number`), or the one typed on it. Move a sheet and its row
   moves and is renumbered with it;
 - the title is the sheet's name, or its typed `sheet_name`;
-- the scale is what its title block reports (`sheetScaleText`). An automatic
+- the scale is what its title block reports (`sheet_scale_text`). An automatic
   plan scale is decided first, as the painter decides it for the title block
-  (`resolvedSheetSet` in `src/katana_qt/plotting/sheet_tables.hpp`), so a
+  (`resolved_sheet_set` in `rust/crates/katana_window/src/plotting/sheet_tables.rs`), so a
   plan drawn at 1:2000 is not listed at the 1:500 it was stored with. An
   automatic key plan is fitted to the sheets' outlines, as the painter fits
   it, and an automatic section's scale and exaggeration are the fitted ones
-  (`resolveSectionViewport`). Preflight lays a register out with the same
-  scales (`PreflightOptions::drawnSet`), and `SHEET FIELD n scale` in the
+  (`resolve_section_viewport`). Preflight lays a register out with the same
+  scales (`PreflightOptions::drawn_set`), and `SHEET FIELD n scale` in the
   window prints them;
 - the revision is the one typed on the sheet (its `revision` field), else
   the set's latest - the last in `SheetSet::revisions`.
 
-**The layout is headless.** `include/katana/cad/plotting/tables.hpp` lays a
+**The layout is headless.** `rust/crates/katana_cad/src/plotting/tables.rs` lays a
 table out: every rule, every text and its anchor in paper millimetres, the
 text size, the rows shown and the rows left out. The painter only draws what
 it is given, shading first, then rules, then text. The tests check the
 layout without pixels. Text is measured by a function the caller passes: the
 painter passes its own font's, so what was measured is what is drawn. Without
-one, `estimateTextWidth` uses Arial's published advance widths, the same on
+one, `estimate_text_width` uses Arial's published advance widths, the same on
 every machine.
 
 | Rule | Value |
@@ -1615,7 +1617,7 @@ right" and the revision table in the panel beside it. It has no utility
 legend, which explains symbols a cover does not draw. A set that already
 has a register anywhere is refused (`AlreadyExists`, naming the sheet): two
 registers would be two lists to keep in step. `addRegisterSheet(document,
-paper)` puts it FIRST in the set with new ids (`prepareForAppend`), as ONE
+paper)` puts it FIRST in the set with new ids (`prepare_for_append`), as ONE
 undoable step, and returns its id. The other sheets are numbered one on, and
 their marks follow them by id.
 
@@ -1635,15 +1637,15 @@ field prints the current revision: typed on the sheet, else the set's
 latest. The built-in frame has no such text, and it is left as it was
 measured; its sheets show their revisions in a revision table. A frame
 written for Katana names the field directly, `REV {revision}`, and
-`parseFrame` reads that as a field text.
+`parse_frame` reads that as a field text.
 
 **Storage.** The kinds are stored by their names above. `revision_limit` is
 written only when it is not 0, and a value that is not a whole number of at
 least 0 is refused rather than read as some other count.
 
-The tests are `tests/cad/plotting/test_tables.cpp`,
-`tests/qt_widgets/plotting/test_sheet_tables_painter.cpp` and
-`tests/qt_widgets/plotting/test_sheet_register_editor.cpp`.
+The tests are `rust/crates/katana_cad/tests/plotting/tables.rs`,
+`rust/crates/katana_window/tests/sheets/sheet_tables_painter.rs` and
+`rust/crates/katana_window/tests/sheet_editor/sheet_register_editor.rs`.
 
 ## The smart legend
 
@@ -1652,14 +1654,14 @@ that are not on the sheet. A set strung along a road then names the whole
 survey on every page. So a Legend viewport lists what the sheet's plans
 actually SHOW, each entry with a sample drawn exactly as the plan prints it.
 
-The logic is headless, in `include/katana/cad/plotting/legend.hpp`:
+The logic is headless, in `rust/crates/katana_cad/src/plotting/legend.rs`:
 `computeLegend(model, set, sheetIndex, scope, options)` is a pure function of
 the model, the set and the options. The painter, the editor, a test and an
 agent all get the same list from it.
 
 **What is shown.** An entity is listed when all of these hold:
 - it is visible, and on a layer the document shows;
-- the plan does not hide its layer (`hiddenLayers`, children with their
+- the plan does not hide its layer (`hidden_layers`, children with their
   parent);
 - its SHAPE meets the plan's window on the ground. The window is the
   viewport's rectangle at its scale about its centre, turned by its
@@ -1704,13 +1706,13 @@ name or the import's provenance, not words for a reader. The survey code
 library is optional: without one, every label is a name.
 
 **Look.** An entry is drawn with the look most of its entities resolve to
-(`resolveDisplay`: colour, weight, linetype, symbol and its size, hatch). A
+(`resolve_display`: colour, weight, linetype, symbol and its size, hatch). A
 tie goes to the look of the entity with the lowest id.
 
 **Order.** Symbols, then points, lines, areas and texts, each sorted by label
 with letter case folded. The same input always gives the same list.
 
-**Scope** (`Viewport::legendScope`, a new member at the end of `Viewport`):
+**Scope** (`Viewport::legend_scope`, a new member at the end of `Viewport`):
 
 | `LegendScope` | Stored as | Lists what is shown by |
 |---|---|---|
@@ -1724,16 +1726,16 @@ unplaced plan (one with an empty rectangle) shows nothing. An unknown
 `legend_scope` is refused when the set is read.
 
 **Automatic plans.** A plan on automatic scale or centre shows the window the
-painter chose. The painter passes its own rule (`resolvePlanViewport`), so
-the legend lists what the plan beside it drew. Without it, `fittedPlanWindow`
+painter chose. The painter passes its own rule (`resolve_plan_viewport`), so
+the legend lists what the plan beside it drew. Without it, `fitted_plan_window`
 applies the same rule to the model. It does not count imagery and meshes,
 which the model does not hold.
 
-**On the paper** (`src/katana_qt/plotting/legend_painter.hpp`):
+**On the paper** (`rust/crates/katana_window/src/plotting/legend_painter.rs`):
 - The heading reads LEGEND.
 - Each entry has a sample cell of 10 x 3.6 mm and its label in capitals
   beside it, 1.8 mm high.
-- `layoutLegend` flows the entries down columns and then across. Each column
+- `layout_legend` flows the entries down columns and then across. Each column
   is as wide as its widest label needs, and the rows are shared evenly
   between as few columns as hold every entry.
 - A label wider than its column is squeezed to it.
@@ -1743,11 +1745,11 @@ which the model does not hold.
 
 Each sample goes through the same resolution the plan painter uses, so a
 legend cannot show a mark the plan does not print. Colours go through the
-paper colour rule (`paperColour`), so white prints black.
+paper colour rule (`paper_colour`), so white prints black.
 
 | Kind | Sample |
 |---|---|
-| Line | a library linestyle's own strokes through the shared style painter (`src/katana_qt/customisation/style_painter.hpp`), else a model linetype's dashes, else a plain line, in the entry's weight; a style's symbol at each end, as the plan puts one at every vertex |
+| Line | a library linestyle's own strokes through the shared style painter (`rust/crates/katana_window/src/customisation/style_painter.rs`), else a model linetype's dashes, else a plain line, in the entry's weight; a style's symbol at each end, as the plan puts one at every vertex |
 | Symbol | the symbol at its plotted size: a size on the ground at the legend's scale, the library definition's own, or the plain mark's for a built-in shape. It is shrunk only when it would not fit its cell |
 | Point | the plain point mark, 2 mm across, as on the plan |
 | Area | a swatch filled or hatched with the entry's pattern, outlined as a line of the entry is |
@@ -1759,7 +1761,7 @@ the legend's sheet, else of the first plan the entries came from, else the
 legend viewport's own.
 
 **In the editor.** A Legend viewport's properties have a **Lists** choice
-(objectName `sheetLegendScope`): what this sheet's plans show, what every
+(control name `sheetLegendScope`): what this sheet's plans show, what every
 sheet's plans show, or everything in the drawing. A change is one undo step.
 Under the choice, a line (`sheetLegendSummary`) says what the legend lists
 now and where a fall-back led, for example "3 entries from 2 plans of the
@@ -1773,24 +1775,24 @@ set - this sheet has no plan".
 | `setLegendScope(document, viewportId, scope)` | sets the scope as one undoable step (`LEGEND_SCOPE`). An unchanged scope records no step |
 | `computeLegend(model, set, sheetIndex, scope, options)` | any sheet at any scope, headless |
 | `legendJson(legend)` | the entries as JSON: kind, label, style, layer, code, colour, weight, linetype, symbol and its size, hatch and count, every member written |
-| `toString` / `legendScopeFrom` | `this_sheet`, `whole_set`, `whole_drawing` |
+| `to_string` / `legend_scope_from` | `this_sheet`, `whole_set`, `whole_drawing` |
 
-The tests are `tests/cad/plotting/test_legend.cpp` (visibility by rectangle
+The tests are `rust/crates/katana_cad/tests/sheetverbs/legend.rs` (visibility by rectangle
 and rotation, hidden layers, grouping, labels, order, scopes, storage, the
-flow into columns), `tests/qt_widgets/plotting/test_legend_painter.cpp` (each
+flow into columns), `rust/crates/katana_window/tests/sheets/legend_painter.rs` (each
 kind of sample, a symbol inked in its cell at its plotted size, the panel on
-a sheet, "+N more") and `tests/qt_widgets/plotting/test_legend_properties.cpp`
+a sheet, "+N more") and `rust/crates/katana_window/tests/sheet_editor/legend_properties.rs`
 (the scope choice in the editor).
 
 ## The coordinate grid and the live key plan
 
 Two things a plan viewport works out for itself. The geometry of both is in
-`katana_cad`, with no Qt: `include/katana/cad/plotting/plan_grid.hpp` and
-`include/katana/cad/plotting/key_plan.hpp`. The painter only strokes and sets
+`katana_cad`, with no window: `rust/crates/katana_cad/src/plotting/plan_grid.rs` and
+`rust/crates/katana_cad/src/plotting/key_plan.rs`. The painter only strokes and sets
 what they return, so both are tested without pixels
-(`tests/cad/plotting/test_plan_grid.cpp`, `test_key_plan.cpp`) and then once
-more on paper (`tests/qt_widgets/plotting/test_plan_grid_painter.cpp`,
-`test_plan_grid_editor.cpp`).
+(`rust/crates/katana_cad/tests/plotting/plan_grid.rs`, `key_plan.rs`) and then once
+more on paper (`rust/crates/katana_window/tests/sheets/plan_grid_painter.rs`,
+`plan_grid_editor.rs`).
 
 ### The coordinate grid
 
@@ -1798,19 +1800,19 @@ A plan or key plan viewport has two members for it, at the end of `Viewport`:
 
 | Member | JSON | |
 |---|---|---|
-| `gridStyle` | `grid_style`: `none`, `ticks`, `crosses`, `lines` | `GridStyle`; `None` by default |
-| `gridInterval` | `grid_interval` | metres between lines; 0, the default, is automatic |
+| `grid_style` | `grid_style`: `none`, `ticks`, `crosses`, `lines` | `GridStyle`; `None` by default |
+| `grid_interval` | `grid_interval` | metres between lines; 0, the default, is automatic |
 
 Both are written only when they are not the default, like every member, and
-an unknown style name fails the parse (`toString`, `gridStyleFrom`).
+an unknown style name fails the parse (`to_string`, `grid_style_from`).
 
-**The interval.** An automatic grid (`automaticGridInterval`) is spaced at 1,
+**The interval.** An automatic grid (`automatic_grid_interval`) is spaced at 1,
 2 or 5 times a power of ten metres: of those, the one whose lines fall
 nearest 50 mm apart on the paper, nearest by ratio. So 1:500 has 20 m (40 mm
 apart), 1:1000 has 50 m (50 mm), 1:2000 has 100 m, and 1:750 has 50 m
-(67 mm, which is nearer 50 than 27 mm is). Every step of `kSheetScales`
+(67 mm, which is nearer 50 than 27 mm is). Every step of `SHEET_SCALES`
 lands between 40 and 67 mm. A grid closer than 2 mm on the paper
-(`kGridMinimumSpacingMm`) is refused rather than drawn as a grey smear: the
+(`GRID_MINIMUM_SPACING_MM`) is refused rather than drawn as a grey smear: the
 plan is still drawn, and the painter reports why (`vp1: a 0.5 m grid at
 1:1000 is 0.5 mm apart on the paper; ...`).
 
@@ -1829,17 +1831,17 @@ edges it meets.
 
 **The labels.** One where each line meets an edge: `E 305 200`,
 `N 6 250 400`.
-- Thousands are grouped with a space (`groupedCoordinate`). Decimals appear
+- Thousands are grouped with a space (`grouped_coordinate`). Decimals appear
   only when the interval needs them: none for whole metres, one for 0.5 or
-  2.5 m, two for 0.25 m (`gridDecimals`). Nothing prints as `-0`.
+  2.5 m, two for 0.25 m (`grid_decimals`). Nothing prints as `-0`.
 - 1.8 mm capitals, set along their edge (reading up the sides), 0.8 mm in
   from it, or past the tick for ticks.
 - Each is knocked out on white, 0.4 mm all round.
 - A label is kept only when it lies wholly inside the viewport, clear of the
   view's title, scale bar and north arrow, and at least 1.5 mm clear of the
-  labels already kept (`PlanGridOptions::labelSpacingMm`): two closer than
+  labels already kept (`PlanGridOptions::label_spacing_mm`): two closer than
   that read as one label run on into the next. The painter passes the exact
-  boxes those three knock out (`PlanGridOptions::keepOut`), so a label never
+  boxes those three knock out (`PlanGridOptions::keep_out`), so a label never
   sits over the title or the scale-bar corner, and never half-under either. Labels are taken bottom,
   left, top, right, and along each edge in order, so the same grid always
   keeps the same ones.
@@ -1847,9 +1849,9 @@ edges it meets.
 `planGrid(viewport, placement, options)` gives all of it on the paper: the
 lines, what is stroked (`PlanGrid::strokes`), the crosses, and the labels
 with their anchor, angle, justification and knock-out box. The placement is
-the viewport's scale and centre once "auto" is decided: `storedPlacement`
-for a fixed viewport, or what the painter resolved. `planPaperToWorld`,
-`planWorldToPaper` and `planFootprint` are the viewport's mapping both ways,
+the viewport's scale and centre once "auto" is decided: `stored_placement`
+for a fixed viewport, or what the painter resolved. `plan_paper_to_world`,
+`plan_world_to_paper` and `plan_footprint` are the viewport's mapping both ways,
 and the ground under its rectangle.
 
 `setPlanGrid(document, viewportId, style, interval)` sets both members as
@@ -1858,8 +1860,8 @@ ONE undoable step. It refuses a viewport that is not a plan or a key plan
 negative or not finite. Setting what the viewport already has records no
 step. In the editor a plan's properties have a Grid list (`sheetGridStyle`)
 and a Grid interval box (`sheetGridInterval`, which shows "Auto" at 0, and
-what that is now in its tooltip). They are a front end to `setPlanGrid`
-and make the edit once their signal has returned, since the edit rebuilds
+what that is now in its tooltip). They are a front end to `set_plan_grid`
+and make the edit after the frame that took it, since the edit rebuilds
 the panel they are on.
 
 ### The live key plan
@@ -1873,18 +1875,18 @@ are worked out whenever the key plan is drawn.
 every placed plan viewport on every sheet. Key plans and sections are not
 outlined. Each outline has:
 - the ground under the plan's rectangle, from its rectangle, scale, centre
-  and rotation (`planFootprint`);
+  and rotation (`plan_footprint`);
 - its sheet's id, index and viewport id;
 - `label`, the number the sheet prints now: its typed `sheet_number` if it
-  has one, else the set's numbering pattern (`printedSheetNumber`). So the
+  has one, else the set's numbering pattern (`printed_sheet_number`). So the
   numbers follow a reorder at once;
 - `current`, set on the key plan's own sheet: "you are here";
 - `labelled`, false for a plan whose centre lies inside a larger plan of the
   same sheet (an inset), whose number is written once already.
 
 `place` decides where an automatic plan's ground is. The painter passes
-`resolvePlanViewport`, so an outline is exactly where its sheet draws.
-`fitPlanPlacement` is the same fit, headless, and a test holds the two
+`resolve_plan_viewport`, so an outline is exactly where its sheet draws.
+`fit_plan_placement` is the same fit, headless, and a test holds the two
 together.
 
 **Without a window.** The painter fits an automatic plan over everything the
@@ -1894,7 +1896,7 @@ model alone: the viewport's stretch of its alignment, else what the model
 draws less the viewport's hidden layers, with the alignments included. It
 also has a form that takes the set and the sheet index, which fits an
 automatic key plan to every outline. `modelPlacer(model)` is the `place` a
-command line hands `keyPlanOutlines`. For a drawing of entities and
+command line hands `key_plan_outlines`. For a drawing of entities and
 alignments they give what the painter gives, and a test holds them to it.
 So `planGrid(viewport, placePlan(model, set, sheet, viewport))` is the grid a
 sheet plots, worked out without drawing it.
@@ -1910,12 +1912,12 @@ A key plan's stored `SheetOutline` marks are no longer drawn, since they are
 the stale copies. Its other marks, match lines, still are. The editor's Add
 View > Key Plan stores none, and neither does `VIEW ADD keyplan`. The tile
 and strip generators still store them, and they still reserve their sheets'
-ids (`newSheetIds`). Preflight and arrange ignore them too: preflight checks
+ids (`new_sheet_ids`). Preflight and arrange ignore them too: preflight checks
 an automatic key plan at the window it is fitted to, and counts its live
 outlines as what it shows; arrange fits it to them.
 
-**An automatic key plan** (`autoScale` or `autoCentre`) fits the union of
-the outlines (`fitKeyPlan`), and the drawing only when the set has no plan to
+**An automatic key plan** (`auto_scale` or `auto_centre`) fits the union of
+the outlines (`fit_key_plan`), and the drawing only when the set has no plan to
 outline. Before, it fitted the drawing alone, so a sheet over ground outside
 the drawing's extent fell off it, and a stray entity far away shrank every
 sheet to a speck. The painter and
@@ -1939,44 +1941,44 @@ each service it crosses is and how deep. Every decision made with numbers is
 headless, in `katana_cad`, so an agent reads the same numbers the sheet
 prints:
 
-| Header (`include/katana/cad/plotting/`) | What it decides |
+| Header (`rust/crates/katana_cad/src/plotting/`) | What it decides |
 |---|---|
-| `section_fit.hpp` | the automatic scale and exaggeration (`fitSection`, `fitExaggeration`, `kSectionExaggerations`), the label steps (`labelStep`, `roundStepAtLeast`, `stepText`, `gridValues`), the plot's layout (`sectionPlotLayout`), a viewport's area, stations and half width (`sectionDrawingArea`, `viewportStations`, `viewportHalfWidth`) |
-| `section_annotation.hpp` | the design and ground series (`designSeries`, `groundSeries`), levels (`levelAt`, `levelRange`), cut and fill (`cutFillAt`, `cutFillText`, `earthworkRegions`, `outlineArea`), a crossing's note (`ownLevel`, `crossingNote`) and where labels go (`placeLabels`) |
+| `section_fit.rs` | the automatic scale and exaggeration (`fit_section`, `fit_exaggeration`, `SECTION_EXAGGERATIONS`), the label steps (`label_step`, `round_step_at_least`, `step_text`, `grid_values`), the plot's layout (`section_plot_layout`), a viewport's area, stations and half width (`section_drawing_area`, `viewport_stations`, `viewport_half_width`) |
+| `section_annotation.rs` | the design and ground series (`design_series`, `ground_series`), levels (`level_at`, `level_range`), cut and fill (`cut_fill_at`, `cut_fill_text`, `earthwork_regions`, `outline_area`), a crossing's note (`own_level`, `crossing_note`) and where labels go (`place_labels`) |
 
-The painter is `src/katana_qt/plotting/section_painter.hpp`
-(`paintSectionViewport`, `fitSectionViewport`). It measures its text and
+The painter is `rust/crates/katana_window/src/plotting/section_painter.rs`
+(`paint_section_viewport`, `fit_section_viewport`). It measures its text and
 draws what those decide. It draws through the sheet painter's paper, pens
 and text setter (`SectionCanvas`), so every colour and weight still passes
-through `paperPen`, `dashedPen` and the `TextSetter`. The tests are
-`tests/cad/plotting/test_section_fit.cpp` and `test_section_annotation.cpp`
-without pixels, and `tests/qt_widgets/plotting/test_sheet_sections.cpp` and
-`test_section_editor.cpp` on paper and in the editor.
+through `paper_pen`, `dashed_pen` and the `TextSetter`. The tests are
+`rust/crates/katana_cad/tests/plotting/section_fit.rs` and `section_annotation.rs`
+without pixels, and `rust/crates/katana_window/tests/sheets/sheet_sections.rs` and
+`section_editor.rs` on paper and in the editor.
 
 ### The automatic section scale
 
-A section viewport with `autoScale` is drawn at a scale and an exaggeration
-chosen for it (`fitSection`):
+A section viewport with `auto_scale` is drawn at a scale and an exaggeration
+chosen for it (`fit_section`):
 - **What must fit across.** A long section's chainage range
-  (`source.chainageFrom` to `chainageTo`), or the whole alignment when the
-  range is empty. A cross section's two half widths. With `autoCentre` off,
+  (`source.chainageFrom` to `chainage_to`), or the whole alignment when the
+  range is empty. A cross section's two half widths. With `auto_centre` off,
   the span is measured both ways from the viewport's centre.
 - **What must fit up.** The levels shown: every series' samples over that
   range, the levels of the crossings drawn (hidden layers left out), and at
   a cross section the design profile's level at the centreline
-  (`levelRange`). All the cross sections of one viewport share one scale and
+  (`level_range`). All the cross sections of one viewport share one scale and
   one exaggeration, the deepest setting it.
 - **The plot** is what the viewport leaves once its title strip, its level
   labels and its data band or axis values are taken out
-  (`sectionPlotLayout`). The level labels are measured, so the fit is for
+  (`section_plot_layout`). The level labels are measured, so the fit is for
   the plot that is drawn. The section fills 90% of it each way
-  (`kSectionFitFill`).
-- **The scale** is the largest of `kSheetScales` at which the span fits the
+  (`SECTION_FIT_FILL`).
+- **The scale** is the largest of `SHEET_SCALES` at which the span fits the
   plot's width, and at which the depth would still fit its height at true
   scale: a deep, narrow section is drawn smaller rather than out of its plot.
-- **The exaggeration** is then the largest of `kSectionExaggerations` (1, 2,
+- **The exaggeration** is then the largest of `SECTION_EXAGGERATIONS` (1, 2,
   2.5, 4, 5, 8, 10, 20) at which the depth fits the height
-  (`fitExaggeration`). One that gives the vertical scale a whole denominator
+  (`fit_exaggeration`). One that gives the vertical scale a whole denominator
   is preferred: at 1:750, 2.5 (V 1:300) rather than 4 (V 1:187.5). A section
   with no depth (flat, or nothing sampled) takes the flat value: 10 for a
   long section (H 1:500 V 1:50, as long sections are drawn), 1 for a cross
@@ -1988,7 +1990,7 @@ automatic plan's scale (`SheetPainter::run`). So the viewport's title
 (`LONG SECTION H 1:750 V 1:75`) and the title block's scale cell report the
 scale drawn. A cross-section viewport with one station keeps its title
 `CROSS SECTION CH 120.000`, and its scale is in the title block.
-`resolveSectionViewport` (`src/katana_qt/sheet_painter.hpp`) gives the same
+`resolve_section_viewport` (`rust/crates/katana_window/src/sheet_painter.rs`) gives the same
 answer without painting; the editor shows it as the tooltip of the scale
 box.
 
@@ -2005,8 +2007,8 @@ is reported as a problem and the viewport is left empty.
 - **Steps from measured widths.** The grid along the section is the
   smallest round step (1, 2 or 5 times a power of ten) at least 10 mm apart
   at which its widest label, as the painter measures it, still clears its
-  neighbours by 2 mm (`labelStep`). A finer step writes more decimals
-  (`stepText`: 0.5 gives one, 0.25 two), so the widest label is measured
+  neighbours by 2 mm (`label_step`). A finer step writes more decimals
+  (`step_text`: 0.5 gives one, 0.25 two), so the widest label is measured
   for each step tried. A data band's values are turned across their row, so
   there their height is what must clear. The level step up the side is at
   least 7 mm on the paper.
@@ -2016,11 +2018,11 @@ is reported as a problem and the viewport is left empty.
   30 mm high gives way to plain axis values.
 - **Placing.** Every label inside the plot (the datum, the key of series,
   the centreline's levels, each crossing's note and offset) is placed by
-  `placeLabels`: in priority order, each takes the first of its candidate
+  `place_labels`: in priority order, each takes the first of its candidate
   places that lies inside the plot and clear of every label placed before.
   The labels nearest the middle go first. A label with no free place is
   dropped, never drawn over another; the notes dropped (a crossing's, the
-  centreline's levels) are counted in `SheetPaintStats::sectionNotesDropped`.
+  centreline's levels) are counted in `SheetPaintStats::section_notes_dropped`.
   The level labels, axis values, band columns and caption are placed the
   same way inside the viewport.
 - **Nothing outside the viewport.** Lines, shades and labels are clipped to
@@ -2037,7 +2039,7 @@ is reported as a problem and the viewport is left empty.
 `earthworkRegions(design, ground)` gives the regions between the design and
 the ground. The design is the first series whose name starts with "design",
 in any case (the alignment's grade line, `design ROAD`, or a design surface);
-the ground is the first other series (`designSeries`, `groundSeries`).
+the ground is the first other series (`design_series`, `ground_series`).
 - Where the ground is above the design the region is CUT, shaded light red.
 - Where it is below, it is FILL, shaded light green.
 - Regions split where the two lines cross between samples, at the crossing
@@ -2046,7 +2048,7 @@ the ground is the first other series (`designSeries`, `groundSeries`).
 
 A long section's data band gains a **CUT/FILL** row when it has both: the
 design less the ground at each column, signed to three decimals (`+2.500`
-fill, `-2.500` cut, `0.000`; `cutFillText`). A cross section writes the
+fill, `-2.500` cut, `0.000`; `cut_fill_text`). A cross section writes the
 design and ground levels at its centreline beside it, and the cut or fill
 between them (`DESIGN RL 25.000`, `GROUND RL 23.500`, `FILL 1.500`), with a
 tick across the centreline at each level. Its design level is the design
@@ -2062,9 +2064,9 @@ numbered.
 ### Services crossed
 
 Each line the section crosses that has a level is marked with a ring at it
-and noted (`crossingNote`):
+and noted (`crossing_note`):
 - **The level** is the entity's own (its vertex heights, straight between
-  the two either side of the crossing; `ownLevel`), else the level the
+  the two either side of the crossing; `own_level`), else the level the
   section found under it.
 - **The depth** is the ground less its own level at the crossing: `WATER RL
   22.00 D 1.70`. Above the ground (an overhead line) it is a height:
@@ -2088,10 +2090,10 @@ range is the whole alignment, ends labelled the same way.
 A section's scale box offers Auto, as a plan's does. With Auto the
 exaggeration box is disabled, since it is chosen with the scale, and a fixed
 scale chosen from Auto keeps the exaggeration Auto drew. The tooltip is
-worked out through the canvas's own cache (`SheetCanvas::paintCache`), so a
+worked out through the canvas's own cache (`SheetCanvas::paint_cache`), so a
 selection cuts nothing again. New long
 sections and cross sections are added with Auto on. Setting it is the usual
-one-step `editViewport` (`viewport.autoScale = true`).
+one-step `edit_viewport` (`viewport.autoScale = true`).
 
 Cross sections are cut at the chainages listed or every so many metres over
 the chainage range, and both sections have their hidden layers, which the
@@ -2104,75 +2106,77 @@ A sheet set is plotted in a PLOT STYLE and to one of several OUTPUTS, all
 chosen by plain data, so the Plot dialog, `katana --plot-sheets` and an agent
 make the same call and get the same files.
 
-**The colour mode** is `cad::PlotColourMode` in
-`include/katana/cad/plot.hpp`, carried by `cad::PlotSettings::colourMode`
-with `PlotSettings::lineWeightScale` beside it. The rule lives in the model,
-in `cad::paperColour` (a pen or a letter) and `cad::paperFillColour` (an
+**The colour mode** is `katana_cad::plot::PlotColourMode` in
+`rust/crates/katana_cad/src/plot.rs`, carried by `PlotSettings::colour_mode`
+with `PlotSettings::line_weight_scale` beside it. The rule lives in the model,
+in `katana_cad::plot::paper_colour` (a pen or a letter) and `katana_cad::plot::paper_fill_colour` (an
 area), so the plan painter, the sheet painter and the frame agree:
 
 - **Colour** prints as drawn (white still prints black under
-  `whiteToBlack`).
-- **Greyscale** prints every colour as the grey of its `cad::luminance`, the
+  `white_to_black`).
+- **Greyscale** prints every colour as the grey of its `katana_cad::plot::luminance`, the
   Rec. 601 luma in integers, so a colour keeps its lightness.
 - **Monochrome** prints every pen and letter black. A FILL is black when its
-  luminance is below `cad::kMonochromeFillThreshold` (128) and paper white
+  luminance is below `katana_cad::plot::MONOCHROME_FILL_THRESHOLD` (128) and paper white
   otherwise, as a one-ink plotter prints it: dark areas stay solid, light
   tints drop out and leave their (black) outline. The paper's own white -
   the page, a knock-out behind a label, the key plan's fade - is never a
   colour of the drawing and stays white in every mode; a fill's alpha is
   kept, so a faint tint stays faint.
 
-In the sheet painter the mode is applied in ONE place: `paperPen`,
-`dashedPen`, `TextSetter` and the `paperFill` helper call `plotInk` and
-`plotFill` (`src/katana_qt/plotting/plot_style.hpp`), and every image placed
+In the sheet painter the mode is applied in ONE place: `paper_pen`,
+`dashed_pen`, `TextSetter` and the `paper_fill` helper call `plot_ink` and
+`plot_fill` (`rust/crates/katana_window/src/plotting/plot_style.rs`), and every image placed
 on a sheet - the logo, an image viewport, the 3D snapshot - passes through
-`plotImage`, which greys it (a photograph is printed grey, not thresholded,
+`plot_image`, which greys it (a photograph is printed grey, not thresholded,
 in monochrome). A plan viewport follows because the plan painter takes the
 same `PlotSettings`. **The line weight scale** multiplies every pen width on
 paper (0.1 to 5): a check plot at 0.7, a bold one at 1.4; text, dash lengths
 and symbol sizes are unchanged.
 
-**The page setup** is `plotting::PageSetup`
-(`include/katana/cad/plotting/page_setup.hpp`), kept at the end of
+**The page setup** is `katana_cad::plotting::page_setup::PageSetup`
+(`rust/crates/katana_cad/src/plotting/page_setup.rs`), kept at the end of
 `SheetSet` and in its JSON as `page_setup` (each member only when it is not
 the default): the colour mode (by name), line weight scale, resolution (50 to
 1200 dpi, 300 by default), the file-name pattern and whether a PDF plot is a
-file per sheet. `plotting::setPageSetup` changes it as one undoable step
-("PAGE_SETUP"). The pattern takes `formatSheetNumber`'s `{n}`, `{n:02}`,
+file per sheet. `katana_cad::plotting::page_setup::set_page_setup` changes it as one undoable step
+("PAGE_SETUP"). The pattern takes `format_sheet_number`'s `{n}`, `{n:02}`,
 `{N}` and `{set}`, plus `{name}`, `{number}` and `{id}`; the default
 `{set}{n:02} {name}` names the third sheet of set C "C03 PLAN TILE 3".
-`plotting::sheetFileNames` expands it, sanitises the result for every file
-system (`plotting::sanitiseFileName`: forbidden characters to '-', device
+`katana_cad::plotting::page_setup::sheet_file_names` expands it, sanitises the result for every file
+system (`katana_cad::plotting::page_setup::sanitise_file_name`: forbidden characters to '-', device
 names prefixed, 120 bytes at most) and tells repeats apart with " (2)".
 
-**A selection** is text: `plotting::parseSheetSelection` reads "1,3-5"
+**A selection** is text: `katana_cad::plotting::page_setup::parse_sheet_selection` reads "1,3-5"
 (positions from 1, in the order given, each once), sheet ids ("s7") and
 ""/"all", and refuses a sheet that is not there or a backward range saying
-which; `plotting::formatSheetSelection` writes the short form back.
+which; `katana_cad::plotting::page_setup::format_sheet_selection` writes the short form back.
 
-**The outputs** are `src/katana_qt/plotting/plot_output.hpp`: a
+**The outputs** are `rust/crates/katana_window/src/plotting/plot_output.rs`: a
 `PlotRequest` (sheets, `PlotFormat`, style, dpi, destination, pattern, title)
-given to `plotSheets` writes
+given to `plot_sheets` writes
 
 - `pdf`: one vector PDF, a page a sheet, each page the size of its paper;
 - `pdfs`: a PDF a sheet in the destination folder, named by the pattern;
 - `png`, `tiff`: a raster a sheet at the dpi, with the resolution recorded
   in the file; one grey channel when the mode is not Colour. TIFF is written
-  by `src/katana_qt/plotting/tiff_writer.hpp` (baseline, Deflate), because
-  Qt's TIFF plugin is not everywhere;
+  by `rust/crates/katana_window/src/plotting/tiff_writer.rs` (baseline, Deflate), as the
+  C++ wrote its own because Qt's TIFF plugin was not everywhere;
 
-and `printSheets` prints on a `QPrinter`, a page a sheet on the sheet's
-paper, scaled down to fit (and reported) when the printer's paper is
-smaller. `validatePlotRequest` and `plannedFiles` check a request and list
+and `print_sheets` writes the sheets as the pages of a PDF for a printer, a
+page a sheet on the sheet's paper, scaled down to fit (and reported) when the
+printer's paper is smaller; handing that PDF to the operating system's print
+queue is not written yet, and answers Unsupported (`plot_output.rs`). `validate_plot_request` and `planned_files` check a request and list
 its files without writing anything; the `PlotReport` lists the files
 written, the sheets, every problem and whether it was cancelled. Every file
-goes through a `QSaveFile`, so a cancelled or failed single PDF leaves no
+is written under a temporary name and takes its own only when it is
+complete (`SaveFile`), so a cancelled or failed single PDF leaves no
 half a set and an earlier file as it was.
 
-**Progress.** `plotSheets` calls a `PlotProgress` before each sheet;
+**Progress.** `plot_sheets` calls a `PlotProgress` before each sheet;
 returning false cancels before the next one. The Plot dialog
-(`src/katana_qt/plotting/plot_dialog.hpp`, `PlotDialog`) only collects a
-request; `plotWithProgress` then runs it on the GUI thread behind an
+(`rust/crates/katana_window/src/plotting/plot_dialog.rs`, `PlotDialog`) only collects a
+request; `plot_with_progress` then runs it on the GUI thread behind an
 application-modal progress dialog (`plotProgress`) with Cancel, so the
 sheets cannot be edited while they are painted, and the plot paints from a
 copy of the set. The editor's Plot Sheet and Plot All and File > Plot
@@ -2182,16 +2186,16 @@ without plotting ("The Sheet Set menu and Page Setup"). On the command line, `--
 `--sheets`, `--format pdf|pdfs|png|tiff`, `--plot-style colour|grey|mono`,
 `--dpi` and `--line-weight-scale` (`docs/headless.md`).
 
-The tests are `tests/cad/plotting/test_page_setup.cpp`,
-`tests/qt_widgets/plotting/test_plot_style.cpp`, `test_plot_output.cpp` and
-`test_plot_dialog.cpp`.
+The tests are `rust/crates/katana_cad/tests/plotting/page_setup.rs`,
+`rust/crates/katana_window/tests/sheets/plot_style.rs`, `rust/crates/katana_window/tests/sheets/plot_output.rs` and
+`rust/crates/katana_window/tests/sheet_editor/plot_dialog.rs`.
 
 ## The Sheet Set menu and Page Setup
 
 The Sheets editor's first menu, **Sheet Set** (`sheetSetMenu`,
-`src/katana_qt/plotting/sheet_set_menu.hpp`), keeps the whole set in a file
+`rust/crates/katana_window/src/plotting/sheet_set_menu.rs`), keeps the whole set in a file
 and changes how it plots without plotting. Each item runs the `SHEETS` line
-a person would type through the editor (`SheetEditor::runLine`; in the
+a person would type through the editor (`SheetEditor::run_line`; in the
 window, its one executor), so the log shows what to type and each edit is
 one step:
 
@@ -2209,8 +2213,8 @@ one step:
   Stored sheets that cannot be read are named in the question, since
   `SHEETS LOAD` is the one verb that replaces them.
 - **Append** puts another set's sheets after these as one step
-  (`addSheets`): renumbered as a generator's output is when it joins a set
-  (`prepareForAppend`, which also moves a key plan's references among
+  (`add_sheets`): renumbered as a generator's output is when it joins a set
+  (`prepare_for_append`, which also moves a key plan's references among
   them), so no id is used twice however often the same file is appended.
   The file's title block, revisions and page setup stay behind: they belong
   to its set, and this set keeps its own. An image view's picture is named,
@@ -2220,31 +2224,31 @@ one step:
   and stored sheets that cannot be read are refused as every verb but LOAD
   refuses them. The editor shows the first appended sheet.
 - **Copy Sheet Set as JSON** is the `SHEETS JSON` reply, the JSON the
-  project keeps (`sheet_json.hpp`), for another program or a message.
+  project keeps (`sheet_json.rs`), for another program or a message.
 - **A headless session** opens no file dialog and asks nothing: the three
   file items name their verb instead (`A headless session opens no file
   dialog: type SHEETS SAVE "path" instead.`).
 
 **Page Setup** (`pageSetupDialog`) is the Plot dialog in its page-setup
-mode (`PlotDialog::Mode::PageSetup`): the plot's colours
+mode (`PlotDialogMode::PageSetup`): the plot's colours
 (`plotColourMode`), line weights (`plotLineWeightScale`), resolution
 (`plotDpi`), file-name pattern (`plotPattern`, with the first file's name
 under it) and "A PDF per sheet" (`pageSetupFilePerSheet`), starting from
 the set's page setup; the sheet choice, the output, the file, the folder,
 the printer and Plot are not there. Save (`pageSetupSave`) runs
-`PlotDialog::pageSetupLine`, for example `SHEETS PAGESETUP style=greyscale
+`PlotDialog::page_setup_line`, for example `SHEETS PAGESETUP style=greyscale
 lineweight=0.7 dpi=150 pattern="{n:02} {name}" filepersheet=on`: one step,
-and nothing is plotted. A pattern `validateFileNamePattern` refuses, or one
+and nothing is plotted. A pattern `validate_file_name_pattern` refuses, or one
 holding a double quote (the command line has no way to type one), disables
 Save and says why; a backslash is written `\\` so the verb reads it back as
 itself. Before, the page setup changed only after a plot had run with "Keep
 these settings" ticked. `--dialog sheetPageSetup` finds the dialog by the
 action's data, so a headless session fills and saves it.
 
-The tests are `tests/cad/plotting/test_sheets_append.cpp` (the verb: one
-step, renumbered as `prepareForAppend` renumbers, the set's own title block
-kept, every refusal) and `tests/qt_widgets/plotting/test_sheet_set_menu.cpp`
-(each item by its object name: save and load round trip with the question
+The tests are `rust/crates/katana_cad/tests/road_sheet_verbs/sheets_append.rs` (the verb: one
+step, renumbered as `prepare_for_append` renumbers, the set's own title block
+kept, every refusal) and `rust/crates/katana_window/tests/sheet_editor/sheet_set_menu.rs`
+(each item by its control name: save and load round trip with the question
 answered and cancelled, append, the clipboard, the page setup saved with no
 plot and refused when it cannot be typed, and the headless session).
 `qt_sheet_set_menu_runs_its_lines_headless` drives the menu in the window,
@@ -2256,18 +2260,18 @@ and `cli.sheets_append_puts_another_sets_sheets_after_these` the verb in
 What makes the sheet editor a layout tool: several viewports picked and
 moved at once, a clipboard, a paper grid, rulers, the world under the cursor,
 and a list of sheets that shows each one. What an edit does is decided in
-`include/katana/cad/plotting/viewport_edits.hpp`, with no Qt, so an agent
+`rust/crates/katana_cad/src/plotting/viewport_edits.rs`, with no window, so an agent
 makes the same edits without the canvas and a test checks each without a
-mouse. The editor's pieces are in `src/katana_qt/plotting/`: the rulers and
-grid (`sheet_rulers.hpp`), the cursor readout (`sheet_readout.hpp`), the
-pictures of the sheets (`sheet_thumbnails.hpp`), the list
-(`sheet_list_widget.hpp`), the clipboard (`viewport_clipboard.hpp`), the
-Edit and View menus (`sheet_editor_editing.cpp`), and the canvas's selection,
-view and cursor (`sheet_canvas_editing.cpp`).
+mouse. The editor's pieces are in `rust/crates/katana_window/src/plotting/`: the rulers and
+grid (`sheet_rulers.rs`), the cursor readout (`sheet_readout.rs`), the
+pictures of the sheets (`sheet_thumbnails.rs`), the list
+(`sheet_list_widget.rs`), the clipboard (`viewport_clipboard.rs`), the
+Edit and View menus (`sheet_editor_editing.rs`), and the canvas's selection,
+view and cursor (`sheet_canvas_editing.rs`).
 
 Nothing new is stored. The selection, the grid and the rulers belong to the
-editor; each edit stores the set through `Document::setSheetSet`, as every
-edit in `sheet_commands.hpp` does, as ONE undoable step.
+editor; each edit stores the set through `Document::set_sheet_set`, as every
+edit in `sheet_commands.rs` does, as ONE undoable step.
 
 ### Several viewports at once
 
@@ -2276,24 +2280,24 @@ edit in `sheet_commands.hpp` does, as ONE undoable step.
   Shift-click on it without a drag adds it or takes it out.) The last one
   picked is the
   **primary**: it has the handles and the properties. `SheetCanvas::selected`
-  returns it, and `SheetCanvas::selectedIds` returns all of them in the
+  returns it, and `SheetCanvas::selected_ids` returns all of them in the
   sheet's order, for anything that acts on several.
 - **The rubber band.** A drag on empty paper draws a band. Dragged left to
   right it is a window and takes what it encloses (solid, blue); right to
   left it is a crossing and takes what it touches (dashed, green), as CAD
-  programs pick (`viewportsInBand`). With Ctrl or Shift it adds to the
+  programs pick (`viewports_in_band`). With Ctrl or Shift it adds to the
   selection. The paper is panned with the middle button, or with Space held
   and the left.
 - **A group drag.** Dragging any selected viewport moves them all. Their
   bounds snap, and each moves by the same distance: ONE step
-  (`moveViewports`). A locked viewport stays where it is. A click on one of
+  (`move_viewports`). A locked viewport stays where it is. A click on one of
   a group without a drag, locked or not, selects it alone, and Escape
   abandons a drag - a rubber band too, the selection left as it was.
 - **The keys.** The arrows move every selected viewport by 1 mm (Shift:
   10 mm), one step a press. Delete or Backspace removes them all, locked or
-  not, in one step (`removeViewports`). Tab and Shift+Tab step the selection
+  not, in one step (`remove_viewports`). Tab and Shift+Tab step the selection
   through the placed viewports in the sheet's order and wrap round
-  (`cycleViewport`); on a sheet with none, Tab moves the focus on.
+  (`cycle_viewport`); on a sheet with none, Tab moves the focus on.
 
 ### Copy, paste and duplicate
 
@@ -2303,15 +2307,15 @@ sheet set's own JSON, one sheet holding them, under the MIME type
 another project, or into another Katana running beside this one. A copy
 records nothing.
 
-Ctrl+V pastes them onto the current sheet as one step (`pasteViewports`),
-with new ids (`newViewportIds`) in their order, and selects them. Where they
-land is `pasteOffset`: the first of 0, 5, 10 ... mm right and down at which
+Ctrl+V pastes them onto the current sheet as one step (`paste_viewports`),
+with new ids (`new_viewport_ids`) in their order, and selects them. Where they
+land is `paste_offset`: the first of 0, 5, 10 ... mm right and down at which
 no pasted rectangle lies exactly on a rectangle already on the sheet. So a
 paste onto another sheet lands where the copies were, a paste onto their own
 sheet lands 5 mm from them, and the next paste 5 mm further. Ctrl+X copies and
 removes (one step); after it, a paste lands where the copies were. Ctrl+D
 duplicates, copying and pasting on the same sheet as one step, without
-touching the clipboard (`duplicateViewports`).
+touching the clipboard (`duplicate_viewports`).
 
 Example: `vp1` at 100..200 x 100..180 on the first sheet, in a set whose
 highest id is `vp4`. Copied and pasted onto the second sheet, it becomes
@@ -2320,7 +2324,7 @@ highest id is `vp4`. Copied and pasted onto the second sheet, it becomes
 
 ### The paper grid
 
-View > Snap to Grid (F9) turns on a 5 mm grid (`kPaperGridMm`) through the
+View > Snap to Grid (F9) turns on a 5 mm grid (`PAPER_GRID_MM`) through the
 paper's bottom-left corner, the corner the rulers count from. It is drawn
 faintly, every tenth line a little stronger, and zoomed out only every
 second, fifth or tenth line is drawn, so the lines are never closer than
@@ -2330,9 +2334,9 @@ A drag snaps as before first: an edge or centre line of the moving
 rectangle to one of the drawing area or another viewport within 8 pixels,
 with a guide drawn. Then, on an axis where nothing was in reach, it takes
 the smaller move that puts its left or right edge (its bottom or top edge)
-on a grid line (`snapMovingRect`). A panel next to another lines up with it
+on a grid line (`snap_moving_rect`). A panel next to another lines up with it
 before it lines up with the grid. A handle's edge snaps the same way
-(`snapEdge`). Alt turns all snapping off. Example: a panel 103 mm wide
+(`snap_edge`). Alt turns all snapping off. Example: a panel 103 mm wide
 dragged to 107.3..210.3 lands at 107..210, because its right edge is 0.3 mm
 from a line and its left edge 2.3 mm.
 
@@ -2341,7 +2345,7 @@ from a line and its left edge 2.3 mm.
 View > Rulers (Ctrl+R) shows rulers along the canvas's top and left. They
 are in paper millimetres from the paper's bottom-left corner, Y up, and
 follow the zoom and the pan. The numbers are at the smallest of 1, 2, 5, 10,
-20, 50 ... mm that stands 50 pixels apart (`rulerSteps`). At 2 pixels a
+20, 50 ... mm that stands 50 pixels apart (`ruler_steps`). At 2 pixels a
 millimetre they are every 50 mm, with ticks every 5. On the rulers the
 paper's span is white, the selection's is shaded, and the cursor is marked
 in red on both.
@@ -2349,12 +2353,12 @@ in red on both.
 The right end of the status bar reads the cursor. It gives the paper
 position, the viewport under the cursor with its kind and scale, and, over
 a plan or key plan, the world point drawn there. That point is the
-painter's mapping turned round (`planPaperToWorld`), at the scale and centre
+painter's mapping turned round (`plan_paper_to_world`), at the scale and centre
 the plan is drawn at, with "auto" decided and kept until the next change.
 Example: a plan at 1:500 in 100..300 x 100..250, centred on (1000, 2000) and
 turned 30 degrees, reads
 `X 222.3  Y 173.7 mm   vp1 Plan 1:500   E 1010.000  N 2005.000`. An agent asks
-`SheetCanvas::readoutAt` for the same values.
+`SheetCanvas::readout_at` for the same values.
 
 ### What a drag shows
 
@@ -2371,7 +2375,7 @@ double-click on empty paper or the desk, or Home, fits the page.
 ### The list of sheets
 
 Each sheet in the list has a picture of itself (`SheetThumbnails`), painted
-by `paintSheet`, the function that plots it, at 112 x 80 pixels. A picture
+by `paint_sheet`, the function that plots it, at 112 x 80 pixels. A picture
 is kept until something it shows changes: the sheet, its position, the order
 of the sheets (its number and the numbers its marks print, and the sheet
 numbers the sheets its marks lead to override), the title-block
@@ -2382,35 +2386,35 @@ picture, and a line drawn in the model does not paint a sheet of notes.
 Stale pictures are painted one at a time while the editor is idle and shown,
 the old picture standing in until then.
 
-A sheet dragged up or down the list is moved with `moveSheet` as one step,
+A sheet dragged up or down the list is moved with `move_sheet` as one step,
 and the list is built again from the document, so it never shows an order
-the set does not have (`SheetListWidget::dropAt`); a drop in the spacing
+the set does not have (`SheetListWidget::drop_at`); a drop in the spacing
 between two rows goes between them. PgUp and PgDn show the previous and the
 next sheet while the canvas or the list has the focus, and are left to a
 spin box of the properties, which pages with them.
 
 ### The actions
 
-Each is a QAction of the editor window with an object name, and each calls
+Each is an action of the editor window with a control name, and each calls
 a public function that an agent calls directly:
 
 | Action | Key | Calls |
 |---|---|---|
-| `sheetCut` | Ctrl+X | `SheetEditor::cutSelection` |
-| `sheetCopy` | Ctrl+C | `SheetEditor::copySelection` |
+| `sheetCut` | Ctrl+X | `SheetEditor::cut_selection` |
+| `sheetCopy` | Ctrl+C | `SheetEditor::copy_selection` |
 | `sheetPaste` | Ctrl+V | `SheetEditor::paste` |
-| `sheetDuplicateViews` | Ctrl+D | `SheetEditor::duplicateSelection` |
-| `sheetDeleteViews` | Delete | `SheetEditor::removeSelectedViewport` |
-| `sheetSelectAll` | Ctrl+A | `SheetCanvas::selectAll` |
-| `sheetSelectNextView`, `sheetSelectPreviousView` | Tab, Shift+Tab on the canvas | `SheetCanvas::cycleSelection` |
-| `sheetZoomSelection` | Shift+Home | `SheetCanvas::zoomToSelection` |
-| `sheetFitPage` | Home | `SheetCanvas::fitPage` |
-| `sheetSnapGrid` | F9 | `SheetCanvas::setSnapToGrid` |
-| `sheetShowRulers` | Ctrl+R | `SheetCanvas::setRulersShown` |
-| `sheetPreviousSheet`, `sheetNextSheet` | PgUp, PgDn on the canvas or the list | `SheetEditor::setCurrentSheet` |
+| `sheetDuplicateViews` | Ctrl+D | `SheetEditor::duplicate_selection` |
+| `sheetDeleteViews` | Delete | `SheetEditor::remove_selected_viewport` |
+| `sheetSelectAll` | Ctrl+A | `SheetCanvas::select_all` |
+| `sheetSelectNextView`, `sheetSelectPreviousView` | Tab, Shift+Tab on the canvas | `SheetCanvas::cycle_selection` |
+| `sheetZoomSelection` | Shift+Home | `SheetCanvas::zoom_to_selection` |
+| `sheetFitPage` | Home | `SheetCanvas::fit_page` |
+| `sheetSnapGrid` | F9 | `SheetCanvas::set_snap_to_grid` |
+| `sheetShowRulers` | Ctrl+R | `SheetCanvas::set_rulers_shown` |
+| `sheetPreviousSheet`, `sheetNextSheet` | PgUp, PgDn on the canvas or the list | `SheetEditor::set_current_sheet` |
 
-The arrows call `SheetEditor::nudgeSelection`, and a drop in the list
-`SheetEditor::moveSheetTo`. Cut, Copy, Duplicate, Delete and Zoom to
+The arrows call `SheetEditor::nudge_selection`, and a drop in the list
+`SheetEditor::move_sheet_to`. Cut, Copy, Duplicate, Delete and Zoom to
 Selection are enabled only while something is selected, and Paste only while
 the clipboard holds viewports. A disabled action leaves its key to the text
 box that has the focus.
@@ -2437,7 +2441,7 @@ The mouse, all in one place:
 | wheel | zooms about the cursor |
 | Escape | abandons a drag, else clears the selection |
 
-The edits themselves, in `viewport_edits.hpp`, take the sheet by its
+The edits themselves, in `viewport_edits.rs`, take the sheet by its
 position and the viewports by id:
 
 | Function | |
@@ -2445,19 +2449,19 @@ position and the viewports by id:
 | `moveViewports(document, sheet, ids, delta)` | the unlocked, placed ones moved by `delta` mm |
 | `removeViewports(document, sheet, ids)` | all of them, locked or not |
 | `copyViewports(set, sheet, ids)` | copies in the sheet's order, ids and all: a clipboard |
-| `pasteViewports(document, sheet, viewports, offset)` | onto the front of the sheet with new ids, moved by `offset` (`pasteOffset` when not given); returns the new ids |
+| `pasteViewports(document, sheet, viewports, offset)` | onto the front of the sheet with new ids, moved by `offset` (`paste_offset` when not given); returns the new ids |
 | `duplicateViewports(document, sheet, ids)` | copies pasted on the same sheet; returns their ids |
-| `viewportsInBand`, `viewportBounds`, `cycleViewport` | picking, the selection's bounds, Tab's order |
-| `snapToGrid`, `snapMovingRect`, `snapEdge` | the grid and a drag's snapping |
-| `planPaperToWorld`, `planWorldToPaper` | a plan's paper and its world |
+| `viewports_in_band`, `viewport_bounds`, `cycle_viewport` | picking, the selection's bounds, Tab's order |
+| `snap_to_grid`, `snap_moving_rect`, `snap_edge` | the grid and a drag's snapping |
+| `plan_paper_to_world`, `plan_world_to_paper` | a plan's paper and its world |
 
 An id that is not on the sheet is refused with `NotFound`, naming it; an
 empty list is refused with `InvalidArgument`; a repeated id counts once. A
 refused edit changes nothing, and an edit that would change nothing adds no
 step.
 
-The tests are `tests/cad/plotting/test_viewport_edits.cpp` and
-`tests/qt_widgets/plotting/test_sheet_editor_editing.cpp`.
+The tests are `rust/crates/katana_cad/tests/plotting/viewport_edits.rs` and
+`rust/crates/katana_window/tests/sheet_editor/sheet_editor_editing.rs`.
 
 ## Not yet
 

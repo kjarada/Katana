@@ -1,9 +1,9 @@
 # Interactive tools
 
 The drawing tools of the Draw, Modify and Annotate menus: state machines in
-`katana_cad` (`include/katana/cad/interactive_tool.hpp`,
-`src/katana_cad/tools/`), a catalogue that builds the menus, and the host in
-`katana_qt` that runs a tool in a plan view (`src/katana_qt/tools/`). The
+`katana_cad` (`rust/crates/katana_cad/src/interactive_tool.rs`,
+`rust/crates/katana_cad/src/tools/`), a catalogue that builds the menus, and the host in
+`katana_window` that runs a tool in a plan view (`rust/crates/katana_window/src/tools/`). The
 window around them is `docs/desktop.md`; the engine the tools' commands run
 on is `docs/cad.md`.
 
@@ -11,19 +11,19 @@ on is `docs/cad.md`.
 
 The owner asked on 2026-09-23 for more CAD tools, with icons and menus, "to
 make it professional CAD software". The tools the application had - Point,
-Line, Polyline, Rectangle, Circle, Arc, Move, Copy - were a `switch` inside
-`ViewportWidget::acceptPoint`, and the editing verbs (Rotate, Trim, Fillet,
+Line, Polyline, Rectangle, Circle, Arc, Move, Copy - were a `switch` inside the
+C++ plan view's acceptPoint, and the editing verbs (Rotate, Trim, Fillet,
 ...) existed only on the command line. Nothing about a tool's behaviour could
 be tested without clicking, and every new tool meant another case in the view
 and another hand-made action in the window.
 
 **A tool is now a state machine in `katana_cad`**
-(`include/katana/cad/interactive_tool.hpp`). The plan view tells it what the
+(`rust/crates/katana_cad/src/interactive_tool.rs`). The plan view tells it what the
 user did - a snapped point, a picked entity, a typed value, Enter, Undo - and
 the tool answers with the next prompt, a rubber-band preview for the cursor
 and, when it completes, ONE command, so one undo removes the whole operation.
 A tool never edits the document itself. Each is tested through
-`tests/cad/tools/tool_driver.hpp`, which feeds it the inputs a user would and
+`rust/crates/katana_cad/tests/support/tool_driver.rs`, which feeds it the inputs a user would and
 executes what it returns, against geometry worked out by hand.
 
 **One catalogue feeds everything that names a tool**: the menus, the toolbars,
@@ -33,70 +33,68 @@ catalogue refuses a duplicate id or alias, a lower-case alias and a
 single-letter shortcut (a letter typed into a view goes to the command line);
 a refusal is kept, not lost, and a test asserts there are none.
 
-**The families are listed explicitly** (`src/katana_cad/tools/families.hpp`),
-not self-registered. `katana_cad` is a static archive, and an object file
-nothing references is dropped by the linker - taking its tools with it and
-saying nothing; `src/katana_surveyio/CMakeLists.txt` measured that trap. The
-source files are globbed so that families written at the same time do not
-all edit one list; a family that goes missing is a link error, not a
-silently empty menu.
+**The families are listed explicitly** (`rust/crates/katana_cad/src/tools/families.rs`),
+not self-registered. In the C++ build `katana_cad` was a static archive, and
+an object file nothing referenced was dropped by the linker - taking its
+tools with it and saying nothing; the Rust keeps the explicit list, so a
+family that goes missing is a compile error, not a silently empty menu.
 
-**Typed input has one router**, `routeTypedInput`: text that looks like a
+**Typed input has one router**, `route_typed_input`: text that looks like a
 point (a comma, or the `@` of relative input) is a point - `x,y`, `@dx,dy`,
 `@distance<angle` from the tool's last point - and anything else is a value,
 so "12.5" reaches a Circle's radius rather than being refused as a malformed
 point, and a clicked point and a typed one are the same input. The command
 interpreter still has its own point parser with the same grammar; folding it
-onto `parsePointInput` is a follow-up. `parsePointInput` itself now
-delegates to the drawing system's `parsePrecisePoint`, so a DMS angle or a
+onto `parse_point_input` is a follow-up. `parse_point_input` itself now
+delegates to the drawing system's `parse_precise_point`, so a DMS angle or a
 quadrant bearing may follow the `<` of polar input, and the router has an
 overload taking the document's drafting settings and the cursor, which the
 tool host uses: `<angle` and `=distance` lock the next points, and a number
 a tool refuses at a point prompt is direct distance entry
 (`docs/drawing.md`, "Precision input"). A typed point reaches the tool as
-`InteractiveTool::exactPoint(at, z)` - given, not pointed at - whose default
+`InteractiveTool::exact_point(at, z)` - given, not pointed at - whose default
 hands it on as a click goes, to `point3d` with a height and `point`
 without; Insert Vertex overrides it, since its "too close to vertex N" is a
 rule about what a POINTER meant. A z reaches only a step whose
-`InteractiveTool::takesHeights` says so (Point, Polyline 3D, Move Vertex's
+`InteractiveTool::takes_heights` says so (Point, Polyline 3D, Move Vertex's
 new place, Insert Vertex's): there `x,y,z` is the height, and the dz of
 `@dx,dy,dz` is read as the tool's VERB reads it - the height itself, as
-`PLINE3D` has it (the default), or, where `InteractiveTool::dzIsAChange`
-says so, a change of `InteractiveTool::lastHeight` (Move Vertex, as
+`PLINE3D` has it (the default), or, where `InteractiveTool::dz_is_a_change`
+says so, a change of `InteractiveTool::last_height` (Move Vertex, as
 `VERTEX MOVE` has it; refused when there is none, never read as a height
 of dz). Everywhere else the z of either form is dropped, as it always was.
 The dz rule first applied to every tool, and `@0,5,0` at MOVE or LINE was
 refused ("the point @ is measured from has no height"); then it made
 Polyline 3D climb dz from its last vertex while `PLINE3D` put the vertex at
 dz, one line two polylines. Rejected: telling the kinds apart by
-`lastHeight` alone - Move Vertex on a vertex with no height must refuse a
+`last_height` alone - Move Vertex on a vertex with no height must refuse a
 dz, not drop it; and making `PLINE3D` climb too, which would change what an
 existing verb line draws (`docs/drawing.md`, Not done).
 
-**Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
-by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
+**Icons live with their family** (`rust/crates/katana_window/src/tools/icons_<family>.rs`,
+by tool id), drawn to `icons.rs`'s conventions: a 24-unit grid, a 1.7-unit
 stroke, neutral for the object and the accent for what the tool does to it. A
 tool with no painter shows a framed initial, visibly a placeholder.
 `katana_tool_icon_sheet` renders every catalogue tool's icon at menu, toolbar
 and large size with its name and aliases, so an icon is reviewed without
-launching the application. `tools::ToolInk` duplicates icons.cpp's private
+launching the application. `tool_icons::ToolInk` duplicates `icons.rs`'s private
 `Ink` while other work is changing that file; merging them is a follow-up.
 
 ### The five families
 
 Thirty-six tools in five families were merged on 2026-09-23, each family one
-file (or a few) in `src/katana_cad/tools/`, each tool tested through
+file (or a few) in `rust/crates/katana_cad/src/tools/`, each tool tested through
 `ToolDriver` against geometry worked out by hand, and each with an icon. The
 aliases are the ones drafters already type, plus the command interpreter's own
 spellings of the same verbs, so a word means one thing whichever reads it:
 
 | Family | Tools (aliases) |
 |---|---|
-| Draw > Lines (`draw_lines.cpp`) | Point (`POINT`, `PO`), Line (`LINE`, `L`), Polyline (`PLINE`, `PL`, `POLYLINE`), Rectangle (`RECTANG`, `REC`, `RECT`, `RECTANGLE`), Polygon (`POLYGON`, `POL`) |
-| Draw > Curves (`draw_curves.cpp`) | Circle (`CIRCLE`, `C`) and its Centre Diameter, 2 Points, 3 Points and Tangent Tangent Radius variants; Arc (`ARC`, `A`, three points) and its Start Centre End, Centre Start End and Start End Radius variants - a variant has no verb, being an option of the general tool, as drafters expect |
-| Modify > Transform (`modify_transform.cpp`) | Move (`MOVE`, `M`), Copy (`COPY`, `CO`, `CP`), Rotate (`ROTATE`, `RO`), Scale (`SCALE`, `SC`), Mirror (`MIRROR`, `MI`), Stretch (`STRETCH`, `S`), Rectangular Array (`ARRAYRECT`, `ARRAY`, `AR`), Polar Array (`ARRAYPOLAR`), Erase (`ERASE`, `E`, `DELETE`, `DEL`) |
-| Modify > Edit (`modify_edit*.cpp`) | Trim (`TRIM`, `TR`), Extend (`EXTEND`, `EX`), Offset (`OFFSET`, `O`), Fillet (`FILLET`, `F`), Chamfer (`CHAMFER`, `CHA`), Break (`BREAK`, `BR`), Break at Point (`BREAKATPOINT`), Join (`JOIN`, `J`), Explode (`EXPLODE`, `X`) |
-| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Baseline Dimension (`DIMBASELINE`, `DBA`), Continue Dimension (`DIMCONTINUE`, `DCO`), Leader (`LEADER`, `LEAD`, `LE`), Balloon (`BALLOON`), Level Leader (`LEADERLEVEL`), Surface Difference Leader (`LEADERSURFACE`), Cut/Fill Leader (`LEADERCUTFILL`), Point Name Leader (`LEADERNAME`), Code Leader (`LEADERCODE`), Station Leader (`LEADERSTATION`), Label Objects (`LABELOBJECTS`, `LBL`, `LABEL`) |
+| Draw > Lines (`draw_lines.rs`) | Point (`POINT`, `PO`), Line (`LINE`, `L`), Polyline (`PLINE`, `PL`, `POLYLINE`), Rectangle (`RECTANG`, `REC`, `RECT`, `RECTANGLE`), Polygon (`POLYGON`, `POL`) |
+| Draw > Curves (`draw_curves.rs`) | Circle (`CIRCLE`, `C`) and its Centre Diameter, 2 Points, 3 Points and Tangent Tangent Radius variants; Arc (`ARC`, `A`, three points) and its Start Centre End, Centre Start End and Start End Radius variants - a variant has no verb, being an option of the general tool, as drafters expect |
+| Modify > Transform (`modify_transform.rs`) | Move (`MOVE`, `M`), Copy (`COPY`, `CO`, `CP`), Rotate (`ROTATE`, `RO`), Scale (`SCALE`, `SC`), Mirror (`MIRROR`, `MI`), Stretch (`STRETCH`, `S`), Rectangular Array (`ARRAYRECT`, `ARRAY`, `AR`), Polar Array (`ARRAYPOLAR`), Erase (`ERASE`, `E`, `DELETE`, `DEL`) |
+| Modify > Edit (`modify_edit*.rs`) | Trim (`TRIM`, `TR`), Extend (`EXTEND`, `EX`), Offset (`OFFSET`, `O`), Fillet (`FILLET`, `F`), Chamfer (`CHAMFER`, `CHA`), Break (`BREAK`, `BR`), Break at Point (`BREAKATPOINT`), Join (`JOIN`, `J`), Explode (`EXPLODE`, `X`) |
+| Annotate (`annotate*.rs`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Baseline Dimension (`DIMBASELINE`, `DBA`), Continue Dimension (`DIMCONTINUE`, `DCO`), Leader (`LEADER`, `LEAD`, `LE`), Balloon (`BALLOON`), Level Leader (`LEADERLEVEL`), Surface Difference Leader (`LEADERSURFACE`), Cut/Fill Leader (`LEADERCUTFILL`), Point Name Leader (`LEADERNAME`), Code Leader (`LEADERCODE`), Station Leader (`LEADERSTATION`), Label Objects (`LABELOBJECTS`, `LBL`, `LABEL`) |
 
 **The Annotate tools and the annotation system** (`docs/annotation.md`,
 2026-09-25). The Leader tool makes ONE leader entity (`LeaderGeometry`) -
@@ -108,15 +106,15 @@ made the size it would have been drawn and then keeps its size on paper. It
 keeps the old hook rule as its landing: one arrowhead long, only for a note on
 a last segment more than 15 degrees off level. A tip clicked within the pick
 aperture of a point, line, arc, circle, polyline or text is put ON it and
-follows it (`nearestAnchor`), and the note of such a leader may name the
+follows it (`nearest_anchor`), and the note of such a leader may name the
 entity's values in braces - `{prop.size} PVC`, `CH {chainage:.1f}` - which
 makes it a smart leader read off the entity (`docs/annotation.md`, "Smart
 leaders"). A line with a brace is checked as it is typed, a note that would
 say nothing is refused with what the entity lacks, and a tip on nothing keeps
-its note as typed, braces and all (`tests/cad/tools/test_smart_leader_tool.cpp`). The Angular, Radius, Diameter
-and Ordinate Dimension tools (`annotate_dimension_kinds.cpp`) make the
+its note as typed, braces and all (`rust/crates/katana_cad/tests/annotools/smart_leader_tool.rs`). The Angular, Radius, Diameter
+and Ordinate Dimension tools (`annotate_dimension_kinds.rs`) make the
 dimension the `DIM` verb makes, through the same builders
-(`include/katana/cad/annotation/dimension_build.hpp`), so a picked pair of
+(`rust/crates/katana_cad/src/annotation/dimension_build.rs`), so a picked pair of
 lines, arc or circle is FOLLOWED when it is edited; a dimension given by
 clicked points measures those points, unless a point was snapped to an
 entity's end, middle, centre or vertex, which it then follows
@@ -124,31 +122,31 @@ entity's end, middle, centre or vertex, which it then follows
 drawing's origin until Datum gives another (`DIM ORDINATE ... datum=x,y`),
 kept for the rest of the run as the datum of the drawing's newest ordinate.
 The Linear Dimension tool stores the projected aligned dimension described
-in `annotate_dimension.cpp` where that can draw what was asked - every
+in `annotate_dimension.rs` where that can draw what was asked - every
 drawing made before the Linear kind holds it - and the Linear kind `DIM
 LINEAR` makes for Rotated (a typed angle or two points), for a line between
 the origins' levels (once refused) and for snapped origins, which only the
-Linear kind can follow. The export draws both (`export_annotation.hpp`), so
+Linear kind can follow. The export draws both (`export_annotation.rs`), so
 the old reason for the projection, that the DXF writer drew only the aligned
 kind, no longer holds. Text takes the `TEXT` verb's style, justification and
 paper height at its first prompt (`S`, `J`, `P`), and Multiline Text makes one
 text of every line typed, as `MTEXT` does (`docs/annotation.md`, "Text in the
 window"). A bare `LEADER`, `DAN` or `DIMRADIUS` typed starts
 the tool; with arguments the line is the command interpreter's, as
-`LINE 0,0 10,0` is. Label Objects (`annotate_label.cpp`, 2026-09-26) is the
-`LABEL` verb by hand, made through the same `annotation::createLabels`; a
+`LINE 0,0 10,0` is. Label Objects (`annotate_label.rs`, 2026-09-26) is the
+`LABEL` verb by hand, made through the same `katana_cad::annotation::auto_label::create_labels`; a
 bare `LABEL` starts it (`docs/annotation.md`, "In the window").
 
 **Chains, balloons and the leader's options** (2026-09-26). Baseline and
-Continue Dimension (`annotate_dimension_chain.cpp`) go on from the drawing's
+Continue Dimension (`annotate_dimension_chain.rs`) go on from the drawing's
 newest linear or aligned dimension - the one the last dimension tool made,
 as AutoCAD's go on from the last - and Select picks another; each origin
 clicked is one more dimension, Enter makes them all as one command through
-`annotation::dimensionChain` (DIM BASELINE's and DIM CONTINUE's door) and
+`katana_cad::annotation::dimension_build::dimension_chain` (DIM BASELINE's and DIM CONTINUE's door) and
 Enter again ends the tool; Esc keeps those placed. Baseline's Spacing
 overrides a text height and a half of the base's style. Balloon
-(`annotate_balloon.cpp`) is BALLOON by hand, numbered by
-`annotation::nextBalloonNumber` unless Number says otherwise, with Style and
+(`annotate_balloon.rs`) is BALLOON by hand, numbered by
+`katana_cad::annotation::leader_edit::next_balloon_number` unless Number says otherwise, with Style and
 Paper - BALLOON's `style=` and `paper=` - at every prompt, for the balloon
 being drawn. The Leader's first prompt takes Arrow, Callout, Style, Paper,
 SIze and Landing - LEADER's `arrow=`, `callout=`, `style=`, `paper=`,
@@ -157,41 +155,41 @@ letters because S is Style's, and Landing's `Auto` gives back the rule of one
 arrowhead where the line slopes. Until 2026-09-26 the tools offered only
 some of their verbs' options, so a leader's own arrowhead size and landing,
 and a balloon's style and height, could be given only by typing the verb.
-The text style is found by `textStyleNamed` (`annotate_common.hpp`), by its
+The text style is found by `text_style_named` (`annotate_common.rs`), by its
 name or ignoring case, the same for both. What a tool
 starting again should remember is read from the drawing, not kept by the
 program: the newest dimension to go on from, the newest ordinate's datum,
 the highest balloon, the newest hand-placed label's style. Each of these
 tools is tested against the verb line that makes the same entities.
 
-**The preset leaders** (2026-10-15, `annotate_leader_presets.cpp`; the
+**The preset leaders** (2026-10-15, `annotate_leader_presets.rs`; the
 owner's request for a leader showing a point's level, its difference to a
 TIN and its name, each one click on the Annotate toolbar). Six tools, one a
 preset of `LEADER preset=` (`docs/annotation.md`, "Presets"): click the point
 the note reads, then the note's place - or Enter for where `LEADER FOR`
 puts one - and the leader `LEADER #id@x,y x,y preset=...` makes is made
-through the same `resolveLeaderPreset` and `newLeader`, as one command, and
+through the same `resolve_leader_preset` and `new_leader`, as one command, and
 the tool starts again. `S` (`A` for a station) names the surface (the
 alignment); the one offered is what the drawing's newest leader of the
 preset reads. A point with nothing to say is refused at the first click.
 Each is a tool of its own, not a "Leader, ..." family, so each is a toolbar
 button and not one behind a drop-down, and `--check-toolbars` is unchanged.
-Tested against the verb line (`tests/cad/tools/test_leader_preset_tools.cpp`).
+Tested against the verb line (`rust/crates/katana_cad/tests/tool_cases/leader_preset_tools.rs`).
 
-The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
+The sixth family in `families.rs`, Inquiry (Distance, Area, ID Point, Angle,
 List), is listed and empty. The drawing system added Draw > Vertices
-(`modify_vertex.cpp`, eighteen tools gathered into a Vertices submenu of
+(`modify_vertex.rs`, eighteen tools gathered into a Vertices submenu of
 Draw by their "Vertices, <tool>" names) and the professional draw tools
-(`draw_professional.cpp`: 3D Polyline, Construction Line, Ray, Double Line,
+(`draw_professional.rs`: 3D Polyline, Construction Line, Ray, Double Line,
 Freehand Sketch, Revision Cloud, Spline, the Ellipse submenu, Circle Tangent
 Tangent Tangent and Arc Start End Direction); `docs/drawing.md` has their
 tables. The Survey menu's tools (`docs/survey.md`) are
 dialogs, not catalogue tools.
 
-**Terrain > Edit Surface** (`terrain_edit.cpp`, 2026-10-15) is the first
+**Terrain > Edit Surface** (`terrain_edit.rs`, 2026-10-15) is the first
 family of another category, Terrain: Delete Triangle, Flip Edge, Add Point,
 Delete Point, Move Point, Delete Triangles Inside, Add Breakline, Boundary and
-Hole, each acting on the active surface. The window hands `tools::fillToolMenus` the
+Hole, each acting on the active surface. The window hands `tools::fill_tool_menus` the
 Edit Surface submenu and the Surface Edit toolbar as the category's targets,
 so the category gets no menu of its own. A tool does not edit the surface: it
 writes the `SURFACE EDIT` line, plans it with the verb's own planner and
@@ -204,7 +202,7 @@ Copy made before Enter, every cut of a Trim. The edit tools need more than
 that, because a later pick can land on a piece an earlier pick made - which
 has no id until a command runs - and a fillet must keep the side of each line
 the user picked. So Trim, Extend, Offset, Fillet, Chamfer, Break and Join
-work on an `EditSession` (`modify_edit_support.hpp`, family-internal): a
+work on an `EditSession` (`modify_edit_support.rs`, family-internal): a
 layer over the document that records what the session has made of each
 entity and what it added, with `begin()`/`undo()` per operation for the `U`
 inside the tool, and `commit()` turning the whole session into one command
@@ -219,33 +217,32 @@ radius, the two chamfer distances, the offset distance (Through until one is
 typed) and a 1 mm join tolerance, one object per program, as CAD programs keep
 the last fillet radius, chamfer distances and offset distance - a user who
 fillets at 5 expects 5 next time - and nothing of it is in the drawing. Offset refuses an INWARD
-offset beyond the polyline's local feature size: `geometry::offset` mitres
+offset beyond the polyline's local feature size: `katana_geometry::offset` mitres
 each vertex, and past that size the sides pass each other, so an 8 x 8 square
 offset inward by 5 came out as a 2 x 2 square drawn the other way round when
-no such offset exists (`keepsItsSides`). Offset also refuses an object on a
+no such offset exists (`keeps_its_sides`). Offset also refuses an object on a
 locked layer, since the copy would land there. Break at Point refuses a
 circle ("A circle has no ends, so one point cannot split it; use Break with
 two points."). Fillet and Chamfer take lines only, Join always makes a
 polyline, and a pending offset cannot itself be picked within the session.
 
-The modify-edit tests reach `modify_edit_support.hpp` through an include
-path of their own (`tests/cad/CMakeLists.txt`), as the family's sources do.
+The modify-edit tests reach `modify_edit_support.rs` as the family's sources do.
 
 ### The tool host: how a view runs a tool
 
 The plan view's own `switch` is gone. Every tool the view runs is a catalogue
-tool, run by a **`ToolHost`** (`src/katana_qt/tools/tool_host.*`) that sits
-between the tool, which knows nothing of Qt, and the view, which knows nothing
+tool, run by a **`ToolHost`** (`rust/crates/katana_window/src/tools/tool_host.rs`) that sits
+between the tool, which knows nothing of the window, and the view, which knows nothing
 of any one tool. It starts a tool with the document's current attributes
 (layer and style, D9) and the live selection, hands it what the user did - a
 snapped point, a picked entity, typed text, Enter, Esc, Undo - and when the
 tool finishes executes its ONE command through the Document. It restarts the
 tool when the tool asks (Circle, Point), and gives the tool the view's pick
-aperture in model units (`ToolContext::pickTolerance`) - read when the tool
+aperture in model units (`ToolContext::pick_tolerance`) - read when the tool
 starts or restarts only, so after a zoom inside the tool Trim's and Fillet's
 own picks can differ from the view's until the next restart. It reports
 through hooks and opens nothing, so a test drives it by calling it
-(`tests/qt_widgets/tools/`). A generation count, bumped whenever a tool is
+(`rust/crates/katana_window/tests/plan_view/tool_host.rs`). A generation count, bumped whenever a tool is
 made, remade or dropped, is how the host knows that a hook replaced the tool
 it was dealing with: a tool started from a hook was once allocated at the
 address of the one it replaced.
@@ -255,35 +252,35 @@ address of the one it replaced.
 Vertices tools, `docs/drawing.md`, "What a vertex tool acts on"):
 
 - `handles`: the grips hot in the view when the tool started - a vertex the
-  user clicked BEFORE choosing the tool. The view sets them in `startTool`
-  (`ToolHost::setHandles`, from `GripController::hot`) and the host gives
-  them to the next tool it makes and to no other (`std::exchange` in
+  user clicked BEFORE choosing the tool. The view sets them in `start_tool`
+  (`ToolHost::set_handles`, from `GripController::hot`) and the host gives
+  them to the next tool it makes and to no other (taken, not copied, in
   `make()`), so a tool restarted after an edit never sees a vertex index the
   edit has renumbered. The view then drops its grips (`GripController::reset`):
   a grip picked up before the tool was otherwise put down by the first click
   after it, a `GRIP_EDIT` nobody asked for.
 - `pick`: the view's own pick NOW, `(at, reach, types)`, through the view's
-  hidden layers; `pickUnder` falls back to the model when a test has none.
-- `pickAperture`, `vertexAperture`: the view's 8 px and 12 px in model units
-  NOW, read at every preview and click; `pickReach` and `vertexReach` fall
-  back to `pickTolerance` and 1.5 times it (the 12 : 8 ratio).
-- `view`: the view's own hidden layers (`ToolHost::setView`), for what a tool
+  hidden layers; `pick_under` falls back to the model when a test has none.
+- `pick_aperture`, `vertex_aperture`: the view's 8 px and 12 px in model units
+  NOW, read at every preview and click; `pick_reach` and `vertex_reach` fall
+  back to `pick_tolerance` and 1.5 times it (the 12 : 8 ratio).
+- `view`: the view's own hidden layers (`ToolHost::set_view`), for what a tool
   finds without the view's pick - through the selection, the handles, a
   point's height: `pickable` asks THE visibility rule with them, as the
-  pick does, and `pickUnder` passes them when it falls back to the model.
+  pick does, and `pick_under` passes them when it falls back to the model.
   The vertex tools took a selected polyline on a hidden layer through the
   selection, round the pick.
 
-**What a tool tells the view (2026-09-30).** `InteractiveTool::takesSnap`:
+**What a tool tells the view (2026-09-30).** `InteractiveTool::takes_snap`:
 whether the view may snap the cursor to a snap for the step the tool is
 at; the view asks it through `SnapRequest::accept`, which passes a refused
 candidate over for the next best. Insert Vertex takes only a snap ON the
-polyline, where its click would be taken. `InteractiveTool::lastHeight`:
-the height a typed dz changes, where `dzIsAChange`.
-`InteractiveTool::takesDelete` and `deleteKey`: whether the tool takes the
+polyline, where its click would be taken. `InteractiveTool::last_height`:
+the height a typed dz changes, where `dz_is_a_change`.
+`InteractiveTool::takes_delete` and `delete_key`: whether the tool takes the
 Delete key from the window's Erase while it runs, and what it makes of it -
 the view claims the key (`ShortcutOverride`) and hands it on through
-`ToolHost::deleteKey`. The vertex tools take it: their polyline is selected
+`ToolHost::delete_key`. The vertex tools take it: their polyline is selected
 while they work on it, and Erase took the whole string from under them.
 Delete Vertex reads it as its Enter; the others refuse it and say so. Every
 other tool leaves Delete to Erase, as it always was. **What the host holds
@@ -295,7 +292,7 @@ restart and never sees the pointer, and the host sees both
 (`AClickTheToolTookIsNotAnsweredInRedUntilThePointerLeavesIt`). The hold
 takes away the marks the tool flags as the refusal's reason and keeps the
 rest, so Straighten's first "keep" stays in sight straight after its pick
-(`StraightensFirstPickIsHeldAsTakenAndItsRefusalShownOnceThePointerComesBack`).
+(`tool_host::straightens_first_pick_is_held_as_taken_and_its_refusal_shown_once_the_pointer_comes_back`).
 **What the host says again**: a refusal usually leaves the prompt as it
 was, but one that drops what the tool held (a pick made stale since) asks
 afresh, and the host then says the new prompt before the refusal - only
@@ -305,12 +302,12 @@ after it would wipe it
 
 Rejected: a new virtual `preview(cursor, pick)` (46 overrides to change, and
 `-Woverloaded-virtual` fails the build at every one left); refreshing
-`pickTolerance` on every move (it still ignores the view's hidden layers,
+`pick_tolerance` on every move (it still ignores the view's hidden layers,
 and leaves the preview's pick and the click's able to disagree). Trim,
-Fillet, Offset and Leader still pick with `pickTolerance` and no view
+Fillet, Offset and Leader still pick with `pick_tolerance` and no view
 (`docs/drawing.md`, "Not done").
 
-**Roles in a preview.** `ToolFeedback` (`include/katana/cad/tool_feedback.hpp`)
+**Roles in a preview.** `ToolFeedback` (`rust/crates/katana_cad/src/tool_feedback.rs`)
 kept `shapes` (the ghost, dashed) and `markers` (base points) and gained
 `marks` - geometry by ROLE: Target (what a click takes), Added (what it makes,
 read from the result), Removed (what it takes away), Enter (what Enter, not
@@ -321,12 +318,12 @@ beside the cursor, `refused` when a click there would be refused, and
 hidden. A mark flagged `FeedbackMark::refused` is the refusal's reason
 (the vertex Insert is too near, the end that is no corner), drawn as a ring
 struck through; a refused preview that flags none has its Target marks
-drawn so. The view draws a role its own way (`drawing/feedback_painter.hpp`),
+drawn so. The view draws a role its own way (`rust/crates/katana_window/src/drawing/feedback_painter.rs`),
 so no tool picks a colour; a tool that fills only `shapes` and `markers` is
 drawn as before. The new members have default initialisers, so the tools
 that build one as `{shapes, markers}` - or a mark as `{role, geometry,
 label}` - still compile under `-Wmissing-field-initializers`. The pointer
-record's keys for the roles are their names (`toString(FeedbackRole)`).
+record's keys for the roles are their names (`to_string(FeedbackRole)`).
 `ToolInfo::title` names a family's variant in the prompt ("Insert Vertex:
 ..."), where the menus still gather the family by its name ("Vertices, Insert
 Vertex").
@@ -335,7 +332,8 @@ Vertex").
 that its Enter only ever COMMITS - a Line or Polyline chain, the cuts of a
 Trim or Extend, Offset's copies, a run of Fillets or Chamfers - is sent Enter
 first, so Esc keeps that work as drafters expect a LINE's segments to stay
-(`tools::escapeKeepsWork`, a list of tool ids). Every other tool is dropped
+(each tool's own cancel says so; the C++ kept a list of tool ids,
+escapeKeepsWork). Every other tool is dropped
 with nothing done, because its Enter at some step applies a DEFAULT - Move's
 "use the first point as the displacement", Join's "join what is selected" -
 which Esc must never do; Copy is dropped for that reason although its placed
@@ -348,34 +346,34 @@ corners a Multiple run made would go with the tool. The list stands in for a
 `InteractiveTool` would replace it.
 
 **A replaced drawing ends the tool.** New and Open call
-`ViewWorkspace::resetInteraction`, which ends the running tool WITHOUT
+`ViewWorkspace::reset_interaction`, which ends the running tool WITHOUT
 committing anything (`ToolHost::abandon`): its picks and ids belong to the
 drawing that is going, and restarting it would read the old drawing's layer
 and selection. So does a plan view that is closed or changed into another
-kind while its tool runs (`ViewWorkspace::stopToolIn`, called by `closeView`
-before it finds the view to erase and by `buildContent`) - the view stops
+kind while its tool runs (`ViewWorkspace::stop_tool_in`, called by `close_view`
+before it finds the view to erase and by `build_content`) - the view stops
 the tool while it can still say so, which is what un-checks the tool in the
 menus.
 
 **Typed input belongs to the running tool.** While a tool runs, what is typed
-over the view is kept in the view (`typedInput()`) and shown after the prompt
+over the view is kept in the view (`typed_input()`) and shown after the prompt
 in a band along the bottom of the view, until Enter or Space sends it
 (Space is a space inside a value being typed), Backspace takes a character
 back and Esc clears it. With no tool running a printable key is the start of
 a command and goes to the window's command line ("type anywhere",
 `onTextTyped`), never a Ctrl or Alt chord, which is a shortcut. On the command
-line itself (`MainWindow::runCommandLine`):
+line itself (`MainWindow::run_command_line`):
 
 - while a tool runs, the whole line is the tool's answer
-  (`ViewWorkspace::typeIntoTool`) - a point, a distance, an option - so
+  (`ViewWorkspace::type_into_tool`) - a point, a distance, an option - so
   Polyline's `C` closes it where on its own `C` would start a Circle. Nothing
   typed is transparent: `ZOOM` typed during a tool goes to the tool too;
 - with none running, a single word that is a tool's alias or its catalogue id
-  starts it (`tools::toolIdForCommand`: `L`, `line`, `TRIM`, `draw.circle.ttr`,
+  starts it (`tools::tool_id_for_command`: `L`, `line`, `TRIM`, `draw.circle.ttr`,
   aliases case-insensitively), and the tool's action is checked in the menus
   and toolbars as if it had been clicked; with arguments the word is the
   interpreter's (`LINE 0,0 10,0` draws at once);
-- an empty line is Enter in the drawing (`ViewWorkspace::pressEnter`),
+- an empty line is Enter in the drawing (`ViewWorkspace::press_enter`),
   delivered as a real Return key to the plan view running a tool - or, with
   none running, to the active plan view, which starts the last tool again -
   so the command line and the view share one Enter path.
@@ -386,7 +384,7 @@ marks.
 
 **Ctrl+Z inside a tool is the tool's.** The view claims the key at
 `ShortcutOverride`, so the window's Undo does not run, and acts on it at the
-key press, since Qt may ask more than once for one press. It steps back the
+key press, since the shortcut check may be asked more than once for one press. It steps back the
 tool's last input - the `U` inside LINE - and a tool with nothing to step
 back says so rather than undoing the drawing: the drawing's Undo is Esc and
 then Ctrl+Z.
@@ -404,7 +402,7 @@ made, together with any input the tool took itself (`All`).
 starts the last tool again, the usual CAD repeat of the last command: a run of
 circles is a click on Circle and then Enter between them. The workspace keeps
 the last tool started in ANY plan view (`onRepeatTool`), so the repeat goes
-through `ViewWorkspace::startTool` like every other start.
+through `ViewWorkspace::start_tool` like every other start.
 
 **One tool per workspace, and Esc to the busy view first.** A tool holds picks
 made in one view, so it runs in the active plan view only, and starting one
@@ -415,9 +413,9 @@ typed input for one; only when none is does every plan view abandon its box
 and clear the selection - so the first Esc ends the tool and keeps the
 selection it was started on, and the second clears it.
 
-**The menus are the catalogue.** `tools::fillToolMenus`
-(`src/katana_qt/tools/tool_menus.*`) builds the Draw, Modify and Annotate
-menus and toolbars from `cad::toolCatalog()`: one `QAction` per tool, shared by
+**The menus are the catalogue.** `tools::fill_tool_menus`
+(`rust/crates/katana_window/src/tools/tool_menus.rs`) builds the Draw, Modify and Annotate
+menus and toolbars from `katana_cad::tool_catalog()`: one action per tool, shared by
 its menu and its toolbar and named by the tool's id (`draw.line`), with its
 family's icon, its shortcut, its tip as the status tip and a tooltip naming its
 aliases ("Line (LINE, L)"). Groups are separated in a fixed order (Lines,
@@ -426,20 +424,20 @@ Variant" ("Circle, 2 Points") are gathered into a submenu by family, and on a
 toolbar the family is ONE button that runs its first variant and drops the
 rest down. A category no menu takes is still reached by its aliases, and the
 window says so in its log at start-up. An action only asks the window to
-start its tool (`MainWindow::startTool`), which decides the view. The tool
+start its tool (`MainWindow::start_tool`), which decides the view. The tool
 actions are checkable, in one exclusive group; Select (`toolSelect`, at the
 head of the Draw toolbar) is not a tool but the absence of one: it stops what
 runs, and is checked while nothing does. What is checked always follows what
-runs (`MainWindow::showRunningTool`, from `onActiveToolChanged`), including
+runs (`ToolActions::set_active`, from the workspace's `ActiveToolChanged`), including
 when a start is REFUSED - a click checks an action before its handler runs, so
 a tool that could not start, for want of a plan view, used to stay checked
 beside Select (`qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless`).
 While a tool runs its prompt is the command line's placeholder text, where the
 answer is typed.
 
-Not done: `ViewportWidget` still has the `enum class Tool` of the first eight
-tools and `setTool`, used for Select (`stopToolIn` calls it) and by
-`test_plan_view_tools.cpp`; the window and the workspace name tools by id.
+Not done: `PlanView` still has the `enum class Tool` of the first eight
+tools and `set_tool`, used for Select (`stop_tool_in` calls it) and by
+`plan_view_tools.rs`; the window and the workspace name tools by id.
 The picks of an entity step (Trim's edges, the part to cut) are not
 highlighted. `ToolContext::view` carries the view's layer overrides, but
-only the vertex tools, Polyline 3D's heights and `pickUnder` read them.
+only the vertex tools, Polyline 3D's heights and `pick_under` read them.

@@ -9,7 +9,7 @@
 # records reach the log; FORMATS typed on the command line answers there too.
 add_test(NAME qt_the_formats_dialog_shows_the_formats_line_it_runs_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@gisFormats|gisFormatsKind=Vector|gisFormatsCapability=Writes|gisFormatsFilter=fgb|?gisFormatsCommand|?gisFormatsCount|?gisFormatsTable|gisFormatsTable=FlatGeobuf|?gisFormatsOptions|!gisFormatsRun|>FORMATS OPTIONS FlatGeobuf"
         "-DEXPECT=gisFormatsCommand: FORMATS VECTOR WRITE fgb[\r\n].*gisFormatsCount: 1 format \\(GDAL 3\\.[0-9.]+\\)[\r\n].*gisFormatsTable: FlatGeobuf \\| FlatGeobuf \\| vector \\| vector \\| vector \\| fgb \\| yes[\r\n].*gisFormatsOptions: [^\r\n]*SPATIAL_INDEX.*format driver=FlatGeobuf kind=vector read=vector write=vector extensions=fgb.*option driver=FlatGeobuf list=layer_creation name=SPATIAL_INDEX type=boolean default=YES"
@@ -26,7 +26,7 @@ execute_process(
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tests/geo/data")
 add_test(NAME qt_import_of_a_zip_opens_the_one_dataset_inside_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=>IMPORT \"${_formats_headless}/lots.zip\"|>LIST"
         "-DEXPECT=imported file=\"?[^ \"]*/lots\\.zip\"? kind=vector entities=3 .*Polyline  layer=lots [^\r\n]*area=2000"

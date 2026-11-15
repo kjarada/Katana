@@ -14,7 +14,7 @@
 # column 36 by 2/3): 14829.208 / 533.333.
 add_test(NAME qt_statistics_by_area_dialog_writes_the_lot_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/terrain.asc"
         "-DDRIVE=>RECT 10,10 50,40|@terrainZonal|!zonalScopeDrawing|?zonalCommand|!zonalRun|?zonalReply"
@@ -32,7 +32,7 @@ set_tests_properties(qt_statistics_by_area_dialog_writes_the_lot_headless
 # a plane is the plane - and nothing at x = 50, off the raster.
 add_test(NAME qt_drape_and_sample_dialog_drapes_and_samples_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/geo/data/plane.asc"
         "-DDRIVE=>PLINE 5.5,5 20.25,10 35,25|@terrainDrape|!drapeScopeDrawing|?drapeCommand|!drapeRun|?drapeReply|drapeTabs=Sample|samplePoint=12.3,7.7|!sampleAdd|samplePoint=50,10|!sampleAdd|?sampleCommand|!sampleRun|?sampleReply"
@@ -54,7 +54,7 @@ set_tests_properties(qt_drape_and_sample_dialog_drapes_and_samples_headless
 # 1.7 (1 - t) at each station, so it is seen.
 add_test(NAME qt_viewshed_and_line_of_sight_dialog_sees_the_plane_headless
     COMMAND ${CMAKE_COMMAND}
-        "-DAPP=$<TARGET_FILE:katana>"
+        "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/geo/data/plane.asc"
         "-DDRIVE=@terrainViewshed|viewshedObserver=0.5,15.5|!viewshedAdd|viewshedCurvature=none|viewshedAreas=site/view|?viewshedCommand|!viewshedRun|?viewshedReply|viewshedTabs=Line of Sight|losObserver=0.5,15.5|losTarget=39.5,15.5|losCurvature=none|?losCommand|!losRun|?losReply|>SURFACE LIST"

@@ -1,18 +1,22 @@
 # Desktop application
 
-`katana` (the target in `src/katana_qt`): the window, its theme, icons and
-toolbars, the workspace of docked views, the panels and the managers, and the
-rules every dialog follows. What the window drives - the document, selection,
+`katana` (the program in `rust/crates/katana_window`, drawn with egui since
+the Rust port; until 2026-11 it was a Qt program): the window, its theme,
+icons and toolbars, the workspace of docked views, the panels and the
+managers, and the rules every dialog follows. Where a passage below names a
+Qt class, it records how the C++ window met a problem and why; the Rust's own
+answer, and why it differs, is in the module comment of the file named beside
+it. What the window drives - the document, selection,
 snapping, the interpreter and the engineering computations - is `katana_cad`,
 in `docs/cad.md`; the drawing tools and their host are `docs/tools.md`; the
 switches that run the window headlessly are `docs/headless.md`.
 
 ## The window
 
-The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with dockable Layers, Properties, Command Line and
+The window (`MainWindow`, `rust/crates/katana_window/src/main_window/window.rs`) is a workspace of views, with dockable Layers, Properties, Command Line and
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, BIM, GIS,
-Help (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
+Help (`katana_window::main_window::actions::compose`; each menu has a control name, `fileMenu` to
 `helpMenu`; BIM, `bimMenu`, is the road model's - `docs/road_design.md`). File is the drawing as a file, what comes into it and goes out
 of it - every import and every export, under two submenus - and the
 program's Settings ("The File menu", below); the managers of what a
@@ -23,28 +27,30 @@ how many, the current layer, the active snap and the cursor coordinates.
 
 ### How the window starts
 
-`main` (`src/katana_qt/main.cpp`) makes the `QApplication`, then applies the
-theme before any widget exists (`theme::apply`: the style, the palette, the
-stylesheet, and the platform's font taken as the one font of the whole
-window - below, "Text"), sets the application icon, reads the switches, and
-builds the `MainWindow`: its actions and menus, its panels, View's Window
-section (`MainWindow::buildWindowMenu`) and the status bar, and records the
-layout it was built with for View > Reset Window Layout. The session's
+`main` (`rust/crates/katana_window/src/bin/katana/main.rs`) reads the switches
+through the program driver (`katana_window::drive::run`), builds the
+`MainWindow` - its actions and menus, its panels, View's Window section and the
+status bar, composed again from the window's state each frame
+(`katana_window::main_window::actions::compose`) - and hands it to eframe,
+which opens the native window with the application icon. The theme is
+applied to the egui context before the first frame is drawn
+(`katana_window::theme::style::apply`: the style, the palette and the one font
+of the whole window - below, "Text"). The session's
 customisation is installed next, so the first drawing is drawn with it ("The
 customisation a session starts with", below). Then an
 interactive run - one with no `--screenshot`, `--plot`, `--plot-sheets`,
 `--sheets-json` or batch `--script` - puts the window where the last session
-left it (`MainWindow::restoreSession`) and shows it, and the project and files
+left it (`MainWindow::restore_session`) and shows it, and the project and files
 on the command line are opened. With neither, it shows the start screen too
 ("The start screen", below), unless that was told not to show.
 
-**The customisation a session starts with.** `MainWindow::loadDefaultCustomisation`
-builds a `cad::CustomisationHost` - the built-in customisation of this run
-(`cad::builtInCustomisation`, which reads the seam
+**The customisation a session starts with.** `MainWindow::load_default_customisation`
+builds a `katana_cad::CustomisationHost` - the built-in customisation of this run
+(`katana_cad::customisation_host::built_in_customisation`, which reads the seam
 `KATANA_BUILTIN_CUSTOMISATION`) and the path of the kept file - hands it to
-the interpreter (`CommandInterpreter::setCustomisationHost`, FIRST: it notes
+the interpreter (`CommandInterpreter::set_customisation_host`, FIRST: it notes
 the kept file as it is at that moment, which `CUSTOMISE KEEP` later refuses
-to write over once it has changed) and calls `cad::startCustomisation`, which
+to write over once it has changed) and calls `katana_cad::customisation_host::start_customisation`, which
 installs the kept customisation when the file is there and reads, else the
 built-in one, else nothing. The window logs what that reports:
 
@@ -77,39 +83,39 @@ file has none, and a clean checkout has the tracked one).
   1. the file the environment variable `KATANA_CUSTOMISATION` names, whatever
      kind of session this is;
   2. else, in an INTERACTIVE session, `customisation.json` in the per-user
-     place Qt gives the application (`QStandardPaths::AppConfigLocation`,
-     where the online sources a person adds are kept too:
-     `OnlineDataWorkbench::userCataloguePath`);
+     configuration folder, beside the window's settings file
+     (`UserSettings::default_path`; the C++ used the folder Qt gave the
+     application), where the online sources a person adds are kept too;
   3. else none: a HEADLESS run with the variable unset. It must be the same
      run on every machine, so it reads and writes no per-user place - as it
      keeps no window layout (`docs/headless.md`, "The customisation a run
      starts with") - and `CUSTOMISE KEEP` and `REVERT` are then refused,
      naming the variable.
 
-  That is why `loadDefaultCustomisation` is called after
-  `MainWindow::setHeadless`. The file need not exist: nothing is kept until a
+  That is why `load_default_customisation` is called after
+  `MainWindow::set_headless`. The file need not exist: nothing is kept until a
   `KEEP` writes it, and the folder is made then. The variable is read with
-  `core::environmentVariable`, as the session of `katana_cli` reads it (wide
+  `katana_core::path_text::environment_variable`, as the session of `katana_cli` reads it (wide
   on Windows, UTF-8 out) and never with `getenv`, so a kept file in a folder
   whose name is outside the code page is still found. File > Settings shows
   the path, or that the session keeps none ("Settings", below). *Rejected:
   the per-user place in a headless run too.* Every fixture test would then
   start with whatever the machine's user last kept.
 - **`--customise FILE...`** then runs `CUSTOMISE "<file>" ...` through the
-  window's one executor (`main.cpp`, `customise`): merged into what the
+  window's one executor (the program driver's `customise` step): merged into what the
   session started with, as the typed line would. A typed, scripted or
   `--customise` load lasts the session; `CUSTOMISE KEEP` is what makes it the
   next start's.
 - **What the window does after a `CUSTOMISE` line it does for every change:**
   the panels' pickers, the views and the managers follow the Document's
-  notification (`documentListener_`, each view's own, a manager's
+  notification (the window's own listener, each view's own, a manager's
   `DocumentWatcher`), which an installed customisation raises as
   `StyleLibrary | SurveyMap | Customisation`. No verb tells the window
   anything, so a line run by a script, a dialog or an agent refreshes it as a
   typed one does.
 - **Gone: the search beside the executable.** A build with nothing compiled
   in used to look for style libraries and survey code files in the program's
-  folder (`findCustomisation`) and load what it found. That was a third
+  folder (the C++'s `findCustomisation`) and load what it found. That was a third
   state, decided at run time by what happened to lie in a folder - the same
   build drew differently on two machines - and it read the files of another
   program, which Katana no longer reads at all. Rejected: keeping it for
@@ -128,19 +134,26 @@ user's folder would be the thing rule 3 is there to prevent.
 **Where the window was.** Until 2026-09-26 every session opened a 1360 x 860
 window, whatever the screen: on a 1366 x 768 laptop it ran off the bottom,
 and on a large screen it was a small window in a corner, with the panels and
-toolbars wherever Qt put them and nothing a person moved kept. Now an
-interactive session keeps, in the application's `QSettings`, the window's
-place and size (`saveGeometry`), where the panels and toolbars are
-(`saveState`, keyed on the object names every dock and toolbar has), which
-panels are minimised to the tray (`DockChrome::minimisedNames`), the text
-size, the toolbar icon size and whether the toolbars show their names; they
-are written when the window closes and read before it is shown. With nothing
-saved - the first run - or a layout from another version (`kLayoutVersion`,
-raised when a change to the toolbars or panels would make an old layout put
-them wrong; the one before the third toolbar row is carried over, "Fitting the
-screen"), the window fits the screen it is on (`MainWindow::fitToScreen`):
-85% of the free area, centred, or maximised on a screen smaller than
-1440 x 900, where the drawing needs every pixel. View > Reset Window Layout
+toolbars wherever Qt put them and nothing a person moved kept. The C++ then
+kept, in the application's `QSettings`, the window's place and size, where
+the panels and toolbars were (keyed on the control names every dock and
+toolbar has), which panels were minimised to the tray, the text size, the
+toolbar icon size and whether the toolbars showed their names, and with
+nothing saved fitted the window to its screen (85% of the free area, centred,
+or maximised on a screen smaller than 1440 x 900, where the drawing needs
+every pixel). The Rust keeps a settings file of its own
+(`rust/crates/katana_window/src/host/user_settings.rs`, under the keys the C++
+gave `QSettings`; Qt's binary layout cannot be read, so a layout the C++ saved
+is not carried over), and in it the layout - which panels and toolbars are
+shown, and the toolbars' rows - the text size, the toolbar icon size and
+whether the toolbars show their names, written when the window closes and
+read before its first frame (`katana_window::main_window::layout::restore_session`).
+A layout from another version (`LAYOUT_VERSION`, raised when a change to the
+toolbars or panels would make an old layout put them wrong; the one before
+the third toolbar row is carried over, "Fitting the screen") is not applied.
+Not done in the Rust: the window's place and size, and the minimised panels,
+are not kept, and the native window opens at 1360 x 860 points whatever the
+screen, as every session did before 2026-09-26. View > Reset Window Layout
 puts the panels and toolbars back as a new window has them and leaves the
 size and the appearance alone. The views inside the workspace are not kept:
 they belong to the drawing being worked on, not to the window. A headless
@@ -149,15 +162,17 @@ is the same on every machine.
 
 The readout (`FrameStatsLabel`) is a 3D view's frame time or a section's
 station and elevation under the cursor, forwarded from whichever view raised
-it (`ViewWorkspace::onFrameStats`) and kept apart from `onStatus`, which is
-for messages, so the status bar's message never hides it. It shows the most
+it (the workspace's `FrameStats` event) and kept apart from a view's status
+message, so the status bar's message never hides it. It shows the most
 recent view's readout, not only the active view's, and keeps its last text
 while a plan view is active. It has no automated test; a screenshot of a 3D
 view is what checked it.
 
-The plan viewport draws with `QPainter` and turns mouse input into commands. It
+The plan viewport (`PlanView`, `rust/crates/katana_window/src/viewport_widget.rs`)
+paints through the window's plan painter (`plan_painter.rs`) and turns mouse
+input into commands. It
 holds no geometry of its own: it paints whatever the model contains (Rule 3).
-It is NOT on the `render::DrawList` path: the tile-binned software rasteriser
+It is NOT on the `katana_render::draw_list::DrawList` path: the tile-binned software rasteriser
 (`docs/render.md`) draws the 3D and Elevation views, and a GPU backend would
 replace that rasteriser, not this painting code.
 
@@ -214,11 +229,11 @@ every export under File > Export: File's own first, then Survey's and GIS's
 under their names. The Survey and GIS menus still show their own, as before;
 File had seventeen top-level items and has fifteen.
 
-- **The items are the same `QAction` objects** the Survey and GIS menus show,
+- **The items are the same actions** the Survey and GIS menus show,
   so an item has one text, one tip, one icon and one enabled state wherever
   it is shown, and `--trigger importRaster` finds one thing. They are put in
-  BY OBJECT NAME at the end of `MainWindow::buildActions`
-  (`MainWindow::fillMenuByName`): File is built first, and the Survey and GIS
+  BY CONTROL NAME once the menus are composed (`fill_by_name` in
+  `rust/crates/katana_window/src/main_window/actions.rs`): File is built first, and the Survey and GIS
   items are made later by their workbenches, which need know nothing of File.
   A name no action carries is left out and logged as an error once the log
   exists - `File > Import: no menu item is named <name>, so it is left out of
@@ -227,7 +242,7 @@ File had seventeen top-level items and has fifteen.
   first. They pass the letter check with texts of their own, and that is the
   trouble: two texts, two tips and two enabled states to drift apart, and two
   names for a test to find one command by.
-- **Three texts changed, and no object name.** A submenu is its own letter
+- **Three texts changed, and no control name.** A submenu is its own letter
   space (`--check-shortcuts`, "Every key reaches one thing"), and a shared
   action brings its letter into every menu that shows it. So `fileImport` is
   "Import Any File..." (A: I is the submenu's letter in File, and Import
@@ -235,32 +250,34 @@ File had seventeen top-level items and has fifteen.
   Survey Points'). `fileExportVector` is "Export Drawing...": it writes DXF,
   archives and IFC as well as the GIS vector formats, which "Export Vector"
   did not say, and its tip says what it takes. Tests, scripts and
-  `--trigger` find an item by its object name, which is why none moved.
-- **Save As offers a folder the person owns.** `MainWindow::saveDocumentAs`
-  proposed the bare name `untitled.katana`, which Qt resolves against the
-  working directory: for a Start menu shortcut or a double-click, the
+  `--trigger` find an item by its control name, which is why none moved.
+- **Save As offers a folder the person owns.** `MainWindow::save_document_as`
+  proposed the bare name `untitled.katana`, which the C++'s Qt file dialog
+  resolved against the working directory: for a Start menu shortcut or a double-click, the
   program's own folder, `bin/` of the install - read-only in a per-machine
   install, and no place for a project. It now proposes the name beside the
   project already open, else in the person's Documents. Not tested: the
   dialog is a native modal one, which a headless run refuses
-  (`refuseFileDialog`), so the folder it opens in has no seam to be read
+  (`refuse_file_dialog`), so the folder it opens in has no seam to be read
   from.
-- **No toolbar changed**, so `kLayoutVersion` was not raised and a saved layout
+- **No toolbar changed**, so `LAYOUT_VERSION` was not raised and a saved layout
   still fitted: File's toolbar keeps New, Open, Save, Import Any File, Export
   Drawing, Plot and Sheets.
 - **Settings is above Quit.** The action is the Format workbench's, which
   owns the dialog ("Settings", below), and is put in when the menus are
-  finished; its role is `QAction::PreferencesRole`, so macOS moves it into
-  the application menu, where that platform keeps it.
+  finished. (The C++ gave it Qt's preferences role, so macOS moved it into the
+  application menu; the egui window draws its own menu bar, and on macOS it
+  stays in File.)
 - **Every item that asks for a file is refused in a headless run**, naming
   the line that does the same. The GIS menu's three imports and Dataset
   Information were not: reached by name they opened a file dialog nobody
   could close, and the run waited until its timeout. They now answer as
-  File's own items do (`MainWindow::refuseFileDialog`), each naming the words
+  File's own items do (`MainWindow::refuse_file_dialog`), each naming the words
   of `IMPORT` that are its kind of data's, and `INFO <file>`
   (`qt_the_gis_items_that_ask_for_a_file_name_their_verbs_in_a_headless_run_headless`).
-- **Open Project and Save As never start in the working folder.** Qt does when
-  it is given no folder or a bare name, and the working folder is the
+- **Open Project and Save As never start in the working folder.** A file
+  dialog does when it is given no folder or a bare name (Qt's did, and the
+  Rust's `rfd` dialogs are given a folder for the same reason), and the working folder is the
   program's own `bin\` for a zip copy (Explorer starts a double-clicked exe in
   its folder) and the install folder, hidden under `%LOCALAPPDATA%`, for the
   installed one: the first project was proposed as `bin\untitled.katana`, and
@@ -268,8 +285,8 @@ File had seventeen top-level items and has fifteen.
   it. The dialogs start in the folder the open project is in,
   else the one the last project was opened or saved in (the `files/projectFolder`
   setting, written by a window a person used and never by a headless run), else
-  Documents, else the home folder (`katana::qt::projectDialogFolder`,
-  `ProjectFolder.TheOpenProjectsFolderComesFirstThenTheLastOneThenDocuments`);
+  Documents, else the home folder (`katana_window::project_folder::project_dialog_folder`,
+  `project_folder::the_open_projects_folder_comes_first_then_the_last_one_then_documents`);
   Plot to PDF and the Sheet Set menu already started in Documents.
 
 `qt_file_keeps_every_import_and_export_in_two_submenus_and_settings_above_quit_headless`
@@ -292,14 +309,14 @@ Not done:
 ## The plan view's shortcut menu
 
 A right-click in a plan view with no tool running opens the shortcut menu
-(`PlanContextMenu`, `src/katana_qt/plan_context_menu.hpp`, object name
+(`PlanContextMenu`, `rust/crates/katana_window/src/plan_context_menu.rs`, control name
 `planContextMenu`); so does the keyboard's menu key, at the cursor. With
 nothing selected, the entity under the cursor is selected first, so the menu
 acts on what was clicked; a selection already there is kept, since the click
-may land beside what the menu is for (`ViewportWidget::selectForMenu`).
+may land beside what the menu is for (`PlanView::select_for_menu`).
 
 It holds no command of its own. Its items are the window's existing actions,
-found by object name, so the menu item, the menu bar's, the toolbar button
+found by control name, so the menu item, the menu bar's, the toolbar button
 and a headless `--trigger` are ONE action and cannot drift: Erase
 (`editErase`); Move, Copy, Rotate, Scale, Mirror and Offset (the tools
 `modify.move` ... `modify.offset`, which start with the selection as their
@@ -325,14 +342,14 @@ so a person learns the verb. Put on Layer is the layer tree, not a list: a
 layer with layers under it is a submenu headed by the layer itself
 (`planContextLayerTree.<path>`), because a drawing brought in from a survey
 has hundreds of layers. The layer, style or ByLayer the whole selection
-shares is ticked. A name is written by `namedLine`, through `commandWord`
+shares is ticked. A name is written by `named_line`, through `command_word`
 ("One rule for a word on the line", below): bare when it can be, quoted when
 it is empty or holds a blank (`CHLAYER 0`, `CHLAYER "Site Boundary"`), and a
 name holding a double quote or a line break is offered disabled.
 
-**The menu may be gone before its item finishes.** The window deletes the
-menu as it hides (`deleteLater`), and a menu hides before it triggers the
-item chosen. Colour > Choose then opens a modal colour dialog, whose event
+**The menu may be gone before its item finishes** - a C++ defect, kept here
+for its rule. The C++ window deleted the menu as it hid (`deleteLater`), and
+a menu hid before it triggered the item chosen. Colour > Choose then opens a modal colour dialog, whose event
 loop - since Qt 6.7, which tracks a deferred delete's event scope as well as
 its loop level - runs that delete while the item is still waiting for the
 colour. The item then reached its runner through the destroyed menu: the
@@ -340,15 +357,17 @@ crash of 2026-11-03, recolouring 774 selected leaders (the dump showed a
 call to `0x200000003` from this item). It was never about leaders; any
 selection crashed the same way. So every item holds its own copies of what it
 calls - the runner, the colour chooser, the tool starter - and never reads the
-menu after it is triggered.
-`PlanContextMenu.ChoosingAColourRunsColorEvenWhenTheMenuIsDestroyedWhileItAsks`
+menu after it is triggered. The egui menu is rows drawn each frame and owns
+nothing an item calls through, and the rule stands in the Rust as in the C++
+(`rust/crates/katana_window/src/plan_context_menu.rs`).
+`plan_context_menu::choosing_a_colour_runs_color_even_when_the_menu_is_destroyed_while_it_asks`
 destroys the menu inside the chooser, as the colour dialog's loop does, with
 a runner that says when it is called through a destroyed copy. Rejected:
-keeping the menu alive until the item returns (a `QPointer` check, or
-deleting it from the item): every item would have to remember to do it,
+keeping the menu alive until the item returns (in the C++, a `QPointer`
+check, or deleting it from the item): every item would have to remember to do it,
 where a copy cannot be forgotten.
 
-**On a grip.** Opened on a selected polyline's grip (`ViewportWidget::gripAt`,
+**On a grip.** Opened on a selected polyline's grip (`PlanView::grip_at`,
 the grip within the pick aperture of the right-click), the menu begins with
 that vertex's or segment's own items, under a section naming it ("Vertex 2
 of polyline 12"). The edits are verb lines through the same executor: Delete
@@ -370,22 +389,22 @@ beside an arc, in line).
 `popup`, not `exec`: nothing waits on the menu, and it deletes itself when it
 closes. It is not built in a headless run, which has no mouse; everything on
 it is a menu action or a verb, so an agent reaches the same through
-`--trigger` and `--command`. `tests/qt_widgets/test_plan_context_menu.cpp`
+`--trigger` and `--command`. `rust/crates/katana_window/tests/plan_view/plan_context_menu.rs`
 checks what it offers with and without a selection, that Put on Layer is one
 undo step, the layer tree, the ticks, and that the view raises it from a view
 made before the window set the hook (the workspace's first plan view is);
 and on a grip, the vertex's and the segment's items, their lines, the tool
 started with the grip, and what is offered disabled
-(`AVertexGripsItemsRunTheVertexVerbsAndStartTheToolsOnIt`,
-`AnEndVertexOffersNoCornerAndNoSegmentAfterIt`,
-`ASegmentGripOffersMakeStraightOnlyOnAnArc`).
+(`plan_context_menu::a_vertex_grips_items_run_the_vertex_verbs_and_start_the_tools_on_it`,
+`plan_context_menu::an_end_vertex_offers_no_corner_and_no_segment_after_it`,
+`plan_context_menu::a_segment_grip_offers_make_straight_only_on_an_arc`).
 
 **Double click to edit.** A double click on an entity with no tool running
-(`ViewportWidget::onEntityDoubleClicked`, after its first click selected it)
+(`PlanView::mouse_double_click`, after its first click selected it)
 makes it the whole selection and opens what edits it: Edit Text for a text
 and Edit Label for a label, or the Leaders manager for a leader, where the
 window has those actions, and the
-Properties panel for anything else (`MainWindow::editDoubleClicked`). On empty
+Properties panel for anything else (`MainWindow::edit_double_clicked`). On empty
 space it does nothing; while a tool runs it is two clicks for the tool.
 
 With leaders selected, the shortcut menu also offers **Edit Leader...** and
@@ -396,7 +415,7 @@ point coordinates and landing direction beside its note and appearance
 controls (`docs/annotation.md`, "Moving and framing existing leaders").
 
 **Select by ID** (Edit > Select by ID..., `editSelectById`;
-`src/katana_qt/select_by_id_dialog.hpp`) turns the ids that `LIST`, `INFO`,
+`rust/crates/katana_window/src/select_by_id_dialog.rs`) turns the ids that `LIST`, `INFO`,
 `AREA` and a refusal print back into a selection. It builds `SELECT id id
 ...` from `selectByIdIds` (commas or blanks between them, `#12` as well as
 12), with the current selection first when `selectByIdAdd` is ticked, and
@@ -409,7 +428,7 @@ kept, like Format > Layers, so several lookups need no reopening, and
 `--dialog editSelectById` makes it a headless run's target
 (`qt_select_by_id_selects_and_frames_headless`).
 
-**Every Edit and View action has an object name**, so `--trigger` and
+**Every Edit and View action has a control name**, so `--trigger` and
 `--report` reach it as a person's click does: `editUndo`, `editRedo`,
 `editSelectAll`, `editDeselect`, `editSelectById`, `editErase`,
 `editAttributes`, `viewZoomExtents`, `viewGrid` and `viewSnap`; the snap
@@ -442,8 +461,8 @@ object snap off altogether - and say what they did (`grid=on`, `snap=off`,
 
 Two rendering details are worth noting. Arcs and circles are tessellated in
 *model* space with a chord count chosen for a sub-quarter-pixel sagitta, so a
-very large radius with only a sliver on screen never hands Qt coordinates in the
-millions. Text below three pixels tall is drawn as a baseline stroke rather than
+very large radius with only a sliver on screen never hands the painter
+coordinates in the millions. Text below three pixels tall is drawn as a baseline stroke rather than
 glyphs, so a zoomed-out drawing stays legible instead of dissolving into
 unreadable marks.
 
@@ -456,26 +475,29 @@ were cut to three letters.
 Layer visibility, locking and colour are edited in the layer panel or the
 Layers dialog (Format > Layers..., Ctrl+L); each edit is a command, so it
 participates in undo. Choosing the CURRENT layer is
-`Document::setCurrentLayer`, deliberately not a command - it changes what the
+`Document::set_current_layer`, deliberately not a command - it changes what the
 next drawing tool does, not the drawing (`docs/cad.md`, "Document"). Opening a project whose
 database is damaged offers to restore the newest sound backup.
 
 **The current style and the Style row (decision D9).** The Properties
 toolbar carries the style new work is drawn in (`CurrentStyleCombo`): ByLayer
 first, then the drawing's styles by name. Choosing one is
-`Document::setCurrentStyle`, session state like the current layer and so not a
-command, and the log says "New work is drawn in ...". It acts on the box's
-`currentIndexChanged`, kept out while `MainWindow::refreshStyleChoices`
-rebuilds the list, so a headless `--fill` sets it as a person's pick does. A
+`Document::set_current_style`, session state like the current layer and so not a
+command, and the log says "New work is drawn in ...". It acts on the choice
+made in the box (`current_style_ui`, `rust/crates/katana_window/src/main_window/panels.rs`),
+and the list is drawn afresh from the drawing each frame, so a headless
+`--fill` sets it as a person's pick does and no rebuild of the list can be
+taken for a choice (the C++ had to keep its `currentIndexChanged` out while
+it rebuilt the list). A
 current style the list does not hold is shown, marked "(not in the drawing)",
 never replaced by the first choice - the QT-02 lesson. The Properties panel
 has a Style row above its read-only table (`PropertyStyle`, editable, and
 `PropertyStyleApply`): it shows the selection's style as it is, even a name
 the drawing lacks, or "<varies>" when the selection disagrees, and Apply or
 Enter gives the selection the style typed or chosen as one undo step
-(`MainWindow::applyPropertyStyle`, `commands::setEntityStyle`). Only the
+(`MainWindow::apply_property_style`, `katana_commands::set_entity_style`). Only the
 entities that change are in that step, so applying the style already shown
-is no step at all; and nothing is applied from the box's own change signal.
+is no step at all; and nothing is applied merely because the box's text changed.
 A rename or delete of the current style clears it rather than following it
 (`docs/cad.md`, "Document"), so the toolbar then shows ByLayer.
 `qt_current_style_and_the_style_row_headless` drives both.
@@ -483,13 +505,13 @@ A rename or delete of the current style clears it rather than following it
 ## The start screen
 
 What a session starts with, chosen as it starts (`StartDialog`, `startDialog`,
-`src/katana_qt/start_dialog.hpp`):
+`rust/crates/katana_window/src/start_dialog.rs`):
 
 - **The customisation** (`startCustomisation`). It lists:
   - the session as it is, first, when that is no built-in as installed (a kept
     copy, a file loaded, or nothing at all, as in a run whose seam says
     `none`), and choosing it makes no line;
-  - every built-in, from `cad::builtInChoices`, the one answer
+  - every built-in, from `katana_cad::customisation_host::built_in_choices`, the one answer
     `CUSTOMISE BUILTIN` and Settings' chooser read, with the session's own
     chosen to begin with;
   - "From a customisation file...", with `startCustomisationFile`,
@@ -500,10 +522,10 @@ What a session starts with, chosen as it starts (`StartDialog`, `startDialog`,
   kept, and offered only for a choice that changes the session, in a window
   that keeps a customisation.
 - **The coordinate system** (`startCrs`): local coordinates, the common
-  systems (`cad::commonCoordinateSystems`), found by any part of their code or
+  systems (`katana_cad::project_crs::common_coordinate_systems`), found by any part of their code or
   name as they are typed, or any EPSG code, WKT or PROJ string typed. It is
   checked as it is typed (`startCrsCheck`), in the Project Coordinate System
-  dialog's words: both call `crsCheckText`. The drawing's own system is
+  dialog's words: both call `crs_check_text`. The drawing's own system is
   offered first; with none, the one chosen last.
 - **Start** (`startOk`) runs the lines `startLine` shows, one by one, through
   the window's executor, so each is logged and is an undo step as typed:
@@ -513,7 +535,7 @@ What a session starts with, chosen as it starts (`StartDialog`, `startDialog`,
   changes nothing. It stops at the first line refused and says why in
   `startStatus`, and stays open. **Skip** (`startSkip`) closes it.
 - **When it shows.** An interactive start with no project or file to open shows
-  it (`MainWindow::showStartScreenIfWanted`), until `startShowAtStart` ("Show
+  it (`MainWindow::show_start_screen_if_wanted`), until `startShowAtStart` ("Show
   this at start") is cleared. File > Start Screen (`fileStartScreen`) opens it
   at any time, on the drawing as it is then. A project opened brings its own
   system, and its record of what it was drawn with, so a start that opens one
@@ -523,11 +545,11 @@ What a session starts with, chosen as it starts (`StartDialog`, `startDialog`,
   in its settings, unless the run is headless. The customisation is kept the
   one way a customisation is kept, by `CUSTOMISE KEEP`. The dialog reads and
   writes no settings itself, so it is tested without the registry
-  (`tests/qt_widgets/test_start_dialog.cpp`). The real window is driven by
+  (`rust/crates/katana_window/tests/workspace/start_dialog.rs`). The real window is driven by
   `qt_the_start_screen_sets_the_coordinate_system_through_the_executor_headless`.
 
 Non-modal, as the Project Coordinate System dialog is: a headless run fills it
-by its object names (`--dialog fileStartScreen`), and the window behind it can
+by its control names (`--dialog fileStartScreen`), and the window behind it can
 be used. *Rejected:* a modal dialog before the window shows, which would hold
 up a start that only wants to open a file, and which `--dialog` could not
 fill. *Rejected:* a second home for the remembered customisation beside the
@@ -543,125 +565,99 @@ a start screen or remembers the system.
 
 A menu or a dialog taller than the screen it is on has its bottom off it: the
 last items, the Close button, the results. Until 2026-10-15 nothing kept a
-window on its screen but the main window's own first-run size
-(`MainWindow::fitToScreen`, above) and the choice lists
-(`KatanaStyle`, `SH_ComboBox_Popup`, "The look of the application"); the
+window on its screen but the main window's own first-run size (above) and
+the choice lists (the C++ style's `SH_ComboBox_Popup`, "The look of the
+application"); the
 managers and dialogs of the terrain and road work are a thousand pixels tall
 and more, and a 1366 x 768 laptop leaves 728 under its task bar. Each piece is
 the application's, not each dialog's, because every dialog written to fit one
 screen is one more that a smaller screen proves wrong.
 
-* **Menus scroll.** `KatanaStyle` answers `SH_Menu_Scrollable` (`theme.cpp`):
-  a menu taller than its screen is ONE column as tall as the room there is,
-  with an arrow at each end that scrolls while the pointer rests on it, and the
-  wheel and the cursor keys scroll it too. Without it Qt lays such a menu out in
-  columns side by side - the Terrain menu became a wall of three, as tall as
-  the screen whatever the menu bar's place on it, so its bottom ran under the
-  task bar (`ScreenFit.AMenuTallerThanTheScreenIsOneScrollingColumn` puts the
-  last item in a second column, at x = 227 against 5, without the hint). The
-  stylesheet's `QMenu` rules leave the hint to the base style; the test sets
-  the stylesheet on the menu to hold that. A menu that fits is not changed.
-* **Dialogs are fitted as they are shown.** `installScreenFit`
-  (`src/katana_qt/screen_fit.hpp`, called by `main` after the theme) is one
-  application-wide event filter that calls `fitDialogToScreen` on every
-  top-level `QDialog` as it is shown, before the dialog's own handler centres
-  it. It takes the room the dialog's screen has - the available area, less 8 px
-  all round, less the window's frame (Qt's once the window is shown, 16 x 40
-  before) - and:
-  * a dialog whose controls need no more than that is left exactly as it was
-    written, its size only limited;
-  * one whose layout cannot be made small enough (`minimumSizeHint`, or a
-    minimum it was given, over the room in either direction) has its layout put
-    in a `QScrollArea` (`screenFitScroll`) that fills it, so every control is
-    reached by scrolling and the window is as large as the screen lets it be.
-    `QWidget::setLayout` takes the layout off the dialog and brings the widgets
-    it lays out with it, so each control keeps its object name and stays a
-    descendant of the dialog: whatever finds one by name finds it still. A
-    scroll bar's width is left in the width when the height is cut;
-  * the dialog's own buttons are not scrolled with the rest. Its **footer**, a
-    widget called `screenFitFooter`, is kept below the scroll area, so Close,
-    Run and Add are on the dialog as it stands and do not move as the body
-    scrolls. The footer is the LAST row of buttons in a dialog laid out in a
-    vertical box, and every item laid out after it, because what the buttons
-    answered - a reply, a status line - is read under them and scrolling it
-    out of sight would look like the button had done nothing. A row of buttons
-    is a `QDialogButtonBox`, or a horizontal box layout that holds buttons,
-    spacing and read-only fields (the line the dialog will run, shown beside
-    Preview and Add) and nothing else. So a lone `QPushButton` laid into the
-    layout, a row with an editable field or a label in it (a path and its Browse
-    button), a row inside another layout, and a dialog laid out in a grid, a
-    form or a row have no footer and scroll as a whole, as before; of two rows
-    of buttons only the later one is the footer; and a footer that needs more
-    than half the room (a button row followed by a long list) is not lifted,
-    because it would leave too little to scroll;
+* **Menus scroll.** A menu taller than its screen is ONE column as tall as the
+  room there is, which scrolls (`rust/crates/katana_window/src/shell/dialog.rs`,
+  `popup_menu`). The C++ asked Qt for it (`SH_Menu_Scrollable` from its style):
+  without it Qt laid such a menu out in columns side by side - the Terrain menu
+  became a wall of three, as tall as the screen whatever the menu bar's place
+  on it, so its bottom ran under the task bar. A menu that fits is not changed
+  (`screen_fit::a_menu_taller_than_the_screen_is_one_scrolling_column`,
+  `screen_fit::a_menu_that_fits_is_not_scrolled`).
+* **Dialogs are fitted to their screen.** Every dialog of the window is drawn
+  inside one dialog frame (`DialogFrame`, `rust/crates/katana_window/src/shell/dialog.rs`),
+  which takes the room the dialog's screen has - the available area, less a
+  margin all round - and:
+  * a dialog whose controls need no more than that is left exactly as it is
+    drawn, its size only limited;
+  * one whose controls cannot be laid out in that room scrolls, so every
+    control is reached by scrolling and the window is as large as the screen
+    lets it be. Each control keeps its control name inside the scrolling body:
+    whatever finds one by name finds it still;
+  * the dialog's own buttons are not scrolled with the rest. Its **footer** -
+    its row of buttons and what is said under them, the reply to what they
+    did - is kept below the scrolling body, so Close, Run and Add are on the
+    dialog as it stands and do not move as the body scrolls, because what the
+    buttons answered is read under them and scrolling it out of sight would
+    look like the button had done nothing. A footer that needs more than half
+    the room is not kept out, because it would leave too little to scroll;
   * a dialog that was moved by hand off the screen is brought back onto it;
-    one that was not is centred by `QDialog` itself, inside the screen, with the
-    size it now has;
-  * Qt's own dialogs (`QMessageBox`, `QFileDialog`, `QColorDialog`,
-    `QFontDialog`, `QInputDialog`) keep their layouts, their size alone limited.
-  Fitted once: showing a wrapped dialog again finds its scroll area and only
-  limits the size again, on whatever screen it is on now.
-* **Tests.** `ScreenFit.*` (`tests/qt_widgets/test_screen_fit.cpp`): a dialog
-  that fits is given no scroll area and keeps its layout; one of eighty
-  40 px rows, 3,200 px, scrolls, is no taller than the screen, and its first,
-  middle and last rows can each be scrolled into view; one wider than the
-  screen scrolls across to a button at the end of its row; shown three times it
-  has one scroll area; a dialog placed off the screen is brought back; a
-  `QMessageBox` is not taken apart; and
-  `VolumesDialog.IsNoTallerThanTheScreenAndStillReachesItsCloseButton` is the
-  real tallest dialog, whose Close button is in the footer and does not move
-  as the body scrolls. The rule for a footer is held at its edges in the same
-  file: a button box, a row and the reply under it, a read-only line beside the
-  buttons, two rows of buttons (only the later is the footer), no row of
-  buttons, a row followed by a long list, a row with an editable field, a
-  grid, a dialog that fits (untouched), and one shown again (one footer).
-  `ScreenFitDialogs.*` (`tests/qt_widgets/test_screen_fit_dialogs.cpp`) gives
+    one that was not is centred in the room.
+  The frame measures what it drew - what it takes beyond the body, its title
+  bar, borders, footer and spacing - and keeps that from one frame to the
+  next, so a dialog is fitted at every frame, on whatever screen it is on now.
+* **Tests.** `screen_fit::*` (`rust/crates/katana_window/tests/foundation/screen_fit.rs`):
+  a dialog that fits is left exactly as it was written; one taller than the
+  screen scrolls and every control can be scrolled into view; one wider than
+  the screen scrolls across as well; a dialog placed off the screen is brought
+  back; the room is inside the screen's available area with a margin round it;
+  a dialog's buttons stay below the scrolling body and in sight whatever is
+  scrolled, and a button row and the reply under it are the footer together;
+  and `volumes_dialog::is_no_taller_than_the_screen_and_still_reaches_its_close_button`
+  is the real tallest dialog. `screen_fit_dialogs::*`
+  (`rust/crates/katana_window/tests/main_window/screen_fit_dialogs.rs`) gives
   each real dialog a minimum height over the screen's, so that it scrolls
   whatever its own layout needs, and holds its buttons and reply in the
   footer, on the dialog and still as the body scrolls: Surface Edit's Heights
-  and Delete Points, Combine Surfaces, Volumes and Road Objects. The offscreen platform's screen is the machine's (2560
-  x 1440 here under the headless driver, 800 x 800 under the widget tests), so
-  a headless run of a dialog shows it as it was written unless the screen is
-  made smaller: `QT_SCALE_FACTOR=2` in the environment of a
-  `--dialog terrainVolumes` run halves it, and that shows Volumes as a 774 x
-  664 window with its scroll bar.
+  and Delete Points, Combine Surfaces, Volumes and Road Objects.
 * **Decided.** A scroll area for the whole dialog rather than a taller screen's
   worth of smaller pages: no dialog has to be redesigned, and a person with room
-  sees nothing different - and a footer found by a stated rule, not marked by
-  each dialog: the dialogs of the terrain and road work all end in a row of
-  buttons, and a rule that finds it needs no edit to a dialog, where an object
-  name or a property each dialog set would be one more thing the next dialog
-  forgets. *Rejected:* each dialog's buttons marked by name; the last layout
-  item only, which misses the Surface Edit dialogs (a reply box under their
-  buttons) and the Road Objects dialog (the line in its row); every button
-  found by class wherever it sits, which would lift a Browse button away from
-  its field. *Rejected:* each dialog sizing itself (the sizes were
-  chosen for the developer's screen, and the next dialog would forget);
-  `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that is
-  too tall (it lets the window shrink and clips or overlaps what no longer
-  fits, and nothing scrolls); a stylesheet's `menu-scrollable` (the style is
-  where the combo popup's hint already is).
+  sees nothing different. *Rejected:* each dialog sizing itself (the sizes were
+  chosen for the developer's screen, and the next dialog would forget).
+* **The footer is declared now, where the C++ found it.** The C++ fitted a Qt
+  dialog already laid out, once, as it was shown, by one application-wide
+  event filter, and so it had to FIND the footer by a stated rule read off the
+  dialog's layout: the last row of buttons in a vertical box (a button box, or
+  a row of buttons, spacing and read-only fields) and everything after it.
+  That rule was chosen over marking each dialog's buttons by name, because a
+  name each dialog set would be one more thing the next dialog forgot. An
+  egui dialog is drawn each frame inside its frame, so there is no finished
+  layout to read: the dialog hands the frame its footer as the second part of
+  what it draws, and forgetting it is visible in the dialog's own code, not a
+  rule a reader must remember. The eleven C++ cases about finding a footer in
+  a Qt layout, the filter, and a dialog shown again are exempt for that
+  (the parity list, retired with the C++). *Rejected in the C++, for the record:*
+  `layout()->setSizeConstraint(QLayout::SetNoConstraint)` on a dialog that was
+  too tall (it let the window shrink and clipped or overlapped what no longer
+  fitted, and nothing scrolled).
 
 **The toolbars along the top: three rows, measured.** A toolbar that has not
 the width for its buttons hides the last ones behind an extension arrow, so
 the arrangement is chosen by what each toolbar needs side by side, which is
-its `sizeHint().width()` (the width at which every action shows). Measured
-alone with the headless driver's grab, in px: Survey 565, Terrain 379, GIS
+the width at which every action shows (the C++'s `sizeHint().width()`).
+Measured alone with the C++'s headless driver's grab, in px: Survey 565, Terrain 379, GIS
 312, Surface Edit 692 (13 buttons and the surface list), BIM 384; File to
 Format together, about 1,180. With a 12 px handle before each, the second row
 of Survey, Terrain and GIS needs about 1,290 px and the third, Surface Edit and
 BIM, about 1,100, against the 1,366 of a 1366 x 768 laptop: both fit. The five
 on one row need some 2,400, which no common screen has, so Surface Edit, BIM
 and GIS showed a handle and an arrow only.
-`MainWindow::toolBarFit` reads the result off the window (a shown toolbar
+`MainWindow::tool_bar_fit` reads the result off the window (a shown toolbar
 along the top whose button is not visible is one behind its arrow) and
 `katana --check-toolbar-fit 1366x768,1632x918,1920x1080` fails a run that
 finds one, printing each row's size-hint sum beside the width it has:
 `qt_every_toolbar_along_the_top_shows_all_its_actions_at_laptop_and_desktop_widths_headless`.
-1632 x 918 is the 85% of a 1920 x 1080 screen that a first run opens at. The
-test is not a widget test, as the arrangement is `MainWindow`'s and the
-widget tests cannot build it (`docs/headless.md`); it is the same run as
-`--check-menus` and `--check-toolbars`.
+1632 x 918 is the 85% of a 1920 x 1080 screen that a first run of the C++
+opened at. The test is a run of the real window, as the arrangement is
+`MainWindow`'s (`docs/headless.md`); it is the same run as `--check-menus`
+and `--check-toolbars`.
 * **Decided: a third row.** A row costs a toolbar's height (about 45 px) of a
   768 px laptop, where the drawing needs it, and the alternatives were each
   weighed against that. *Rejected:* the bottom edge, beside the Drafting bar
@@ -675,15 +671,17 @@ widget tests cannot build it (`docs/headless.md`); it is the same run as
   is no narrower than the second row kept - 1,290 - and Survey, Terrain and GIS
   there is what every saved layout of the older builds already has);
   shrinking Surface Edit's buttons, which would not match its neighbours.
-* **A saved layout.** `kLayoutVersion` is 2 and `restoreLayout` is the one door
-  `restoreSession` takes. A layout of version 2 is restored as it is, a hidden
-  toolbar staying hidden. A layout of version 1 - every one saved before this
-  change, from builds with no Surface Edit and BIM, or with them squeezed on the
-  second row - is restored too, then `seatThirdToolBarRow` puts those two on a
-  third row (whether the person had hidden either is read first and kept), and
-  a toolbar the layout does not place at all is put along the top and shown:
-  what Qt's `restoreState` does with a toolbar its state never mentioned is not
-  documented, so the loop does not rely on either answer. *Rejected:* raising
+* **A saved layout.** `LAYOUT_VERSION` is 2 and `restore_layout` is the one door
+  `restore_session` takes (`rust/crates/katana_window/src/main_window/layout.rs`).
+  A layout of version 2 is restored as it is, a hidden toolbar staying hidden.
+  A layout of version 1 - every one saved before this change, from builds with
+  no Surface Edit and BIM, or with them squeezed on the second row - is
+  restored too, with those two seated on a third row (whether the person had
+  hidden either is read first and kept), and a toolbar the layout does not
+  place at all is put along the top and shown. (The C++ did the same because
+  what Qt's `restoreState` did with a toolbar its state never mentioned was not
+  documented; the Rust's layout is a JSON object of its own, but the rule is
+  kept.) *Rejected:* raising
   the version with no carry-over, which would send every saved layout back to
   the built one - the panels' places too - for the sake of two toolbars (the
   reason the BIM toolbar did not raise it); keeping the version and testing for
@@ -693,10 +691,10 @@ widget tests cannot build it (`docs/headless.md`); it is the same run as
   fail), one saved before they existed, one of this version with BIM hidden,
   and an older one with Surface Edit hidden. A layout saved by a build of
   2026-10-15, with the bars on the second row, is repaired the same way.
-* **The order of a restore** (`MainWindow::restoreWindow`, what
-  `restoreSession` does with what it read). From 2026-10-15 to 2026-10-21
-  every start from a version 1 layout saved with the window maximised
-  crashed, before the window drew. The cause was in this order of events:
+* **The order of a restore** - a C++ defect, kept for its test. From
+  2026-10-15 to 2026-10-21 every start of the C++ window from a version 1
+  layout saved with the window maximised crashed, before the window drew. The
+  cause was in this order of events:
   - `restoreGeometry` made the hidden window maximised.
   - `restoreState` then kept a copy of the restored layout, as Qt does for a
     window not yet shown that is to be maximised or full screen and that the
@@ -719,29 +717,25 @@ widget tests cannot build it (`docs/headless.md`); it is the same run as
   shown. `--check-session-restore` (the
   `qt_a_layout_saved_maximised_by_an_older_build_restores_before_the_window_is_shown_headless`
   test) restores one before the first show. Without the fix it crashed, as the
-  owner's window did; with it, it passes.
+  owner's window did; with it, it passed. The Rust window keeps no Qt layout
+  and no copy of one, so the order cannot bite it; the check still runs
+  against it, restoring a version 1 layout before the first frame.
 
 Not done: a window narrower
 than about 1,290 px (a 1280-px laptop) still overflows the second row, and
 larger icons or text widen every toolbar (a button is 41 px at Large Icons
 against 33); no setting chooses a density from the screen; a floating dock is
-not fitted. After the window is first shown maximised, Qt keeps its copy of a
-restored layout until the layout fits, and at most 150 ms more
-(`discardRestoredStateTimer`): a `removeToolBar` or `removeDockWidget` in that
-time would meet the same deleted item the start crashed on ("The order of a
-restore", above). Nothing does one then today; one that is added must come
-after the first event loop turn, or apply the layout first as Qt's own
-`tabifyDockWidget` does.
+not fitted.
 
 ## Failure modes
 
 Every command failure surfaces as a message in the command log and, for errors,
 the status bar; the model is untouched. Closing the window asks twice, in this
-order (`MainWindow::closeEvent`): first the Survey Code Manager, whose
+order (`MainWindow::close`): first the Survey Code Manager, whose
 unapplied rule edits live only in its buffer - it is shown and asks Apply /
-Discard / Cancel over the rules it is about (`CustomisationWorkbench::confirmClose`),
+Discard / Cancel over the rules it is about (`CustomisationWorkbench::confirm_close`),
 first because its Apply changes the drawing the next question is about - and
-then, with unsaved changes, save, discard or cancel (`confirmDiscard`). A
+then, with unsaved changes, save, discard or cancel (`confirm_discard`). A
 headless run has nobody to answer either, so it refuses and says why in the
 log, never discarding anything unasked: a scripted `QUIT` with unapplied code
 edits, or `NEW` after an edit, is refused, and the script can Apply or Revert
@@ -757,31 +751,39 @@ recovery and never deletes the damaged file.
 ## The look of the application: theme, icons, toolbars
 
 The viewport has been dark (`#1e2329`) from the start, and the window around
-it was whatever grey Qt defaults to. A dark drawing in a light frame is most
-of why the application looked unfinished. Three files fix that, and each was
-shaped by what this toolchain does and does not have.
+it was whatever grey the toolkit defaulted to. A dark drawing in a light
+frame is most of why the application looked unfinished. Three files fix
+that; the C++ shaped each by what its Qt toolchain did and did not have, and
+the Rust keeps each one's rule.
 
-**`theme.hpp` - every chrome colour is a named token.** `window`, `panel`,
-`raised`, `hover`, `border`, `text`, `textMuted`, `accent` and so on, as
-functions. The stylesheet is ASSEMBLED from them rather than written with
-colour literals, so the tokens are the only place a colour is decided and a
-change of theme is a change to one file. Nothing else under `src/katana_qt`
-should contain a widget colour literal; the viewports keep their own constants
-for DRAWING colours (grid, snap marker, selection), which are content, not
-chrome. The style is Fusion, because it is the one built-in style that honours
-a palette completely - the native Windows style draws light controls into a
-dark palette. The accent is blue, not the red of the logo: in an engineering
+**`palette.rs` - every chrome colour is a named token**
+(`rust/crates/katana_window/src/theme/palette.rs`). `window`, `panel`,
+`raised`, `hover`, `border`, `text`, `text_muted`, `accent` and so on, as
+functions. egui's look is ASSEMBLED from them (`style.rs`'s `visuals`, one
+for the dark theme and the light) rather than written with colour literals,
+so the tokens are the only place a colour is decided and a change of theme is
+a change to one file. Nothing else under `rust/crates/katana_window` should
+contain a widget colour literal; the viewports keep their own constants for
+DRAWING colours (grid, snap marker, selection), which are content, not
+chrome. egui draws its own controls, the same on every platform, which is
+why the C++ chose Qt's Fusion style: it was the one built-in style that
+honoured a palette completely - the native Windows style drew light controls
+into a dark palette. The accent is blue, not the red of the logo: in an engineering
 program red already means "error", and a checked tool must not read as one.
 
-**Text.** The fonts are tokens too (`theme::uiFont`, `theme::monospaceFont`,
-`theme::overlayFont`). The command line named "Consolas", the plan view's
+**Text.** The fonts are tokens too (`katana_window::theme::style::ui_font`, `katana_window::theme::style::monospace_font`,
+`katana_window::theme::style::overlay_font`). In the C++ the command line named "Consolas", the plan view's
 prompt and snap tag "Segoe UI" at fixed sizes, and eighteen dialogs'
-reports and command fields `QFontDatabase::systemFont(FixedFont)` - Courier
+reports and command fields Qt's system fixed font - Courier
 New on Windows, wider and lighter than the Consolas beside it - while on
 Windows the menus, the menu bar, tooltips and message boxes each kept the
-font the platform gave that class. Now the whole window is one font, the
-platform's UI face (Segoe UI on Windows): `theme::setTextSize` sets it
-without a class name, which drops the per-class fonts. The fixed-pitch font
+font the platform gave that class. Now the whole window is one font:
+`katana_window::theme::style::set_text_size` sets every text style of the
+context at the chosen size. The face is egui's embedded sans (Ubuntu-Light,
+which has no bold face), where the C++ took the platform's UI face (Segoe UI
+on Windows); which face the window carries is the owner's to decide, and
+changes in `style.rs` only. The sizes are still a step from the platform's
+9 points (`PLATFORM_POINTS`). The fixed-pitch font
 is the first the machine has of Cascadia Mono, Consolas, DejaVu Sans Mono,
 Liberation Mono and Menlo, then the platform's own, at the same size as the
 chrome, so a column of coordinates in a report lines up and is the size of
@@ -790,44 +792,44 @@ the text around it. **View > Text Size** (`viewTextSizeSmall` to
 size less a point, Large two points more and Extra Large four - one point
 (9 to 10) is a difference few people see. The command line's font, set on
 the widget, is set again with the rest. The drawing's own text face
-(`PlanPaintOptions::fontFamily`) is content, like the viewport's colours, and
+(`PlanPaintOptions::font_family`) is content, like the viewport's colours, and
 is not a theme font: a plot must print the same whatever size the window's
 text is.
 
-**`KatanaStyle` (in `theme.cpp`) - Fusion, with three things it does not do.**
-The Survey, Terrain and GIS menus were grouped under titled sections
+**`style.rs` - three things the toolkit did not do.** The C++ had to teach
+Qt's Fusion style three things (its `KatanaStyle`), and the Rust's style
+(`rust/crates/katana_window/src/theme/style.rs`) keeps each. First, the
+Survey, Terrain and GIS menus were grouped under titled sections
 ("Surfaces", "Point Cloud - PDAL") and not one title had ever been seen:
-Fusion says it does not support sections (`SH_Menu_SupportsSections`), so
-`QMenu` drew each as a plain separator - and the stylesheet drew a menu's
-separators with its own parent's code whenever the menu had a background
-colour, which draws no text either. The style says it does and draws the
-title in small muted capitals, and the `QMenu` rule declares
-`-qt-style-features: background-color`, which hands the separators back to
-the style while the stylesheet keeps drawing the items
-(`qt_widgets.Theme.AMenuSectionShowsItsTitleUnderTheStylesheet`, shown
-failing without that line). Every long menu is now in titled sections: File
+Fusion said it did not support sections, so Qt drew each as a plain
+separator, and the stylesheet drew a menu's separators with code that drew no
+text either; the C++ style drew the title in small muted capitals, and so
+does the Rust's (`menu_section`;
+`theme::a_menu_section_shows_its_title_under_the_stylesheet`). Every long menu is now in titled sections: File
 (Drawing, Import and Export, Scripts, Plot, Project), View (Display,
 Viewports, 3D Views, Window), Format (Tables and Libraries, Across the
 Drawing, Annotation Styles), Annotate's editors and Leader
 Manager, and the tool menus by their catalogue groups (Lines, Curves,
-Transform, Edit, Dimensions ...; `src/katana_qt/tools/tool_menus.hpp`). Second, for a
-choice list that cannot be typed into, Fusion drops a popup the height of
-every item (`SH_ComboBox_Popup`), ignoring `maxVisibleItems`: a drawing's two
-hundred styles ran off the screen. The style asks for the scrolling list
-(`qt_widgets.Theme.ALongChoiceListScrollsRatherThanRunningOffTheScreen`).
-Third, a toolbar's overflow arrow: Qt's is a small dark image made for light
+Transform, Edit, Dimensions ...; `rust/crates/katana_window/src/tools/tool_menus.rs`). Second, for a
+choice list that cannot be typed into, Fusion dropped a popup the height of
+every item, ignoring the visible-item limit: a drawing's two hundred styles
+ran off the screen. A choice list shows `MAX_VISIBLE_ITEMS` rows and scrolls
+the rest (`theme::a_long_choice_list_scrolls_rather_than_running_off_the_screen`).
+Third, a toolbar's overflow arrow: Qt's was a small dark image made for light
 toolbars, and the style draws it in the muted text colour instead, in whole
 device pixels, and in the accent while a tool runs whose button it hides
-("Tool families on the toolbars", below, has why it was not seen at all).
+(`paint_overflow_arrow`; "Tool families on the toolbars", below, has why it
+was not seen at all).
 
-**`icons.hpp` - the icons are drawn in code.** Each is a vector drawing on a
-24-unit grid painted by a `QIconEngine` at whatever size and device-pixel ratio
-Qt asks for. There are no image files behind them, for four reasons: they are
-crisp at every size because nothing is resampled; they take their colours from
-the theme, so a theme change recolours all of them; a function that is wrong
-does not compile, where a resource path that is wrong is a blank button; and
-this toolchain has no Qt SVG module and no image tools, so an SVG or PNG set
-would have been a dependency added for decoration. The language is one rule
+**`icons.rs` - the icons are drawn in code.** Each is a vector drawing on a
+24-unit grid painted through the window's canvas at whatever size and
+device-pixel ratio it is shown at. There are no image files behind them, for
+four reasons: they are crisp at every size because nothing is resampled; they
+take their colours from the theme, so a theme change recolours all of them; a
+function that is wrong does not compile, where a resource path that is wrong
+is a blank button; and the C++'s toolchain had no Qt SVG module and no image
+tools, so an SVG or PNG set would have been a dependency added for
+decoration (as an SVG renderer would be now). The language is one rule
 applied everywhere: a 1.7-unit round stroke, neutral for the object and ACCENT
 for the part the command acts on - the arrow of Import, the new geometry of a
 draw tool, the cut line of a section. 1.7 rather than the usual 2.0 because at
@@ -838,18 +840,21 @@ inside of the magnet).
 writes `resources/katana.ico` (nine sizes, PNG-compressed entries), a 256 px
 PNG, and `icon_sheet.png` - every icon at 96 px and at the 20 px it ships at.
 The `.ico` is COMMITTED, not generated in the build: generating it would make
-an ordinary build run a Qt program before it could compile a resource file,
-which fails wherever that program cannot start, and buys nothing for an icon
-that changes once a year. Below 64 px the sword is drawn larger and heavier
-within its tile; at true proportions it is a few pixels wide on a taskbar and
-disappears. `katana.rc.in` embeds the icon and a `VERSIONINFO` block whose
-numbers come from `project(Katana VERSION ...)`, so a version is written in
-exactly one place.
+an ordinary build run a program of the build before it could compile a
+resource file, which fails wherever that program cannot start, and buys
+nothing for an icon that changes once a year. Below 64 px the sword is drawn
+larger and heavier within its tile; at true proportions it is a few pixels
+wide on a taskbar and disappears. The window takes its icon at run time
+(eframe's viewport icon, `rust/crates/katana_window/src/drive/desktop.rs`).
+The C++ also embedded the icon and a `VERSIONINFO` block in the executable
+(`katana.rc.in`, its numbers from `project(Katana VERSION ...)`); not done in
+the Rust: `katana.exe` carries no Windows resource, so Explorer shows no icon
+or version for the file itself.
 
 **Every menu item has an icon and says what it does.** Until 2026-09-26
 sixty menu items had no icon or no status tip, or neither: the snap modes,
 the viewport layouts, the standard 3D views, Deselect, Quit, the annotation
-editors and managers, every submenu. `MainWindow::menuGaps` walks the menu
+editors and managers, every submenu. `MainWindow::menu_gaps` walks the menu
 bar and every submenu and lists each item without both; `katana
 --check-menus` fails a run that has one, and
 `qt_every_menu_item_has_an_icon_and_a_status_tip_headless` runs it. The new
@@ -857,22 +862,23 @@ icons keep the one language: a snap mode is the mark the plan view draws for
 it, on the geometry it snaps to; a layout is its panes with the main view in
 the accent; an orthographic standard view is the object in plan with the face
 seen in the accent and the eye's arrow coming at it, and an isometric one the
-cube with the arrow from its corner. `qt_widgets.Icons.TheListHoldsEveryIconOnceAndEachPaintsSomething`
-holds `allIcons` to every enumerator, in order, each painting at 16 px.
+cube with the arrow from its corner. `icons::the_list_holds_every_icon_once_and_each_paints_something`
+holds `all_icons` to every enumerator, in order, each painting at 16 px.
 
 **The contact sheet earned its keep at once.** The first application icon had
 the handle running UP the blade with the guard at the pommel - a sign error in
 the tangent - and the Circle tool read as a minus sign in a ring. Both were
 obvious on the sheet and invisible in the code.
 
-**Toolbars share their actions with the menus.** `MainWindow::makeAction`
-makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
-that names the command and shows its shortcut, since an icon-only button owes
-the user its name - and the same object goes into the menu and the toolbar, so
-the two cannot drift. File, Edit, Properties (the current style), View and
-Format run along the top; Survey, Terrain and GIS have a second row of their
-own (`addToolBarBreak`), because in one row they were squeezed to a button each
-behind overflow arrows, and Surface Edit and BIM a third (`seatThirdToolBarRow`):
+**Toolbars share their actions with the menus.** Each action is made once
+(`rust/crates/katana_window/src/main_window/actions.rs`) - text, shortcut,
+icon, status tip and a tooltip that names the command and shows its
+shortcut, since an icon-only button owes the user its name - and the same
+action goes into the menu and the toolbar, so the two cannot drift. File,
+Edit, Properties (the current style), View and Format run along the top;
+Survey, Terrain and GIS have a second row of their own, because in one row
+they were squeezed to a button each behind overflow arrows, and Surface Edit
+and BIM a third:
 Surface Edit (692 px), BIM (384) and the second row's three (1,256) are some
 2,400 px of toolbars with their handles, and the 1,366 of a laptop's screen
 holds the second row (about 1,290) and the third (about 1,100) but not both in
@@ -884,15 +890,14 @@ every CAD program keeps its drawing tools, because they are the ones reached
 for without looking and a strip beside the drawing is a shorter journey than a
 row above it; Modify runs down the RIGHT edge, as in the classic CAD layout,
 because one column could not hold all three without hiding the last tools
-behind an overflow arrow. Every toolbar and dock has an object name, which is
-what `QMainWindow::saveState` keys a layout on. View > Panels brings back any
-dock that has been closed.
+behind an overflow arrow. Every toolbar and dock has a control name, which is
+what a saved layout keys on. View > Panels brings back any dock that has been
+closed.
 
 **A toolbar says its name.** Two rows of icon-only buttons read as one
 undivided strip, and which icons were Survey's and which Terrain's was a
 matter of hovering over each. A toolbar along the top or the bottom now
-starts with its name, muted (`QLabel#toolBarName`, made by
-`MainWindow::makeToolBar`); a vertical one has no room for a word, and the
+starts with its name, muted (the label `toolBarName`); a vertical one has no room for a word, and the
 Properties bar's " Style " label already says what it holds. View >
 Toolbars (`viewToolBars`) shows or hides each toolbar (`viewToolBarFile` ...),
 turns the names off (`viewToolBarNames`) and sizes the icons: Small 16 px,
@@ -903,18 +908,23 @@ would not fit in the widest window.
 **Tool families on the toolbars: a mark in the corner, not a split button.**
 A family of tools - Circle's six, Arc's five, Ellipse's three, the eighteen
 Vertices tools - is one button on the Draw toolbar
-(`src/katana_qt/tools/tool_menus.hpp`). Until 2026-09-30 it was Qt's split
-button (`QToolButton::MenuButtonPopup`), and the sign of its menu sat on its
-icon. The theme's `QToolButton` rule has padding and a border, and for such a
-rule `QStyleSheetStyle` reserves no width for a split button's arrow strip
-(its `PM_MenuButtonIndicator` is 0), yet still lays the strip over the
-button's right 12 px, paints it after the icon - solid under the pointer and
-while the tool runs, cutting the circle's ring - and takes presses there: a
+(`rust/crates/katana_window/src/tools/tool_menus.rs`). Until 2026-09-30 it was Qt's split
+button (Qt's MenuButtonPopup), and the sign of its menu sat on its
+icon. The C++ theme's `QToolButton` rule had padding and a border, and for
+such a rule `QStyleSheetStyle` reserved no width for a split button's arrow
+strip (its `PM_MenuButtonIndicator` was 0), yet still laid the strip over the
+button's right 12 px, painted it after the icon - solid under the pointer and
+while the tool ran, cutting the circle's ring - and took presses there: a
 click on the right of the ring opened the menu instead of starting Circle.
 Undo and Redo, the window's other split buttons, had the strip over their
-icons too.
+icons too. The Rust paints every tool button with one painter
+(`paint_tool_button`) and keeps the C++'s geometry pixel for pixel, so the
+toolbar's checks pin the same numbers. Every pixel measure in this section and
+the ones after it was taken on the C++ window and holds for the Rust, which
+paints the same geometry; the Qt stylesheet rules, styles and events these
+paragraphs name are the C++'s, the causes its numbers were chosen against.
 
-The family button is now a `FlyoutButton` (`src/katana_qt/tools/flyout_button.hpp`).
+The family button is now a `FlyoutButton` (`rust/crates/katana_window/src/tools/flyout_button.rs`).
 Its icon has the whole button, as on every other tool button, and a small
 triangle in the bottom-right corner - in the 5 px the centred icon leaves
 free at every toolbar icon size, inside the border - says that the button
@@ -923,8 +933,8 @@ tool group. It is muted at rest and lighter under the pointer; it takes the
 accent while the pointer is on its corner, the part of the button that opens
 the family, and while a tool of the family runs. A click anywhere on the icon
 runs the family's first tool. The family opens from a press on the
-triangle's corner, from a press held for the style's popup delay (Qt's
-`DelayedPopup`, 600 ms) and from a right click. The corner is 12 px each
+triangle's corner, from a press held for the popup delay (600 ms, Qt's
+`DelayedPopup` delay, kept) and from a right click. The corner is 12 px each
 way, the width of the strip it replaced, less the icon's square - so less
 area than the strip, an L of 119 square pixels at 20 px icons against its
 396, the icon keeping its whole square; the held press and the right click,
@@ -942,32 +952,33 @@ Vertex / ..."), and elsewhere on the button the tool's, where it showed the
 first tool's alone. The menu is the Draw menu's own submenu, one action per
 tool, so a tool is the same object in both.
 
-**Not done: the held press's test failed once on a loaded runner.**
-`ToolFamilyButtons.AClickOnTheIconRunsTheToolWhileTheMarkAHoldOrARightClickOpensTheFamily`
+**The held press's test failed once on a loaded runner** - the C++'s, before
+the port. `tool_family_buttons::a_click_on_the_icon_runs_the_tool_while_the_mark_a_hold_or_a_right_click_opens_the_family`
 holds a press past the popup delay, then lets go. In release run 41839118311
-(2026-11-04, Windows x86-64 job) the menu opened, after the delay, and the
+(2026-11-04, Windows x86-64 job) the C++'s menu opened, after the delay, and the
 release still started a fourth tool where three were expected. It passed in
 the other four jobs and on the owner's machine (a whole suite there on
 2026-11-05 included). By Qt
-6.11's source this should not happen:
+6.11's source this should not have happened:
 - the button's private `popupTimerDone` opens the menu with a blocking `exec`;
 - `updateButtonDown`, on `aboutToHide`, clears the pressed state before the
   test sends its release, so the release has nothing to click.
-The cause was therefore not found. In the window it cannot reach a person:
-the open menu takes the release, not the button. The test now names the
-tools that started when it fails, so the next failure says which tool ran
-and from where.
+The cause was therefore not found. In the window it could not reach a
+person: the open menu took the release, not the button. The test names the
+tools that started when it fails, so a failure of its Rust twin, which runs
+on the Rust's own press handling, says which tool ran and from where.
 
 **A family is framed for its own tool, and its mark lights for any.** A
-tool's button is framed in the accent while its tool runs
-(`QToolButton:checked`), the toolbar's one sign that a tool runs, and a
+tool's button is framed in the accent while its tool runs, the toolbar's one
+sign that a tool runs, and a
 family's button is checked while its default action is - the tool its icon
 shows. With another of its tools running (Delete Vertex, Circle 2 Points) the
 button's mark takes the accent and its tooltip ends "Running now: Delete
-Vertex", in the accent; its menu ticks which. The button hears of it from the
-family's menu, which every tool's action tells when it is checked or
-unchecked (`QEvent::ActionChanged`): the button itself is told only of its
-default action. Until 2026-09-30 no button showed such a tool running at
+Vertex", in the accent; its menu ticks which. Every frame paints the button
+from its family's actions as they are then; the C++ button had to hear of it
+from the family's menu, which every tool's action told when it was checked or
+unchecked (Qt's `ActionChanged` event), since the button itself was told only of
+its default action. Until 2026-09-30 no button showed such a tool running at
 all, and then, for a day, the family's button was framed while ANY of its
 tools ran - so with Delete Vertex running the Vertices button framed Insert
 Vertex's icon, a plus on a polyline: the wrong tool, even the opposite one,
@@ -978,17 +989,15 @@ becoming the button's own ("Decided", below). The families are behind the
 Draw toolbar's overflow arrow at the window's first size, and a tool running
 behind that arrow lights it (below).
 
-**The families follow their toolbar's icon size.** A button a toolbar makes
-for an action follows the toolbar's icon size (its layout connects
-`iconSizeChanged` to `setIconSize`); a button put on it as a widget does
-not, and `QToolButton` caches its size hint. So after View > Toolbars >
-Large Icons the families kept the 33 px they were made at while the other
-buttons grew to 41 - their icons drawn at 23 px beside the others' 28, their
-marks squeezed to 3 px against the icon's corner - and at Small they stood
-4 px wider than the column. `tools::followToolBarIconSize` makes the
-toolbar's own connection for the families and for Undo and Redo, which
-`MainWindow::setToolBarIconSize` used to size by name; it now sizes the
-bars and nothing else.
+**The families follow their toolbar's icon size.** A button drawn each frame
+is drawn at its bar's icon size, so the Rust needs nothing for it. In the C++
+a button a toolbar made for an action followed the toolbar's icon size; a
+button put on it as a widget did not, and `QToolButton` cached its size hint.
+So after View > Toolbars > Large Icons the families kept the 33 px they were
+made at while the other buttons grew to 41 - their icons drawn at 23 px
+beside the others' 28, their marks squeezed to 3 px against the icon's
+corner - and at Small they stood 4 px wider than the column, until the C++
+made the toolbar's own connection for the families and for Undo and Redo.
 
 **The mark is drawn in the screen's own pixels.** The triangle is filled a
 row at a time, each a pixel wider, without antialiasing: a filled polygon
@@ -1018,19 +1027,17 @@ inset of three device pixels at 125% wherever the button sits. Where the
 button starts on a whole device pixel, as in a grab, the 6 px mark would
 then cover the icon's last column, or would have to shrink to 5 px.
 
-**The mark goes out when the pointer leaves.** It is lit on the corner by the
-hover events, and the pointer leaves the button over the family's menu to
-pick from it. While a popup is open Qt tells the button with a Leave and no
-HoverLeave (`QApplication` sends a HoverLeave only with no popup up, or to
-the popup's own widgets), so the mark stayed lit in the accent - the colour
-of a tool running - after the menu closed, and after the tool it started had
-ended, until the pointer next crossed the button. The button clears it on
-Leave too. The test drives the pointer through the platform
-(`qt_handleMouseEvent`, what QtTest's mouse functions call), since a Leave
-sent by hand would say what the test thought Qt sends.
+**The mark goes out when the pointer leaves.** The pointer leaves the button
+over the family's menu to pick from it. In the C++ the mark was lit on the
+corner by Qt's hover events, and while a popup was open Qt told the button
+with a Leave and no HoverLeave, so the mark stayed lit in the accent - the
+colour of a tool running - after the menu closed, and after the tool it
+started had ended, until the pointer next crossed the button; the button
+cleared it on Leave too. The Rust works the hover out each frame from where
+the pointer is, so a mark is lit only while the pointer is on its corner.
 
 The alternatives were rendered and measured on 2026-09-30 with a scratch
-prototype compiled against this theme and Qt 6.11.2:
+prototype compiled against the C++ theme and Qt 6.11.2:
 - reserving the strip in the stylesheet, Qt's own recipe (Qt Style Sheets
   Examples, "Customizing QToolButton": `padding-right` on
   `QToolButton[popupMode="MenuButtonPopup"]`) - kept for Undo and Redo,
@@ -1095,7 +1102,7 @@ property of the kind switcher's own for the rule to match - a second marker
 to keep in step with the popup mode, which is what Qt's own recipe matches
 (Qt Style Sheets Examples, "Customizing QToolButton") and which the button
 must have anyway for its menu to open on a click.
-`TitleBarButtons.EveryTitleBarButtonDrawsItsWholeIconWhereCloseDrawsItsOwn`
+`title_bar_buttons::every_title_bar_button_draws_its_whole_icon_where_close_draws_its_own`
 measures every button of a panel's and a view's title bars, menu or none,
 against the bar's Close button, which no popup mode rule reaches; the
 checks before it measured only buttons with a menu, and passed with every
@@ -1118,8 +1125,7 @@ pixels they are shown in (`OverflowArrowEngine`), 7 x 8 px in the button's
 colours at 125% against 7 at 100%), and at 100% the two 1.5 px chevrons all
 but ran into one shape. While a tool runs whose button the arrow hides - a
 family with any of its tools running, or a plain tool's button framed - the
-chevrons take the accent (`tools::lightOverflowWhileAHiddenToolRuns`, which
-`fillToolMenus` sets up for each toolbar it fills): at the first size all
+chevrons take the accent (`overflow_lit`, `rust/crates/katana_window/src/tools/flyout_button.rs`): at the first size all
 eighteen Vertices tools are behind the Draw toolbar's arrow, and with Delete
 Vertex running nothing on the toolbars said a tool ran. Only a tool's
 button lights it: Select, which heads the Draw toolbar, is checked while no
@@ -1129,7 +1135,7 @@ a window shown short with a tool already running has the arrow lit as it
 appears; expanded, the toolbar shows every button, and the arrow is not
 lit.
 
-Tested in `qt_widgets.ToolFamilyButtons.*` - the mark, its press zone and
+Tested in `tool_family_buttons::*` - the mark, its press zone and
 the icon apart at 16, 20 and 28 px icons, on a bar made at that size and on
 one switched to it, and drawn where they say; the mark the same whole
 staircase of device pixels at 100, 125, 150, 175 and 200% wherever the
@@ -1142,21 +1148,21 @@ button is) and running another (unframed, as the plain button at rest),
 differing only in the mark's square, the mark in the accent while either
 runs; the button painted again when any of its tools starts or stops; a
 click on the icon, the mark, a held press, a right click and
-`QAbstractButton::click`, which `--press` uses; the mark lit with the
+the click `--press` gives; the mark lit with the
 pointer on its corner and out once the pointer has left for the family's
 menu, the pointer driven through the platform; the status bar's line on the
 corner and off it; the tooltip as it is shown, for a family made by hand and
-for the catalogue's, laid out as the tooltip's label lays it out
-(`QTextOption::WordWrap`) at every width from 60 to 400 px with no name
+for the catalogue's, laid out as the tooltip lays it out, word-wrapped,
+at every width from 60 to 400 px with no name
 split - the test also asserts it reached widths where the names wrap, since
 a document not yet laid out has no lines and passed the check with the
 names' spaces plain - and naming another tool while it runs - and in
-`qt_widgets.SplitButtons.*` (Undo's strip beside its icon and its arrow in
+`split_buttons::*` (Undo's strip beside its icon and its arrow in
 from the edge, by hand; its hover the button's),
-`qt_widgets.TitleBarButtons.*` (the kind switcher, by hand, and every
+`title_bar_buttons::*` (the kind switcher, by hand, and every
 title bar button's whole icon, where its bar's Close draws its own),
-`qt_widgets.ToolBarSigns.*` (the check fails a split button's arrow and a
-kind switcher's drawn over their icons) and `qt_widgets.ToolBarOverflow.*`
+`tool_bar_signs::*` (the check fails a split button's arrow and a
+kind switcher's drawn over their icons) and `tool_bar_overflow::*`
 (the arrow whole, in whole device pixels at 100 to 200%, lit while a tool it
 hides runs, also when the window is shown short with the tool already
 running, never for a checked button that is no tool, and outlined while
@@ -1188,12 +1194,12 @@ screenshot assume. It is a feature with a decision of the owner's in it (and a
 setting to turn it off), not a defect, so it stays as it is. The mark is not
 mirrored for a right-to-left layout, which the window does not use.
 
-**Every key reaches one thing.** `MainWindow::shortcutClashes` gathers every
-key a person can press - each action's key sequences, any `QShortcut`, each
-menu's Alt letter and each item's underlined letter within its own menu (two
-items with one letter make the key cycle between them instead of choosing) -
-and lists those that reach more than one thing, since Qt disables an
-ambiguous shortcut for both. `katana --check-shortcuts` fails a run that has
+**Every key reaches one thing.** `MainWindow::shortcut_clashes` gathers every
+key a person can press - each action's key sequences, each menu's Alt letter
+and each item's underlined letter within its own menu (two items with one
+letter make the key cycle between them instead of choosing) - and lists those
+that reach more than one thing, since a key that reaches two cannot be meant
+for both (Qt disabled an ambiguous shortcut for both). `katana --check-shortcuts` fails a run that has
 any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
 Library, In&verse, Toggle Pe&rspective and others; one of the ten was on
@@ -1209,7 +1215,7 @@ reviewed, and the same run can drive the menus and dialogs step by step:
 **Not done.** There is no light theme. The dialogs (corridor, plot) are
 themed but plain. The views inside the workspace are not kept between
 sessions (above, "How the window starts"); the dock chrome's hooks
-(`minimisedNames`, `minimiseNamed`) are ready for it. The Text Size is the
+(`minimised_names`, `minimise_named`) are ready for it. The Text Size is the
 window's; a dialog that set a font of its own other than the fixed-pitch one
 keeps it. `resources/icon_sheet.png` is regenerated by `katana_make_icons` and
 carries every icon, the menu items' of 2026-09-26 included.
@@ -1219,68 +1225,73 @@ carries every icon, the menu items' of 2026-09-26 included.
 The user's request of 2026-09-23 was for panels and views that dock, move,
 minimise, close and come back from the menus, views that go out onto another
 screen, and per-view control of which layers show. Until then the views were
-tiles: `ViewportContainer` placed widgets at the rectangles of a fixed split
-(`cad::ViewportLayout`), so a view was identified by its POSITION. Every layout
+tiles: the C++'s `ViewportContainer` placed widgets at the rectangles of a fixed split
+(`katana_cad::viewport_layout`), so a view was identified by its POSITION. Every layout
 change destroyed and rebuilt every widget, which lost the plan's zoom, every
 section but the first and any half-picked clicks - and the application changed
 the layout on its own, whenever a surface was built or a section cut.
 
-**Each view is now a `QDockWidget` inside a nested `QMainWindow`**
-(`katana_qt/view_workspace.*`), which is the main window's central widget. Qt's
-dock machinery gives splitting, tabbing and floating onto any screen for free.
-A NESTED window rather than the main window's own dock areas, because an
-arrangement ("Four: Equal") must move views and never the Layers panel, and a
-panel should not be droppable between two views. Rejected alternatives:
+**Each view is now a dock of the workspace's own dock area**
+(`rust/crates/katana_window/src/view_workspace.rs`), which fills the middle
+of the main window. The area is an egui_dock `DockState`, laid out by
+egui_dock's split arithmetic and drawn by the workspace with the window's
+dock chrome; a tab strip is drawn only over a group of more than one view.
+(The C++ made each view a `QDockWidget` inside a nested `QMainWindow`, whose
+dock machinery gave splitting, tabbing and floating onto any screen.) An
+area of its OWN rather than the main window's, because an arrangement ("Four:
+Equal") must move views and never the Layers panel, and a panel should not be
+droppable between two views. Rejected alternatives:
 
 * *Keep the tiles and add pop-out windows.* Two ways of showing a view, and the
   tiled half still rebuilds on every change.
-* *Qt Advanced Docking System* (LGPL-2.1+, packaged by MSYS2 for ucrt64 but not
-  installed). It would give auto-hide side bars and native floating frames with
-  a real minimise button off the shelf. It is a new third-party dependency, a
-  change to the bundle and a licence decision, which belong to the owner; the
-  plain-Qt design does not preclude moving to it later, because the views and
-  their state do not know what hosts them.
+* *Qt Advanced Docking System*, for the C++ (LGPL-2.1+, packaged by MSYS2 for
+  ucrt64 but not installed). It would have given auto-hide side bars and
+  native floating frames with a real minimise button off the shelf, at the
+  cost of a new third-party dependency, a change to the bundle and a licence
+  decision, which belong to the owner.
+* *egui_dock's own `DockArea`*, for the Rust: it draws a 24-point tab bar over
+  every dock, where a view has only its 26-point title bar, with close and add
+  buttons of its own, and its drags would put a view among the main window's
+  panels, which the area of its own is there to prevent. The views and their
+  state do not know what hosts them, so either could still be changed.
 
-**A `QMainWindow` makes itself a top-level window whatever parent it is given**
-(its constructor ORs in `Qt::Window`), and a window placed as another main
-window's central widget is an EMPTY layout item. The first build of the
-workspace was given no space at all and every view vanished while the panels
-filled the window. `setWindowFlags(Qt::Widget)` in the constructor is what
-makes it a child; the comment there says so.
+A view floats as a window inside the main window, not onto another screen:
+not done in the Rust, where the C++'s floating docks could go out onto any
+screen.
 
-**A view's state lives in `cad::ViewSet`, not in its widget.** `ViewState`
+**A view's state lives in `katana_cad::view_set::ViewSet`, not in its widget.** `ViewState`
 holds the kind, the 3D camera, the plan zoom, the layers hidden in that view,
 the reference layers hidden in it and its section. Views are identified by a
 `ViewId` that is monotonic and never reused, like entity ids, so a queued event
-for a closed view cannot find another. States are held by `unique_ptr` because
-each widget holds a reference to its state; closing a view deletes the dock
-(and so the widget) BEFORE dropping the state. Changing a view's kind replaces
+for a closed view cannot find another. States are boxed, so taking a closing
+view's state hands over the very object the set held (as the C++'s
+`unique_ptr` did, each widget holding a reference to its state). Changing a view's kind replaces
 only the widget inside the dock, so a 3D view switched to plan and back keeps
-its orbit. `ViewSet::mostRecent(kind)` is what Plot, F9 and the Standard Views
+its orbit. `ViewSet::most_recent(kind)` is what Plot, F9 and the Standard Views
 act on: the active view when it is that kind, otherwise the one of that kind
 the user touched last - so F9 still reaches the 3D view after a click in the
-plan. The layout presets survive as arrangements: `cad::dockSplits(kind)` lists
-the `splitDockWidget` steps that build each one, and a test asserts that
-applying them to rectangles reproduces `layoutRects(kind)` exactly.
+plan. The layout presets survive as arrangements: `katana_cad::viewport_layout::dock_splits(kind)` lists
+the split steps that build each one, and a test asserts that
+applying them to rectangles reproduces `layout_rects(kind)` exactly.
 
 **Showing a view never replaces one.** Building a surface or importing meshes
 used to split the window and turn a cell into 3D; cutting a section turned the
 ACTIVE cell into a section, which was the plan view being drawn in whenever the
-user had just clicked there to select the alignment. `ensureView(kind)` raises
+user had just clicked there to select the alignment. `ViewWorkspace::ensure_view(kind)` raises
 the view of that kind used most recently, or opens a new one beside the active
 view.
 
 **Zoom Extents frames the active view only** - and the views linked with it
 follow (below, "Linked views"); one view's zoom is not another's business
 unless the user has linked them, and the old container did one thing while
-its header said another. After New, Open and an import every view is framed
-(`zoomExtentsAll`), because all of them are looking at a drawing that has
+its C++ header said another. After New, Open and an import every view is framed
+(`zoom_extents_all`), because all of them are looking at a drawing that has
 just changed under them; the link is framed once there, as below.
 
 **Per-view layers extend THE visibility rule rather than adding a second.**
-`cad::isDrawn` and `isSelectable` take a `const LayerOverrides&` - the layers
+`katana_cad::selection::is_drawn` and `is_selectable` take a `&LayerOverrides` - the layers
 one view hides - with NO default argument, so every caller has to say whether
-it means a view or the document (`kNoLayerOverrides`); a default would let the
+it means a view or the document (`NO_LAYER_OVERRIDES`); a default would let the
 next consumer ignore the view it draws in, which is how the 3D view once came
 to ignore layer visibility altogether (audit REN-03). The overrides are
 SUBTRACTIVE: a view can hide what the document shows, never show what it hides,
@@ -1313,14 +1324,14 @@ and ZOOM") - so an agent, a script and a test set up a design view hiding the
 as-built layers beside an as-built view hiding the design ones
 (`qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless`).
 **The popup runs those lines; it edits nothing itself.** Each box and button
-builds the VIEWS line a person would type (`viewLayersLine`,
-`viewReferencesLine`, pure functions of the layers' names, held in
-`ViewLayersLines.*`) and hands it to the window's one executor through
-`ViewWorkspace::setViewLayersShown`, `isolateLayerInView`, `showEverythingInView`
-and `setViewReferenceShown`, so a click is logged as a typed line is, takes the
+builds the VIEWS line a person would type (`view_layers_line`,
+`view_references_line`, pure functions of the layers' names, held in
+`view_layers_lines::*`) and hands it to the window's one executor through
+`ViewWorkspace::set_view_layers_shown`, `isolate_layer_in_view`, `show_everything_in_view`
+and `set_view_reference_shown`, so a click is logged as a typed line is, takes the
 verb's own code path and is refused as the verb refuses; the popup then reads
 every box from the view, so a refused line leaves each where the view is
-(`LayersPopup.*`). A plain name is a word of the line; a name with a blank is
+(`layers_popup::*`). A plain name is a word of the line; a name with a blank is
 quoted; a name with a comma, or one that is the verb's own word (ALL, LAYER,
 REFERENCE), goes after `LAYER`, which takes every word after it whole
 (`VIEWS HIDE 2 LAYER a,b`); the reference layers are `VIEWS HIDE|SHOW <id>
@@ -1344,41 +1355,41 @@ the view widget itself". A plan view is linked or not; every linked view
 shows the centre and the scale (pixels per unit) of the linked view moved
 last, each at its own size and through its own hidden layers - the design
 view hiding the as-built layers and the as-built view the design ones, both
-looking at the same place. The model is `cad::ViewSet`'s link and
-`include/katana/cad/view_link.hpp`; the verbs are `VIEWS LINK`, `VIEWS
+looking at the same place. The model is `katana_cad::view_set::ViewSet`'s link and
+`rust/crates/katana_cad/src/view_link.rs`; the verbs are `VIEWS LINK`, `VIEWS
 UNLINK` and every `ZOOM` (`docs/cad.md`, "The window's views: VIEWS and
 ZOOM").
 
 **What moves the link.** A wheel notch, a middle-drag pan, a frame (Zoom
 Extents from the bar, the menu or a line, the program's own framing, a
 `ZOOM`) and a first paint's frame: each raises the plan view's
-`ViewportWidget::onViewMoved`, and the workspace's `viewMoved` has the others
+`PlanViewEvent::ViewMoved`, and the workspace's `view_moved` has the others
 take its centre and scale in the same pass, with one repaint each. The
 follow is STAR-SHAPED: a view moved by the link never reports that move -
-`ViewportWidget::holdView` raises nothing - and the workspace's guard flag
+`PlanView::hold_view` raises nothing - and the workspace's guard flag
 makes sure of it, so no echo can run between two views. **A linked view
 never refits on a resize**: a view framed by Zoom Extents refits its frame
 whenever it is resized until the user moves it, which in a linked view would
 change its scale behind the link's back, so every member forgets its frame
 when the link moves it or it moves the link. Resizing a dock never breaks the
-link (`ViewLinks.ALinkedViewKeepsTheLinksViewWhenResized`, shown failing with
-`holdView` emptied). Each move has its test through the widget, shown failing
+link (`view_links::a_linked_view_keeps_the_links_view_when_resized`, shown failing with
+`hold_view` emptied). Each move has its test through the widget, shown failing
 with its hook taken out: the wheel's, a middle-drag pan's - the other view
 bit for bit where it was worked by hand, and reporting nothing itself
-(`ViewLinks.APanInALinkedViewMovesTheOtherBitForBitAndTheOtherNeverReportsIt`)
+(`view_links::a_pan_in_a_linked_view_moves_the_other_bit_for_bit_and_the_other_never_reports_it`)
 - and the first paint's, where a view linked before it was ever seen, and
 named the one the others come to, moves nobody until its first paint frames
 the drawing, and then leads
-(`ViewLinks.AViewLinkedBeforeItWasEverSeenLeadsFromItsFirstPaint`). When
+(`view_links::a_view_linked_before_it_was_ever_seen_leads_from_its_first_paint`). When
 that first paint frames nothing - the view hides every layer with anything
 on it - the view has no place of its own to lead to, and takes the link's
 place instead: that of the member the user moved last that has framed, else
-the first opened (`ViewWorkspace::viewMoved`); with none framed yet it waits,
+the first opened (`ViewWorkspace::view_moved`); with none framed yet it waits,
 and the first to frame brings it along. It said nothing then, kept the
 place every new view starts at, and a script's `VIEWS HIDE 2 design` and
 `VIEWS LINK 1,2 TO 2` left the link showing two places while both views said
 `linked=yes`
-(`ViewLinks.ALinkLedByAViewThatFramesNothingAtItsFirstPaintTakesTheOthersPlace`).
+(`view_links::a_link_led_by_a_view_that_frames_nothing_at_its_first_paint_takes_the_others_place`).
 Rejected: framing what the link draws there, as its Zoom Extents does - it
 would throw away the place the user had put the other views at.
 
@@ -1386,38 +1397,38 @@ would throw away the place the user had put the other views at.
 the others to TO; without TO the joining views come to the link (its lowest
 id), or with no link yet to the first id listed. The Link button always
 sends TO: the view the user panned or zoomed most recently of the one clicked
-and the link's members (`ViewSet::linkLeaderFor`, on a clock of the user's
-moves, `ViewState::lastMoved`), else a member, else the view clicked.
+and the link's members (`ViewSet::link_leader_for`, on a clock of the user's
+moves, `ViewState::last_moved`), else a member, else the view clicked.
 Clicking the two views' buttons in either order then keeps the zoom just
-made (`ViewSet.AJoiningViewComesToTheViewTheUserMovedLast`). Rejected:
+made (`view_set::a_joining_view_comes_to_the_view_the_user_moved_last`). Rejected:
 "the joining view always follows", which loses that zoom whenever the view
 zoomed is clicked second; and one click linking to an implicit "previous"
 view, which surprises with three views open. The first click makes a link of
 one, which waits for the second ("Linked, waiting"), in a DASHED accent
 frame: in the solid frame of a working link it looked finished, and the
-second click was not made (`Theme.ALinkWaitingForASecondViewIsFramedDashedNotSolid`);
+second click was not made (`theme::a_link_waiting_for_a_second_view_is_framed_dashed_not_solid`);
 an unlink, a close or a change of kind that leaves one member dissolves the
 link, and none of them moves a view.
 
-**Zoom Extents on every view** (`zoomExtentsAll`, after New, Open and an
+**Zoom Extents on every view** (`zoom_extents_all`, after New, Open and an
 import) frames the link ONCE, in the member moved last (else the lowest id),
-on the union of what the members draw (`ViewWorkspace::linkDrawnBounds`);
+on the union of what the members draw (`ViewWorkspace::link_drawn_bounds`);
 the others follow. Framed one by one, each on what it alone draws, a design
 view and an as-built view would come apart the moment a drawing opened
-(`ViewLinks.ZoomExtentsAllFramesTheLinkOnceOnTheUnionOfWhatItsViewsDraw`).
-`ViewWorkspace::zoomTo` frames the box it is given, once, in that same
+(`view_links::zoom_extents_all_frames_the_link_once_on_the_union_of_what_its_views_draw`).
+`ViewWorkspace::zoom_to` frames the box it is given, once, in that same
 member, and the others follow it. A linked view's own Zoom Extents frames
 what it draws; when it draws nothing - the design view hiding the drawing's
 only layer - it frames what the link draws instead: Zoom Extents on nothing
 goes to the origin at a pixel a unit, as it always has for a view alone,
 and a linked view took the as-built view there too, millions of units off
-a survey (`ViewLinks.ZoomExtentsInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws`).
-The rule lives in `ViewWorkspace::zoomExtents(id)`, where every Zoom Extents
+a survey (`view_links::zoom_extents_in_a_linked_view_that_draws_nothing_frames_what_the_link_draws`).
+The rule lives in `ViewWorkspace::zoom_extents(id)`, where every Zoom Extents
 of one view comes: `ZOOM EXTENTS`, the bar's button, Ctrl+E, and a plan
 view's middle double-click, which the widget hands to the workspace
-(`ViewportWidget::onZoomExtents`, as a GPU 3D view hands its own) - it went
+(`PlanView::zoom_extents`, as a GPU 3D view hands its own) - it went
 to the widget's own Zoom Extents, around the rule
-(`ViewLinks.AMiddleDoubleClickInALinkedViewThatDrawsNothingFramesWhatTheLinkDraws`).
+(`view_links::a_middle_double_click_in_a_linked_view_that_draws_nothing_frames_what_the_link_draws`).
 
 **The Link.** A plan view's Link is the first of its bar's tools, before
 Layers and the zoom tools (the whole bar is under "The zoom tools on the
@@ -1429,14 +1440,15 @@ tooltip that names the views it moves with. A click builds `VIEWS LINK <id>
 TO <id>` or `VIEWS UNLINK <id>` and runs it through the window's command
 runner, so it is logged as the line it is; afterwards every Link button is
 set from the link with its signals blocked, so a refused line leaves the
-button as it was (`ViewLinks.ARefusedLinkLeavesTheButtonAsItWas`). The
+button as it was (`view_links::a_refused_link_leaves_the_button_as_it_was`). The
 button shows on plan views only and follows the view's kind; each tool
 always on the bar costs 23 px of the dock's least width (22 px and the bar's
 1 px spacing), which the Link button's test holds to
-(`ViewLinks.ThePlanDocksMinimumWidthGrowsByTheLinkButtonAlone`). A checked
-title-bar button had no frame at all: the rule for every chrome button came
-after `QToolButton:checked` with the same weight and took it away, so
-`theme.cpp` now has a `:checked` rule of its own for them. View > Link This
+(`view_links::the_plan_docks_minimum_width_grows_by_the_link_button_alone`). A checked
+title-bar button had no frame at all in the C++: the stylesheet rule for
+every chrome button came after `QToolButton:checked` with the same weight and
+took it away, so the C++ theme gave them a `:checked` rule of their own; the
+Rust's one button painter frames every checked button alike. View > Link This
 View (`viewLinkActive`, Ctrl+Shift+L; K, as Viewport Layout has L) does the
 Link button's line for the ACTIVE view, and is checked from its link; it is
 disabled while the active view is of a kind that cannot be linked. It took
@@ -1447,14 +1459,14 @@ Unlink All Views (`viewUnlinkAll`) runs `VIEWS UNLINK ALL`; both items are
 run by a test through the window
 (`qt_the_view_menus_link_items_link_the_active_view_and_unlink_all_headless`).
 Link This View and Show the Selection on Hidden Layers are toggles, and
-their check was never seen: the stylesheet draws a menu item that has an
-icon by its `QMenu::icon` rule and draws no check mark for it at all, so
+their check was never seen: the C++ stylesheet drew a menu item that had an
+icon by its QMenu icon rule and drew no check mark for it at all, so
 they - and Grid, Object Snap and every other toggle with an icon - looked
 the same on as off, pixel for pixel, and Link This View on a linked view
 unlinked it with nothing on screen to say it was on. A checked item's icon
 now wears the accent frame a checked toolbar button wears
-(`QMenu::icon:checked` in `theme.cpp`,
-`Theme.ACheckedMenuItemWithAnIconIsFramedAndAnUncheckedOneIsNot`). Rejected:
+(`menu_icon_cell` in `rust/crates/katana_window/src/theme/style.rs`,
+`theme::a_checked_menu_item_with_an_icon_is_framed_and_an_unchecked_one_is_not`). Rejected:
 a label that changes with the state ("Unlink This View") - a checkable item
 keeps one label and shows its state by its check, as Grid does, and a label
 that turns into its opposite reads as a second item.
@@ -1468,7 +1480,7 @@ view=<id>`, `ZOOM SELECTION view=<id>`, `ZOOM EXTENTS view=<id>` - so a
 click is logged, the views linked with it follow, and Zoom to Selection with
 nothing selected says `matched=0` and moves nothing. A button the view's
 kind would refuse is not offered: the bar shows what ZOOM takes there, and
-follows the view's kind, by ZOOM's own rule (`cad::zoomTakes`). The View
+follows the view's kind, by ZOOM's own rule (`katana_cad::view_verbs::zoom_takes`). The View
 menu has the same four for the active view (`viewZoomIn`, `viewZoomOut`,
 `viewZoomSelection`, and Zoom Extents, which now runs `ZOOM EXTENTS` too),
 enabled by the same rule for the active view's kind - a section frames no
@@ -1477,46 +1489,46 @@ scope, so its Zoom to Selection is disabled
 and Zoom To (below). The menu items and the bar's buttons are run by a test
 through the window, each line in the log and its view moved as asked
 (`qt_the_view_menus_zoom_items_and_the_bars_buttons_run_their_lines_headless`,
-`ViewLinks.TheBarsZoomInAndOutRunTheirLinesAndZoomTheView`). Each tool's tip
+`view_links::the_bars_zoom_in_and_out_run_their_lines_and_zoom_the_view`). Each tool's tip
 says what it does in that kind of view, and only a view that can be linked
 says its linked views follow: one tip per tool promised a link to a section
 and a 3D view, which cannot have one
-(`ViewLinks.AZoomToolsTipSaysLinkedViewsFollowOnlyWhereTheViewCanBeLinked`).
+(`view_links::a_zoom_tools_tip_says_linked_views_follow_only_where_the_view_can_be_linked`).
 
 **In a 3D or elevation view** Zoom In and Out are its wheel turned over the
-middle of it: `RenderViewWidget::zoomBy` turns the notches that make the
+middle of it: `RenderView::zoom_by` turns the notches that make the
 factor at the wheel's 1.15 a notch, over the pixel the view's axis passes
-through (`Camera::rayThroughPixel` samples pixel centres), by
-`RenderViewWidget::zoomAtPixel`, the function the wheel itself calls - so a
+through (`Camera::ray_through_pixel` samples pixel centres), by
+`RenderView::zoom_at_pixel`, the function the wheel itself calls - so a
 zoom from the bar can never be a different zoom from the wheel's, and it
 goes wherever the wheel goes. Twice as close: the eye half as far from the
 target, which stays the middle of the view
-(`ViewLinks.AThreeDViewsZoomInIsTwiceAsCloseAboutItsMiddle`). Out no farther
+(`view_links::a_three_d_views_zoom_in_is_twice_as_close_about_its_middle`). Out no farther
 than where the scene is a pixel across - its diagonal D at D (H / 2) /
 tan(fov / 2), H the view's height in the camera's pixels - as a plan view's
 scale stops at its least: `ZOOM 1e-300` took the eye 4.7e302 units off,
 where the camera's arithmetic had no digits left for where it looked, and
 the target it keeps in the middle moved from (87.5, 68.69) to (175, 137.38)
-(`ViewLinks.AnEnormousZoomOutOfAThreeDViewStopsWhereTheSceneIsAPixelAcross`).
+(`view_links::an_enormous_zoom_out_of_a_three_d_view_stops_where_the_scene_is_a_pixel_across`).
 
 **Zoom to Selection frames what the view shows of it**, in every kind of
-view, by one rule, the verb's (`shownOf` in `view_verbs.cpp`): of what the
+view, by one rule, the verb's (`shown_of` in `view_verbs.rs`): of what the
 scope took, the entities the view draws - by its own hidden layers as well
 as the drawing's - and, with its ghosts on, the selected ones it ghosts (a
 plan view ghosts no label). A plan view frames their box; a 3D or elevation
 view the box its scene puts them in, draped and on the datum
-(`SceneBuilder::overlayBounds`, the selection overlay's own emit over the
+(`SceneBuilder::overlay_bounds`, the selection overlay's own emit over the
 ids, so a 3D view has no second rule for where an entity stands). The same
 for ZOOM on any scope. A plan view framed the box of ALL of the selection:
 in the as-built view with its ghosts off, a selected design feature took the
 view - and the design view linked with it - to empty ground, where nothing
 was drawn or highlighted, while its tip said nothing would move and a 3D
 view pressed the same way stayed put
-(`ViewLinks.APlanViewsZoomToSelectionMovesNothingWhereItShowsNoneOfTheSelection`,
+(`view_links::a_plan_views_zoom_to_selection_moves_nothing_where_it_shows_none_of_the_selection`,
 `qt_a_plan_views_zoom_to_selection_moves_nothing_it_does_not_show_headless`,
-`ViewVerbsTest.AViewThatShowsNoneOfWhatTheScopeTookMovesNothingAndSaysSo`,
-`ViewVerbsTest.AThreeDViewAndAPlanViewFrameTheSelectionByOneRule`,
-`ViewLinks.ZoomToSelectionInAThreeDViewFramesWhatItDrawsOfTheSelection`). The
+`view_verbs_test::a_view_that_shows_none_of_what_the_scope_took_moves_nothing_and_says_so`,
+`view_verbs_test::a_three_d_view_and_a_plan_view_frame_the_selection_by_one_rule`,
+`view_links::zoom_to_selection_in_a_three_d_view_frames_what_it_draws_of_the_selection`). The
 framed view's record ends `shown=`, how many of what matched it shows; a view
 that shows none of it does not move, and its record after the scope's says
 `shown=0 moved=no` - the scope's record alone read as though it had framed
@@ -1525,12 +1537,12 @@ nothing moved." Rejected: a tip for the plan view that said what it did -
 one button and one verb would then have followed two rules by the kind of
 view, and a frame of empty ground shows the person nothing.
 Select by ID's zoom and a style manager's Select Users run the active plan
-view's Zoom to Selection line (`ViewWorkspace::zoomToSelection`), where they
+view's Zoom to Selection line (`ViewWorkspace::zoom_to_selection`), where they
 framed the view directly, outside the log - each shown by a test that the
 old direct zoom fails: the line's reply read from the window's log
 (`qt_select_by_id_selects_and_frames_headless`), and the line the window's
 executor was handed
-(`CustomisationWorkbench.ShowingWhatUsesAThingSelectsItAndFramesItInTheActivePlanView`).
+(`customisation_workbench::showing_what_uses_a_thing_selects_it_and_frames_it_in_the_active_plan_view`).
 
 **A view not yet painted.** A view frames what it draws at its first paint,
 and until then holds the place every new view starts at: a plan view the
@@ -1538,18 +1550,18 @@ origin at 10 px a unit, a 3D view a target at the origin 100 away. A script
 runs its lines back to back with no paint between, so `VIEWS OPEN plan` then
 `ZOOM IN` zoomed about the origin and marked the view framed - it never
 framed the drawing, and a link took its other views there too. A zoom now
-does what the first paint would first (`ViewportWidget::frameIfUnframed`;
-`RenderViewWidget::zoomBy` frames a 3D view)
-(`ViewLinks.AZoomOfAViewNotYetPaintedStartsFromWhatItDraws`,
-`ViewLinks.AThreeDViewNotYetPaintedFramesTheSceneBeforeItZooms`,
+does what the first paint would first (`PlanView::frame_if_unframed`;
+`RenderView::zoom_by` frames a 3D view)
+(`view_links::a_zoom_of_a_view_not_yet_painted_starts_from_what_it_draws`,
+`view_links::a_three_d_view_not_yet_painted_frames_the_scene_before_it_zooms`,
 `qt_a_script_that_opens_a_view_and_zooms_it_zooms_about_what_it_draws_headless`).
-And first the layout Qt has queued is done (`ViewWorkspace::zoomView`): a
+And first the layout still pending is done (`ViewWorkspace::zoom_view`): a
 new view's bar fits its tools to the width the split gave it, a tool it
 drops queues one more layout, and that moves the split by a pixel or two -
 in the headless window, `tests/qt_widgets/data/scripts/open_and_zoom.kcs`
 framed the new view at 330 px, scale 5.544, where it is seen at 328 px,
 scale 5.5104, so the reply's area was not the one shown
-(`ViewLinks.AZoomStraightAfterAViewOpensIsFramedAtTheWidthTheViewIsSeenAt`,
+(`view_links::a_zoom_straight_after_a_view_opens_is_framed_at_the_width_the_view_is_seen_at`,
 over the window widths at which the tools come and go).
 A view's record says `framed=no` until it has framed (`docs/cad.md`): VIEWS
 OPEN's record gave the placeholder as though the view looked there.
@@ -1557,82 +1569,81 @@ Rejected: framing a plan view as it opens - a view opened on an empty
 drawing would then never frame what is drawn next, which the first paint
 does.
 
-In, Out and Zoom to Selection are OPTIONAL tools (`DockTitleBar::addTool`
+In, Out and Zoom to Selection are OPTIONAL tools (`DockTitleBar::add_tool`
 with a priority): a bar shows them, highest priority first, only while they
 fit and leave the title the room to be read whole - its text's width and
-`DockTitleBar::kTitleGap` (6 px, the gap before the window buttons), never
-more than `kTitleRoom` (56 px); tools of one priority come and go together.
+`DockTitleBar::TITLE_GAP` (6 px, the gap before the window buttons), never
+more than `TITLE_ROOM` (56 px); tools of one priority come and go together.
 Zoom to Selection (2) outlasts In and Out (1), which the wheel does as well.
 A flat 56 px left "Plan 1" a 69 px gap at the owner's two-up width, where In
 and Out needed 46, so both bars lost them; room by the title's own width
 fits all six there. They are never in the bar's least width
-(`DockTitleBar::minimumSizeHint` leaves them out: Qt asks a child's hint
-rather than taking its layout's minimum), so a view can always be narrowed
+(`DockTitleBar::minimum_width` leaves them out), so a view can always be narrowed
 past them - each tool always shown costs 23 px of the least width, and three
 more would have stopped a Quad view's bars from narrowing to their docks. No
 overflow menu: every optional tool is in the View menu too, and a menu opened
 from a title bar is a modal loop a headless press would wait in
-(`ViewChrome.TheTitleBarShowsOptionalToolsOnlyWhereTheyFitAndNoTwoOverlap`,
-`ViewChrome.OptionalToolsNeverWidenTheDocksMinimum`).
+(`view_chrome::the_title_bar_shows_optional_tools_only_where_they_fit_and_no_two_overlap`,
+`view_chrome::optional_tools_never_widen_the_docks_minimum`).
 
-**A bar is measured afresh after every change of its tools.** Hiding a widget
-invalidates its parent's layout - the bar's own row - and not the tools' row
-nested in it, which went on counting a tool just hidden until the bar's next
-activation. Two things read that stale count. The fit itself: a 3D view
+**A bar is measured afresh after every change of its tools.** In the C++,
+hiding a widget invalidated its parent's layout - the bar's own row - and not
+the tools' row nested in it, which went on counting a tool just hidden until
+the bar's next activation. Two things read that stale count. The fit itself: a 3D view
 turned plan wanted In, Out and Selection one after another, found In hidden
 but counted, left no room for Selection, and nothing refitted a bar whose
 size had not changed - a mouse user's only route to two plan views showed
 three tools where a plan opened at that width showed four
-(`ViewChrome.AViewTurnedIntoAPlanShowsTheToolsAPlanOpenedAtItsWidthShows`).
+(`view_chrome::a_view_turned_into_a_plan_shows_the_tools_a_plan_opened_at_its_width_shows`).
 And the dock, which asks the bar's least width as it lays views out: a view
 split just after its bar dropped tools kept a least width that counted them,
 308 px of a 554 px row where half was 277, and the Quad layout took 34 and
 33 px from the side panels for it
-(`ViewChrome.OpeningAViewSplitsItIntoEqualHalvesWhateverToolsItsBarShows`,
-`ViewChrome.QuadPutsTheViewsInQuartersWhateverToolsTheirBarsShow`). So
-`DockTitleBar::fitOptionalTools` marks both rows to be measured again before
-it measures and again after it shows and hides
-(`DockTitleBar::remeasure`). Measured after, in the 1360 px window, the
-Quad layout's side panels are 11 and 10 px narrower than before the link
-existed - the Link button's 23 px of the plan dock's least width, which
-QDockWidget takes as the dock's own hint where it exceeds the content's -
-where they were 34 and 33 px narrower.
+(`view_chrome::opening_a_view_splits_it_into_equal_halves_whatever_tools_its_bar_shows`,
+`view_chrome::quad_puts_the_views_in_quarters_whatever_tools_their_bars_show`). So
+the C++ marked both rows to be measured again before it fitted the tools and
+again after it showed and hid them. The Rust bar keeps no layout to go stale:
+`DockTitleBar::fit` works the tools that fit out from the width each time, and
+`DockTitleBar::minimum_width` from the tools always shown. Measured after the
+fix, in the 1360 px window, the Quad layout's side panels were 11 and 10 px
+narrower than before the link existed - the Link button's 23 px of the plan
+dock's least width - where they had been 34 and 33 px narrower.
 
 **Zoom To** (View > Zoom To, `zoomToDialog`) frames what a scope takes - the
 shared "Apply to" and "Only those that match" (`ScopeFilterWidget`, prefix
 `zoomTo`) - in a chosen view (`zoomToView`: the active view, then every open
 plan, 3D and elevation view by its title and id - the kinds that frame a
-scope, by `cad::zoomTakes`; a section was offered and ZOOM refused it). It
+scope, by `katana_cad::view_verbs::zoom_takes`; a section was offered and ZOOM refused it). It
 builds `ZOOM <scope words> [view=<id>]` (`zoomToLine` shows it as the
 controls change), runs it through the command runner (`zoomToRun`) and says
 what ZOOM answered as a sentence (`zoomToStatus`: "2 matched, framed in view
-1; view 2 followed.", `ZoomToDialog::spokenReply`), a refusal in the error
+1; view 2 followed.", `ZoomToDialog::spoken_reply`), a refusal in the error
 colour, as Online Data words its status. The raw records - long reals among
 them - wrapped over five lines there, and the dialog, grown only to its
 least height, pressed its type grid until the captions lost their
 descenders; they are in the command log. Non-modal and kept, as Select by ID
 is (`qt_zoom_to_dialog_runs_its_line_headless`,
 `qt_zoom_to_frames_the_scope_in_the_view_chosen_headless`, which chooses a
-plan view and a 3D view; `ZoomTo.TheStatusSaysWhatZoomAnsweredAsASentenceAndARefusalInTheErrorColour`).
+plan view and a 3D view; `zoom_to::the_status_says_what_zoom_answered_as_a_sentence_and_a_refusal_in_the_error_colour`).
 
 **ZOOM typed while a tool runs** - Z, ZOOM, 'ZOOM, 'Z and whatever follows -
 is the view's, not the tool's, as AutoCAD resumes LINE after 'ZOOM (and
 'ZOOM with no tool running is ZOOM, as at AutoCAD's prompt): the tool
-host hands it to the workspace (`ToolHost::onTransparent`), which runs it as
+host hands it to the workspace (`ToolHost::on_transparent`), which runs it as
 its ZOOM line through the command runner, and the tool stays at its step
-with its prompt (`ViewLinks.ATransparentZoomTypedInsideLineZoomsAndLeavesLineAtItsStep`).
+with its prompt (`view_links::a_transparent_zoom_typed_inside_line_zooms_and_leaves_line_at_its_step`).
 The line names the view the tool runs in, `view=<id>`, whichever view is
 active; a `view=` typed is kept. Without it the ACTIVE view was zoomed: a
 click on another view's bar or drawing, to look at it, made that one active,
 and a Z typed at Line's prompt zoomed it while the view Line picks its next
 point in stayed where it was
-(`ViewLinks.AZoomTypedAtAToolsPromptZoomsTheViewTheToolRunsInNotTheActiveOne`).
+(`view_links::a_zoom_typed_at_a_tools_prompt_zooms_the_view_the_tool_runs_in_not_the_active_one`).
 Which words are ZOOM is the interpreter's reading - its alias table and its
-apostrophe rule, `CommandInterpreter::verbOf` - not a list of the window's,
+apostrophe rule, `CommandInterpreter::verb_of` - not a list of the window's,
 so an alias added there reaches a line typed inside a tool too
-(`CommandVerb.TheVerbOfALineIsTheInterpretersOwnReading`).
+(`command_verb::the_verb_of_a_line_is_the_interpreters_own_reading`).
 The command line leaves the line's echo to the runner
-(`ViewWorkspace::runsTransparently`), so it is logged once
+(`ViewWorkspace::runs_transparently`), so it is logged once
 (`qt_dist_typed_at_the_command_line_reports_the_inverse_headless`). PAN and
 'P have no verb, so the host goes on refusing them by name. A workspace
 built without a window runs the bars' lines through an interpreter of its
@@ -1645,8 +1656,8 @@ the drawing (above).
 
 **Rejected alternatives.** Linking by the visible extent: views of different
 shapes fit one box at different scales, and each move would round each
-view's scale differently, so they drift over a session. Qt signals from
-widget to widget, and document notifications: a notification repaints every
+view's scale differently, so they drift over a session. Signals from
+widget to widget (Qt's, in the C++), and document notifications: a notification repaints every
 plan view's whole kept drawing, and signals between widgets would be a
 second way of saying who follows whom, outside the tested model. A toolbar
 drawn over the drawing, or a second row under the title bar: the first
@@ -1667,7 +1678,7 @@ them in one row with two plan views, need 1388 px where the window has 1360
 (1365 px opened in another order, the section's and the elevation's titles
 cut to "Sect..." and "Elev..."), and the Properties panel goes to its least
 (five views fit). On a narrow plan bar the title's end can stand 2 to 4 px
-from the checked Link's frame: the optional zoom tools keep `kTitleGap` (6
+from the checked Link's frame: the optional zoom tools keep `TITLE_GAP` (6
 px) clear of the title, and the tools always shown do not. Letting the
 Link drop off a narrow bar as the zoom tools do was rejected for now: the
 checked Link is what says a view is linked, and a linked view would not show
@@ -1692,7 +1703,7 @@ view:
   with a dot at its level, where the other crossings are 1 px red dashes.
 - **Selected, on a layer the drawing shows and the view hides: a ghost** -
   drawn faint, and never picked, snapped to, given grips or plotted there
-  (`ViewLayerRule.AGhostIsNeitherPickedNorSnappedToNorGivenGrips`). A feature selected in
+  (`view_layer_rule::a_ghost_is_neither_picked_nor_snapped_to_nor_given_grips`). A feature selected in
   the design view shows where it is in the as-built view that hides the
   design layers. In plan it is DOTS of the orange at 60 % (alpha 153), 2 px
   square and 6 px apart, where a selection is dashed, with no fill, hatch,
@@ -1707,22 +1718,22 @@ view:
   "selected, but hidden in this view", never "selected, though switched
   off" - nor an entity made invisible.
 
-**One rule, beside the drawn rule.** `cad::isGhost(model, entity, view)`
-(`selection.hpp`) is true where `view` alone hides an entity the document
+**One rule, beside the drawn rule.** `katana_cad::selection::is_ghost(model, entity, view)`
+(`selection.rs`) is true where `view` alone hides an entity the document
 draws; the plan painter, the 3D scene and a section ask it and nothing else.
 A section asks both of its questions of a crossing - does this view hide
 it, and how is its selection marked - of the layer its entity is on NOW
-(`SectionViewWidget::layerOf`): the hidden rule read the layer the cut
+(`SectionView::layer_of`): the hidden rule read the layer the cut
 found, so the design line moved onto the as-built layer the section hides
 was drawn as a plain crossing and as a ghost at one station, and a line
 moved off it was counted hidden and drawn selected
-(`ViewSelection.ASectionHidesAndMarksACrossingByTheLayerItsEntityIsOnNow`).
-It was written three ways - the scene's by `isDrawn`, the painter's inline,
+(`view_selection::a_section_hides_and_marks_a_crossing_by_the_layer_its_entity_is_on_now`).
+It was written three ways - the scene's by `is_drawn`, the painter's inline,
 the section's a third way that read the layer the cut found and never the
 entity - and the copies had drifted: a selected entity made invisible, or
 its layer switched off in the drawing, went on being marked in a section,
 as selected or as a ghost, where plan and 3D drew nothing
-(`ViewSelection.ASelectedFeatureTheDrawingHidesIsMarkedInNoView`). A
+(`view_selection::a_selected_feature_the_drawing_hides_is_marked_in_no_view`). A
 section now reads the crossing's entity as it is now; a crossing whose
 entity the drawing hides keeps the plain dashed line every crossing had
 before a section knew of the selection. Its surfaces' palette has no orange
@@ -1732,32 +1743,32 @@ recoloured - and a selected crossing's dot sat among that surface's orange
 vertex dots; the nearest is now the yellow, 50.9.
 
 **No grip on a ghost.** A view offers grips only on what it draws:
-`cad::gripsOfSelection` takes the view's `LayerOverrides`, with no default,
-as `isSelectable` does, and the plan view's grip controller follows the
+`katana_cad::drawing::grips::grips_of_selection` takes the view's `LayerOverrides`, with no default,
+as `is_selectable` does, and the plan view's grip controller follows the
 view's layers, which change with no document notification (it compares them
 with those it last built from). Before, every grip of a selected entity was
 drawn in a view that hid its layer, and could be dragged: in the owner's
 case - a design line and an as-built line that cross - a drag from the
 crossing in the as-built view moved the design line that view does not show
-(`ViewSelection.AGhostOffersNoGripSoADragWhereItCrossesTheAsBuiltLineEditsNothing`,
-`GripCommands.AViewOffersNoGripOnWhatItHidesAndTheOthersKeepTheirs`). A
+(`view_selection::a_ghost_offers_no_grip_so_a_drag_where_it_crosses_the_as_built_line_edits_nothing`,
+`grip_commands::a_view_offers_no_grip_on_what_it_hides_and_the_others_keep_theirs`). A
 headless run reads what a plan view drew, ghosts and grips among it
 (`?PlanView2`, `docs/headless.md`), so the check that a view with its ghosts
 off shows no trace of the selection looks at the drawing, not only at the
 view's record (`qt_a_view_with_its_ghosts_off_shows_no_trace_of_the_selection_headless`).
 
-One colour and every size are in `include/katana/cad/selection_style.hpp`,
+One colour and every size are in `rust/crates/katana_cad/src/selection_style.rs`,
 each with its reason. The 3D selection was (255, 190, 60), beside the
 BOUNDARY layer's (255, 213, 79) and the top of the elevation ramp, and apart
 from the plan's; the sheet editor's blue stays, since it selects sheet
 items, not entities.
 
 **Each view has its own switch**, on when the view opens
-(`ViewState::selectionGhosts`): "Show the selection on hidden layers"
+(`ViewState::selection_ghosts`): "Show the selection on hidden layers"
 (`ViewLayersShowSelection`) in the view's Layers popup, beside the layer
 filter it belongs with, and `VIEWS SET <id> ghosts=on|off`, which the box
 runs through the command runner, so a click is logged as its line
-(`ViewSelection.TheLayersPopupsBoxRunsViewsSetThroughTheRunner`,
+(`view_selection::the_layers_popups_box_runs_views_set_through_the_runner`,
 `qt_the_layers_popups_box_turns_a_views_ghosts_off_headless`). View > Show
 the Selection on Hidden Layers (`viewSelectionGhosts`; D, every other letter
 of it being taken in the View menu) is the active view's switch by the same
@@ -1774,17 +1785,17 @@ view's kept drawing, whose key already held the selection and the view's
 hidden layers and now holds the switch. The 3D overlay walks the selection's
 ids the same way (it used to walk the whole drawing and keep the selected),
 and a section repaints on a document change without cutting again
-(`SectionViewWidget::setDocument`).
+(`SectionView::set_document`).
 
-**The casing in 3D is a draw list of its own** (`SceneLayers::selectionCasing`),
+**The casing in 3D is a draw list of its own** (`SceneLayers::selection_casing`),
 drawn just before the core's and writing no depth, so the core covers it
 wherever they overlap. In one list with the core the software view was
 right, by the draw lists' depth bias, but the GPU view - which pulls a mark
 nearer by its width and reads no bias - drew the wider casing over the core,
 and a selected line was a dark line (the control in
-`GpuLayers.ASelectionCoreDrawnAfterACasingThatWritesNoDepthKeepsItsColour`).
+`gpu_layers::a_selection_core_drawn_after_a_casing_that_writes_no_depth_keeps_its_colour`).
 A frame's depth range takes in the selection's box too, because a ghost lies
-where the view draws nothing (`SceneFrame.TheDepthRangeTakesInAGhostOutsideWhatTheViewDraws`);
+where the view draws nothing (`scene_frame::the_depth_range_takes_in_a_ghost_outside_what_the_view_draws`);
 what a view frames is unchanged.
 
 Rejected: ghosting layers the drawing hides (a switched-off layer would
@@ -1810,8 +1821,8 @@ Not done:
   after the cut) as a plain dashed line; only the selection's marks follow
   the drawing's rule, since the crossings are the cut's.
 - `VIEWS SET <3d id> ghosts=...` rebuilds the 3D view's terrain as well as
-  its overlay (`ViewWorkspace::viewSettingsChanged` calls
-  `RenderViewWidget::invalidateScene`, one scene build, 60 to 115 ms on the
+  its overlay (`ViewWorkspace::view_settings_changed` calls
+  `RenderView::invalidate_scene`, one scene build, 60 to 115 ms on the
   229k-triangle benchmark surface), though only the overlay reads the switch.
   Narrowing it belongs with the render view's rework on the 3D zoom branch,
   where the change would otherwise conflict.
@@ -1819,109 +1830,112 @@ Not done:
 ### The dock chrome: one title bar for panels and views
 
 The same request asked for panels and views that minimise, float, maximise
-and close. `QDockWidget`'s own title bar has two buttons, Float and Close,
-drawn by the style - and Fusion drew them light on the dark theme, which is
-why `theme.cpp` used to strip them, so no dock could be closed or floated
-except by dragging. It has no Minimise, no Maximise and nowhere for a view's
-own controls. `DockTitleBar` (`src/katana_qt/dock_chrome.*`) replaces the
-whole bar: `[icon] title ... [tools] [_] [float] [max] [x]`, with a view's
-kind switcher where the icon is and its Layers button among the tools. Qt then
-draws no buttons and gives a floating dock no native frame; it still resizes
-one from its edges (4 px, outlined by the chrome, since Fusion's was one
-invisible pixel), and dragging the bar still moves and re-docks it -
-PROVIDED the bar ignores the mouse events it does not use. It does, and must
-go on doing so; a double click is the one it takes, as the Float button.
+and close. A plain dock's title bar has no Minimise, no Maximise and nowhere
+for a view's own controls: the C++'s `QDockWidget` bar had two buttons,
+Float and Close, drawn by the style - and Fusion drew them light on the dark
+theme, which is why the C++ theme had once stripped them, so no dock could be
+closed or floated except by dragging. `DockTitleBar`
+(`rust/crates/katana_window/src/dock_chrome.rs`) is the whole bar of every
+dock: `[icon] title ... [tools] [_] [float] [max] [x]`, 26 points tall, with
+a view's kind switcher where the icon is and its Layers button among the
+tools. The dock area is egui_dock's: the window draws each tab through
+`DockChrome::dock_ui` and applies what its buttons asked once the area has
+been drawn (`DockChrome::apply`), since egui_dock holds its `DockState`
+while it draws. A dock is dragged by egui_dock's own tab, not by this bar
+(the C++ moved and re-docked a dock by dragging the bar, which therefore had
+to ignore the mouse events it did not use); a double click on the bar is the
+Float button.
 
-**One owner.** One `DockChrome` per main window holds the tray and the
+**One owner.** One `DockChrome` per window holds the tray and the
 bookkeeping, and the panels (`MainWindow`) and the views (`ViewWorkspace`)
 share it: a panel and a view minimised into two trays would be two ways of
 doing one thing. It knows nothing of views or panels beyond the `DockRole` it
 is told (`Panel`: Close hides it and the menus bring it back; `View`: it can
-be maximised, and one view is active).
+be maximised, and one view is active), and of a tab nothing but its dock's
+control name.
 
-**Minimise is a tray, and why.** A floating dock is a `Qt::Tool` window and
-must stay one: Qt relays a Tool window's shortcuts to its parent, so Esc,
-Delete, Ctrl+Z and F9 keep working in a view floated onto another screen,
-where a `Qt::Window` would lose every one (and Qt resets the flags on every
-float anyway). A Tool window has no taskbar button, so the window manager's
-minimise would lose it, and a docked panel is not a window at all. So
-Minimise HIDES the dock and puts a button for it on `MinimisedToolBar` at the
-bottom of the main window, and the button puts it back exactly where it was:
-in its area and tab when docked, at its geometry on its screen when floating.
-A hidden dock keeps its place in the layout tree, so "where" comes free; its
-SIZE does not - the neighbours grow into the space and Qt shares the
-shortfall equally when it comes back - so the sizes of the docks around it
-are recorded and put back with it. Setting only the returning dock's size is
-not enough: when the places of one row add up to more than the row has, Qt
-takes the same number of pixels off each, so `DockChrome::applySizes` sets
-every dock in both directions.
+**Minimise is a tray, and why.** A floating dock keeps the window's
+shortcuts (in the C++ it had to stay a Qt tool window for that, which has
+no taskbar button, so the window manager's minimise would have lost it), and
+a docked panel is not a window at all. So Minimise HIDES the dock and puts a
+button for it on `MinimisedToolBar` at the bottom of the main window (its
+buttons `Restore<dock>`), and the button puts it back exactly where it was:
+in its place and tab when docked, at its rectangle when floating. Docked,
+the place is egui_dock's tree: the layout as it was when the dock went -
+every split and its share - is kept with it and given back whole when the
+tabs open then are the tabs open now; otherwise the dock is put in the first
+place there is. (The C++ recorded the sizes of the docks around a minimised
+one and set every dock in both directions when it came back, because Qt
+shared a returning dock's shortfall out equally.)
 
 **Rejected: rolling a dock up to its title bar.** Measured offscreen in the
-1360 x 860 window: Properties alone in the right area, rolled up, took the
-whole column with it - 270 x 770 became 131 x 26, and the column's space went
-to the drawing sideways; Layers rolled up above Reference Data narrowed the
-left column from 300 to 135 px, and it stayed narrow after unrolling. Qt sizes
-a dock area from its docks' hints, and a dock with its contents hidden hints
-at the width of its bar. Only a floating dock behaved. Minimise does the job
-for docked and floating docks alike and moves nothing else.
+C++'s 1360 x 860 window: Properties alone in the right area, rolled up, took
+the whole column with it - 270 x 770 became 131 x 26, and the column's space
+went to the drawing sideways; Layers rolled up above Reference Data narrowed
+the left column from 300 to 135 px, and it stayed narrow after unrolling, as
+Qt sized a dock area from its docks' hints. Minimise does the job for docked
+and floating docks alike and moves nothing else, and the Rust does not roll
+up either.
 
 **Maximise (views only).** A docked view hides every other docked view of its
 window until it is restored, which gives back the sizes they had; a floating
-view fills the available geometry of its screen, one per screen. A maximise
-is a temporary state, not a layout: the workspace undoes every docked
-maximise before it opens or arranges views (a split made while the others
-were hidden would be made against the wrong neighbours), a tray restore of a
-docked view ends a maximise in its window, and everything is unmaximised
-before a layout is saved.
+view fills the window it floats in. A maximise is a temporary state, not a
+layout: the workspace undoes every docked maximise before it opens or
+arranges views (a split made while the others were hidden would be made
+against the wrong neighbours), a tray restore of a docked view ends a
+maximise in its window, and everything is unmaximised before a layout is
+saved.
 
-**Not GroupedDragging**, in either window. With it, dragging a tabbed view
-drags its whole tab group out into a `QDockWidgetGroupWindow` - Qt's own
-window, with a native frame and none of the chrome - and a view in it can no
-longer be floated or docked on its own.
+**A tab group is not dragged whole.** The C++ turned Qt's GroupedDragging
+off in both its windows: with it, dragging a tabbed view dragged its whole
+tab group out into Qt's own window, with a native frame and none of the
+chrome, and a view in it could no longer be floated or docked on its own.
 
-**The side columns own the bottom corners.** `setCorner` gives both bottom
-corners to the left and right areas, so the panels run the full height of
-the window and the command line sits under the drawing only, between them -
-the usual CAD arrangement. Qt's default gives both corners to the bottom area,
-which ran the command line under both columns and cut them short.
+**The side columns own the bottom corners.** The panels run the full height
+of the window and the command line sits under the drawing only, between them
+- the usual CAD arrangement (`rust/crates/katana_window/src/main_window/layout.rs`;
+the C++ gave both bottom corners to the left and right areas with
+`setCorner`, since Qt's default ran the command line under both columns and
+cut them short).
 
 **The active view is always one on screen.** Zoom Extents and the view
-menus act on the active view (and `mostRecent(kind)` prefers it), and its
+menus act on the active view (and `most_recent(kind)` prefers it), and its
 title bar carries the accent, so an active view nobody can see is a menu
-acting on nothing visible. Pressing a
-view's title bar or any of its buttons makes it active. Minimising or closing
-the active view hands on to a view that is ON SCREEN - floating, or a docked
-view inside the workspace's rectangle - not merely one that is not hidden,
-because a tab page behind the current one is not hidden: Qt moves it off the
-window. The one that takes over is the first on screen in the order the views
-were opened; the most recently used would be better, but `cad::ViewSet`
-keeps its recency order private (a public `ViewSet::recent()` is the fix).
-`openView` also activates the new view when the active one is hidden.
+acting on nothing visible. Pressing a view's title bar or any of its buttons
+makes it active. Minimising or closing the active view hands on to a view
+that is ON SCREEN - floating, or a docked view showing in the workspace's
+rectangle - not merely one that is not hidden, because a tab page behind the
+current one is not hidden. The one that takes over is the first on screen in
+the order the views were opened; the most recently used would be better, but
+`katana_cad::view_set::ViewSet` keeps its recency order private (a public
+`ViewSet::recent()` is the fix). `open_view` also activates the new view
+when the active one is hidden.
 
-Two Qt 6.11.2 behaviours were measured on the way, and the code relies on
-them: a tab group is laid out again AS SOON AS a page is hidden - the new
-current page is already inside the window when the minimise hook runs, which
-is why the on-screen test, not a `raise()`, is what picks the right view (the
-`raise()` stays for a window never laid out, where no geometry means
-anything); and `resizeDocks` leaves a hidden dock out of the total it gives
-the enclosing row, so a view must be shown before it is sized - a stacked
-split of a view already side by side came out 397 and 197 px of 600 until
-`openView` showed the new dock first (297 each after).
+Two Qt 6.11.2 behaviours were measured on the way for the C++ and shaped
+it: a tab group was laid out again AS SOON AS a page was hidden, which is
+why the on-screen test, not a raise, is what picks the right view; and
+`resizeDocks` left a hidden dock out of the total it gave the enclosing row,
+so a view had to be shown before it was sized - a stacked split of a view
+already side by side came out 397 and 197 px of 600 until `open_view` showed
+the new dock first (297 each after).
 
-Tested in `tests/qt_widgets/test_view_chrome.cpp` (`qt_widgets.ViewChrome.*`),
-each test shown failing without its fix. Not yet tested outside a
-hand-run harness, because `MainWindow` cannot be built into the widget test
-target: the four panels' bars, their exact minimise and restore, F9 from a
-floating panel, floating maximise across two screens. Not done: a Window
-menu; keeping the VIEWS between sessions - the panels' places and which are
-minimised ARE kept (`MainWindow::saveSession` and `restoreLayout`, with
-`minimisedNames` and `minimiseNamed`), and `MainWindow::saveState` does not see
-the views' docks, which are the workspace's own window's, so a maximised view
-needs no `unmaximiseAll` before it; a layout that kept the views would; a floating
-active view left minimised during an arrange stays hidden and active, since
-only the tray button (`DockChrome::restore`) raises `onRestored`. The Survey
+Tested in `rust/crates/katana_window/tests/workspace/view_chrome.rs` (`view_chrome::*`),
+each test shown failing without its fix. The C++ could not build `MainWindow`
+into its widget test target, so the four panels' bars, their exact minimise
+and restore, F9 from a floating panel and a floating maximise were tested
+only in a hand-run harness; the Rust's window tests build the real window
+(`rust/crates/katana_window/tests/main_window/`), but no case of them was
+written for these yet. Not done: a Window menu; keeping the VIEWS between
+sessions - the panels' places are kept (`MainWindow::save_session` and
+`restore_layout`), and which panels are minimised is not yet
+(`minimised_names` and `minimise_named` are ready for it), and the saved
+layout does not see the views' docks, which are the workspace's own area's,
+so a maximised view needs no `unmaximise_all` before it; a layout that kept
+the views would; a floating active view left minimised during an arrange
+stays hidden and active, since only the tray button (`DockChrome::restore`)
+restores it. The Survey
 Point Manager dock (`SurveyPointsDock`) wears the chrome now that
-`SurveyServices::chrome` hands it over, and the workbench has the chrome
+the window's dock chrome hands it over, and the workbench has the chrome
 forget the dock before deleting it; its minimise, tray and float have been
 seen only in a screenshot, with no automated test.
 
@@ -1938,7 +1952,7 @@ to show as a tree structure, because some lines are very long and contain
 lots of attributes in the vertices, so need a smart way to load all these
 information".
 
-`PropertyTreePanel` (`src/katana_qt/property_panel.hpp`) is a filter box
+`PropertyTreePanel` (`rust/crates/katana_window/src/property_panel.rs`) is a filter box
 above a tree (`propertyFilter`, and `propertyTable`, the name the table had,
 so `--report` and DRIVE's `?` read it as before). One entity is its groups:
 
@@ -1951,10 +1965,10 @@ so `--report` and DRIVE's `?` read it as before). One entity is its groups:
 | Source | the import's record of the entity (`Entity::metadata`), kept to be written back | no |
 
 **Nothing is read until it is opened.** A group's level is read by
-`cad::propertyOutline` - the reading `PROP TREE` replies with, so the panel and
+`katana_cad::property_outline::property_outline` - the reading `PROP TREE` replies with, so the panel and
 an agent cannot disagree (`docs/cad.md`, "Properties as a tree: PROP TREE") -
 when a person opens it, and made a page of 200 rows at a time
-(`kPropertyPage`); a "Show 200 more" row at the end of a level makes the next
+(`PROPERTY_PAGE`); a "Show 200 more" row at the end of a level makes the next
 page when clicked or chosen with Enter. The model (`PropertyTreeModel`)
 draws an expander for a level it has not read, so a vertex with thirty
 attributes costs one row until it is opened. A vertex is numbered from 1, as
@@ -1979,16 +1993,16 @@ shortcut menu) puts the selected rows on the clipboard, name and value
 separated by a tab. The panel edits nothing; the Style row above it and
 Edit > Attributes do.
 
-One trap was found on the way and is recorded in the model: `QTreeView`
-calls `fetchMore` from inside its own layout of the row it is opening, and a
-fetch there that removed the Show more row cleared the view's items under
-the layout and wrote past their end (valgrind found it in
-`qt_widgets.PropertyPanel.ALongStringIsMadeAPageAtATimeWithAShowMoreRow`). So
+One trap was found on the way in the C++ and is recorded in the model: Qt's
+`QTreeView` called `fetchMore` from inside its own layout of the row it was
+opening, and a fetch there that removed the Show more row cleared the view's
+items under the layout and wrote past their end (valgrind found it in
+`property_panel::a_long_string_is_made_a_page_at_a_time_with_a_show_more_row`). So
 `fetchMore` only reads a level the first time, adding rows and removing none,
 and the next pages come from the Show more row after the click is over
-(`qt_widgets.PropertyPanel.OpeningALongLevelAsAPersonDoesReadsItsFirstPageOnly`,
+(`property_panel::opening_a_long_level_as_a_person_does_reads_its_first_page_only`,
 which fails with the old rule because the view then made every page at once).
-The rest is `tests/qt_widgets/test_property_panel.cpp`.
+The rest is `rust/crates/katana_window/tests/host/property_panel.rs`.
 
 ## The layer manager, and why "move" is "rename"
 
@@ -2007,7 +2021,7 @@ Move ask for a name in a prompt row inside the dialog; a colour is typed as
 `#RRGGBB` (`layerColourText`) or picked in a colour dialog opened with
 `open()`, never `exec()`'d; and once its Document is gone it reads and changes
 nothing, every control but Close disabled the first time a person reaches for
-one. Its constructor is unchanged, and `selectedLayer()` and `selectLayer()`
+one. Its constructor is unchanged, and `selected_layer()` and `select_layer()`
 are public for a caller that opens it on a layer. Since 2026-09-24 the
 window keeps ONE instance, made the first time Format > Layers is chosen and
 shown, raised and reused after that (`formatLayersDialog`), as the Format
@@ -2017,9 +2031,9 @@ grabs it on its own. Selecting another row drops unsaved form edits without
 asking, as the style manager does.
 
 Moving needed no new command. A layer name is a path ("design/surface/tin1"
-- see `layer_path.hpp` for why the tree is derived from the names rather
+- see `layer_path.rs` for why the tree is derived from the names rather
 than stored), so moving a layer under another parent is exactly renaming it,
-and `renameLayer` already carries the subtree and the entities on it as one
+and `rename_layer` already carries the subtree and the entities on it as one
 undo step. A "move" command would have been a second spelling of the same
 thing.
 
@@ -2037,7 +2051,7 @@ per entity and no nesting - but unreadable on a survey string with thirty of
 them, so the manager rebuilds the branches for
 display and writes back the flat key. Nothing in the model changes: the tree
 is a view of the names, exactly as the layer panel is a view of "/"-separated
-layer paths (see `layer_path.hpp` for why that tree is derived and not
+layer paths (see `layer_path.rs` for why that tree is derived and not
 stored).
 
 The decision worth keeping is `<varies>`. The dialog acts on the whole
@@ -2048,7 +2062,7 @@ pressing Save would then write that value over the others without anyone
 asking for it. Showing `<varies>` means a user who saves has said what they
 want all of them to be.
 
-Values are formatted by `entity::toString`, which is in `entity` and not in
+Values are formatted by `katana_entity::entity::to_string`, which is in `entity` and not in
 the dialog, because the properties panel and the `PROP` command line print
 the same values and must not disagree about them. A real is written with
 enough digits to read back as the same double: a level shown as 31.2 that is
@@ -2081,8 +2095,8 @@ the window"), and like every dialog that changes the drawing they run the
 verb lines they build through the one executor below.
 
 The Format toolbar carries Layers, the three managers and Global Modify. Survey > Survey
-Coding shows the same code manager - the same `QAction` object
-(`SurveyServices::codeManager`), so two menus cannot drift apart - then the
+Coding shows the same code manager - the same action
+(`SurveyServices::code_manager`), so two menus cannot drift apart - then the
 window's Apply Survey Codes (`applySurveyCodes`), which is also on the Survey
 toolbar, and Process Linework (`surveyLinework`): the codes' editor, and the
 two things done with them, in the order they are done.
@@ -2097,7 +2111,7 @@ is gone - and, on 2026-10-07, what was left of them: the two members of
 `CustomisationServices` that carried the actions, which only a widget test
 still assigned, and the Survey Code Manager's tip, which said "the loaded
 survey code files" and says "the survey codes of the session's customisation"
-(`GeneralTexts.NoFormatMenuItemOrToolbarButtonNamesAnotherProgramInItsTextOrTips`
+(`general_texts::no_format_menu_item_or_toolbar_button_names_another_program_in_its_text_or_tips`
 holds the menu to both). A Katana customisation file (`docs/customisation.md`) is loaded in
 the window by
 
@@ -2120,12 +2134,12 @@ Settings' Import is that, with a path field a headless run can fill and the
 Replace choice beside it; and the customisation as a whole - load a file,
 write one, reset, keep - is not one of Format's tables.
 
-**Apply Survey Codes is the `CODE` line.** `MainWindow::applySurveyCodes` runs
+**Apply Survey Codes is the `CODE` line.** `MainWindow::apply_survey_codes` runs
 `CODE SELECTION` when something is selected, else `CODE DRAWING`, through the
 window's one executor ("One executor", below): echoed in the log, kept in the
 history, one undo step, and answered in the verb's words - what the scope
 took, the property the codes were read from, what was matched and created.
-It used to call `cad::applySurveyCodes` itself, with sentences of its own, a
+It used to call `katana_cad::survey_coding::apply_survey_codes` itself, with sentences of its own, a
 box when no codes were loaded, and a lookup of the standard colours only -
 so a colour the customisation defines was applied by the typed `CODE` and
 not by the menu item. With no codes loaded the item is now refused as the
@@ -2138,7 +2152,7 @@ step, with the points it had just drawn selected for it. It no longer does:
 its import codes and strings its own points inside its one command
 (`docs/survey.md`, "The import wizard").
 
-**Process Linework is the `LINEWORK` line.** `MainWindow::surveyLinework` runs
+**Process Linework is the `LINEWORK` line.** `MainWindow::survey_linework` runs
 `LINEWORK SELECTION` when something is selected, else `LINEWORK DRAWING`, the
 same way and for the same reasons: echoed, one undo step, and answered in the
 verb's records - what the scope took, each line strung, each reason a point
@@ -2150,21 +2164,21 @@ says which this click meant
 (`qt_process_linework_runs_the_linework_line_on_the_selection_or_the_drawing_headless`).
 It is in the menu and not on the Survey toolbar, which is as it was.
 
-**`CustomisationWorkbench`** (`src/katana_qt/customisation/customisation_workbench.*`)
-is built like the Survey workbench: `MainWindow::buildFormatActions` makes the
-menu and the toolbar and hands them over with `CustomisationServices` - the
+**`CustomisationWorkbench`** (`rust/crates/katana_window/src/customisation/customisation_workbench.rs`)
+is built like the Survey workbench: the window makes the Format menu and
+toolbar (`rust/crates/katana_window/src/main_window/actions.rs`) and hands them over with `CustomisationServices` - the
 Document, the view workspace, the window's action factory and log, whether
 the session is headless (asked each time, since the window learns it after it
 is built), and the window's own Layers action. So the
-workbench never includes `main_window.hpp`, and a widget test builds it and
-drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
+workbench never reaches into `main_window`, and a widget test builds it and
+drives it (`rust/crates/katana_window/tests/workspace/customisation_workbench.rs`).
 It owns what the managers share: the picture cache (`DefinitionThumbnails`)
 and the one `CustomisationContext` each manager is built from. It owns the definition
 editor as well ("The definition editor", below), which has no menu item: a
 manager asks for it through the context. And it makes File > Settings' action
 and owns that dialog ("Settings", below): the window tells it what its host
 offers - whether there is a built-in customisation, and the kept file
-(`CustomisationServices::hasBuiltIn`, `keptFile`, `hasKeptFile`).
+(`CustomisationServices::has_built_in`, `kept_file`, `hasKeptFile`).
 
 - **The linework control codes are not the workbench's.** They are the
   customisation's - the Document's (`customisationState().linework`: what a
@@ -2183,12 +2197,13 @@ offers - whether there is a built-in customisation, and the kept file
   once the customisation's is the token on the third, and FORBIDs the line
   the follower's press of the button logged.
 - **The code manager is handed the views.** Its two action tabs have a View
-  scope, so `showCodeManager` gives the dialog the workspace's open views
+  scope, so `show_code_manager` gives the dialog the workspace's open views
   (`SurveyCodeManagerDialog::views`, read afresh each time, as Global
   Modify's are).
 
 - **Non-modal, one of each, kept.** A manager is made the first time it is
-  asked for and then hidden, not deleted, between uses (`QPointer` slots);
+  asked for and then hidden, not deleted, between uses (the window keeps its
+  model between frames);
   asking again shows and raises the same one. That is what lets the code
   manager's unapplied edits survive closing it. Each opens on its first entry
   - the style manager's first rows, the symbol library's first symbol, the
@@ -2197,20 +2212,20 @@ offers - whether there is a built-in customisation, and the kept file
   from the workbench's cache, and a window destroys its members BEFORE its
   child widgets, so `~CustomisationWorkbench` deletes them itself - and the
   window destroys the workbench before the Document.
-- **"Show me what uses it"** (`CustomisationContext::selectAndShow`) selects
+- **"Show me what uses it"** (`CustomisationContext::select_and_show`) selects
   the entities and frames them in the ACTIVE plan view only; the other views
   keep their zoom.
 - **Found by the headless driver.** Each manager's action carries its
-  dialog's object name as its data, which is how `--dialog formatStyles`
+  dialog's control name as its data, which is how `--dialog formatStyles`
   finds the dialog it opened.
-- **Purge Unused** (`purgeUnused`) deletes every style, linetype and hatch
-  pattern nothing uses (`cad::planPurge`, `cad::purgeCommand`) as ONE undo
+- **Purge Unused** (`purge_unused`) deletes every style, linetype and hatch
+  pattern nothing uses (`katana_cad::purge::plan_purge`, `katana_cad::purge::purge_command`) as ONE undo
   step, keeping the current style, and names them in the log. An interactive
   session is asked first (the `confirm` hook, else a question box); a
   headless one is not. `qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless`
   purges, undoes and checks the style is back.
 - **Closing the window asks the definition editor and the code manager
-  first** ("Failure modes", above: `confirmClose`).
+  first** ("Failure modes", above: `confirm_close`).
 
 What a load does - a merge, or a Replace that is asked for - is
 `docs/customisation.md`, "The verbs".
@@ -2223,22 +2238,22 @@ Not done:
 ### Styles and Linetypes
 
 One dialog for the `Style` and `Linetype` tables and the session's library
-linestyles (`src/katana_qt/style_manager.cpp`), because
+linestyles (`rust/crates/katana_window/src/style_manager.rs`), because
 they are one subject: a style names a linetype. An archive import brings 211
 styles from one file - but NOT their linetypes: each style's linetype is a
 LIBRARY name, which lives in the session's style library, not in the
 model's Linetype table. So almost every real style names something the
 drawing's own linetype table does not contain, and the dialog lists both.
 
-What it shows, all from `include/katana/cad/style_manager_rows.hpp` so the
-rows, filters and bulk edit are tested below Qt:
+What it shows, all from `rust/crates/katana_cad/src/style_manager_rows.rs` so the
+rows, filters and bulk edit are tested below the window:
 
 | Tab | Shows | Does |
 |---|---|---|
-| Styles | `cad::styleRows`: each style, how many entities wear it, and whether its linetype or symbol is missing; the chips All / Used / Unused / Missing and a search | a form (linetype and symbol through `NamePicker`, weight, colour or ByLayer, hatch, symbol size, description) with Save and Revert; New, Duplicate, Rename, Merge Into, Delete, Purge; Apply to Selection, Select Users, Make Current |
-| Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Edit Definition (`linetypeEditDefinition`: a library linestyle, in the definition editor) and New Library Linestyle (`linetypeNewDefinition`: a new one, there); Select Users |
-| Hatch Patterns | `cad::hatchPatternRows`: each hatch pattern, solid or how many families, and who uses it (`entity::tableUsage`) | a family grid (angle in degrees, spacing in model units) or Solid, with a swatch drawn by `cad::hatchSegments`, Save and Revert; New, New Solid, Duplicate, Delete, Purge; New Style Using This; Select Users |
-| Diagnostics | `cad::styleDiagnostics`: `cad::missingNames`, then the D2 collisions, each with who uses it and what is drawn meanwhile | Select Users |
+| Styles | `katana_cad::style_manager_rows::style_rows`: each style, how many entities wear it, and whether its linetype or symbol is missing; the chips All / Used / Unused / Missing and a search | a form (linetype and symbol through `NamePicker`, weight, colour or ByLayer, hatch, symbol size, description) with Save and Revert; New, Duplicate, Rename, Merge Into, Delete, Purge; Apply to Selection, Select Users, Make Current |
+| Linetypes | `katana_cad::style_manager_rows::linetype_rows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Edit Definition (`linetypeEditDefinition`: a library linestyle, in the definition editor) and New Library Linestyle (`linetypeNewDefinition`: a new one, there); Select Users |
+| Hatch Patterns | `katana_cad::hatch_pattern_rows::hatch_pattern_rows`: each hatch pattern, solid or how many families, and who uses it (`katana_entity::table_usage::table_usage`) | a family grid (angle in degrees, spacing in model units) or Solid, with a swatch drawn by `katana_cad::hatching::hatch_segments`, Save and Revert; New, New Solid, Duplicate, Delete, Purge; New Style Using This; Select Users |
+| Diagnostics | `katana_cad::style_manager_rows::style_diagnostics`: `katana_cad::style_catalogue::missing_names`, then the D2 collisions, each with who uses it and what is drawn meanwhile | Select Users |
 
 A `StylePreview` beside each form draws the style, or the linestyle, at a
 plot scale on paper or on screen through the shared painter (`docs/cad.md`,
@@ -2247,7 +2262,7 @@ at every scale and a `worldstyle` shrinks as the scale's N grows; a symbol
 fitted to the pane on its insertion point, with a scale bar in ground metres.
 The dialog's Undo and Redo buttons are the drawing's own stack. A name is
 asked for in a prompt row inside the dialog and a purge is checked in a panel,
-never in a box, so a headless session drives every action by object name.
+never in a box, so a headless session drives every action by control name.
 
 **QT-02's rule** (audit QT-02, fixed 2026-09-24). Save used to rewrite the
 linetype and symbol of every archive-imported style: the form's boxes were
@@ -2255,15 +2270,15 @@ non-editable combos filled from the model's linetypes and the sixteen
 built-in shapes, `setCurrentText` with a library name was a silent no-op on them,
 and Save wrote back whatever they still showed. Now:
 
-- a form writes back only the fields a person EDITED (`cad::StyleFields`,
-  `applyEdit`) - even for one style, because a spin box cannot show every
+- a form writes back only the fields a person EDITED (`katana_cad::StyleFields`,
+  `apply_edit`) - even for one style, because a spin box cannot show every
   stored value exactly (a weight of 0.1234, a symbol size of 0.03125), so
   writing back what it shows would change a style nobody edited;
-- an unedited Save is no command at all (`cad::editStylesCommand`,
-  `commands::updateStyleIfChanged`), so Save is enabled whenever a style is
+- an unedited Save is no command at all (`katana_cad::style_manager_rows::edit_styles_command`,
+  `katana_commands::table_commands::update_style_if_changed`), so Save is enabled whenever a style is
   selected and Revert only when there are edits;
 - every name field keeps a name it cannot list - `NamePicker` for linetypes
-  and symbols, `kept_name_combo.hpp` for the hatch and dimension-style
+  and symbols, `kept_name_combo.rs` for the hatch and dimension-style
   combos;
 - selecting several styles shows `<varies>` for the fields they differ in,
   and Save leaves those fields of each style alone unless they were edited.
@@ -2274,13 +2289,14 @@ so its unchanged Save compares the `Layer`.
 Two decisions from the first version still hold:
 
 - **The table is read-only; the form edits.** Editing in the table would run
-  a command from inside the table's own `itemChanged` signal - the shape of
-  the crash recorded under "Panels refresh on the event loop" below. There is
-  no `itemChanged` handler here at all, so the bug cannot be written. The
+  a command from inside the table's own change - in the C++, its
+  `itemChanged` signal, the shape of the crash recorded under "Panels refresh
+  on the event loop" below. The table has no edit of its own at all, so the
+  bug cannot be written. The
   dialog's own commands do not reload it either: they record what to select
   and the watcher's deferred reload does it, so there is one reload path.
 - **A rename is a move, not an edit of a name field.** A `NamedTable` is
-  keyed by name, so `renameStyle` removes, re-adds under the new name and
+  keyed by name, so `rename_style` removes, re-adds under the new name and
   repoints every holder (entities for a style; layers and styles for a
   linetype) in one command, and therefore one undo step. It then asks the
   DELETE guard whether anything still names the old item: the guard and the
@@ -2295,7 +2311,7 @@ Two decisions from the first version still hold:
   a library linestyle (`commands` cannot see the library).
 
 **The Hatch Patterns tab** (`HatchPatternsTab`,
-`src/katana_qt/customisation/hatch_patterns_tab.hpp`) is where the window got
+`rust/crates/katana_window/src/customisation/hatch_patterns_tab.rs`) is where the window got
 the `HATCH` verb, which it had only offered by name in pick lists. Unlike the
 two tabs before it, it runs nothing itself: every button writes the line -
 `HATCH NEW`, `SOLID`, `SET`, `DELETE`, `PURGE HATCHES`, `STYLE NEW name HATCH
@@ -2303,7 +2319,7 @@ pattern` - and hands it to the window's executor (`CustomisationContext::run`),
 so it is echoed and one undo step, and an agent types the same. The family
 grid is a buffer saved by one `HATCH SET`; its swatch draws the grid as it
 stands, with the offsets Save keeps, through the hatcher the plan view uses.
-Angles show to twelve significant digits (`cad::hatchAngleDegrees`), the
+Angles show to twelve significant digits (`katana_cad::hatch_pattern_rows::hatch_angle_degrees`), the
 degrees that were typed: radians cannot hold 30 degrees exactly, and the
 exact reading, 29.999999999999996, would be written back by every Save.
 `none` - what an unhatched layer resolves to - is neither edited nor deleted.
@@ -2325,7 +2341,7 @@ shows a disabled ByLayer button with a stray drop-down arrow.
 ### Symbol Library
 
 A block palette, a cell selector and a civil package's symbol chooser in one
-window (`src/katana_qt/customisation/symbol_library.*`):
+window (`rust/crates/katana_window/src/customisation/symbol_library.rs`):
 
 - **left**, a tree of groups: All, Built-in, the library's `/` groups,
   "(ungrouped)", and "Not defined" when a name resolves to nothing;
@@ -2337,41 +2353,41 @@ window (`src/katana_qt/customisation/symbol_library.*`):
   and a warning when it lies outside what the symbol draws), the details,
   and the actions.
 
-What is listed is `cad::symbolLibrary`: D3's symbols (a definition is a
+What is listed is `katana_cad::symbol_assign::symbol_library`: D3's symbols (a definition is a
 symbol when it is drawn at vertices, a survey code draws it as one, a style
 names it as one, or its customisation lists it as a symbol), the built-in
 shapes, and every symbol name a style OR A SURVEY CODE gives that nothing
 defines, in the pickers' amber with the shape it is drawn as instead. The
-codes' names are the library's own addition: `cad::missingNames` looks only at
+codes' names are the library's own addition: `katana_cad::style_catalogue::missing_names` looks only at
 styles and layers. The details' Source is the NAME of the customisation a
 definition came from (`LineStyle::source`), or "Made in this session".
 
 **How big it prints.** The details say what a point wearing the symbol
-prints: "2 x 2 mm at 1:500, 1 x 1 m on the ground". `cad::symbolPrintSize`
-(`include/katana/cad/symbol_assign.hpp`) measures what `cad::symbolDrawing`
+prints: "2 x 2 mm at 1:500, 1 x 1 m on the ground". `katana_cad::symbol_assign::symbol_print_size`
+(`rust/crates/katana_cad/src/symbol_assign.rs`) measures what `katana_cad::style_drawing::symbol_drawing`
 draws - its strokes AND the space each of its texts covers, since a symbol
 that is a letter, or carries one above its mark, prints the letter too - at
 the style's size (a width in model units; 0 for the definition's own), at
 1:N. A text's size comes from a `TextExtent`: the dialog measures it with the
-preview's own font (`styleTextExtent` in `style_painter`), so the number
+preview's own font (`style_text_extent` in `style_painter`), so the number
 agrees with the picture beside it, and without one cad estimates it
-(`estimatedTextExtent`: 0.6 of the height per character, the height tall,
+(`estimated_text_extent`: 0.6 of the height per character, the height tall,
 descenders not counted) - so the two can differ a little, 2.91 mm with Arial
 against 3 mm estimated for the fixture's TEST Valve. A built-in shape, or the
 stand-in for a missing name, has no size of its own at size 0: its print size
 is the viewport's plain mark, and the pane says so rather than giving a
 number.
 
-The actions, each from a button and never from the grid's own selection
-signal; each that changes the drawing is ONE undo step through
+The actions, each from a button and never from a change of the grid's own
+selection; each that changes the drawing is ONE undo step through
 `Document::execute`:
 
 | Button | What it does |
 |---|---|
-| Assign to Selected Points | `cad::assignSymbolToPoints`: the points among the selection move into a style that draws the symbol at the size given - one found that draws exactly that, else one made - and the log counts the points moved, already in it, not points, and not found |
-| Set on Style | the chosen style's symbol (an inline style picker; `updateStyleIfChanged`) |
+| Assign to Selected Points | `katana_cad::symbol_assign::assign_symbol_to_points`: the points among the selection move into a style that draws the symbol at the size given - one found that draws exactly that, else one made - and the log counts the points moved, already in it, not points, and not found |
+| Set on Style | the chosen style's symbol (an inline style picker; `update_style_if_changed`) |
 | Select Points Using | the points wearing a style that names it, selected and framed |
-| Replace in Styles | `cad::replaceSymbolInStyles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
+| Replace in Styles | `katana_cad::symbol_assign::replace_symbol_in_styles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
 | Import Definitions... (`importDefinitions`) | runs `CUSTOMISE DEFINITIONS "<file>"`: a Katana customisation file's DEFINITIONS and its colours, MERGED into the session's (D1: never a Replace from here); the executor logs the verb's reply, which counts what it added and replaced and what it left |
 | Export Selected... (`exportSelected`) | runs `CUSTOMISE EXPORT "<file>" NAME <name> ONLY <the selected names>`: the selected library definitions as a Katana customisation file, with the session's notice, the sources they came from and the colours their pens name |
 | New Symbol..., Edit Definition..., Duplicate Definition..., Delete Definition (`symbolNew`, `symbolEdit`, `symbolDuplicate`, `symbolDelete`; along the bottom, since they change the library and not the drawing) | ask the definition editor ("The definition editor", below) for a new symbol, or for the current symbol's definition; the last three need a symbol the library defines, not a built-in shape or a name nothing defines. The buttons do nothing themselves |
@@ -2401,22 +2417,22 @@ They were style library files of another program's format until 2026-10-06.
   brings them as the session's sources, and of those the import hands on only
   the ones that brought the file definitions, each as a source of definitions
   alone, and a table of colours when the file has colours
-  (`cad::definitionsOfFile`, `include/katana/cad/customisation_part.hpp`). A source that
+  (`katana_cad::customisation_part::definitions_of_file`, `rust/crates/katana_cad/src/customisation_part.rs`). A source that
   brought the file nothing but rules is left out. *Rejected: keeping it with
   its `rules` flag cleared*, which is what the import first did. Every source
   a load lists is taken off the names the open project is missing
-  (`Document::installCustomisation`) and is recorded by the next save, so a
+  (`Document::install_customisation`) and is recorded by the next save, so a
   project that warned "B is missing" lost the warning - for good - by an
   import of definitions from a file that merely listed B, with not one of B's
   rules in the session
-  (`ImportingDefinitionsLeavesOutASourceThatBroughtOnlyRules`).
+  (`symbol_library::importing_definitions_leaves_out_a_source_that_brought_only_rules`).
 - **Export** runs `CUSTOMISE EXPORT "<file>" NAME <the session's name, or the
   file's own while it has none> ONLY <the selected names>`, which writes the
   session's customisation CUT DOWN to the selected definitions through the
   verb's one writer (a file beside the target, then a rename, so that a write
-  that fails leaves the file that was there) (`cad::customisationPart`,
-  `include/katana/cad/customisation_part.hpp`; then
-  `entity::customisationToJson` with the same
+  that fails leaves the file that was there) (`katana_cad::customisation_part::customisation_part`,
+  `rust/crates/katana_cad/src/customisation_part.rs`; then
+  `katana_entity::customisation::customisation_to_json` with the same
   `CustomisationWriteOptions::only`), under the session's name - or, while
   the session has none, the file's own name without `.customisation.json`.
   It is the ONE rule a part of a customisation is written by: both managers'
@@ -2449,8 +2465,8 @@ They were style library files of another program's format until 2026-10-06.
   carries the control codes and every colour. A definition reads back exactly
   as the session holds it, where it came from and that it is listed as a
   symbol included, which the older file could not hold
-  (`ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest`,
-  `AnExportCarriesTheSessionsNoticeAndTheSourcesThatBroughtDefinitions`).
+  (`symbol_library::export_writes_only_the_selected_library_definitions_and_names_the_rest`,
+  `symbol_library::an_export_carries_the_sessions_notice_and_the_sources_that_brought_definitions`).
 
   The sources are those the SELECTED definitions came from. Until
   2026-10-07 they were every source that had brought the session a
@@ -2458,7 +2474,7 @@ They were style library files of another program's format until 2026-10-06.
   managers and the `CUSTOMISE EXPORT` verb were written side by side and cut
   a session down by two rules. *Rejected, with the reason kept*: the wider
   list was there because the session's own entry is the one a later load
-  gives the file's notice to (`include/katana/cad/customisation_merge.hpp`:
+  gives the file's notice to (`rust/crates/katana_cad/src/customisation_merge.rs`:
   a notice "goes with the source of its name, or with every source it lists
   when none has its name"), so that a list narrowed to the selection's
   sources hangs the session's notice on somebody else's symbols. It does.
@@ -2467,29 +2483,29 @@ They were style library files of another program's format until 2026-10-06.
   to stop - and a notice shown beside more than its author meant is the
   safe side of the two. The decision, and what each of the two rules had
   right, is `docs/customisation.md` ("One rule for a part, whoever writes
-  it"); the rule itself is tested below Qt
-  (`tests/cad/customisation/test_customisation_part.cpp`).
+  it"); the rule itself is tested below the window
+  (`rust/crates/katana_cad/tests/leaf/customisation_part.rs`).
 - **A pen inside a definition is the colour the session resolves its name
   to**: the customisation's own colours, then the standard names. The one
-  painter every picture goes through (`paintStyleDrawing`) takes the table as
+  painter every picture goes through (`paint_style_drawing`) takes the table as
   `StylePaintTarget::colours`, and the grid's pictures, the preview, the plan
   (`PlanSource::colours`) and a sheet's legend all hand it the Document's. A
   name neither knows still draws in the entity's pen, as it always did
-  (`APenIsTheColourTheCustomisationGivesItsNameAndTheEntitysPenWhenNothingDoes`).
+  (`symbol_library::a_pen_is_the_colour_the_customisation_gives_its_name_and_the_entitys_pen_when_nothing_does`).
   A changed colour table moves the library's generation, which is what drops
   the pictures and symbol stamps painted with the old colours: a stamp's key
   holds its symbol and the entity's pen, not the colour a pen inside it
-  resolved to (`ASymbolStampedOnThePlanIsDrawnAgainWhenTheCustomisationsColoursChange`,
+  resolved to (`symbol_library::a_symbol_stamped_on_the_plan_is_drawn_again_when_the_customisations_colours_change`,
   which keeps one cache across the change as a view does; the legend's
-  wiring is `ASheetsLegendDrawsAPenInTheColourThePlansSourceGivesIt`).
+  wiring is `symbol_library::a_sheets_legend_draws_a_pen_in_the_colour_the_plans_source_gives_it`).
 
 A headless session opens no file dialog: Import and Export are
-`importDefinitionsFile` and `exportSelectedTo`, which take a path, and the
+`importDefinitionsFile` and `export_selected_to`, which take a path, and the
 buttons say in the log what to call. Not done: Assign makes a style with
 linetype ByLayer and weight 0.25, and under D8 a line later put in that style
 draws the symbol at its vertices; the grid's pictures are on the dark screen
 ground only, though the preview switches; the dialog reloads whole (two
-`tableUsage` passes) on every command the watcher reports, not measured on a
+`table_usage` passes) on every command the watcher reports, not measured on a
 250,000-entity drawing; a project's record
 is of NAMES, so importing the definitions of a customisation that brought
 both kinds clears a warning that it is missing although its rules are still
@@ -2501,10 +2517,10 @@ verb writes.
 An import into a session that was the kept one is kept again: Import
 Definitions calls the commit hook round its line - before it, and what
 the hook hands back after one that was taken
-(`ImportCallsTheCommitHookBeforeTheInstallAndWhatItHandsBackAfterOneThatWasTaken`)
+(`symbol_library::import_calls_the_commit_hook_before_the_install_and_what_it_hands_back_after_one_that_was_taken`)
 - and the workbench answers the hook with the `CUSTOMISE KEEP` line ("The
 definition editor", below). A linetype picker's picture of a DRAWING linetype
-(`modelLinetypeImage`) is handed the session's colours as every other picture
+(`model_linetype_image`) is handed the session's colours as every other picture
 is; such a linetype is dashes and names no pen, so nothing is coloured by
 them yet.
 
@@ -2513,9 +2529,9 @@ them yet.
 The survey code library a surveyor codes against - what civil packages call
 description keys or feature definitions - in five tabs, each
 over one cad foundation, so the dialog decides nothing the CLI would say
-differently: Code Table (`cad::codeTable` and `cad::explainCode`, with the
-rule form), Codes in Drawing (`cad::codeCensus`), Issues
-(`cad::lintSurveyMap`), Apply Codes (the `CODE` line, previewed before it
+differently: Code Table (`katana_cad::code_table::code_table` and `katana_cad::code_table::explain_code`, with the
+rule form), Codes in Drawing (`katana_cad::code_table::code_census`), Issues
+(`katana_cad::code_table::lint_survey_map`), Apply Codes (the `CODE` line, previewed before it
 runs) and Linework (the `LINEWORK` line, and the customisation's control
 codes). Its edits go to a BUFFER and reach the drawing only on Apply; Revert
 takes the drawing's map back; closing with unapplied edits asks. That, and
@@ -2547,18 +2563,18 @@ filter"):
   (`censusScopeDrawing`, `censusFilterLayer` ...), and builds `CODE CENSUS
   <scope> [WHERE ...] [PROPERTY p]` (`censusCommand`), which Run Line
   (`censusRun`) hands to the executor. The table is counted here, over what
-  the scope takes (`cad::codeCensus` with the ids `cad::matchEntities` gave),
+  the scope takes (`katana_cad::code_table::code_census` with the ids `katana_cad::global_modify::match_entities` gave),
   and not read from the line's reply, because it is classed against the rules
   being EDITED and the verb reads the drawing's; the summary begins with what
   the scope took ("3 entities matched the scope; ..."), Select Entities With
   Code acts among those it took, and a scope that cannot be read (no layer
   ticked) leaves the table empty with the reason in the summary
-  (`TheCensusTabCountsWhatItsScopeTakesAndBuildsTheCodeCensusLineItSays`).
+  (`survey_code_manager::the_census_tab_counts_what_its_scope_takes_and_builds_the_code_census_line_it_says`).
 - **Preview is a plan made in the manager**, read-only and unlogged, because
   it shows more than a reply does: a row a code with its layer and style,
   every point in no line with its reason, every note. It is planned by what
-  the verb plans with - `cad::matchEntities` over the same scope and filter,
-  then `cad::applySurveyCodes`, or `cad::planLinework`, which IS the
+  the verb plans with - `katana_cad::global_modify::match_entities` over the same scope and filter,
+  then `katana_cad::survey_coding::apply_survey_codes`, or `katana_cad::linework_verbs::plan_linework`, which IS the
   `LINEWORK` verb's planning - and begins with what the scope took ("4
   matched."). So the Linework preview leaves out what the verb leaves out,
   and says so: the points their survey job has strung, and lines the drawing
@@ -2577,7 +2593,7 @@ filter"):
   and `lineworkKeepPoints`, off for deleting the points a line replaces
   (`LINEWORK` never removes a point: one taken out from under a survey job
   reads to its next re-adjustment as deleted by hand). The options are still
-  in `cad::SurveyCodingOptions` and `cad::LineworkOptions` for a verb word
+  in `katana_cad::survey_coding::SurveyCodingOptions` and `katana_cad::linework::LineworkOptions` for a verb word
   that wants them.
 - **Controls that stayed, because the verb gained their words**:
   `lineworkProperty` (`PROPERTY <name>`, as `CODE` has it) and
@@ -2587,16 +2603,16 @@ filter"):
   starts on). `docs/survey_coding.md`,
   "`LINEWORK` on the command line".
 
-Tests: `tests/qt_widgets/customisation/test_code_manager.cpp` (and, for the View
-scope the workbench hands the manager, `test_customisation_workbench.cpp`) - each tab
+Tests: `rust/crates/katana_window/tests/codes/code_manager.rs` (and, for the View
+scope the workbench hands the manager, `customisation_workbench.rs`) - each tab
 building exactly its line as each control changes, through a recording
 executor that then runs it
-(`TheApplyCodesTabBuildsExactlyTheCodeLineItsControlsSay`,
-`TheLineworkTabBuildsExactlyTheLineworkLineItsControlsSay`,
-`TheLineworkCodesAreTheCustomisationsAndUseTheseCodesRunsTheSetLine`), a
+(`survey_code_manager::the_apply_codes_tab_builds_exactly_the_code_line_its_controls_say`,
+`survey_code_manager::the_linework_tab_builds_exactly_the_linework_line_its_controls_say`,
+`survey_code_manager::the_linework_codes_are_the_customisations_and_use_these_codes_runs_the_set_line`), a
 preview changing nothing and running no line, Execute as one undo step, a
 second run drawing nothing twice, and a manager with no executor
-(`WithNoExecutorExecuteSaysItCannotRunItsLineAndChangesNothing`).
+(`survey_code_manager::with_no_executor_execute_says_it_cannot_run_its_line_and_changes_nothing`).
 
 Not done: the two previews do not mark themselves stale
 when the drawing changes under them (Execute plans again before it runs, so
@@ -2611,19 +2627,19 @@ alone, and Export runs `CUSTOMISE EXPORT <file> CODES`, which writes the
 DRAWING's rules (so it is refused while the buffer has unapplied edits: Apply
 or Revert them first, since no line can name a buffer) as a customisation of
 survey codes alone, cut out of the session by the rule the Symbol Library's Export is cut by
-("Symbol Library", above; `cad::customisationPart`, which is what
+("Symbol Library", above; `katana_cad::customisation_part::customisation_part`, which is what
 `CUSTOMISE EXPORT <file> CODES` writes by): the session's name and notice,
 the sources that brought it rules, the notice of each source left out, the
 colours the rules name, and none of its settings. Apply calls the commit
-hook round its `setSurveyMap`, as the definition editor's Save does
-(`ApplyCallsTheCommitHookBeforeTheMapIsSetAndWhatItHandsBackAfter`). Apply is
+hook round its `set_survey_map`, as the definition editor's Save does
+(`survey_code_manager::apply_calls_the_commit_hook_before_the_map_is_set_and_what_it_hands_back_after`). Apply is
 not a line, and is not undone: it puts the edited buffer on the session, which
 is session data (D1), and a line for it would write the buffer to a file in
 order to merge it back (`docs/customisation.md`, "The verbs", "Two window
 paths are not lines").
 Every colour the manager shows or applies - the swatches of the Code Table,
 the three colour fields of the rule form, the explanation, the lint, Apply
-Codes and Linework - is resolved by the Document (`cad::resolveColour`): the
+Codes and Linework - is resolved by the Document (`katana_cad::colour_lookup::resolve_colour`): the
 customisation's own colours first, which the fields list ahead of the
 standard names.
 
@@ -2634,16 +2650,16 @@ linestyle or symbol definition: the symbol grid is read-only, the Linetypes
 tab's library page was a label, and every library the window installed was a
 whole file's. The owner asked to edit the customisation; survey codes had
 their manager, and definitions now have theirs
-(`src/katana_qt/customisation/definition_editor.*`, `DefinitionEditorDialog`,
-object name `definitionEditorDialog`).
+(`rust/crates/katana_window/src/customisation/definition_editor.rs`, `DefinitionEditorDialog`,
+control name `definitionEditorDialog`).
 
 **One editor, kept by the workbench, with no menu item.** A definition is
 reached from where it is listed, so the editor is asked for by the managers:
 the Symbol Library's `symbolNew`, `symbolEdit`, `symbolDuplicate` and
 `symbolDelete`, and the Linetypes tab's `linetypeEditDefinition` and
 `linetypeNewDefinition`. Each button does nothing itself: it calls
-`CustomisationContext::editDefinition`, which the workbench answers with the
-one dialog (`CustomisationWorkbench::editDefinition`), made the first time
+`CustomisationContext::edit_definition`, which the workbench answers with the
+one dialog (`CustomisationWorkbench::edit_definition`), made the first time
 and kept like the managers. A new definition is of the kind the manager that
 asked lists - a symbol from the Symbol Library, a linestyle from the
 Linetypes tab, whose button sits with the tab's own rather than on the page
@@ -2657,7 +2673,7 @@ empty form: every use of the editor starts from a definition or from the
 list a new one belongs in, and Format > Symbol Library and Format > Styles
 and Linetypes are those lists. The managers' buttons are its menu items.
 
-**What it edits** is one `entity::LineStyle`:
+**What it edits** is one `katana_entity::LineStyle`:
 
 | Field | Object name | Holds |
 |---|---|---|
@@ -2674,7 +2690,7 @@ and Linetypes are those lists. The managers' buttons are its menu items.
 | Strokes | `definitionStrokes` | `strokes` and `texts`, as text |
 
 A number is shown as the shortest text that reads back as itself
-(`core::formatExactReal`) in a plain field, never a spin box: a spin box
+(`katana_core::text::format_exact_real`) in a plain field, never a spin box: a spin box
 shows 0.30000000000000004 as 0.3, and a Save of a form nobody touched would
 then change the definition (QT-02's rule, above, was paid for by exactly
 that). An empty number is the value a file's missing member has, and text
@@ -2682,7 +2698,7 @@ that is not a finite number - `inf`, `nan`, `1e999` - is refused as text that
 is no number. The anchors and modes of a definition whose units are not
 `twoPoint` are READ even though they cannot be typed into, so changing its
 length does not drop them
-(`AnUntouchedFormDescribesExactlyTheDefinitionItWasOpenedOn`). The units box,
+(`definition_editor::an_untouched_form_describes_exactly_the_definition_it_was_opened_on`). The units box,
 its note and the tips of the fields it enables all use the format's word,
 `twoPoint`, so the form says one thing by one name.
 
@@ -2692,16 +2708,16 @@ its note and the tips of the fields it enables all use the format's word,
 learns in the editor is what a customisation file holds, a line copied from
 one to the other means the same, and there is no second vocabulary of
 strokes to keep in step with the file's. They are read as they are typed by
-the format's own reader (`entity::definitionFromJson`); the dialog has no
+the format's own reader (`katana_entity::customisation::definition_from_json`); the dialog has no
 parser. What joins the lines for the reader, finds the line a refusal is
-about and words it is not the dialog's either: `cad::strokeText` and
-`cad::readStrokeText` (`include/katana/cad/definition_edit.hpp`), below Qt,
+about and words it is not the dialog's either: `katana_cad::definition_edit::stroke_text` and
+`katana_cad::definition_edit::read_stroke_text` (`rust/crates/katana_cad/src/definition_edit.rs`), below the window,
 where a refusal's wording is tested without a window
-(`tests/cad/customisation/test_definition_edit.cpp`). *Rejected: a table of strokes with editable cells.* The headless
+(`rust/crates/katana_cad/tests/customisation_verbs/definition_edit.rs`). *Rejected: a table of strokes with editable cells.* The headless
 driver cannot edit a cell, so an agent could not drive it; "tables are
 read-only and a form edits" is the house rule ("The rules a dialog or panel
 follows"), because an edited cell runs code from inside the table's own
-signal; and the seven kinds of stroke take different values - two numbers,
+change; and the seven kinds of stroke take different values - two numbers,
 three, one, a name, an object of seven members - so a grid's columns would
 mean something else on every row.
 
@@ -2711,7 +2727,7 @@ mean something else on every row.
   editor's one leniency, and the strict reader never sees it - the lines are
   joined with commas before they are handed over.
 - *A line that does not read is named by its number in the box*
-  (`AStrokeLineWithATypoKeepsSaveDisabledAndNamesTheLine`), with the reader's
+  (`definition_editor::a_stroke_line_with_a_typo_keeps_save_disabled_and_names_the_line`), with the reader's
   own refusal after it - `Line 3: definition "TEST Valve" strokes[2]: "drow"
   is not a kind of stroke ...` - and is washed in the box. The reader names a
   stroke by its place counted from 0, and says nothing of lines. So when the
@@ -2723,45 +2739,46 @@ mean something else on every row.
   large to hold - 1e999`). For text that is not JSON the reason is asked of
   the line by itself: read in place, a line short of its `]` was reported as
   `unexpected '}'`, a brace of the wrapper
-  (`ARefusalNeverCitesAPlaceInTextNobodyTyped`).
-- *The box is read character for character*
-  (`QTextDocument::toRawText`), not as "plain text": Qt's `toPlainText`
-  hands a no-break space back as a blank and a line separator as a line
-  break, and both are characters a stroke's text may hold. A form opened on
-  such a text read as edited before anything was typed - every other
-  definition then refused, Revert no way out - and Save wrote the blank
-  (`ATextHoldingANoBreakSpaceOpensUneditedAndIsSavedCharacterForCharacter`).
-  The one character a line of the box cannot hold is a paragraph separator,
+  (`definition_edit::a_refusal_never_cites_a_place_in_text_nobody_typed`).
+- *The box is read character for character*, not as "plain text": in the
+  C++, Qt's `toPlainText` handed a no-break space back as a blank and a line
+  separator as a line break (so it read the box's raw text instead), and both
+  are characters a stroke's text may hold; egui's text box holds the text as
+  typed. A form opened on such a text read as edited before anything was
+  typed - every other definition then refused, Revert no way out - and Save
+  wrote the blank
+  (`definition_editor::a_text_holding_a_no_break_space_opens_unedited_and_is_saved_character_for_character`).
+  The one character a line of the C++'s Qt box could not hold was a paragraph separator,
   at which it breaks; a definition whose text has one is not opened, and is
   told why, rather than shown as two lines that are no stroke.
 - *The box holds strokes and nothing else.* A line can end the list of
   strokes and go on to give the definition members - `]], "atVertices": true,
   ...` - and read as sound JSON. Only the strokes are taken from what was
   read, and text that would have set anything else is refused
-  (`TheStrokesBoxHoldsStrokesAndNothingElseOfTheDefinition`), or a definition
+  (`definition_editor::the_strokes_box_holds_strokes_and_nothing_else_of_the_definition`), or a definition
   could be saved that the fields above do not show.
 
 **A name is fixed once its definition exists.** Styles and survey code rules
-NAME a definition, and a library has no rename (`include/katana/entity/named_table.hpp`),
+NAME a definition, and a library has no rename (`rust/crates/katana_entity/src/named_table.rs`),
 so another name would be another definition, and everything naming the first
 left naming nothing - drawn as a plain line or a stand-in mark, with nothing
 said. Duplicate is how a definition comes by a new name: a copy equal but for
 its name, under the first free one (`TEST Valve 2`), which can be changed
 until it is saved - the first free in the library AND among the drawing's
-own linetypes (`cad::freeDefinitionName`), so a copy does not begin as a name
+own linetypes (`katana_cad::definition_edit::free_definition_name`), so a copy does not begin as a name
 in both. A blank at an end of a NEW name is taken off, since it cannot be
 seen where the name is shown and a rule naming `Valve` would miss `Valve `.
 A new definition is not made under a name no command line could name it by -
 one holding a double quote, or one that is a word of the `CUSTOMISE REMOVE`
 line itself (`CODE`, `FORCE`): saved, it could never be removed again
-(`ADefinitionIsNotMadeUnderANameNoLineCouldRemoveItBy`). One that already has
+(`definition_editor::a_definition_is_not_made_under_a_name_no_line_could_remove_it_by`). One that already has
 such a name, out of a file, is opened and changed like any other.
 
 **The preview is of what is typed, not of what is saved**: as a symbol on
 its insertion point (`definitionPreview`) and, for a linestyle, along the
 sample line (`definitionLinePreview`), at the plot scale chosen
 (`definitionPlotScale`). `StylePreview` drew only NAMES found in the
-Document's library; `StylePreview::setDefinition` hands it a definition
+Document's library; `StylePreview::set_definition` hands it a definition
 instead, which it keeps in a library of its own holding that one alone, so
 nothing is read from the Document's library and nothing put into it. The
 pane's cache of flattened definitions is emptied at every such call: it is
@@ -2776,10 +2793,10 @@ be blank for most of the time one is typed - and a line under the panes
 (`definitionPreviewNote`) says the picture is not of what is typed now.
 
 **The message area** (`definitionIssues`) says the first thing wrong, in
-the reader's or `entity::validate`'s words; a name that is taken; and, while
+the reader's or `katana_entity::tables::validate`'s words; a name that is taken; and, while
 the form reads, who names the definition - `rule #1 AC* (symbol) draws it as
 its symbol`, `style "Marks" draws it as its symbol` - from
-`cad::definitionUsers` (`include/katana/cad/definition_users.hpp`). That is
+`katana_cad::definition_users::definition_users` (`rust/crates/katana_cad/src/definition_users.rs`). That is
 said of a NEW name too: a rule that names a symbol nothing defines is
 waiting for it. What those users are drawn as meanwhile is said from the same
 answer and not assumed: a name the drawing's own Linetype table also holds is
@@ -2787,7 +2804,7 @@ dashed by that linetype, and a name that is a built-in shape is drawn as that
 shape - neither is "a plain line or a stand-in mark" - and a definition saved
 under such a name is drawn in their place. That is allowed, as decision D2
 allows a name in both, and said before Save
-(`ANameTheDrawingAlsoAnswersToIsSaidAsThatAndNotAsNamingNothing`). A
+(`definition_editor::a_name_the_drawing_also_answers_to_is_said_as_that_and_not_as_naming_nothing`). A
 definition with no strokes is saved, since the format holds one, and said to
 have none.
 
@@ -2795,28 +2812,28 @@ have none.
 (`docs/survey_coding.md`), so:
 
 - **Save** (`definitionSave`) installs a copy of the session's library with
-  the definition added or replaced (`Document::setStyleLibrary`), as the
+  the definition added or replaced (`Document::set_style_library`), as the
   Survey Code Manager's Apply installs its map. It is enabled only while the
   form reads as a definition and has something to save, and for a new
   definition only while its name is free
-  (`ANameTheLibraryHoldsCannotBeMadeASecondTime`).
+  (`definition_editor::a_name_the_library_holds_cannot_be_made_a_second_time`).
 - **Revert** (`definitionRevert`) shows the form as it was opened, or as the
   library has had the definition since.
 - **Delete** (`definitionDelete`) runs the line `CUSTOMISE REMOVE "<name>"`
-  (`cad::removeDefinitionLine`) through the window's one executor ("One
+  (`katana_cad::definition_edit::remove_definition_line`) through the window's one executor ("One
   executor", below), so it is echoed and an agent types the same. That verb
   is the interpreter's (`docs/customisation.md`, "The verbs") and refuses a
   definition something names, by the function the editor lists with
-  (`cad::definitionUsers`). The window takes no `CUSTOMISE` line itself
+  (`katana_cad::definition_users::definition_users`). The window takes no `CUSTOMISE` line itself
   (2026-10-07): while it did, it read `REMOVE` as a file's name, and Delete
   deleted nothing.
   - *What the line answered is shown as it answered it.* The editor does
     not say why a line failed: it once said "is used" of any failure on a
     definition that had users, whatever the line had said
-    (`ALineThatFailsForAnotherReasonIsShownAsItFailedAndAFailedForceOffersNothing`).
+    (`definition_editor::a_line_that_fails_for_another_reason_is_shown_as_it_failed_and_a_failed_force_offers_nothing`).
   - *Who names the definition is said ONCE.* The verb's refusal cites each
     user in its own words (`rule #7 AC* (symbol) names it`;
-    `cad::DefinitionUsers::cited`), and until 2026-10-07 the editor put its
+    `DefinitionUsers::cited`), and until 2026-10-07 the editor put its
     own list of the same users under it (`rule #7 AC* (symbol) draws it as
     its symbol`), so a person read them twice. Decided then: the verb's
     reply, once. The editor's list is added only where what is on the
@@ -2824,7 +2841,7 @@ have none.
     cites nobody, and a refusal that came before something else named the
     definition does not cite that - asked of the function the verb makes its
     lines with, not read out of the reply
-    (`TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt`).
+    (`definition_editor::the_verb_itself_refuses_a_definition_in_use_and_delete_anyway_removes_it`).
     *Rejected: never adding the list*, which would offer `FORCE` over a user
     nothing on the page names.
   - *Delete Anyway* (`definitionDeleteAnyway`; Keep It is
@@ -2838,7 +2855,7 @@ have none.
     which left the button pressable by a script, and one press then ran the
     `FORCE` line on a definition in use with nothing listed - and
     `remove(true)` is refused unless the refusal is showing
-    (`DeleteAnywayIsNotCarriedOutUnlessItsRefusalIsOnThePage`,
+    (`definition_editor::delete_anyway_is_not_carried_out_unless_its_refusal_is_on_the_page`,
     `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`).
   - Both questions are built into the page: a box would hang a headless run.
     What was deleted stays in the form, and Save puts it back - the only way
@@ -2848,13 +2865,13 @@ have none.
     line's own word - the tokenizer drops the quotes, so
     `CUSTOMISE REMOVE "CODE" FORCE` would be read as "remove the survey code
     FORCE".
-- **`CustomisationContext::beginCommit`** is called before each commit, and
+- **`CustomisationContext::begin_commit`** is called before each commit, and
   what it hands back is called after one that succeeded - never after one
   that was refused. It is how a session whose customisation is the kept one
   stays kept across an editor's own change while a typed change lasts the
   session only: the maker of the context knows whether the session was kept
   and runs `CUSTOMISE KEEP` afterwards; the editor knows neither and only
-  keeps the order (`TheCommitHookIsCalledBeforeASaveAndWhatItHandsBackAfterIt`).
+  keeps the order (`definition_editor::the_commit_hook_is_called_before_a_save_and_what_it_hands_back_after_it`).
   *Rejected: the editor reading "kept" from the Document itself*, which would
   put the rule for what is kept in every editor that commits. Every editor
   that commits to the session's customisation calls it the same way: this
@@ -2864,7 +2881,7 @@ have none.
     `customisationState().kept` when asked, and hands back the line
     `CUSTOMISE KEEP`, through the window's one executor, ONLY when the
     session was the kept one and the session has a kept file
-    (`CustomisationServices::hasKeptFile`, which the window sets from its
+    (`CustomisationServices::has_kept_file`, which the window sets from its
     host's kept-file path). A customisation typed, scripted or loaded with
     `--customise` is "not kept", and an editor's change on top of it lasts
     the session as it does. With no kept file nothing is handed back: `KEEP`
@@ -2873,11 +2890,11 @@ have none.
     changed on disk since it was read - is said as it would be to a person
     who typed it. Tested with a host and a kept file of the test's own, each
     of the three commits in turn
-    (`CustomisationWorkbench.AnEditorsCommitOfAKeptSessionRunsTheKeepLineOnceAndItStaysKept`,
-    `ASessionThatWasNotTheKeptOneIsNotKeptByAnEditorsCommit`,
-    `WithNoKeptFileAnEditorsCommitRunsNoLineAndLogsNoRefusal`).
-  - *The window's half is two lines* - `MainWindow::buildFormatActions` hands
-    the workbench the predicate, and `loadDefaultCustomisation` sets what it
+    (`customisation_workbench::an_editors_commit_of_a_kept_session_runs_the_keep_line_once_and_it_stays_kept`,
+    `customisation_workbench::a_session_that_was_not_the_kept_one_is_not_kept_by_an_editors_commit`,
+    `customisation_workbench::with_no_kept_file_an_editors_commit_runs_no_line_and_logs_no_refusal`).
+  - *The window's half is two lines* - the window hands the workbench the
+    predicate as it makes the Format actions, and `load_default_customisation` sets what it
     answers from the host's kept-file path - and the three tests above cannot
     see either: they supply the predicate themselves. Found in review
     (2026-10-07): with either line deleted every test passed, while the real
@@ -2894,42 +2911,42 @@ have none.
 
 **One definition at a time.** Opening another while the form has edits that
 are not saved is REFUSED and said, in the message area and the log
-(`AnotherDefinitionIsNotOpenedOverEditsThatAreNotSaved`): there is no undo
+(`definition_editor::another_definition_is_not_opened_over_edits_that_are_not_saved`): there is no undo
 to get typed strokes back from, so Save or Revert comes first. *Rejected:
 dropping the edits*, which is what the style manager's form does on another
 row ("Not done" under "Styles and Linetypes") and is survivable there only
 because a style is three fields. Closing the dialog hides it and keeps the
 form, and says so in the log; closing the WINDOW asks first
-(`CustomisationWorkbench::confirmClose`). A yes is only remembered
-(`DefinitionEditorDialog::agreeToDiscard`), until the form next changes:
+(`CustomisationWorkbench::confirm_close`). A yes is only remembered
+(`DefinitionEditorDialog::agree_to_discard`), until the form next changes:
 the code manager and the unsaved drawing are asked about after it, and a
 Cancel at either keeps the window open - with the strokes still in the form.
 It once reverted the form on yes, and that Cancel then found them gone
-(`TheWindowIsNotClosedOverAFormThatIsNotSaved`).
+(`definition_editor::the_window_is_not_closed_over_a_form_that_is_not_saved`).
 
 **Changed elsewhere.** The editor watches the Document as the managers do.
 A definition another load or command changed is taken up when the form is
 untouched; when it holds edits they are kept, the message area says the
 definition was changed elsewhere, and Revert shows the library's as it is
 now. One removed elsewhere stays in the form, and Save puts it back
-(`ADefinitionChangedElsewhereIsTakenUpUneditedAndSaidOverEdits`).
+(`definition_editor::a_definition_changed_elsewhere_is_taken_up_unedited_and_said_over_edits`).
 
-Tested in `tests/qt_widgets/customisation/test_definition_editor.cpp`, with
+Tested in `rust/crates/katana_window/tests/codes/definition_editor.rs`, with
 a customisation written out in the test and every saved definition compared
 with one built by hand; the unsaved-definition preview in
-`tests/qt_widgets/customisation/test_shared_style_preview.cpp`; who names a
-definition in `tests/cad/customisation/test_definition_users.cpp`; the
+`rust/crates/katana_window/tests/styles/shared_style_preview.rs`; who names a
+definition in `rust/crates/katana_cad/tests/custedit/definition_users.rs`; the
 strokes as text, the name a copy takes and the remove line in
-`tests/cad/customisation/test_definition_edit.cpp`; and the real window,
+`rust/crates/katana_cad/tests/customisation_verbs/definition_edit.rs`; and the real window,
 headless, in `qt_a_symbol_made_in_the_definition_editor_is_listed_by_the_symbol_library_headless`,
 `qt_delete_anyway_cannot_be_pressed_before_delete_has_been_refused_headless`
 and `qt_a_definition_a_survey_code_names_is_refused_by_delete_and_removed_by_delete_anyway_headless`.
 The widget tests give the editor a runner of their own for `CUSTOMISE
 REMOVE`, so that what they assert is the editor's; one gives it the verb
-itself (`TheVerbItselfRefusesADefinitionInUseAndDeleteAnywayRemovesIt`), and
+itself (`definition_editor::the_verb_itself_refuses_a_definition_in_use_and_delete_anyway_removes_it`), and
 that every line the editor can build is read by the verb as that one
-definition is `TheLineAnEditorBuildsToRemoveADefinitionIsReadAsThatDefinitionAlone`
-(`tests/cad/customisation/test_customisation_verbs.cpp`).
+definition is `customisation_verbs::the_line_an_editor_builds_to_remove_a_definition_is_read_as_that_definition_alone`
+(`rust/crates/katana_cad/tests/customisation_verbs/customisation_verbs.rs`).
 
 Not done:
 
@@ -2940,7 +2957,7 @@ Not done:
 - **A session with no kept file keeps nothing.** An editor's commit keeps a
   kept session kept only where the session has a kept file. An interactive
   window has one - `customisation.json` in the per-user place, or the file
-  `KATANA_CUSTOMISATION` names (`MainWindow::loadDefaultCustomisation`;
+  `KATANA_CUSTOMISATION` names (`MainWindow::load_default_customisation`;
   `docs/customisation.md`, "Settings and the kept customisation") - and a
   headless run has none unless that variable is set; there Keep is refused
   by name, and `CUSTOMISE` says `Kept file: none.`
@@ -2952,7 +2969,7 @@ Not done:
   are not its text strokes in order; `docs/customisation.md`, "What it
   refuses"), or one a text of which holds a paragraph separator. The editor
   says which and opens nothing
-  (`ADefinitionTheFormCannotShowIsNotOpenedOrCopiedAndIsSaidWhenItArrives`);
+  (`definition_editor::a_definition_the_form_cannot_show_is_not_opened_or_copied_and_is_said_when_it_arrives`);
   only a library built outside the editor can hold one.
 - **The Linetypes tab's library page still opens with library linestyles
   "are read-only here"**, now followed by where one IS edited. The first
@@ -2965,7 +2982,7 @@ Not done:
 - A text stroke's letters are previewed in the pane's own font, as every
   preview's are.
 - **The theme has no rule for a disabled field**, only for a disabled button
-  (`src/katana_qt/theme.cpp`): a line, a choice or a number box that cannot
+  (`rust/crates/katana_window/src/theme`): a line, a choice or a number box that cannot
   be typed into is drawn exactly as one that can. The editor dims its own
   with a rule on the dialog, because a fixed name has to be told from one
   that can still be typed; every other dialog's disabled fields still look
@@ -2973,29 +2990,32 @@ Not done:
 
 ## Panels refresh on the event loop, never inside their own signal
 
-Switching a layer off in the layer panel crashed the application. The chain
-was: the box's `itemChanged` signal -> `execute(updateLayer)` -> the
+Switching a layer off in the C++'s layer panel crashed the application. The
+chain was: the box's `itemChanged` signal -> `execute(updateLayer)` -> the
 document's change listener -> `refreshAll()` -> `refreshLayers()` ->
-`QTreeWidget::clear()`, all synchronous, all while the item whose `setData`
+QTreeWidget's clear(), all synchronous, all while the item whose `setData`
 raised the signal was still on Qt's stack. `clear()` deleted it, and
-`QTreeWidgetItem::setData` read its parent pointer on the way out. The
-property table had the same shape of bug behind an edited value.
+`setData` read its parent pointer on the way out. The property table had the
+same shape of bug behind an edited value. The C++'s listener then queued one
+refresh on the event loop however many times it was asked before that ran,
+which also coalesced: a transaction of a hundred commands had rebuilt every
+panel a hundred times. **Rejected:** guarding each slot with a re-entrancy
+flag, because that leaves the next slot to make the same mistake.
 
-The listener now calls `scheduleRefresh()`, which queues one `refreshAll()`
-on the event loop however many times it is asked before that runs. It also
-coalesces: a transaction of a hundred commands used to rebuild every panel a
-hundred times. **Rejected:** guarding each slot with a re-entrancy flag,
-because that leaves the next slot to make the same mistake; the rule is that
-a document change never rebuilds a widget synchronously, and one function
-holds it.
+The rule stands: a document change never rebuilds a widget synchronously. In
+the egui window it holds by construction: a panel is drawn from the document
+each frame and keeps no items a change could delete under it, so an edit
+made from inside the panel's own drawing is shown at the next frame, and a
+transaction of a hundred commands draws the panel once.
 
 `katana --toggle-layer NAME --screenshot out.png` flips the box through the
-real widget, headlessly, and refuses to continue if the tree was rebuilt
-during the signal (it compares the item pointers before and after, without
-dereferencing the old ones) or if the document and the panel disagree
-afterwards. `qt_toggle_layer_headless` runs it on the sample; with the
-listener made synchronous again it fails with "the layer panel was rebuilt
-inside its own itemChanged signal", which is how the test earned its place.
+panel's own handler, headlessly, and refuses to continue if the document and
+the panel disagree afterwards (`toggle_layer_through_panel`,
+`rust/crates/katana_window/src/main_window/panels.rs`; the C++ also compared
+the tree's item pointers before and after). `qt_toggle_layer_headless` runs
+it on the sample; with the C++'s listener made synchronous again it failed
+with "the layer panel was rebuilt inside its own itemChanged signal", which
+is how the test earned its place.
 
 A related rule, from the same afternoon: **a headless session never opens a
 modal box** - every question the window would ask becomes a line in the log
@@ -3006,32 +3026,32 @@ box") lists what each one does.
 
 A dialog that changes the drawing does not do the work itself: it builds the
 verb line a person would type and hands it to the window's one executor,
-`MainWindow::runVerbLine`, as a `CommandRunner` (`src/katana_qt/command_runner.hpp`).
+`MainWindow::run_verb_line`, as a `CommandRunner` (`rust/crates/katana_window/src/host/command_runner.rs`).
 The workbenches carry it to their dialogs - `SurveyServices::run`,
 `CustomisationServices::run` into every manager's `CustomisationContext::run`,
-`AnnotationWorkbench::setCommandRunner`, `UtilityServices::run` - so a dialog
+`AnnotationWorkbench::set_command_runner`, `UtilityServices::run` - so a dialog
 never reaches into the window for it.
 
-- **The same dispatcher as a typed line.** `runCommandLine` is Enter on the
+- **The same dispatcher as a typed line.** `run_command_line` is Enter on the
   command line: it reads and clears the field, echoes the line, offers it to
-  the workbenches' verbs (`runWorkbenchLine`: the geoprocessing executor's -
+  the workbenches' verbs (`run_workbench_line`: the geoprocessing executor's -
   `GDAL`, `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` - then `ONLINE`,
-  `UTILITY`), then to a running tool (`ViewWorkspace::typeIntoTool`), and
-  hands whatever is left to `dispatchLine` - the view verbs, the window's own
+  `UTILITY`), then to a running tool (`ViewWorkspace::type_into_tool`), and
+  hands whatever is left to `dispatch_line` - the view verbs, the window's own
   (`SCRIPT`, `PLOTSHEETS`, `PLOT`, `SNAPSHOT`), a tool's alias,
   and the interpreter (`CUSTOMISE` among its verbs, which the window read and
   ran itself until 2026-10-06). `runVerbLine` echoes the line and runs the same
-  `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
+  `run_workbench_line` and `dispatch_line`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
   leaves out. A tool waiting for a point or a text takes any typed line for
   one; a dialog's `CIRCLE 5,5 2` while Line waits for its first point is drawn,
   and the tool still waits. What is being typed on the command line is left
   alone.
-- **The reply comes back.** While the line runs, `logMessage` also collects
-  what it logs, and `warnUser` what it shows in a box, into a
+- **The reply comes back.** While the line runs, `log_message` also collects
+  what it logs, and `warn_user` what it shows in a box, into a
   `VerbOutcome`: `ok`, the `reply` lines and the `error` lines. `ok` is judged
-  by the errors counted, as `runCommand` judges a `--command` line, so a
+  by the errors counted, as `run_command` judges a `--command` line, so a
   `PLOTSHEETS` that plotted with a missing image is still ok. An empty line is
   not ok: a dialog has no Enter to press.
 
@@ -3045,17 +3065,17 @@ step (`docs/headless.md`) runs a line the same way and prints the outcome;
 Line waits for its first point.
 
 The Sheets editor is handed the runner when File > Sheets first opens it
-(`SheetEditor::setCommandRunner`): Generate Sheets, Choose Paper and the view
+(`SheetEditor::set_command_runner`): Generate Sheets, Choose Paper and the view
 fields run their `GENERATE`, `SHEET SUGGESTPAPER` and `VIEW SET` lines
 through it (`docs/plotting.md`, "The sheet editor"), and the Sheet Set menu
 its `SHEETS SAVE`, `LOAD`, `APPEND`, `JSON` and `PAGESETUP` lines ("The Sheet
 Set menu and Page Setup"). The window's command line
 and the editor's lines get the same sheet-verb context,
-`sheetVerbContextFor`, which replaced the window's own copy of it.
+`sheet_verb_context_for`, which replaced the window's own copy of it.
 
 **One rule for a word on the line.** A name a dialog writes into its line is
-written by `cad::annotation::commandWord`
-(`include/katana/cad/annotation/command_words.hpp`): bare when it can be,
+written by `katana_cad::annotation::command_words::command_word`
+(`rust/crates/katana_cad/src/annotation/command_words.rs`): bare when it can be,
 double-quoted when it is empty or holds a blank. A name with a double quote or
 a line break in it cannot be carried, because the tokenizer has no escape, so it
 is refused. Otherwise the line would run on the name cut short at the quote.
@@ -3063,30 +3083,30 @@ One verb reads past the tokenizer: `CRS SET` takes the rest of its line
 verbatim, because a WKT is all quotes (`docs/cad.md`, "The project's
 coordinate system"), so File > Project Coordinate System writes its text onto
 the line as typed.
-An annotation text uses `annotationTextWord`, which also writes a line break
-as `\n`. `src/katana_qt/command_word.hpp` hands a QString to the same rules
-(`commandWord`, `annotationTextWord`) and names the field in the refusal, and
-writes a number exactly (`exactNumber`). The Alignment Manager, the Hatch
+An annotation text uses `annotation_text_word`, which also writes a line break
+as `\n`. `rust/crates/katana_window/src/command_word.rs` hands a field's text to the same rules
+(`command_word`, `annotation_text_word`) and names the field in the refusal, and
+writes a number exactly (`exact_number`). The Alignment Manager, the Hatch
 Patterns tab, Edit Label, the text and label style managers, the Dimension
 Styles manager's numbers and the plan view's shortcut menu write their words
 with it. The menu lists a layer or style whose name holds a quote (a DXF can
 bring one) disabled, with the reason as its tip. The parallel lanes of the
 2026-09-26 UI work first wrote four copies of this rule, and the integration
 folded them into this one; Edit Label and the style managers still carried
-QString wrappers of their own over it, and four files their own exact-number
+wrappers of their own over it (on Qt's `QString`), and four files their own exact-number
 helper, until these were folded in too.
 
 Not done: these lines still quote a name or a path by hand, always, rather
-than through `commandWord` - the Sheets editor (`sheet_editor.cpp` `quoted`),
-the Sheet Set menu (`plotting/sheet_set_menu.cpp` `quotedPath`), File >
-Import's `IMPORT "<file>"` (`import_placement.cpp`), Plot to PDF's
-`PLOT "<file>"` (`plotting/plot_drawing_dialog.cpp`), Export View as Image's
-`SNAPSHOT "<file>"` (`plotting/view_image_export.cpp`), Run Script's
-`SCRIPT "<file>"` (`script_runner.cpp`), the GIS menu's `COPC "<source>"
-"<destination>"` (`main_window.cpp`), and Page Setup's `pattern="..."`, with
-its own backslash doubling (`plotting/plot_dialog.cpp`). A Windows path
+than through `command_word` - the Sheets editor (`sheet_editor.rs` `quoted`),
+the Sheet Set menu (`rust/crates/katana_window/src/plotting/sheet_set_menu.rs` `quoted_path`), File >
+Import's `IMPORT "<file>"` (the window's `import_placement.rs`), Plot to PDF's
+`PLOT "<file>"` (`rust/crates/katana_window/src/plotting/plot_drawing_dialog.rs`), Export View as Image's
+`SNAPSHOT "<file>"` (`rust/crates/katana_window/src/plotting/view_image_export.rs`), Run Script's
+`SCRIPT "<file>"` (`script_runner.rs`), the GIS menu's `COPC "<source>"
+"<destination>"` (`rust/crates/katana_window/src/main_window/window.rs`), and Page Setup's `pattern="..."`, with
+its own backslash doubling (`rust/crates/katana_window/src/plotting/plot_dialog.rs`). A Windows path
 cannot hold a double quote, and none of these dialogs offers one. Still, each
-is a second spelling of the rule and should move onto `commandWord`; doing so
+is a second spelling of the rule and should move onto `command_word`; doing so
 changes the lines those dialogs' tests pin.
 
 ### The session's verbs on the window's command line
@@ -3099,14 +3119,14 @@ Each now reaches the same code on every front end
 
 - `INFO 12` describes entity 12, unless a file of that name exists, and
   `INFO #12` describes it whatever files there are:
-  `CommandInterpreter::isEntityId`. Entity Information and
+  `CommandInterpreter::is_entity_id`. Entity Information and
   `katana_describe_entity` send `INFO #<id>`; run beside a file called `1`
   or `#1` they once failed (`cli.info_hash_id_is_the_entity_beside_a_file_of_that_name`,
   `qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless`). The window, and the session under
   `katana_cli` and `katana_mcp`, once took every `INFO` for `INFO <file>`, so
   `katana_describe_entity` answered that the file did not exist.
 - `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `CODE LIST` and `CODE CHECK`
-  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`). They
+  are the interpreter's (`rust/crates/katana_cad/src/survey_code_verbs.rs`). They
   resolve a colour name through the Document - the customisation's own
   table, then the standard names - and no front end hands the interpreter
   a lookup of its own any more: the window had only the standard names to
@@ -3122,14 +3142,14 @@ Each now reaches the same code on every front end
   the job has converted it. In a headless session the menu item opens no
   file dialog and names this verb instead.
 - `CUSTOMISE`, the whole family, is the interpreter's
-  (`include/katana/cad/customisation_verbs.hpp`; `docs/customisation.md`,
+  (`rust/crates/katana_cad/src/customisation_verbs.rs`; `docs/customisation.md`,
   "The verbs"): the report, `JSON`, a load (merge or `REPLACE`), `EXPORT`,
   `RESET`, `KEEP`, `REVERT`, `REMOVE` and `SET`, answered in records. The
   window had a tokenizer and a loader of its own for `CUSTOMISE [REPLACE]
   <file>...`, beside `katana_cli`'s, written twice because the readers of
   the older files lived where the interpreter could not see them - and the
   two had come to differ. Both are gone from the window
-  (`MainWindow::dispatchLine` hands the line on), with the prose they
+  (`Executor::dispatch_line` hands the line on), with the prose they
   printed: a load now answers `loaded file=... name=... definitions_added=...`
   a file, the names the rules ask for that nothing defines, and the
   `customisation` record; a file named twice is `repeated file=...`; a file
@@ -3141,14 +3161,14 @@ Each now reaches the same code on every front end
 - `IMPORT <file> LOCAL` moves a DXF, vector file or .12da archive as one piece
   so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
   cloud refuses it by name. The path and the `LOCAL` are read by
-  `CommandInterpreter::importArgument`, as the session reads them; `LOCAL` was
+  `CommandInterpreter::import_argument`, as the session reads them; `LOCAL` was
   once taken for part of the path. `ALONGSIDE` and `OFFSET=dE,dN` work the
   same way, and the import dialogs offer all of them (`docs/interop.md`,
   "Placing an import").
 - `UPDATE`, the whole family, is the session's
-  (`src/katana_app/update_verbs.hpp`): `CHECK`, `STATUS`, `DOWNLOAD CONFIRM`,
+  (`rust/crates/katana_app/src/update_verbs.rs`): `CHECK`, `STATUS`, `DOWNLOAD CONFIRM`,
   `APPLY CONFIRM`, `SKIP`, `BLOCKED CLEAR`, `SET AUTO` and `TOKEN`.
-  `MainWindow::runWorkbenchLine` takes it before every other family and the
+  `Executor::run_workbench_line` takes it before every other family and the
   update workbench runs it - the three lines that take time as jobs, the rest
   at once ("Help > Check for Updates", below). A headless window answers
   `CHECK` and `STATUS` when they are typed and has `DOWNLOAD` and `APPLY`
@@ -3164,9 +3184,9 @@ non-blank is `#` skipped. The session under `katana_cli` and `katana_mcp`
 once skipped only a line whose first character was `#`, and refused an
 indented note that the window skipped; it reads the same rule now
 (`cli.an_indented_note_in_a_script_runs_nothing`,
-`McpServer.AScriptsIndentedNoteRunsNothing`). The window runs the same files three ways, all
-through one function, `MainWindow::runScript`
-(`src/katana_qt/script_runner.hpp`):
+`mcp_server::a_scripts_indented_note_runs_nothing`). The window runs the same files three ways, all
+through one function, `Executor::run_script`
+(`rust/crates/katana_window/src/script_runner.rs`):
 
 - **File > Run Script...** (`fileRunScript`) opens a non-modal dialog
   (`fileRunScriptDialog`) that shows the file's commands with their line
@@ -3213,14 +3233,14 @@ refused, `script=pasted` in its record; whatever was typed before the paste
 starts the first line. The single-line field used to show the breaks as
 blanks and run the whole as one line of nonsense. Pasted while a tool waits
 for typed text - the lines of a Text or a Multiline Text - they are that text
-instead (`MainWindow::typeLinesIntoTool`): each line typed in turn, as though
+instead (`Executor::type_lines_into_tool`): each line typed in turn, as though
 typed and entered, and a blank line left out, since to Text it is the Enter
 that finishes and a paragraph break in what was copied is not. Run as a
 script, a label's words were once taken for commands - `RECT 0,0 5,5` pasted
 as a text's first line drew a rectangle, and its second line was refused
 (`qt_lines_pasted_at_a_text_prompt_are_the_texts_lines_headless`).
 
-Tested in `tests/qt_widgets/test_script_runner.cpp` (reading, the stopping
+Tested in `rust/crates/katana_window/tests/host/script_runner.rs` (reading, the stopping
 rules, the record, the dialog) and through the real window by
 `qt_script_switch_runs_every_line_of_a_script_headless`,
 `qt_script_switch_stops_at_the_first_refused_line_headless`,
@@ -3236,26 +3256,26 @@ Help > Command Reference (`helpCommandReference`, F1) used to print the
 interpreter's help into the log, which left out every verb the window's front
 end runs itself, and the sheet verbs' options could be read only by typing
 HELP SHEETS. It is now a non-modal, searchable dialog (`commandReferenceDialog`,
-`src/katana_qt/command_reference_dialog.hpp`), built from the texts the verbs'
+`rust/crates/katana_window/src/command_reference_dialog.rs`), built from the texts the verbs'
 own code keeps, so nothing is written twice:
 
-- **Commands**: `CommandInterpreter::helpText`, the annotation verbs included;
-- **Sheets**: `plotting::sheetVerbHelp`, every option (Help > Sheets and
+- **Commands**: `CommandInterpreter::help_text`, the annotation verbs included;
+- **Sheets**: `katana_cad::plotting::sheet_verbs::sheet_verb_help`, every option (Help > Sheets and
   Plotting Commands, `helpSheetCommands`, opens the reference here);
-- **Subsurface utilities**: `utilities::utilityVerbHelp`;
-- **Online data**: `interop::onlineUsage`;
-- **Updates**: `app::updateHelpText`, the `UPDATE` verbs' own help, which
+- **Subsurface utilities**: `katana_cad::utilities::utility_verbs::utility_verb_help`;
+- **Online data**: `katana_interop::online_verbs::online_usage`;
+- **Updates**: `katana_app::update_verbs::update_help_text`, the `UPDATE` verbs' own help, which
   `HELP UPDATE` and `katana_cli --help` print. One text, so a line added to
   the family is in the reference at once: `UPDATE BLOCKED CLEAR` came with
   the verb and needed no edit here
-  (`TheUpdatesSectionIsTheUpdateVerbsOwnHelp` holds every line of the help to
+  (`command_reference::the_updates_section_is_the_update_verbs_own_help` holds every line of the help to
   be in the section, and the section to have no line of its own);
-- **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
-  `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
+- **Window**: `window_help_text`, the verbs `Executor::dispatch_line` and
+  `run_workbench_line` take before the interpreter (`SCRIPT`, `IMPORT`,
   `EXPORT`, `INFO <file>`, `REFS`, `COPC` - the geoprocessing executor's,
   whose usage the Geoprocessing section gives - `PLOTSHEETS`, `PLOT`,
   `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ROADMODEL SHOW`
-  (`runWorkbenchLine`, the road workbench's), `ONLINE`, `UTILITY`,
+  (`run_workbench_line`, the road workbench's), `ONLINE`, `UTILITY`,
   `UPDATE` - a row that names the family's lines and sends the reader to the
   Updates section for their usage - `QUIT`, and `HELP`, which adds this
   section to the interpreter's), and the rule for a bare tool
@@ -3267,18 +3287,18 @@ own code keeps, so nothing is written twice:
 - **the tools**, a section a menu: each tool's name, aliases, key, tip and id,
   from the tool catalogue.
 
-`referenceEntries` reads a help text into entries by the layout every help
+`reference_entries` reads a help text into entries by the layout every help
 here keeps: an entry starts at a line that does not start with a blank, a
 label in the first column (`DimStyle  DIMSTYLE LIST ...`) titles a group, and a
 first paragraph ended by a blank line is the section's introduction. The
 search wants every word it is given, in any case; a double-click puts the
 entry's verb on the command line, to be finished there, and the reference
-itself runs nothing. `windowHelpText` lives beside the reference rather than
-in `main_window.cpp` so that the widget tests search the real text; a comment
-on `dispatchLine` says a verb added there is added to it, and
-`CommandReference.TheWindowSectionNamesEveryVerbTheWindowRunsItself` checks
+itself runs nothing. `window_help_text` lives beside the reference rather than
+in the main window so that the widget tests search the real text; a comment
+on `dispatch_line` says a verb added there is added to it, and
+`command_reference::the_window_section_names_every_verb_the_window_runs_itself` checks
 the list. A typed `HELP` (or `?`) alone prints the interpreter's help, the
-geoprocessing verbs', the `UPDATE` verbs' and then `windowHelpText`; `HELP
+geoprocessing verbs', the `UPDATE` verbs' and then `window_help_text`; `HELP
 SHEETS` and `HELP UTILITY` are unchanged, and `HELP UPDATE` prints that
 family alone.
 
@@ -3286,11 +3306,11 @@ The Updates section and `UPDATE` in the Window list were added on 2026-10-14.
 The update verbs had come with their own help and a `HELP UPDATE`, and the
 reference - the one place a person searches - had neither: a search for
 "update" found nothing, though the command line took every line of the
-family. *Rejected: a second description of the lines in `windowHelpText`*,
+family. *Rejected: a second description of the lines in `window_help_text`*,
 which is how the Window section describes the verbs only the window runs:
 `UPDATE` is the session's, its help is the session's, and two texts would
 have drifted at the first line added
-(`TheUpdateVerbsAreFoundBySearchingAndPutOnTheCommandLine`).
+(`command_reference_dialog::the_update_verbs_are_found_by_searching_and_put_on_the_command_line`).
 
 The reverse fault is fixed too: the interpreter's help listed `PLOTSHEETS`,
 which `katana_cli` refuses (it paints, and only the window can), so
@@ -3299,14 +3319,14 @@ reader could not run. The line now says it is the window's, and names
 `--plot-sheets` for a headless run.
 
 Help > Keyboard Shortcuts (`helpKeyboardShortcuts`, `keyboardShortcutsDialog`,
-`src/katana_qt/keyboard_shortcuts_dialog.hpp`) is a searchable table of every
+`rust/crates/katana_window/src/keyboard_shortcuts_dialog.rs`) is a searchable table of every
 key the window answers to - the key, the command, the menu it is under and its
-status tip (`MainWindow::shortcutRows`) - with any key that
-`MainWindow::shortcutClashes` finds reaching two commands marked "(clash)" and
+status tip (`MainWindow::shortcut_rows`) - with any key that
+`MainWindow::shortcut_clashes` finds reaching two commands marked "(clash)" and
 listed under the table. The keys are the ones `--check-shortcuts` counts, so
 the two cannot disagree.
 
-Tested in `tests/qt_widgets/test_command_reference.cpp` and, through the Help
+Tested in `rust/crates/katana_window/tests/host/command_reference.rs` and, through the Help
 menu, by `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`.
 
 ## Help > Check for Updates
@@ -3315,7 +3335,7 @@ Katana replaces itself with a newer release. The engine that checks,
 downloads and swaps the files, the helper program that does the swap and the
 release feed are the update system's own (its document is `update.md`); the
 verbs are the session's, shared with `katana_cli`
-(`src/katana_app/update_verbs.hpp`: `UPDATE CHECK`, `STATUS`, `DOWNLOAD
+(`rust/crates/katana_app/src/update_verbs.rs`: `UPDATE CHECK`, `STATUS`, `DOWNLOAD
 CONFIRM`, `APPLY CONFIRM`, `SKIP`, `BLOCKED CLEAR`, `SET AUTO`, `TOKEN`). This
 section is what the WINDOW adds: a menu item, a status-bar button, a dialog, a
 page of Settings ("The Updates page", under "Settings"), and the close that
@@ -3328,46 +3348,46 @@ the dialog), above About. And a button in the status bar,
 `statusUpdateAvailable`, reading "Update 0.3.0": hidden until a newer release
 is known, shown while there is one to act on - offered, on its way,
 downloaded, or waiting for other programs to close
-(`updateStatusButtonText`; in a build tree, where no update is ever known,
+(`update_status_button_text`; in a build tree, where no update is ever known,
 the button is there by its name and has no words:
 `qt_a_typed_update_status_says_a_build_tree_is_a_development_copy_headless`).
 Both open the dialog.
 
-**Two classes.** `UpdateDialog` (`src/katana_qt/update_dialog.hpp`) shows and
-asks; `UpdateWorkbench` (`src/katana_qt/update_workbench.hpp`) owns it and
+**Two classes.** `UpdateDialog` (`rust/crates/katana_window/src/update_dialog.rs`) shows and
+asks; `UpdateWorkbench` (`rust/crates/katana_window/src/update_workbench.rs`) owns it and
 does everything else, built as the geoprocessing and utility workbenches are.
 The dialog needs no window and reads no engine: it is given an `UpdateView` -
 plain data - and a context of callbacks, so the widget tests drive it alone
-(`tests/qt_widgets/test_update_dialog.cpp`). A press changes no text in it:
+(`rust/crates/katana_window/tests/update/update_dialog.rs`). A press changes no text in it:
 what a line did comes back as the next view, never as a guess of the
-dialog's (`APressChangesNoSentenceByItselfTheNextViewDoes`).
+dialog's (`update_dialog::a_press_changes_no_sentence_by_itself_the_next_view_does`).
 
 **What the workbench decides is not in the workbench.** It needs the whole
 window, so no test can build it; a decision written inside it is run by
 nothing. So each one is a function of its arguments beside the dialog
-(`update_dialog.hpp`, "THE DECISIONS"), in the library the widget tests link,
+(`update_dialog.rs`, "THE DECISIONS"), in the library the widget tests link,
 and the workbench only gathers the facts - the disk, the clock, the
 environment, the job runner - and does what they say:
 
 | Function | Decides |
 |---|---|
-| `updateViewOfOffer` | which state `UPDATE CHECK`'s answer is: Available, or Ready when that version is already downloaded; Current; NotOffered; CheckFailed; Unsupported |
-| `updateQuietAnswer` | what the AUTOMATIC check does with its answer: announce it, show it without a word, or drop it |
-| `updateEffectOfLine` | what a line that was run at once and carried out does to what the dialog shows: `UPDATE SKIP NONE` and `UPDATE BLOCKED CLEAR` take back what their own list set aside, `UPDATE SKIP <version>` the release that was offered |
-| `updateStagedToOffer` | whether the release `UPDATE STATUS` says is downloaded is offered as Ready when the window starts |
-| `updateStagedAfter` | whether a downloaded release is still one to install after a check answered |
-| `updateViewOfLastResult` | how the last apply's result is shown at the next start, and for which endings the view carries the command that puts the install right by hand |
-| `updateAutomaticCheckIsDue` | whether the window checks by itself now |
-| `updateSkippedOfState`, `updatePutBackOfState` | what Settings > Updates is told of the state file: the skipped version, and whether a release that was put back can still be offered here - and nothing at all for a file that does not read, never "none" ("The Updates page") |
-| `updateTellsOfSetAside` | whether the dialog is telling of a release that is set aside, which keeps the page's button on while the dialog points at it |
-| `updateStartMayConfirm` | whether a window that has come idle is the proof that an update starts: only in a copy with an install record whose installed version is the program's own, which refuses a record that names a version above the program's ("An update that was never said to start", below) |
-| `updateFailureIsBoxed` | whether an update that could not be started is said in a message box as well as on stderr: only in a run that was given no line to run. It is `main()`'s decision, here with the others so that a test can ask it |
-| `updateRecoveredTransactions` | which helper copies a start may remove: those of this install's updates that a recovery put right and that are over |
-| `updateStatusButtonText` | the status-bar button's words, and that it is hidden |
-| `updateReplyValue`, `updateStagedOfReply` | a record of a reply, by its key |
-| `updateLoggedLine`, `updateLoggedReply` | what the log may show of a line, and of the verbs' answer to it |
+| `update_view_of_offer` | which state `UPDATE CHECK`'s answer is: Available, or Ready when that version is already downloaded; Current; NotOffered; CheckFailed; Unsupported |
+| `update_quiet_answer` | what the AUTOMATIC check does with its answer: announce it, show it without a word, or drop it |
+| `update_effect_of_line` | what a line that was run at once and carried out does to what the dialog shows: `UPDATE SKIP NONE` and `UPDATE BLOCKED CLEAR` take back what their own list set aside, `UPDATE SKIP <version>` the release that was offered |
+| `update_staged_to_offer` | whether the release `UPDATE STATUS` says is downloaded is offered as Ready when the window starts |
+| `update_staged_after` | whether a downloaded release is still one to install after a check answered |
+| `update_view_of_last_result` | how the last apply's result is shown at the next start, and for which endings the view carries the command that puts the install right by hand |
+| `update_automatic_check_is_due` | whether the window checks by itself now |
+| `update_skipped_of_state`, `update_put_back_of_state` | what Settings > Updates is told of the state file: the skipped version, and whether a release that was put back can still be offered here - and nothing at all for a file that does not read, never "none" ("The Updates page") |
+| `update_tells_of_set_aside` | whether the dialog is telling of a release that is set aside, which keeps the page's button on while the dialog points at it |
+| `update_start_may_confirm` | whether a window that has come idle is the proof that an update starts: only in a copy with an install record whose installed version is the program's own, which refuses a record that names a version above the program's ("An update that was never said to start", below) |
+| `update_failure_is_boxed` | whether an update that could not be started is said in a message box as well as on stderr: only in a run that was given no line to run. It is `main()`'s decision, here with the others so that a test can ask it |
+| `update_recovered_transactions` | which helper copies a start may remove: those of this install's updates that a recovery put right and that are over |
+| `update_status_button_text` | the status-bar button's words, and that it is hidden |
+| `update_reply_value`, `update_staged_of_reply` | a record of a reply, by its key |
+| `update_logged_line`, `update_logged_reply` | what the log may show of a line, and of the verbs' answer to it |
 
-Their tests are `UpdateDecisions`, with records written by hand.
+Their tests are `update_decisions`, with records written by hand.
 
 **The states.** The first sentence is `updateStateText`, the rest
 `updateDetailText`, and exactly these buttons are shown; the others are
@@ -3391,13 +3411,13 @@ Idle, Checking and NotOffered are not in the design's list and a window
 cannot do without them: something is shown before the first answer and while
 one is on its way, and `UPDATE CHECK` has two answers that name a newer
 release without offering it. The reason in a sentence is a person's words for
-the engine's token (`updateReasonWords`: `offline` is "this computer is
+the engine's token (`update_reason_words`: `offline` is "this computer is
 offline, or the release server did not answer", `http_503` "the release
 server answered with error 503", `html_page` - a hotel's or a site office's
 sign-in page where the release server should have answered - "a web page
 answered in the place of the release server; this network may want you to
 sign in first"; a token it does not know is shown as it came, and
-`EveryReasonTheEngineGivesHasWordsOfItsOwn` holds the table to the tokens the
+`update_words::every_reason_the_engine_gives_has_words_of_its_own` holds the table to the tokens the
 engine's headers list: a check's, the transport's, a download's, the helper's
 preflight's and an apply's). A megabyte is a million bytes, rounded to
 the nearest, and a download is never said to be 0 MB. The files of
@@ -3420,33 +3440,33 @@ and `elevated` reads "Katana was started as administrator; start it the
 ordinary way, not as administrator, and update again - the download is kept".
 `platform`, where this version installs nothing, reads "this copy of Katana
 cannot install an update on this kind of computer; the release notes say
-where to download it" (`ACopyThatMayNotInstallIsToldWhatItCanDoAboutIt`). The
+where to download it" (`update_words::a_copy_that_may_not_install_is_told_what_it_can_do_about_it`). The
 verbs refuse `UPDATE APPLY CONFIRM` for either as an error, and an error is
 shown in the verbs' own sentence, which says the same; the table's words are
 for the token wherever it arrives without one. And `interrupted_update` reads
 "an earlier update is not settled yet", not that it failed: it is what the
 helper answers while an earlier update is neither confirmed nor put back
 ("An update that was never said to start", below;
-`AnEarlierUpdateThatIsStillOpenIsSaidToBeUnsettledNotFailed`).
+`update_words::an_earlier_update_that_is_still_open_is_said_to_be_unsettled_not_failed`).
 
 **A refusal over an earlier update says what to do** (2026-10-14). The helper
 names the way out of `interrupted_update` in its own `detail` - "... or run:
 katana_updater --recover ..." - which goes to a console nobody sees: the
 result it leaves for the next start keeps the reason's token alone
-(`update::LastResult`). So in an install whose window could not confirm the
+(`katana_update::state::LastResult`). So in an install whose window could not confirm the
 earlier update, each Restart and update closed Katana and reopened it on
 "Reason: an earlier update is not settled yet." with nothing to do, and the
-release was Ready again. `updateViewOfLastResult` now gives that ending the
+release was Ready again. `update_view_of_last_result` now gives that ending the
 command it gives `rollback_incomplete`, and the sentence after the reason is
 "Update again; if this is said again, close Katana and run: katana_updater
 --recover "C:\Programs\Katana"" - the install's folder, as the platform
 writes it. Update again FIRST, because the start that shows the sentence is
 what settles most such updates: every start puts back what a crash
-interrupted (`update::recover`), and a window of the installed version
+interrupted (`katana_update::recover::recover`), and a window of the installed version
 confirms an update that was never said to start. Where the refusal comes
 again - a window that may not confirm, a release that does not start - only
 the helper's recovery, run by hand with Katana closed, settles it
-(`AnUpdateRefusedOverAnEarlierOneThatIsNotSettledNamesTheCommandThatSettlesIt`).
+(`update_decisions::an_update_refused_over_an_earlier_one_that_is_not_settled_names_the_command_that_settles_it`).
 The sentence is in the command log too, as every ending is. `UPDATE STATUS`
 still gives the token alone (`last=refused:interrupted_update`), on every
 surface.
@@ -3463,7 +3483,7 @@ a check's `update=blocked`, and the last apply's ending when its reason is
 `health_exit` or `health_timeout` - the two after which the helper blocks a
 release, and no others. After any other ending nothing was set aside and the
 sentence is not said: it would send the person to a button that is off
-(`OnlyAReleaseThatWasPutBackForNotStartingIsSaidToBeOfferedAgainInSettings`).
+(`update_dialog::only_a_release_that_was_put_back_for_not_starting_is_said_to_be_offered_again_in_settings`).
 The button is Settings > Updates' "Offer the version that was put back
 again" ("The Updates page"). Once its line was carried out, a dialog that
 still said "not offered again" goes back to "Not checked for updates yet.",
@@ -3471,8 +3491,8 @@ as it does after `UPDATE SKIP NONE`, and the next check offers the release.
 Each line takes back only what its own list set aside - `BLOCKED CLEAR`
 leaves a skipped release as it is shown, `SKIP NONE` one that was put back -
 and a reply that gives a reason (`blocked=none reason=no_state`: no update
-folder, so nothing was kept) takes back nothing (`updateEffectOfLine`;
-`ALineThatWasCarriedOutTakesBackOnlyWhatItsOwnListSetAside`).
+folder, so nothing was kept) takes back nothing (`update_effect_of_line`;
+`update_decisions::a_line_that_was_carried_out_takes_back_only_what_its_own_list_set_aside`).
 *Rejected: a button for it in this dialog.* RolledBack is read and closed,
 with nothing to press, so that no single press there installs again a
 release that has just failed to start; the way back is a deliberate step
@@ -3480,7 +3500,7 @@ somewhere else.
 
 **What each button does.** It builds the line a person would type and hands
 it to the window's one executor ("One executor: the command runner"), or
-calls one callback (`EachButtonBuildsExactlyItsLineOrCallsExactlyItsCallback`):
+calls one callback (`update_dialog::each_button_builds_exactly_its_line_or_calls_exactly_its_callback`):
 
 | Button | Object name | Does |
 |---|---|---|
@@ -3502,7 +3522,7 @@ both go with the next view. No button is a default.
 
 **The lines that take time are jobs.** `UPDATE CHECK`, `UPDATE DOWNLOAD
 CONFIRM` and `UPDATE APPLY CONFIRM` - whose preflight copies the helper and
-runs its self-test - are run by `app::runUpdateLine` on a worker thread
+runs its self-test - are run by `katana_app::update_verbs::run_update_line` on a worker thread
 ("Geoprocessing jobs", below, for the runner: progress and Cancel in the
 status bar), with a COPY of the verbs' context taken on the interface thread,
 and their reply is logged on the interface thread when they end, as a typed
@@ -3515,15 +3535,15 @@ refused for a job they never started: a check asked for - typed, Check now,
 or Help > Check for Updates with nothing known yet - while the AUTOMATIC
 check is on its way takes that one over. It is not started twice; the dialog
 says Checking, and its answer is logged and shown as a typed check's is.
-`MainWindow::runWorkbenchLine`
+`Executor::run_workbench_line`
 takes `UPDATE` lines before every other family, as the session does, so a
 `DOWNLOAD` or an `APPLY` typed on the command line goes exactly the way the
 buttons go - the buttons build those very lines. `HELP UPDATE` prints the
 verbs' own help, `HELP` alone includes it, and Help > Command Reference shows
 it as its Updates section.
 
-**The context** (`app::UpdateContext`) is made once, at first use -
-`app::makeUpdateContext` for the surface the window turned out to be,
+**The context** (`katana_app::UpdateContext`) is made once, at first use -
+`katana_app::update_verbs::make_update_context` for the surface the window turned out to be,
 `Window` or `HeadlessWindow`, which it knows only after `main()` has said so
 - and given this process's id and this program's path: what the helper waits
 for before it touches a file, and what it starts again afterwards. It is made
@@ -3535,21 +3555,21 @@ interactive window is shown, and then an hourly look at whether one is due.
 It runs only when ALL of these hold: the window is one a person uses (never
 headless); the copy was installed by packaging (a build tree, which has no
 install record, stays offline - so does a `--command` run in one); the
-state's automatic flag is on; `update::checkIsDue` says so (every 24 hours and
+state's automatic flag is on; `katana_update::state::check_is_due` says so (every 24 hours and
 up to 2 more, the jitter drawn once per process); and the environment
 variable `KATANA_UPDATE_DISABLE` is not set to anything
-(`updateAutomaticCheckIsDue`; `TheWindowChecksByItselfOnlyWhenEveryConditionHolds`
+(`update_automatic_check_is_due`; `update_decisions::the_window_checks_by_itself_only_when_every_condition_holds`
 takes each condition away in turn). It is QUIET: when it learns nothing -
 offline, a 404, a signature that does not verify - nothing is logged and
 nothing shown. A release the person skipped, or one that was rolled back
-here, is not offered (`update::applyUpdateState`) - and if the window still
+here, is not offered (`katana_update::check::apply_update_state`) - and if the window still
 offered it, as Available or Ready, the offer is taken back without a word,
 as it is when the feed no longer has the release at all. When there is news,
 the line and its reply are logged as a typed check's are and the status-bar
 button appears; the dialog is not opened unasked. A release the window
 already offers is no news, and what must stay until it is read - how the
 last update ended - is not replaced
-(`TheAutomaticChecksAnswerIsAnnouncedShownWithoutAWordOrDropped`).
+(`update_decisions::the_automatic_checks_answer_is_announced_shown_without_a_word_or_dropped`).
 
 **One click.** Update is `UPDATE DOWNLOAD CONFIRM`, then - when its reply says
 the release is staged - `UPDATE APPLY CONFIRM`, then the window's ordinary
@@ -3564,8 +3584,8 @@ question are asked as ever:
   that `APPLY CONFIRM` made for the request (`run-<transaction>` in the update
   state folder) is listed for the sweep the next start makes; so it is after
   Later, and when the person closes the window themselves while the close
-  for the update is waiting. The listing is `app::abandonApply`
-  (`src/katana_app/update_verbs.hpp`), the one way a prepared apply is given
+  for the update is waiting. The listing is `katana_app::update_verbs::abandon_apply`
+  (`rust/crates/katana_app/src/update_verbs.rs`), the one way a prepared apply is given
   up, which the session and `katana_cli` take too; the workbench had a second
   copy of it until 2026-10-14.
 - **A job is running** - a geoprocessing run, say - and the close waits for
@@ -3578,14 +3598,14 @@ question are asked as ever:
   The update dialog says "Katana will close when the dialog that is open has
   been closed, then update and reopen."
 - **The close succeeds**, and only then does
-  `MainWindow::takePendingUpdate` hand `main()` the request, after the event
-  loop has ended; `main()` calls `update::launchApply` as its last act, and
+  `MainWindow::take_pending_update` hand `main()` the request, after the event
+  loop has ended; `main()` calls `katana_update::apply::launch_apply` as its last act, and
   the helper swaps the files once this process has gone. A window the PERSON
   closes while an update waits installs nothing.
 - **The helper cannot be started.** The window is gone by then, so `main()`
   says it: on stderr ALWAYS ("the update could not be started: ..."), and the
   run ends with exit 1, as `katana_cli`'s does; the helper's copy goes to the
-  sweep (`app::abandonApply`) and the release stays downloaded. It is said in
+  sweep (`katana_app::update_verbs::abandon_apply`) and the release stays downloaded. It is said in
   a message box as well - a GUI program's stderr goes nowhere a person looks -
   but only when the run was given no line to run: no `--command`, `--enter`
   or `--run-line`. A run that was given one is not headless (it is a window a
@@ -3593,8 +3613,8 @@ question are asked as ever:
   whoever started it - a script, a test, an agent - and nobody may be there
   to close a box: until 2026-10-14 `katana --command "UPDATE APPLY CONFIRM"`
   whose helper did not start waited on that box for ever. Which runs get the
-  box is `updateFailureIsBoxed`, asked with the kinds of the steps the run
-  was given (`AnUpdateThatCouldNotBeStartedIsBoxedOnlyInAWindowNobodyDrove`).
+  box is `update_failure_is_boxed`, asked with the kinds of the steps the run
+  was given (`update_decisions::an_update_that_could_not_be_started_is_boxed_only_in_a_window_nobody_drove`).
   *Rejected: making every `--command` run headless.* A headless window is
   never shown, restores no session and starts nothing about updates, and a
   run is started with `--command` precisely to set a window up for a person.
@@ -3608,10 +3628,10 @@ earlier update could not delete - and with it the helper's copy of each
 update of this install that a recovery put right. A recovery writes nothing
 per user, so nothing in the update state folder names that copy; the
 install's own `recovery.log` does, and a copy is removed only once its
-update is over (`updateRecoveredTransactions`; `update.md`, "Recovery").
+update is over (`update_recovered_transactions`; `update.md`, "Recovery").
 And it offers again, as Ready, a release that was downloaded in an earlier
 session and not installed - with two exceptions, which are the rule that a
-skipped or blocked release is not offered (`updateStagedToOffer`):
+skipped or blocked release is not offered (`update_staged_to_offer`):
 
 - one the person **skipped** since it was downloaded;
 - one that was **rolled back here**. A release that was installed and did
@@ -3623,7 +3643,7 @@ skipped or blocked release is not offered (`updateStagedToOffer`):
   workbench reads the blocked list from the state file and looks in the
   update folder: while the complete download of a blocked build is there,
   nothing is offered as Ready at a start
-  (`AReleaseThatWasRolledBackHereIsNotOfferedAsReadyAtTheNextStart`). A later
+  (`update_decisions::a_release_that_was_rolled_back_here_is_not_offered_as_ready_at_the_next_start`). A later
   build of the release, once downloaded, replaces that folder and is offered.
 
 A development copy does none of this: a build run from a build tree shares
@@ -3636,12 +3656,12 @@ helper that dies in that wait - power, a shutdown, the process ended - leaves
 the release installed with nothing recorded either way: not healthy, not put
 back, and no result for the next start to show. Recovery leaves such an
 update alone (the tree is a whole version), so three later events settle it
-(`include/katana/update/recover.hpp`; `update.md`): the next logon's
+(`rust/crates/katana_update/src/recover.rs`; `update.md`): the next logon's
 `katana_updater --recover`, the next update, and - the window's part - **a
 window of that very version that has come idle**, which is exactly what the
 health run exists to show. On its first idle turn, before the automatic
-check, `UpdateWorkbench::start` asks `updateStartMayConfirm` and then calls
-`update::confirmStarted` for the install and the update state folder: with
+check, `UpdateWorkbench::start` asks `update_start_may_confirm` and then calls
+`katana_update::recover::confirm_started` for the install and the update state folder: with
 nothing to settle - every start but that one - it is a listing of one folder
 and takes no lock; otherwise the update is recorded healthy and the dead
 helper's copy is cleared away. Nothing is shown and nothing logged: the
@@ -3650,8 +3670,8 @@ update did work.
 - **Only the version that was installed proves it.** The call is made only
   in an interactive window (it writes per-user state) of an installed copy
   that has an install record and whose installed version is the program's
-  own (`AStartConfirmsAnUpdateOnlyInAWindowOfTheVersionThatWasInstalled`).
-  The installed version is the HIGHER of two builds (`update::readInstall`;
+  own (`update_decisions::a_start_confirms_an_update_only_in_a_window_of_the_version_that_was_installed`).
+  The installed version is the HIGHER of two builds (`katana_update::install::read_install`;
   `update.md`, "The installed version"): the one the helper recorded in
   `installed.json` when an update committed, and the one the package names
   of itself in `install.json`. The program that asks is not asked: its
@@ -3670,7 +3690,7 @@ update did work.
   the verbs' context, which read it when the window was built - during the
   swap that may have been the old record still.
 - **A helper that is alive settles its own update.** It holds the update
-  lock, and `confirmStarted` then answers that it is busy. The window asks
+  lock, and `confirm_started` then answers that it is busy. The window asks
   again every 5 seconds, 12 times - the minute the helper waits at most - in
   case the helper dies instead, and then leaves it to the next start or the
   next logon.
@@ -3678,8 +3698,9 @@ update did work.
   release starts, never that it does not; putting back is for the logon's
   `--recover`, with no program of the install running.
 
-**`main()`** (`src/katana_qt/main.cpp`) does three things for updates: before
-Qt is started, `update::recover` for the install the program is in, so that
+**`main()`** (`rust/crates/katana_window/src/bin/katana/main.rs`, through the program driver's
+`recover_interrupted_update`) does three things for updates: before
+any window is made, `katana_update::recover::recover` for the install the program is in, so that
 an update a crash interrupted is put right before anything else runs (a
 listing of one folder when there is nothing to do); the switch
 `--update-health`, by which the helper asks a version it has just put in
@@ -3709,7 +3730,7 @@ Decisions, and what was rejected:
   a minute later. The health run is therefore a window that is built, never
   shown, and gone again; the helper then starts Katana as a person would.
 
-Tested in `tests/qt_widgets/test_update_dialog.cpp` (the dialog, the words
+Tested in `rust/crates/katana_window/tests/update/update_dialog.rs` (the dialog, the words
 and the decisions) and in the real window by
 `tests/update/headless/update_window.cmake`:
 `qt_the_update_dialog_opens_by_its_name_and_says_a_build_tree_cannot_update_headless`,
@@ -3723,7 +3744,7 @@ the reply in the log and the view it becomes - that a build tree allows.
 Not done:
 
 - **The workbench's wiring has no test of its own.** What it DECIDES is
-  tested (`UpdateDecisions`); what it DOES with a decision is not, beyond the
+  tested (`update_decisions`); what it DOES with a decision is not, beyond the
   one job a build tree allows: it needs the window, so it is not in the
   widget tests' library, and a development copy never asks a server,
   downloads or applies. A download's job and its progress, the order of the
@@ -3732,17 +3753,17 @@ Not done:
   over, and the last result being cleared are exercised only by the update
   system's end-to-end tests and by a release. So is the confirmation of an
   update that was never said to start: whether a window may confirm is
-  tested (`updateStartMayConfirm`), and what confirming does is the engine's
+  tested (`update_start_may_confirm`), and what confirming does is the engine's
   and tested there; the call itself, its fresh read of the install record and
   its twelve askings are run by an installed copy alone. And `main()`'s
   answer to a helper that cannot be started - stderr, exit 1, the box - is
   reached by no test: it takes an installed copy whose helper is there for
   the preflight and gone a moment later. Which runs get the box is tested
-  (`updateFailureIsBoxed`); that `main()` asks it, and says the rest, is not.
+  (`update_failure_is_boxed`); that `main()` asks it, and says the rest, is not.
   What a start lists from the install's `recovery.log` and then sweeps is
   reached by neither a development copy nor a headless run, so by no test:
-  which copies it may list is tested (`updateRecoveredTransactions`), and the
-  sweep is the engine's and tested there (`update::processCleanupList`);
+  which copies it may list is tested (`update_recovered_transactions`), and the
+  sweep is the engine's and tested there (`katana_update::state::process_cleanup_list`);
   reading the log and listing the copies are run by a release alone.
 - **A typed check that fails while a release is Ready** leaves the dialog on
   "Could not check for updates" with Retry; the downloaded release is not
@@ -3777,7 +3798,7 @@ layer, the current style - and nowhere the alignment count, the undo depth,
 the full project path or the customisation it was drawn with; the
 customisation's coverage was logged once, at a load, and scrolled away. File >
 Drawing Summary (`fileDrawingSummary`, `drawingSummaryDialog`,
-`src/katana_qt/customisation/drawing_summary_dialog.hpp`) keeps it all in view,
+`rust/crates/katana_window/src/customisation/drawing_summary_dialog.rs`) keeps it all in view,
 non-modal and kept, following the Document through a `DocumentWatcher`
 (refreshed once a turn of the event loop however many commands ran):
 
@@ -3787,22 +3808,22 @@ non-modal and kept, following the Document through a `DocumentWatcher`
 - the selection;
 - the undo and redo depth with the next step each way;
 - the customisation, word for word what a bare `CUSTOMISE` replies
-  (`cad::formatCustomisationReply` of `cad::customisationSummary(document)`):
+  (`katana_cad::customisation_report::format_customisation_reply` of `katana_cad::customisation_report::customisation_summary(document)`):
   the counts, then the records - the session's name, origin and whether it
   is kept, its sources in load order, the automation, the linework codes,
   the names the project was drawn with that are not loaded - and this
   drawing's coverage. The pane wraps at its edge: the records are longer
   than it is wide (the linework record is 143 characters), and unwrapped the
   end of each was out of sight behind a scroll bar
-  (`DrawingSummaryDialog.NoRecordOfTheCustomisationPaneIsCutAtThePanesEdge`).
+  (`drawing_summary_dialog::no_record_of_the_customisation_pane_is_cut_at_the_panes_edge`).
   It reads the Document's own state; the window once
   kept the loaded files and the missing ones in lists of its own and handed
   them over, and the pane printed an older prose of them. Then the names the
   drawing's styles give that no loaded library defines
   (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
   and Linetypes, opens Format > Styles and Linetypes on its Styles tab with the
-  Missing chip and the name in the search, reached by the object names the
-  manager's header lists (`MainWindow::showMissingInStyles`), so its styles
+  Missing chip and the name in the search, reached by the control names the
+  manager's module lists (`MainWindow::show_missing_in_styles`), so its styles
   are what the manager shows.
 
 It changes nothing. Copy as JSON runs `STATUS JSON` through the one executor
@@ -3813,11 +3834,11 @@ the item is gone ("The Format menu", above), and the button with it, since a
 trigger of a name that is no menu item fails without a word. The heading over
 its customisation report (`drawingSummaryCustomisationLabel`) says where the
 customisation is changed now - "File > Settings loads, writes or resets it"
-(`DrawingSummaryDialog.ItOffersNoButtonForTheRemovedLoadCustomisationItem`).
+(`drawing_summary_dialog::it_offers_no_button_for_the_removed_load_customisation_item`).
 The status bar has a permanent `statusSelectionCount` label, "3 selected / 120
 entities", refreshed with the panels.
 
-Tested in `tests/qt_widgets/customisation/test_drawing_summary_dialog.cpp`
+Tested in `rust/crates/katana_window/tests/styles/drawing_summary_dialog.rs`
 and, typed and through the menu, by
 `qt_drawing_summary_and_status_json_describe_the_drawing_headless`, which
 leaves a style's linestyle undefined by replacing the library that defined it
@@ -3833,8 +3854,8 @@ now, and the menu items write their lines:
 
 - **`PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N]
   [dpi=N] [style=colour|grey|mono] [lineweight=F] [margin=MM]`**
-  (`src/katana_qt/plotting/plot_drawing_dialog.hpp`): the drawing on one
-  sheet as the active plan view shows it, through the `plotDrawingToPdf`
+  (`rust/crates/katana_window/src/plotting/plot_drawing_dialog.rs`): the drawing on one
+  sheet as the active plan view shows it, through the `plot_drawing_to_pdf`
   that `--plot` uses; what is not given is `PlotSettings`' default. It logs
   the sentence it always did and a record, `file="..." paper= orientation=
   scale= dpi= style= lineweight=`, with the scale a fitted plot chose. A plot
@@ -3844,26 +3865,26 @@ now, and the menu items write their lines:
   sentence and the `file=` record, which stays the last line; the plot is
   written all the same (`qt_a_plot_of_a_surface_with_contours_too_fine_says_so_headless`),
   and the dialog shows the records in `plotDrawingWarnings`, hidden when a
-  plot had none (`PlotDrawingDialog.TheWarningRecordsOfTheReplyAreShownAndTheFileRecordStaysTheStatus`). File >
+  plot had none (`plot_drawing_dialog::the_warning_records_of_the_reply_are_shown_and_the_file_record_stays_the_status`). File >
   Plot to PDF (`filePlot`) opens `plotDrawingDialog`, non-modal and kept:
-  every field has an object name, the colour mode
+  every field has a control name, the colour mode
   (`plotDrawingColourMode`, Colour / Greyscale / Monochrome) and the line
   weight scale (`plotDrawingLineWeightScale`, 0.10 to 5.00) among them;
   `plotDrawingCommand` shows the line and Plot runs it through the one
   executor. The file is a field, so a headless run fills it; Browse opens a
   file dialog, except headless. The file suggested follows the drawing
-  (`MainWindow::suggestPlotFiles`, on a drawing opened, made new or saved):
+  (`MainWindow::suggest_plot_files`, on a drawing opened, made new or saved):
   kept from the first showing, the dialog once plotted a drawing opened
   afterwards into the first project's folder under its name. A path typed in
   the field is left as it is. Plot asks before writing over a file that is
   there, as the save dialog before it did - the drawing's suggested PDF is the
-  sheet set's too (`suggestedPlotFile`) - and a headless run writes it, as the
+  sheet set's too (`suggested_plot_file`) - and a headless run writes it, as the
   verb does (`qt_the_plot_dialogs_file_follows_the_drawing_opened_headless`).
 - **`SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N]
   [scale=F] [bg=theme|white|none] [view=plan|3d]`**
-  (`src/katana_qt/plotting/view_image_export.hpp`): a picture of the plan or
+  (`rust/crates/katana_window/src/plotting/view_image_export.rs`): a picture of the plan or
   3D view. The plan view is painted afresh at the size asked by the plan
-  painter (`ViewportWidget::renderToImage`, read-only: the view's own kept
+  painter (`PlanView::render_to_image`, read-only: the view's own kept
   drawing is untouched), at the scale that fits what the view shows, without
   the grid, the snap marker or a tool's preview. On `bg=white` it is drawn
   as a plot draws it - white pens black, line weights in millimetres - since
@@ -3880,18 +3901,18 @@ now, and the menu items write their lines:
   `SNAPSHOT CLIPBOARD`. The record is `file="..."` or `clipboard=yes`, then
   `view= width= height=`.
 
-Both are the window's verbs, beside `PLOTSHEETS`: the painter is Qt's, which
+Both are the window's verbs, beside `PLOTSHEETS`: the painter is the window's, which
 `katana_cli` and `katana_mcp` do not have, and which refuse the lines by name,
 saying where they run (`docs/mcp.md`, "What the server adds to the command
 line"), rather than as unknown commands. A headless run has `--plot` with
 the same settings, and an agent driving the window types the lines (the
 Command Reference's Window section lists them).
 
-Tested in `tests/qt_widgets/plotting/test_plot_drawing_dialog.cpp` and
-`tests/qt_widgets/plotting/test_view_image_export.cpp` (the grammars, the
+Tested in `rust/crates/katana_window/tests/sheets/plot_drawing_dialog.rs` and
+`rust/crates/katana_window/tests/sheets/view_image_export.rs` (the grammars, the
 dialogs' lines, the sizes, each file format, and the plan painted into an
 image), by `qt_plot_and_view_image_dialogs_run_their_verbs_headless` (both
-dialogs driven by object name, Copy View as Image, a typed transparent PNG,
+dialogs driven by control name, Copy View as Image, a typed transparent PNG,
 the 3D view grabbed; the dialog's image size read from the PNG's header), and
 by `qt_plot_headless`, whose `PLOT` script prints the same sheet in each
 style: the colour plot has coloured pixels and the greyscale and monochrome
@@ -3905,8 +3926,8 @@ moved several, but only for someone who typed them. The Edit toolbar's Undo
 and Redo are now split buttons (`editUndoButton`, `editRedoButton`): the
 button is one step, as before, and the arrow - in a strip of its own beside
 the icon ("Tool families on the toolbars", above) - drops down the history
-(`editUndoMenu`, `editRedoMenu`) from `CommandStack::undoNames` and
-`CommandStack::redoNames`, the next step first. The k-th entry (`undoStepK`,
+(`editUndoMenu`, `editRedoMenu`) from `CommandStack::undo_names` and
+`CommandStack::redo_names`, the next step first. The k-th entry (`undoStepK`,
 `redoStepK`, so `--trigger undoStep3` reaches it) runs `UNDO k` or `REDO k`
 through the one executor: one line in the log, and what it did said as the
 typed line says it. Its status tip is that line and what it covers: "UNDO 3:
@@ -3915,20 +3936,20 @@ the Redo list's once said "the last" too, which REDO does not do. The lists show
 how many more there are and that `UNDO n` reaches them; they are refilled with
 the panels. The names are the commands' own (`CREATE_POINT`), the words the
 Undo item and the Drawing Summary use. Tested in
-`tests/commands/test_command_stack_names.cpp` and by
+`rust/crates/katana_commands/tests/command_stack_names.rs` and by
 `qt_the_undo_and_redo_lists_step_through_the_history_headless`. Not done: an
 Undo History dock with the save point marked is not built.
 
 ## GIS > Online Data: a workbench of its own
 
 The online import (`docs/gis_online.md`) is `OnlineDataWorkbench`
-(`src/katana_qt/gis_online.hpp`), built as the Survey and Format workbenches
-are: `MainWindow::buildGisActions` hands it the GIS menu and a few callbacks
-(the document, the views, the log, whether the session is headless, and one
-that adds a raster to the reference data), and `MainWindow::runCommandLine`
-hands it any line that starts with `ONLINE`. Nothing else of it is in
-`main_window.cpp`. Its dialog (`src/katana_qt/gis_online_dialog.hpp`) is
-non-modal, has an object name on every control, and imports only by building
+(`rust/crates/katana_window/src/gis_online.rs`), built as the Survey and Format workbenches
+are: the window hands it the GIS menu as it makes the GIS actions, and it
+reaches the document, the views, the log, whether the session is headless,
+and the reference data through the window's host; `MainWindow::run_command_line`
+hands it any line that starts with `ONLINE`. Nothing else of it is in the
+main window. Its dialog (`rust/crates/katana_window/src/gis_online_dialog.rs`) is
+non-modal, has a control name on every control, and imports only by building
 the `ONLINE IMPORT` command the verb would parse and handing it back to the
 workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
@@ -3938,9 +3959,9 @@ progress and Cancel in the status bar; the entities arrive as one command.
 
 The geoprocessing verbs (`docs/geoprocessing.md`) - GDAL, and the families
 the geoprocessing packages add - are `GeoWorkbench`
-(`src/katana_qt/geo/geo_workbench.hpp`), built as the online and utility
-workbenches are. `MainWindow::buildGisActions` hands it the window's
-document, interpreter, reference rasters and surfaces. `runWorkbenchLine`
+(`rust/crates/katana_window/src/geo/geo_workbench.rs`), built as the online and utility
+workbenches are. The window hands it its document, interpreter, reference
+rasters and surfaces through the host. `run_workbench_line`
 asks it before the online and utility workbenches, so a typed line and a
 dialog's line through `runVerbLine` reach the same executor `katana_cli` and
 `katana_mcp` run. The window links `katana_app` for it: the window never has
@@ -3949,22 +3970,22 @@ a second implementation of a session verb.
 - **Prepared on the GUI thread.** The line is read, its scope resolved and
   what the run needs copied there. What answers at once - LIST, HELP, a
   PREVIEW, a refusal - is logged there.
-- **Run as a job.** Anything that runs is a background job (`jobs.hpp`), with
+- **Run as a job.** Anything that runs is a background job (`jobs.rs`), with
   progress and Cancel in the status bar. The job's Apply runs the executor's
   apply, as one undo step.
 - **Headless, the line waits for its job,** so what it did is logged, and
   captured by `runVerbLine`, before the next line.
 - **Interactively it logs `job id=<n> title="..." state=started`,** and when
-  the job ends it tells `GeoServices::finished` and any listener a dialog
-  added (`GeoWorkbench::addFinishedListener`). A cancelled job applies
+  the job ends it tells the window's geo services' `finished` and any listener a dialog
+  added (`GeoWorkbench::add_finished_listener`). A cancelled job applies
   nothing, whenever the cancel arrived.
 
 Its menu items come from one table with a block per package
-(`src/katana_qt/geo/menu_table.cpp`, `GeoMenus`). The GIS sections and the
+(`rust/crates/katana_window/src/geo/menu_table.rs`, `GeoMenus`). The GIS sections and the
 Terrain submenus are made only when an item is added, so no empty heading
 shows. The GDAL verb's item is GIS > Processing - GDAL > GDAL Toolbox.
 
-**The GDAL Toolbox** (`gdalToolboxDialog`, `src/katana_qt/geo/gdal_toolbox_dialog.hpp`)
+**The GDAL Toolbox** (`gdalToolboxDialog`, `rust/crates/katana_window/src/geo/gdal_toolbox_dialog.rs`)
 is every one of GDAL's algorithms in one window: the catalogue as a searchable
 tree, and for the algorithm chosen a form made at run time from the arguments
 GDAL declares - its bounds on the spin boxes, its choices in the lists, the
@@ -3980,19 +4001,19 @@ executor, as the dialogs below do.
 (`gridDemDialog`), Terrain > DEM > DEM Tools (`demToolsDialog`, a tab per
 tool) and the dialogs after them do no work of their own: each
 writes the line its fields describe into its Command field and hands it to
-`GeoServices::run`, the window's one executor. `GeoRunPanel`
-(`src/katana_qt/geo/geo_dialog_support.hpp`) is the Command, Preview, Run and
+the window's geo services' `run`, the window's one executor. `GeoRunPanel`
+(`rust/crates/katana_window/src/geo/geo_dialog_support.rs`) is the Command, Preview, Run and
 Reply they share: an interactive run answers `job id=<n> ... state=started`,
 so the panel shows "running" and takes the reply from the workbench's
 finished listeners when the job ends; a headless run's reply is the runner's
 own. A dialog is kept once made, a child of the window, so `--dialog` finds it
 by the name its action carries. Their scope and filter controls are Global
 Modify's (`ScopeFilterWidget`), given the window's views through
-`GeoServices::views`.
+the window's geo services' `views`.
 
 **The terrain dialogs** (Terrain > Surface From, GIS > Export Surface as DEM,
 and the Terrain > Analysis items) share
-`src/katana_qt/geo/terrain_dialog_support.hpp`. Each writes its line into a
+`rust/crates/katana_window/src/geo/terrain_dialog_support.rs`. Each writes its line into a
 read-only `<d>Command` field and Run hands it to `runVerbLine`. `TerrainRun`
 shows the reply in `<d>Reply`: at once when the line answered at once (a
 refusal, a PREVIEW, a headless run), else when the job whose id the reply
@@ -4009,7 +4030,7 @@ dialog through `showTerrainDialog` (made on first use under the window, so
 `--dialog <item>` finds it by the name the action carries as its data).
 The submenu is A&nalysis (A is Cut Section Along Alignment's) and its items
 take C, H, S, A, D and V, so each is reached from the keyboard; they had no
-letters, and `GeoMenus.EveryItemTheLanesAddHasALetterOfItsOwn` now fails an
+letters, and `geo_menus::every_item_the_lanes_add_has_a_letter_of_its_own` now fails an
 item the GIS or Terrain lanes add without one, as
 `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` fails a
 letter shared in one menu:
@@ -4043,7 +4064,7 @@ letter shared in one menu:
   tabs: Drape writes a DRAPE line (the ground, how a raster is read between
   cells - off for a surface - and the shared scope controls, `drapeScope`),
   and Sample a RASTER SAMPLE line of the points listed, typed or picked in
-  a plan view (`samplePick`, through `GeoServices::pickPoint`: the next
+  a plan view (`samplePick`, through `PointPick` and the workspace's `ViewAccess::pick_point`: the next
   left click; Esc or a right click cancels) (`docs/terrain.md`, "Sampling
   and drape").
 - `terrainViewshed` "Viewshed and Line of Sight..." opens `viewshedDialog`,
@@ -4053,7 +4074,7 @@ letter shared in one menu:
   curvature, a layer for the visible area and the raster's name), and Line
   of Sight a LOS line (the two ends, each typed or picked, and the heights)
   (`docs/terrain.md`, "Viewshed and line of sight").
-- The three are driven by object name through the real window headless,
+- The three are driven by control name through the real window headless,
   filled, run and their replies read (`tests/geo/headless/analysis.cmake`;
   `docs/terrain.md`, "Viewshed and line of sight", "Tests in the window").
   The pick buttons are not: a pick waits for a click in a plan view, which
@@ -4063,18 +4084,18 @@ letter shared in one menu:
 (`Document::surfaces`; `docs/terrain.md`, "Surfaces in the drawing"), saved
 with the project and changed one undo step at a time, so `SURFACE <name>`
 finds the same surface on every front end and the window keeps none of its
-own. `MainWindow::syncSceneSurfaces` rebuilds the views' list from the
+own. `Executor::sync_scene_surfaces` rebuilds the views' list from the
 Document whenever its generation moves - at once, inside the notification,
 because the list points at surfaces a step may have replaced - keeping how
 each was shown and taking whether it is shown from the drawing. Surfaces
 are shared and immutable, so a job may read one while the views draw it.
 The store keeps names unique: a second surface of a name is "name (2)".
 Terrain > Surfaces Panel (View > Panels > Surfaces) lists them
-(`src/katana_qt/terrain/surfaces_panel.hpp`).
+(`rust/crates/katana_window/src/terrain/surfaces_panel.rs`).
 
 **The GIS menu's option dialogs are one file each** - `gis_import_dialogs`,
 `gis_export_dialog`, `surface_raster_dialog`, `dataset_info_dialog`, with
-their shared OK/Cancel row in `gis_dialog_support.hpp` - split from one
+their shared OK/Cancel row in `gis_dialog_support.rs` - split from one
 `gis_dialogs` file without a change in behaviour, since four geoprocessing
 packages each extend one of them.
 
@@ -4087,9 +4108,9 @@ above) rather than inside those two: what an IFC exchange chooses
 - which of the drawing's objects go, an AS 5488 utility schedule and the
 delivery schema it was written to, a project's classification rules - has no
 place in the generic dialogs. Each opens a dialog (`IfcImportDialog`,
-`IfcExportDialog`, `src/katana_qt/ifc_dialogs.hpp`) that the window makes on
+`IfcExportDialog`, `rust/crates/katana_window/src/ifc_dialogs.rs`) that the window makes on
 first use and keeps: non-modal, a File field with a Browse button rather than a
-file dialog asked up front, and every control named in the header, so that a
+file dialog asked up front, and every control named at the head of its module, so that a
 headless run drives it (`--dialog fileExportIfc`, `--fill`, `--press`) and
 Browse, headless, says to type the path instead of opening a box.
 
@@ -4099,13 +4120,13 @@ verb: `EXPORT <file.ifc> ... [NOENTITIES] [SELECTED] [NOALIGNMENTS]
 [NOSURFACES] [NOROADMODEL] [PREVIEW]` and `IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS]
 [NOELEMENTS] [NOSURFACES] [TOLERANCE <m>] [TAKECRS | KEEPCRS]`, with `INFO`
 and `IFC RULES` (`docs/ifc.md`, "Using it"). A dialog writes the line its
-fields mean (`ifc::formatExportLine`, `ifc::formatImportLine`), shows it as it
+fields mean (`katana_ifc::front_end::format_export_line`, `katana_ifc::front_end::format_import_line`), shows it as it
 is edited in `ifcExportCommand` and `ifcImportCommand`, and hands it to the
-window's command line through its context's `runLine`
-(`MainWindow::runIfcCommand`, `src/katana_qt/main_window_ifc.cpp`), which
-echoes it as typed and runs it by `MainWindow::runIfcLine` - the code a typed
+window's command line through its context's `run_line`
+(`MainWindow::run_ifc_command`, `rust/crates/katana_window/src/main_window_ifc.rs`), which
+echoes it as typed and runs it by `Executor::run_ifc_line` - the code a typed
 line runs, which reads it with the grammar `katana_cli` reads it with
-(`include/katana/ifc/front_end.hpp`). So there is nothing a dialog can do that
+(`rust/crates/katana_ifc/src/front_end.rs`). So there is nothing a dialog can do that
 a typed line, a script or an agent cannot, and the reply - key=value records
 - is the same whoever asked. The alternative, a dialog calling the export
 function itself with options no line could say, was what these dialogs first
@@ -4117,8 +4138,8 @@ layer, service, alignment and surface, how many objects become which IFC
 class, in which system, and why ("rule kerb", "a graded segment: type water",
 "a label: labels are not exported"). Preview runs the dialog's own line with
 `PREVIEW` added, and fills the table from the reply's object records
-(`ifc::readExportObjects`, the one reader of what `ifc::formatExportReply`
-writes): the writer's own account (`ifc::IfcExport::tally`), made by writing
+(`katana_ifc::front_end::read_export_objects`, the one reader of what `katana_ifc::front_end::format_export_reply`
+writes): the writer's own account (`IfcExport::tally`), made by writing
 the file in memory, never a second guess at the mapping, and the same rows an
 agent asking `PREVIEW` reads. A class that is wrong for a project's layers is
 put right with a rules file, which Save Default Rules starts from the defaults
@@ -4130,19 +4151,19 @@ only" with nothing selected is refused rather than writing the whole drawing -
 as `EXPORT ... SELECTED` is.
 
 With the geoprocessing executor in the window, which takes `IMPORT`,
-`EXPORT` and `INFO` of every other file, `MainWindow::runWorkbenchLine` asks
-`MainWindow::runIfcLine` first, before the geo workbench: a typed line and a
+`EXPORT` and `INFO` of every other file, `Executor::run_workbench_line` asks
+`Executor::run_ifc_line` first, before the geo workbench: a typed line and a
 dialog's line through `runVerbLine` reach the workbench before
-`dispatchLine`, so without it the executor read an IFC line's options as
+`dispatch_line`, so without it the executor read an IFC line's options as
 part of a path (`qt_ifc_typed_export_and_import_are_the_command_lines_headless`
-failed exactly so). The session does the same (`src/katana_app/session.cpp`).
+failed exactly so). The session does the same (`rust/crates/katana_app/src/session.rs`).
 
 A .ifc reaches the same line from everywhere else a path enters: File > Import
 and its IFC filter and a path given to the window run `IMPORT "<file>"`, the
 typed `IMPORT`, `EXPORT` and `INFO` are split by the shared grammar before the
 window's generic one takes the rest of the line as a path, the GIS imports'
 "All files" and GIS > Dataset Information describe it
-(`MainWindow::describeIfcFile`, `INFO`'s reply), and `--import-options` builds
+(`MainWindow::describe_ifc_file`, `INFO`'s reply), and `--import-options` builds
 the import dialog. Choosing IFC in Export Drawing's file dialog opens the
 export dialog with the file filled. The Command Reference lists the window's
 own verbs after the interpreter's.
@@ -4159,13 +4180,13 @@ The change is its own undoable step, after the import's. Declining the
 far-apart question cancels the import (`CommandRejected`), which the dialog
 says as a cancel, not a failure. Data shifted or moved to the origin is in no
 system, and takes none. Terrain comes in as surfaces of the drawing, in the
-import's one undo step (`cad::importSurfaces`), which the export also writes
+import's one undo step (`katana_cad::terrain::surface_verbs::import_surfaces`), which the export also writes
 out - the one exchange that carries the drawing's surfaces both ways besides
 the .12da archive.
 
-`qt_widgets.IfcExportDialog.TheLineCarriesEveryChoiceAsTheVerbReadsIt`,
-`qt_widgets.IfcExportDialog.PreviewShowsTheWritersAccountClassByClass` and the
-rest of `qt_widgets.IfcExportDialog.*` and `qt_widgets.IfcImportDialog.*`
+`ifc_export_dialog::the_line_carries_every_choice_as_the_verb_reads_it`,
+`ifc_export_dialog::preview_shows_the_writers_account_class_by_class` and the
+rest of `ifc_export_dialog::*` and `ifc_import_dialog::*`
 drive the dialogs against a command line that records their lines and answers
 as the verb does; the `qt_ifc_*_headless` checks (`tests/CMakeLists.txt`)
 drive each way in through the real window - the two dialogs, whose echoed
@@ -4176,18 +4197,18 @@ alignment, a missing file, and surfaces out and back.
 ## Survey > Subsurface Utilities (AS 5488): the same pattern, one verb
 
 The AS 5488 tools (`docs/subsurface_utilities.md`) are `UtilityWorkbench`
-(`src/katana_qt/survey/utility_workbench.hpp`), built as the Online Data
-workbench is: `MainWindow::buildSurveyActions` makes it after the Survey
-workbench and hands it the Survey menu, which it ends with the section
+(`rust/crates/katana_window/src/survey/utility_workbench.rs`), built as the Online Data
+workbench is: the window makes it after the Survey workbench, as it makes the
+Survey actions, and hands it the Survey menu, which it ends with the section
 "Subsurface Utilities (AS 5488)" - Draw Utility Schedule, Utility
 Investigation Report, Verify Detections Against Exposures, Clearance of
 Proposed Works, Check Against a Delivery Schema, Regrade Drawn Utilities,
 Export Drawn Utilities as a Schedule (`utilityDraw`, `utilityReport`,
 `utilityVerify`, `utilityClearance`, `utilityCheck`, `utilityRegrade`,
 `utilityWriteSchedule`; N and X were the letters the Survey menu had left).
-`MainWindow::runCommandLine` hands it any line that starts with `UTILITY`,
+`MainWindow::run_command_line` hands it any line that starts with `UTILITY`,
 before a running tool can take the line for an answer - unless that tool is
-waiting for typed text (`ViewWorkspace::toolTakesText`: a Text's string, a
+waiting for typed text (`ViewWorkspace::tool_takes_text`: a Text's string, a
 count), whose answer the whole line is, as it is for a bare `ZOOM`: a label on
 a services plan may well read "Utility pit". `ONLINE` gives way to such a
 tool the same way (`qt_utility_line_leaves_a_text_to_the_tool_headless`).
@@ -4196,17 +4217,17 @@ The verb is the `CommandInterpreter`'s, shared with `katana_cli`; the
 workbench runs it through the window's interpreter and adds the one thing
 only a window has: after a `UTILITY DRAW` or a `UTILITY REGRADE` that worked,
 every plan view is framed on the reply's `bounds=` box
-(`utilities::drawReplyBounds`, `ViewWorkspace::zoomTo`). A schedule in a real coordinate system lands far
+(`katana_cad::utilities::utility_verbs::draw_reply_bounds`, `ViewWorkspace::zoom_to`). A schedule in a real coordinate system lands far
 from whatever the view was showing, and without the framing a draw that
 worked looked like one that did nothing - the lesson Online Data learnt. The
 box is read by the verb's own function, not a second parser in the window,
 so the record's format has one reader to keep in step with its writer
-(`utilities::formatUtilityDrawing`); the two branches that built this each
+(`katana_cad::utilities::utility_drawing::format_utility_drawing`); the two branches that built this each
 had one, and the window's was dropped when they were merged.
 
 All seven items open ONE non-modal dialog (`UtilityToolsDialog`,
-`src/katana_qt/survey/utility_dialog.hpp`, object name `utilityDialog`), each
-on its own tab; the header lists every control's object name. The detected
+`rust/crates/katana_window/src/survey/utility_dialog.rs`, control name `utilityDialog`), each
+on its own tab; the module lists every control's name. The detected
 spacing and the minimum cover sit above the tabs, shared by Draw, Report and
 Regrade and live on those tabs only, because the verb reads `SPACING` and
 `MINCOVER` for each: a drawing and a report of one schedule are graded and
@@ -4220,7 +4241,7 @@ named `utility...` - on the left. For Draw, what is drawn is the lines,
 polylines and points a survey or an import left there, drawn as services
 (`docs/subsurface_utilities.md`, "Services from surveyed and imported
 geometry"); for the others, the lines `UTILITY DRAW` drew. The widget's
-`verbWords()` are the line's scope and filter words, so Report on the
+`verb_words()` are the line's scope and filter words, so Report on the
 drawing is `UTILITY REPORT DRAWING`, on a view `UTILITY REPORT VIEW 3` (or
 `VIEW 3 EXTENTS` without "Only what is on screen"), and so on. Draw,
 Report, Verify, Clearance and Check take either source; Regrade and Schedule
@@ -4253,9 +4274,9 @@ in. The status is read from the reply's first record, never from the tab
 alone: a scope that takes no utility line is answered with the scope's
 record, and the status then says nothing was regraded or written, rather
 than offering an Undo that would take back the person's previous edit
-(`UtilityDialog.AScopeThatTakesNoUtilityLineIsSaidSoAndNothingIsSaidRegradedOrWritten`).
+(`utility_dialog::a_scope_that_takes_no_utility_line_is_said_so_and_nothing_is_said_regraded_or_written`).
 
-`utilityCommandLine` - a pure function of
+`utility_command_line` - a pure function of
 the fields, tested without a window - writes the `UTILITY` line (a path with
 blanks quoted, a blank option left out, a file field left empty, a number
 that does not read or a scope the controls cannot say refused with the field
@@ -4268,9 +4289,9 @@ since the dialog's line is never a text - and the reply the workbench got for it
 back into `utilityOutput`, with Copy and Save As beside it. The reply stays
 while another tab is brought forward, and Save As offers the name of the tool
 it came from, `utility_draw.txt`, not of the tab in front
-(`UtilityToolsDialog::suggestedFileName`). A headless session
+(`UtilityToolsDialog::suggested_file_name`). A headless session
 opens no file dialog: Browse and Save As say so, and a script fills the path
-fields instead. Tested in `tests/qt_widgets/survey/test_utility_dialog.cpp`
+fields instead. Tested in `rust/crates/katana_window/tests/utilities/utility_dialog.rs`
 and, through the real window, by `qt_utility_dialog_writes_the_line_headless`,
 `qt_utility_dialog_headless` (Run on Draw),
 `qt_utility_draw_typed_frames_the_views_headless` (the same draw typed, as an
@@ -4284,28 +4305,28 @@ framed), `qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless`
 by a typed `IMPORT`, then Draw on what is drawn with its Fields: the
 sample's hand-worked figures). A Draw whose scope had nothing left to draw
 says so in the status, and that no undo step was added
-(`UtilityDialog.ADrawOfTheSurveyInTheDrawingRunsTheVerbAndSaysWhenNothingWasLeftToDraw`).
+(`utility_dialog::a_draw_of_the_survey_in_the_drawing_runs_the_verb_and_says_when_nothing_was_left_to_draw`).
 
 **The window answers `VIEW`.** The scope word `VIEW` (`docs/cad.md`, "Scope
 and filter") is the window's: `MainWindow` gives its interpreter
-`cad::scopeViewOf(views_->viewSet(), id)` through
-`CommandInterpreter::setScopeContext`, next to the sheet context. No id is
-the plan view Plot and the Standard Views act on (`ViewSet::mostRecent`); an
+`katana_cad::scope_verbs::scope_view_of` through
+`CommandInterpreter::set_scope_context`, next to the sheet context. No id is
+the plan view Plot and the Standard Views act on (`ViewSet::most_recent`); an
 id is that open view, of any kind, with its own hidden layers and, for a
-plan view, `ViewTransform::visibleWorldBounds` as it is when the line runs. So
+plan view, `ViewTransform::visible_world_bounds` as it is when the line runs. So
 `MODIFY VIEW WHERE TYPE=point SET COLOUR=#FF0000` typed in the window acts on
 the points the plan view shows, where `katana_cli` refuses `VIEW` in favour
 of `AREA` (`qt_modify_view_takes_what_the_plan_view_shows_headless`). The
 rule lives in `katana_cad`, not a widget, so it is tested without a window
-(`ScopeVerbsTest.AWorkspacesViewSetAnswersViewAsTheWindowDoes`).
+(`scope_verbs_test::a_workspaces_view_set_answers_view_as_the_window_does`).
 
 ## Global Modify
 
 Format > Global Modify... (`GlobalModifyDialog`,
-`src/katana_qt/customisation/global_modify_dialog.*`) states the request
-`cad::planGlobalModify` takes (`docs/cad.md`, "Global Modify") and decides
+`rust/crates/katana_window/src/customisation/global_modify_dialog.rs`) states the request
+`katana_cad::global_modify::plan_global_modify` takes (`docs/cad.md`, "Global Modify") and decides
 nothing of its own. Non-modal, one instance kept by the Format workbench
-(`CustomisationWorkbench::showGlobalModify`), as the managers are:
+(`CustomisationWorkbench::show_global_modify`), as the managers are:
 
 - **Apply to**: the selection, a view, the checked layers (with their
   sublayers or not), or the whole drawing. The views are the workspace's
@@ -4317,24 +4338,24 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
 - **Only those that match**: types, layer and style patterns, colour,
   property and value, text, drawn only.
 - These two groups are `ScopeFilterWidget`
-  (`src/katana_qt/customisation/scope_filter_widget.*`), the ONE set of
+  (`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`), the ONE set of
   scope and filter controls every dialog on drawing data shows (`docs/cad.md`,
   "Scope and filter"). Global Modify gives it the prefix `globalModify`, so its controls kept
   their names and its tests pass unchanged. It says what it holds twice from
-  the same controls: `scope()` and `filter()`, what `matchEntities` takes and
-  Global Modify plans with, and `verbWords()`, the same as the shared
-  grammar's words (`cad::formatScopeWords`), for a dialog that builds a verb
+  the same controls: `scope()` and `filter()`, what `match_entities` takes and
+  Global Modify plans with, and `verb_words()`, the same as the shared
+  grammar's words (`katana_cad::scope_verbs::format_scope_words`), for a dialog that builds a verb
   line. A view is named by its id, which the view list shows beside its
   title - "Plan 2 (VIEW 3)" - since the number in a title counts only the
   views of its kind; "Only what is on screen" unticked is
   `VIEW <id> EXTENTS`, a word added to the grammar for it, since without it
   the controls could say what no line could. What a line cannot say - a `:`
-  in the property's name, a comma in a layer's - `verbWords()` refuses
+  in the property's name, a comma in a layer's - `verb_words()` refuses
   rather than write words that take something else; a value with the
   property left empty is `PROP=:value`, any property's. The fallback "Whole drawing
   view" of a dialog with no workspace is read by `scope()` and refused by
-  `verbWords()`: a line can name only an open view.
-  `tests/qt_widgets/customisation/test_scope_filter_widget.cpp` shows every
+  `verb_words()`: a line can name only an open view.
+  `rust/crates/katana_window/tests/foundation/scope_filter_widget.rs` shows every
   scope and filter said in words, and those words, read back by the one
   parser and resolved with the window's answer for `VIEW`, taking exactly
   what the controls take.
@@ -4357,9 +4378,9 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
   - Each type box says how many of its kind the scope and the REST of the
     filter take - "Leader (774)", "Arc (0)" - refreshed with the preview:
     what ticking that box would select. A ticked box does not count itself
-    out. The numbers are `cad::countByType`, which `SELECT`'s `types=` uses
+    out. The numbers are `katana_cad::scope_verbs::count_by_type`, which `SELECT`'s `types=` uses
     too; the shared widget shows them only when a dialog gives them
-    (`ScopeFilterWidget::showTypeCounts`), so the other dialogs keep plain
+    (`ScopeFilterWidget::show_type_counts`), so the other dialogs keep plain
     names.
   - Select Matches runs `SELECT <the scope words>` through the window's
     executor - `SELECT DRAWING WHERE TYPE=leader` - so the line is in the log
@@ -4375,7 +4396,7 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
     applied only as the dialog opens, never to a scope chosen while it is
     open.
 
-Tested in `tests/qt_widgets/customisation/test_global_modify_dialog.cpp`.
+Tested in `rust/crates/katana_window/tests/styles/global_modify_dialog.rs`.
 
 Not done: Apply still runs the plan itself (`document().execute`) rather
 than a `MODIFY` line through the executor, as a dialog is to ("One
@@ -4386,8 +4407,8 @@ infers the value's type from its text, where the dialog lets it be chosen
 ## Terrain > Alignment Manager
 
 The alignments, their PIs, design profiles and setting-out tables, in a
-non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
-`src/katana_qt/alignment_manager.hpp`): every edit an `ALIGN` line through
+non-modal dialog the window keeps (`MainWindow::show_alignment_manager`,
+`rust/crates/katana_window/src/alignment_manager.rs`): every edit an `ALIGN` line through
 `runVerbLine`, the PI and PVI grids buffers applied by one line each. The
 decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
 opens with it, in an Alignments section, and the toolbar with its button.
@@ -4395,7 +4416,7 @@ opens with it, in an Alignments section, and the toolbar with its button.
 ## Terrain > Volumes
 
 Earthwork volumes between the drawing's surfaces in one non-modal dialog the
-window keeps (`volumesDialog`, `src/katana_qt/terrain/volumes_dialog.hpp`,
+window keeps (`volumesDialog`, `rust/crates/katana_window/src/terrain/volumes_dialog.rs`,
 `showVolumesDialog`): a page per method, the boundary from the shared scope
 and filter controls or typed corners, factors, the results table, the mass
 haul diagram, Copy, Save CSV and Make Cut/Fill Map. Every one of them is a
@@ -4407,8 +4428,8 @@ button.
 ## Terrain > Surface Styles
 
 The drawing's surface display styles in a non-modal dialog the window keeps
-(`MainWindow::showSurfaceStyleManager`,
-`src/katana_qt/terrain/surface_style_manager.hpp`): every field of a style in
+(`MainWindow::show_surface_style_manager`,
+`rust/crates/katana_window/src/terrain/surface_style_manager.rs`): every field of a style in
 four tabs with a live preview drawn through the plan view's own painter, and
 every button a `SURFACESTYLE` or `SURFACE STYLE` line through `runVerbLine`,
 the form a buffer applied by one line naming only what changed. It is in the
@@ -4420,13 +4441,13 @@ Surface From items, icon `SurfaceStyles`. The record is
 
 What the session's customisation IS, and the few things that are done to it
 whole, in one non-modal dialog (`SettingsDialog`, `settingsDialog`,
-`src/katana_qt/customisation/settings_dialog.hpp`). The lines it runs are the
+`rust/crates/katana_window/src/customisation/settings_dialog.rs`). The lines it runs are the
 `CUSTOMISE` family's (`docs/customisation.md`, "The verbs"), and what "kept"
 means is in "Settings and the kept customisation" there; this is the dialog.
 
 **File > Settings** (`fileSettings`, "Settings...", above Quit: "The File
 menu", above). The action and the dialog are the Format workbench's
-(`CustomisationWorkbench::showSettings`): the dialog is made the first time
+(`CustomisationWorkbench::show_settings`): the dialog is made the first time
 it is asked for and kept, non-modal, and deleted with the workbench before
 the Document - as the managers are, and for their reasons. The workbench
 hands it a `SettingsContext`:
@@ -4436,29 +4457,29 @@ hands it a `SettingsContext`:
 - whether the Survey Code Manager holds unapplied edits, which only the
   workbench knows, asked at each press - a manager not made yet holds none;
 - callbacks that open the code manager, the code manager at its Linework tab
-  (`CustomisationWorkbench::showLinework`: the tab is brought forward by the
-  object names `codeManagerTabs` and `lineworkTab`, as a person reaches it,
+  (`CustomisationWorkbench::show_linework`: the tab is brought forward by the
+  control names `codeManagerTabs` and `lineworkTab`, as a person reaches it,
   and a tab that cannot be found is said in the log) and the Symbol Library;
 - what the session's host offers: whether there is a built-in customisation,
-  and the kept file's path as text (`CustomisationServices::hasBuiltIn`,
-  `keptFile`; "How the window starts" says where the file is). They are read
+  and the kept file's path as text (`CustomisationServices::has_built_in`,
+  `kept_file`; "How the window starts" says where the file is). They are read
   once, when the dialog is first opened - a host does not change while a
   session runs;
-- the built-ins the chooser offers (`SettingsContext::builtIns`). The window
+- the built-ins the chooser offers (`SettingsContext::built_ins`). The window
   leaves it empty, and the dialog then lists those compiled into the program
-  (`cad::builtIns()`); a widget test gives its own.
+  (`katana_cad::customisation_host::built_ins()`); a widget test gives its own.
 
 Every member has an empty default, and a button whose callback is empty is
 disabled, so a widget test builds the dialog on its own
-(`tests/qt_widgets/customisation/test_settings_dialog.cpp`) and through the
-workbench (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
+(`rust/crates/katana_window/tests/settings/settings_dialog.rs`) and through the
+workbench (`rust/crates/katana_window/tests/workspace/customisation_workbench.rs`).
 The action's data names the dialog, which is how `--dialog fileSettings`
 finds it in a headless run.
 
 A page list (`settingsPages`) beside a stack (`settingsStack`). Two pages:
 Customisation (`settingsCustomisation`), which the table below and the rest
 of this section describe, and Updates (`settingsUpdates`; "The Updates page",
-at the end of this section). A third is one more `addPage`.
+at the end of this section). A third is one more `add_page`.
 
 | Part | Object names | What it shows or runs |
 |---|---|---|
@@ -4470,7 +4491,7 @@ at the end of this section). A third is one more `addPage`.
 | When survey data comes in | `settingsAutoCodes`, `settingsAutoLinework` | `CUSTOMISE SET auto.codes=on` or `off`, `CUSTOMISE SET auto.linework=on` or `off`, when the box is toggled |
 | Linework control codes | `settingsLinework`, `settingsEditLinework` | the seven spellings, read-only, each under the word its editor labels it with (`Start: ST, End: END, Close: CL, Begin curve: BC, ...`; `(off)` for a control switched off), and a button that opens that editor, the Survey Code Manager at its Linework tab |
 | Editors | `settingsOpenCodes`, `settingsOpenSymbols` | open the Survey Code Manager and the Symbol Library |
-| Status | `settingsStatus`, `settingsClose` | each line run, as the command log echoes it (`> CUSTOMISE RESET`), then what it answered: the reply, or `Refused:` and the verb's own words, in the error colour. The names a load reports as undefined that the built-in ITSELF leaves undefined (`undefined name=... in_built_in=yes`) are not listed after every load of anything: they are said once, as a count - `3 names undefined (as in the built-in)`, or `3 names undefined, 2 of them as in the built-in` with the load's own named below (`TheNamesTheBuiltInItselfLeavesUndefinedAreShownAsACountAndTheRestByName`). A file of another program's format is refused in the verb's words, `not a Katana customisation file; the older formats are converted with katana_customisation_convert (a developer's tool, not installed; see docs/customisation.md)`, with none of the JSON parser's sentence |
+| Status | `settingsStatus`, `settingsClose` | each line run, as the command log echoes it (`> CUSTOMISE RESET`), then what it answered: the reply, or `Refused:` and the verb's own words, in the error colour. The names a load reports as undefined that the built-in ITSELF leaves undefined (`undefined name=... in_built_in=yes`) are not listed after every load of anything: they are said once, as a count - `3 names undefined (as in the built-in)`, or `3 names undefined, 2 of them as in the built-in` with the load's own named below (`settings_dialog::the_names_the_built_in_itself_leaves_undefined_are_shown_as_a_count_and_the_rest_by_name`). A file of another program's format is refused in the verb's words, `not a Katana customisation file; the older formats are converted with katana_customisation_convert (a developer's tool, not installed; see docs/customisation.md)`, with none of the JSON parser's sentence |
 
 **Every button that changes anything builds a line** and hands it to the one
 executor ("One executor: the command runner"), so it is echoed in the command
@@ -4482,27 +4503,27 @@ as a click does.
 **The page shows what the Document says**, never what a button hoped for. It
 is read again from the Document's change notification, through a
 `DocumentWatcher`, when one of three counters has moved:
-`Document::customisationGeneration`, `Document::libraryGeneration` and
-`Document::surveyMapGeneration`. The first alone is not enough - an editor's
+`Document::customisation_generation`, `Document::library_generation` and
+`Document::survey_map_generation`. The first alone is not enough - an editor's
 second commit in a session already marked edited moves only the library's or
 the map's, and the counts would stand still
-(`TheLabelsFollowTheDocument`). A box whose line was refused, or that nothing
+(`settings_dialog::the_labels_follow_the_document`). A box whose line was refused, or that nothing
 ran, goes back to what the Document has, since no notification comes to say
 that nothing changed; reading the boxes from the Document runs no line
-(`RefreshingFromADocumentChangeRunsNothing`).
+(`settings_dialog::refreshing_from_a_document_change_runs_nothing`).
 
 **What the start found stays on the page.** A kept file that did not read,
 a built-in that did not parse, a kept customisation made from another
 built-in than this program has: the window says each once, at start-up, in a
 log that has scrolled away by the time a person opens Settings to ask why
 their own customisation is not the one loaded. The Document keeps them
-(`CustomisationState::startProblems`, `keptFromAnotherBuiltIn`), and the row
-`settingsActiveProblems` shows the sentences as `cad::startCustomisation`
+(`CustomisationState::start_problems`, `keptFromAnotherBuiltIn`), and the row
+`settingsActiveProblems` shows the sentences as `katana_cad::customisation_host::start_customisation`
 wrote them, one a line, then - for the second - the window's own start-up
 sentence with Reset to Built-in where that names `CUSTOMISE RESET`. They are
 of the start: a load or a reset since does not take them off the page
-(`WhatTheStartOfTheSessionFoundIsShownAndTheRowIsHiddenWhenItFoundNothing`,
-`AKeptFileThatDidNotReadWhenTheSessionStartedIsSaidOnThePage`).
+(`settings_dialog::what_the_start_of_the_session_found_is_shown_and_the_row_is_hidden_when_it_found_nothing`,
+`settings_dialog::a_kept_file_that_did_not_read_when_the_session_started_is_said_on_the_page`).
 
 **What is edited in Settings is kept.** A session that was kept before
 Import, Reset to Built-in, Use or a toggled box, and is not kept after it, is kept
@@ -4514,7 +4535,7 @@ inferred from the line: one that was refused, or a reset that left the
 session the kept one, is followed by nothing. A load typed on the command
 line or run by a script is not followed either, and the page then says "Not
 kept" beside an enabled Keep
-(`WithTheVerbItselfAnEditOfAKeptSessionIsWrittenToTheKeptFile` runs it with
+(`settings_dialog::with_the_verb_itself_an_edit_of_a_kept_session_is_written_to_the_kept_file` runs it with
 the verbs themselves and reads the kept file back).
 
 **A reset that is kept sets the kept file aside.** Reset to Built-in on a kept
@@ -4531,30 +4552,30 @@ aside:
   codes, each kind it holds, and its control codes and switches are set as it
   says them; the session being the kept one, the import is kept, in a kept
   file written anew
-  (`AfterAResetOfAKeptSessionRevertHasNoneToReadAndTheFileSetAsideIsTheWayBack`).
+  (`settings_dialog::after_a_reset_of_a_kept_session_revert_has_none_to_read_and_the_file_set_aside_is_the_way_back`).
   A kind the file does not hold stays the built-in's, and so does a colour
   name it does not give;
 - **or, outside the program, give the file its own name back** and press
   Revert to Kept, which reads it exactly as it was
-  (`TheFileSetAsideGivenItsOwnNameBackIsReadByRevertAsItWas`).
+  (`settings_dialog::the_file_set_aside_given_its_own_name_back_is_read_by_revert_as_it_was`).
 
 Only until the next `KEEP` that finds a kept file, because ONE earlier file
 is kept. The first edit made in Settings after the reset writes a new kept
 file and leaves the `.bak`; the second sets that new file aside in the
 `.bak`'s place, and the customisation the reset put away is then in neither
-file (`TheFileAResetSetAsideLastsOnlyUntilTheSecondEditKeptAfterIt`).
+file (`settings_dialog::the_file_a_reset_set_aside_lasts_only_until_the_second_edit_kept_after_it`).
 
 No question is asked before the press, so the button says it first. On a kept
 session whose host has a kept file, Reset to Built-in's tip names the `.bak`,
 says that Revert to Kept will have none to read, and gives the way back
-(`ResetSaysBeforeItIsPressedThatAKeptSessionsFileIsSetAside`). Keep's tip
+(`settings_dialog::reset_says_before_it_is_pressed_that_a_kept_sessions_file_is_set_aside`). Keep's tip
 says the same of a session that is the built-in and not kept - what a reset
 typed on the command line leaves - where a press writes nothing and sets the
 kept file aside
-(`KeepOfASessionThatIsTheBuiltInWritesNothingAndSetsTheKeptFileAside`). A
+(`settings_dialog::keep_of_a_session_that_is_the_built_in_writes_nothing_and_sets_the_kept_file_aside`). A
 reset that is NOT kept - typed, or made here on a session that was not the
 kept one - leaves the kept file where it is, and Revert to Kept then does go
-back (`ARevertOfASessionThatWasResetAndNotKeptReadsTheKeptFileAgain`).
+back (`settings_dialog::a_revert_of_a_session_that_was_reset_and_not_kept_reads_the_kept_file_again`).
 
 **Use does the same, twice over.** Use is followed by `CUSTOMISE KEEP` on a kept
 session like Reset, and the kept file does not stay: choosing an alternate
@@ -4565,7 +4586,7 @@ file after a second Use (an alternate, then the default), the case a combo makes
 natural. Use's tip says it before the press, in Reset's words: four forms, by
 the host (a kept file or none), the session (kept or not) and the choice (the
 run's own or another)
-(`UseSaysBeforeItIsPressedWhatKeepingTheChoiceDoesToTheKeptFile`). The way back
+(`settings_dialog::use_says_before_it_is_pressed_what_keeping_the_choice_does_to_the_kept_file`). The way back
 is the same file, Imported with Replace. *Not done: a second backup generation*:
 the single `.bak` is every `KEEP`'s contract, as the paragraph above says of a
 reset.
@@ -4575,23 +4596,23 @@ nothing run:
 
 - **Import, Reset to Built-in, Use and Revert to Kept while the Survey Code
   Manager holds unapplied edits**, in the words the window refuses to close
-  over them with (`CustomisationWorkbench::confirmClose`). The manager keeps
+  over them with (`CustomisationWorkbench::confirm_close`). The manager keeps
   its buffer when the drawing's rules change under it, and its Apply then
   installs that buffer whole: the load would be undone without a word. Revert
   to Kept is held to it with the other two because it loads rules the same
   way.
 - **A file no line can carry** - a double quote or a line break in its path:
   the tokenizer's quoted words have no escape, and the rule is the one every
-  dialog writes a word by (`src/katana_qt/command_word.hpp`) - and no file at
+  dialog writes a word by (`rust/crates/katana_window/src/command_word.rs`) - and no file at
   all.
 - **Browse in a headless session**, which opens no file dialog and names the
   line to type and the field to fill. Browse is the only thing here that
   opens one; it offers the filter the two managers offer
-  (`customisationFileFilter`), opens where the path in the field points, and
+  (`customisation_file_filter`), opens where the path in the field points, and
   only fills the field. Export's gives a name that does not end `.json`, in
   any letter case, the ending `.customisation.json`, so that the file is one
   Import's own filter shows
-  (`ExportsBrowseFillsTheFieldAndEndsANameWithNoJsonEndingAsACustomisationFile`).
+  (`settings_dialog::exports_browse_fills_the_field_and_ends_a_name_with_no_json_ending_as_a_customisation_file`).
 
 Reset to Built-in is disabled, with a tip saying why, when the host has no
 built-in; Keep and Revert to Kept when it has no kept file; Keep also while
@@ -4605,7 +4626,7 @@ would run `KEEP`, and `EXPORT` refuses a file called as one of its own words;
 a file so called is given with its directory (`docs/customisation.md`, "The
 verbs"). Every name with no directory in it is, so the dialog keeps no list
 of the family's words to go stale
-(`TheLinesItBuildsAreReadByTheVerbItself`).
+(`settings_dialog::the_lines_it_builds_are_read_by_the_verb_itself`).
 
 **A path pasted in its quotes is the path inside them.** A file manager
 copies a path with double quotes round it (`"C:\data\site codes.json"`), and
@@ -4613,7 +4634,7 @@ they are no part of the file's name: ONE pair round the WHOLE path is taken
 off, with the blanks beside it, before the path is read - by Import, by
 Export and by Browse alike. Left on, the path was refused for holding a
 double quote. A quote anywhere else is still refused, and quotes round
-nothing name no file (`APathPastedInItsQuotesIsReadAsThePathItIs`).
+nothing name no file (`settings_dialog::a_path_pasted_in_its_quotes_is_read_as_the_path_it_is`).
 
 Decisions, and what was rejected:
 
@@ -4632,14 +4653,14 @@ Decisions, and what was rejected:
   script. The page says Start, End, Close, Begin curve, End curve, Join to
   point and Rectangle - the labels of the one editor its button opens - so
   that a control has one name in the window. The words are ONE list,
-  `kLineworkControlLabels` in
-  `src/katana_qt/customisation/linework_labels.hpp`, keyed by the format's
-  names and checked against `entity::lineworkCodeMembers`
-  (`TheOneListOfLineworkLabelsNamesEveryControlInTheOrderTheFormatListsThem`).
+  `LINEWORK_CONTROL_LABELS` in
+  `rust/crates/katana_window/src/customisation/linework_labels.rs`, keyed by the format's
+  names and checked against `katana_entity::linework_codes::linework_code_members`
+  (`settings_dialog::the_one_list_of_linework_labels_names_every_control_in_the_order_the_format_lists_them`).
   The Linework tab builds its seven fields by looping over
-  `entity::lineworkCodeMembers` and labels each from that list
-  (`lineworkControlLabel`), where it once wrote the seven words out itself;
-  `TheLineworkControlsAreCalledWhatTheirOneEditorCallsThem` reads the tab's
+  `katana_entity::linework_codes::linework_code_members` and labels each from that list
+  (`linework_control_label`), where it once wrote the seven words out itself;
+  `settings_dialog::the_linework_controls_are_called_what_their_one_editor_calls_them` reads the tab's
   labels against what Settings shows.
 - *Decided: a reset made in Settings is kept.* Resetting in Settings means
   the built-in is what the next session starts with, so the reset is followed
@@ -4680,7 +4701,7 @@ Not done:
 - **ONE earlier file is kept.** A reset made in Settings sets the kept file
   aside one `.bak` deep, and the second edit kept after it is the end of what
   was there. Keeping more than one earlier file would be `CUSTOMISE KEEP`'s
-  to do (`src/katana_cad/customisation/customisation_verbs.cpp`).
+  to do (`rust/crates/katana_cad/src/customisation_verbs.rs`).
 - **The host's two facts are read when the dialog is first opened**, not at
   each press: right while a host cannot change in a running session.
 - **Revert to Kept is enabled whenever the host has a kept file**, whether or
@@ -4696,7 +4717,7 @@ Settings' second page (`settingsUpdates`, "Updates" in `settingsPages`) is of
 the PROGRAM, not of the drawing: how Katana checks for a newer version of
 itself ("Help > Check for Updates", above). It needs no Document - it works
 in a Settings opened on no drawing and after the drawing has closed
-(`ThePageWorksWithNoDrawingAndAfterOneHasClosed`) - and like the first page
+(`settings_updates::the_page_works_with_no_drawing_and_after_one_has_closed`) - and like the first page
 it runs lines and changes nothing itself, with one exception that is the
 reason it exists.
 
@@ -4715,18 +4736,18 @@ that cannot start here, and wrong for a sound one whose first start was slow
 - a virus scanner reading every new file is enough - and there was no way
 back but deleting the state file by hand. The button is that way back, built
 as the skipped version's is and under it: it hands the window's executor the
-line `UPDATE BLOCKED CLEAR` (`runUpdatesLine`, the path every line of the
+line `UPDATE BLOCKED CLEAR` (`run_updates_line`, the path every line of the
 page takes), the verbs empty the list - all of it, there being one release
 to be had from the feed - and the page then shows what the state has
-(`OfferTheVersionThatWasPutBackAgainBuildsExactlyItsLineAndNothingElse`:
+(`settings_updates::offer_the_version_that_was_put_back_again_builds_exactly_its_line_and_nothing_else`:
 that one line, no second one, no store written, nothing logged by the
-dialog; `OfferTheVersionThatWasPutBackAgainIsAButtonUnderTheSkippedVersionsOne`
+dialog; `settings_updates::offer_the_version_that_was_put_back_again_is_a_button_under_the_skipped_versions_one`
 for its name, its words and its place). The next check offers the release
 and Update installs it. Whether a version is set aside is read from the
-state file by the window (`SettingsUpdates::putBack`), since `UPDATE STATUS`
+state file by the window (`SettingsUpdates::put_back`), since `UPDATE STATUS`
 does not say it; with nobody to say - a headless run - the page says nothing
 of it and the button stays on for the verbs to answer
-(`TheButtonForAVersionThatWasPutBackIsOffWithNoneAndOnWhenNobodySays`).
+(`settings_updates::the_button_for_a_version_that_was_put_back_is_off_with_none_and_on_when_nobody_says`).
 
 **A state file that does not read is nobody to say, too.** The verbs do not
 write over such a file: `UPDATE BLOCKED CLEAR` and `UPDATE SKIP NONE` are
@@ -4734,11 +4755,11 @@ refused, and the refusal is the one thing that names the cause. The window
 told the page "none" for it, so the page said "No version was put back." and
 switched the button off - a guess, and one that kept a person from that
 refusal. Both of the page's questions now answer nothing at all for a file
-that did not read (`updateSkippedOfState`, `updatePutBackOfState`:
-`AStateFileThatDoesNotReadIsNobodyCanSayAndNeverNone`; a file that is not
+that did not read (`update_skipped_of_state`, `update_put_back_of_state`:
+`update_decisions::a_state_file_that_does_not_read_is_nobody_can_say_and_never_none`; a file that is not
 there reads as the defaults, which ARE known: none skipped, none put back),
 and the page then leaves the label empty and the button on
-(`AStateThatDoesNotReadIsNotGuessedAtAndTheButtonsLetTheVerbAnswer`: the
+(`settings_updates::a_state_that_does_not_read_is_not_guessed_at_and_the_buttons_let_the_verb_answer`: the
 line is run, its refusal is shown, and the button is still there to press
 once the file is put right). The skipped version's label and button had the
 same fault and follow the same rule. The automatic box does not: a state
@@ -4755,20 +4776,20 @@ offers over 0.4.0, and with a button that changed nothing a check could show.
 The list keeps a build by its sequence, the time it was made, and no version;
 the install's record keeps the sequence of the build an update put there. So
 the window tells the page of a build only while it can still be offered to
-this install (`updatePutBackOfState`, given what the window knows as
+this install (`update_put_back_of_state`, given what the window knows as
 `UpdatePutBackFacts`;
-`AVersionThatWasPutBackIsToldOfOnlyWhileItCanStillBeOfferedHere`):
+`update_decisions::a_version_that_was_put_back_is_told_of_only_while_it_can_still_be_offered_here`):
 
 - a build made AFTER the one installed here - a sequence above the install
   record's - or any build where the install has no record of its own (a fresh
   install: nothing says when its build was made);
 - or any build at all, while the update dialog is telling of a release that
-  is set aside (`updateTellsOfSetAside`). A build made before the installed
+  is set aside (`update_tells_of_set_aside`). A build made before the installed
   one can still be of a higher version - a release line that went back to an
   older version, which was installed, and forward again - and the list cannot
   tell. A check that meets such a release can, and its sentence sends the
   person to this button, which must then be on
-  (`TheDialogTellsOfAReleaseThatIsSetAsideExactlyWhereItPointsAtSettings`).
+  (`update_decisions::the_dialog_tells_of_a_release_that_is_set_aside_exactly_where_it_points_at_settings`).
 
 Otherwise the page says "No version was put back." and the button is off.
 Nothing of this changes the state file: the build stays on the list.
@@ -4790,23 +4811,23 @@ release are the same act.
 that it is echoed in the command log and done by the one code path a typed
 line takes. A token on a line would be echoed there too, and into a script's
 output, and a headless run's stderr. So there is no `UPDATE TOKEN SET`
-(`src/katana_app/update_verbs.hpp`), and Save is the one thing the dialog does
+(`rust/crates/katana_app/src/update_verbs.rs`), and Save is the one thing the dialog does
 itself: the store's `write`, then the field emptied. Nothing of the token is
 said anywhere - the status says only that one was saved and where, a refusal
 shows the store's own message, which names the rule and the place and never
-the value, and `SaveWritesTheCredentialStoreAndNeverProducesALine` reads the
+the value, and `settings_updates::save_writes_the_credential_store_and_never_produces_a_line` reads the
 status, every label, the log and the lines run for it. A script gives a run a
 token with the environment variable `KATANA_UPDATE_TOKEN` instead.
 
 A person may still TYPE a line that carries one, expecting it to work
 (`UPDATE TOKEN ghp_...`), and the window echoes a typed line before any verb
 refuses it. So the echo shows every word after `UPDATE TOKEN` that is not
-`STATUS` or `CLEAR` as `***` (`updateLoggedLine`, in both of the window's
-echoes; `WhatIsTypedWhereATokenWasHopedToGoIsNeverEchoed`), and what the
+`STATUS` or `CLEAR` as `***` (`update_logged_line`, in both of the window's
+echoes; `update_words::what_is_typed_where_a_token_was_hoped_to_go_is_never_echoed`), and what the
 verbs say back about such a line is logged with those words taken out IN ANY
-CASE (`updateLoggedReply`): a refusal may quote the line it refuses, and may
+CASE (`update_logged_reply`): a refusal may quote the line it refuses, and may
 have folded its case to find the verb
-(`WhatTheVerbsSayBackToALineWithATokenTypedOnItIsHiddenInAnyCase`; in the
+(`update_decisions::what_the_verbs_say_back_to_a_line_with_a_token_typed_on_it_is_hidden_in_any_case`; in the
 real window, `qt_a_token_typed_after_update_token_is_shown_nowhere_in_the_log_headless`).
 The line itself still reaches the verbs as typed, and is refused.
 
@@ -4815,13 +4836,13 @@ dialog and knows nothing of updates, so the page's services
 (`SettingsUpdates`: how to read the automatic flag, the skipped version and
 whether a version was put back, the credential store, the user agent, the
 note) are handed over by the
-window: `SettingsDialog::setUpdates`, called each time File > Settings is
-triggered, after the workbench's own slot has made the dialog (Qt calls an
-action's slots in the order they were connected). The page is filled again
+window: `SettingsDialog::set_updates`, called each time File > Settings is
+triggered, after the workbench has made the dialog (in the C++, because Qt
+called an action's slots in the order they were connected). The page is filled again
 at each opening and each time it is turned to, so a `UPDATE SET AUTO OFF`
-typed meanwhile is shown (`TurningToThePageReadsTheStateAgainAndRunsNothing`).
+typed meanwhile is shown (`settings_updates::turning_to_the_page_reads_the_state_again_and_runs_nothing`).
 Given no services - a widget test's bare dialog - every control on it is
-disabled (`WithNothingGivenThePagesControlsAreOffAndItSaysWhyNoTokenIsKept`).
+disabled (`settings_updates::with_nothing_given_the_pages_controls_are_off_and_it_says_why_no_token_is_kept`).
 *Rejected: a `CustomisationServices` member for them*, which is the tidier
 wiring and one line in the workbench; it was outside the files of the change
 that added the page, and is the first thing to do when that workbench is next
@@ -4838,7 +4859,7 @@ pressed in the real window by
 where the command log shows `UPDATE BLOCKED CLEAR` and no other `UPDATE`
 line, and the status shows the verbs' refusal, `reason=headless`.
 
-Tested in `tests/qt_widgets/test_update_dialog.cpp` (the `SettingsUpdates`
+Tested in `rust/crates/katana_window/tests/update/update_dialog.rs` (the `SettingsUpdates`
 cases) and, in the real window, by `tests/update/headless/update_window.cmake`.
 
 ## The rules a dialog or panel follows
@@ -4846,18 +4867,20 @@ cases) and, in the real window, by `tests/update/headless/update_window.cmake`.
 Collected here because each was paid for once, and a new manager is where
 they are easiest to break:
 
-- **No moc.** No `Q_OBJECT`, no custom signals: connections are lambdas and
-  state is passed through `std::function` members (`DockTitleBar::onPressed`,
-  `onMinimised`). A `QAbstractItemModel` or `QSortFilterProxyModel` subclass
-  needs no `Q_OBJECT` and is fine.
+- **A dialog is a model and a function that draws it.** It keeps its state
+  between frames in plain fields, and what it asks of the window it asks
+  through the `Host` it is drawn with or as events the window reads after
+  the call (`WorkspaceEvent`, `ChromeRequest`); no callbacks are stored in
+  it. (The C++ had its own rule for this, no moc: no `Q_OBJECT` and no custom
+  signals, connections as lambdas and state through `std::function` members.)
 - **Tables are read-only and a form edits**; a command is never run from a
-  list's or table's own change signal ("Styles and Linetypes").
+  list's or table's own change ("Styles and Linetypes").
 - **A view reacting to the Document defers and coalesces** its reload to the
-  event loop, never rebuilding a table inside its own signal ("Panels refresh
-  on the event loop"). A manager does it through a `DocumentWatcher`
-  (`customisation/document_watcher.*`), declared as its LAST member so it
-  goes first: one delivery per turn of the event loop however many
-  notifications came, saying what moved - the model (`Document::modelRevision`),
+  next frame, never rebuilding a table inside the notification ("Panels
+  refresh on the event loop"). A manager does it through a `DocumentWatcher`
+  (`rust/crates/katana_window/src/customisation/document_watcher.rs`): one
+  delivery per frame however many notifications came, asked for when the
+  dialog draws, saying what moved - the model (`Document::model_revision`),
   the library or the map (their generations), the selection, the current
   layer or style.
 - **A manager is non-modal and kept** by the workbench that opened it (the
@@ -4882,16 +4905,17 @@ they are easiest to break:
   <c> key=value`). A verb that takes one thing at a time is given a form that
   takes several rather than being run in a loop by the dialog.
 - **A headless session never opens a modal box**, and every action, menu,
-  field, button and tab has an object name, so tests and the headless driver
+  field, button and tab has a control name, so tests and the headless driver
   can find it.
-- **A dialog holding `Document&` must be deletable before the Document**, and
-  a registration is owned by a `ListenerHandle` (`docs/cad.md`, "A listener
+- **A dialog keeps no reference to the Document**: it is lent the drawing for
+  each frame or call, so it can never outlive it (the C++ rule was that a
+  dialog holding `Document&` must be deletable before the Document), and a
+  registration is owned by a `ListenerHandle` (`docs/cad.md`, "A listener
   lives exactly as long as the thing it notifies").
-- **Logic that can be tested below Qt lives in `katana_cad`** -
-  `src/katana_cad/customisation/*.cpp` and `include/katana/cad/*.hpp` are
-  globbed, with tests in `tests/cad/customisation/` - and the dialog stays
-  thin. What must be tested WITH Qt goes in `katana_qt_widget_tests`
-  (`tests/qt_widgets/`, run offscreen as `qt_widgets.*`), which compiles
-  `src/katana_qt/customisation/*.cpp` and `src/katana_qt/tools/*.cpp` and
-  globs its own `customisation/` and `tools/` tests; `widget_harness.hpp`
-  drives widgets by object name and asserts on the Document.
+- **Logic that can be tested below the window lives in `katana_cad`**
+  (`rust/crates/katana_cad/src/`, with its tests in
+  `rust/crates/katana_cad/tests/`) - and the dialog stays thin. What must be
+  tested WITH the window goes in the window's tests
+  (`rust/crates/katana_window/tests/`, headless), which drive a dialog by its
+  control names through the drive harness
+  (`rust/crates/katana_window/src/drive/`) and assert on the Document.

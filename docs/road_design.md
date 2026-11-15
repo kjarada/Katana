@@ -15,14 +15,14 @@ Where it lives:
 
 | Part | Files |
 |---|---|
-| templates | `include/katana/cad/road/road_template.hpp`, `src/katana_cad/road/road_template.cpp` |
-| corridors | `include/katana/cad/road/corridor_model.hpp`, `src/katana_cad/road/corridor_model.cpp` |
-| the engine | `include/katana/cad/road/road_section.hpp`, `src/katana_cad/road/road_section.cpp` |
-| kept in the project | `src/katana_cad/road/road_document.cpp` (`Document::roadTemplates`, `Document::corridors`) |
-| the objects | `include/katana/cad/bim/bim_object.hpp`, `src/katana_cad/road/corridor_objects.cpp`, `src/katana_cad/bim/bim_object.cpp`, `include/katana/cad/bim/bim_view.hpp` |
-| the verbs | `include/katana/cad/road/road_verbs.hpp`, `src/katana_cad/road/road_verbs.cpp` |
-| the window | `src/katana_qt/bim/` (the workbench, three dialogs), `src/katana_qt/plan_painter.cpp` (`PlanPainter::drawRoadModel`) |
-| the old corridor | `include/katana/cad/corridor.hpp` - now the same engine |
+| templates | `rust/crates/katana_cad/src/road/road_template.rs` |
+| corridors | `rust/crates/katana_cad/src/road/corridor_model.rs` |
+| the engine | `rust/crates/katana_cad/src/road/road_section.rs` |
+| kept in the project | `rust/crates/katana_cad/src/road/road_document.rs` (`Document::road_templates`, `Document::corridors`) |
+| the objects | `rust/crates/katana_cad/src/bim/bim_object.rs` (the corridor's objects too), `rust/crates/katana_cad/src/bim/bim_view.rs` |
+| the verbs | `rust/crates/katana_cad/src/road/road_verbs.rs` |
+| the window | `rust/crates/katana_window/src/bim/` (the workbench, three dialogs), `rust/crates/katana_window/src/plan_painter.rs` (`PlanPainter::draw_road_model`) |
+| the old corridor | `rust/crates/katana_cad/src/corridor.rs` - now the same engine |
 
 ## Road templates
 
@@ -44,16 +44,16 @@ writes and a colour.
 | batter | cut and fill slopes to the ground, benched or not | no | earthworks |
 
 **Signs.** An offset is positive to the LEFT looking along increasing
-station, as `SolvedAlignment::pointAtStationOffset` has it. A crossfall is a
+station, as `SolvedAlignment::point_at_station_offset` has it. A crossfall is a
 PERCENT and is the change of level going OUTWARD from the centreline: -3 falls
 3 % away from it (a crowned lane), +2.5 rises (a footpath rising to the
-boundary). A batter slope is run per unit rise, as `cad::Assembly` had it: 2
-is 1V:2H. *Rejected:* `cad::Assembly`'s positive-falls-away ratio - every
+boundary). A batter slope is run per unit rise, as `katana_cad::corridor::Assembly` had it: 2
+is 1V:2H. *Rejected:* `katana_cad::corridor::Assembly`'s positive-falls-away ratio - every
 template value would then need its own sign rule, a footpath rising and a
 superelevated lane being the common cases; outward percent is the one sign
 for all of them.
 
-**A kerb is a shape, not a width** (`road::kerbShape`). Its columns run out
+**A kerb is a shape, not a width** (`katana_cad::road::road_template::kerb_shape`). Its columns run out
 from the lip - the pavement's edge - at each change of its top, with a base
 `depth` under the lip: level under a barrier or a mountable kerb, following
 the channel under a kerb and gutter (`depth` below the lip at the lip, then
@@ -87,7 +87,7 @@ top and the profile is the top of the median. (Facing the way a roadside kerb
 does, the lanes started 100 mm ABOVE the profile and the kerb's face looked
 into a depressed median; the solid, the IfcKerb and every level outside the
 median were wrong with it. The offsets and levels, worked by hand, are
-`RoadSection.TheDividedRoadsLanesSitUnderTheMedianAndItsKerbFacesTheTraffic`.)
+`road_section::the_divided_roads_lanes_sit_under_the_median_and_its_kerb_faces_the_traffic`.)
 An outward kerb's points are `<side>/<kerb>/face` (the crest of the face), `invert` for a
 kerb and gutter, and `lip`, where an inward kerb's are `face`, `invert` and
 `back`. An edge strip has no face and is refused with `faces=outward`.
@@ -96,10 +96,10 @@ profile - a component cannot start above the design level its side starts at;
 and a negative `height` for a falling kerb - one number for two things, and
 the base would need its own sign rule.
 
-**Limits.** `road::checkTemplate` refuses what would make a section cost the
+**Limits.** `katana_cad::road::road_template::check_template` refuses what would make a section cost the
 session: a width, depth, thickness or maximum batter width over 1 000 m
-(`road::kMaximumComponentLength`), and a batter that would make more than 100
-benches across its maximum width (`road::kMaximumBenches`: the reach divided
+(`katana_cad::road::road_template::MAXIMUM_COMPONENT_LENGTH`), and a batter that would make more than 100
+benches across its maximum width (`katana_cad::road::road_template::MAXIMUM_BENCHES`: the reach divided
 by the bench period, a bench height of the flatter slope's run plus the flat).
 The first is a sanity bound with no standard behind it: a section is sampled
 every half metre across its whole span, so a width typed in the wrong unit
@@ -109,14 +109,14 @@ hanging the build: each bench is two named points a section and the cut and
 fill areas cost more than linearly in a section's points. *Rejected:* a floor
 on the bench's size (say 10 mm) - the cost is the number of benches, which
 depends on the reach too, and a 0.1 m reach with a 50 mm bench is a few
-points; and a linear merge-walk in `areaBetween` instead - the bound already
+points; and a linear merge-walk in `area_between` instead - the bound already
 keeps a section to a few hundred points. The refusal reaches every route a
 template takes into the drawing: the verbs, the JSON read back with a project,
 and a section or corridor being built.
 
 ### Defaults, and where they come from
 
-`road::defaultComponent` gives each kind its starting values; a designer
+`katana_cad::road::road_template::default_component` gives each kind its starting values; a designer
 edits them. Each is of the order the guide named gives, not a design:
 
 - a 3.5 m lane at 3 % crossfall - the common rural two-lane cross-section in
@@ -134,9 +134,9 @@ edits them. Each is of the order the guide named gives, not a design:
   base and 250 mm of subbase, both crushed rock; a sprayed seal on the
   shoulders; 100 mm concrete paths on 50 mm of sand; 100 mm of topsoil on
   verges and medians. A course's colour follows its material
-  (`road::makeCourse`).
+  (`katana_cad::road::road_template::make_course`).
 
-`ROADTEMPLATE DEFAULTS` adds three standard templates (`road::standardTemplates`),
+`ROADTEMPLATE DEFAULTS` adds three standard templates (`katana_cad::road::road_template::standard_templates`),
 each side the mirror of the other: **rural two-lane** (3.5 m lane, 2 m sealed
 shoulder, table drain, batter), **urban street** (3.3 m lane, 2.3 m parking
 lane, kerb and gutter, 1.5 m footpath, 1 m verge, batter) and **divided road**
@@ -162,7 +162,7 @@ outward percent: (+6, -6) is full superelevation falling to the right, for a
 curve to the right. Between two entries it is linear; outside the table each
 component keeps its template crossfall. A table is entered as a
 superelevation diagram is drawn, with normal crown at both ends of each
-transition (`road::superelevationAt`). *Rejected:* holding the nearest
+transition (`katana_cad::road::corridor_model::superelevation_at`). *Rejected:* holding the nearest
 entry outside the table - one entry at the middle of a curve would then
 superelevate the whole road. *Rejected:* rules from a design speed and a
 radius - those are a design standard's, differ between authorities, and the
@@ -175,12 +175,12 @@ RUNS, numbered from 1 in station order; the number is in each object's id.
 
 ## Building a corridor
 
-`road::buildCorridor` sections each run at the interval (multiplied from the
+`katana_cad::road::road_section::build_corridor` sections each run at the interval (multiplied from the
 corridor's start, as the setting-out table is, so the hundredth is not off by
 a hundred roundings) and at every key station - the alignment's TS, SC, CS,
 ST, the profile's PVC and PVT, each superelevation station and each region's
 ends - because the road changes character there and a schedule that stepped
-over them could not be checked (`road::sectionStations`). More than 100 000
+over them could not be checked (`katana_cad::road::road_section::section_stations`). More than 100 000
 sections is refused before one is made, as ALIGN STATIONS refuses as many
 rows.
 
@@ -192,7 +192,7 @@ chords of its lip line, short by about theta^2/24 (0.16 %). The corridor therefo
 adds sections inside a curve, and no step is left that turns through more than
 `sqrt(6 x curvetol)`: 0.0775 radians at the default of 0.001, 3.9 m on R = 50 m
 and 15.5 m on R = 200 m, where the interval's 10 m already does it
-(`road::sectionStations` with the alignment). A gap that turns through more is cut
+(`katana_cad::road::road_section::section_stations` with the alignment). A gap that turns through more is cut
 into the fewest EQUAL parts that do not, so every station of the plain list is
 still there, a straight gets none, and the same stations serve the strings, the
 surfaces, the solids, the quantities and the IFC export: this is the one engine.
@@ -202,7 +202,7 @@ wide, r = 46.7 to 50 m, 12.5314 m3 exact: pi/4 x (50^2 - 46.7^2) x 0.05) comes o
 12.4505 m3 with no sections added (`curvetol=0`: 0.65 % short) and 12.5224 m3 at
 the default (0.07 % short, inside the 0.1 % asked), at the cost of 16 sections
 more than the 20 the interval and the keys give over its 178.5 m
-(`StationsInsideACurveAreCutUntilNoStepTurnsThroughMoreThanTheTolerancesAngle`,
+(`road_section::stations_inside_a_curve_are_cut_until_no_step_turns_through_more_than_the_tolerances_angle`,
 `ACoursesVolumeRoundAQuarterCircleIsTheAnnulusSectorsToTheCurveTolerance`). The
 EARTHWORKS get those sections too, which can only bring
 their end-area volume nearer the true one. `curvetol=` is a relative error from 0
@@ -216,11 +216,11 @@ then disagree, the model and its quantity agreeing being the point of measuring
 the solid, and spirals, superelevation and an offset kerb would each need a
 formula. *Rejected:* a smaller default interval - a straight would pay for the
 bend. *Rejected:* a tolerance in metres of sagitta, as a drawing's polyline is
-chorded (`SolvedAlignment::toPolyline`): what a quantity cares about is the
+chorded (`SolvedAlignment::to_polyline`): what a quantity cares about is the
 angle a step turns through, and the same sagitta is a different relative error
 on every radius.
 
-**A section** (`road::roadSection`) sets each side's components out in turn
+**A section** (`katana_cad::road::road_section::road_section`) sets each side's components out in turn
 from the centreline at the design level; a lane or shoulder at its crossfall
 (or the superelevation's), a kerb by its shape, a drain as its V, the rest at
 their crossfalls. Each point is named - `CL`, `left/lane/outer`,
@@ -235,7 +235,7 @@ half-metre steps until the batter and the ground change order, then forty
 bisections (`docs/cad.md`, "Corridor quantities"). The last step is the
 maximum width itself, so a limit that is not a multiple of half a metre - or
 is under half a metre - still finds a daylight inside it
-(`RoadSection.ABatterLimitThatIsNotAMultipleOfAStepStillFindsADaylightInsideIt`).
+(`road_section::a_batter_limit_that_is_not_a_multiple_of_a_step_still_finds_a_daylight_inside_it`).
 Benches are flats of their width every bench height of rise or fall. A batter
 that meets no ground within its maximum width - or meets no surface at all -
 leaves its side NOT REACHED and the section incomplete; its pavement is still
@@ -244,14 +244,14 @@ built.
 **The formation** - the subgrade - is the bottom of each component's courses,
 a kerb's base, the top of what has no courses, and then the batter. Where two
 neighbours' bottoms differ, or the courses end at the hinge, the line steps,
-and the shallower corner is set `road::kFaceRun` (1 mm) into its own
+and the shallower corner is set `katana_cad::road::road_section::FACE_RUN` (1 mm) into its own
 component, so the formation stays a function of offset. A TIN of it needs
 that (two levels at one point cannot be triangulated), and so do the end
 areas. 1 mm is more than the TIN builder's duplicate tolerance (0.1 mm,
-`math::tolerance::kCoordinate`) and less than any construction tolerance on
+`tolerance::COORDINATE`) and less than any construction tolerance on
 a subgrade; the area it moves is under a thousandth of a square metre for a
 metre-deep pavement, and the tests work it in by hand
-(`RoadSection.ThePavementBoxIsCutAndTheBatterStartsAtTheFinishedEdge`).
+(`road_section::the_pavement_box_is_cut_and_the_batter_starts_at_the_finished_edge`).
 *Rejected:* taking the deeper of two neighbours across the shallower one -
 the subgrade surface then lies below the shallower courses for the whole of
 its width.
@@ -265,20 +265,20 @@ shallower corner stepped 1 mm. Before this the line ran straight from that
 side's daylight to the other side's first point and the triangle under the
 batter was left out of the cut and fill, the earthworks solids and the
 subgrade
-(`RoadSection.ASideOfABatterAloneStartsItsFormationAtTheHingeAndMeasuresTheTriangleUnderIt`,
-`CorridorObjects.AnEmbankmentOfBattersAloneIsTheTrianglesUnderTheirSlopesAndItsSubgradeRises`).
+(`road_section::a_side_of_a_batter_alone_starts_its_formation_at_the_hinge_and_measures_the_triangle_under_it`,
+`corridor_objects::an_embankment_of_batters_alone_is_the_triangles_under_their_slopes_and_its_subgrade_rises`).
 
 **Earthworks** are between the formation and the ground across the section:
 CUT where the ground is above it - the pavement box is cut - and FILL where
 it is below, each side's split at the centreline. Along the run they are
 measured by the AVERAGE END AREA between two complete sections, as
-`corridorQuantities` always measured them, and for the reason it gives: it is
+`corridor_quantities` always measured them, and for the reason it gives: it is
 the method specifications and measurement standards name. An interval
 touching an incomplete section adds nothing, and the count is a problem.
 
 A side has cut (or fill) at a section only where the ground and the formation
-are more than 0.1 mm apart (`math::tolerance::kCoordinate`, the TIN's
-duplicate tolerance) at some point of the stretch: `RoadSection::leftCutSpans`
+are more than 0.1 mm apart (`tolerance::COORDINATE`, the TIN's
+duplicate tolerance) at some point of the stretch: `RoadSection::left_cut_spans`
 and its three kin hold those stretches, out from the centreline, found
 exactly where the two lines cross between the ground samples. A side with none
 has an area of exactly zero. The daylight is bisected to about 1e-13 m, so it
@@ -293,18 +293,18 @@ a 30 m width and 100 m is 0.15 m3).
 **Where two runs meet** - a region's start or end - each run has a section of
 its own at the station, built with its own template (`RoadSection::run` tells
 them apart). The solids are lofted per run, so they step there. The strings
-and the surfaces do the same: `road::corridorSections` lists both sections,
+and the surfaces do the same: `katana_cad::road::road_section::corridor_sections` lists both sections,
 every string breaks at the join and runs over its own run's stations (a code
 only the region has is one string from the region's start to its end, not
 from one interval after), and a surface lays the later run's section 1 mm on
-(`kFaceRun`, the formation's device across an offset) so that the TIN, which
+(`FACE_RUN`, the formation's device across an offset) so that the TIN, which
 holds one level at a point, has a near-vertical face there and each template's
 own surface either side of it. The strings end at the join, so nothing but the
 Delaunay rule would keep the TIN from joining the earlier run's last interval to
 the points a millimetre on - and it did, blending the two over that interval (9.793
 at 6 m out, 35 m along the rural-urban test road, where the rural surface is
 9.585) - so the two sections of a join are breaklines as well
-(`sectionsSurface`; a section across the road, its vertices the strings' own).
+(`sections_surface`; a section across the road, its vertices the strings' own).
 Before, the later run's section at the join was
 dropped for the earlier run's: a region's own codes lost their first interval,
 a region one interval long lost its strings altogether, a code both templates
@@ -315,11 +315,11 @@ it). *Rejected:* one section standing for the station, taken from the run
 that is longer or the later one - either way the other template's last
 interval is drawn with the wrong section.
 
-**One engine.** `cad::corridorSection`, `corridorQuantities` and
-`corridorSurface` (`include/katana/cad/corridor.hpp`) are this engine run on
-`road::templateFromAssembly` - a lane each side at the assembly's half width
+**One engine.** `katana_cad::corridor::corridor_section`, `corridor_quantities` and
+`corridorSurface` (`rust/crates/katana_cad/src/corridor.rs`) are this engine run on
+`katana_cad::road::road_template::template_from_assembly` - a lane each side at the assembly's half width
 and crossfall, then a batter of its slopes - with their old refusals checked
-first in their old words. Their tests (`tests/cad/test_corridor.cpp`) are
+first in their old words. Their tests (`rust/crates/katana_cad/tests/road/corridor.rs`) are
 unchanged and are the check that the engine is the old one where the two
 meet. The only difference: their stations now include the alignment's key
 stations as well as the profile's.
@@ -329,7 +329,7 @@ stations as well as the profile's.
 case), and its cut's `Target Surface` is `ground`, the name the IFC export
 finds the ground by, exactly: otherwise it did not find it and wrote a second,
 empty TERRAIN element, voided by the cuts, beside the real one
-(`RoadVerbs.ACorridorsEarthworksNameTheSurfaceAsTheDrawingSpellsItWhateverWasTyped`).
+(`road_verbs::a_corridors_earthworks_name_the_surface_as_the_drawing_spells_it_whatever_was_typed`).
 
 **What it cannot build it says.** `road::BuiltCorridor::problems` lists,
 a sentence each: an alignment, a design profile, a template or a surface the
@@ -340,8 +340,8 @@ is built.
 
 ## The road model's objects
 
-`bim::corridorObjects` builds every corridor and `road::corridorSolids` makes
-its objects (`include/katana/cad/bim/bim_object.hpp`):
+`katana_cad::bim::bim_object::corridor_objects` builds every corridor and `katana_cad::road::road_section::corridor_solids` makes
+its objects (`rust/crates/katana_cad/src/bim/bim_object.rs`):
 
 - a closed solid per COURSE of each component, per side, per run;
 - one per KERB per side per run;
@@ -351,7 +351,7 @@ its objects (`include/katana/cad/bim/bim_object.hpp`):
   where its end area tapers to nothing, in a line (below). None where there
   is none.
 
-**A closed solid** (`road::loftSolid`): the solid's columns at each station
+**A closed solid** (`katana_cad::road::road_section::loft_solid`): the solid's columns at each station
 give a top and a bottom face, the first and last column an inner and an
 outer face, and the first and last station a cap each - each quad walked so
 that every edge it shares is walked the other way by its neighbour, so each
@@ -359,17 +359,17 @@ edge is shared by exactly two triangles and the solid is closed and
 consistently turned. Which way that turns depends on the side (offsets grow
 to the left, so the right side's solids are mirror images): it is turned
 outward by the sign of the volume it encloses. An earthworks solid has
-`road::kEarthworksColumns` (41) columns across each STRETCH of a side - its
+`katana_cad::road::road_section::EARTHWORKS_COLUMNS` (41) columns across each STRETCH of a side - its
 look, not its quantity - spread from where that stretch of earthworks starts
 across a section to where it ends, not from the centreline to the daylight: a
 fill beside a road in cut is no sheet laid over the whole half-section.
 
 **A solid may taper, and then it has no face of no area.** A column whose top
-and bottom are the same (to the model's 0.1 mm, `math::tolerance::kCoordinate`,
-the thickness under which `earthworkSpans` finds no earthworks) is ONE vertex,
+and bottom are the same (to the model's 0.1 mm, `tolerance::COORDINATE`,
+the thickness under which `earthwork_spans` finds no earthworks) is ONE vertex,
 and the faces between its two, which have no area, are not made: the solid ends
 in a line with a wedge welded to it, every edge still shared by two triangles
-(`loftSolid`'s `weldBelow`). That is done in the places a solid ends: a
+(`loft_solid`'s `weld_below`). That is done in the places a solid ends: a
 station's first and last column (where the ground meets the formation, the
 daylight, a stretch's edge) and every column of the first and last station (the
 section beyond a piece, which is a line along the formation). A cell with all
@@ -383,7 +383,7 @@ on its indices (the IFC export judges closure there, and wrote them as they
 were).
 
 **A section with a gap in its earthworks** (cut, fill, cut across one
-half-section: `RoadSection::leftCutSpans` holds two stretches) makes the solid
+half-section: `RoadSection::left_cut_spans` holds two stretches) makes the solid
 of cut one SHELL for each stretch counted from the centreline, the
 `k`-th stretch of each section lofted over the sections that have `k` of them
 and one beyond each end that is in the piece, where it is a line along the
@@ -408,7 +408,7 @@ and a model handed over twice must name the same things the same way:
     corridor/<corridor>/<side>/<component>/<run>                  a kerb
     corridor/<corridor>/<side>/earthworks/cut|fill/<run>[-<piece>]
 
-No component can be named `earthworks`, in any case (`checkTemplate`): the
+No component can be named `earthworks`, in any case (`check_template`): the
 earthworks' ids are `corridor/<c>/<side>/earthworks/cut|fill/<run>`, and a
 component of that name with a course called `cut` or `fill` made the same id,
 which the IFC export answers by keeping the first element and skipping the
@@ -419,7 +419,7 @@ can be (a run number, a `-<piece>`).
 in station order over the pieces made: a fill that ends along the road and
 begins again is `fill/1` and `fill/1-2`. A piece is a stretch of stations
 over which that side has cut (or fill), inside a stretch of complete sections
-(`CorridorObjects.EarthworksSplitWhereTheirThicknessEndsAndTheSecondPieceCarriesItsNumber`).
+(`corridor_objects::earthworks_split_where_their_thickness_ends_and_the_second_piece_carries_its_number`).
 
 **IFC classes**, as the IFC export reads them (`docs/ifc.md`): a pavement,
 verge, median or drain course is an IfcCourse of its course's type (PAVEMENT
@@ -439,7 +439,7 @@ its UndisturbedVolume and a fill's its CompactedVolume (the in-place volume
 the end areas measure); what the set has no name for - an earthworks object's
 GrossArea - stays in `Katana_Quantities`. Renaming at the builder instead would
 have changed CORRIDOR QUANTITIES, its CSV and ROADMODEL JSON, which total by
-these names (`IfcExportRoad.TheRoadModelsQuantityNamesAreWrittenAsTheirClassesBaseQuantitiesNameThem`).
+these names (`ifc_export_road::the_road_models_quantity_names_are_written_as_their_classes_base_quantities_name_them`).
 
 | Object | Length | Width | Depth / Height | GrossArea | GrossVolume |
 |---|---|---|---|---|---|
@@ -452,7 +452,7 @@ outline runs from where the earthworks start to where they end across each
 section, narrowing to a point over the last interval where the end area
 tapers to nothing (as the average-end-area volume does), so on a straight a
 side's cut and fill add up to the side's footprint
-(`CorridorObjects.ASideWithCutAndFillGivesEachItsOwnFootprintAndTheTwoAddUpToTheSide`).
+(`corridor_objects::a_side_with_cut_and_fill_gives_each_its_own_footprint_and_the_two_add_up_to_the_side`).
 A section with the earthworks in two separate stretches draws and measures
 their hull.
 
@@ -462,7 +462,7 @@ as the longer thing it is (to the chords between its sections, which the
 curve tolerance holds to a thousandth: "Sections inside a curve"). The earthworks' is the END AREA, the measurement
 standard, as above; the solid drawn for them differs from it by the corners
 its 41 columns cut, which the tests work out by hand
-(`CorridorObjects.TheEarthworksAreTheEndAreasTheOldAssemblyMeasured`).
+(`corridor_objects::the_earthworks_are_the_end_areas_the_old_assembly_measured`).
 
 **Layers and colours.** An object is on its component's layer
 (`road/pavement`, `road/shoulder`, `road/kerb`, `road/footpath`,
@@ -471,18 +471,18 @@ its 41 columns cut, which the tests work out by hand
 colour, a kerb in its component's, earthworks blue for cut and red for fill,
 as the Cut Fill surface style draws them.
 
-**An object follows its layer** (`bim::isShown`): the deepest part of its
+**An object follows its layer** (`katana_cad::bim::bim_view::is_shown`): the deepest part of its
 path the drawing has decides, so "road" switched off hides everything under
 it even before "road/pavement" is made, and a path the drawing has none of
 is drawn - an object is not an entity and is drawn in its own colour. A view
 that hides a layer of its own hides its objects there: a plan view through
-`isShown` with its overrides, a 3D view through `SceneMesh::layer`, which
-`bim::sceneMeshes` fills and `RenderViewWidget::shownMeshes` tests against the
+`is_shown` with its overrides, a 3D view through `SceneMesh::layer`, which
+`katana_cad::bim::bim_view::scene_meshes` fills and `render_view_widget::shown_meshes` tests against the
 view's own hidden layers. The window makes ONE list of meshes for every 3D
 view, with the drawing's layers only. *Rejected:* a list for each view, a copy
 of every mesh a view for the sake of a layer hidden in one; a view that hides
 none of the meshes uses the window's list as it is, and copies nothing
-(`RoadWorkbench.AThreeDViewThatHidesALayerOfItsOwnDoesNotDrawTheRoadObjectsOnIt`).
+(`road_workbench::a_three_d_view_that_hides_a_layer_of_its_own_does_not_draw_the_road_objects_on_it`).
 `CORRIDOR NEW` makes the layers its objects are on in the same undo step,
 `road/earthworks/cut` switched OFF: a cut is the ground taken away, and drawn
 solid it would bury the road it was taken away for.
@@ -490,20 +490,20 @@ solid it would bury the road it was taken away for.
 ## Kept with the project
 
 The templates and corridors are versioned JSON under the project metadata
-keys `road_templates` and `corridors` (`road::roadTemplatesToJson`,
-`road::corridorsToJson`), the sheets' pattern (`docs/plotting.md`): the storage
+keys `road_templates` and `corridors` (`katana_cad::road::road_template::road_templates_to_json`,
+`katana_cad::road::corridor_model::corridors_to_json`), the sheets' pattern (`docs/plotting.md`): the storage
 layer carries a key it does not read, so no schema change; parsed once per
 change and shared by an undo step; every edit ONE undo step
-(`Document::setRoadTemplates`, `Document::setCorridors`, and the command forms
+(`Document::set_road_templates`, `Document::set_corridors`, and the command forms
 for a step that does more - CORRIDOR NEW with its layers, a template renamed
 with the corridors that name it); an empty set stored as no key, so undoing
 the first template leaves the metadata as it was; a set equal to the current
 one no step; what a newer Katana wrote kept, every edit refused
 (`Unsupported` read, `CommandRejected` on a write).
 
-**The RoadModel change.** `Document::roadModelChanged` compares the road
+**The RoadModel change.** `Document::road_model_changed` compares the road
 model's metadata keys - these two and the placed objects' `road_objects` -
-after every command, undo and redo, and reports `DocumentChange::RoadModel`
+after every command, undo and redo, and reports `DocumentChange::ROAD_MODEL`
 with the step's other parts: one notification, and the placed objects need no
 mechanism of their own. *Rejected:* each store calling the notifier from its
 command - a second notification per step, and one the placed objects would
@@ -511,7 +511,7 @@ have had to repeat. The first command after a project is opened may report
 it once more than it changed; what listens rebuilds from a cache, so that
 costs nothing (below).
 
-**The cache** (`bim::bimModel`, `src/katana_cad/bim/bim_object.cpp`). Made
+**The cache** (`katana_cad::bim::bim_object::bim_model`, `rust/crates/katana_cad/src/bim/bim_object.rs`). Made
 once per change of what it is made from, in two halves, each keyed on what it
 reads and nothing wider:
 
@@ -523,7 +523,7 @@ reads and nothing wider:
 So a line drawn, a layer, a surface no corridor targets and no object names - an
 edit of it, a hide, a removal, a new one - make neither again, and a template
 edit leaves the placed objects alone, as a placed object leaves the corridors
-(`bim::bimBuildCounts` counts each half's makings, for the tests and the
+(`katana_cad::bim::bim_object::bim_build_counts` counts each half's makings, for the tests and the
 benchmark). Before, the corridors' half was keyed on the surfaces' whole
 generation and the placed objects' on every command, so any edit of any surface
 sectioned every corridor again for a model that came out the same. A surface is
@@ -540,14 +540,15 @@ alignments' revision (both halves read the whole set, which is
 conservative), and a model handed to the views as a different object made
 every 3D view build its terrain again - so the model a view holds is the same
 object until something in it changes
-(`RoadVerbs.TheRoadModelIsMadeAgainWhenATemplateChangesAndNotOtherwise`,
-`RoadVerbs.TheRoadModelIsTheSameObjectAfterAnEditThatLeftItAsItWas`). The
+(`road_verbs::the_road_model_is_made_again_when_a_template_changes_and_not_otherwise`,
+`road_verbs::the_road_model_is_the_same_object_after_an_edit_that_left_it_as_it_was`). The
 views call it every paint; while nothing it is made from moved that is a few
 counters, two texts and a lookup of each surface named, and a half made again
 is compared with the old one (vertex for vertex) only after a key moved. The
 one way a placed object reads a surface is `placement.surface`; a new way
-would need its name in that key (`placedGrounds`). What it costs is measured by
-`benchmarks/bench_road.cpp` (`BM_RoadModelUnchanged`,
+would need its name in that key (`placed_grounds`). What it costs is measured by
+the C++ build's `bench_road` benchmark (removed with the C++ tree, not yet
+ported; `BM_RoadModelUnchanged`,
 `BM_RoadModelAfterAnUnrelatedSurface` against `...AfterTheTargetedSurface`):
 measured on 2026-10-16 (Release): the model asked for again with nothing moved
 takes 0.4 microseconds; after an edit of a surface no corridor or object names
@@ -561,7 +562,7 @@ the next paint, and an unrelated edit costs a microsecond now.
 
 ## The verbs
 
-The interpreter's (`road::runRoadVerb`), so the window's command line,
+The interpreter's (`katana_cad::road::road_verbs::run_road_verb`), so the window's command line,
 `katana_cli` and `katana_mcp` all run them; `HELP CORRIDOR` lists every word.
 
     ROADTEMPLATE [LIST] [JSON] | INFO <t> | DEFAULTS | SECTION <t>
@@ -601,14 +602,14 @@ committed); and a verb of its own for the grid, a second way to do what SET
 does.
 
 **Replies** are records, key=value, one a line. A definition's numbers are
-written exactly (`core::formatExactReal`), so a value a reply prints can be
+written exactly (`katana_core::text::format_exact_real`), so a value a reply prints can be
 typed back; a computed length, level, area or volume to three places - a
 millimetre, a thousandth of a square or cubic metre - which is what a
-schedule is read to (`std::format`, locale-free). A refusal names what is
+schedule is read to (`katana_core::text::format_fixed`, locale-free). A refusal names what is
 wrong: `NotFound` for a template, component, course, corridor, alignment or
 surface the drawing lacks, `ParseFailure` for a word or value that does not
 read, `InvalidArgument` for a template or corridor that cannot be built
-(`road::checkTemplate`, `road::checkCorridor`), `AlreadyExists` for a name in
+(`katana_cad::road::road_template::check_template`, `katana_cad::road::corridor_model::check_corridor`), `AlreadyExists` for a name in
 use, `InvalidState` for definitions that cannot be read. A template a
 corridor uses is not deleted from under it.
 
@@ -620,16 +621,16 @@ net=` empty for one with no target surface, or whose alignment, profile or
 surface the drawing lacks (a road measured to have no cut says `cut=0.000`);
 a `total` leaves `length=`, `area=` or `volume=` empty when no object of its
 kind carries one (a kerb has no area). The dialog says "not measured".
-(`BuiltCorridor::hasRange` and `hasEarthworks` carry it.)
+(`BuiltCorridor::has_range` and `has_earthworks` carry it.)
 
 **A key a component does not keep is refused.** `ROADTEMPLATE ADD` and `SET`
-take the keys the component's kind keeps (`road::componentKeys`, what its
+take the keys the component's kind keeps (`katana_cad::road::road_template::component_keys`, what its
 JSON writes): a lane has no `material=`, a batter no `width=`. Before, the
 key was read, the JSON came out as it was, no step was made, and the reply
 said "updated". The refusal is a `ParseFailure` naming the kind's keys.
 
 **`CORRIDOR SECTION` is refused outside the corridor's stations** (its
-`from=` to `to=` held to the alignment and the profile, `road::corridorRange`,
+`from=` to `to=` held to the alignment and the profile, `katana_cad::road::road_section::corridor_range`,
 the range `BUILD` uses): a section at 90 on a corridor of 20 to 60 looked
 built and was not part of anything.
 
@@ -643,16 +644,16 @@ as `RENAME` and `LIST` do: an empty set would say that none uses the template.
 template (or every one: the word ALL, in any case, is always every template, so
 a template of that name is exported by renaming it first) in the plain-data,
 versioned JSON that `ROADTEMPLATE JSON` prints and the project keeps
-(`road::roadTemplatesToJson`: format `katana-road-templates`, version 1, every
+(`katana_cad::road::road_template::road_templates_to_json`: format `katana-road-templates`, version 1, every
 number exact), and a newline. A file already there is only replaced with
 `OVERWRITE`, as every verb that writes one; a drawing with no templates has none
 to export. `ROADTEMPLATE IMPORT <file.json>` reads such a file back through the
-code the project reads its own with (`road::roadTemplatesFromJson`: the format,
+code the project reads its own with (`katana_cad::road::road_template::road_templates_from_json`: the format,
 the version - a newer Katana's file is `Unsupported`, never read by guesswork -
-and `road::checkTemplate` of every template, the check `ROADTEMPLATE SET`
+and `katana_cad::road::road_template::check_template` of every template, the check `ROADTEMPLATE SET`
 makes, so a lane of no width or a name used twice is refused naming the
 component), after a byte order mark or UTF-16 an editor wrote has been read as
-text (`core::decodeText`). A file over 16 MiB (`kMaximumTemplateFileBytes`, a
+text (`katana_core::text_encoding::decode_text`). A file over 16 MiB (`MAXIMUM_TEMPLATE_FILE_BYTES`, a
 sanity bound with no standard behind it) is refused unread, and a file of no
 templates is refused as a mistake and not imported as nothing. The templates go
 in as ONE undo step, in the file's order after the drawing's own. A name the
@@ -666,17 +667,17 @@ renaming a clash to `name (2)` - every corridor would still name the old one,
 and the person asked for that template. Both verbs act on named definitions and
 a file, not on drawing entities, so they take no scope or filter. `katana_mcp`
 reaches them through `katana_run_commands`, and an agent has no other door to
-the file (`AnAgentMovesRoadTemplatesThroughAFileByTheirLines`); a drawing's
+the file (`mcp_server::an_agent_moves_road_templates_through_a_file_by_their_lines`); a drawing's
 templates are copied between projects this way and no longer by hand.
 
 **`QUANTITIES csv=`** writes through the one CSV writer of the report verbs
-(`cad::writeCsvTable`, shared with VOLUME): RFC 4180, records ending in CRLF,
+(`katana_cad::csv_table::write_csv_table`, shared with VOLUME): RFC 4180, records ending in CRLF,
 and a file already there is only replaced with the word `OVERWRITE` (the
 dialog has a box for it). Before, it was a copy that replaced silently and
 ended records in LF.
 
 **STRINGS** draws each code's points along the corridor as a 3D polyline
-(`entity::setHeights`) on `road/strings`, marked `road.corridor` and
+(`katana_entity::entity::set_heights`) on `road/strings`, marked `road.corridor` and
 `road.string`, replacing in the same step the strings that corridor made
 before and nothing else - found by its name read ignoring case, as corridors
 are found. `CORRIDOR RENAME` retags the strings with the new name in its own
@@ -685,7 +686,7 @@ beside a second set and a corridor later given the old name would delete
 them. `CORRIDOR DELETE` leaves its strings in the drawing: they are
 entities a person may have kept; a corridor later made with the same name
 replaces them on its next STRINGS. **SURFACE** puts the finished surface and the
-formation into the drawing's surfaces (`Document::setSurfaces`), as `<c>
+formation into the drawing's surfaces (`Document::set_surfaces`), as `<c>
 finished` and `<c> subgrade` unless named, replacing surfaces of those names
 in place: every section's points (the reply's `sections=` counts them, both of
 a join's), each code's string as a breakline, the outermost points as the
@@ -702,7 +703,7 @@ what the same corridor made before. QUANTITIES takes a corridor or ALL.
 ## In the window
 
 The BIM menu (`bimMenu`), after Terrain, and the BIM toolbar, on the third row
-beside Surface Edit's (`src/katana_qt/bim/road_workbench.hpp`), each item building
+beside Surface Edit's (`rust/crates/katana_window/src/bim/road_workbench.rs`), each item building
 its line and running it through the window's one executor:
 
 | Section | Item | Object name | Dialog |
@@ -714,7 +715,7 @@ its line and running it through the window's one executor:
 
 The road objects' items follow, in a section of their own (the road
 objects document, docs/road_objects.md). The dialogs' widgets and what each runs are listed
-in their headers: `src/katana_qt/bim/road_template_manager.hpp` (the templates;
+in their modules' documentation: `rust/crates/katana_window/src/bim/road_template_manager.rs` (the templates;
 the components and courses in two grids that are buffers, each applied by ONE
 line - a group of `key=value` for every edited row - so an Apply is one undo
 step and a refused value leaves the template as it was; the components' grid
@@ -724,11 +725,11 @@ the dialog for a template file, a text box with a Browse button (no file dialog
 in a headless run, where the path is typed), Export, Export All and Import that
 build the `ROADTEMPLATE EXPORT` and `IMPORT` lines, and a Replace box that adds
 OVERWRITE to them; a drawing of the
-template across a level road - `road::templateSection` - its courses
+template across a level road - `katana_cad::road::road_section::template_section` - its courses
 coloured and its vertical exaggerated so a 50 mm course can be seen),
-`src/katana_qt/bim/corridor_dialog.hpp` (the corridors, their regions and
+`rust/crates/katana_window/src/bim/corridor_dialog.rs` (the corridors, their regions and
 superelevation, Build, Build Strings, Build Surfaces, and the problems) and
-`src/katana_qt/bim/corridor_quantities_dialog.hpp` (the records of CORRIDOR
+`rust/crates/katana_window/src/bim/corridor_quantities_dialog.rs` (the records of CORRIDOR
 QUANTITIES as a table, Copy and Save CSV with its Replace box, which adds
 OVERWRITE; no file dialog in a headless run).
 
@@ -737,7 +738,7 @@ DOCUMENT's state after an edit, an undo, a redo, New and Open, and keep a
 person's unapplied edits only while what they were made on is as it was:
 
 - *Template Manager.* The components grid keeps its edits across a reload that
-  left the template as it was (`filledFrom`). The courses grid does the same on
+  left the template as it was (`filled_from`). The courses grid does the same on
   what it was filled from - the template, the component and the component's
   courses as the drawing held them - not on the component's reference alone
   (`left:lane` is in every template that has a lane, so a grid filled from
@@ -756,17 +757,17 @@ person's unapplied edits only while what they were made on is as it was:
   acted on that one). The combos show the name the corridor holds - found
   ignoring case, as the verbs find it - or, where the drawing has none (a
   surface since removed, an alignment that lost its profile), an extra item
-  with that name. `QComboBox::setCurrentText` does neither on a combo that is
-  not editable, and Apply, which writes every key, then re-pointed the corridor
+  with that name. The C++ dialog's combo box (Qt's setCurrentText) did neither
+  on a combo that was not editable, and Apply, which writes every key, then re-pointed the corridor
   to whatever item was showing; Apply now also writes a name in the case the
   corridor already holds it.
-  `CorridorDialog.ApplyKeepsTheTemplateAndSurfaceACorridorNamesInAnotherCase` and
-  its neighbours in `tests/qt_widgets/bim/test_road_dialogs.cpp`. The curve
+  `corridor_dialog::apply_keeps_the_template_and_surface_a_corridor_names_in_another_case` and
+  its neighbours in `rust/crates/katana_window/tests/roads/road_dialogs.rs`. The curve
   tolerance is in the line only when it is not what the corridor already has
   (a new corridor has the default), so the lines stay as short as they were
-  (`TheCurveToleranceIsInTheLineOnlyWhenItIsNotWhatTheCorridorHolds`).
+  (`corridor_dialog::the_curve_tolerance_is_in_the_line_only_when_it_is_not_what_the_corridor_holds`).
 - *Corridor Quantities.* The table and the totals are the records of the
-  last line it ran, so when the road model that line read (`bim::bimModel`'s
+  last line it ran, so when the road model that line read (`katana_cad::bim::bim_object::bim_model`'s
   object) is no longer the drawing's - an edit, an undo, a redo, New, Open -
   they are cleared, the status says to press List Quantities again, and Copy
   hands out nothing. *Rejected:* running the line again by itself - a CORRIDOR
@@ -777,38 +778,38 @@ person's unapplied edits only while what they were made on is as it was:
   such alignment; with a corridor they open whatever became of its alignment,
   as its problems ("the alignment road has no design profile") are what the
   Corridors dialog is there to show
-  (`RoadWorkbench.TheCorridorDialogsOpenForCorridorsWhoseAlignmentLostItsProfile`).
+  (`road_workbench::the_corridor_dialogs_open_for_corridors_whose_alignment_lost_its_profile`).
 
 **Where the old corridor commands went.** Terrain > Corridor Quantities... and
 Corridor Surface... asked for an alignment, a surface and an assembly in a
-modal box (`askCorridor`) and called `cad::` directly - no verb, nothing
+modal box (the C++ window's askCorridor) and called the cad layer directly - no verb, nothing
 kept, nothing to undo, nothing an agent could reach. They are gone; Terrain's
 Corridors section now shows the BIM menu's Corridors... and Corridor
-Quantities... - the same QAction objects, as File shows the other menus'
+Quantities... - the same actions, as File shows the other menus'
 imports - and both still say where an alignment with a design profile is made
 when there is none and no corridor to show
 (`qt_terrain_commands_point_to_the_alignment_manager_headless`). A
 one-carriageway corridor is a template like any other now. The Terrain
 toolbar lost the two buttons, which are the BIM toolbar's.
 
-**The road model in the views.** Each 3D view draws `bim::bimModel`'s objects
-as meshes in their colours (`bim::sceneMeshes`), put in the window's list of
-meshes beside the imported ones (`MainWindow::setRoadMeshes`), marked
-`SceneMesh::planFootprint` off so that the plan view does not also draw
+**The road model in the views.** Each 3D view draws `katana_cad::bim::bim_object::bim_model`'s objects
+as meshes in their colours (`katana_cad::bim::bim_view::scene_meshes`), put in the window's list of
+meshes beside the imported ones (`RoadWorkbench::road_meshes`), marked
+`SceneMesh::plan_footprint` off so that the plan view does not also draw
 their hulls - a curved course's hull would cover the inside of the curve.
 Each plan view, plot and sheet draws their plan outlines through the one
-painter (`PlanSource::roadModel`, `PlanPainter::drawRoadModel`), beneath the
+painter (`PlanSource::road_model`, `PlanPainter::draw_road_model`), beneath the
 drawing as a mesh's footprint is, in the object's colour with a light fill,
 earthworks dashed; Zoom Extents counts them. The meshes are made again from
 the event loop when the road model, the surfaces, the alignments or the
 layers change, and handed over only when what is shown changed. Show Road
-Model (`setRoadModelShown`) takes them out of all of it for the session, as
+Model (`set_road_model_shown`) takes them out of all of it for the session, as
 View > Thin screen lines is set.
 
 **Show Road Model has a line**, `ROADMODEL SHOW [ON|OFF]` (alone, the other of
 the two), as View > Grid has `GRID`: it is the window's own, the session's
-display state, so the road workbench takes it (`RoadWorkbench::runLine`, from
-`MainWindow::runWorkbenchLine` where the online and update workbenches take
+display state, so the road workbench takes it (`RoadWorkbench::run_line`, from
+`main_window::run_workbench_line` where the online and update workbenches take
 theirs) before the interpreter ever sees it, switches the same action as the
 menu's item and replies `roadmodel=on` or `roadmodel=off`, once. An agent that
 drives the window (`katana --command`, a script, a dialog's line) no longer has
@@ -821,21 +822,21 @@ edit; and a hidden-layer shortcut, which changes the drawing's layers for a
 picture.
 
 **The Command Reference** (Help) lists the road verbs in a section of their own,
-Road model, read from `HELP CORRIDOR` (`road::roadVerbHelp`) as the Road objects
+Road model, read from `HELP CORRIDOR` (`katana_cad::road::road_verbs::road_verb_help`) as the Road objects
 section is from `HELP ROADOBJECT`, so a word added to the verbs' help is there at
 once; its Window section names `ROADMODEL SHOW`, the one of them that is the
 window's alone.
 
-**The layout.** The BIM toolbar did not bump `kLayoutVersion` when it was made;
+**The layout.** The BIM toolbar did not bump `LAYOUT_VERSION` when it was made;
 raising the version would have put every saved layout back to the default for
 it. With Surface Edit it now has a third row of its own (`docs/desktop.md`,
-"Fitting the screen"), and the version is 2: `MainWindow::restoreLayout`
+"Fitting the screen"), and the version is 2: `MainWindow::restore_layout`
 carries a layout of version 1 over, seating the two toolbars on that row,
 whether the layout had put them on the second row or never knew them.
 
 ## Through MCP
 
-`katana://road-model` is `ROADMODEL JSON` (`road::roadModelJson`): every
+`katana://road-model` is `ROADMODEL JSON` (`katana_cad::road::road_verbs::road_model_json`): every
 object without its mesh - its triangle count and box instead - with its IFC
 class, layer, quantities and properties, and every problem
 (`docs/mcp.md`). Every verb above reaches `katana_mcp` through
@@ -843,10 +844,10 @@ class, layer, quantities and properties, and every problem
 
 ## Tests
 
-- `tests/cad/road/test_road_template.cpp`: the standard templates valid and
+- `rust/crates/katana_cad/tests/road/road_template.rs`: the standard templates valid and
   mirrored, a kerb's shapes worked by hand, the checks, the JSON round trip
   exact.
-- `tests/cad/road/test_road_section.cpp`: a street set out at hand-worked
+- `rust/crates/katana_cad/tests/road/road_section.rs`: a street set out at hand-worked
   offsets and levels, its solids, the formation's steps, superelevation at
   the middle of its transition (and of an edge strip and a drain), batters
   daylighting on a plane in cut, fill and on sidelong ground, a side of a
@@ -855,7 +856,7 @@ class, layer, quantities and properties, and every problem
   curve, measured from the alignment's directions and not from the curvature
   they were cut by (an arc, a spiral, a straight, an unusable tolerance, one
   that needs too many).
-- `tests/cad/road/test_corridor_objects.cpp`: course volumes on a straight as
+- `rust/crates/katana_cad/tests/road/corridor_objects.rs`: course volumes on a straight as
   width x thickness x length, every solid closed and turned outward, stable
   ids and IFC classes, a kerb's length and volume, the earthworks against the
   old assembly's end areas and their footprints (a side with cut and fill, a
@@ -865,11 +866,11 @@ class, layer, quantities and properties, and every problem
   the curve tolerance on and off; the lofted solids that taper (a wedge, an edge
   column of no thickness, a gap, an interior column that must not be welded)
   with their vertex and triangle counts worked out by hand, closed on their
-  indices, and no triangle under `math::tolerance::kAbsolute` - also over every
+  indices, and no triangle under `tolerance::ABSOLUTE` - also over every
   earthworks solid of the three standard templates on three grounds (a tilt, a
   sawtooth, two cuts across), where the cases that weld are counted so that the
   property is not satisfied by luck.
-- `tests/cad/road/test_road_verbs.cpp`: each verb as one undo step, refusals,
+- `rust/crates/katana_cad/tests/road_sheet_verbs/road_verbs.rs`: each verb as one undo step, refusals,
   layers, renames, quantities and the CSV, strings, surfaces, the cache (the
   same object after an edit that left the model as it was, and which half each
   kind of edit makes again, counted: a surface nothing reads neither, the
@@ -879,20 +880,20 @@ class, layer, quantities and properties, and every problem
   group changing none; the template files (written and read back exactly, a
   file's names against the drawing's, the refusals, OVERWRITE for a file and
   for a name).
-- `tests/cad/test_corridor.cpp`: the old functions, unchanged, on the new engine.
-- `tests/qt_widgets/bim/test_road_dialogs.cpp`: each dialog's lines and the
+- `rust/crates/katana_cad/tests/road/corridor.rs`: the old functions, unchanged, on the new engine.
+- `rust/crates/katana_window/tests/roads/road_dialogs.rs`: each dialog's lines and the
   workbench's menu and meshes; the dialogs' state across New, Rename, an
   unrelated command, an undo and a changed drawing (the Corridors dialog's
   fields and combos, the Template Manager's two grids, the listing of the
   Quantities dialog); the template file row's lines, quoting and Replace box,
   and the Faces column; Show Road Model's line and the Command Reference's
-  section of the road verbs (`TheCommandReferenceHasTheRoadVerbsInASectionOfTheirOwn`);
+  section of the road verbs (`road_workbench::the_command_reference_has_the_road_verbs_in_a_section_of_their_own`);
   an Apply of several rows as one line; the 3D view's own
   hidden layers.
 - `qt_the_bim_menu_makes_a_corridor_through_its_dialogs_headless` and
   `qt_terrain_commands_point_to_the_alignment_manager_headless`: the real
   window.
-- `src/katana_app/road_cli.cmake`: `katana_cli` end to end, a road model
+- `tests/cli/road_cli.cmake`: `katana_cli` end to end, a road model
   saved and read back by another process
   (`cli.a_saved_road_model_is_read_back_by_another_process`); several
   components or courses set by one line and taken back by one UNDO, and a
@@ -904,8 +905,8 @@ class, layer, quantities and properties, and every problem
   templates exported by one process and imported by another, a second export and
   a second import refused, and OVERWRITE
   (`cli.road_templates_exported_by_one_process_are_imported_by_another`).
-- `McpServer.TheRoadModelIsAResourceAsRoadModelJsonGivesIt` and
-  `McpServer.AnAgentMovesRoadTemplatesThroughAFileByTheirLines`;
+- `mcp_server::the_road_model_is_a_resource_as_road_model_json_gives_it` and
+  `mcp_server::an_agent_moves_road_templates_through_a_file_by_their_lines`;
   `cli.roadmodel_show_is_the_windows_alone_and_katana_cli_says_so` for the
   refusal where there are no views.
 
