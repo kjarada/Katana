@@ -61,6 +61,15 @@ use crate::format::{grouped, plan_number, plan_point};
 use crate::host::Clipboard;
 use crate::theme::palette;
 
+/// The tree's Copy action (propertyCopy), on QKeySequence::Copy (Ctrl+C in every keyboard
+/// scheme) as the C++'s is: the key the tree answers while it has the focus, and the row the
+/// window's Keyboard Shortcuts table and its clash check list as no menu's.
+pub fn copy_action() -> Action {
+    Action::new("propertyCopy", "Copy")
+        .tip("Copy the selected rows, name and value separated by a tab")
+        .shortcut(egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C))
+}
+
 /// Rows made at a time, in a level and in the filter's list: enough to fill a tall panel twice, few
 /// enough to make in well under a frame.
 pub const PROPERTY_PAGE: usize = 200;
@@ -1456,9 +1465,7 @@ impl PropertyTreePanel {
                     }
                     // The tree's context menu (Qt::ActionsContextMenu): Copy.
                     name.context_menu(|ui| {
-                        let action = Action::new("propertyCopy", "Copy")
-                            .tip("Copy the selected rows, name and value separated by a tab");
-                        if action_item(ui, &action).clicked() {
+                        if action_item(ui, &copy_action()).clicked() {
                             copy = true;
                             ui.close();
                         }

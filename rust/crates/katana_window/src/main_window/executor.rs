@@ -1790,8 +1790,9 @@ impl Executor {
 
     /// What the drawing did since the last look, carried out now: the scene's surfaces made again
     /// when they changed (at once in the C++, where the views pointed at them), the open sections
-    /// cut again, the road model followed. The panels read the drawing as they are drawn.
-    pub fn follow_drawing(&mut self) {
+    /// cut again, the road model followed. The panels read the drawing as they are drawn. Answers
+    /// the parts heard (DocumentChange's), for what the window follows itself.
+    pub fn follow_drawing(&mut self) -> u32 {
         let parts = self.heard.take();
         let change = DocumentChange::of(parts);
         if change.has(DocumentChange::SURFACES | DocumentChange::SURFACE_STYLES) {
@@ -1811,6 +1812,7 @@ impl Executor {
             self.take_road_events();
             self.workspace.prune_view_layers(&self.document);
         }
+        parts
     }
 
     /// A job's ends delivered and their effects applied: the start of every frame.

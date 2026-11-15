@@ -613,6 +613,16 @@ impl StyleManagerDialog {
         &self.status
     }
 
+    /// The Styles tab at the front, its Missing chip on and its search `name`: what the drawing
+    /// summary's "Show in Styles and Linetypes" asks (MainWindow::showMissingInStyles, which
+    /// clicked the chip and typed the search). The rows follow when the tab is next drawn.
+    pub fn show_missing_named(&mut self, name: &str) {
+        self.show_tab(Tab::Styles);
+        // The chips are in StyleFilter's order: All, Used, Unused, Missing.
+        self.style_filter.set_chip(3);
+        self.style_filter.set_text(name);
+    }
+
     /// Brings a tab to the front, as a click on it does.
     pub fn show_tab(&mut self, tab: Tab) {
         self.tab = match tab {

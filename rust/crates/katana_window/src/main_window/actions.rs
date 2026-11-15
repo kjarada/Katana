@@ -10,7 +10,9 @@
 //! keep in step.
 //!
 //! A submenu is a menu item too, which `--check-menus` holds to an icon and a status tip; the
-//! frozen `drive::Menu` row has neither, so each submenu's are kept beside the rows (`signs`).
+//! `drive::Menu` row was frozen without either, so each submenu's are kept beside the rows
+//! (`signs`). The tip was added to the row later, since a parent menu's `--report` shows it, and
+//! is set from `signs` once every row is composed (`tip_submenus`): one source still.
 
 use std::collections::BTreeMap;
 
@@ -52,6 +54,11 @@ pub struct Composed {
     pub bars: Vec<(ToolBar, BarPlace)>,
     /// Each submenu's icon and status tip, by its object name.
     pub signs: BTreeMap<String, (&'static str, String)>,
+    /// The panels' own actions, which no menu or toolbar shows (the Properties tree's Copy):
+    /// what findChildren<QAction*> found beside the menus' and toolbars' in the C++, after the
+    /// menus' and before the toolbars'. Only the shortcut table and its clash check read them;
+    /// a panel triggers its own.
+    pub panel_actions: Vec<Action>,
 }
 
 impl Composed {
@@ -274,14 +281,22 @@ pub fn summary_action() -> Action {
     .opens("drawingSummaryDialog")
 }
 
-pub fn quit_action() -> Action {
-    act(
+/// File > Quit. The C++ gave it QKeySequence::Quit, the platform's own key, which Qt's Windows
+/// keyboard scheme leaves empty (Alt+F4 is the system's) and the X11 and macOS schemes make
+/// Ctrl+Q. The Windows scheme is also what Qt's offscreen platform uses, so a headless run has no
+/// key for it on any system: `headless` says which.
+pub fn quit_action(headless: bool) -> Action {
+    let quit = act(
         "fileQuit",
         "Quit",
         "&Quit",
         "Close Katana, asking first about anything unsaved",
-    )
-    .shortcut(ctrl(Key::Q))
+    );
+    if headless || cfg!(windows) {
+        quit
+    } else {
+        quit.shortcut(ctrl(Key::Q))
+    }
 }
 
 // ---- Edit -----------------------------------------------------------------------------------
@@ -1282,7 +1297,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(summary_action())
         .separator()
         .action(CustomisationWorkbench::settings_action())
-        .action(quit_action());
+        .action(quit_action(exec.headless));
 
     // ---- the menu bar, in the order a CAD user reads it --------------------------------------
     let mut menus = vec![file, edit, view, draw, modify, annotate];
@@ -1525,10 +1540,72 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     bars.push((drafting, BarPlace::Bottom));
     // What fill_by_name could not find: logged by the window once its log exists.
     let _ = problems;
+    // Each submenu's status tip on its row too, where a parent menu's report reads it, as Qt's
+    // reportWidget reads the statusTip of every item, a submenu's menuAction() among them.
+    for menu in &mut menus {
+        tip_submenus(menu, &signs);
+    }
     Composed {
         menus,
         bars,
         signs,
+        panel_actions: vec![crate::property_panel::copy_action()],
+    }
+}
+
+/// The steps a history list shows each way, the next first, as far as a list can be read: a
+/// longer history is said in a last line and reached by typing UNDO n (refreshHistoryMenus).
+const HISTORY_LISTED: usize = 25;
+
+/// MainWindow::refreshHistoryMenus: the lists the Edit toolbar's Undo and Redo buttons drop down
+/// (editUndoMenu, editRedoMenu), untitled as the C++'s QMenus were. The k-th item, undoStep k or
+/// redoStep k, runs UNDO k or REDO k through the one executor (MainWindow::trigger). Made from the
+/// history whenever they are asked for, where the C++ refilled them as it changed.
+pub fn history_menus(document: &katana_cad::Document) -> [Menu; 2] {
+    let history = document.history();
+    // `which` says where the k steps are: the last ones for Undo, the next for Redo.
+    let fill = |name: &str, names: Vec<&str>, verb: &str, item: &str, which: &str| {
+        let mut menu = Menu::new(name, "");
+        for (k, step) in names.iter().take(HISTORY_LISTED).enumerate() {
+            let k = k + 1;
+            let line = format!("{verb} {k}");
+            let tip = if k == 1 {
+                format!("{line}: {step}")
+            } else {
+                format!("{line}: the {which} {k} steps, down to {step}")
+            };
+            // '&&' so a name's own '&' is shown, not taken for a mnemonic.
+            menu.items.push(MenuItem::Action(
+                Action::new(&format!("{item}{k}"), &format!("{k}  {}", step.replace('&', "&&")))
+                    .tip(&tip),
+            ));
+        }
+        if names.len() > HISTORY_LISTED {
+            menu.items.push(MenuItem::Action(
+                Action::new(
+                    "",
+                    &format!("{} more: type {verb} n", names.len() - HISTORY_LISTED),
+                )
+                .enabled(false),
+            ));
+        }
+        menu
+    };
+    [
+        fill("editUndoMenu", history.undo_names(), "UNDO", "undoStep", "last"),
+        fill("editRedoMenu", history.redo_names(), "REDO", "redoStep", "next"),
+    ]
+}
+
+/// Gives every submenu of `menu`, at any depth, the status tip `signs` keeps for it by its name.
+fn tip_submenus(menu: &mut Menu, signs: &BTreeMap<String, (&'static str, String)>) {
+    for item in &mut menu.items {
+        if let MenuItem::Menu(sub) = item {
+            if let Some((_, tip)) = signs.get(&sub.name) {
+                sub.tip.clone_from(tip);
+            }
+            tip_submenus(sub, signs);
+        }
     }
 }
 
