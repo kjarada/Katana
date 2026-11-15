@@ -258,7 +258,10 @@ pub mod customisation {
     pub use symbol_library::SymbolLibraryDialog;
     // UP:  pub mod linework_labels;
     //      pub mod settings_dialog;
-    // WS:  pub mod customisation_workbench;
+    // WS
+    pub mod customisation_workbench;
+
+    pub use customisation_workbench::{CustomisationServices, CustomisationWorkbench};
 }
 
 pub mod drawing {
@@ -487,9 +490,9 @@ pub mod surface_raster_dialog;
 // UP:  pub mod update_dialog;
 //      pub mod update_workbench;
 // WS
+pub mod start_dialog;
 pub mod view_layers_popup;
 pub mod view_workspace;
-// WS:  pub mod start_dialog;
 // SH2: pub mod sheet_editor;
 // K:   pub mod main_window;
 //      pub mod main_window_ifc;
@@ -532,4 +535,5 @@ pub use annotation::{AnnotationWorkbench, DimensionStyleManagerDialog};
 pub use bim::road_workbench::{RoadWorkbench, RoadWorkbenchEvent};
 // WS
 pub use view_layers_popup::{ViewLayersPopup, view_layers_line, view_references_line};
+pub use start_dialog::{StartChoices, StartDialog};
 pub use view_workspace::{Scenery, ViewWorkspace, WorkspaceEvent, WorkspaceLines};

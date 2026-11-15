@@ -1961,7 +1961,10 @@ impl WorkspaceLines {
 
 // ---- the workspace ------------------------------------------------------------------------------
 
-/// The drawing views as docks (see the module comment).
+/// The drawing views as docks (see the module comment). A clone is another handle on the same
+/// workspace: the window keeps one and lends another to its host, through which a dialog reaches
+/// the views (Host::views).
+#[derive(Clone)]
 pub struct ViewWorkspace {
     shared: Rc<Shared>,
 }
