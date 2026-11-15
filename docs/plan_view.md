@@ -4,7 +4,7 @@ The plan drawing - imagery, point clouds, mesh footprints, the drawing's
 surfaces in their display styles, every entity through its layer and style,
 library linestyles and symbols, hatches, dimensions, text and the alignment
 overlay - is painted by ONE function,
-`katana_window::plan_painter::paint_plan` (`rust/crates/katana_window/src/plan_painter.rs`). The plan view
+`katana_window::plan_painter::paint_plan` (`crates/katana_window/src/plan_painter.rs`). The plan view
 (`PlanView`) paints through it, its tool previews go through
 `paint_plan_geometry`, and a plot goes through `plot_plan_to_pdf`, which needs no
 widget at all. A sheet with many viewports - plan viewports turned to an
@@ -30,7 +30,7 @@ pub fn paint_plan(
 ```
 
 The `Canvas` is the window's painter over a raster image or a PDF page
-(`rust/crates/katana_window/src/canvas/`).
+(`crates/katana_window/src/canvas/`).
 
 | Argument | What it is |
 |---|---|
@@ -189,11 +189,11 @@ The action is disabled for an active non-plan view.
 
 The kept plan image includes `ViewState::paper_style_scale` in its key;
 symbol sprites already key on the effective paper-to-model scale.
-`rust/crates/katana_window/tests/workspace/view_scale.rs` checks independent marker and tick
+`crates/katana_window/tests/workspace/view_scale.rs` checks independent marker and tick
 sizes, zoom versus Auto, unchanged ground marks and plots, both caches,
-and the dialog-to-command path. `rust/crates/katana_cad/tests/styles/view_set.rs` and
-`rust/crates/katana_cad/tests/top_verbs/view_verbs.rs` cover validation, versioned persistence,
-project reopen, undo and saved headless ids. `rust/crates/katana_app/tests/session/view_scale.rs`
+and the dialog-to-command path. `crates/katana_cad/tests/styles/view_set.rs` and
+`crates/katana_cad/tests/top_verbs/view_verbs.rs` cover validation, versioned persistence,
+project reopen, undo and saved headless ids. `crates/katana_app/tests/session/view_scale.rs`
 exercises the shared CLI session and the MCP command tool. The headless
 window tests drive the menu, read the exact command, save and reopen, then
 the `cli.a_saved_plan_views_paper_scale_is_editable_and_undoable` test reads
@@ -207,13 +207,13 @@ size on paper for ONE scale, `PlanPaintOptions::annotation_scale`: the plan
 view passes the document's (`Document::annotation_scale`, the Format
 toolbar's box and `ANNOSCALE`), a plot of the drawing its own scale, and a
 sheet viewport its viewport's. The painter never reads it from a widget.
-Such text is laid out by `katana_cad` (`rust/crates/katana_cad/src/annotation/text_layout.rs`,
+Such text is laid out by `katana_cad` (`crates/katana_cad/src/annotation/text_layout.rs`,
 `leader_draw.rs`) into a `Drawing` of strokes, fills, masks and text runs,
-which `rust/crates/katana_window/src/annotation/annotation_painter.rs` paints; plain
+which `crates/katana_window/src/annotation/annotation_painter.rs` paints; plain
 bottom-left text with no style or paper height is drawn exactly as before.
 
 Labels are drawn LAST, together (`draw_labels`): the placer
-(`rust/crates/katana_cad/src/annotation/label_layout.rs`) lays out every label whose anchor is in
+(`crates/katana_cad/src/annotation/label_layout.rs`) lays out every label whose anchor is in
 view for the annotation scale, keeping each off the labels placed before it
 and off the lines and the notes', leaders' and dimensions' text drawn this
 paint (gathered as they are drawn, at most 200 000 segments), unless
@@ -384,7 +384,7 @@ only what a viewport shows, only as finely as it can be seen.
    Then, if the result is over `raster_pixel_cap` (16 megapixels: A1 at
    140 dpi, A0 at 100), both sides shrink evenly to fit.
 3. The crop is averaged down by a box filter (`area_resample` in
-   `rust/crates/katana_window/src/plan_painter.rs`): each output pixel the mean of the
+   `crates/katana_window/src/plan_painter.rs`): each output pixel the mean of the
    source area it covers, a pixel its edge cuts counted by the part inside,
    premultiplied first so a transparent pixel's colour does not bleed. It
    reads the raster's own bytes in place, a row at a time, across the task
@@ -432,7 +432,7 @@ a 1 443 523-byte PDF with the cap lifted to the plot's resolution and
 
 What follows was measured in the C++ window, which painted with Qt's
 QPainter; the Rust canvas reproduces Qt's raster coverage
-(`rust/crates/katana_window/src/canvas/coverage.rs`) and keeps every measure
+(`crates/katana_window/src/canvas/coverage.rs`) and keeps every measure
 below, and the benchmark went with the C++ tree and is not yet ported.
 
 The plan view repainted the whole drawing on every mouse move, and a frame of
@@ -568,7 +568,7 @@ is on - the plan view sets it from its view's switch, `ViewState::selection_ghos
 every other caller leaves it off and draws what it always drew, and a plot
 never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
 153), 2 px square, one every 6 px from the line's start, each on whole device
-pixels (below; `rust/crates/katana_cad/src/selection_style.rs`), with no fill, hatch, linestyle or
+pixels (below; `crates/katana_cad/src/selection_style.rs`), with no fill, hatch, linestyle or
 symbol, so it
 never reads as the entity drawn; a point is a ring of dots 6 px about it, a
 text, note, leader or dimension the outline of the box it draws, and a label
@@ -676,7 +676,7 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
 
 ## Tests
 
-* `rust/crates/katana_window/tests/plan_painting/plan_painter.rs` - turned frames (culling box,
+* `crates/katana_window/tests/plan_painting/plan_painter.rs` - turned frames (culling box,
   entities in turned corners), the plot's frame and margin clip, the paper
   marks in millimetres at two resolutions each (the point cross, the hatch
   lines' 0.13 mm, and the alignment overlay's tick and its ink as a whole),
@@ -694,13 +694,13 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
   the same image at two resolutions, and the pixel cap; a mesh outline's
   ink at two resolutions; and File > Plot to PDF embedding the image, and
   not a hidden one.
-* `rust/crates/katana_window/tests/sheets/sheet_painter.rs` - a photo filling a plan
+* `crates/katana_window/tests/sheets/sheet_painter.rs` - a photo filling a plan
   viewport and nowhere else, hidden and not; a turned photo with
   transparent pixels in a turned viewport, where its geotransform puts it;
   and a sheet PDF over a large photo, with the cap and without.
-* `rust/crates/katana_geometry/tests/cases/polygon.rs` `polygon_clip_polyline` - the clipper, in
+* `crates/katana_geometry/tests/cases/polygon.rs` `polygon_clip_polyline` - the clipper, in
   both modes, by hand and as a property over random lines.
-* `rust/crates/katana_cad/tests/leaf/plot.rs` `plot::a_line_with_no_height_fits_on_its_length_alone`.
+* `crates/katana_cad/tests/leaf/plot.rs` `plot::a_line_with_no_height_fits_on_its_length_alone`.
 * `qt_plot_headless` - above.
 
 ## Still open
@@ -726,7 +726,7 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
 
 With a selection and no tool running the view draws the selection's grips
 and forwards its mouse and keys to `drawing::GripController`
-(`rust/crates/katana_window/src/drawing/grip_controller.rs`) before its own selection
+(`crates/katana_window/src/drawing/grip_controller.rs`) before its own selection
 handling; a grip drag snaps from the grip's old position and, with no
 object snap, is constrained by the document's drafting settings (ortho,
 polar, locks), whose label is drawn beside the cursor. The gesture and the
@@ -734,12 +734,12 @@ rules are `docs/drawing.md` ("Grips", "Precision input").
 
 ## A tool's preview, by role
 
-A running tool's preview (`katana_cad::tool_feedback::ToolFeedback`, `rust/crates/katana_cad/src/tool_feedback.rs`)
+A running tool's preview (`katana_cad::tool_feedback::ToolFeedback`, `crates/katana_cad/src/tool_feedback.rs`)
 is drawn by ONE function, `katana_window::drawing::feedback_painter::paint_feedback`
-(`rust/crates/katana_window/src/drawing/feedback_painter.rs`), over the kept drawing image
+(`crates/katana_window/src/drawing/feedback_painter.rs`), over the kept drawing image
 like every other piece of furniture: a hover repaints the marks and never
 the drawing (`drawing_paint_count`, asserted in
-`rust/crates/katana_window/tests/plan_view/vertex_tool_hover.rs`). The overlay's colours
+`crates/katana_window/tests/plan_view/vertex_tool_hover.rs`). The overlay's colours
 have their one home there too, `drawing::overlay` - the preview cyan, the
 target green, the removed red, the grips' blue, green and red, the band's
 ground, a selection box's two fills - where they were literals in the view

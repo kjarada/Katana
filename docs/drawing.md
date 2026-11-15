@@ -20,7 +20,7 @@ appended since"); the tool machinery is `docs/tools.md`.
 They were appended after the annotation system's Label (7) and Leader (8),
 whose branch was merged first so that no kind byte could mean two things
 (`docs/model.md`). All three are written in version 2 of the geometry blob
-(`rust/crates/katana_entity/src/geometry_blob.rs` has the layouts;
+(`crates/katana_entity/src/geometry_blob.rs` has the layouts;
 `geometry_blob_wire_format::a_curve_polylines_layout_is_pinned` pins the polyline's
 against bytes written by hand, and the ellipse's and spline's beside it).
 They hold no anchor, so the smart leaders' version 3 never has cause to be
@@ -47,7 +47,7 @@ A polyline is stored as the SIMPLEST kind that holds it:
   (one per vertex, a missing one for "not surveyed") and whose elevation
   properties are removed.
 
-The vertex editing layer (`rust/crates/katana_cad/src/drawing/vertex_editing.rs`, below) reads
+The vertex editing layer (`crates/katana_cad/src/drawing/vertex_editing.rs`, below) reads
 either kind into one `CurvePolyline2` and writes the answer back by this
 rule, so converting the last arc of a polyline to a line gives back a
 `Polyline2` with its heights in its properties, and nothing downstream sees
@@ -107,12 +107,12 @@ rather than falling through to erasing the leader. Their appearance and
 coordinate editor is described in `docs/annotation.md`, "Moving and framing
 existing leaders".
 
-**Everything a grip does is headless** (`rust/crates/katana_cad/src/drawing/grips.rs`):
+**Everything a grip does is headless** (`crates/katana_cad/src/drawing/grips.rs`):
 `grips_of` says which handles an entity offers, `apply_grip_drag` what a drag
 does to it, `grip_drag_command` makes the drag ONE undoable `GRIP_EDIT`
 command over every entity it touches, and `delete_hot_vertices` is Delete on
-hot vertex grips (`VERTEX_DELETE`). `rust/crates/katana_cad/tests/annotation/grips.rs` tests
-each kind. The view's part is `rust/crates/katana_window/src/drawing/grip_controller.rs`:
+hot vertex grips (`VERTEX_DELETE`). `crates/katana_cad/tests/annotation/grips.rs` tests
+each kind. The view's part is `crates/katana_window/src/drawing/grip_controller.rs`:
 the gesture's state and the drawing of the squares, fed from the view's
 mouse and keys before its own selection handling.
 
@@ -222,7 +222,7 @@ Dimensions, labels and leaders offer none here: their handles are the
 annotation system's.
 
 Tested with real mouse and key events in
-`rust/crates/katana_window/tests/plan_view/plan_view_grips.rs`: a drag is one undo step,
+`crates/katana_window/tests/plan_view/plan_view_grips.rs`: a drag is one undo step,
 click-move-click, a typed point, Shift-hot grips moving together, Ctrl
 inserting, Delete and Esc, snapping to an endpoint and ortho; and, each shown
 to fail without its fix, Delete claimed from the window's shortcut
@@ -240,13 +240,13 @@ tools' way of writing a height, `katana_cad::drawing::drawing_verbs::height_text
 where a tool's label wrote "z 0.000") are asserted as text, and the Ctrl cue
 as ink against the same view without Ctrl
 (`plan_view_grips::ctrl_over_a_segment_middle_shows_the_vertex_a_drag_would_add`); a Ctrl-insert's
-feedback in `rust/crates/katana_cad/tests/annotation/grips.rs`
+feedback in `crates/katana_cad/tests/annotation/grips.rs`
 (`grip_drags::grip_feedback_of_a_ctrl_insert_shows_the_new_vertex`).
 
 ## Precision input
 
 Every point a user gives passes through the drafting aids
-(`rust/crates/katana_cad/src/drawing/drafting.rs`), headless, reading ONE set of
+(`crates/katana_cad/src/drawing/drafting.rs`), headless, reading ONE set of
 settings: `Document::drafting()`. A view, the command line and an agent's
 verbs therefore change the same state, and it is session state - not saved
 with the drawing and not undone.
@@ -300,12 +300,12 @@ object snap, a lock, ortho and polar: it only moves a cursor nothing else
 has fixed. Acquiring is immediate rather than after a pause, since a view
 cannot tell a pause from a slow mouse, and landing on an acquired point
 again moves it to the front of the seven. Tested in
-`rust/crates/katana_window/tests/plan_view/plan_view_tracking.rs`.
+`crates/katana_window/tests/plan_view/plan_view_tracking.rs`.
 
 **One-shot snaps**: From (`from_base`: a base point, then an offset, the `@`
 implied) and Midpoint Between Two Points (`mid_between`).
 
-Tested in `rust/crates/katana_cad/tests/drawtools/drafting.rs`, including a typed radius
+Tested in `crates/katana_cad/tests/drawtools/drafting.rs`, including a typed radius
 staying the circle's radius while a typed distance at a line prompt goes
 along the cursor.
 
@@ -329,7 +329,7 @@ Parallel two slanted strokes, Apparent Intersection a cross in a square.
 
 ## The Vertices tools (Draw > Vertices)
 
-Eighteen catalogue tools in one family (`rust/crates/katana_cad/src/tools/modify_vertex.rs`,
+Eighteen catalogue tools in one family (`crates/katana_cad/src/tools/modify_vertex.rs`,
 registered in `families.rs` as `add_modify_vertex_tools`), each named
 "Vertices, <tool>" so the menus gather them into a Vertices submenu of the
 Draw menu (`toolFamily.Draw.Vertices`) and the Draw toolbar into one
@@ -389,7 +389,7 @@ types 2.5, 1.5 and 0.75 (`vertex_tool_feedback::fillet_and_chamfer_remember_what
 sits (a point entity with the survey import's point-number property, within
 0.1 mm) is never weeded: a string's shots are its data.
 
-Icons: `rust/crates/katana_window/src/tools/icons_drawing.rs`, one picture - a
+Icons: `crates/katana_window/src/tools/icons_drawing.rs`, one picture - a
 three-vertex polyline - with what each tool does to it in the accent.
 
 ## What a vertex tool acts on
@@ -403,7 +403,7 @@ mid-way along a 100 m segment deleted a vertex 50 m away; a survey point on a
 vertex took the pick from its string; the preview was one generic band from
 the vertex nearest the pick - which was not even the segment Insert split -
 and Segment to Arc drew a straight line. The rules now, in
-`rust/crates/katana_cad/src/tools/modify_vertex.rs`:
+`crates/katana_cad/src/tools/modify_vertex.rs`:
 
 - **R1, one function decides what a pick takes** (`resolve`), for the
   preview, the click and a typed point alike, so they cannot disagree. In
@@ -546,7 +546,7 @@ spared only Insert's pointer rule (R2), and a miss says why; a whole
 number names vertex N (or segment N) of the polyline in play, read as the
 verbs read an index (`katana_core::text::parse_integer`), so a headless run can drive
 every pick by typing. `#12.v3` typed into the window's command line at a
-tool's prompt is still read as a comment (the window's executor, `rust/crates/katana_window/src/main_window/executor.rs`), below.
+tool's prompt is still read as a comment (the window's executor, `crates/katana_window/src/main_window/executor.rs`), below.
 
 **Choosing a vertex, then the tool.** A plain click on a vertex chooses it,
 and also picks the grip up to take a typed point. A word typed next - the
@@ -555,7 +555,7 @@ there. Nothing a grip takes starts with a letter (`x,y`, `@dx,dy`,
 `<bearing`, a distance), so a letter typed first puts the grip down, still
 chosen, and goes to the command line (`PlanView::key_press`).
 
-**The look** (`rust/crates/katana_window/src/drawing/feedback_painter.rs`, the one home of
+**The look** (`crates/katana_window/src/drawing/feedback_painter.rs`, the one home of
 the overlay's colours, the snap marker's yellow among them; each at least
 3:1 against the view's ground): a Target piece a solid 3 px green line, arcs
 as arcs; a Target vertex a green ring round a filled square, with its number
@@ -654,7 +654,7 @@ Rejected, and why:
   pick): 46 `preview` overrides and `-Woverloaded-virtual` (in Rust, a second
   trait method beside `preview` on every tool). The view's pick
   reaches a tool through its context instead (`docs/tools.md`).
-- **Colours in the theme's palette** (`rust/crates/katana_window/src/theme/palette.rs`): its
+- **Colours in the theme's palette** (`crates/katana_window/src/theme/palette.rs`): its
   tokens are the chrome's, and it says the views keep their drawing colours.
 - **A see-through green halo** for a Target: muddy over the orange
   selection. The solid 3 px line is not.
@@ -705,8 +705,8 @@ Rejected, and why:
   second Target ring would read as the click taking both; the label ("2 ·
   Enter") and the prompt say what Enter does to the vertex it marks.
 
-Tested in `rust/crates/katana_cad/tests/tool_cases/modify_vertex.rs`, each tool driven as a
-user drives it, and `rust/crates/katana_cad/tests/tool_cases/vertex_tool_feedback.rs`: every
+Tested in `crates/katana_cad/tests/tool_cases/modify_vertex.rs`, each tool driven as a
+user drives it, and `crates/katana_cad/tests/tool_cases/vertex_tool_feedback.rs`: every
 cue's coordinates against values worked out by hand (a vertex on the arc
 bulge +1 at (5,-5), halves of bulge sqrt(2) - 1; the centre (5,-5.25) and
 radius 7.25 of an arc through (5,2); a closed hexagon picked 3 then 1
@@ -737,15 +737,15 @@ The review of 2026-09-30, each test shown to fail without its fix:
 `vertex_tool_feedback::insert_takes_no_snap_beside_the_line_nor_on_a_vertex_of_it`,
 `vertex_tool_feedback::a_chosen_vertex_the_tool_cannot_use_is_explained_not_dropped` and
 `vertex_tool_feedback::the_tool_stays_on_the_polyline_last_edited_not_the_first`; the verbs' side and
-anchored forms in `rust/crates/katana_cad/tests/annotation_drawing_verbs/drawing_verbs.rs`
+anchored forms in `crates/katana_cad/tests/annotation_drawing_verbs/drawing_verbs.rs`
 (`drawing_verbs::straighten_and_grade_walk_forward_unless_the_short_or_long_side_is_asked_for`,
 `drawing_verbs::vertex_insert_at_a_point_of_the_polyline_takes_that_segment_and_a_height`) and
 `cli.straighten_walks_forward_and_takes_the_short_side_when_asked`,
 `cli.vertex_insert_on_the_line_takes_a_height`. The drawn cues in
-`rust/crates/katana_window/tests/plan_view/vertex_tool_hover.rs` (ink against a baseline,
+`crates/katana_window/tests/plan_view/vertex_tool_hover.rs` (ink against a baseline,
 and the drawing never repainted by a hover) and
-`rust/crates/katana_window/tests/plan_painting/feedback_painter.rs`, the hold in
-`rust/crates/katana_window/tests/plan_view/tool_host.rs`
+`crates/katana_window/tests/plan_painting/feedback_painter.rs`, the hold in
+`crates/katana_window/tests/plan_view/tool_host.rs`
 (`tool_host::a_click_the_tool_took_is_not_answered_in_red_until_the_pointer_leaves_it`); the whole
 window with the pointer steps (`docs/headless.md`), in
 `qt_insert_vertex_shows_where_the_vertex_goes_headless`,
@@ -825,7 +825,7 @@ contrast, from the pixels) and
 ## The Vertices panel
 
 A dock ("VerticesDock", hidden until asked for) holding
-`rust/crates/katana_window/src/drawing/vertex_panel.rs`: the first polyline in the selection
+`crates/katana_window/src/drawing/vertex_panel.rs`: the first polyline in the selection
 as a table - index, easting, northing, height, bulge, and the bearing
 (whole-circle, D°MM'SS") and chord distance of the segment that starts at
 each vertex - that follows the selection and the drawing live. Typing into
@@ -836,23 +836,23 @@ table is edited. A value that does not parse changes nothing, puts the cell
 back and says why in the panel's title. Insert After and Delete act on the
 current row.
 
-The rows and the cell edits are headless (`rust/crates/katana_cad/src/drawing/vertex_table.rs`),
+The rows and the cell edits are headless (`crates/katana_cad/src/drawing/vertex_table.rs`),
 shared with the VERTEX verbs; the distance column is the CHORD's, so a
 distance typed back into an arc segment gives the arc that chord, not a
 longer arc. The dock is made with the drafting toolbar by
-`DrawingUi::install` (`rust/crates/katana_window/src/drawing/drawing_ui.rs`), a
+`DrawingUi::install` (`crates/katana_window/src/drawing/drawing_ui.rs`), a
 few lines in the window: Ortho (F8), Polar (F10), Tracking (F11), Bearings,
 and toggles for the snaps the drawing system added, each bound to the
 document's drafting settings and re-read on `DocumentChange::drafting`, so a
 verb that changes a setting checks its button. Edit Vertices shows the dock
 when it starts.
 
-Tested in `rust/crates/katana_cad/tests/custedit/vertex_table.rs` and
-`rust/crates/katana_window/tests/plan_view/vertex_panel.rs`.
+Tested in `crates/katana_cad/tests/custedit/vertex_table.rs` and
+`crates/katana_window/tests/plan_view/vertex_panel.rs`.
 
 ## The draw tools
 
-The drawing system's draw tools (`rust/crates/katana_cad/src/tools/draw_professional.rs`,
+The drawing system's draw tools (`crates/katana_cad/src/tools/draw_professional.rs`,
 registered as `add_draw_professional_tools`) join the Draw family's Lines and
 Curves groups beside the tools already there; a "<Family>, <Variant>" name
 puts a tool in a submenu (Draw > Ellipse, Draw > Circle, Draw > Arc).
@@ -894,7 +894,7 @@ whether both should climb is under Not done.)
 **Construction lines are layer-marked.** The model has no infinite line, so
 a construction line or ray is a line `CONSTRUCTION_REACH` (100 km) long on
 the "construction" layer, which the tool creates, in the same undo step, if
-the drawing has none (`rust/crates/katana_cad/src/drawing/construction.rs`). That
+the drawing has none (`crates/katana_cad/src/drawing/construction.rs`). That
 layer and every layer beneath it is drawn and snapped to on screen but
 never plotted (`plan_painter.rs` skips it on paper) and never counted in
 the drawing's extents (`selection.rs`'s `drawn_extent`), so Zoom Extents
@@ -906,12 +906,12 @@ Tangent completes the set. Arc already offered 3 Points, Start Centre End,
 Centre Start End and Start End Radius; Start End Direction is added. Polygon's inscribed, circumscribed and edge forms were
 complete and are unchanged.
 
-Tested in `rust/crates/katana_cad/tests/drawtools/draw_professional.rs` and
-`rust/crates/katana_cad/tests/drawtools/draw_lines.rs`.
+Tested in `crates/katana_cad/tests/drawtools/draw_professional.rs` and
+`crates/katana_cad/tests/drawtools/draw_lines.rs`.
 
 ## The command line
 
-The drawing system's verbs (`rust/crates/katana_cad/src/drawing/drawing_verbs.rs`,
+The drawing system's verbs (`crates/katana_cad/src/drawing/drawing_verbs.rs`,
 members of `CommandInterpreter` routed by `is_drawing_verb`) give an agent
 everything the grips, the tools and the panel give a person. They follow
 the annotation verbs' three rules: options are `key=value` in any order
@@ -969,7 +969,7 @@ took any `OPEN` for a project's, so `OPEN #12` in the window asked to
 discard the drawing and then zoomed to its extents, and through `katana_mcp`
 it was refused for unsaved changes.
 
-Tested in `rust/crates/katana_cad/tests/annotation_drawing_verbs/drawing_verbs.rs`.
+Tested in `crates/katana_cad/tests/annotation_drawing_verbs/drawing_verbs.rs`.
 
 ## The merge into main
 
@@ -978,12 +978,12 @@ gained smart leaders, the one scope grammar, the utility tools on scope, the
 one executor for dialog lines and IFC 4.3 meanwhile, all written before these
 kinds existed. The merge (2026-09-26) made each of them take the new kinds
 or refuse them by name, never pass over them
-(`rust/crates/katana_cad/tests/annotation_drawing_verbs/new_kinds_in_main.rs`, the IFC and scope-widget
+(`crates/katana_cad/tests/annotation_drawing_verbs/new_kinds_in_main.rs`, the IFC and scope-widget
 tests named below):
 
 | Where | What a curve polyline, ellipse or spline now does |
 |---|---|
-| anchors (`rust/crates/katana_entity/src/anchor.rs`) | a curve polyline offers Along (on an arc segment, the fraction of its sweep - ON the arc) and Inside when closed; an ellipse Along (the fraction of its sweep of eccentric anomaly) and Inside when whole; a spline only its Start and End - its parameter is not its length, so no fraction of it would stay where a note was put |
+| anchors (`crates/katana_entity/src/anchor.rs`) | a curve polyline offers Along (on an arc segment, the fraction of its sweep - ON the arc) and Inside when closed; an ellipse Along (the fraction of its sweep of eccentric anomaly) and Inside when whole; a spline only its Start and End - its parameter is not its length, so no fraction of it would stay where a note was put |
 | smart leaders' values (`leader_values.rs`) | a curve polyline gives a segment's or an arc's values where the tip is, chainage along it, level from its vertices' heights, length, vertices, and area and perimeter when closed; an ellipse its length, and area and perimeter when whole; a spline its length |
 | LEADER FOR and Attach (`leader_edit.rs`), the Leader tool's pick | inside a closed curve polyline or a whole ellipse, else halfway along; a spline at its start; the tool's tip can be put on a curve polyline and an ellipse |
 | `#id@x,y`, `#id.alongN:t` | as a polyline for a curve polyline; a spline refused, saying to use its start or end |
@@ -996,7 +996,7 @@ tests named below):
 | `TYPE=` in the one scope grammar, `SELECT TYPE` | the names in any case (`entity_type_from_string`); `TYPE=CurvePolyline` was refused, title-cased to `Curvepolyline` |
 | the "Only those that match" type boxes (`ScopeFilterWidget`) | a box for every kind, counted off the variant; the list stopped at Dimension |
 | the utilities (`utility_data.rs`) | a service run given an arc is still its line's run; a design centre line may be a curve polyline, chorded within a millimetre with its vertices' heights |
-| IFC export (`rust/crates/katana_ifc/src/drawing.rs`, `classification.rs`) | a curve polyline one `IfcIndexedPolyCurve` with an `IfcArcIndex` through each arc's true middle; an ellipse `IfcEllipse`, trimmed by parameter for an arc; a spline `IfcBSplineCurveWithKnots` (rational with weights); a curve polyline or spline on a kerb, pipe or fence layer is that element; a rules file may name the three kinds |
+| IFC export (`crates/katana_ifc/src/drawing.rs`, `classification.rs`) | a curve polyline one `IfcIndexedPolyCurve` with an `IfcArcIndex` through each arc's true middle; an ellipse `IfcEllipse`, trimmed by parameter for an arc; a spline `IfcBSplineCurveWithKnots` (rational with weights); a curve polyline or spline on a kerb, pipe or fence layer is that element; a rules file may name the three kinds |
 | Cut Section along the selection | along a curve polyline's or a spline's chords |
 | Alignment Manager, PIs from the selection | a curve polyline refused: its vertices are tangent points, not PIs |
 | the object snap in the window | one owner, the document's drafting settings: View > Snap Modes, the drafting toolbar, `SNAP` and new views read and write the same, where the views had kept a copy that a click in the menu or a new view wrote back over the toolbar's modes; `SNAP` with `modes=`, `add=` or `remove=` typed in the window is the drawing verb (`SNAP <mode> ON\|OFF` stays the window's shorthand) |
@@ -1009,7 +1009,7 @@ tests named below):
 
 - A grip's shortcut menu is reached with the mouse only: no headless step
   right-clicks (`+` is a left click), so its items are tested on the menu
-  itself (`rust/crates/katana_window/tests/plan_view/plan_context_menu.rs`) and each is a verb
+  itself (`crates/katana_window/tests/plan_view/plan_context_menu.rs`) and each is a verb
   line or a tool an agent reaches directly.
 - The Vertices panel is not joined to the view: choosing a row does not
   make that vertex hot, a hot grip does not choose the row, and its Insert
@@ -1086,7 +1086,7 @@ nothing to choose. The retrofit is to read the target with
 
 **The three surfaces (the contributors' contract, section 1).**
 
-- The Vertices panel (`rust/crates/katana_window/src/drawing/vertex_panel.rs`) executes
+- The Vertices panel (`crates/katana_window/src/drawing/vertex_panel.rs`) executes
   `katana_cad::drawing::vertex_editing::edit_polyline` commands itself; it does not build `VERTEX SET` /
   `VERTEX INSERT` / `VERTEX DELETE` lines and hand them to
   `MainWindow::run_verb_line`, so its edits are not logged as lines.

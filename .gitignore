@@ -1,6 +1,6 @@
 build/
 # cargo's output for the Rust port on Windows (docs/rust.md; WSL builds elsewhere).
-rust/target/
+target/
 .vscode/
 .idea/
 *.user
@@ -32,7 +32,7 @@ docs/12d Refrence Files/
 docs/TfNSW Reference Files/
 
 # Not ignored, on purpose: resources/customisation/nsw.customisation.json, a
-# customisation compiled into the programs (rust/crates/katana_cad/build.rs). It
+# customisation compiled into the programs (crates/katana_cad/build.rs). It
 # is tracked, committed on the owner's decision of 2026-10-08, and it is the one
 # file derived from the reference files above that is: the converter of the
 # legacy formats made it from them (docs/customisation.md, "The reference

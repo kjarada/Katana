@@ -5,10 +5,10 @@ for the sheet, text styles, labels that read their words off the geometry,
 rules that label a whole drawing, the placer that keeps labels apart, the
 dimension kinds, leaders and callouts, and smart leaders that read their note
 off what they point at. The model's side is `katana_entity`
-(`rust/crates/katana_entity/src/annotation.rs`, `label_text.rs`, `label_values.rs`,
+(`crates/katana_entity/src/annotation.rs`, `label_text.rs`, `label_values.rs`,
 `leader_values.rs`, `anchor.rs`, `text_block.rs`), the layout and the edits are `katana_cad`
-(`rust/crates/katana_cad/src/annotation/`), and the
-window's part is a thin front end (`rust/crates/katana_window/src/annotation/`). Built on
+(`crates/katana_cad/src/annotation/`), and the
+window's part is a thin front end (`crates/katana_window/src/annotation/`). Built on
 2026-09-25 at the owner's request for "a professional annotation system",
 drivable by an agent as much as by a person.
 
@@ -55,7 +55,7 @@ storage layer carries without reading it, so it needed no schema change.
 ## Text styles
 
 A text style is a row of the `text_styles` table (`TextStyle`,
-`rust/crates/katana_entity/src/annotation.rs`), changed only by its table commands
+`crates/katana_entity/src/annotation.rs`), changed only by its table commands
 (`create_text_style`, `update_text_style`, `delete_text_style`), like the dimension
 styles beside it. The built-in `Standard` style is seeded by the model and
 cannot be deleted; deleting a style still used names the first user.
@@ -84,7 +84,7 @@ its justification mirrored so it still covers the same place
 (`text_layout::a_readable_text_is_turned_and_covers_the_same_place`) - a label along a line running
 west reads left to right.
 
-`layout_text` (`rust/crates/katana_cad/src/annotation/text_layout.rs`) lays a text
+`layout_text` (`crates/katana_cad/src/annotation/text_layout.rs`) lays a text
 out once, into a `Drawing` - text runs, masks, strokes - that every painter
 paints the same way. Widths come from a MEASURE: the window's painter passes its
 font's (`AnnotationFonts::measure`), the tests and a file export the
@@ -99,10 +99,10 @@ the justification (`TL` to `BR`), `P` for a height on paper in millimetres
 (`0` for a model height) - and **Multiline Text** (`MTEXT`, `MT`; the
 `annotate.mtext` tool) takes the same, then a line at a time until an empty
 line, and makes ONE text of them, broken by `\n`, as `MTEXT p "a\nb"` does
-(`rust/crates/katana_cad/src/tools/annotate_text.rs`). A bare `MT` or `MTEXT` starts the
+(`crates/katana_cad/src/tools/annotate_text.rs`). A bare `MT` or `MTEXT` starts the
 tool; with arguments the line is the interpreter's verb, as `TEXT` is. Both
 make a text by the verb's own rule, `fit_model_height`
-(`rust/crates/katana_cad/src/annotation/text_layout.rs`): a paper-sized one - a
+(`crates/katana_cad/src/annotation/text_layout.rs`): a paper-sized one - a
 paper height, or a style with one - gets its model height for the drawing's
 annotation scale and is never asked a height, so a drawn text and a typed
 one of the same request are the same entity
@@ -117,7 +117,7 @@ they are one tool with two modes rather than two copies of the option
 prompts.
 
 **Annotate > Edit Text...** (`annotateEditText`, the dialog `textEditDialog`,
-`rust/crates/katana_window/src/annotation/text_edit_dialog.rs`) edits the one text
+`crates/katana_window/src/annotation/text_edit_dialog.rs`) edits the one text
 selected: its words over several lines, style, height on paper, model
 height, justification, rotation and position. It follows the selection and,
 with no single text selected, says so and waits for one - it asks nothing in
@@ -127,7 +127,7 @@ through the window's one executor: one undo step, the verb's refusal in the
 dialog's words. A text or a name holding a double quote cannot be written on
 a command line at all (the interpreter's quotes have no escape), and is
 refused before anything runs rather than sent cut short
-(`rust/crates/katana_cad/src/annotation/command_words.rs`). A double click on a
+(`crates/katana_cad/src/annotation/command_words.rs`). A double click on a
 text in the plan view opens it on that text (`MainWindow::edit_double_clicked`
 triggers `annotateEditText`).
 
@@ -162,7 +162,7 @@ property.
 
 ### Templates
 
-`rust/crates/katana_entity/src/label_text.rs` is the reference. A template is
+`crates/katana_entity/src/label_text.rs` is the reference. A template is
 literal text with fields in braces, `{value:step:step}`, the steps applied
 left to right: unit conversions (`m`, `mm`, `km`, `ft`; `m2`, `ha`, `km2`,
 `ac`; `deg`, `rad`, `gon`), a number format (`.3f`, or `+.3f`, which writes a
@@ -213,7 +213,7 @@ and Chainage (every 20 m, ticks every 10 m).
 
 ## The placer
 
-`rust/crates/katana_cad/src/annotation/label_layout.rs` is the reference; in short,
+`crates/katana_cad/src/annotation/label_layout.rs` is the reference; in short,
 a deterministic greedy CANDIDATE placer, the classical cartographic method:
 
 1. Each piece of each label (a point, each segment or arc, an area, each
@@ -331,7 +331,7 @@ a copied pair snapped the copy's tip back onto the original pit.
 
 Rather than teach every command about annotation, `Document::execute` wraps
 EVERY command in `with_associative_update`
-(`rust/crates/katana_cad/src/annotation/associative.rs`): after the command runs,
+(`crates/katana_cad/src/annotation/associative.rs`): after the command runs,
 the annotations that follow what it changed are brought up to date as a
 second change set INSIDE the same undo step, so one undo puts back the
 geometry and everything that followed it. A radius follows its circle's
@@ -376,7 +376,7 @@ exactly what it was before the kinds (`dimension_draw::the_aligned_drawing_is_wh
 A dimension is drawn in its LAYER's dimension style (`LAYER DIMSTYLE layer
 style`), else `Standard`. `DIMSTYLE` names thirteen fields - `TEXT GAP EXTOFF
 EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM PAPER` - and
-`rust/crates/katana_cad/src/annotation/dimension_style_verbs.rs` is the one
+`crates/katana_cad/src/annotation/dimension_style_verbs.rs` is the one
 statement of each: its name, how its value is read and how it is written
 back. The verb reads its lines with it, `DIMSTYLE INFO` writes its record with
 it, and the window's manager builds its lines with it, so the dialog cannot
@@ -401,7 +401,7 @@ write a line the verb would read differently.
 A value that holds a blank is quoted (`PREFIX "L= "`, `SUFFIX ""` for none).
 The interpreter's quotes have no escape, so a prefix or suffix holding a
 double quote cannot be written on a line; the dialog says so rather than send
-a line that sets something else (`rust/crates/katana_cad/src/annotation/command_words.rs`).
+a line that sets something else (`crates/katana_cad/src/annotation/command_words.rs`).
 
 ## Leaders and callouts
 
@@ -490,9 +490,9 @@ JSON` and MCP's `katana_leaders` expose the full `points` array, `text_style`,
 `paper_height`, `arrow_size`, `landing`, and the optional `landing_angle`
 in radians, so an agent can inspect the same positions and appearance.
 
-`rust/crates/katana_cad/tests/annotation_drawing_verbs/leader_positions.rs` checks point edits, scoped
+`crates/katana_cad/tests/annotation_drawing_verbs/leader_positions.rs` checks point edits, scoped
 frames, refusals, atomic multi-grip moves and attached tips.
-`rust/crates/katana_window/tests/annotation/leader_manager_positions.rs` drives the
+`crates/katana_window/tests/annotation/leader_manager_positions.rs` drives the
 exact-coordinate fields and their errors; the plan-view grip and context-menu
 tests exercise the mouse gesture and frame commands. CLI, MCP and the
 headless window all edit the same bent leader and check its points and box.
@@ -510,7 +510,7 @@ of `LeaderGeometry` say so, both appended with their defaults being a plain
 leader:
 
 * `fields`: the leader's `text` is a TEMPLATE in the label template language
-  (`rust/crates/katana_entity/src/label_text.rs`, "Templates" above) -
+  (`crates/katana_entity/src/label_text.rs`, "Templates" above) -
   `LEADER #12 25,15 template="IL {prop.invert:.3f}\n{length:.1f} m"`;
 * `labelStyle`: the note is that label style's template, read live - one
   `LABELSTYLE SET` and every leader in the style says the new thing. Only the
@@ -524,7 +524,7 @@ A plain leader's note is still exactly what was typed, braces and all.
 
 ### What a leader can say
 
-`rust/crates/katana_entity/src/leader_values.rs` is the reference, and `LEADER VALUES
+`crates/katana_entity/src/leader_values.rs` is the reference, and `LEADER VALUES
 #id@x,y` lists what a note at a place could say, each value in its own format.
 The values are those of the entity the tip names AT THE TIP
 (`anchor_values`): the whole set of names is `leader_value_names`, and a
@@ -591,7 +591,7 @@ Decisions:
   point, one giving an alignment's station, offset and profile level, and the
   two lists of names - goes through `anchor_values`, `leaderValues`,
   `leaderNote` and `check_leader_says_something`, and `katana_cad::annotation::leader_presets::leader_context`
-  makes it from a Document (`rust/crates/katana_cad/src/annotation/leader_presets.rs`).
+  makes it from a Document (`crates/katana_cad/src/annotation/leader_presets.rs`).
   It holds COPIES - of the surface store, a pointer a surface, and of the
   alignments' definitions, each solved once when a leader first reads it -
   so it reads the drawing as it was when it was made and is safe on another
@@ -625,7 +625,7 @@ Decisions:
   exactly, as `ALIGN` does.
 * **Offset is positive LEFT**, looking along increasing station: the sign
   `SolvedAlignment::point_at_station_offset` and a cross section
-  (`rust/crates/katana_cad/src/corridor.rs`) already use. Rejected: right positive, as some road
+  (`crates/katana_cad/src/corridor.rs`) already use. Rejected: right positive, as some road
   texts write it - a second convention in one program is a sign error waiting.
   The station of a point is `SolvedAlignment::station_offset`, the inverse of
   `point_at_station_offset` (`docs/geometry.md`).
@@ -827,7 +827,7 @@ one place and stays an id. Decisions:
 
 ### One set of edits
 
-`rust/crates/katana_cad/src/annotation/leader_edit.rs` is every leader edit - the
+`crates/katana_cad/src/annotation/leader_edit.rs` is every leader edit - the
 note and look (`change_leaders`, `apply_leader_change`), attaching, freezing
 and detaching, an attribute through the leader (`set_leaders_target_property`,
 for many at once), one per entity (`leaders_for`), aligning, renumbering (of
@@ -896,9 +896,9 @@ Format > **Text Styles...** (`formatTextStyles`, the dialog
 (`formatLabelStyles`, `labelStyleManagerDialog`), Format > **Dimension
 Styles...** (`formatDimensionStyles`, `dimensionStyleManagerDialog`), and the
 annotation scale box on the Format toolbar (`annotationScaleCombo`), all built by
-`AnnotationWorkbench` (`rust/crates/katana_window/src/annotation/annotation_workbench.rs`)
+`AnnotationWorkbench` (`crates/katana_window/src/annotation/annotation_workbench.rs`)
 so `MainWindow` gains one member. The managers
-(`rust/crates/katana_window/src/annotation/annotation_managers.rs`, which lists every
+(`crates/katana_window/src/annotation/annotation_managers.rs`, which lists every
 field's control name) are a list and a form: Apply stores the form - one undo
 step, nothing when the form is unchanged - and a refusal is shown in the
 dialog's problem line in the verb's own words. The label manager's template
@@ -908,7 +908,7 @@ open shows at once. The Annotate menu's tools are in `docs/tools.md`; the
 painting is in `docs/plan_view.md`, "Annotation".
 
 The Dimension Styles manager
-(`rust/crates/katana_window/src/annotation/dimension_style_manager.rs`, which lists every
+(`crates/katana_window/src/annotation/dimension_style_manager.rs`, which lists every
 control name) was the first of them to change nothing itself: each button
 builds the `DIMSTYLE` line a person would type and runs it through the
 window's one executor (`docs/desktop.md`, "One executor: the command
@@ -982,7 +982,7 @@ reported one. Now:
   the tool, starting again, asks for the next objects instead of labelling
   the same ones twice.
 * **Annotate > Edit Label...** (`annotateEditLabel`, the dialog
-  `labelEditDialog`; `rust/crates/katana_window/src/annotation/label_edit_dialog.rs` lists
+  `labelEditDialog`; `crates/katana_window/src/annotation/label_edit_dialog.rs` lists
   every field) opens on the selected label: its style, its own text (ticked,
   or `text=none`), where its text is pinned (ticked, or `at=none` for the
   placer) and its layer. OK and Apply build the `LABEL SET` line naming only
@@ -1022,7 +1022,7 @@ triggers `annotateEditText` for a text; `docs/desktop.md`, "Double click to
 edit").
 
 **Leaders.** Under the Annotate menu's tools, three entries open the Leaders
-manager (`LeaderManagerDialog`, `rust/crates/katana_window/src/annotation/leader_manager.rs`,
+manager (`LeaderManagerDialog`, `crates/katana_window/src/annotation/leader_manager.rs`,
 the dialog `leaderManagerDialog`) on one of its tabs: **Leaders...**
 (`annotateLeaders`), **Leaders for Selection...**
 (`annotateLeadersForSelection`) and **Arrange Leaders and Balloons...**
@@ -1062,7 +1062,7 @@ widgets cannot hold exactly.
 
 The **Which leaders...** button above the list, **For Selection** and
 **Arrange** each carry the shared Apply to / Only those that match controls
-(`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`, the very widget of Global Modify and
+(`crates/katana_window/src/customisation/scope_filter_widget.rs`, the very widget of Global Modify and
 the utilities dialog; control names `leaderList...`, `leaderFor...` and
 `leaderArrange...`, `Scope`, `Layers`, `FilterLayer`, `TypePoint` and so on).
 On the Leader tab pressing the button shows the controls and the list then
@@ -1160,14 +1160,14 @@ names are what the headless tests and shortcuts know it by.
   (`leader_manager::arrange_aligns_the_selected_notes_and_renumbers_the_balloons`).
 
 **Preset leaders** (2026-10-15). Six tools of the catalogue's Annotate
-category, group Leaders (`rust/crates/katana_cad/src/tools/annotate_leader_presets.rs`):
+category, group Leaders (`crates/katana_cad/src/tools/annotate_leader_presets.rs`):
 Level Leader (`annotate.leader.level`, `LEADERLEVEL`), Surface Difference
 Leader (`annotate.leader.surface`, `LEADERSURFACE`), Cut/Fill Leader
 (`annotate.leader.cutfill`, `LEADERCUTFILL`), Point Name Leader
 (`annotate.leader.name`, `LEADERNAME`), Code Leader (`annotate.leader.code`,
 `LEADERCODE`) and Station Leader (`annotate.leader.station`,
 `LEADERSTATION`) - so each is a menu item on Annotate and a button of its own
-on the Annotate toolbar, with a painted icon (`rust/crates/katana_window/src/tools/icons_annotate.rs`:
+on the Annotate toolbar, with a painted icon (`crates/katana_window/src/tools/icons_annotate.rs`:
 the point a vertex handle, the leader the accent, and at its landing a level
 mark, a ground line with the difference dashed and a plus-or-minus, cut and
 fill arrows, a name tag, a code's bars, an alignment's chainage ticks). Click
@@ -1207,7 +1207,7 @@ alignments' values at the tip, and the property panel shows a preset's
 
 ## Stored with the project
 
-Migration 11 (`rust/crates/katana_storage/src/project_store.rs`, `docs/model.md`) adds
+Migration 11 (`crates/katana_storage/src/project_store.rs`, `docs/model.md`) adds
 `text_styles` (a column a field, a fixed set a DXF STYLE row also has),
 `label_styles` (the name and kind as columns and the rest as versioned JSON,
 `label_style_definition_to_json`, so a later placement option needs no
@@ -1219,7 +1219,7 @@ and not stored until changed. A project from before opens exactly as it was
 table and kind survives saving twice and reopening
 (`annotation_storage::every_table_and_kind_survives_saving_twice_and_reopening`).
 
-The geometry blob (`rust/crates/katana_entity/src/geometry_blob.rs`) has a second
+The geometry blob (`crates/katana_entity/src/geometry_blob.rs`) has a second
 version, `BLOB_VERSION_ANNOTATION`, written ONLY for what needs it - a label,
 a leader, a text with a style, paper height or justification, a dimension of
 another kind or with references (`fits_version_one`). Everything else is
@@ -1239,11 +1239,11 @@ not read correctly (`annotation_storage::smart_leaders_and_anchors_along_survive
 
 ## Exchange
 
-DXF (`rust/crates/katana_dxf/src/writer.rs`) has no label entity, and the writer
+DXF (`crates/katana_dxf/src/writer.rs`) has no label entity, and the writer
 draws only an aligned dimension and a bare leader itself; it may not see
 `katana_cad`, where the placer and the builders are
 (`katana_dxf`'s `Cargo.toml` does not depend on it). So a front end draws the rest -
-`draw_annotation_for_export` (`rust/crates/katana_cad/src/annotation/export_annotation.rs`):
+`draw_annotation_for_export` (`crates/katana_cad/src/annotation/export_annotation.rs`):
 labels placed as the plan view places them at the drawing's annotation
 scale, every dimension kind but aligned, and leaders with their arrowheads
 and callout frames - as lines, closed polylines and single-line texts, and
@@ -1266,7 +1266,7 @@ factor and a slant do not reach the file.
 A scoped export (`EXPORT file.dxf LAYERS notes`, a selection, an area, a
 filter - the window's Export Drawing dialog builds the same line) draws the
 annotation from the WHOLE drawing and only then writes the entities the scope
-took (`write_dxf_export` with the scope, `rust/crates/katana_app/src/dxf_verbs.rs`): a
+took (`write_dxf_export` with the scope, `crates/katana_app/src/dxf_verbs.rs`): a
 smart leader reads the entity its tip is on, a label the entity it labels, and
 the writer was handed a copy of the drawing with everything the scope left out
 already removed - a scope that took the leader and not its point wrote a bare
@@ -1289,51 +1289,51 @@ it skipped dimensions, and so does the archive exporter.
 
 | File | What |
 |---|---|
-| `rust/crates/katana_entity/tests/label_text.rs` | the template language: every step, DMS carry, chainage, absent lines dropped, errors named |
-| `rust/crates/katana_entity/tests/annotation_model.rs` | the tables' policies, text blocks, label values of every kind, anchors, the new kinds' validation, bounds and transforms |
-| `rust/crates/katana_commands/tests/annotation_tables.rs` | the table commands, a style in use refused with its user, the change-set guards |
-| `rust/crates/katana_storage/tests/annotation_storage.rs` | migration 11 and saving twice |
-| `rust/crates/katana_cad/tests/leaf/text_layout.rs` | paper height at several scales, justification, readability, masks |
-| `rust/crates/katana_cad/tests/annotation/label_layout.rs` | the placer: collisions, scale, suppression, displacement with leaders, order independence, priority, keep-out of lines and of annotation, area labels, dragged labels, chainage ticks |
-| `rust/crates/katana_cad/tests/custedit/associative.rs` | following moves, stretches, radii and intersections, erasing, locked layers; one undo step each |
-| `rust/crates/katana_cad/tests/annotation/auto_label.rs` | rule matching, one step, re-runs, clearing, chainage rules, the default styles |
-| `rust/crates/katana_cad/tests/annotation/dimensions_and_leaders.rs` | every kind built and drawn, paper-sized styles, chains, leaders and callouts |
-| `rust/crates/katana_cad/tests/annotation_drawing_verbs/annotation_verbs.rs` | every verb and its reply, undo as one step |
-| `rust/crates/katana_cad/tests/annotation_drawing_verbs/dimstyle_set_many.rs` | `DIMSTYLE SET` and `NEW` with several pairs as one step, a bad pair refusing the line, `INFO`'s record, the changes between two styles reading back as the second, the words a dialog writes |
-| `rust/crates/katana_cad/tests/annotation/export_annotation.rs` | what a file is handed |
-| `rust/crates/katana_cad/tests/annotools/annotate.rs` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
-| `rust/crates/katana_cad/tests/tool_cases/annotate_text_options.rs` | the Text tool's Style, Justify and Paper options and Multiline Text, each checked against what `TEXT` and `MTEXT` make |
-| `rust/crates/katana_cad/tests/tool_cases/annotate_label_tool.rs` | the Label Objects tool against the `LABEL` line, its style offered, options, undo and refusals |
-| `rust/crates/katana_cad/tests/tool_cases/annotate_dimension_chain.rs` | the Baseline and Continue Dimension tools against `DIM BASELINE` and `DIM CONTINUE`: the newest base, Select, Spacing, Enter and Esc, a snapped origin followed |
-| `rust/crates/katana_cad/tests/tool_cases/annotate_leader_options.rs` | `snap_anchor`; the Leader's options and the Balloon tool against `LEADER` and `BALLOON`; Linear's Rotated and a line between the levels against `DIM LINEAR`; the Ordinate's Datum against `DIM ORDINATE datum=`; snapped points followed |
+| `crates/katana_entity/tests/label_text.rs` | the template language: every step, DMS carry, chainage, absent lines dropped, errors named |
+| `crates/katana_entity/tests/annotation_model.rs` | the tables' policies, text blocks, label values of every kind, anchors, the new kinds' validation, bounds and transforms |
+| `crates/katana_commands/tests/annotation_tables.rs` | the table commands, a style in use refused with its user, the change-set guards |
+| `crates/katana_storage/tests/annotation_storage.rs` | migration 11 and saving twice |
+| `crates/katana_cad/tests/leaf/text_layout.rs` | paper height at several scales, justification, readability, masks |
+| `crates/katana_cad/tests/annotation/label_layout.rs` | the placer: collisions, scale, suppression, displacement with leaders, order independence, priority, keep-out of lines and of annotation, area labels, dragged labels, chainage ticks |
+| `crates/katana_cad/tests/custedit/associative.rs` | following moves, stretches, radii and intersections, erasing, locked layers; one undo step each |
+| `crates/katana_cad/tests/annotation/auto_label.rs` | rule matching, one step, re-runs, clearing, chainage rules, the default styles |
+| `crates/katana_cad/tests/annotation/dimensions_and_leaders.rs` | every kind built and drawn, paper-sized styles, chains, leaders and callouts |
+| `crates/katana_cad/tests/annotation_drawing_verbs/annotation_verbs.rs` | every verb and its reply, undo as one step |
+| `crates/katana_cad/tests/annotation_drawing_verbs/dimstyle_set_many.rs` | `DIMSTYLE SET` and `NEW` with several pairs as one step, a bad pair refusing the line, `INFO`'s record, the changes between two styles reading back as the second, the words a dialog writes |
+| `crates/katana_cad/tests/annotation/export_annotation.rs` | what a file is handed |
+| `crates/katana_cad/tests/annotools/annotate.rs` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
+| `crates/katana_cad/tests/tool_cases/annotate_text_options.rs` | the Text tool's Style, Justify and Paper options and Multiline Text, each checked against what `TEXT` and `MTEXT` make |
+| `crates/katana_cad/tests/tool_cases/annotate_label_tool.rs` | the Label Objects tool against the `LABEL` line, its style offered, options, undo and refusals |
+| `crates/katana_cad/tests/tool_cases/annotate_dimension_chain.rs` | the Baseline and Continue Dimension tools against `DIM BASELINE` and `DIM CONTINUE`: the newest base, Select, Spacing, Enter and Esc, a snapped origin followed |
+| `crates/katana_cad/tests/tool_cases/annotate_leader_options.rs` | `snap_anchor`; the Leader's options and the Balloon tool against `LEADER` and `BALLOON`; Linear's Rotated and a line between the levels against `DIM LINEAR`; the Ordinate's Datum against `DIM ORDINATE datum=`; snapped points followed |
 | `qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless` | the window: `DBA`, `BALLOON` and `LE`'s Callout answered on the command line |
-| `rust/crates/katana_window/tests/annotation/label_edit_dialog.rs` | the `LABEL SET` line Edit Label writes, the dialog and the Label Layout Report driven by control name, each line run as the window runs it |
+| `crates/katana_window/tests/annotation/label_edit_dialog.rs` | the `LABEL SET` line Edit Label writes, the dialog and the Label Layout Report driven by control name, each line run as the window runs it |
 | `qt_labels_are_made_edited_and_reported_in_the_window_headless` | the window end to end: `LBL` answered on the command line, the Properties rows, Edit Label's line through the one executor, the layout report, the Annotate menu |
 | `cli.label_layout_names_the_label_that_found_no_room` | `katana_cli`: the suppressed record, and a pinned label placed |
-| `rust/crates/katana_entity/tests/leader_values.rs` | Along and Inside anchors, the nearest place, what a leader can say of every kind of target, the leader template check, validation, the version-3 blob and JSON; the degenerate cases - a fraction that is no number, a repeated vertex, a figure of no area, no place at all - and a national grid's magnitudes |
-| `rust/crates/katana_cad/tests/annotation_drawing_verbs/smart_leaders.rs` | the LEADER verbs end to end: templates, label styles, `#id@x,y`, `.inside` and `.alongN:T`, a backslash typed, VALUES, LIST, SET, ATTACH, DETACH, FREEZE, PROP, FOR, ALIGN, BALLOON FOR and RENUMBER; following stretches and moves, going with the target, copies |
-| `rust/crates/katana_cad/tests/drawtools/modify_transform.rs` | (`copying_tools::a_callout_copied_with_its_pit_reads_the_pits_copy`) the Copy, Rotate and Scale with Copy, and polar Array tools copy a callout as one of its pit's copy |
+| `crates/katana_entity/tests/leader_values.rs` | Along and Inside anchors, the nearest place, what a leader can say of every kind of target, the leader template check, validation, the version-3 blob and JSON; the degenerate cases - a fraction that is no number, a repeated vertex, a figure of no area, no place at all - and a national grid's magnitudes |
+| `crates/katana_cad/tests/annotation_drawing_verbs/smart_leaders.rs` | the LEADER verbs end to end: templates, label styles, `#id@x,y`, `.inside` and `.alongN:T`, a backslash typed, VALUES, LIST, SET, ATTACH, DETACH, FREEZE, PROP, FOR, ALIGN, BALLOON FOR and RENUMBER; following stretches and moves, going with the target, copies |
+| `crates/katana_cad/tests/drawtools/modify_transform.rs` | (`copying_tools::a_callout_copied_with_its_pit_reads_the_pits_copy`) the Copy, Rotate and Scale with Copy, and polar Array tools copy a callout as one of its pit's copy |
 | `tests/cli/CMakeLists.txt` | `cli.a_smart_leader_is_saved_with_the_point_it_reads` and the tests after it: the verbs through `katana_cli` - saved, opened by another process and read afresh, an exact along, balloons numbered again, a refusal stopping and failing the script |
-| `rust/crates/katana_cad/tests/annotools/smart_leader_tool.rs` | the Leader tool: a tip put on what it is clicked on, fields checked as typed, a note that would say nothing refused |
-| `rust/crates/katana_cad/tests/annotation/leader_edit.rs` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped (negative sizes too), a label style's look lent, attaching (and again, no command), the value rows, where a leader goes on an entity (and a tip put on one, inside a lot), LEADER FOR's and ALIGN's refusals, a numbered balloon kept a circle and the largest number refusing a next |
-| `rust/crates/katana_entity/tests/leader_context_values.rs` | what a leader reads of the drawing through a fake context of planes and a straight alignment: a surface's level and the difference, cut and fill (one line, on the surface a fill of nothing), a name with a blank, station, offset, profile and its difference, every refusal's reason, no context, every value listed, the template check of each kind, `+.Nf` |
-| `rust/crates/katana_cad/tests/annotation_drawing_verbs/leader_presets.rs` | the presets on a Document with a real TIN: level, surface (the first visible chosen and said, a name in any case, a hidden one named), the note following a surface edit and its undo, cut/fill for many in one step, station with its alignment and profile, every refusal and nothing made, `LEADER PRESETS`, `LIST JSON`, `VALUES`, recognising each preset, a freeze, `LEADER SET preset=`, the context a copy, LIST and the export |
-| `rust/crates/katana_cad/tests/tool_cases/leader_preset_tools.rs` | the six tools in the catalogue; the Level Leader against `LEADER #1@30,40 40,50 preset=level`; the surface chosen with `S`, and offered from the newest leader; a point with nothing to say refused at the first click; Enter's place; a row of levels; name, code and station |
-| `rust/crates/katana_window/tests/annotation/leader_manager_presets.rs` | the Leaders manager's Preset boxes by control name: a preset's template written and applied in one step, a named surface and refusals, a leader shown as its preset until typed away, For Selection, the surfaces' values |
-| `rust/crates/katana_geometry/tests/cases/alignment.rs` | (`StationOffset...`) the station and offset of a point on a straight alignment, a curve, outside a kink, beyond the ends, and undoing `point_at_station_offset` on spirals |
+| `crates/katana_cad/tests/annotools/smart_leader_tool.rs` | the Leader tool: a tip put on what it is clicked on, fields checked as typed, a note that would say nothing refused |
+| `crates/katana_cad/tests/annotation/leader_edit.rs` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped (negative sizes too), a label style's look lent, attaching (and again, no command), the value rows, where a leader goes on an entity (and a tip put on one, inside a lot), LEADER FOR's and ALIGN's refusals, a numbered balloon kept a circle and the largest number refusing a next |
+| `crates/katana_entity/tests/leader_context_values.rs` | what a leader reads of the drawing through a fake context of planes and a straight alignment: a surface's level and the difference, cut and fill (one line, on the surface a fill of nothing), a name with a blank, station, offset, profile and its difference, every refusal's reason, no context, every value listed, the template check of each kind, `+.Nf` |
+| `crates/katana_cad/tests/annotation_drawing_verbs/leader_presets.rs` | the presets on a Document with a real TIN: level, surface (the first visible chosen and said, a name in any case, a hidden one named), the note following a surface edit and its undo, cut/fill for many in one step, station with its alignment and profile, every refusal and nothing made, `LEADER PRESETS`, `LIST JSON`, `VALUES`, recognising each preset, a freeze, `LEADER SET preset=`, the context a copy, LIST and the export |
+| `crates/katana_cad/tests/tool_cases/leader_preset_tools.rs` | the six tools in the catalogue; the Level Leader against `LEADER #1@30,40 40,50 preset=level`; the surface chosen with `S`, and offered from the newest leader; a point with nothing to say refused at the first click; Enter's place; a row of levels; name, code and station |
+| `crates/katana_window/tests/annotation/leader_manager_presets.rs` | the Leaders manager's Preset boxes by control name: a preset's template written and applied in one step, a named surface and refusals, a leader shown as its preset until typed away, For Selection, the surfaces' values |
+| `crates/katana_geometry/tests/cases/alignment.rs` | (`StationOffset...`) the station and offset of a point on a straight alignment, a curve, outside a kink, beyond the ends, and undoing `point_at_station_offset` on spirals |
 | `tests/cli/geo/leaders.cmake` | `cli.a_surface_leader_says_how_far_a_point_is_above_the_ground`: a surface from the sample terrain, a point at RL 30, surface, cut/fill and level leaders and LIST; one on no surface failing the script |
-| `rust/crates/katana_app/tests/mcp/mcp_server.rs` | `mcp_server::the_leaders_tool_gives_what_each_leader_says_and_the_presets`, and `mcp_server::the_leaders_tool_takes_a_scope_and_filter_and_says_how_many_leaders_it_took`: a layer, an area given alone, a filter, a scope that takes none giving none, a filter alone on the selection, and the refusals (ids with a scope, a layer that is not there, VIEW, an area that is not four numbers) |
-| `rust/crates/katana_cad/tests/annotation_drawing_verbs/leader_scope.rs` | the leader verbs over the shared scope and filter, each value worked out by hand: LIST (a layer, an area, a filter, the selection, the window's view with its hidden layers), VALUES, SET, FREEZE, DETACH, PROP (two leaders on one pit set it once), ALIGN, FOR and BALLOON FOR and RENUMBER; a scope that takes nothing is said and never means "all"; the refusals (ids with a scope, two scopes, a missing layer, VIEW headless, an edit of an empty selection); a WHERE key after WHERE is the condition; `SURFACE RENAME` rewriting the notes that read the surface in its one undo step (any case, steps and doubled braces kept, a locked layer or an unwritable name left and warned), `ALIGN DELETE`'s warning, `rename_leader_reads` for an alignment, `rename_template_fields`; the anchor words the dialog writes read back as the same place; and the JSON writer handed a byte that is not UTF-8 |
+| `crates/katana_app/tests/mcp/mcp_server.rs` | `mcp_server::the_leaders_tool_gives_what_each_leader_says_and_the_presets`, and `mcp_server::the_leaders_tool_takes_a_scope_and_filter_and_says_how_many_leaders_it_took`: a layer, an area given alone, a filter, a scope that takes none giving none, a filter alone on the selection, and the refusals (ids with a scope, a layer that is not there, VIEW, an area that is not four numbers) |
+| `crates/katana_cad/tests/annotation_drawing_verbs/leader_scope.rs` | the leader verbs over the shared scope and filter, each value worked out by hand: LIST (a layer, an area, a filter, the selection, the window's view with its hidden layers), VALUES, SET, FREEZE, DETACH, PROP (two leaders on one pit set it once), ALIGN, FOR and BALLOON FOR and RENUMBER; a scope that takes nothing is said and never means "all"; the refusals (ids with a scope, two scopes, a missing layer, VIEW headless, an edit of an empty selection); a WHERE key after WHERE is the condition; `SURFACE RENAME` rewriting the notes that read the surface in its one undo step (any case, steps and doubled braces kept, a locked layer or an unwritable name left and warned), `ALIGN DELETE`'s warning, `rename_leader_reads` for an alignment, `rename_template_fields`; the anchor words the dialog writes read back as the same place; and the JSON writer handed a byte that is not UTF-8 |
 | `tests/cli/CMakeLists.txt` | `cli.leaders_take_a_scope_and_say_how_many_they_took`, `cli.leaders_named_by_id_and_by_scope_are_refused`, `cli.balloons_of_one_layer_are_numbered_again_by_scope`; `tests/cli/geo/leaders.cmake` adds `cli.renaming_a_surface_moves_its_leaders_and_removing_it_warns` |
-| `rust/crates/katana_window/tests/annotation/leader_manager.rs` | the Leaders manager driven by control name and by its widgets' own edits: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
-| `rust/crates/katana_window/tests/annotation/leader_manager_lines.rs` | the Leaders manager hands lines to the executor and changes nothing itself: the options of a change written exactly (2.3456 not cut), a note's line break and backslash, a double quote refused with a sentence naming the field and nothing run, an untouched form running no line, no executor said, each button's line (SET of only what changed, FREEZE, DETACH, ATTACH along, PROP, FOR, BALLOON FOR, ALIGN, RENUMBER), the list and the For Selection and Arrange tabs taking a layer, a filter or the whole drawing from the shared controls, and the reply's report |
-| `rust/crates/katana_dxf/tests/writer.rs` | paper-sized text at the scale, drawn annotation, labels with no room |
-| `rust/crates/katana_window/tests/plan_painting/leader_preview.rs` | a smart leader painted as a preview or a grip drag with the drawing it reads says its note, a plain one and one whose target is gone are as they were |
-| `rust/crates/katana_window/tests/annotation/annotation_ui.rs` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by control name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
+| `crates/katana_window/tests/annotation/leader_manager.rs` | the Leaders manager driven by control name and by its widgets' own edits: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, a label style's look lent, set back, kept when typed over and lent exactly, and lent anew when the style comes or goes, attributes set, attach (past a dimension, waiting for Apply, again no step) and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview for the first with a place, its look and a style's, and placing, numbered balloons kept circles, Arrange, each menu entry's tab |
+| `crates/katana_window/tests/annotation/leader_manager_lines.rs` | the Leaders manager hands lines to the executor and changes nothing itself: the options of a change written exactly (2.3456 not cut), a note's line break and backslash, a double quote refused with a sentence naming the field and nothing run, an untouched form running no line, no executor said, each button's line (SET of only what changed, FREEZE, DETACH, ATTACH along, PROP, FOR, BALLOON FOR, ALIGN, RENUMBER), the list and the For Selection and Arrange tabs taking a layer, a filter or the whole drawing from the shared controls, and the reply's report |
+| `crates/katana_dxf/tests/writer.rs` | paper-sized text at the scale, drawn annotation, labels with no room |
+| `crates/katana_window/tests/plan_painting/leader_preview.rs` | a smart leader painted as a preview or a grip drag with the drawing it reads says its note, a plain one and one whose target is gone are as they were |
+| `crates/katana_window/tests/annotation/annotation_ui.rs` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by control name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
 | `qt_the_label_style_manager_runs_chosen_rules_headless` (`tests/CMakeLists.txt`) | the real window: a label style named with its kind, a rule with its type previewed and run as the one chosen |
-| `rust/crates/katana_window/tests/annotation/text_edit_dialog.rs` | Edit Text by control name: the selection followed, one `TEXTEDIT` of the changed keys, a value no line can carry refused |
+| `crates/katana_window/tests/annotation/text_edit_dialog.rs` | Edit Text by control name: the selection followed, one `TEXTEDIT` of the changed keys, a value no line can carry refused |
 | `qt_multiline_text_and_edit_text_run_in_the_window_headless` (`tests/CMakeLists.txt`) | the real window: `MT` typed, two lines made one text; Edit Text on a selected text |
-| `rust/crates/katana_window/tests/annotation/dimension_style_manager.rs` | the Dimension Styles manager by control name: every field in one line and one step, New, Duplicate, a refused Delete, the preview and sample, Revert |
+| `crates/katana_window/tests/annotation/dimension_style_manager.rs` | the Dimension Styles manager by control name: every field in one line and one step, New, Duplicate, a refused Delete, the preview and sample, Revert |
 | `qt_the_dimension_styles_manager_runs_its_lines_headless` (`tests/CMakeLists.txt`) | the real window: Format > Dimension Styles..., a style made and applied, undone by one typed UNDO |
 
 ## Not yet

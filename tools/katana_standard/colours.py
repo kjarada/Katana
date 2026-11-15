@@ -21,8 +21,8 @@ Why these twenty-eight, and why these values:
   cream, stormwater green, recycled water purple, fire service red, unidentified services pink, and petroleum
   brown (`AS5488_NAMES`; `docs/subsurface_utilities.md` has the sources). The standard names the colours and
   gives no sRGB for them, so each value here is Katana's rendering of the name, and it is the same value
-  `UTILITY DRAW` draws in (`utility_type_colour`, `rust/crates/katana_cad/src/utilities/utility_drawing.rs`);
-  `rust/crates/katana_cad/tests/tool_cases/katana_standard.rs` holds the two equal. Traffic systems have no AS 5488
+  `UTILITY DRAW` draws in (`utility_type_colour`, `crates/katana_cad/src/utilities/utility_drawing.rs`);
+  `crates/katana_cad/tests/tool_cases/katana_standard.rs` holds the two equal. Traffic systems have no AS 5488
   colour and stay Katana's choice. The US convention (electricity red, communications orange, sewer green)
   is not Australian and is not used.
 - Yellow and cream are the exception to the 3:1 floor on paper. They cannot reach 3:1 on white and still be
@@ -110,12 +110,12 @@ AS5488_NAMES = {
 PRINTS_LIGHT = ("katana gas", "katana sewer")
 
 # The channel at or above which a pen prints black, all three of them: katana_cad's plot::NEAR_WHITE_CHANNEL
-# (rust/crates/katana_cad/src/plot.rs), the plot's rule for white and near-white pens (PlotSettings's
+# (crates/katana_cad/src/plot.rs), the plot's rule for white and near-white pens (PlotSettings's
 # white_to_black). `problems()` reads that source and fails when this number is not the plot's, so the two
 # cannot drift apart. (Until 2026-11-15 it read the C++ header, plot.hpp, which declared the same 230.)
 NEAR_WHITE_CHANNEL = 230
 PLOT_HEADER = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "rust", "crates", "katana_cad", "src",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "crates", "katana_cad", "src",
                  "plot.rs"))
 
 ROLES = {
@@ -214,7 +214,7 @@ def paper_contrast(text):
 
 
 def plot_near_white_channel():
-    """`NEAR_WHITE_CHANNEL` as rust/crates/katana_cad/src/plot.rs declares it, or None when it cannot be read."""
+    """`NEAR_WHITE_CHANNEL` as crates/katana_cad/src/plot.rs declares it, or None when it cannot be read."""
     try:
         with open(PLOT_HEADER, encoding="utf-8") as handle:
             match = re.search(r"\bconst\s+NEAR_WHITE_CHANNEL\s*:\s*u8\s*=\s*(\d+)\s*;", handle.read())

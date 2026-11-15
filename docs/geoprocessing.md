@@ -17,13 +17,13 @@ The foundation (package F0) is five pieces, one per layer:
 
 | Piece | Where | What |
 |---|---|---|
-| The bridge | `rust/crates/katana_gis/src/processing/`, with `rust/crates/katana_gis/native/algorithm_shim.cpp` | GDAL's catalogue, argument specs and runs behind plain types; the shim is the only code that includes GDAL's algorithm headers |
-| The bindings | `rust/crates/katana_interop/src/geo/` | drawing data to feature tables and back as one undo step; a surface as a grid; derived rasters |
-| The executor | `rust/crates/katana_app/src/geo/geo_verbs.rs` | prepare, work, apply: the one path every geoprocessing verb runs on |
-| The GDAL verb | `rust/crates/katana_app/src/geo/gdal_verbs.rs` | `GDAL VERSION`, `LIST`, `HELP`, and a run of any algorithm in GDAL's own words with Katana's `FROM` and `TO` |
-| The MCP tools | `rust/crates/katana_app/src/geo/mcp_geo_tools.rs` | `katana_gdal_catalogue`, `katana_gdal_describe`, `katana_gdal_run` |
+| The bridge | `crates/katana_gis/src/processing/`, with `crates/katana_gis/native/algorithm_shim.cpp` | GDAL's catalogue, argument specs and runs behind plain types; the shim is the only code that includes GDAL's algorithm headers |
+| The bindings | `crates/katana_interop/src/geo/` | drawing data to feature tables and back as one undo step; a surface as a grid; derived rasters |
+| The executor | `crates/katana_app/src/geo/geo_verbs.rs` | prepare, work, apply: the one path every geoprocessing verb runs on |
+| The GDAL verb | `crates/katana_app/src/geo/gdal_verbs.rs` | `GDAL VERSION`, `LIST`, `HELP`, and a run of any algorithm in GDAL's own words with Katana's `FROM` and `TO` |
+| The MCP tools | `crates/katana_app/src/geo/mcp_geo_tools.rs` | `katana_gdal_catalogue`, `katana_gdal_describe`, `katana_gdal_run` |
 
-In the window the verb runs as a background job (`rust/crates/katana_window/src/geo/`).
+In the window the verb runs as a background job (`crates/katana_window/src/geo/`).
 
 Every rule in "The bridge" was measured, not assumed. The measurements were
 made with small programs against GDAL 3.13.2 on 2026-09-26, while the
@@ -32,13 +32,13 @@ those runs.
 
 ## The bridge
 
-`katana_gis::processing` (`rust/crates/katana_gis/src/processing/`) wraps GDAL's
+`katana_gis::processing` (`crates/katana_gis/src/processing/`) wraps GDAL's
 C++ algorithm API behind plain types: `ArgSpec`, `AlgorithmInfo`,
 `RunRequest`, `RunOutputs`, `RasterGrid`, `FeatureSet`. No GDAL type crosses
 it, so everything above is written against this module. GDAL's C API has no
 twin for some of the calls the bridge makes, so those go through a small C++
-shim with a C ABI (`rust/crates/katana_gis/native/algorithm_shim.cpp`, its
-declarations held to the Rust's by `algorithm_check.c`); `rust/crates/katana_gis/src/ffi/algorithm.rs`
+shim with a C ABI (`crates/katana_gis/native/algorithm_shim.cpp`, its
+declarations held to the Rust's by `algorithm_check.c`); `crates/katana_gis/src/ffi/algorithm.rs`
 says which calls and how that was measured. GDAL itself calls its
 algorithm API provisional: `gdal --help` "reserves the right to modify,
 rename, reorganize". The contract tests (below) are what notice when it does.
@@ -234,7 +234,7 @@ read from its words when it is not one quoted argument.
 
 ## Safety
 
-Every leaf is Safe or Confirm (`rust/crates/katana_gis/src/processing/policy.rs`).
+Every leaf is Safe or Confirm (`crates/katana_gis/src/processing/policy.rs`).
 
 - **What Confirm means.** An algorithm that changes or removes EXISTING data
   in place is Confirm: vsi delete, move, sync, copy, sozip create and
@@ -312,7 +312,7 @@ Every leaf is Safe or Confirm (`rust/crates/katana_gis/src/processing/policy.rs`
 
 ### Drawing data to features
 
-`katana_interop::geo::drawing_dataset::drawing_dataset` (`rust/crates/katana_interop/src/geo/drawing_dataset.rs`)
+`katana_interop::geo::drawing_dataset::drawing_dataset` (`crates/katana_interop/src/geo/drawing_dataset.rs`)
 is the ONE conversion of entities to feature tables, and EXPORT writes files
 through it too (I1; `docs/interop.md`, "Fidelity"). For EXPORT it writes
 one table of every kind (`one_table`), with `katana_id` and `layer` but not
@@ -337,7 +337,7 @@ asked (`properties`).
   before it, so a file imported twice joins each hole to its own exterior
   (`drawing_dataset::a_tagged_hole_joins_its_exterior`: 10000 - 400 = 9600 m2). A
   tagged hole inside no area stays an area of its own, and says so. The rule
-  is `katana_entity::ring_tags::HoleJoiner` (`rust/crates/katana_entity/src/ring_tags.rs`, tested by
+  is `katana_entity::ring_tags::HoleJoiner` (`crates/katana_entity/src/ring_tags.rs`, tested by
   `hole_joiner::of_equal_rings_the_hole_joins_the_one_made_nearest_before_it` and its
   neighbours), shared with the volume verbs, which read a lot with a hole the
   same way (`docs/volumes.md`, "A lot with a hole"). GEOS's
@@ -345,7 +345,7 @@ asked (`properties`).
   of every vertex does it without GDAL in the interop layer, and it is what
   the part hint is checked against.
 - **Curves.** Arcs and circles are chords within `curveTolerance` (1 mm by
-  default), by the same `chord_count` EXPORT uses (`rust/crates/katana_interop/src/curve_chords.rs`).
+  default), by the same `chord_count` EXPORT uses (`crates/katana_interop/src/curve_chords.rs`).
 - **The draw system's curves** (`docs/drawing.md`), each read as main's
   vector export read it before the one conversion took EXPORT over:
   - a **curve polyline** (`CurvePolyline2`, a polyline with arcs by bulge)
@@ -529,7 +529,7 @@ hold a reference raster there.
 
 ## The executor
 
-`katana_app::geo` (`rust/crates/katana_app/src/geo/geo_verbs.rs`) runs a line in three
+`katana_app::geo` (`crates/katana_app/src/geo/geo_verbs.rs`) runs a line in three
 phases, so a session runs it inline and the window as a job:
 
 1. **`prepare`, on the calling thread** (the GUI thread in the window):
@@ -584,7 +584,7 @@ phases, so a session runs it inline and the window as a job:
 - **The window.** It runs the line through `GeoWorkbench::run_line`
   ("The window" below).
 
-**The verb table** (`rust/crates/katana_app/src/geo/verb_table.rs`) maps a verb, and an
+**The verb table** (`crates/katana_app/src/geo/verb_table.rs`) maps a verb, and an
 optional second word, to its prepare function and its usage, and - where a
 verb is shared with the interpreter - to `takes`, which says which of its
 lines are the executor's (`INFO <file>`, not `INFO <id>`). `handles`,
@@ -709,7 +709,7 @@ the fields is a field with no value, never glued to the next key.
 
 ### Schemas
 
-`rust/crates/katana_app/src/geo/schema.rs` turns the specs into JSON, generated at run
+`crates/katana_app/src/geo/schema.rs` turns the specs into JSON, generated at run
 time and never written by hand:
 
 - `argument_json` is one argument;
@@ -725,14 +725,14 @@ the toolbox's forms the specs they are made from.
 
 ## The window
 
-`GeoWorkbench` (`rust/crates/katana_window/src/geo/geo_workbench.rs`) is built as the online
-and utility workbenches are. The window's GIS actions (`rust/crates/katana_window/src/main_window/actions.rs`) hand it the
+`GeoWorkbench` (`crates/katana_window/src/geo/geo_workbench.rs`) is built as the online
+and utility workbenches are. The window's GIS actions (`crates/katana_window/src/main_window/actions.rs`) hand it the
 window's document, interpreter, reference rasters and surfaces, and
 `Executor::run_workbench_line` asks it first. So a typed line and a dialog's
 line through `MainWindow::run_verb_line` reach it alike.
 
 - **What answers at once is logged** (LIST, HELP, a refusal).
-- **Anything that runs is a background job** (`rust/crates/katana_window/src/jobs.rs`),
+- **Anything that runs is a background job** (`crates/katana_window/src/jobs.rs`),
   with progress and Cancel in the status bar. The job's Apply runs the
   executor's apply on the GUI thread, as one undo step.
 - **Headless, the line waits for its job.** Under `--command`, `--run-line`
@@ -764,7 +764,7 @@ one. The verb table's SURFACE row takes only LIST, INFO, REMOVE, FROM and
 EXPORT (`takes_surface`); the rest are the interpreter's.
 
 **Menus.** The packages add their items through `GeoMenus`
-(`rust/crates/katana_window/src/geo/menu_table.rs`, a block each). It makes the GIS
+(`crates/katana_window/src/geo/menu_table.rs`, a block each). It makes the GIS
 menu's "Processing - GDAL", "Analysis - GDAL" and "Check - GDAL" sections,
 and the Terrain menu's `terrainAnalysisMenu` and `terrainDemMenu`, the first
 time an item is added, so an empty heading never shows. `Icon::Processing`
@@ -847,7 +847,7 @@ its names and shapes except here:
   `table_name`, `style_fields` and `properties`; `katana_interop::geo::drawing_dataset::feature_pieces`;
   `VectorGeometry::arcs`; `GdalDataset::read_table` and `write_tables`, over
   the `katana_gis::processing::types::FeatureTable` of this contract.
-- I2 added, all source-compatible: `rust/crates/katana_gis/src/formats.rs`
+- I2 added, all source-compatible: `crates/katana_gis/src/formats.rs`
   (`katana_gis::formats::formats`, `find_format`, `format_options`, `readable_extensions`,
   `vector_save_choices`, `vector_writer_for`, `is_virtual_path`, `is_remote_path`,
   `identify_content`); `katana_interop::import::archive_extensions`; a `katana_gis::zip_container::write_zip` of
@@ -861,18 +861,18 @@ its names and shapes except here:
 GDAL's algorithm framework is provisional, and MSYS2 upgrades GDAL on a
 rolling basis. Each package therefore pins the paths and arguments it binds,
 with `expect_argument(path, name, ArgType, required)`
-(`rust/crates/katana_gis/tests/support/contract_support.rs`). F0 pins its own in
-`rust/crates/katana_gis/tests/processing/processing_contract.rs`: the inputs every raster algorithm
+(`crates/katana_gis/tests/support/contract_support.rs`). F0 pins its own in
+`crates/katana_gis/tests/processing/processing_contract.rs`: the inputs every raster algorithm
 took as a dataset list in 3.13, `output-string`, `return-code`, `pipeline`,
 and the name-only inputs.
 
-The tests: `rust/crates/katana_gis/tests/processing/` holds the bridge, policy
-and contract tests, `rust/crates/katana_interop/tests/drawing_bindings/` the
-bindings', and `rust/crates/katana_app/tests/geo_*/` the surface store's, the
+The tests: `crates/katana_gis/tests/processing/` holds the bridge, policy
+and contract tests, `crates/katana_interop/tests/drawing_bindings/` the
+bindings', and `crates/katana_app/tests/geo_*/` the surface store's, the
 executor's and the verb's, run through a Session (`geo_session::a_gdal_line_runs_through_the_session_and_its_raster_is_a_reference`).
 `tests/cli/geo/gdal.cmake` holds the `cli.gdal_*` tests,
 `tests/geo/headless/gdal.cmake` the window's, and
-`rust/crates/katana_window/tests/host/geo_workbench.rs` the workbench's. Every expected
+`crates/katana_window/tests/host/geo_workbench.rs` the workbench's. Every expected
 value is worked by hand and quoted beside it:
 
 - hillshade of flat ground at altitude 45: 1 + 254 sin 45 deg = 180.6, so
@@ -898,14 +898,14 @@ module list of its crate (`lib.rs`) or of its test program (`main.rs`), a line
 of its own that two packages adding files do not both edit. The places a
 package adds files to:
 
-- `rust/crates/katana_gis/src/processing/*.rs` (the bridge);
-- `rust/crates/katana_interop/src/geo/*.rs`;
+- `crates/katana_gis/src/processing/*.rs` (the bridge);
+- `crates/katana_interop/src/geo/*.rs`;
 - a geo module in katana_cad, for domain edits that need no GDAL
-  (`rust/crates/katana_cad/src/geo/`);
-- `rust/crates/katana_app/src/geo/*.rs`, with its `cli.` tests' `.cmake` files;
-- `rust/crates/katana_window/src/geo/*.rs`;
-- `rust/crates/katana_app/tests/geo_*/*.rs`, `tests/geo/headless/*.cmake`, and
-  `rust/crates/katana_window/tests/gis_*/*.rs`.
+  (`crates/katana_cad/src/geo/`);
+- `crates/katana_app/src/geo/*.rs`, with its `cli.` tests' `.cmake` files;
+- `crates/katana_window/src/geo/*.rs`;
+- `crates/katana_app/tests/geo_*/*.rs`, `tests/geo/headless/*.cmake`, and
+  `crates/katana_window/tests/gis_*/*.rs`.
 
 ### F0: GDAL algorithm bridge, bindings, one geoprocessing executor, the GDAL verb, MCP tools
 
@@ -916,7 +916,7 @@ tools are in `docs/mcp.md`.
 ### X1: GIS > GDAL Toolbox window
 
 Built: GIS > Processing - GDAL > GDAL Toolbox (`gdalToolbox`, opening
-`gdalToolboxDialog`; `rust/crates/katana_window/src/geo/gdal_toolbox_dialog.rs`), the GDAL
+`gdalToolboxDialog`; `crates/katana_window/src/geo/gdal_toolbox_dialog.rs`), the GDAL
 verb's menu item. It runs nothing itself: it writes the GDAL line its fields
 describe and hands it to the window's one executor, so its CLI and MCP
 surfaces are the verb's and `katana_gdal_run`'s.
@@ -952,7 +952,7 @@ surfaces are the verb's and `katana_gdal_run`'s.
   chosen again; a store that cannot be read is no algorithm.
 
 `gdal_toolbox_line` is the pure function the line comes from. Tests:
-`rust/crates/katana_window/tests/gis_terrain/gdal_toolbox.rs` (the search, the form's bounds
+`crates/katana_window/tests/gis_terrain/gdal_toolbox.rs` (the search, the form's bounds
 and choices, the exact line, the pickers' kinds, the exclusive minimum, the
 exclusion group, Confirm, optional and listed inputs, a file output, Run and
 Preview through a stub runner) and `qt_gdal_toolbox_buffers_a_drawn_line_headless`
@@ -975,7 +975,7 @@ That is not built.
 
 ### X2: Toolbox pipeline tab
 
-Built: the GDAL Toolbox's Pipeline tab (`rust/crates/katana_window/src/geo/pipeline_builder.rs`).
+Built: the GDAL Toolbox's Pipeline tab (`crates/katana_window/src/geo/pipeline_builder.rs`).
 Its CLI and MCP surfaces are the GDAL verb's: it writes
 `GDAL pipeline "read ! <step> ... ! write" FROM input <source> TO <target>`.
 
@@ -1019,8 +1019,8 @@ last step is `info`, `compare` or `export-schema`, the steps GDAL declares
 with an output-string (`pipeline_contract::the_steps_that_print_are_the_ones_gdal_declares_so`
 names any it adds; `pipeline_verb::*` fail without the fix).
 
-Tests: `rust/crates/katana_window/tests/gis_terrain/pipeline_builder.rs`,
-`rust/crates/katana_app/tests/geo_frame/pipeline_verb.rs`,
+Tests: `crates/katana_window/tests/gis_terrain/pipeline_builder.rs`,
+`crates/katana_app/tests/geo_frame/pipeline_verb.rs`,
 `cli.gdal_pipeline_contours_then_buffer_from_a_raster_to_a_layer`
 (`tests/cli/geo/pipeline.cmake`) and
 `qt_gdal_toolbox_pipeline_tab_runs_its_steps_headless`
@@ -1031,12 +1031,12 @@ buffered into one area: three.
 ### T0: Terrain session: one surface store and SURFACE verbs on every front end
 
 Built: `SURFACE LIST | INFO | REMOVE | FROM | EXPORT`
-(`rust/crates/katana_app/src/geo/surface_verbs.rs`, its helpers in
-`rust/crates/katana_app/src/geo/terrain_verbs.rs`), `TO SURFACE` in `bindings.rs`'s T0
+(`crates/katana_app/src/geo/surface_verbs.rs`, its helpers in
+`crates/katana_app/src/geo/terrain_verbs.rs`), `TO SURFACE` in `bindings.rs`'s T0
 block, `katana_terrain_list` (`docs/mcp.md`), and the window's Terrain >
 Surface From and GIS > Export Surface as DEM, which build SURFACE lines
-(`rust/crates/katana_window/src/surface_raster_dialog.rs`, with
-`rust/crates/katana_window/src/geo/terrain_dialog_support.rs` for what the terrain dialogs
+(`crates/katana_window/src/surface_raster_dialog.rs`, with
+`crates/katana_window/src/geo/terrain_dialog_support.rs` for what the terrain dialogs
 share). The rules that make survey points and breaklines of drawing data
 moved to `katana_cad::geo::surface_input::surface_input`. `docs/terrain.md`, "Surfaces on every
 front end", has the grammar, the records and the decisions.
@@ -1061,14 +1061,14 @@ Where it differs from the plan:
 
 ### T1: CONTOUR from a surface or an elevation raster
 
-Built: `CONTOUR` (`rust/crates/katana_app/src/geo/contour_verbs.rs`), its conversion,
-clip and command in `rust/crates/katana_interop/src/geo/contour_entities.rs`, and
+Built: `CONTOUR` (`crates/katana_app/src/geo/contour_verbs.rs`), its conversion,
+clip and command in `crates/katana_interop/src/geo/contour_entities.rs`, and
 Terrain > Analysis > Contours (`terrainContours`, `contoursDialog`,
-`rust/crates/katana_window/src/geo/contours_dialog.rs`). `docs/terrain.md`, "Contours", has
+`crates/katana_window/src/geo/contours_dialog.rs`). `docs/terrain.md`, "Contours", has
 the grammar, the records and the decisions. What T1 to T3 share - a raster
 handed from one GDAL step to the next (`RasterChain`), the source reader
 (`bind_terrain_source`) and the areas a scope's closed shapes make
-(`bind_areas`) - is in `rust/crates/katana_app/src/geo/terrain_verbs.rs`, declared in
+(`bind_areas`) - is in `crates/katana_app/src/geo/terrain_verbs.rs`, declared in
 `terrain_verbs.rs`; the dialogs' shared pieces are in
 `terrain_dialog_support.rs`. No MCP tool: `katana_run_commands` runs the
 line (`docs/mcp.md`).
@@ -1084,11 +1084,11 @@ Where it differs from the plan:
 
 ### T2: Terrain shading: hillshade, colour relief, slope shading
 
-Built: `RASTER SHADE` (`rust/crates/katana_app/src/geo/shade_verbs.rs`), the ramps in
-`rust/crates/katana_interop/src/geo/colour_ramps.rs` (over the one table of
-`rust/crates/katana_terrain/src/colour_ramps.rs`), and Terrain > Analysis >
+Built: `RASTER SHADE` (`crates/katana_app/src/geo/shade_verbs.rs`), the ramps in
+`crates/katana_interop/src/geo/colour_ramps.rs` (over the one table of
+`crates/katana_terrain/src/colour_ramps.rs`), and Terrain > Analysis >
 Terrain Shading (`terrainShading`, `terrainShadingDialog`,
-`rust/crates/katana_window/src/geo/terrain_shading_dialog.rs`). `docs/terrain.md`,
+`crates/katana_window/src/geo/terrain_shading_dialog.rs`). `docs/terrain.md`,
 "Shading", has the grammar, the records and the decisions. The picture is a
 derived reference raster through F0's `apply_outputs` (TO REFERENCE), its
 `display_style` set after. No MCP tool: `katana_run_commands` runs the line,
@@ -1105,9 +1105,9 @@ Where it differs from the plan:
 
 ### T3: Slope and aspect with slope-class areas
 
-Built: `RASTER SLOPE` and `RASTER ASPECT` (`rust/crates/katana_app/src/geo/slope_verbs.rs`)
+Built: `RASTER SLOPE` and `RASTER ASPECT` (`crates/katana_app/src/geo/slope_verbs.rs`)
 and Terrain > Analysis > Slope and Aspect (`terrainSlope`,
-`slopeAnalysisDialog`, `rust/crates/katana_window/src/geo/slope_analysis_dialog.rs`).
+`slopeAnalysisDialog`, `crates/katana_window/src/geo/slope_analysis_dialog.rs`).
 `docs/terrain.md`, "Slope and aspect", has the grammar, the records and the
 decisions. The slope raster goes through F0's `apply_outputs` (TO
 REFERENCE), the class areas through `result_command` (one undo step). No MCP
@@ -1126,25 +1126,25 @@ Where it differs from the plan:
 
 ### T4: Statistics by area, sampling and drape
 
-Built: `RASTER ZONAL` (`rust/crates/katana_app/src/geo/zonal_verbs.rs`), `RASTER SAMPLE`
-and `DRAPE` (`rust/crates/katana_app/src/geo/drape_verbs.rs`), recorded in
+Built: `RASTER ZONAL` (`crates/katana_app/src/geo/zonal_verbs.rs`), `RASTER SAMPLE`
+and `DRAPE` (`crates/katana_app/src/geo/drape_verbs.rs`), recorded in
 `docs/terrain.md`, "Statistics by area" and "Sampling and drape". Window:
 Terrain > Analysis > Statistics by Area (`terrainZonal`, `zonalStatsDialog`)
 and Drape and Sample Heights (`terrainDrape`, `drapeDialog`). katana_cli
 and katana_mcp: the verbs, through the session (`katana_run_commands`); no
 tool of their own. Pieces of their own:
 
-- `rust/crates/katana_gis/src/raster_sampling.rs`: a raster's value at a point,
+- `crates/katana_gis/src/raster_sampling.rs`: a raster's value at a point,
   through `GDALRasterInterpolateAtPoint` - the C API, since no algorithm of
   the framework samples at arbitrary points without a vector round trip
   (`raster pixel-info` writes a GeoJSON per call).
-- `rust/crates/katana_cad/src/geo/drape.rs`: the drape as a domain edit, given the
+- `crates/katana_cad/src/geo/drape.rs`: the drape as a domain edit, given the
   ground as a callback, so katana_cad never sees GDAL.
-- `rust/crates/katana_app/src/geo/analysis_support.rs`, shared with T5: the ground
+- `crates/katana_app/src/geo/analysis_support.rs`, shared with T5: the ground
   (a surface on its triangles, or a raster file), points written `x,y`, and
   keyword-and-value words (`AT x,y`) taken out of a line before the rest
   goes to the one scope parser through `katana_app::geo::vector_support::read_verb_words`.
-- `ViewAccess::pick_point` (the workspace's) and `PointPick` (`rust/crates/katana_window/src/geo/point_pick.rs`, the
+- `ViewAccess::pick_point` (the workspace's) and `PointPick` (`crates/katana_window/src/geo/point_pick.rs`, the
   dialog's side): the next left click in any plan view, for a dialog's line.
 
 Both in-place applies compare their targets with the copies taken at
@@ -1170,7 +1170,7 @@ Where it differs from the plan:
 
 ### T5: Viewshed and line of sight
 
-Built: `RASTER VIEWSHED` and `LOS` (`rust/crates/katana_app/src/geo/viewshed_verbs.rs`),
+Built: `RASTER VIEWSHED` and `LOS` (`crates/katana_app/src/geo/viewshed_verbs.rs`),
 recorded in `docs/terrain.md`, "Viewshed and line of sight". Window:
 Terrain > Analysis > Viewshed and Line of Sight (`terrainViewshed`,
 `viewshedDialog`), whose Pick buttons use T4's `PointPick`.
@@ -1184,7 +1184,7 @@ katana_cli and katana_mcp: the verbs, through the session
 - An observer off the raster is refused by the work, which is where the
   raster is first opened.
 - The line of sight is `katana_terrain::line_of_sight::line_of_sight`
-  (`rust/crates/katana_terrain/src/line_of_sight.rs`), fed from the analysis
+  (`crates/katana_terrain/src/line_of_sight.rs`), fed from the analysis
   support's ground: a TIN, or a raster through `katana_gis::raster_sampling::RasterSampler`.
 - `viewshed_contract::the_verb_still_finds_the_arguments_it_binds` pins `raster
   viewshed`'s `input`, `position`, `height`, `target-height`,
@@ -1203,7 +1203,7 @@ Where it differs from the plan:
 
 ### T6: RASTER GRID: survey points to a DEM
 
-Built: `RASTER GRID` (`rust/crates/katana_app/src/geo/grid_verbs.rs`), recorded in
+Built: `RASTER GRID` (`crates/katana_app/src/geo/grid_verbs.rs`), recorded in
 `docs/terrain.md`, "Gridding points to a DEM". It grids the points a scope
 takes with `vector grid <method>`, heights from the geometry
 (`DrawingDatasetOptions::require_heights`) or a property (`--zfield`), and
@@ -1218,14 +1218,14 @@ Where it differs from the plan: the extent is grown outwards to whole cells
 (GDAL stretches the cells to fit an extent, measured), and `TO SURFACE`
 waits for T0's block in the bindings, so the dialog's `gridToSurface` is
 not offered yet. The shared pieces of the DEM verbs are
-`rust/crates/katana_app/src/geo/dem_support.rs`, and of their dialogs
-`rust/crates/katana_window/src/geo/geo_dialog_support.rs`; the window's geo services' `views` is new, so
+`crates/katana_app/src/geo/dem_support.rs`, and of their dialogs
+`crates/katana_window/src/geo/geo_dialog_support.rs`; the window's geo services' `views` is new, so
 a dialog's scope offers the window's views.
 
 ### T7: DEM tools: mosaic, clip, fill, footprint, reproject, difference
 
 Built: `RASTER MOSAIC`, `CLIP`, `FILL`, `FOOTPRINT`, `REPROJECT` and
-`DIFFERENCE` (`rust/crates/katana_app/src/geo/dem_verbs.rs`), recorded in
+`DIFFERENCE` (`crates/katana_app/src/geo/dem_verbs.rs`), recorded in
 `docs/terrain.md`, "The DEM tools". Window: Terrain > DEM > DEM Tools
 (`demToolsDialog`, a tab each). katana_cli and katana_mcp: the verbs, through
 the session. The contract test pins `raster mosaic`'s `input`, `output`,
@@ -1246,7 +1246,7 @@ Where it differs from the plan:
   system rather than refusing two known systems that differ: that is the
   right answer, not a guess. REPROJECT refuses a raster with no system,
   which GDAL would "reproject" unchanged.
-- The binding picker (`rust/crates/katana_window/src/geo/binding_picker.rs`, X1's) was
+- The binding picker (`crates/katana_window/src/geo/binding_picker.rs`, X1's) was
   built here, since the DEM tools pick rasters as the toolbox picks its
   datasets.
 
@@ -1261,9 +1261,9 @@ GIS DISSOLVE [<scope>] [by=k1,k2] [keep=identical] [TO LAYER <path>] [REPLACE] [
 
 Easements, setbacks, corridors and clearance zones around what the scope
 takes, and areas merged by what their properties say
-(`rust/crates/katana_app/src/geo/buffer_verbs.rs`). The window's items are GIS >
+(`crates/katana_app/src/geo/buffer_verbs.rs`). The window's items are GIS >
 Analysis - GDAL > Buffer... and Dissolve... (`gisBuffer`, `gisDissolve`;
-`rust/crates/katana_window/src/geo/buffer_dialog.rs`, `dissolve_dialog.rs`). An agent
+`crates/katana_window/src/geo/buffer_dialog.rs`, `dissolve_dialog.rs`). An agent
 types the same lines through `katana_run_commands`.
 
 **BUFFER** runs `vector buffer` on the scope's feature set.
@@ -1331,7 +1331,7 @@ the replies carry the area, not the entities, which would go stale. A scope
 that took nothing answers `ran=no` and runs nothing; PREVIEW answers `gis
 op=buffer preview=yes`, the scope record and `preview valid=yes changed=no`.
 
-**What the vector verbs share** (`rust/crates/katana_app/src/geo/vector_support.rs`),
+**What the vector verbs share** (`crates/katana_app/src/geo/vector_support.rs`),
 written here for BUFFER and DISSOLVE and used by every vector verb after them:
 
 - **Their own words are read as MODIFY reads SET and PREVIEW**: taken out of
@@ -1348,7 +1348,7 @@ written here for BUFFER and DISSOLVE and used by every vector verb after them:
   (`katana_app::geo::vector_support::merged_table`), and one step executed and framed
   (`katana_app::geo::vector_support::execute_step`).
 
-**The dialogs' frame** (`rust/crates/katana_window/src/geo/gis_tool_dialog.rs`) is shared
+**The dialogs' frame** (`crates/katana_window/src/geo/gis_tool_dialog.rs`) is shared
 by every GIS analysis and check dialog: the scope controls
 (`ScopeFilterWidget`), the dialog's fields, `<d>Command`, `<d>Preview`,
 `<d>Run`, `<d>Status`, `<d>Reply`. Run hands the line to the window's one
@@ -1364,13 +1364,13 @@ toolbox lane each added a views service, and when the lanes were merged the
 workspace pointer, the form the window's other services structs already had,
 became the one.)
 
-**Tests.** `rust/crates/katana_app/tests/geo_vector/buffer_and_dissolve.rs`, every value by hand: a
+**Tests.** `crates/katana_app/tests/geo_vector/buffer_and_dissolve.rs`, every value by hand: a
 100 m line 1 m either side with flat ends, 200 m2; the 14 x 34 setback,
 476 m2; clearances of 1 and 3 m on 100 m lines, 200 and 600 m2; a 5 m circle,
 78.540 m2; two crossing strips dissolved, 400 - 4 = 396 m2; two 50 x 40 lots
 merged, 4000 m2. `gis_buffer_contract::the_arguments_the_verbs_bind_are_gdals` pins
 `vector buffer`, `combine` and `dissolve`. The dialogs:
-`rust/crates/katana_window/tests/gis_vector/buffer_dialog.rs`; katana_cli:
+`crates/katana_window/tests/gis_vector/buffer_dialog.rs`; katana_cli:
 `cli.gis_buffer_of_a_drawn_line_creates_two_hundred_square_metres`,
 `cli.gis_dissolve_of_two_adjacent_lots_is_one_area_of_four_thousand_square_metres`.
 
@@ -1386,12 +1386,12 @@ GIS OVERLAY intersection|difference|union|symdifference|identity|update|clip
     [csv=<file>] [OVERWRITE] [PREVIEW]
 ```
 
-The union, intersection and difference `rust/crates/katana_geometry/src/polygon.rs` says Katana
+The union, intersection and difference `crates/katana_geometry/src/polygon.rs` says Katana
 does not provide, through GDAL's `vector layer-algebra`
-(`rust/crates/katana_app/src/geo/overlay_verbs.rs`): easement area per lot, net
+(`crates/katana_app/src/geo/overlay_verbs.rs`): easement area per lot, net
 developable area, lots split by a zone, pipe length per lot. The window's
 item is GIS > Analysis - GDAL > Overlay... (`gisOverlay`,
-`rust/crates/katana_window/src/geo/overlay_dialog.rs`).
+`crates/katana_window/src/geo/overlay_dialog.rs`).
 
 - **Two scopes, one parser.** The subject's words end at WITH, which is no
   scope word, and the overlay's begin after it; both are read by the one
@@ -1445,12 +1445,12 @@ them `gisOverlaySubject` and `gisOverlayWith`, but the shared widget names
 itself `<prefix>Scope`, so the subject keeps the frame's name every dialog
 has. `gisOverlayWithSourceFile` chooses a file instead.
 
-**Tests.** `rust/crates/katana_app/tests/geo_vector/overlay_verb.rs`, on `tests/geo/data/lots.geojson`
+**Tests.** `crates/katana_app/tests/geo_vector/overlay_verb.rs`, on `tests/geo/data/lots.geojson`
 drawn, by hand: a 4 m corridor over each 50 m lot, 200 m2; each lot less it,
 1800 m2; the union, 2000 + 2000 + 480 - 400 = 4080 m2; identity keeps the
 lots' 4000 m2; the file's corridor cuts as the drawn one does.
 `gis_overlay_contract::the_arguments_the_verb_binds_are_gdals` pins the operations and
-fields. The dialog: `rust/crates/katana_window/tests/gis_vector/overlay_dialog.rs`;
+fields. The dialog: `crates/katana_window/tests/gis_vector/overlay_dialog.rs`;
 katana_cli:
 `cli.gis_overlay_of_a_corridor_on_two_lots_gives_two_hundred_square_metres_each`,
 `cli.gis_overlay_with_a_file_reads_its_corridor`.
@@ -1468,9 +1468,9 @@ GIS CLIP [<scope>] BY (<scope> | FILE <path> [LAYER <name>] [where="<sql>"])
 ```
 
 The boundary around what the scope takes, and what it takes cut to a
-boundary (`rust/crates/katana_app/src/geo/hull_clip_verbs.rs`). The window's items are
+boundary (`crates/katana_app/src/geo/hull_clip_verbs.rs`). The window's items are
 GIS > Analysis - GDAL > Boundary Around Features... and Clip to Boundary...
-(`gisHull`, `gisClip`; `rust/crates/katana_window/src/geo/hull_dialog.rs`, `clip_dialog.rs`).
+(`gisHull`, `gisClip`; `crates/katana_window/src/geo/hull_dialog.rs`, `clip_dialog.rs`).
 
 **HULL** takes every point and vertex of the scope (curves as their chords),
 once each.
@@ -1519,10 +1519,10 @@ hull kind=concave ratio=0.1 holes=no points=57 area=36.500
 clip mode=replace features=3 whole=1 cut=1 outside=1 area=0.000 length=30.000
 ```
 
-**Tests.** `rust/crates/katana_app/tests/geo_vector/hull_and_clip.rs`, by hand as above, and a pipe
+**Tests.** `crates/katana_app/tests/geo_vector/hull_and_clip.rs`, by hand as above, and a pipe
 through boxes at 10..40 and 60..95 keeping its id on the 35 m piece;
 `gis_hull_clip_contract::the_arguments_the_verbs_bind_are_gdals` pins concave-hull and
-clip. The dialogs: `rust/crates/katana_window/tests/gis_vector/hull_and_clip_dialogs.rs`;
+clip. The dialogs: `crates/katana_window/tests/gis_vector/hull_and_clip_dialogs.rs`;
 katana_cli: `cli.gis_hull_of_a_squares_corners_and_centre_is_the_square`,
 `cli.gis_clip_in_place_leaves_thirty_metres_of_the_line`.
 
@@ -1540,10 +1540,10 @@ GIS COVERAGE CLEAN [<scope>] [gap=<m>] [snap=<m>]
 ```
 
 Invalid geometry in imported data, and the gaps and overlaps of a
-subdivision or a cadastral fabric (`rust/crates/katana_app/src/geo/check_verbs.rs`).
+subdivision or a cadastral fabric (`crates/katana_app/src/geo/check_verbs.rs`).
 The window's items are GIS > Check - GDAL > Check Geometry..., Repair
 Geometry... and Gaps and Overlaps... (`gisCheck`, `gisRepair`, `gisCoverage`;
-`rust/crates/katana_window/src/geo/geometry_check_dialog.rs`, `coverage_dialog.rs`), whose
+`crates/katana_window/src/geo/geometry_check_dialog.rs`, `coverage_dialog.rs`), whose
 `<d>Problems` table lists the problem records of the last reply.
 
 **CHECK** runs `vector check-geometry` on the scope's lines and areas (a
@@ -1633,11 +1633,11 @@ ring (`katana_app::geo::vector_support::same_ring`), not the vertex list.
 REPAIR, CLEAN and the clip of V3 use - the largest part on the id, the rest
 as copies - and `replace_markers` the markers' rerun rule.
 
-**Tests.** `rust/crates/katana_app/tests/geo_vector/check_verbs.rs` (the bow-tie, the lots
+**Tests.** `crates/katana_app/tests/geo_vector/check_verbs.rs` (the bow-tie, the lots
 overlapping by a metre, four lots about a 0.02 m enclosed gap);
 `gis_check_contract::the_arguments_the_verbs_bind_are_gdals` pins check-geometry,
 make-valid, check-coverage and clean-coverage. The dialogs:
-`rust/crates/katana_window/tests/gis_vector/check_dialogs.rs`; the window:
+`crates/katana_window/tests/gis_vector/check_dialogs.rs`; the window:
 `qt_gis_check_dialog_headless`; katana_cli:
 `cli.gis_check_finds_the_bow_ties_crossing_at_35_5`,
 `cli.gis_repair_makes_the_bow_tie_two_triangles_of_25_square_metres`.
@@ -1653,8 +1653,8 @@ GIS SQL "<select>" [<scope>] [dialect=sqlite|ogrsql]
 ```
 
 The drawing queried with SQL through GDAL's `vector sql`
-(`rust/crates/katana_app/src/geo/sql_verbs.rs`). The window's item is GIS > Analysis -
-GDAL > Query with SQL... (`gisSql`, `rust/crates/katana_window/src/geo/sql_dialog.rs`), with
+(`crates/katana_app/src/geo/sql_verbs.rs`). The window's item is GIS > Analysis -
+GDAL > Query with SQL... (`gisSql`, `crates/katana_window/src/geo/sql_dialog.rs`), with
 the tables and their columns listed for the scope and the rows in a grid;
 an agent's is the MCP tool `katana_gis_query` (`docs/mcp.md`).
 
@@ -1708,13 +1708,13 @@ the usual one - runs it through the Session and reads the records back:
 `{columns, column_types, rows, matched, used}`, each cell typed by its
 column (`gis_query_mcp::gis_query_returns_rows_as_json`, driving the MCP server as a
 client does). Its test is in `tests/geo`, beside the verb's, rather than
-in `rust/crates/katana_app/tests/mcp/mcp_server.rs`, which every lane would otherwise append
+in `crates/katana_app/tests/mcp/mcp_server.rs`, which every lane would otherwise append
 to.
 
-**Tests.** `rust/crates/katana_app/tests/geo_vector/sql_verb.rs`, by hand: a 50 x 40 lot's
+**Tests.** `crates/katana_app/tests/geo_vector/sql_verb.rs`, by hand: a 50 x 40 lot's
 `ST_Area` is 2000 and its 1 m inward buffer's 48 x 38 = 1824; Smith's two
 lots sum to 4000 and Jones's to 600. The dialog:
-`rust/crates/katana_window/tests/gis_vector/sql_dialog.rs`; katana_cli:
+`crates/katana_window/tests/gis_vector/sql_dialog.rs`; katana_cli:
 `cli.gis_sql_counts_and_sums_the_area_of_two_lots`.
 
 **Not done.** Spatialite over the MEM tables has no spatial index, so a
@@ -1724,7 +1724,7 @@ GeoPackage first is the plan's answer when it is measured to matter.
 ### I0: One GIS executor: IMPORT, EXPORT, INFO, REFS, COPC
 
 Built. The five verbs are the executor's, a file each
-(`rust/crates/katana_app/src/geo/import_verb.rs`, `export_verb.rs`, `info_verb.rs`,
+(`crates/katana_app/src/geo/import_verb.rs`, `export_verb.rs`, `info_verb.rs`,
 `refs_verb.rs`, `copc_verb.rs`), in the table's I0 block, and they reply
 in records; `docs/interop.md` ("IMPORT, EXPORT, INFO, REFS and COPC on every
 front end") has the grammar, the records and the decisions. What the other
@@ -1749,7 +1749,7 @@ packages build on:
   `record_json` / `records_json`, any reply's records as JSON objects -
   `katana_import` and `katana_export` hand them to an agent, and D1's and
   D2's tools can.
-- **`import_records.rs`** and **`dxf_verbs.rs`** in `rust/crates/katana_app`: the
+- **`import_records.rs`** and **`dxf_verbs.rs`** in `crates/katana_app`: the
   records and the DXF steps every build shares, so a build without GDAL
   replies in the same records.
 - The session's store came to hold a 12d archive's surfaces; since
@@ -1771,26 +1771,26 @@ reads and writes typed tables, keeps a file's arcs for the import, counts
 what it cannot carry, and returns GDAL's warnings. KML, KMZ and GPX are
 converted to longitude and latitude from the project's coordinate system,
 which EXPORT now passes on every front end. Tests:
-`rust/crates/katana_interop/tests/interop_core/vector_fidelity.rs`,
+`crates/katana_interop/tests/interop_core/vector_fidelity.rs`,
 `tests/cli/geo/vector_fidelity.cmake`,
 `tests/geo/headless/vector_fidelity.cmake`.
 
 ### I2: Every driver: FORMATS
 
 Built (`docs/interop.md`, "Formats"): the formats come from GDAL's driver
-manager with a small curated overlay (`rust/crates/katana_gis/src/formats.rs`), a file is routed
+manager with a small curated overlay (`crates/katana_gis/src/formats.rs`), a file is routed
 by what it holds, an archive by its inside, and `/vsi` paths and URLs open.
-`FORMATS` is the verb table's I2 row (`rust/crates/katana_app/src/geo/formats_verbs.rs`);
+`FORMATS` is the verb table's I2 row (`crates/katana_app/src/geo/formats_verbs.rs`);
 it answers at prepare, as `GDAL LIST` does. `katana_formats` and
 `katana://formats` share its records; GIS > Processing - GDAL > Formats...
-is the I2 block of `menu_table.rs`. Tests: `rust/crates/katana_interop/tests/interop_core/formats.rs`,
-`rust/crates/katana_window/tests/gis_vector/formats_dialog.rs`,
+is the I2 block of `menu_table.rs`. Tests: `crates/katana_interop/tests/interop_core/formats.rs`,
+`crates/katana_window/tests/gis_vector/formats_dialog.rs`,
 `tests/cli/geo/formats.cmake`, `tests/geo/headless/formats.cmake`.
 
 ### I3: IMPORT options
 
 Built (`docs/interop.md`, "Import options"). `IMPORT` keeps its I0 row; its
-words are read by `prepare_import` in `rust/crates/katana_app/src/geo/import_verb.rs`,
+words are read by `prepare_import` in `crates/katana_app/src/geo/import_verb.rs`,
 the option words by `katana_app::geo::vector_support::read_verb_words` - the one reader of a line's
 own words and its scope - with `oo=` taken out first, since it may be given
 more than once. The reader takes a verb's options wherever they stand, but
@@ -1800,7 +1800,7 @@ filter at the end of a dialog's line (`docs/terrain.md`, "Contours";
 CONTOUR and RASTER SLOPE / ASPECT moved onto the reader from readers of
 their own that refused an option after the filter). What the others build on:
 
-- **`katana_gis::formats::check_options`** (`rust/crates/katana_gis/src/formats.rs`): KEY=VALUE
+- **`katana_gis::formats::check_options`** (`crates/katana_gis/src/formats.rs`): KEY=VALUE
   options checked against a driver's open, creation or layer-creation list.
   I4's `co=` and `lco=` use it.
 - **`VectorReadOptions::attribute_filter` and `spatial_filter`, and
@@ -1811,7 +1811,7 @@ their own that refused an option after the filter). What the others build on:
   dialogs' Preview among them). The C++ added it to the GIS dialogs'
   context as `await` rather than making a fourth context (see "Not done",
   three dialog contexts); in the Rust every dialog asks the host.
-- **`katana_app::mcp::tools::scope_words_of`** (`rust/crates/katana_app/src/mcp/tools.rs`): a scope in a
+- **`katana_app::mcp::tools::scope_words_of`** (`crates/katana_app/src/mcp/tools.rs`): a scope in a
   tool's JSON as the grammar's words. `katana_gdal_run`'s sources and
   `katana_gis_query` each read it in their own copy; both now call this,
   and `katana_import` does.
@@ -1820,15 +1820,15 @@ A deviation from the plan's grammar: `class=` takes one class, since the
 point cloud reader filters by one, and a list is refused rather than read as
 its first. Added beyond it: `attributes=no` (the dialog's "keep attributes"
 box had no word) and `resolution=` (the cloud dialog's COPC level of
-detail had none). Tests: `rust/crates/katana_app/tests/geo_io/import_options.rs`,
-`rust/crates/katana_window/tests/gis_vector/import_dialogs.rs`,
+detail had none). Tests: `crates/katana_app/tests/geo_io/import_options.rs`,
+`crates/katana_window/tests/gis_vector/import_dialogs.rs`,
 `tests/cli/geo/import_options.cmake`, and
 `mcp_server::import_takes_its_filter_scope_and_preview_arguments_as_the_words_a_person_types`.
 
 ### I4: EXPORT on the shared scope and filter
 
 Built (`docs/interop.md`, "Export options"). `EXPORT` keeps its I0 row; its
-words are read by `prepare_export` in `rust/crates/katana_app/src/geo/export_verb.rs`
+words are read by `prepare_export` in `crates/katana_app/src/geo/export_verb.rs`
 through `katana_app::geo::vector_support::read_verb_words` and the one scope parser, with `co=` and
 `lco=` taken out first (repeatable). What the others build on:
 
@@ -1837,7 +1837,7 @@ through `katana_app::geo::vector_support::read_verb_words` and the one scope par
   **`VectorExportOptions::append`** adds layers to an existing file.
 - **A table's `OGR_STYLE` field** is also written as each feature's style
   string (`GdalDataset::write_tables`), for any verb that wants labels drawn.
-- **`rust/crates/katana_interop/src/table_reprojection.rs`**: the one move of a feature
+- **`crates/katana_interop/src/table_reprojection.rs`**: the one move of a feature
   table between coordinate systems, for IMPORT's `crs=project` and EXPORT's
   `crs=<code>`.
 
@@ -1850,8 +1850,8 @@ project's. The Export Drawing dialog is the GIS frame's (`vectorExport`),
 opened by File > Export > Export Drawing after its file dialog, so `--dialog` does not
 reach it headless - the widget tests drive it by control name, and the
 `EXPORT` line is the headless path. Tests:
-`rust/crates/katana_app/tests/geo_io/export_options.rs`,
-`rust/crates/katana_window/tests/gis_vector/export_dialog.rs`,
+`crates/katana_app/tests/geo_io/export_options.rs`,
+`crates/katana_window/tests/gis_vector/export_dialog.rs`,
 `tests/cli/geo/export_options.cmake`, and
 `mcp_server::export_takes_the_shared_scope_and_its_options_as_the_words_a_person_types`.
 

@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 
-# The version is written here and nowhere else: rust/crates/katana_update/build.rs reads it from
+# The version is written here and nowhere else: crates/katana_update/build.rs reads it from
 # this line into every program, and the update tests hold the programs to it.
 project(Katana VERSION 0.3.0 LANGUAGES NONE)
 
-# CMake builds nothing. Katana is built by cargo (rust/, docs/rust.md); CMake is the TEST RUNNER
+# CMake builds nothing. Katana is built by cargo (the root Cargo.toml, docs/rust.md); CMake is the TEST RUNNER
 # of the programs cargo built: it registers every process-level test - the `cli.` lines through
 # katana_cli and katana_mcp (tests/cli), the window's headless checks through
 # tools/check_screenshot.cmake (tests/), the update programs' tests (tests/update) - and the
@@ -34,21 +34,21 @@ endif()
 #                       configure's environment names a CARGO_TARGET_DIR (tools/build_visible.sh
 #                       sets one); else, on Linux and macOS, ~/katana-build/<checkout>/cargo/release,
 #                       the folder build_visible.sh's WSL phase builds in; else, on Windows,
-#                       rust/target/release, cargo's own default for rust/Cargo.toml.
+#                       target/release, cargo's own default for Cargo.toml.
 #   KATANA_RUNTIME_BIN  the folder of the libraries the programs load, put first on each test's
 #                       PATH: on Windows, MSYS2 UCRT64's bin (GDAL, PDAL, PROJ), where it is
 #                       installed; elsewhere the programs' own folder, since cargo writes the
 #                       libraries' run-time path into them (build_visible.sh's RUSTFLAGS).
 #
 # Each program is then KATANA_PROGRAM_<name> - KATANA_PROGRAM_katana, _katana_cli, _katana_mcp,
-# _katana_updater, and the three test programs of rust/crates/katana_updater - which is what a
+# _katana_updater, and the three test programs of crates/katana_updater - which is what a
 # test names where the C++ build's tests named $<TARGET_FILE:<name>>. A program that is not there
 # is not a reason to register fewer tests: a test of it then fails, which is what it should do.
 # ---------------------------------------------------------------------------
 if(DEFINED ENV{CARGO_TARGET_DIR} AND NOT "$ENV{CARGO_TARGET_DIR}" STREQUAL "")
     set(_katana_default_programs "$ENV{CARGO_TARGET_DIR}/release")
 elseif(CMAKE_HOST_WIN32)
-    set(_katana_default_programs "${PROJECT_SOURCE_DIR}/rust/target/release")
+    set(_katana_default_programs "${PROJECT_SOURCE_DIR}/target/release")
 else()
     get_filename_component(_katana_checkout_name "${PROJECT_SOURCE_DIR}" NAME)
     set(_katana_default_programs "$ENV{HOME}/katana-build/${_katana_checkout_name}/cargo/release")
@@ -87,7 +87,7 @@ option(KATANA_TEST_CLI "Register the cli. tests, which run katana_cli and katana
 option(KATANA_TEST_WINDOW "Register the window's headless checks, which run katana" ON)
 
 # The built-in customisations the programs are built with: the files that
-# rust/crates/katana_cad/build.rs compiles in when they are there, the default first. The tests
+# crates/katana_cad/build.rs compiles in when they are there, the default first. The tests
 # that depend on which of them a build holds read this list.
 set(KATANA_BUILTIN_FILES "")
 foreach(_katana_builtin IN ITEMS katana-standard nsw)
@@ -99,7 +99,7 @@ foreach(_katana_builtin IN ITEMS katana-standard nsw)
 endforeach()
 
 # The update system's pinned public keys (cmake/KatanaUpdateKeys.cmake), which
-# rust/crates/katana_update/build.rs compiles into the programs. ON makes this configure FAIL
+# crates/katana_update/build.rs compiles into the programs. ON makes this configure FAIL
 # while they are placeholders, as KATANA_REQUIRE_UPDATE_KEYS in cargo's environment fails the
 # build.
 option(KATANA_REQUIRE_UPDATE_KEYS "Refuse to configure while the update keys are placeholders" OFF)

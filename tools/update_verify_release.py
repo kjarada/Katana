@@ -3,7 +3,7 @@
 
 The producer (tools/update_make_manifest.py) makes the manifest, the update zip and the signature. This tool
 asks whether what it made is what the engine and the helper will accept, using nothing of the producer:
-it does NOT import it, it re-derives the path rules from rust/crates/katana_update/src/paths.rs, reads the zip
+it does NOT import it, it re-derives the path rules from crates/katana_update/src/paths.rs, reads the zip
 with Python's zipfile and a raw inflate of the signed byte range, and checks the signature with the
 openssl command line. A bug in the producer therefore cannot also be in the check (a test holds the
 import list to that).

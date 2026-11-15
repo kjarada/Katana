@@ -133,9 +133,9 @@ foreach(_rule IN LISTS _rules)
             continue()
         endif()
         file(RELATIVE_PATH _rel "${_root}" "${_path}")
-        # cargo's own target folder in a Windows checkout (rust/target) holds
+        # cargo's own target folder in a Windows checkout (target) holds
         # built programs too.
-        if(_rel MATCHES "^(build|rust/target)/")
+        if(_rel MATCHES "^(build|target)/")
             continue()
         endif()
         math(EXPR _checked "${_checked} + 1")

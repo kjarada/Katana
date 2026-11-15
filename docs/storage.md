@@ -108,13 +108,13 @@ so the cheap first step is to store bulk point data as Parquet and query it
 with Arrow, adding DuckDB only if the queries outgrow that.
 
 Whatever is chosen there, it goes **behind a Katana interface in its own
-crate under `rust/crates/`**, with no third-party type in a public signature
+crate under `crates/`**, with no third-party type in a public signature
 (Rule 4) — the same isolation GDAL and PDAL already have.
 
 ## The result
 
 Schema version 3 stores geometry as a versioned little-endian blob
-(`rust/crates/katana_entity/src/geometry_blob.rs`). Same machine, same benchmark:
+(`crates/katana_entity/src/geometry_blob.rs`). Same machine, same benchmark:
 
 | 50 000 entities | Before | After | |
 |---|---|---|---|

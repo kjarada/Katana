@@ -9,12 +9,12 @@ is exact where it says it is, says which method it is in every reply, and is
 held in the tests to a solid whose volume is known in closed form or to an
 independent method.
 
-The terrain layer does the arithmetic (`rust/crates/katana_terrain/src/overlay.rs`,
-`rust/crates/katana_terrain/src/volume.rs`, `rust/crates/katana_terrain/src/section_volume.rs`);
-the verbs are `katana_cad`'s (`rust/crates/katana_cad/src/terrain/volume_verbs.rs`),
+The terrain layer does the arithmetic (`crates/katana_terrain/src/overlay.rs`,
+`crates/katana_terrain/src/volume.rs`, `crates/katana_terrain/src/section_volume.rs`);
+the verbs are `katana_cad`'s (`crates/katana_cad/src/terrain/volume_verbs.rs`),
 so the window, `katana_cli` and `katana_mcp` run the same code; the window's
 Terrain > Volumes only builds their lines
-(`rust/crates/katana_window/src/terrain/volumes_dialog.rs`).
+(`crates/katana_window/src/terrain/volumes_dialog.rs`).
 
 ## The verbs
 
@@ -222,7 +222,7 @@ area, 2088.635 m3
 
 - **The polygon** is an `#id`, typed corners, or what a scope takes, read
   by the one reader of the drawing's polygons that the surface edits use too
-  (`rust/crates/katana_cad/src/terrain/drawing_shapes.rs`, which says what each kind
+  (`crates/katana_cad/src/terrain/drawing_shapes.rs`, which says what each kind
   of entity gives); `read_volume_polygons` only words its refusals. A closed
   polyline or curve polyline, one drawn back to its first vertex without
   being closed, a circle, a full ellipse and a closed spline are polygons,
@@ -252,7 +252,7 @@ area, 2088.635 m3
   inside another is a polygon of its own (a building in a lot is not a hole in
   the lot). A ring is a hole only when it says so - `source.ring=hole`, which
   IMPORT writes into an entity's metadata, or `gis.ring=hole`, which a
-  geoprocessing result writes into its properties (`rust/crates/katana_entity/src/ring_tags.rs`) -
+  geoprocessing result writes into its properties (`crates/katana_entity/src/ring_tags.rs`) -
   and then it joins the polygon it lies in, as the GIS conversion joins it
   (`drawing_dataset::a_tagged_hole_joins_its_exterior`): the polygon whose part
   (`source.part` or `gis.part`) it shares, else the smallest that holds every
@@ -658,7 +658,7 @@ page's two surfaces and offers the new surface at once; Make Envelope
 and `volumesEnvelopeName`) runs SURFACE ENVELOPE of the same two the same way.
 Until the review of 2026-10-15 SURFACE ENVELOPE was typed on the command line
 only, with no window control, and docs/terrain.md said it had a dialog. Every
-widget's object name is listed in `rust/crates/katana_window/src/terrain/volumes_dialog.rs`.
+widget's object name is listed in `crates/katana_window/src/terrain/volumes_dialog.rs`.
 
 ## Through katana_mcp
 
@@ -670,9 +670,9 @@ records do not carry.
 
 ## Tests
 
-- Terrain (`rust/crates/katana_terrain/tests/overlay.rs`,
-  `rust/crates/katana_terrain/tests/volume_methods.rs`,
-  `rust/crates/katana_terrain/tests/section_volume.rs`): the region; the overlay's pieces;
+- Terrain (`crates/katana_terrain/tests/overlay.rs`,
+  `crates/katana_terrain/tests/volume_methods.rs`,
+  `crates/katana_terrain/tests/section_volume.rs`): the region; the overlay's pieces;
   the difference and envelope surfaces against crossing planes and against
   `compare_surfaces`; two parallel planes 1 m apart over a 10 x 10 polygon,
   100 m3; a tilted plane against a level inside a square; a prism under a
@@ -686,22 +686,22 @@ records do not carry.
   along spirals and on a sloping design, against the annulus and the exact
   integral; two legs side by side, touching and a hair over; every refusal; and
   the same bits at any thread count.
-- The tagged rings (`rust/crates/katana_entity/tests/ring_tags.rs`): what makes a hole, the
+- The tagged rings (`crates/katana_entity/tests/ring_tags.rs`): what makes a hole, the
   part, and which exterior a hole joins - held by all of it, the part's, the
   smallest, the nearest before.
-- The verbs (`rust/crates/katana_cad/tests/terrain_utility_verbs/volume_verbs.rs`, the `VolumeVerbs`
+- The verbs (`crates/katana_cad/tests/terrain_utility_verbs/volume_verbs.rs`, the `VolumeVerbs`
   suite): every form through `CommandInterpreter::run`, EACH per polygon with
   an open line skipped, an ellipse and a polyline drawn back to its start as
   polygons, a lot with a tagged hole by every method that takes a polygon, a
   spline drawn back to its start, overlapping polygons, the factors, the CSV,
   the curvature correction and its words, two legs side by side, the
   difference as one undo step, the envelope, the refusals.
-- The polygons' reader (`rust/crates/katana_cad/tests/terrainverbs/drawing_shapes.rs`, the
+- The polygons' reader (`crates/katana_cad/tests/terrainverbs/drawing_shapes.rs`, the
   `DrawingShapes` suites, shared with the surface edits): what each kind of
   entity gives and why one gives none, a closed spline, typed corners with and
   without heights, the words, a scope that takes nothing, and the tagged rings
   joined to their polygons and left alone.
-- The window (`rust/crates/katana_window/tests/surfaces/volumes_dialog.rs`): each
+- The window (`crates/katana_window/tests/surfaces/volumes_dialog.rs`): each
   page's line by object name, the curvature box included; Measure with the
   interpreter as the executor, filling the table and the mass haul diagram;
   Make Cut/Fill Map; Make Envelope; Save CSV.
@@ -738,7 +738,7 @@ records do not carry.
   (`docs/terrain.md`, "Where the time actually goes"), and the pieces a pair
   clip gives are the partition it built. The region is a third cut of the
   same clipper rather than a polygon boolean: the geometry layer has no
-  polygon booleans (`rust/crates/katana_geometry/src/polygon.rs`), and a triangle is
+  polygon booleans (`crates/katana_geometry/src/polygon.rs`), and a triangle is
   convex, so the clipper already does it.
 - **The difference surface joins the pieces directly, with the constrained
   triangulation as the fallback.** Re-triangulating every time would be
@@ -746,7 +746,7 @@ records do not carry.
   linear in the pieces. Rejected: welding corners by distance, which merges
   two crossings a hair apart into one and tears the surface somewhere else.
 - **The section areas are cut by segment clipping, not by `extract_section`.**
-  The section view's sampler (`rust/crates/katana_cad/src/section.rs`) finds a surface's breaks by
+  The section view's sampler (`crates/katana_cad/src/section.rs`) finds a surface's breaks by
   bisection to `GEOMETRIC` between interval samples: right for a drawing,
   but an area integrated from it is exact only to the bisection, and it is
   in `cad`, where the terrain layer cannot reach. The clipper is closed form.
@@ -759,7 +759,7 @@ records do not carry.
   also refuse an almost straight one whose sections cross nowhere within
   reach; the test is the crossing itself, so it follows the geometry.
 - **A section on a boundary is on the surface within `GEOMETRIC`.** The one
-  tolerance of the policy (`rust/crates/katana_math/src/numerics.rs`) is used, not a
+  tolerance of the policy (`crates/katana_math/src/numerics.rs`) is used, not a
   second one for sections; 0.1 micrometre is four orders above the rounding
   of a bearing at survey coordinates (9e-15 m at a 141 m reach, 1e-9 at the
   ulp of 6 000 000) and far below any ground that could be measured.

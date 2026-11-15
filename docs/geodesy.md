@@ -1,6 +1,6 @@
 # Geodesy: coordinate systems, transformations, units and site calibration
 
-`katana_geodesy` (`rust/crates/katana_geodesy/src/`): the
+`katana_geodesy` (`crates/katana_geodesy/src/`): the
 coordinate reference systems a project's data is in, the one route by which a
 coordinate moves between two of them, the grid and ground factors a surveyor
 reduces distances with, geodesics on the ellipsoid, the unit catalogue, and
@@ -10,20 +10,20 @@ the four-parameter site calibration that ties a local grid to a projected one.
 
 Beside geometry: it sees `core` and `math` and nothing else, and `cad` sees it
 (`docs/architecture.md`, "Layering"). PROJ is a private dependency, confined to
-the crate's FFI modules (`rust/crates/katana_geodesy/src/ffi.rs`,
-`rust/crates/katana_geodesy/src/proj_internal.rs`) behind Katana's own types
+the crate's FFI modules (`crates/katana_geodesy/src/ffi.rs`,
+`crates/katana_geodesy/src/proj_internal.rs`) behind Katana's own types
 (Rule 4): no PROJ type appears in the crate's public interface, and no other
 crate links PROJ for it. `entity` cannot see geodesy, which is why the unit ratios every layer
-needs live one layer down in `rust/crates/katana_math/src/unit_ratio.rs` and `rust/crates/katana_geodesy/src/units.rs` is
+needs live one layer down in `crates/katana_math/src/unit_ratio.rs` and `crates/katana_geodesy/src/units.rs` is
 the catalogue built on them - one definition of a foot, not two.
 
 Users today: the Survey menu's coordinate converter (`katana_cad::survey_tools::convert_coordinates`,
-`rust/crates/katana_cad/src/survey_tools.rs`), which reads source and target systems
+`crates/katana_cad/src/survey_tools.rs`), which reads source and target systems
 as EPSG codes or anything PROJ accepts and reports the operation PROJ applied,
 its declared accuracy, and the grid factors at each point on each projected
 side; and the survey points' coordinate system (`declared_system_from_epsg`, and
 `transform_survey_project`, which moves a surveyed job between two EPSG systems;
-`rust/crates/katana_cad/src/survey_points.rs`).
+`crates/katana_cad/src/survey_points.rs`).
 
 | Header | What it holds |
 |---|---|
@@ -54,8 +54,8 @@ handed to a transformer whose CRS is of the other kind is `InvalidArgument`.
 Other modules have their own orders: `katana_survey::coordinate::Coordinate2` is (northing,
 easting), while the drawing's `Point2` and `SimilarityTransform2D`'s `Vec2`
 are (x = easting, y = northing). The drawing and the survey model meet in two
-places, the survey import (`rust/crates/katana_cad/src/survey_import.rs`) and the parcel
-report (`rust/crates/katana_cad/src/parcel.rs`), and the swap is made there and nowhere
+places, the survey import (`crates/katana_cad/src/survey_import.rs`) and the parcel
+report (`crates/katana_cad/src/parcel.rs`), and the swap is made there and nowhere
 else.
 
 **Angles.** Geodesic azimuths and `GridFactors` are DEGREES CLOCKWISE FROM
@@ -170,7 +170,7 @@ accuracy around 1e-9", has no measurement behind it, and the convergence SIGN
 has never been checked: if PROJ's convention differed from the documented
 one, every grid bearing would be rotated by twice the convergence - about
 2 x 1.4 degrees at 3 degrees from a UTM central meridian at latitude 30. The
-oracles to check both exist in `rust/crates/katana_geodesy/tests/support/mod.rs`
+oracles to check both exist in `crates/katana_geodesy/tests/support/mod.rs`
 (`kruger_factors`, from the Krueger series differentiated along the meridian)
 and nothing calls them (audit SUR-01, OPEN).
 
@@ -290,7 +290,7 @@ instead of calling a valid code "not a coordinate system".
 
 ## Tests
 
-`rust/crates/katana_geodesy/tests/` (`cargo test -p katana_geodesy`): the CRS
+`crates/katana_geodesy/tests/` (`cargo test -p katana_geodesy`): the CRS
 values, the transformer and the units. Every assertion on a coordinate is tagged with where its
 expected value comes from: `[identity]` (an exact property of the CRS
 definition), `[oracle]` (a formula coded in the tests' `support/mod.rs`, which

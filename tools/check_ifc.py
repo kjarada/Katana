@@ -16,7 +16,7 @@
 #     enumeration, the inverse attributes, and - with pytest present - the
 #     schema's EXPRESS WHERE rules and functions. Any finding fails;
 #   * no IfcBuildingElementProxy, unless --allow-proxies: the export's
-#     promise (rust/crates/katana_ifc/src/classification.rs);
+#     promise (crates/katana_ifc/src/classification.rs);
 #   * every alignment's geometry, evaluated by IfcOpenShell's own geometry
 #     kernel, against its business logic: each horizontal segment must start
 #     where, and in the direction, the composite curve is at the distance the

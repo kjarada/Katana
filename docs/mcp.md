@@ -15,7 +15,7 @@ save it. The tool that runs commands names each `UTILITY` action and the
 scope words in its description, since that is what a client reads first.
 The window can then open the same project.
 
-It is the session `katana_cli` runs (`rust/crates/katana_app/src/session.rs`), served to a
+It is the session `katana_cli` runs (`crates/katana_app/src/session.rs`), served to a
 client instead of typed. Every tool that changes anything is a shape over the
 command line's verbs, so there is one implementation of each, pinned by the
 `cli.*` tests, and Claude can do nothing that a person at `katana_cli` could
@@ -85,7 +85,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_undo` | undo, or with `redo` redo, `steps` steps | `UNDO n` / `REDO n` |
 | `katana_customisation` | the session's customisation as structured data: `part` is `summary`, `codes`, `definitions` or `problems`, with `filter`, `name`, `offset` and `limit` ("The customisation", below) | nothing: read from the Document, through `cad` and the customisation format's own writer |
 | `katana_road_objects` | the drawing's road objects - barriers, guide posts, signs, light poles, culverts, walls, fences, line markings - as structured data: each definition as the drawing keeps it, the solids made of it (id, IFC class and predefined type, layer, material, triangles, whether closed, quantities) and the problems ("Road objects", below) | `scope` (`selection`, `drawing`, `area`, `layers`), `area`, `layers`, `only`, `where` - the shared scope and filter, as `katana_export` takes them; none: every object. Read from the Document by `katana_cad::road::road_object_verbs::road_objects_report`; placing and editing them is `katana_run_commands`' `ROADOBJECT` lines |
-| `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`rust/crates/katana_app/src/update_verbs.rs`), for the surface `UpdateSurface::Mcp` |
+| `katana_check_update` | whether a newer Katana has been released, and this copy's update status; read-only, and the one thing of the update system an agent has ("Updates", below) | no session line: the verbs' own `UPDATE CHECK` and `UPDATE STATUS` (`crates/katana_app/src/update_verbs.rs`), for the surface `UpdateSurface::Mcp` |
 
 Two tools were broken in every build with the GIS module until 2026-09-26,
 and are pinned now by `mcp_server::describe_entity_describes_the_entity_it_names` and
@@ -263,7 +263,7 @@ when that view id exists. This changes neither the entities nor annotation
 or plot scales. MCP and CLI have no live views: only previously saved plan
 view assignments may be named here, and a new session lists `views=0`.
 An unknown id, zero, non-finite or out-of-range denominator is refused with
-the specific error and no edit. `rust/crates/katana_app/tests/session/view_scale.rs` exercises the
+the specific error and no edit. `crates/katana_app/tests/session/view_scale.rs` exercises the
 MCP result records, undo and the refusal to invent a view.
 
 Each tool that runs commands answers with a transcript (`> command`, then what
@@ -514,8 +514,8 @@ drawing and by filter on the (empty) selection.
 ## Geoprocessing tools
 
 GDAL's algorithm framework (`docs/geoprocessing.md`) as tools, in
-`rust/crates/katana_app/src/geo/mcp_geo_tools.rs`, with the GIS module only. They are
-built from the same helpers as the tools above (`rust/crates/katana_app/src/mcp/tools.rs`:
+`crates/katana_app/src/geo/mcp_geo_tools.rs`, with the GIS module only. They are
+built from the same helpers as the tools above (`crates/katana_app/src/mcp/tools.rs`:
 `Tool`, `ToolReply`, `ToolRefusal`, `object_schema`, `hints`, `one_line`),
 which moved there from `mcp_server.rs` unchanged so that a tool in another
 file is the same kind of thing. One subsection per geoprocessing package;
@@ -532,7 +532,7 @@ each adds its tools in its own block of `mcp_geo_tools.rs`.
 - **Read-only tools read the bridge.** `katana_gdal_catalogue` and
   `katana_gdal_describe` change nothing, so they read the bridge directly;
   a line would add nothing. Their schemas are generated from the argument
-  specs GDAL declares (`rust/crates/katana_app/src/geo/schema.rs`). An algorithm's
+  specs GDAL declares (`crates/katana_app/src/geo/schema.rs`). An algorithm's
   `arguments_schema` is the JSON Schema of `katana_gdal_run`'s `arguments`,
   and its `inputs_schema` that of its `inputs`. Each input is offered only
   the sources its kinds read (`dataset.sources`): a raster input no drawing
@@ -685,7 +685,7 @@ sees the edited surface.
 | `katana_gis_query` | `{sql, scope?, area?, layers?, only?, where?, dialect?}`: one SELECT; the scope `drawing` (the default), `selection`, `area` or `layers`, with the shared filter; `sqlite` (the default, Spatialite's `ST_` functions) or `ogrsql` | `{ok, line, columns, column_types, rows: [{column: value}], matched, used}` |
 
 An agent's question of the drawing in one call - "the easement area per
-owner" - answered as typed JSON (`rust/crates/katana_app/src/geo/sql_mcp.rs`,
+owner" - answered as typed JSON (`crates/katana_app/src/geo/sql_mcp.rs`,
 `docs/geoprocessing.md` "V5"). It builds the line a person would type,
 `GIS SQL "<sql>" <scope> dialect=<d>`, runs it through the Session, and reads
 the `column` and `row` records back: each cell is typed by its column's type
@@ -714,7 +714,7 @@ geometry column is `geometry`. Only a SELECT runs, and it changes nothing
   same objects the tool returns.
 
 The tool and the resource are built from the verb's own chooser and records
-(`rust/crates/katana_app/src/geo/formats_verbs.rs`), so `FORMATS`, the tool and the
+(`crates/katana_app/src/geo/formats_verbs.rs`), so `FORMATS`, the tool and the
 resource cannot come to differ. The text is the verb's records; the
 structured content is `{gdal_version, formats: [...]}`, or the driver's
 `{format, open_options, creation_options, layer_creation_options}`. An
@@ -835,7 +835,7 @@ and puts every one back if the new version does not start. The verbs are
 `UPDATE CHECK`, `STATUS`, `DOWNLOAD CONFIRM`, `APPLY CONFIRM`, `SKIP`,
 `BLOCKED CLEAR`, `SET AUTO` and `TOKEN STATUS | CLEAR`; their grammar, their
 replies and what each front end may run are written once, in
-`rust/crates/katana_app/src/update_verbs.rs`, and `HELP UPDATE` prints them.
+`crates/katana_app/src/update_verbs.rs`, and `HELP UPDATE` prints them.
 
 **An agent checks and reports, and nothing more.** `katana_mcp` has one tool
 for all of it:
@@ -883,7 +883,7 @@ What is decided here, and why:
   holds an access token and the public address answers that there is no such
   release - what a private release repository answers - the check asks
   `api.github.com` instead and sends the token there, and to no other host
-  (`rust/crates/katana_update/src/feed.rs`, "the private-repository route"). A
+  (`crates/katana_update/src/feed.rs`, "the private-repository route"). A
   client is told this in the description before it lets the tool run; without
   the variable no token exists for this surface and nothing but the user
   agent is sent.
@@ -933,9 +933,9 @@ What is decided here, and why:
   `HELP UPDATE` is a `HELP` line and is answered like any other.
 - **An interrupted update is put back before the server reads anything.**
   The first thing `katana_mcp`'s `main()` does, as `katana_cli`'s does, is
-  `recover_interrupted_update` (`rust/crates/katana_app/src/session.rs`): when an update of
+  `recover_interrupted_update` (`crates/katana_app/src/session.rs`): when an update of
   the install was cut short - a crash, a power cut - the install is put back
-  before a file of it is read (`rust/crates/katana_update/src/recover.rs`). With
+  before a file of it is read (`crates/katana_update/src/recover.rs`). With
   nothing interrupted, which is every start but that one, it is the listing
   of one folder, and nothing at all in a build tree. What it has to say goes
   to stderr, the server's log, never to the protocol's stream.
@@ -972,7 +972,7 @@ Those runs keep their state in a folder of the build tree
 
 The verbs themselves are run for real over a fake feed, a scratch install
 and the signed fixtures of the release tools in
-`rust/crates/katana_app/tests/session/update_verbs.rs`. A build tree is never updated, so what
+`crates/katana_app/tests/session/update_verbs.rs`. A build tree is never updated, so what
 `katana_cli` does with an installed copy is tested there too, through the
 session it runs: `Session::set_update_context_source` hands the session the
 scratch install where it would read the running program's
@@ -1011,7 +1011,7 @@ and both are tested there:
   (`update_verbs::apply_is_refused_in_a_katana_started_as_administrator_before_any_helper_is_copied`).
   A machine with that protection turned off, and the built-in administrator
   account, have one token and no unelevated half to interfere, and are not
-  refused (`rust/crates/katana_update/src/process.rs`, `process_is_elevated`). It is
+  refused (`crates/katana_update/src/process.rs`, `process_is_elevated`). It is
   the last of the line's own refusals, so a build tree says
   `reason=development_tree` from an administrator's prompt as from any other
   (`update_verbs::the_other_refusals_of_apply_are_said_before_the_one_for_an_administrators_session`),
@@ -1081,10 +1081,10 @@ project that matters.
 
 ## How it is built
 
-* `rust/crates/katana_app/src/session.rs` - the session both front ends share: the
+* `crates/katana_app/src/session.rs` - the session both front ends share: the
   Document, its `CommandInterpreter`, and the verbs above `katana_cad`
   (`IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC` and the
-  geoprocessing verbs through the executor in `rust/crates/katana_app/src/geo/`, the one
+  geoprocessing verbs through the executor in `crates/katana_app/src/geo/`, the one
   the window runs; `SURVEY`; a build without GDAL has the DXF `IMPORT` and
   `EXPORT` of `dxf_verbs.rs`). When it starts it builds the customisation's
   host and starts the Document with it.
@@ -1093,21 +1093,21 @@ project that matters.
   has them too (`docs/cad.md`); `CUSTOMISE` was here, with a parser and a
   loader of its own, until 2026-10-06, and is the interpreter's family now
   (`docs/customisation.md`, "The verbs"). It was
-  `katana_cli`'s `main.rs`; `rust/crates/katana_app/src/bin/katana_cli/main.rs` is now only the command
+  `katana_cli`'s `main.rs`; `crates/katana_app/src/bin/katana_cli/main.rs` is now only the command
   line's argument handling.
-* `rust/crates/katana_app/src/mcp/server.rs` - `Server::handle`: one JSON-RPC message in,
+* `crates/katana_app/src/mcp/server.rs` - `Server::handle`: one JSON-RPC message in,
   its reply out, and the tools. It has no I/O of its own, which is what lets
-  `rust/crates/katana_app/tests/mcp/mcp_server.rs` drive it message by message.
-* `rust/crates/katana_app/src/mcp/customisation.rs` - `katana_customisation`, built from
-  the helpers of `rust/crates/katana_app/src/mcp/tools.rs` as the geoprocessing tools
+  `crates/katana_app/tests/mcp/mcp_server.rs` drive it message by message.
+* `crates/katana_app/src/mcp/customisation.rs` - `katana_customisation`, built from
+  the helpers of `crates/katana_app/src/mcp/tools.rs` as the geoprocessing tools
   are.
-* `rust/crates/katana_app/src/update_verbs.rs` - the `UPDATE` verbs, over the update
-  engine (`rust/crates/katana_update/src/`): one function runs a line for the context
+* `crates/katana_app/src/update_verbs.rs` - the `UPDATE` verbs, over the update
+  engine (`crates/katana_update/src/`): one function runs a line for the context
   it is handed, so `katana_cli`, the window and `katana_check_update` run the
   same code, and the tests run it on a fake feed. `server.rs` builds the
   tool's reply from the two records (`check_update_reply`, declared in
-  `rust/crates/katana_app/src/mcp/tools.rs`).
-* `rust/crates/katana_app/src/bin/katana_mcp/main.rs` - the process: the stdio transport
+  `crates/katana_app/src/mcp/tools.rs`).
+* `crates/katana_app/src/bin/katana_mcp/main.rs` - the process: the stdio transport
   (newline-delimited JSON-RPC 2.0) and `--project`; before either, an
   interrupted update of the install is put back ("Updates", above).
 
@@ -1144,11 +1144,11 @@ anything else with the JSON-RPC error the specification names.
   beforehand, without writing into the install, is not written.
 * **`katana_cli`'s start of the helper has no test.** Everything up to the
   prepared request is tested through the session
-  (`rust/crates/katana_app/tests/session/update_verbs.rs`); the few lines of `main()` after the
+  (`crates/katana_app/tests/session/update_verbs.rs`); the few lines of `main()` after the
   session has ended - `katana_update::apply::launch_apply`, and the note on stderr when the
   line was typed or piped - run only in an installed copy, and the shipped
   programs cannot be given the test keys an installed copy in a test would
-  need (`rust/crates/katana_update/src/trust.rs`).
+  need (`crates/katana_update/src/trust.rs`).
 * **Two programs that change the update settings at the same instant can
   lose one change.** A setting is changed by reading the state file and
   writing it back, and `UPDATE CHECK` records its time the same way, into

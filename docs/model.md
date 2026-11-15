@@ -104,7 +104,7 @@ pub trait Command: Send {
 }
 ```
 
-(`rust/crates/katana_commands/src/command.rs`.)
+(`crates/katana_commands/src/command.rs`.)
 
 Most commands are a `ChangeSetCommand`: a named function from the current model
 to a `ChangeSet` of entities to add, modify and remove. That single shape gives
@@ -209,14 +209,14 @@ drawing on screen.
 Geometry is stored as a versioned binary blob (schema 3 onwards,
 `geometry_blob.rs`), which is what made opening a 50 000-entity project 4.6x
 faster. Properties, metadata and property defaults are JSON text via
-`rust/crates/katana_entity/src/serialization.rs`, which keeps those readable
+`crates/katana_entity/src/serialization.rs`, which keeps those readable
 for debugging and diffing. (This paragraph said geometry was JSON too, from
 before schema 3. The JSON is the workspace's own reader and writer,
 `katana_core::json`, where the C++ used nlohmann.)
 
 ### The tables, and the migration that made each
 
-`MIGRATIONS` in `rust/crates/katana_storage/src/project_store.rs` is the schema's
+`MIGRATIONS` in `crates/katana_storage/src/project_store.rs` is the schema's
 history and its reference: each entry's comment says why the change was made
 and why no existing row needed repairing. The file is marked as a Katana
 project by `PRAGMA application_id` ("KTNA") and versioned by
@@ -236,7 +236,7 @@ project by `PRAGMA application_id` ("KTNA") and versioned by
 | 10 | `survey_jobs` and `survey_job_files`: each imported field file kept whole, with its settings, report and the entities it made |
 | 11 | `text_styles`, `label_styles` (name, kind and the rest as versioned JSON) and `label_rules`, and a dimension style's `paper_sized` (`docs/annotation.md`, "Stored with the project") |
 | 12 | no table: the drawing system's geometry kinds - curve polyline 9, ellipse 10, spline 11 - in the existing geometry blob (`docs/drawing.md`). The version moves so a schema-11 build refuses the project up front as one from a newer Katana ("schema=12 supported=11") rather than failing row by row with "unknown geometry kind in blob". Every project a schema-12 build opens is raised to 12, whether or not it holds one of the kinds; writing 11 or 12 by what a save contained was rejected as a second versioning rule beside `MIGRATIONS` |
-| 13 | `surfaces`: the drawing's TIN surfaces (`katana_storage::project_store::SurfaceRecord` - name, source, display style, shown, and the surface as one BLOB in the terrain layer's own versioned form, `rust/crates/katana_terrain/src/tin_codec.rs`, which storage keeps without reading, since it may not see the terrain layer). An ordinary rowid table, as the survey jobs' is, for rows of megabytes; saved and loaded in the one transaction, refused before a byte is written when a load could not give it back (no name, no bytes, two of one name without case, over `ProjectStore::MAX_SURFACE_BYTES`). A project from before it opens with none. Files in the project's `terrain/` folder were rejected: they would be written outside the save's one transaction (`docs/terrain.md`, "Surfaces in the drawing") |
+| 13 | `surfaces`: the drawing's TIN surfaces (`katana_storage::project_store::SurfaceRecord` - name, source, display style, shown, and the surface as one BLOB in the terrain layer's own versioned form, `crates/katana_terrain/src/tin_codec.rs`, which storage keeps without reading, since it may not see the terrain layer). An ordinary rowid table, as the survey jobs' is, for rows of megabytes; saved and loaded in the one transaction, refused before a byte is written when a load could not give it back (no name, no bytes, two of one name without case, over `ProjectStore::MAX_SURFACE_BYTES`). A project from before it opens with none. Files in the project's `terrain/` folder were rejected: they would be written outside the save's one transaction (`docs/terrain.md`, "Surfaces in the drawing") |
 
 A new table or column is a new entry at the end, never an edit of a released
 one, and each default is chosen so that a project written before it draws
@@ -273,13 +273,13 @@ as a different list. It is a record, not a reference: nothing is loaded from
 it (`docs/survey_coding.md`). A new key is not a schema change, which is why
 this could be added while migrations are deferred (decision D6). Both front
 ends set it before a save and warn on opening a project whose files are not
-loaded (`rust/crates/katana_cad/src/customisation_record.rs`; `docs/survey_coding.md`, "What the
+loaded (`crates/katana_cad/src/customisation_record.rs`; `docs/survey_coding.md`, "What the
 project records").
 
 The second is `reference_layers`: the reference layers - rasters and point
 clouds - the drawing is worked on top of (`ProjectMetadata::reference_layers`),
 one record a line, each a line of versioned JSON that `interop` writes and
-reads (`rust/crates/katana_interop/src/reference_data.rs`: `to_record`, `parse_reference_record`) and
+reads (`crates/katana_interop/src/reference_data.rs`: `to_record`, `parse_reference_record`) and
 storage carries without reading. `save` refuses a record that is empty or
 holds a line break. The records say where each layer came from and how it is
 shown, never its pixels or points; both front ends set them before a save and
@@ -404,8 +404,8 @@ the viewport cull and validation for free.
 | the window's entity description (the C++ `main_window.cpp`'s describeGeometry) | where it is in the Rust window was not re-traced after the port |
 | `anchor.rs` | `resolve_anchor`, which points of a kind a dimension or leader can follow |
 | `modify_transform.rs` | the Stretch tool's `Stretcher` |
-| `rust/crates/katana_dxf/src/reader.rs` | `translate` and `place_geometry` (a block's contents under its insert) |
-| `rust/crates/katana_dxf/src/writer.rs` | the entity writer |
+| `crates/katana_dxf/src/reader.rs` | `translate` and `place_geometry` (a block's contents under its insert) |
+| `crates/katana_dxf/src/writer.rs` | the entity writer |
 | `domain_export.rs` | the archive export's visitor |
 
 ### The compiler will NOT stop you here
@@ -413,7 +413,7 @@ the viewport cull and validation for free.
 These opted out of exhaustive dispatch, mostly for good reasons. Each is a
 place where a new kind is silently absent rather than reported.
 
-**`rust/crates/katana_entity/src/curve_pieces.rs` is the cure for most of them.** `curve_pieces`
+**`crates/katana_entity/src/curve_pieces.rs` is the cure for most of them.** `curve_pieces`
 gives any geometry as the segments, arcs and circles the editing kernel
 understands (a curve polyline's segments and arcs exactly; an ellipse's and
 a spline's chords to a millimetre). The drawing system routed the snaps'
@@ -477,7 +477,7 @@ the same change, and `remove` orphaned children because of it.
 ## Named tables
 
 `Linetype`, `DimensionStyle`, `Style`, `HatchPattern`, `Alignment`, `TextStyle`, `LabelStyle` and `LabelRule` are stored in `NamedTable<T, Policy>`
-(`rust/crates/katana_entity/src/named_table.rs`), one implementation of "an ordered map
+(`crates/katana_entity/src/named_table.rs`), one implementation of "an ordered map
 from name to record" with the add / update / remove / find / all surface, the
 `AlreadyExists` and `NotFound` shape, and the built-in entry that `remove`
 refuses. They were three hand-written copies of that; the copies differed only
@@ -497,7 +497,7 @@ does not.
 *The compiler will stop you here:*
 
 * a field on `katana_entity::Model`;
-* `ProjectContents` in `rust/crates/katana_storage/src/project_store.rs`;
+* `ProjectContents` in `crates/katana_storage/src/project_store.rs`;
 * the create / update / delete commands.
 
 *The compiler will NOT stop you here. Each of these fails silently:*
@@ -521,7 +521,7 @@ does not.
 
 The five tables that ARE plain named tables - linetypes, dimension styles,
 hatch patterns, alignments and styles - share one implementation of their
-create, update and delete commands (`rust/crates/katana_commands/src/table_commands.rs`),
+create, update and delete commands (`crates/katana_commands/src/table_commands.rs`),
 parameterised by a `TablePolicy<T>` that holds the only things that differ:
 the item that may not be deleted, an update that may not be made, and who
 still uses an item so a deletion is refused naming the holder. There used to
@@ -530,7 +530,7 @@ pattern visible, and a change to how these commands undo now lands in one
 place.
 
 **Who uses an item is one function** (`katana_entity::table_usage::table_usage`,
-`rust/crates/katana_entity/src/table_usage.rs`), one pass over the entities for
+`crates/katana_entity/src/table_usage.rs`), one pass over the entities for
 every style, linetype name, symbol name, hatch pattern and layer, counting
 an entity against the linetype and hatch it is DRAWN with (through
 `resolved_linetype` and `resolved_hatch_pattern`, which `resolve_display` itself

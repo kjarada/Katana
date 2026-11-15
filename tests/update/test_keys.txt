@@ -3,11 +3,11 @@
 # key must never be one that a release could be signed with. The seeds and public keys were
 # checked against OpenSSL: the public key it derives from each seed is the one the RFC prints.
 #
-# They are in the test programs alone (rust/crates/katana_update/tests/test_key and
-# rust/crates/katana_updater's katana_updater_test and katana_update_e2e), none of which is
+# They are in the test programs alone (crates/katana_update/tests/test_key and
+# crates/katana_updater's katana_updater_test and katana_update_e2e), none of which is
 # installed. This file is where the checks that the programs which ship hold none of them read
 # the keys: tests/update/CMakeLists.txt (check_no_test_keys.cmake),
-# rust/crates/katana_updater/tests/shipped.rs, and tests/update/tool_tests/test_fixtures.py, which
+# crates/katana_updater/tests/shipped.rs, and tests/update/tool_tests/test_fixtures.py, which
 # holds the Python side's seeds (tests/update/fixtures/keys) to the same keys. Each reads every
 # quoted run of 64 lower-case hexadecimal digits, and there must be four.
 

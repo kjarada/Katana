@@ -10,7 +10,7 @@
 #   interop/    the window's ONLINE checks, on a catalogue of local files
 #   update/     the update programs, the pinned keys, the installer script and the release tools
 #
-# The unit tests are cargo's (rust/crates/*/tests), not CTest's. The families the C++ build
+# The unit tests are cargo's (crates/*/tests), not CTest's. The families the C++ build
 # registered here and this runner does not - the unit suites, and the checks that needed the C++
 # build or read its sources - went with the C++ (the commit that removed it names each family).
 
@@ -246,7 +246,7 @@ if(Python3_Interpreter_FOUND)
     # (test_pictures.py), on one-pixel pictures it writes itself in a scratch folder.
     add_test(NAME katana_standard_pictures_script COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_pictures.py")
 
-    # `rust_layering`: each crate of rust/crates is a layer's, and depends only on what tools/check_layering.cmake
+    # `rust_layering`: each crate of crates/ is a layer's, and depends only on what tools/check_layering.cmake
     # (the layer table) allows that layer, and re-exports no third-party crate. It is shown, on a fixture that breaks
     # each rule, to see the breach: a check that cannot see a violation passes as quietly as one that finds none.
     set(_rust_fixtures "${CMAKE_CURRENT_SOURCE_DIR}/rust_check_fixtures")
@@ -267,8 +267,8 @@ if(Python3_Interpreter_FOUND)
         COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_rust_layering.py"
                 --crates "${_rust_fixtures}/layering/missing_layer/crates" "${PROJECT_SOURCE_DIR}")
     set_tests_properties(rust_layering_catches_missing_layer PROPERTIES
-        PASS_REGULAR_EXPRESSION "layer 'math' has no crate in rust/crates")
-    # Step 3's round-trip gate (rust/crates/katana_app/tests/round_trip.rs) compares the projects
+        PASS_REGULAR_EXPRESSION "layer 'math' has no crate in crates/")
+    # Step 3's round-trip gate (crates/katana_app/tests/round_trip.rs) compares the projects
     # the two programs save through tools/project_dump.py, a dump made with Python's own sqlite3
     # so that the judge is neither program. `project_dump_self_test` is the dump's own test, on
     # projects it builds in a scratch folder: two saves of the same content dump the same whatever

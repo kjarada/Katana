@@ -28,7 +28,7 @@ Rust - and the owner's word is the reason.
   gates (`rust_cli_gate.py`, `rust_window_gate.py`) with `window_streams.py`,
   `window_geometry.py` and `ctest_tree.py`, the SIMD kernel checks, the C++
   half of the number-to-text check (`check_float_to_string.py`; the Rust
-  guard is `rust/clippy.toml`'s disallowed methods), `compare_benchmarks.py`
+  guard is `clippy.toml`'s disallowed methods), `compare_benchmarks.py`
   and `find_narrow_paths.py`. Two Rust tests whose subject was the C++ went
   too: the corpus round trip that ran the C++ `katana_cli` against the Rust
   (`round_trip.rs` of `katana_app`) and the number formats compared with the
@@ -41,9 +41,9 @@ Rust - and the owner's word is the reason.
   `tools/check_layering.cmake` and its check `tools/check_rust_layering.py`;
   and three C++ files inside the crates, which the Rust build compiles because
   the libraries they reach have only C++ APIs:
-  `rust/crates/katana_gis/native/algorithm_shim.cpp` (GDAL's algorithm
-  framework), `rust/crates/katana_gis/native/http_shim.cpp` (GDAL's HTTP) and
-  `rust/crates/katana_pointcloud/native/pdal_shim.cpp` (PDAL has no C API).
+  `crates/katana_gis/native/algorithm_shim.cpp` (GDAL's algorithm
+  framework), `crates/katana_gis/native/http_shim.cpp` (GDAL's HTTP) and
+  `crates/katana_pointcloud/native/pdal_shim.cpp` (PDAL has no C API).
 - **What this record keeps.** The sections below are the port's history, and
   what the C++ was is part of it: where they name a C++ file, class or test,
   they name it in words, since none of it is in the tree to cite. "The oracle"
@@ -133,7 +133,7 @@ redraw a fraction rounded to one, rather than clamping it. A forced
 maximum-integer sample proves that branch is reached and rejects the old
 clamp.
 
-The number-format gate is rust/crates/katana_core/tests/number_oracle.rs,
+The number-format gate is crates/katana_core/tests/number_oracle.rs,
 against the test-only C++ executable built from
 tests/core/number_format_oracle.cpp. Its 28,942 bit patterns cover both
 signs of every binary exponent, boundary mantissas, half-integer rounding,
@@ -155,7 +155,7 @@ value was rejected because it does not have this wire-format contract.
 The visible build sets `KATANA_NUMBER_FORMAT_ORACLE` to the helper in the
 C++ build's `bin/tests` directory. A missing helper fails the Rust test;
 `wsl cargo` therefore needs a preceding full WSL build. It never silently
-skips the cross-language gate. `rust/clippy.toml` and the workspace lint
+skips the cross-language gate. `clippy.toml` and the workspace lint
 reject direct `to_string` calls.
 Because that method is generic, the guard deliberately rejects integer and
 string calls too; integers use explicit formatting and strings use owned
@@ -365,7 +365,7 @@ claimed: the update layer's Windows code is written and not compiled.
 
 ### Step 3's round-trip gate
 
-The gate is a Rust test, rust/crates/katana_app/tests/round_trip.rs, that
+The gate is a Rust test, crates/katana_app/tests/round_trip.rs, that
 runs both programs on every file of the test data and the samples of the
 formats step 3 ported, and compares what they make:
 
@@ -939,7 +939,7 @@ dialogs. Decisions:
   missing font falls back to the same face on every machine.
 - **Arial and Helvetica stand in as Liberation Sans where the machine lacks
   them** (the owner's choice, 2026-11-15). Liberation Sans 2.1.5 (SIL OFL 1.1)
-  is embedded in four styles (`rust/crates/katana_window/fonts/`), and its
+  is embedded in four styles (`crates/katana_window/fonts/`), and its
   every glyph is as wide as Arial's. Found by wave 2's integration: the
   C++ asks for Arial, and where Arial is missing Qt takes fontconfig's
   substitute (DejaVu Sans in WSL), about as wide; the Rust took egui's thinner
@@ -1108,7 +1108,7 @@ left. K's window is two halves, as the plan's borrow split has it: the
 executor (the drawing, the interpreter, the reference data, the
 workbenches the dispatcher runs, the log and the jobs; it is the `Host`)
 and the UI state (menus, toolbars, panels, the views' workspace). The
-dispatcher keeps the C++'s order; `rust/crates/katana_window/src/bin/katana/main.rs` is the only file
+dispatcher keeps the C++'s order; `crates/katana_window/src/bin/katana/main.rs` is the only file
 that names eframe and hands the window to wave 1's program driver. Decisions:
 
 - **The window's settings keep the C++'s QSettings names** (`window/layout`,
@@ -1253,8 +1253,8 @@ script asserted the old text.
 
 ## The workspace
 
-`rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
-`tools/check_layering.cmake` in `rust/crates/`, named `katana_<layer>`. Two
+`Cargo.toml` is one Cargo workspace, with one crate per layer of
+`tools/check_layering.cmake` in `crates/`, named `katana_<layer>`. Two
 names differ: the qt layer's crate is `katana_window` (the window is not Qt
 in the port), and the helper program `katana_updater` is a crate of the update
 layer, as src/katana_updater is.
@@ -1334,7 +1334,7 @@ cargo links with the prefix's GCC and its sysroot (glibc 2.28), as CMake
 builds with them, and writes the prefix's `lib/` into each program's run
 path, so a test finds GDAL without `LD_LIBRARY_PATH`. `tools/build_visible.sh`
 sets both; a crate that links a C library names the prefix as a search path
-from `KATANA_TOOLCHAIN` (as `rust/crates/katana_gis/build.rs` does).
+from `KATANA_TOOLCHAIN` (as `crates/katana_gis/build.rs` does).
 
 The build in WSL has a `PATH` of its own: the prefix's build tools, then the
 system's directories, and nothing of Windows. WSL appends the Windows `PATH`
@@ -1478,12 +1478,12 @@ in porting:
 - **GDAL, PDAL and libcurl** (step 5) are reached as PROJ and SQLite are:
   declarations of exactly what the C++ calls, on the libraries the build
   links. GDAL's are checked by a C file compiled with the crate
-  (`rust/crates/katana_gis/native/ffi_check.c`): a `_Generic` test of each
+  (`crates/katana_gis/native/ffi_check.c`): a `_Generic` test of each
   declared function's type, written in the header's own typedefs, and a
   static assert of every size, offset and constant copied, so that a
   declaration GDAL's headers contradict fails the build. PDAL has no C
   API, so a thin C++ shim
-  (`rust/crates/katana_pointcloud/native/pdal_shim.cpp`) puts its
+  (`crates/katana_pointcloud/native/pdal_shim.cpp`) puts its
   primitives behind one, catching every exception, and every decision of
   the C++ engine is Rust. The `cc` crate compiles both from the crates'
   build scripts, with the toolchain's own compilers, so the C++ ABI is that
@@ -1562,7 +1562,7 @@ pin classifies every algorithm GDAL lists.
 
 ## Not done
 
-- **No release job builds the Rust yet.** Nothing in `rust/` ships before
+- **No release job builds the Rust yet.** Nothing of the Rust workspace ships before
   step 8, and a change to `.github/workflows/release.yml` can only be proven
   by a release run; the cargo steps are added then, when that run is part of
   the gate anyway. The ARM64 job's Rust (CLANGARM64) and the macOS job's (the

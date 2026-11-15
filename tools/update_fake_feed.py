@@ -5,7 +5,7 @@
 
 It serves the files of one folder (a release: Katana-update-<target>.json, its .sig, the update zip) the
 way a release host does, and misbehaves on request, so that the engine's transport rules
-(rust/crates/katana_update/src/feed.rs) are tested against real HTTP and not only against a function that
+(crates/katana_update/src/feed.rs) are tested against real HTTP and not only against a function that
 pretends to be it. Standard library only (http.server). It listens on 127.0.0.1, port 0, twice, and
 prints the two ports the system gave it, one `key=value` a line, before it serves anything:
 

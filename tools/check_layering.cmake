@@ -2,7 +2,7 @@
 # and why where the reason is not obvious.
 #
 # It is DATA, read by tools/check_rust_layering.py (the `rust_layering` test),
-# which holds the crates of rust/crates to it: a crate's katana_* dependencies
+# which holds the crates of crates/ to it: a crate's katana_* dependencies
 # are its own layer's crates or the layers listed for it here, and no crate
 # re-exports a third-party crate (`pub use`), which would put a third-party
 # type in its public interface.

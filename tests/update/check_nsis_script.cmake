@@ -2,7 +2,7 @@
 # (decision D1, docs/release.md "The Windows installer", cmake/NSIS.template.in), without
 # running it:
 #
-#   cmake -DTEMPLATE=<cmake/NSIS.template.in> [-DREGISTRY_SOURCE=<rust/crates/katana_update/src/registry.rs>]
+#   cmake -DTEMPLATE=<cmake/NSIS.template.in> [-DREGISTRY_SOURCE=<crates/katana_update/src/registry.rs>]
 #         [-DMUTATE=<name>] -P check_nsis_script.cmake
 #   cmake -DSCRIPT=<project.nsi> [-DEXPECT_VERSION=0.2.0] [-DEXPECT_FILES=bin/katana.exe;...]
 #         [-DREGISTRY_SOURCE=...] [-DMUTATE=<name>] -P check_nsis_script.cmake
@@ -15,7 +15,7 @@
 #   * no administrator rights asked for, and nothing machine-wide written: no HKLM or any
 #     other hive but HKCU, no "all users" shell context, no Program Files or system folder;
 #   * the folder is %LOCALAPPDATA%\Programs\Katana, and the registry holds what the updater
-#     reads and Settings > Apps shows (rust/crates/katana_update/src/registry.rs); a copy that is
+#     reads and Settings > Apps shows (crates/katana_update/src/registry.rs); a copy that is
 #     already installed is offered as the folder again; no folder at all, or one that cannot
 #     be written to, is refused before anything is put down, by a silent run too;
 #   * installed over a copy of Katana, it clears the updater's record of that copy's version

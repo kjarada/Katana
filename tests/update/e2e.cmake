@@ -1,6 +1,6 @@
 # The end-to-end tests of the update system, and the test of the fake feed they fetch from (T12).
 # Included by tests/update/CMakeLists.txt (it globs e2e*.cmake); the programs are cargo's
-# katana_update_e2e, katana_updater_test and katana_updater_stub (rust/crates/katana_updater).
+# katana_update_e2e, katana_updater_test and katana_updater_stub (crates/katana_updater).
 #
 #   update_e2e_program_...   katana_update_e2e by itself: its usage, and that it cannot leave the machine
 #   update_tools_fake_feed   tools/update_fake_feed.py asked with urllib (tool_tests/test_fake_feed.py)
@@ -66,7 +66,7 @@ cmake_language(DEFER CALL katana_name_update_e2e_tests_without_their_environment
 # ---- the program's own rule, with no feed and no Python ------------------------------------------
 #
 # katana_update_e2e is what every case below fetches with, so that it cannot leave the machine is a
-# promise worth a test of its own (src/bin/katana_update_e2e.rs of rust/crates/katana_updater): a
+# promise worth a test of its own (src/bin/katana_update_e2e.rs of crates/katana_updater): a
 # feed that is not `http://127.0.0.1` is refused on the command line, a name is never looked up
 # (localhost included), and GitHub's own addresses are not connected to unless --connect says which
 # loopback port stands in for the host. None of these opens a socket. The install they name is the

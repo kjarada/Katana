@@ -766,7 +766,7 @@ def catalogue(data, root):
     w("")
     w("- **The data** is plain Python in `tools/katana_standard/`: `colours.py`, `linestyles.py`, `symbols.py` "
       "and `codes.py`, each importing nothing of the outside and each with its own `--check`; the check of "
-      "`colours.py` also reads `NEAR_WHITE_CHANNEL` from `rust/crates/katana_cad/src/plot.rs`, so the white rule it "
+      "`colours.py` also reads `NEAR_WHITE_CHANNEL` from `crates/katana_cad/src/plot.rs`, so the white rule it "
       "prints by is the plot's. `codes.py --check` also holds that every definition is named by a code and "
       "every colour of the palette is used. "
       "`make_katana_standard.py` is the only thing that knows the file format. `--json` writes the file, "
@@ -790,7 +790,7 @@ def catalogue(data, root):
       "`katana_standard::forty_codes_across_all_classes_resolve_to_the_kind_of_entity_the_nsw_built_in_makes` "
       "do the same in Rust, "
       "from the two files alone.")
-    w("- **Tests.** `katana_standard::*` (`rust/crates/katana_cad/tests/tool_cases/katana_standard.rs`) reads the committed "
+    w("- **Tests.** `katana_standard::*` (`crates/katana_cad/tests/tool_cases/katana_standard.rs`) reads the committed "
       "file with the strict reader and holds the counts, the grammar, every name resolved, every definition "
       "used and catalogued, the weights, the utility words, the geometry bounds of the contract and the "
       "byte-for-byte writer round trip. `" + CLI_IMPORT_TEST + "` imports the invented field file; `" +

@@ -8,7 +8,7 @@
 # command names katana, katana_cli or katana_mcp is a test that RUNS a program, and must say
 # which customisation it starts with. This one only reads bytes.
 #
-# The update system's central promise (rust/crates/katana_update/src/trust.rs) is that the trust
+# The update system's central promise (crates/katana_update/src/trust.rs) is that the trust
 # root is a PARAMETER and only the test executables pass a test key, so that no shipped
 # binary contains one and nothing in the environment can move which signatures count. A
 # promise that nothing checks is a promise about the author's intentions; this checks the

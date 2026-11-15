@@ -1,7 +1,7 @@
 # Mathematics and geometry
 
-The crates `katana_math` and `katana_geometry` (`rust/crates/katana_math/`,
-`rust/crates/katana_geometry/`). These are the foundation every other module
+The crates `katana_math` and `katana_geometry` (`crates/katana_math/`,
+`crates/katana_geometry/`). These are the foundation every other module
 computes on, and they depend on nothing but the standard library.
 
 ## Purpose
@@ -181,7 +181,7 @@ tree; the Rust port carries the same algorithms and has not been re-measured,
 Two numbers set expectations for later phases. `triangulate` grows quadratically
 — 13× the time for 4× the vertices — so terrain-scale triangulation uses the terrain
 layer's constrained Delaunay (spade, behind
-`rust/crates/katana_terrain/src/cdt_backend.rs`) rather than this routine, which exists for drafting-scale
+`crates/katana_terrain/src/cdt_backend.rs`) rather than this routine, which exists for drafting-scale
 polygons. And point-in-polygon is O(n) twice over (a boundary-distance pass and
 a crossing-number pass); at 11.6 µs against a 1024-vertex ring it is comfortably
 inside the 16 ms selection target (`docs/architecture.md`, "Performance
@@ -210,7 +210,7 @@ and 6 (`docs/architecture.md`) — tests first, profile before optimising.
 
 ## The clothoid (`Spiral2`)
 
-`rust/crates/katana_geometry/src/spiral2.rs` is the transition curve every road and
+`crates/katana_geometry/src/spiral2.rs` is the transition curve every road and
 railway standard uses: curvature changes linearly with distance, which is the
 path a vehicle follows when the wheel is turned at a steady rate. It is the
 first slice of the civil work (alignments, profiles, corridors), and the only
@@ -598,5 +598,5 @@ ends on one implementation. Two decisions in it:
   end has none, because an invented height on a survey string is worse than
   a missing one.
 
-Tested in `rust/crates/katana_geometry/tests/cases/curves2d.rs` and
-`rust/crates/katana_geometry/tests/cases/polyline_vertices.rs`.
+Tested in `crates/katana_geometry/tests/cases/curves2d.rs` and
+`crates/katana_geometry/tests/cases/polyline_vertices.rs`.

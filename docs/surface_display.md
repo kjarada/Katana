@@ -11,29 +11,29 @@ record of how a surface is now drawn in its display style: in the plan view
 The style itself - the named `SurfaceDisplayStyle`, the set the drawing keeps,
 which surface is drawn in which, the `SURFACESTYLE` and `SURFACE STYLE` verbs
 that edit them, and how they are saved - is the drawing's surfaces' own
-(`rust/crates/katana_cad/src/terrain/surface_style.rs`, `docs/terrain.md`). This
+(`crates/katana_cad/src/terrain/surface_style.rs`, `docs/terrain.md`). This
 document is what is DONE with a style.
 
 ## The pieces
 
 | Where | What |
 |---|---|
-| `rust/crates/katana_terrain/src/colour_ramps.rs` | THE ramp table, plain data with the source of each ramp's colours: `colour_ramps`, `colour_ramp_names`, `find_colour_ramp` ("The ramps") |
-| `rust/crates/katana_cad/src/terrain/surface_style.rs`, `rust/crates/katana_cad/src/terrain/surface_colouring.rs` | the surface styles' view of it, in the drawing's colours: `surface_ramp_names`, `surface_ramp_stops`, and the lookup arithmetic the 3D kernels are held to (`surface_ramp_colour`) |
-| `rust/crates/katana_cad/src/terrain/surface_colouring.rs` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
-| `rust/crates/katana_cad/src/terrain/surface_plan.rs` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surface_plan`, `SurfacePlanCache`) |
-| `rust/crates/katana_cad/src/terrain/surface_display_verbs.rs` | `SURFACE LEGEND` and `SURFACE PLAN` |
-| `rust/crates/katana_cad/src/scene.rs` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `apply_surface_display`, `SceneLayers::legends`) |
-| `rust/crates/katana_window/src/terrain/surface_plan_painter.rs` | the plan painter's surface layer, and the legend panel and the stack of them (`paint_surface_legend_stack`) both views draw |
-| `rust/crates/katana_window/src/plan_painter.rs` | `PlanSource::surfaces`, `PlanPaintOptions::surfaces`, the statistics |
-| `rust/crates/katana_window/src/terrain/surface_style_manager.rs` | Terrain > Surface Styles... |
-| `rust/crates/katana_window/src/terrain/main_window_surface_display.rs` | the window's wiring: the action, the dialog, the 3D views restyled |
+| `crates/katana_terrain/src/colour_ramps.rs` | THE ramp table, plain data with the source of each ramp's colours: `colour_ramps`, `colour_ramp_names`, `find_colour_ramp` ("The ramps") |
+| `crates/katana_cad/src/terrain/surface_style.rs`, `crates/katana_cad/src/terrain/surface_colouring.rs` | the surface styles' view of it, in the drawing's colours: `surface_ramp_names`, `surface_ramp_stops`, and the lookup arithmetic the 3D kernels are held to (`surface_ramp_colour`) |
+| `crates/katana_cad/src/terrain/surface_colouring.rs` | the colouring a style gives a surface's faces, resolved against the values it spans (`SurfaceColouring`), aspect sectors, band pieces, the legend |
+| `crates/katana_cad/src/terrain/surface_plan.rs` | a surface in plan for one view: what is drawn, culled and to a level of detail (`surface_plan`, `SurfacePlanCache`) |
+| `crates/katana_cad/src/terrain/surface_display_verbs.rs` | `SURFACE LEGEND` and `SURFACE PLAN` |
+| `crates/katana_cad/src/scene.rs` | the 3D scene's surfaces in their styles (`SceneSurface::display`, `apply_surface_display`, `SceneLayers::legends`) |
+| `crates/katana_window/src/terrain/surface_plan_painter.rs` | the plan painter's surface layer, and the legend panel and the stack of them (`paint_surface_legend_stack`) both views draw |
+| `crates/katana_window/src/plan_painter.rs` | `PlanSource::surfaces`, `PlanPaintOptions::surfaces`, the statistics |
+| `crates/katana_window/src/terrain/surface_style_manager.rs` | Terrain > Surface Styles... |
+| `crates/katana_window/src/terrain/main_window_surface_display.rs` | the window's wiring: the action, the dialog, the 3D views restyled |
 
 ## The ramps
 
 Every ramp is five colours evenly spaced over 0 to 1 and blended linearly
 between them. Five, because that is the form the 3D scene's vector kernels
-read (`rust/crates/katana_cad/src/simd/scene_kernels.rs`: four segments a channel): a
+read (`crates/katana_cad/src/simd/scene_kernels.rs`: four segments a channel): a
 surface coloured smoothly by ANY ramp takes the kernel path, and the kernels'
 parameters are filled from the ramp the style names
 (`scene_kernels::a_surface_in_a_display_style_on_every_ramp_builds_the_same_at_every_level`).
@@ -48,7 +48,7 @@ parameters are filled from the ramp the style names
 | spectral | #2b83ba #abdda4 #ffffbf #fdae61 #d7191c | ColorBrewer Spectral, five classes, reversed |
 
 **One table.** The ramps are rows of `katana_terrain::colour_ramps()`
-(`rust/crates/katana_terrain/src/colour_ramps.rs`):
+(`crates/katana_terrain/src/colour_ramps.rs`):
 plain data, three bytes a colour, each row with the source of its colours (the
 Source column above is that field). It sits in the `terrain` layer because that
 is the lowest layer both users may see (the crates' dependencies: `cad` may
@@ -65,7 +65,7 @@ everywhere without a second edit
 `surface_ramps::every_style_ramp_is_the_one_tables_ramp_at_full_alpha_and_its_names_are_the_tables`).
 
 Until 2026-10-15 `RASTER SHADE` and `RASTER SLOPE` had a table of their own
-(`rust/crates/katana_interop/src/geo/colour_ramps.rs`) with four of the same names -
+(`crates/katana_interop/src/geo/colour_ramps.rs`) with four of the same names -
 terrain, diverging, slope and grey - and different colours, so `ramp=terrain`
 was two maps, and an earlier version of this file called the styles' table
 "THE ramp table" while the other existed. Its terrain was the hypsometric green
@@ -205,7 +205,7 @@ nothing but a surface frames it.
 
 What is drawn is decided in `katana_cad` by `katana_cad::terrain::surface_plan::surface_plan`, for one
 surface through one view, and drawn by
-`rust/crates/katana_window/src/terrain/surface_plan_painter.rs`; in order:
+`crates/katana_window/src/terrain/surface_plan_painter.rs`; in order:
 
 1. **Faces** - an image of the part of the surface in view, each pixel the
    colour of the surface under its centre, at the style's opacity.
@@ -222,7 +222,7 @@ surface through one view, and drawn by
 Zoomed out, a dense TIN has many triangles to a pixel, and a polygon each is
 most of a frame for colour nobody can see. The faces are rasterised in
 `katana_cad` into a premultiplied RGBA image (the layout the window's canvas
-paints and egui's textures take, `rust/crates/katana_window/src/canvas/image.rs`), one image
+paints and egui's textures take, `crates/katana_window/src/canvas/image.rs`), one image
 pixel a device pixel on screen, on a grid lined up with the view's first
 pixel (`katana_cad::terrain::surface_plan::plan_image_grid`), and laid down through the frame like a raster.
 Its cost is the pixels it covers and the triangles in view, whatever the zoom.
@@ -625,29 +625,29 @@ twins yet (`docs/performance.md`); these figures are the C++ build's.
 
 ## Tests
 
-* `rust/crates/katana_cad/tests/scene/surface_colouring.rs` - the ramps' published stops
+* `crates/katana_cad/tests/scene/surface_colouring.rs` - the ramps' published stops
   and the scene's old constants, the table's names and fallback, aspect
   sectors either side of each edge, bands and stops by value, smooth stops,
   the range, slope in percent, band pieces covering a triangle exactly, the
   legends and their decimals.
-* `rust/crates/katana_cad/tests/scene/surface_plan.rs` - the cull grid against testing
+* `crates/katana_cad/tests/scene/surface_plan.rs` - the cull grid against testing
   every triangle, the four-pixel edge rule and its tint, the colour of a known
   face in a known band either side of a band edge, coverage on the shared
   diagonal, opacity, slope and aspect faces, the image at any thread count, a
   contour at its level and its label, minors hidden, contours traced once and
   the refusal of a too-fine interval, the rim and a breakline joined, points
   as marks and as pixels, nothing out of view, the image grid and its cap.
-* `rust/crates/katana_cad/tests/scene/scene_surface_style.rs` and
+* `crates/katana_cad/tests/scene/scene_surface_style.rs` and
   `scene_kernels::a_surface_in_a_display_style_on_every_ramp_builds_the_same_at_every_level` -
   the 3D colouring by style (above).
-* `rust/crates/katana_cad/tests/terrain_utility_verbs/surface_display_verbs.rs` - both verbs' replies,
+* `crates/katana_cad/tests/terrain_utility_verbs/surface_display_verbs.rs` - both verbs' replies,
   worked out on a 10 x 10 square, and every refusal.
-* `rust/crates/katana_window/tests/plan_painting/surface_plan_painter.rs` - a surface inking
+* `crates/katana_window/tests/plan_painting/surface_plan_painter.rs` - a surface inking
   exactly its own 80 x 80 pixels where nothing was, a known face its band's
   colour, each built style inking its own way against the same paint without
   the surface, hidden drawing nothing, the legend on screen and never plotted,
   contours traced once through the painter's cache.
-* `rust/crates/katana_window/tests/surfaces/surface_style_manager.rs` - each button's
+* `crates/katana_window/tests/surfaces/surface_style_manager.rs` - each button's
   line word for word, Apply naming only what changed, a bad field stopping
   Apply, the preview drawing the form's style, and the lines changing the
   drawing through the interpreter, undone as one step, the dialog following.
@@ -677,7 +677,7 @@ twins yet (`docs/performance.md`); these figures are the C++ build's.
   (two styled, one hidden, one unstyled, one wireframe), `surface_legend3_d`
   (stacked in order and not overlapping; none styled keeps the bar; more than fit
   are left out whole) and the headless report; the one ramp table:
-  `colour_ramps` in `rust/crates/katana_terrain/tests/colour_ramps.rs`,
+  `colour_ramps` in `crates/katana_terrain/tests/colour_ramps.rs`,
   `colour_ramps::the_shadings_ramps_are_the_surface_styles_ramps_stop_for_stop` and the
   `ShadeVerb` tests that read the table's colours.
 * `qt_a_surface_is_drawn_in_plan_in_its_style_headless` - the sample terrain
@@ -746,7 +746,7 @@ twins yet (`docs/performance.md`); these figures are the C++ build's.
 * The minors are hidden by the surface's MEAN slope, so on a site of steep
   batters and flat pads they go from the flats when the batters crowd them.
 * `RASTER ASPECT` colours the eight compass directions with a constant of its
-  own (`rust/crates/katana_app/src/geo/slope_verbs.rs`), which is neither the aspect wheel
+  own (`crates/katana_app/src/geo/slope_verbs.rs`), which is neither the aspect wheel
   a surface style uses (`aspect_sector_colour`) nor a row of the ramp table: two
   palettes for aspect.
 * `PLOTSHEETS` reports a surface style it could not draw as one of the

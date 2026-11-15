@@ -1,9 +1,9 @@
 # Interactive tools
 
 The drawing tools of the Draw, Modify and Annotate menus: state machines in
-`katana_cad` (`rust/crates/katana_cad/src/interactive_tool.rs`,
-`rust/crates/katana_cad/src/tools/`), a catalogue that builds the menus, and the host in
-`katana_window` that runs a tool in a plan view (`rust/crates/katana_window/src/tools/`). The
+`katana_cad` (`crates/katana_cad/src/interactive_tool.rs`,
+`crates/katana_cad/src/tools/`), a catalogue that builds the menus, and the host in
+`katana_window` that runs a tool in a plan view (`crates/katana_window/src/tools/`). The
 window around them is `docs/desktop.md`; the engine the tools' commands run
 on is `docs/cad.md`.
 
@@ -18,12 +18,12 @@ be tested without clicking, and every new tool meant another case in the view
 and another hand-made action in the window.
 
 **A tool is now a state machine in `katana_cad`**
-(`rust/crates/katana_cad/src/interactive_tool.rs`). The plan view tells it what the
+(`crates/katana_cad/src/interactive_tool.rs`). The plan view tells it what the
 user did - a snapped point, a picked entity, a typed value, Enter, Undo - and
 the tool answers with the next prompt, a rubber-band preview for the cursor
 and, when it completes, ONE command, so one undo removes the whole operation.
 A tool never edits the document itself. Each is tested through
-`rust/crates/katana_cad/tests/support/tool_driver.rs`, which feeds it the inputs a user would and
+`crates/katana_cad/tests/support/tool_driver.rs`, which feeds it the inputs a user would and
 executes what it returns, against geometry worked out by hand.
 
 **One catalogue feeds everything that names a tool**: the menus, the toolbars,
@@ -33,7 +33,7 @@ catalogue refuses a duplicate id or alias, a lower-case alias and a
 single-letter shortcut (a letter typed into a view goes to the command line);
 a refusal is kept, not lost, and a test asserts there are none.
 
-**The families are listed explicitly** (`rust/crates/katana_cad/src/tools/families.rs`),
+**The families are listed explicitly** (`crates/katana_cad/src/tools/families.rs`),
 not self-registered. In the C++ build `katana_cad` was a static archive, and
 an object file nothing referenced was dropped by the linker - taking its
 tools with it and saying nothing; the Rust keeps the explicit list, so a
@@ -71,7 +71,7 @@ dz, one line two polylines. Rejected: telling the kinds apart by
 dz, not drop it; and making `PLINE3D` climb too, which would change what an
 existing verb line draws (`docs/drawing.md`, Not done).
 
-**Icons live with their family** (`rust/crates/katana_window/src/tools/icons_<family>.rs`,
+**Icons live with their family** (`crates/katana_window/src/tools/icons_<family>.rs`,
 by tool id), drawn to `icons.rs`'s conventions: a 24-unit grid, a 1.7-unit
 stroke, neutral for the object and the accent for what the tool does to it. A
 tool with no painter shows a framed initial, visibly a placeholder.
@@ -83,7 +83,7 @@ launching the application. `tool_icons::ToolInk` duplicates `icons.rs`'s private
 ### The five families
 
 Thirty-six tools in five families were merged on 2026-09-23, each family one
-file (or a few) in `rust/crates/katana_cad/src/tools/`, each tool tested through
+file (or a few) in `crates/katana_cad/src/tools/`, each tool tested through
 `ToolDriver` against geometry worked out by hand, and each with an icon. The
 aliases are the ones drafters already type, plus the command interpreter's own
 spellings of the same verbs, so a word means one thing whichever reads it:
@@ -111,10 +111,10 @@ entity's values in braces - `{prop.size} PVC`, `CH {chainage:.1f}` - which
 makes it a smart leader read off the entity (`docs/annotation.md`, "Smart
 leaders"). A line with a brace is checked as it is typed, a note that would
 say nothing is refused with what the entity lacks, and a tip on nothing keeps
-its note as typed, braces and all (`rust/crates/katana_cad/tests/annotools/smart_leader_tool.rs`). The Angular, Radius, Diameter
+its note as typed, braces and all (`crates/katana_cad/tests/annotools/smart_leader_tool.rs`). The Angular, Radius, Diameter
 and Ordinate Dimension tools (`annotate_dimension_kinds.rs`) make the
 dimension the `DIM` verb makes, through the same builders
-(`rust/crates/katana_cad/src/annotation/dimension_build.rs`), so a picked pair of
+(`crates/katana_cad/src/annotation/dimension_build.rs`), so a picked pair of
 lines, arc or circle is FOLLOWED when it is edited; a dimension given by
 clicked points measures those points, unless a point was snapped to an
 entity's end, middle, centre or vertex, which it then follows
@@ -174,7 +174,7 @@ alignment); the one offered is what the drawing's newest leader of the
 preset reads. A point with nothing to say is refused at the first click.
 Each is a tool of its own, not a "Leader, ..." family, so each is a toolbar
 button and not one behind a drop-down, and `--check-toolbars` is unchanged.
-Tested against the verb line (`rust/crates/katana_cad/tests/tool_cases/leader_preset_tools.rs`).
+Tested against the verb line (`crates/katana_cad/tests/tool_cases/leader_preset_tools.rs`).
 
 The sixth family in `families.rs`, Inquiry (Distance, Area, ID Point, Angle,
 List), is listed and empty. The drawing system added Draw > Vertices
@@ -231,7 +231,7 @@ The modify-edit tests reach `modify_edit_support.rs` as the family's sources do.
 ### The tool host: how a view runs a tool
 
 The plan view's own `switch` is gone. Every tool the view runs is a catalogue
-tool, run by a **`ToolHost`** (`rust/crates/katana_window/src/tools/tool_host.rs`) that sits
+tool, run by a **`ToolHost`** (`crates/katana_window/src/tools/tool_host.rs`) that sits
 between the tool, which knows nothing of the window, and the view, which knows nothing
 of any one tool. It starts a tool with the document's current attributes
 (layer and style, D9) and the live selection, hands it what the user did - a
@@ -242,7 +242,7 @@ aperture in model units (`ToolContext::pick_tolerance`) - read when the tool
 starts or restarts only, so after a zoom inside the tool Trim's and Fillet's
 own picks can differ from the view's until the next restart. It reports
 through hooks and opens nothing, so a test drives it by calling it
-(`rust/crates/katana_window/tests/plan_view/tool_host.rs`). A generation count, bumped whenever a tool is
+(`crates/katana_window/tests/plan_view/tool_host.rs`). A generation count, bumped whenever a tool is
 made, remade or dropped, is how the host knows that a hook replaced the tool
 it was dealing with: a tool started from a hook was once allocated at the
 address of the one it replaced.
@@ -307,7 +307,7 @@ and leaves the preview's pick and the click's able to disagree). Trim,
 Fillet, Offset and Leader still pick with `pick_tolerance` and no view
 (`docs/drawing.md`, "Not done").
 
-**Roles in a preview.** `ToolFeedback` (`rust/crates/katana_cad/src/tool_feedback.rs`)
+**Roles in a preview.** `ToolFeedback` (`crates/katana_cad/src/tool_feedback.rs`)
 kept `shapes` (the ghost, dashed) and `markers` (base points) and gained
 `marks` - geometry by ROLE: Target (what a click takes), Added (what it makes,
 read from the result), Removed (what it takes away), Enter (what Enter, not
@@ -318,7 +318,7 @@ beside the cursor, `refused` when a click there would be refused, and
 hidden. A mark flagged `FeedbackMark::refused` is the refusal's reason
 (the vertex Insert is too near, the end that is no corner), drawn as a ring
 struck through; a refused preview that flags none has its Target marks
-drawn so. The view draws a role its own way (`rust/crates/katana_window/src/drawing/feedback_painter.rs`),
+drawn so. The view draws a role its own way (`crates/katana_window/src/drawing/feedback_painter.rs`),
 so no tool picks a colour; a tool that fills only `shapes` and `markers` is
 drawn as before. The new members have default initialisers, so the tools
 that build one as `{shapes, markers}` - or a mark as `{role, geometry,
@@ -414,7 +414,7 @@ and clear the selection - so the first Esc ends the tool and keeps the
 selection it was started on, and the second clears it.
 
 **The menus are the catalogue.** `tools::fill_tool_menus`
-(`rust/crates/katana_window/src/tools/tool_menus.rs`) builds the Draw, Modify and Annotate
+(`crates/katana_window/src/tools/tool_menus.rs`) builds the Draw, Modify and Annotate
 menus and toolbars from `katana_cad::tool_catalog()`: one action per tool, shared by
 its menu and its toolbar and named by the tool's id (`draw.line`), with its
 family's icon, its shortcut, its tip as the status tip and a tooltip naming its

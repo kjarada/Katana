@@ -7,7 +7,7 @@
 ;     (any folder they can write to), and asks for no administrator rights. The registry is
 ;     touched under HKCU only. The updater (docs/update.md) replaces files inside that folder
 ;     as the same user, and a per-user install is what lets it do so without a UAC prompt.
-;   * What it writes where, and the updater reads (rust/crates/katana_update/src/registry.rs):
+;   * What it writes where, and the updater reads (crates/katana_update/src/registry.rs):
 ;       HKCU\Software\Jarada\Katana                                  the install folder
 ;       HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Katana
 ;                                          DisplayName DisplayVersion Publisher UninstallString
@@ -363,7 +363,7 @@ SectionEnd
 ; Deletes one file a release lists, and the folders that leaves empty.
 ;
 ; Push the path as the manifest writes it, with \ for /, relative to the install folder. It
-; is the same rule as the updater's (rust/crates/katana_update/src/paths.rs) in the part that matters
+; is the same rule as the updater's (crates/katana_update/src/paths.rs) in the part that matters
 ; here: the first folder is one a release installs into, and no component is "." or "..", so a
 ; manifest that has been tampered with cannot send the delete outside the folder. A path that
 ; fails is skipped, not an error: what the uninstaller cannot vouch for it leaves.

@@ -1,7 +1,7 @@
 # Sheets: the plot frame, sheet sets and the sheet generators
 
 A drawing is handed over on paper, or as PDF pages that stand in for paper.
-Katana's single-page plot (`rust/crates/katana_cad/src/plot.rs`, `docs/cad.md`) puts
+Katana's single-page plot (`crates/katana_cad/src/plot.rs`, `docs/cad.md`) puts
 one plan view on one page. This document describes what a whole SET of sheets
 is made of: several sheets, each with a title block and several views, all
 numbered and filled in automatically.
@@ -19,7 +19,7 @@ This part is the **model**: the data, the frame, the generators and the
 undoable edits. It lives in `katana_cad` and draws nothing itself. The painter that
 draws a sheet and the editor for sheets come next ("Not yet", at the end).
 
-| Module (`rust/crates/katana_cad/src/plotting/`) | What it holds |
+| Module (`crates/katana_cad/src/plotting/`) | What it holds |
 |---|---|
 | `frame.rs` | the frame: paper, margins, drawing area, lines, texts, cells, field slots, the logo slot; uniform scaling to other sizes |
 | `sheet_set.rs` | `SheetSet`, `Sheet`, `Viewport`; fields and their automatic values |
@@ -28,7 +28,7 @@ draws a sheet and the editor for sheets come next ("Not yet", at the end).
 | `sheet_json.rs` | the versioned JSON a project stores its sheets in |
 | `sheet_commands.rs` | the undoable edits, the logo import, the project's field values |
 
-`rust/crates/katana_cad/src/document.rs` gains `sheet_set()`, `sheet_set_status()` and
+`crates/katana_cad/src/document.rs` gains `sheet_set()`, `sheet_set_status()` and
 `set_sheet_set()`, and `plot.rs` gains the finer sheet scale ladder
 `SHEET_SCALES` and `sheet_scale_at_least`. The tests are in `tests/cad/plotting/`.
 
@@ -98,7 +98,7 @@ The frame is the owner's cross-section app's A3 landscape frame. It was
 measured item by item from the app's own parser and renderer, and the
 renders were compared with the app's page. The result is committed as data:
 `resources/plot_frames/a3_landscape.json`. The build compiles that file in
-with `include_bytes!` (`rust/crates/katana_cad/src/plotting/frame.rs`; the C++
+with `include_bytes!` (`crates/katana_cad/src/plotting/frame.rs`; the C++
 used C++26 `#embed` of the same file). Cargo tracks the included file, so
 editing it rebuilds the frame, and a missing file is a build error rather than
 a blank title block.
@@ -648,7 +648,7 @@ are at the edge of the A/A spread, and no claim is made for them either way.
 
 ## The sheet painter
 
-`rust/crates/katana_window/src/sheet_painter.rs` draws one sheet onto any `Canvas` (`rust/crates/katana_window/src/canvas/painter.rs`): the
+`crates/katana_window/src/sheet_painter.rs` draws one sheet onto any `Canvas` (`crates/katana_window/src/canvas/painter.rs`): the
 editor's canvas and every PDF page go through the same `paint_sheet`, so the
 editor shows exactly what plots. It reads no widget and keeps its caches
 (frames, cut sections, 3D snapshots, images, the plan painter's) in a
@@ -723,7 +723,7 @@ fitted to the drawing without adding it to the project.
 
 ## The sheet editor
 
-File > Sheets (Ctrl+Shift+P) opens `rust/crates/katana_window/src/sheet_editor.rs`, a window
+File > Sheets (Ctrl+Shift+P) opens `crates/katana_window/src/sheet_editor.rs`, a window
 beside the drawing:
 
 - **Sheets** on the left, each with a picture of itself: add, duplicate,
@@ -828,10 +828,10 @@ come to lay out other sheets than the typed line. The toolbar opens it
 without waiting (`open_generate_dialog`), which is how a headless session
 fills it; `generate_sheets` still runs it and waits.
 
-The tests are `rust/crates/katana_window/tests/sheets/sheet_painter.rs`,
-`sheet_editor.rs`, `rust/crates/katana_window/tests/sheet_editor/sheet_view_options.rs` (each field
+The tests are `crates/katana_window/tests/sheets/sheet_painter.rs`,
+`sheet_editor.rs`, `crates/katana_window/tests/sheet_editor/sheet_view_options.rs` (each field
 above, its line, its one step and its refusal) and
-`rust/crates/katana_window/tests/sheet_editor/generate_dialog.rs` (each layout's choices, the line they
+`crates/katana_window/tests/sheet_editor/generate_dialog.rs` (each layout's choices, the line they
 make, and the same sheets as that line typed into a second document with
 the window's context). `qt_generate_sheets_runs_the_line_it_shows_headless`
 fills the dialog in the window by its control names, presses Generate, and
@@ -840,7 +840,7 @@ undoes it as one step.
 ## Sheets on the command line
 
 Everything the editor does to sheets can be typed. The verbs are in
-`rust/crates/katana_cad/src/plotting/sheet_verbs.rs`: `runSheetVerb(document,
+`crates/katana_cad/src/plotting/sheet_verbs.rs`: `runSheetVerb(document,
 words)` runs one line and returns its reply, with no window. The
 `CommandInterpreter` hands them on, so they work in three places:
 - the window's command line;
@@ -1001,7 +1001,7 @@ the imagery a plan draws, so the front end supplies them
   imagery and meshes, the painter's rule for an automatic plan), and
   `ARRANGE MATCHSCALE`, `VIEW FIT`, `VIEW BESTROTATE` and
   `SHEET SUGGESTPAPER` what each view shows with its reference layers
-  (`viewport_content` in `rust/crates/katana_window/src/plotting/sheet_arrange.rs`). Headless they check
+  (`viewport_content` in `crates/katana_window/src/plotting/sheet_arrange.rs`). Headless they check
   the document (`check_document_sheets`) and measure the drawing.
 - The context is asked for only by the verbs that need it.
 
@@ -1017,7 +1017,7 @@ katana <copy-of-project> --command "GENERATE fit legend=on" \
 
 The `qt_sheets_agent_headless` test (`tools/check_sheets_agent_headless.cmake`)
 runs such a line with every verb above, and the verbs themselves are tested
-in `rust/crates/katana_cad/tests/road_sheet_verbs/sheet_agent_verbs.rs`.
+in `crates/katana_cad/tests/road_sheet_verbs/sheet_agent_verbs.rs`.
 
 **Title-block fields** are the set's shared values (`title_block_value`,
 `set_title_block_value`):
@@ -1089,7 +1089,7 @@ is copied into the project. The same lines give the same set every time.
   `katana project --command "GENERATE grid scale=500" --command SAVE
   --sheets-json - --plot-sheets out.pdf`.
 
-The tests are `rust/crates/katana_cad/tests/road_sheet_verbs/sheet_verbs.rs`, which types lines
+The tests are `crates/katana_cad/tests/road_sheet_verbs/sheet_verbs.rs`, which types lines
 through the interpreter:
 - every verb, with its reply and its errors;
 - each edit undone and redone exactly, one step at a time
@@ -1106,7 +1106,7 @@ in the window.
 
 A plot that comes out with a view under the title block, a plan over empty
 ground or a blank "Surveyed by" wastes the paper and the time of whoever
-reads it. `rust/crates/katana_cad/src/plotting/preflight.rs` finds such things
+reads it. `crates/katana_cad/src/plotting/preflight.rs` finds such things
 before the plot. `checkSheets(set, model, context, options)` reads the sheet
 set, the drawing and the project's field values and returns a list of
 `Finding`s. It changes nothing and needs no window, and the same input gives the
@@ -1267,7 +1267,7 @@ is not a whole number of zero or more.
                "viewport": "vp3", "message": "...", "fix": "..."}]}
 ```
 
-**In the editor** (`rust/crates/katana_window/src/plotting/sheet_checks.rs`):
+**In the editor** (`crates/katana_window/src/plotting/sheet_checks.rs`):
 - `preflightOptionsFor(source)` fills the options from the painter's
   `SheetSource`, and `checkSheetsFor(set, source, sheets)` runs the checks
   with them. The checks and the painter then agree about what prints empty:
@@ -1303,21 +1303,21 @@ is not a whole number of zero or more.
 - File > Plot Sheets to PDF and `--plot-sheets` log a summary line and each
   error before plotting (`preflight_log`), and plot.
 
-The tests are `rust/crates/katana_cad/tests/sheetverbs/preflight.rs` (each check with the
+The tests are `crates/katana_cad/tests/sheetverbs/preflight.rs` (each check with the
 smallest set that trips it and the nearest that does not, the order, the
 options, the JSON; `plan.surface-style` with a surface just inside and just
-outside the window), `rust/crates/katana_cad/tests/road_sheet_verbs/sheet_agent_verbs.rs`
+outside the window), `crates/katana_cad/tests/road_sheet_verbs/sheet_agent_verbs.rs`
 (`SHEETS CHECK` on a document with a too-fine style: the record and the JSON,
 mended and hidden), `cli.sheets_check_warns_of_a_surface_whose_contours_are_too_fine_to_plot`
 and `mcp_server::the_sheet_checks_warn_of_a_surface_whose_contours_are_too_fine_to_plot` in
-`rust/crates/katana_app/tests/mcp/mcp_server.rs`, and
-`rust/crates/katana_window/tests/sheet_editor/sheet_checks.rs`.
+`crates/katana_app/tests/mcp/mcp_server.rs`, and
+`crates/katana_window/tests/sheet_editor/sheet_checks.rs`.
 
 ## Arranging a sheet
 
-Layout advice and tidying, headless first. `rust/crates/katana_cad/src/plotting/arrange.rs`
+Layout advice and tidying, headless first. `crates/katana_cad/src/plotting/arrange.rs`
 holds pure functions on world points and on `Sheet` and `SheetSet` values.
-`rust/crates/katana_cad/src/plotting/arrange_commands.rs` makes each of them ONE
+`crates/katana_cad/src/plotting/arrange_commands.rs` makes each of them ONE
 undoable step on a document, through `edit_sheet`, `edit_viewport` or
 `edit_sheet_set`. The sheet editor's Arrange menu calls those steps, and an
 agent or a command-line verb calls the same ones.
@@ -1340,7 +1340,7 @@ the outlines it stored when it was made are stale and not counted. A
 chainage range wholly off the alignment shows none of it, and then, as the
 painter does, the drawing. The
 editor adds the window's reference layers and meshes
-(`rust/crates/katana_window/src/plotting/sheet_arrange.rs`, `drawing_content`).
+(`crates/katana_window/src/plotting/sheet_arrange.rs`, `drawing_content`).
 
 ### The best rotation
 
@@ -1532,9 +1532,9 @@ the sheet** (`sheetGenerateRotate`), which writes `rotate=on` on its
 The strip above, generated fitted, is one sheet at 1 : 2000 square and at
 1 : 1250 turned 3.62 degrees.
 
-The tests are `rust/crates/katana_cad/tests/sheetverbs/arrange.rs`,
-`rust/crates/katana_cad/tests/sheetverbs/arrange_commands.rs` and
-`rust/crates/katana_window/tests/sheet_editor/sheet_arrange.rs`. The last paints a turned
+The tests are `crates/katana_cad/tests/sheetverbs/arrange.rs`,
+`crates/katana_cad/tests/sheetverbs/arrange_commands.rs` and
+`crates/katana_window/tests/sheet_editor/sheet_arrange.rs`. The last paints a turned
 plan at 4 px a millimetre and finds each corner of the strip inked where the
 view's rotation, centre and scale put it, so the rotation means to the
 painter what it means to the model.
@@ -1565,7 +1565,7 @@ sheets:
 - the title is the sheet's name, or its typed `sheet_name`;
 - the scale is what its title block reports (`sheet_scale_text`). An automatic
   plan scale is decided first, as the painter decides it for the title block
-  (`resolved_sheet_set` in `rust/crates/katana_window/src/plotting/sheet_tables.rs`), so a
+  (`resolved_sheet_set` in `crates/katana_window/src/plotting/sheet_tables.rs`), so a
   plan drawn at 1:2000 is not listed at the 1:500 it was stored with. An
   automatic key plan is fitted to the sheets' outlines, as the painter fits
   it, and an automatic section's scale and exaggeration are the fitted ones
@@ -1575,7 +1575,7 @@ sheets:
 - the revision is the one typed on the sheet (its `revision` field), else
   the set's latest - the last in `SheetSet::revisions`.
 
-**The layout is headless.** `rust/crates/katana_cad/src/plotting/tables.rs` lays a
+**The layout is headless.** `crates/katana_cad/src/plotting/tables.rs` lays a
 table out: every rule, every text and its anchor in paper millimetres, the
 text size, the rows shown and the rows left out. The painter only draws what
 it is given, shading first, then rules, then text. The tests check the
@@ -1643,9 +1643,9 @@ written for Katana names the field directly, `REV {revision}`, and
 written only when it is not 0, and a value that is not a whole number of at
 least 0 is refused rather than read as some other count.
 
-The tests are `rust/crates/katana_cad/tests/plotting/tables.rs`,
-`rust/crates/katana_window/tests/sheets/sheet_tables_painter.rs` and
-`rust/crates/katana_window/tests/sheet_editor/sheet_register_editor.rs`.
+The tests are `crates/katana_cad/tests/plotting/tables.rs`,
+`crates/katana_window/tests/sheets/sheet_tables_painter.rs` and
+`crates/katana_window/tests/sheet_editor/sheet_register_editor.rs`.
 
 ## The smart legend
 
@@ -1654,7 +1654,7 @@ that are not on the sheet. A set strung along a road then names the whole
 survey on every page. So a Legend viewport lists what the sheet's plans
 actually SHOW, each entry with a sample drawn exactly as the plan prints it.
 
-The logic is headless, in `rust/crates/katana_cad/src/plotting/legend.rs`:
+The logic is headless, in `crates/katana_cad/src/plotting/legend.rs`:
 `computeLegend(model, set, sheetIndex, scope, options)` is a pure function of
 the model, the set and the options. The painter, the editor, a test and an
 agent all get the same list from it.
@@ -1731,7 +1731,7 @@ the legend lists what the plan beside it drew. Without it, `fitted_plan_window`
 applies the same rule to the model. It does not count imagery and meshes,
 which the model does not hold.
 
-**On the paper** (`rust/crates/katana_window/src/plotting/legend_painter.rs`):
+**On the paper** (`crates/katana_window/src/plotting/legend_painter.rs`):
 - The heading reads LEGEND.
 - Each entry has a sample cell of 10 x 3.6 mm and its label in capitals
   beside it, 1.8 mm high.
@@ -1749,7 +1749,7 @@ paper colour rule (`paper_colour`), so white prints black.
 
 | Kind | Sample |
 |---|---|
-| Line | a library linestyle's own strokes through the shared style painter (`rust/crates/katana_window/src/customisation/style_painter.rs`), else a model linetype's dashes, else a plain line, in the entry's weight; a style's symbol at each end, as the plan puts one at every vertex |
+| Line | a library linestyle's own strokes through the shared style painter (`crates/katana_window/src/customisation/style_painter.rs`), else a model linetype's dashes, else a plain line, in the entry's weight; a style's symbol at each end, as the plan puts one at every vertex |
 | Symbol | the symbol at its plotted size: a size on the ground at the legend's scale, the library definition's own, or the plain mark's for a built-in shape. It is shrunk only when it would not fit its cell |
 | Point | the plain point mark, 2 mm across, as on the plan |
 | Area | a swatch filled or hatched with the entry's pattern, outlined as a line of the entry is |
@@ -1777,21 +1777,21 @@ set - this sheet has no plan".
 | `legendJson(legend)` | the entries as JSON: kind, label, style, layer, code, colour, weight, linetype, symbol and its size, hatch and count, every member written |
 | `to_string` / `legend_scope_from` | `this_sheet`, `whole_set`, `whole_drawing` |
 
-The tests are `rust/crates/katana_cad/tests/sheetverbs/legend.rs` (visibility by rectangle
+The tests are `crates/katana_cad/tests/sheetverbs/legend.rs` (visibility by rectangle
 and rotation, hidden layers, grouping, labels, order, scopes, storage, the
-flow into columns), `rust/crates/katana_window/tests/sheets/legend_painter.rs` (each
+flow into columns), `crates/katana_window/tests/sheets/legend_painter.rs` (each
 kind of sample, a symbol inked in its cell at its plotted size, the panel on
-a sheet, "+N more") and `rust/crates/katana_window/tests/sheet_editor/legend_properties.rs`
+a sheet, "+N more") and `crates/katana_window/tests/sheet_editor/legend_properties.rs`
 (the scope choice in the editor).
 
 ## The coordinate grid and the live key plan
 
 Two things a plan viewport works out for itself. The geometry of both is in
-`katana_cad`, with no window: `rust/crates/katana_cad/src/plotting/plan_grid.rs` and
-`rust/crates/katana_cad/src/plotting/key_plan.rs`. The painter only strokes and sets
+`katana_cad`, with no window: `crates/katana_cad/src/plotting/plan_grid.rs` and
+`crates/katana_cad/src/plotting/key_plan.rs`. The painter only strokes and sets
 what they return, so both are tested without pixels
-(`rust/crates/katana_cad/tests/plotting/plan_grid.rs`, `key_plan.rs`) and then once
-more on paper (`rust/crates/katana_window/tests/sheets/plan_grid_painter.rs`,
+(`crates/katana_cad/tests/plotting/plan_grid.rs`, `key_plan.rs`) and then once
+more on paper (`crates/katana_window/tests/sheets/plan_grid_painter.rs`,
 `plan_grid_editor.rs`).
 
 ### The coordinate grid
@@ -1941,18 +1941,18 @@ each service it crosses is and how deep. Every decision made with numbers is
 headless, in `katana_cad`, so an agent reads the same numbers the sheet
 prints:
 
-| Header (`rust/crates/katana_cad/src/plotting/`) | What it decides |
+| Header (`crates/katana_cad/src/plotting/`) | What it decides |
 |---|---|
 | `section_fit.rs` | the automatic scale and exaggeration (`fit_section`, `fit_exaggeration`, `SECTION_EXAGGERATIONS`), the label steps (`label_step`, `round_step_at_least`, `step_text`, `grid_values`), the plot's layout (`section_plot_layout`), a viewport's area, stations and half width (`section_drawing_area`, `viewport_stations`, `viewport_half_width`) |
 | `section_annotation.rs` | the design and ground series (`design_series`, `ground_series`), levels (`level_at`, `level_range`), cut and fill (`cut_fill_at`, `cut_fill_text`, `earthwork_regions`, `outline_area`), a crossing's note (`own_level`, `crossing_note`) and where labels go (`place_labels`) |
 
-The painter is `rust/crates/katana_window/src/plotting/section_painter.rs`
+The painter is `crates/katana_window/src/plotting/section_painter.rs`
 (`paint_section_viewport`, `fit_section_viewport`). It measures its text and
 draws what those decide. It draws through the sheet painter's paper, pens
 and text setter (`SectionCanvas`), so every colour and weight still passes
 through `paper_pen`, `dashed_pen` and the `TextSetter`. The tests are
-`rust/crates/katana_cad/tests/plotting/section_fit.rs` and `section_annotation.rs`
-without pixels, and `rust/crates/katana_window/tests/sheets/sheet_sections.rs` and
+`crates/katana_cad/tests/plotting/section_fit.rs` and `section_annotation.rs`
+without pixels, and `crates/katana_window/tests/sheets/sheet_sections.rs` and
 `section_editor.rs` on paper and in the editor.
 
 ### The automatic section scale
@@ -1990,7 +1990,7 @@ automatic plan's scale (`SheetPainter::run`). So the viewport's title
 (`LONG SECTION H 1:750 V 1:75`) and the title block's scale cell report the
 scale drawn. A cross-section viewport with one station keeps its title
 `CROSS SECTION CH 120.000`, and its scale is in the title block.
-`resolve_section_viewport` (`rust/crates/katana_window/src/sheet_painter.rs`) gives the same
+`resolve_section_viewport` (`crates/katana_window/src/sheet_painter.rs`) gives the same
 answer without painting; the editor shows it as the tooltip of the scale
 box.
 
@@ -2107,7 +2107,7 @@ chosen by plain data, so the Plot dialog, `katana --plot-sheets` and an agent
 make the same call and get the same files.
 
 **The colour mode** is `katana_cad::plot::PlotColourMode` in
-`rust/crates/katana_cad/src/plot.rs`, carried by `PlotSettings::colour_mode`
+`crates/katana_cad/src/plot.rs`, carried by `PlotSettings::colour_mode`
 with `PlotSettings::line_weight_scale` beside it. The rule lives in the model,
 in `katana_cad::plot::paper_colour` (a pen or a letter) and `katana_cad::plot::paper_fill_colour` (an
 area), so the plan painter, the sheet painter and the frame agree:
@@ -2126,7 +2126,7 @@ area), so the plan painter, the sheet painter and the frame agree:
 
 In the sheet painter the mode is applied in ONE place: `paper_pen`,
 `dashed_pen`, `TextSetter` and the `paper_fill` helper call `plot_ink` and
-`plot_fill` (`rust/crates/katana_window/src/plotting/plot_style.rs`), and every image placed
+`plot_fill` (`crates/katana_window/src/plotting/plot_style.rs`), and every image placed
 on a sheet - the logo, an image viewport, the 3D snapshot - passes through
 `plot_image`, which greys it (a photograph is printed grey, not thresholded,
 in monochrome). A plan viewport follows because the plan painter takes the
@@ -2135,7 +2135,7 @@ paper (0.1 to 5): a check plot at 0.7, a bold one at 1.4; text, dash lengths
 and symbol sizes are unchanged.
 
 **The page setup** is `katana_cad::plotting::page_setup::PageSetup`
-(`rust/crates/katana_cad/src/plotting/page_setup.rs`), kept at the end of
+(`crates/katana_cad/src/plotting/page_setup.rs`), kept at the end of
 `SheetSet` and in its JSON as `page_setup` (each member only when it is not
 the default): the colour mode (by name), line weight scale, resolution (50 to
 1200 dpi, 300 by default), the file-name pattern and whether a PDF plot is a
@@ -2152,7 +2152,7 @@ names prefixed, 120 bytes at most) and tells repeats apart with " (2)".
 ""/"all", and refuses a sheet that is not there or a backward range saying
 which; `katana_cad::plotting::page_setup::format_sheet_selection` writes the short form back.
 
-**The outputs** are `rust/crates/katana_window/src/plotting/plot_output.rs`: a
+**The outputs** are `crates/katana_window/src/plotting/plot_output.rs`: a
 `PlotRequest` (sheets, `PlotFormat`, style, dpi, destination, pattern, title)
 given to `plot_sheets` writes
 
@@ -2160,7 +2160,7 @@ given to `plot_sheets` writes
 - `pdfs`: a PDF a sheet in the destination folder, named by the pattern;
 - `png`, `tiff`: a raster a sheet at the dpi, with the resolution recorded
   in the file; one grey channel when the mode is not Colour. TIFF is written
-  by `rust/crates/katana_window/src/plotting/tiff_writer.rs` (baseline, Deflate), as the
+  by `crates/katana_window/src/plotting/tiff_writer.rs` (baseline, Deflate), as the
   C++ wrote its own because Qt's TIFF plugin was not everywhere;
 
 and `print_sheets` writes the sheets as the pages of a PDF for a printer, a
@@ -2175,7 +2175,7 @@ half a set and an earlier file as it was.
 
 **Progress.** `plot_sheets` calls a `PlotProgress` before each sheet;
 returning false cancels before the next one. The Plot dialog
-(`rust/crates/katana_window/src/plotting/plot_dialog.rs`, `PlotDialog`) only collects a
+(`crates/katana_window/src/plotting/plot_dialog.rs`, `PlotDialog`) only collects a
 request; `plot_with_progress` then runs it on the GUI thread behind an
 application-modal progress dialog (`plotProgress`) with Cancel, so the
 sheets cannot be edited while they are painted, and the plot paints from a
@@ -2186,14 +2186,14 @@ without plotting ("The Sheet Set menu and Page Setup"). On the command line, `--
 `--sheets`, `--format pdf|pdfs|png|tiff`, `--plot-style colour|grey|mono`,
 `--dpi` and `--line-weight-scale` (`docs/headless.md`).
 
-The tests are `rust/crates/katana_cad/tests/plotting/page_setup.rs`,
-`rust/crates/katana_window/tests/sheets/plot_style.rs`, `rust/crates/katana_window/tests/sheets/plot_output.rs` and
-`rust/crates/katana_window/tests/sheet_editor/plot_dialog.rs`.
+The tests are `crates/katana_cad/tests/plotting/page_setup.rs`,
+`crates/katana_window/tests/sheets/plot_style.rs`, `crates/katana_window/tests/sheets/plot_output.rs` and
+`crates/katana_window/tests/sheet_editor/plot_dialog.rs`.
 
 ## The Sheet Set menu and Page Setup
 
 The Sheets editor's first menu, **Sheet Set** (`sheetSetMenu`,
-`rust/crates/katana_window/src/plotting/sheet_set_menu.rs`), keeps the whole set in a file
+`crates/katana_window/src/plotting/sheet_set_menu.rs`), keeps the whole set in a file
 and changes how it plots without plotting. Each item runs the `SHEETS` line
 a person would type through the editor (`SheetEditor::run_line`; in the
 window, its one executor), so the log shows what to type and each edit is
@@ -2245,9 +2245,9 @@ itself. Before, the page setup changed only after a plot had run with "Keep
 these settings" ticked. `--dialog sheetPageSetup` finds the dialog by the
 action's data, so a headless session fills and saves it.
 
-The tests are `rust/crates/katana_cad/tests/road_sheet_verbs/sheets_append.rs` (the verb: one
+The tests are `crates/katana_cad/tests/road_sheet_verbs/sheets_append.rs` (the verb: one
 step, renumbered as `prepare_for_append` renumbers, the set's own title block
-kept, every refusal) and `rust/crates/katana_window/tests/sheet_editor/sheet_set_menu.rs`
+kept, every refusal) and `crates/katana_window/tests/sheet_editor/sheet_set_menu.rs`
 (each item by its control name: save and load round trip with the question
 answered and cancelled, append, the clipboard, the page setup saved with no
 plot and refused when it cannot be typed, and the headless session).
@@ -2260,9 +2260,9 @@ and `cli.sheets_append_puts_another_sets_sheets_after_these` the verb in
 What makes the sheet editor a layout tool: several viewports picked and
 moved at once, a clipboard, a paper grid, rulers, the world under the cursor,
 and a list of sheets that shows each one. What an edit does is decided in
-`rust/crates/katana_cad/src/plotting/viewport_edits.rs`, with no window, so an agent
+`crates/katana_cad/src/plotting/viewport_edits.rs`, with no window, so an agent
 makes the same edits without the canvas and a test checks each without a
-mouse. The editor's pieces are in `rust/crates/katana_window/src/plotting/`: the rulers and
+mouse. The editor's pieces are in `crates/katana_window/src/plotting/`: the rulers and
 grid (`sheet_rulers.rs`), the cursor readout (`sheet_readout.rs`), the
 pictures of the sheets (`sheet_thumbnails.rs`), the list
 (`sheet_list_widget.rs`), the clipboard (`viewport_clipboard.rs`), the
@@ -2460,8 +2460,8 @@ empty list is refused with `InvalidArgument`; a repeated id counts once. A
 refused edit changes nothing, and an edit that would change nothing adds no
 step.
 
-The tests are `rust/crates/katana_cad/tests/plotting/viewport_edits.rs` and
-`rust/crates/katana_window/tests/sheet_editor/sheet_editor_editing.rs`.
+The tests are `crates/katana_cad/tests/plotting/viewport_edits.rs` and
+`crates/katana_window/tests/sheet_editor/sheet_editor_editing.rs`.
 
 ## Not yet
 

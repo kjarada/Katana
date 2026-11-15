@@ -3,7 +3,7 @@
 Katana runs without a display in two ways: `katana_cli`, the engine with no
 GUI at all, and the desktop application `katana` driven by switches, which
 builds the real window with no display - the egui window drawn by the
-headless runner (`rust/crates/katana_window/src/drive/headless.rs`) on the
+headless runner (`crates/katana_window/src/drive/headless.rs`) on the
 CPU, with no GPU and no windowing system - acts on it as a person would and
 writes a screenshot or a PDF. The second is how the window, its menus and its dialogs
 are tested (`docs/testing.md`) and how a change to the look is reviewed by
@@ -28,7 +28,7 @@ Scripts and `-c` batches stop at the first failing command and exit 1, so the
 tool composes with shell pipelines. A refusal is one line on stderr; a
 refusal that carries a report - `UTILITY CHECK` of a schedule with errors -
 prints the report after it on stdout, where a reply goes, so output kept from
-stdout has it (`rust/crates/katana_app/tests/session/session.rs`). The `cli.*` tests
+stdout has it (`crates/katana_app/tests/session/session.rs`). The `cli.*` tests
 (`tests/cli/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
 process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
@@ -54,7 +54,7 @@ The same session is served to Claude over the Model Context Protocol by
 
 ### Text and names
 
-Text in the model is UTF-8 (`rust/crates/katana_core/src/text_encoding.rs`), and two things follow
+Text in the model is UTF-8 (`crates/katana_core/src/text_encoding.rs`), and two things follow
 from that for `katana_cli` and `katana_mcp`, which on Windows are handed a
 command line, a script and a pipe in the ANSI code page unless they ask for
 more. Until this change they did not: an accented letter in a path ended the
@@ -120,11 +120,11 @@ LEGEND JSON`). One rule now, applied where text arrives:
   now refuses (ANSI bytes, a double quote an importer let through) opens, with
   the name repaired (`SurfaceStore::nameable`) and a warning in the log.
 
-What is tested without a console: `rust/crates/katana_core/tests/text_encoding.rs` (the
-Windows-1252 reading), `rust/crates/katana_update/tests/contract.rs` (UTF-16 to UTF-8, the
+What is tested without a console: `crates/katana_core/tests/text_encoding.rs` (the
+Windows-1252 reading), `crates/katana_update/tests/contract.rs` (UTF-16 to UTF-8, the
 conversion every wide argument goes through), the door tests in
-`rust/crates/katana_terrain/tests/geo_terrain/surface_store.rs`, `rust/crates/katana_cad/tests/document/surface_style.rs`
-and `rust/crates/katana_cad/tests/terrain_utility_verbs/surface_verbs.rs`, and the `cli.non_ascii_*` /
+`crates/katana_terrain/tests/geo_terrain/surface_store.rs`, `crates/katana_cad/tests/document/surface_style.rs`
+and `crates/katana_cad/tests/terrain_utility_verbs/surface_verbs.rs`, and the `cli.non_ascii_*` /
 `cli.ansi_lines_*` / `cli.mcp_opens_a_non_ascii_*` tests
 (`tests/cli/text_cli.cmake`), which start the real programs from a
 folder named with an accented letter, a letter in no Western code page and a
@@ -194,7 +194,7 @@ file-name pattern; `--plot-style` prints in `colour`, `grey` or `mono`;
 default); `--line-weight-scale` multiplies every line weight (0.1 to 5).
 Every file written is printed on stdout, a path a line. The File menu's Plot
 dialog and the switch share `plot_sheets` in
-`rust/crates/katana_window/src/plotting/plot_output.rs`. `--plot` takes `--plot-style` and
+`crates/katana_window/src/plotting/plot_output.rs`. `--plot` takes `--plot-style` and
 `--line-weight-scale` too.
 
 **`--sheets-json out.json`** writes the
@@ -226,9 +226,9 @@ real screen.
 ## The switches
 
 The program driver parses them (`katana_window::drive::run::read_switches`,
-`rust/crates/katana_window/src/drive/run.rs`; the steps' switches are
-`StepKind::from_switch` in `rust/crates/katana_window/src/drive/steps.rs`), and
-its module comment is the reference; `rust/crates/katana_window/src/bin/katana/main.rs`
+`crates/katana_window/src/drive/run.rs`; the steps' switches are
+`StepKind::from_switch` in `crates/katana_window/src/drive/steps.rs`), and
+its module comment is the reference; `crates/katana_window/src/bin/katana/main.rs`
 is the program around it. Arguments that are not switches are opened (a directory) or
 imported (anything else), in order, before any step runs.
 
@@ -271,7 +271,7 @@ through their session's `startCustomisation`.)
 
 | Variable | What it says |
 |---|---|
-| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`rust/crates/katana_cad/src/customisation_host.rs`), tried in this order: unset, the built-in is the DEFAULT customisation compiled into the program (Katana Standard), when the build has one; `none`, there is no built-in for this run; a built-in's NAME (`NSW`, `Katana Standard`; any letter case), that compiled-in built-in is the built-in of this run; otherwise a path, THAT Katana customisation file is the built-in (a file in the working folder called like a built-in is given as `./name`). One that does not read is said - a word that is no built-in's name also lists the names there are - and the run has no built-in, never the compiled-in one in its place |
+| `KATANA_BUILTIN_CUSTOMISATION` | the seam (`crates/katana_cad/src/customisation_host.rs`), tried in this order: unset, the built-in is the DEFAULT customisation compiled into the program (Katana Standard), when the build has one; `none`, there is no built-in for this run; a built-in's NAME (`NSW`, `Katana Standard`; any letter case), that compiled-in built-in is the built-in of this run; otherwise a path, THAT Katana customisation file is the built-in (a file in the working folder called like a built-in is given as `./name`). One that does not read is said - a word that is no built-in's name also lists the names there are - and the run has no built-in, never the compiled-in one in its place |
 | `KATANA_CUSTOMISATION` | the kept customisation file: what `CUSTOMISE KEEP` writes and the next start reads in the place of the built-in. Unset, a headless run has none, and `KEEP` and `REVERT` are refused naming the variable. It is the ONLY way a headless run reads or writes one: it looks in no per-user place, so that it is the same run on every machine. (An interactive window with the variable unset keeps its own in the per-user place: `docs/desktop.md`, "How the window starts") |
 
 The start-up line says what was installed, on stderr with the rest of the
@@ -390,7 +390,7 @@ test executable without being named on the command line; there is none.
 
 The `cli.` tests are held by the same variable: `katana_cli` starts its
 session through `katana_cad::customisation_host::start_customisation` and reads the seam
-(`rust/crates/katana_app/src/session.rs`).
+(`crates/katana_app/src/session.rs`).
 
 ## The steps: driving dialogs, docks and the command line
 
@@ -431,8 +431,8 @@ passed. A step that cannot be taken - an unknown
 dialog or widget, a fill of a choice the dialog does not offer, a press of a
 disabled button - ends the run with exit 1 and a sentence on stderr, never a
 crash and never a silent no-op. The names a dialog's fields carry are listed
-in its module (`rust/crates/katana_window/src/survey/survey_dialogs.rs`, `survey_import_wizard.rs`,
-`survey_points_ui.rs`, `rust/crates/katana_window/src/ifc_dialogs.rs`, the managers' own).
+in its module (`crates/katana_window/src/survey/survey_dialogs.rs`, `survey_import_wizard.rs`,
+`survey_points_ui.rs`, `crates/katana_window/src/ifc_dialogs.rs`, the managers' own).
 File > Export IFC, for one, is `@fileExportIfc|ifcExportFile=out.ifc|!ifcExportPreview|?ifcExportClasses|!ifcExportExport`:
 the preview's table printed, then the file written
 (`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`). A
@@ -459,7 +459,7 @@ move - and for `+` a press and a release - and paint again. The view cannot
 tell them from a person's mouse, so they drive the same code: snapping, the
 grips, the tool's pick. Each prints one line, numbers exact
 (`format_exact_real`), what the view then drew of the running tool's preview
-by role (`rust/crates/katana_window/src/drawing/feedback_painter.rs`) - `enter` counts where Enter,
+by role (`crates/katana_window/src/drawing/feedback_painter.rs`) - `enter` counts where Enter,
 not a click, would add:
 
     pointer: action=hover x=110.3 y=50 tool=draw.vertex.insert expects=point shapes=0 markers=0 target=1 added=1 removed=0 enter=0 focus=4 refused=no caption="new vertex between 1 and 2 · 15.000 from 1" prompt="Insert Vertex: Click on polyline 2 where the new vertex goes"
@@ -590,7 +590,7 @@ starting the window:
 - **No automatic check.** `UpdateWorkbench::start` is called by `main()` only
   for a window that is shown, and does nothing in a headless one.
 - **No per-user state.** The UPDATE verbs are given the headless window's
-  surface (`rust/crates/katana_app/src/update_verbs.rs`, `HeadlessWindow`), whose context
+  surface (`crates/katana_app/src/update_verbs.rs`, `HeadlessWindow`), whose context
   has no state folder: nothing is read from or written to the update folder
   of whoever runs the suite - not when the last check was, not a skipped
   version, not how the last update ended, which an interactive start shows
@@ -656,7 +656,7 @@ release still downloaded. A window nobody drove says it in a message box as
 well, since nobody reads a GUI program's stderr; a run that was given a line
 to run - `--command`, `--enter` or `--run-line` - is shown none, because
 whoever started it may not be there to close it, and it would wait for ever
-(`rust/crates/katana_window/src/bin/katana/main.rs`). Which runs are shown none is a function of the
+(`crates/katana_window/src/bin/katana/main.rs`). Which runs are shown none is a function of the
 steps the run was given, and tested (`update_failure_is_boxed`,
 `update_decisions::an_update_that_could_not_be_started_is_boxed_only_in_a_window_nobody_drove`); `main()`'s
 own path - stderr, exit 1, the box - is reached by no test (`docs/desktop.md`,
@@ -668,7 +668,7 @@ window exists:
 **`katana_update::recover`, first in `main()`.** The program looks whether an update
 of the install it was started from was interrupted - a crash, a power cut -
 and has the install put back before it goes on
-(`rust/crates/katana_update/src/recover.rs`). With nothing interrupted, which is
+(`crates/katana_update/src/recover.rs`). With nothing interrupted, which is
 every start but that one, it is a listing of one folder, and of none in a
 copy that has never updated: a build tree. This is not a per-user matter: an
 install half swapped is no state for any run to start from. And it writes
@@ -694,9 +694,9 @@ recovery that fails is said on stderr with the command that puts the install
 right by hand, and the run goes on.
 
 **`--update-health TX`.** How the helper asks a version it has just put in
-place whether it starts (`rust/crates/katana_update/src/apply.rs`, step 7). The run
+place whether it starts (`crates/katana_update/src/apply.rs`, step 7). The run
 is headless and its window is never shown; the marker `healthy-<TX>` goes to
-the update state folder (`rust/crates/katana_update/src/state.rs`) - the one thing a
+the update state folder (`crates/katana_update/src/state.rs`) - the one thing a
 headless run writes to a per-user place, and the reason the switch exists.
 Then it EXITS: the helper waits for that exit, and starts Katana again itself
 as a person would (`docs/desktop.md`, "Help > Check for Updates", "the health
@@ -774,13 +774,13 @@ A modal box in a headless run is a hang until the test's timeout. So
   every run here starts from a build tree, which is a development copy and
   never asks a server, downloads or applies. Those states, and what the
   window decides from a check's answer, the update folder and the last
-  result, are the widget tests' (`rust/crates/katana_window/tests/update/update_dialog.rs`,
+  result, are the widget tests' (`crates/katana_window/tests/update/update_dialog.rs`,
   `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
   the update system's own end-to-end tests'.
 - No step presses a key into a view (`&KEY` was proposed for a view's own
   keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
   through `>` alone; the rest is tested in the window's own tests
-  (`rust/crates/katana_window/tests/`) with real key events, where the
+  (`crates/katana_window/tests/`) with real key events, where the
   window's shortcut map is not in the way, so Delete through that map is not
   driven end to end.
 - No step drags: `+` is a press and a release at one point. A grip drag is
@@ -803,8 +803,8 @@ A modal box in a headless run is a hang until the test's timeout. So
   `path_from_utf8` has not been re-checked since the port; the list stands as
   where to look.
   - Most of them hand a file name to GDAL, PDAL or a message. Examples:
-    `rust/crates/katana_gis/src/gdal_adapter.rs`, `rust/crates/katana_pointcloud/src/point_cloud_engine.rs`,
-    `rust/crates/katana_interop/src/import.rs` and `rust/crates/katana_interop/src/terrain_io.rs`.
+    `crates/katana_gis/src/gdal_adapter.rs`, `crates/katana_pointcloud/src/point_cloud_engine.rs`,
+    `crates/katana_interop/src/import.rs` and `crates/katana_interop/src/terrain_io.rs`.
   - The Windows ARM64 build therefore cannot import, for example, a raster
     under `C:/Users/José`. The GCC builds can: `path_to_utf8` and
     `path_from_utf8` give exactly what libstdc++ gives there, and on Linux and
@@ -813,12 +813,12 @@ A modal box in a headless run is a hang until the test's timeout. So
     is one change, with a test per reader that opens a file under a folder
     named as the `cli.non_ascii_*` tests' is.
   - Two of the nine are urgent on GCC too, both in
-    `rust/crates/katana_interop/src/archive12d.rs`:
+    `crates/katana_interop/src/archive12d.rs`:
     - one takes a zip member's name, which may be code page 437;
     - the other takes a file name the archive references, written on Windows,
       which may be Windows-1252.
     libstdc++ throws at a byte that is not UTF-8, and `path_from_utf8` never
     does.
-  - Two in `rust/crates/katana_window/src/gis_online.rs` read an environment variable with
-    the C library's `getenv` in the C++, which `rust/crates/katana_core/src/path_text.rs` says to
+  - Two in `crates/katana_window/src/gis_online.rs` read an environment variable with
+    the C library's `getenv` in the C++, which `crates/katana_core/src/path_text.rs` says to
     read through `environment_variable`.

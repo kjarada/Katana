@@ -658,10 +658,10 @@ class CommandLine(unittest.TestCase):
 
 class StandardColours(unittest.TestCase):
     def test_the_table_is_the_one_the_reader_compiles_in(self):
-        """The 27 values against rust/crates/katana_entity/src/colour_names.rs, read as text; skipped outside a
+        """The 27 values against crates/katana_entity/src/colour_names.rs, read as text; skipped outside a
         checkout. (Until 2026-11-15 it read the C++ table, colour_names.cpp, which held the same 27.)"""
         import re
-        source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "rust", "crates",
+        source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "crates",
                               "katana_entity", "src", "colour_names.rs")
         if not os.path.exists(source):
             self.skipTest("no colour_names.rs beside this script's checkout")

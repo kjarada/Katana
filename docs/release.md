@@ -126,7 +126,7 @@ is the latest, and are never offered a version below their own.
 An installed Katana finds a newer version by reading two small files of the
 latest release, and then fetches only the files that differ from its own
 (`docs/update.md`; the addresses are built in
-`rust/crates/katana_update/src/feed.rs`):
+`crates/katana_update/src/feed.rs`):
 
 ```
 https://github.com/<repo>/releases/latest/download/Katana-update-<token>.json.sig
@@ -169,7 +169,7 @@ What the producer is told about a tree:
 
 | Option | Value | Why |
 |---|---|---|
-| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests, and the one the five packages were made with | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`is_newer_than`, `rust/crates/katana_update/src/trust.rs`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
+| `--sequence` | the UTC time in seconds at which the run began, read once in the Version job: ONE value for all five manifests, and the one the five packages were made with | it orders two BUILDS of one version, so it is taken when the building starts and not when the publishing does. A whole new run outranks an earlier one. The Publish job run again by itself gets the first job's value again, and so publishes the same files under the same sequence (for the same input the producer writes the same bytes, its zlib being the same). That matters because an update is offered when `(version, sequence)` is above what a copy recorded when it was last updated (`is_newer_than`, `crates/katana_update/src/trust.rs`): a sequence read at publishing would offer every such copy the files it already has, and have it restart to install none. The recheck refuses a release whose manifests disagree on it |
 | `--seed` | `share/katana/samples/*` | a seed is written only where it is absent. Opening a sample project changes it in place, so as ordinary data every update would fetch the samples again and write over what the user had done in them |
 | `--exclude` | `LICENSE`, and for Linux `ssl/*` | a manifest names files under `bin`, `share`, `etc` and `lib` and nowhere else, and the producer refuses a tree that holds anything more rather than leave it out unasked. The licence text lies beside those folders; the Linux tree keeps its certificate bundle in `ssl/`, where the bundled libcurl looks ("How the Linux and macOS packages are made self-contained"). Neither is ever updated |
 | `--version`, `--tag`, `--repo` | what is being published, and where | what a manifest offers, and its link to the release notes |
@@ -230,7 +230,7 @@ on Linux, and the recheck of the manifests it made passed.
 
 **No package holds a symbolic link,** which the producer refuses (a manifest
 has no way to say one, and the updater does not follow links,
-`rust/crates/katana_update/src/plan.rs`). The Linux tree has none by construction:
+`crates/katana_update/src/plan.rs`). The Linux tree has none by construction:
 `cmake/KatanaDeployUnix.cmake.in` copies each library as a FILE, under the
 name the loader asks for and with the contents its chain of links ends at,
 not the chain. Were one ever to appear - in a data folder, which that
@@ -413,9 +413,9 @@ against other programs than are packaged:
 | Variable | Read by | Why |
 |---|---|---|
 | `RUSTFLAGS` | rustc | `-D warnings`; on Linux and macOS also `-C link-arg=-Wl,-rpath,<prefix>/lib`, so the tests find the prefix's libraries (the packaging rewrites that entry) |
-| `KATANA_REQUIRE_UPDATE_KEYS=ON` | `rust/crates/katana_update/build.rs` | fails the build while `cmake/KatanaUpdateKeys.cmake` holds the placeholder update keys, since a program built with them can never be updated |
+| `KATANA_REQUIRE_UPDATE_KEYS=ON` | `crates/katana_update/build.rs` | fails the build while `cmake/KatanaUpdateKeys.cmake` holds the placeholder update keys, since a program built with them can never be updated |
 | `KATANA_UPDATE_REPO=<owner/name>` | the same | the repository an installed copy asks for the next version: the one the run publishes in, which is this repository unless the input `publish_repo` names another |
-| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` | `rust/crates/katana_cad/build.rs` | fails the build when the default built-in customisation is not there, rather than shipping a program that draws plain lines |
+| `KATANA_REQUIRE_BUILTIN_CUSTOMISATION=ON` | `crates/katana_cad/build.rs` | fails the build when the default built-in customisation is not there, rather than shipping a program that draws plain lines |
 
 Then the packaging configure is given `-DKATANA_REQUIRE_UPDATE_KEYS=ON`,
 `-DKATANA_UPDATE_REPO=<owner/name>` and `-DKATANA_UPDATE_SEQUENCE=<sequence>`,
@@ -475,7 +475,7 @@ The Linux and macOS toolchain prefixes are cached under a key that is the
 hash of `tools/setup_linux_toolchain.py` and the runner's system and
 architecture: its `SNAPSHOT` and `SPECS` fix every version. The specs lost
 everything only the C++ needed on 2026-11-15, so the first Rust run solves
-and installs a new prefix. cargo fetches the crates `rust/Cargo.lock` names
+and installs a new prefix. cargo fetches the crates `Cargo.lock` names
 from crates.io in each job; they are not cached. MSYS2 is not frozen: it
 installs whatever the rolling distribution has that day, so a Windows release
 records the versions of rustc, cargo and the compiler in its log (the
@@ -1070,7 +1070,7 @@ on macOS, breaks each one's code signature.
 Three kinds of file are found by a path compiled into a library for the
 prefix it was built in, which the user's machine does not have. Each is
 looked for beside the library instead
-(`rust/crates/katana_core/src/library_data.rs`, and katana_gis's
+(`crates/katana_core/src/library_data.rs`, and katana_gis's
 `gdal_registry.rs`, which hands GDAL what it found):
 
 | Library | Reads | From, in the package |
@@ -1625,7 +1625,7 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   of the four folders a manifest may name, so `ssl/cacert.pem` is excluded
   ("Update assets"). It will matter when a Linux copy can be updated in
   place: then either `ssl` joins the folders
-  (`rust/crates/katana_update/src/paths.rs` and both tools) or the bundle moves
+  (`crates/katana_update/src/paths.rs` and both tools) or the bundle moves
   under one of them.
 * **No CI on every change.** The whole suite runs in the release workflow,
   which is started by hand; a change is still gated by running the suite

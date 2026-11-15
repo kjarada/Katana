@@ -63,7 +63,7 @@ set(KATANA_PROGRAMS "" CACHE PATH
     "The folder cargo put the release programs in (<cargo target>/release): what is installed and packaged")
 if(KATANA_PROGRAMS STREQUAL "")
     message(FATAL_ERROR "Give -DKATANA_PROGRAMS=<the folder of the release programs cargo built>, "
-                        "e.g. rust/target/release, or ~/katana-build/<worktree>/cargo/release in WSL")
+                        "e.g. target/release, or ~/katana-build/<worktree>/cargo/release in WSL")
 endif()
 file(TO_CMAKE_PATH "${KATANA_PROGRAMS}" KATANA_PROGRAMS)
 if(NOT DEFINED KATANA_PUBLISHER)
@@ -134,13 +134,13 @@ endforeach()
 if(_katana_missing)
     list(JOIN _katana_missing "\n  " _katana_missing)
     message(FATAL_ERROR "The programs to package are not built:\n  ${_katana_missing}\n"
-                        "Build them first: cargo build --manifest-path rust/Cargo.toml --locked --workspace --release")
+                        "Build them first: cargo build --locked --workspace --release")
 endif()
 
 # --- the programs are the build this packages ----------------------------------------
 #
 # What a release must be built with reaches the programs through cargo's
-# environment, read by rust/crates/katana_update/build.rs: the update keys
+# environment, read by crates/katana_update/build.rs: the update keys
 # (cmake/KatanaUpdateKeys.cmake, refused while they are placeholders when
 # KATANA_REQUIRE_UPDATE_KEYS is set), the repository an installed copy asks for
 # the next version (KATANA_UPDATE_REPO) and the version (project(Katana
@@ -195,7 +195,7 @@ install(DIRECTORY "${KATANA_ROOT}/samples/"
     PATTERN "backups" EXCLUDE
     PATTERN "cache" EXCLUDE)
 # The built-in customisations are COMPILED INTO the programs
-# (rust/crates/katana_cad/build.rs embeds them with include_bytes!), so there is
+# (crates/katana_cad/build.rs embeds them with include_bytes!), so there is
 # nothing to install beside them: their linestyles, symbols and survey codes
 # travel inside the executable and need no files at run time.
 #
@@ -383,7 +383,7 @@ if(WIN32)
         # two, cpack stops at "Invalid character escape '\P'").
         set(CPACK_NSIS_INSTALL_ROOT "$LOCALAPPDATA\\\\Programs")
         # The key the installer writes under HKCU Software\<vendor> and ...\Uninstall, and the
-        # updater rewrites DisplayVersion in (rust/crates/katana_update/src/registry.rs): said
+        # updater rewrites DisplayVersion in (crates/katana_update/src/registry.rs): said
         # here rather than left to CPack's default, which is the install directory's name, so
         # that renaming one cannot move the other.
         set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "Katana")

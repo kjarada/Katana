@@ -16,25 +16,25 @@ development notes belong in `docs/`, and `docs/` does not cite it
 
 **Katana is Rust.** The owner had the whole product ported from C++ (decided
 2026-11-05; the C++ removed on the owner's word on 2026-11-15: "remove c++ i
-dont want to see it"). One Cargo workspace, `rust/`, holds a crate per layer
-(`rust/crates/katana_<layer>`) and the four programs: the window `katana`
+dont want to see it"). One Cargo workspace, at the checkout's root (`Cargo.toml`), holds a crate
+per layer (`crates/katana_<layer>`) and the four programs: the window `katana`
 (egui and wgpu), `katana_cli`, `katana_mcp` and `katana_updater`. The only
 C++ left is three small shims inside the crates that GDAL's algorithm
-framework and PDAL need (`rust/crates/katana_gis/native`,
-`rust/crates/katana_pointcloud/native`); write no other. CMake remains only as
+framework and PDAL need (`crates/katana_gis/native`,
+`crates/katana_pointcloud/native`); write no other. CMake remains only as
 the runner of the process-level tests (`project(Katana LANGUAGES NONE)`; the
 `cli.*` and headless window tests against the cargo-built programs).
 `docs/rust.md` is the port's record.
 
 **Start every session in the checkout root:** the folder that holds `.git`,
-`rust/` and this file, and nothing above it. A session started in a folder
+`Cargo.toml` and this file, and nothing above it. A session started in a folder
 that merely contains the checkout is not in a git repository, does not load
 this file or `.claude/settings.json` at the start, and puts its own
 `.claude/` in that outer folder instead of this one. Where things live:
 
 - **Tracked, shared:** `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/`.
 - **Ignored, per developer:** `.claude/settings.local.json`, `CLAUDE.local.md`,
-  `.claude/worktrees/`, `.vscode/`, `build/`, `rust/target/`.
+  `.claude/worktrees/`, `.vscode/`, `build/`, `target/`.
 - **Outside the repository, by Claude Code's design:** the auto-memory and the
   session transcripts, in `%USERPROFILE%\.claude\projects\<folder>\` (on
   Windows). They belong to one person's account, are never committed, and are
@@ -50,7 +50,7 @@ Katana is agentic CAD. A person must be able to do everything in the window
 with the mouse, and an AI agent must be able to do everything through a
 command. **Every feature ships, in the same change, in:**
 
-- **The desktop window (`katana`, `rust/crates/katana_window`).**
+- **The desktop window (`katana`, `crates/katana_window`).**
   - A menu item in the right menu and section, plus a toolbar or context-menu
     entry where apt.
   - A dialog or panel with a stable control name on every action and control
@@ -58,20 +58,20 @@ command. **Every feature ships, in the same change, in:**
   - The dialog does not do the work itself. It builds the verb line and hands
     it to the window's command executor, exactly as if it had been typed.
     That makes it one code path, logged and undoable like a typed command.
-    Models: `rust/crates/katana_window/src/gis_online_dialog.rs` (GIS > Online
+    Models: `crates/katana_window/src/gis_online_dialog.rs` (GIS > Online
     Data) and the Survey menu's utilities dialog
-    (`rust/crates/katana_window/src/survey/utility_dialog.rs`).
+    (`crates/katana_window/src/survey/utility_dialog.rs`).
 - **`katana_cli`.** Prefer a verb in the shared command interpreter
-  (`rust/crates/katana_cad/src/command_interpreter.rs`). There, the window's
+  (`crates/katana_cad/src/command_interpreter.rs`). There, the window's
   command line, `katana_cli` and `katana_mcp` all get it at once;
-  `rust/crates/katana_cad/src/plotting/sheet_verbs.rs` is the model for a verb
+  `crates/katana_cad/src/plotting/sheet_verbs.rs` is the model for a verb
   family. A verb that needs GDAL or PDAL lives in
-  `rust/crates/katana_app/src/session.rs`, and the window's command line must
+  `crates/katana_app/src/session.rs`, and the window's command line must
   accept it too. Add `cli.*` tests in `tests/cli/CMakeLists.txt`.
 - **`katana_mcp`.** It runs session lines, so a verb reaches it. When an agent
   needs structured data, add a tool or resource in
-  `rust/crates/katana_app/src/mcp/` and `docs/mcp.md`, and test it in
-  `rust/crates/katana_app/tests/mcp/`.
+  `crates/katana_app/src/mcp/` and `docs/mcp.md`, and test it in
+  `crates/katana_app/tests/mcp/`.
 
 Underneath all three:
 
@@ -106,15 +106,15 @@ labelling, coding, export, modify, measure, and drawing from data.
   colour, property and value, text, drawn only.
 - **One mechanism.**
   - `ModifyScope` and `ModifyFilter`, resolved by `match_entities`
-    (`rust/crates/katana_cad/src/global_modify.rs`).
+    (`crates/katana_cad/src/global_modify.rs`).
   - The verb grammar
     `[SELECTION|VIEW|DRAWING|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]] [WHERE k=v ...]`,
-    read by the one shared parser (`rust/crates/katana_cad/src/scope_verbs.rs`).
+    read by the one shared parser (`crates/katana_cad/src/scope_verbs.rs`).
     `VIEW` is the window's active plan view, supplied to the interpreter by the
     window; headless it is refused in favour of `AREA`.
   - In the window, the same "Apply to" and "Only those that match" controls
     as the Global Modify dialog, from one shared widget
-    (`rust/crates/katana_window/src/customisation/scope_filter_widget.rs`).
+    (`crates/katana_window/src/customisation/scope_filter_widget.rs`).
   - Never write a second scope or filter implementation. If a tool needs more,
     extend the shared one.
 - **Files stay an alternative source, not the only one.** A tool that also
@@ -158,9 +158,9 @@ A build and a test run are, in WSL, with `CARGO_TARGET_DIR` in
 `~/katana-build/<checkout>/cargo`:
 
 ```sh
-cargo clippy --manifest-path rust/Cargo.toml --locked --workspace --all-targets --release -- -D warnings
-cargo build  --manifest-path rust/Cargo.toml --locked --workspace --release
-cargo test   --manifest-path rust/Cargo.toml --locked --workspace --release
+cargo clippy --locked --workspace --all-targets --release -- -D warnings
+cargo build  --locked --workspace --release
+cargo test   --locked --workspace --release
 cmake --preset linux-release -B ~/katana-build/<checkout>/tests -DKATANA_PROGRAMS=$CARGO_TARGET_DIR/release
 xvfb-run -a ctest --test-dir ~/katana-build/<checkout>/tests --parallel 14 --output-on-failure
 ```
@@ -227,7 +227,7 @@ watches (below, "Show the build"); never type them into Claude's shell.
 - **Never run two builds in one target directory at once.**
   `tools/build_visible.sh` refuses a second run while one is going in the same
   checkout; wait for the status file before starting another.
-- **Every crate is pinned in `rust/Cargo.lock`**, at releases at least two
+- **Every crate is pinned in `Cargo.lock`**, at releases at least two
   weeks old, and every cargo run is `--locked`; a new crate is added with the
   owner's knowledge and its notice in `THIRD_PARTY_NOTICES.md`.
 
@@ -254,7 +254,7 @@ Never delete or disable a failing test to make a suite green.
 - New public behaviour needs the happy path, every documented failure, and
   the degenerate input (empty, zero, coincident, non-finite, enormous).
 - No test opens a window. The window's tests drive egui headless through the
-  drive harness (`rust/crates/katana_window/src/drive/`); the real program is
+  drive harness (`crates/katana_window/src/drive/`); the real program is
   driven headlessly through `tools/check_screenshot.cmake` (`-DDRIVE` steps;
   see `docs/headless.md`).
 - Fonts differ between machines, so assert ink against a baseline, never an
@@ -437,7 +437,7 @@ the conversation.
 
 ## 11. Architecture quick reference
 
-Each layer is a crate, `rust/crates/katana_<layer>`, and may depend only on the
+Each layer is a crate, `crates/katana_<layer>`, and may depend only on the
 layers `tools/check_layering.cmake`'s table allows it. The `rust_layering`
 test enforces this on the crates' `Cargo.toml` files.
 
@@ -465,7 +465,7 @@ core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> 
   `katana_core::text` (locale-independent) and `katana_math::unit_ratio`. A
   real becomes text through `katana_core::text::format_exact_real` and its
   siblings, never `to_string`: Clippy refuses `ToString::to_string`
-  (`rust/clippy.toml`), and an integer is formatted with `format!`.
+  (`clippy.toml`), and an integer is formatted with `format!`.
 - **Absent is not zero.** A missing height is an `Option`, never a placeholder
   number.
 - **The entity geometry enum is append-only.** Its index is the on-disk kind
@@ -478,7 +478,7 @@ core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> 
 - `Status` success is `Ok(())`.
 - Entity ids are monotonic and never reused.
 - Layer names are `/`-separated paths (`design/surface/tin1`;
-  `rust/crates/katana_entity/src/layer_path.rs`).
+  `crates/katana_entity/src/layer_path.rs`).
 - Use British spelling in prose. In identifiers, use American spelling where
   the surrounding code does (`color`, `normalize`).
 - `#![deny(unsafe_code)]` everywhere but the named FFI, OS-call and SIMD

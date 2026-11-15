@@ -8,14 +8,14 @@ export read. Horizontal BIM, as the owner asked on 2026-10-15 ("im only
 interested in horizontal bim like roads etc, not intrested in buildings"):
 nothing here is a building.
 
-The code is `rust/crates/katana_cad/src/road/road_objects.rs` (the kinds, the
-definition, how each is made), `rust/crates/katana_cad/src/road/road_object_mesh.rs`
-(the solids), `rust/crates/katana_cad/src/road/road_object_verbs.rs` (the `ROADOBJECT`
-verbs), `rust/crates/katana_cad/src/road/road_object_scope.rs` (the scope and filter
-they take) and `rust/crates/katana_cad/src/road/road_object_store.rs` (the Document's
-members); the window's side is `rust/crates/katana_window/src/bim/`. The road templates and
+The code is `crates/katana_cad/src/road/road_objects.rs` (the kinds, the
+definition, how each is made), `crates/katana_cad/src/road/road_object_mesh.rs`
+(the solids), `crates/katana_cad/src/road/road_object_verbs.rs` (the `ROADOBJECT`
+verbs), `crates/katana_cad/src/road/road_object_scope.rs` (the scope and filter
+they take) and `crates/katana_cad/src/road/road_object_store.rs` (the Document's
+members); the window's side is `crates/katana_window/src/bim/`. The road templates and
 corridors beside them are `road_design.md`'s; both are made into the one
-`katana_cad::bim::BimModel` (`rust/crates/katana_cad/src/bim/bim_object.rs`), corridors first.
+`katana_cad::bim::BimModel` (`crates/katana_cad/src/bim/bim_object.rs`), corridors first.
 
 ## A definition, made every time
 
@@ -72,7 +72,7 @@ surface at once.
 ### Where the defaults come from
 
 Every default is a published or a typical value, named in the code beside it
-(`rust/crates/katana_cad/src/road/road_objects.rs`) and said by `ROADOBJECT KINDS
+(`crates/katana_cad/src/road/road_objects.rs`) and said by `ROADOBJECT KINDS
 <kind>`'s `source=`:
 
 - **Barriers.** The beam rails of AASHTO M 180: a W-beam 311 mm and a
@@ -189,7 +189,7 @@ drawn at its invert.
 
 ## How an object is made
 
-The solids (`rust/crates/katana_cad/src/road/road_object_mesh.rs`) are closed and
+The solids (`crates/katana_cad/src/road/road_object_mesh.rs`) are closed and
 outward-oriented - every edge used by two triangles, once each way
 (`katana_cad::road::road_object_mesh::is_closed_mesh`) - so the IFC export writes each as a closed face
 set and a volume is the divergence theorem over the triangles
@@ -246,7 +246,7 @@ closed, and the IFC export judges closure on the mesh's own indices
 closed face set.
 
 **One ear clipper.** A cap, and a sign's plate, is cut by the shared
-`katana_geometry::polygon::triangulate` (`rust/crates/katana_geometry/src/polygon.rs`) in its `CollinearVertices::Keep`
+`katana_geometry::polygon::triangulate` (`crates/katana_geometry/src/polygon.rs`) in its `CollinearVertices::Keep`
 mode, which uses every corner and makes every edge of the polygon an edge of a
 triangle, so a cap meets the quads of the sides at each corner they use, even a
 corner of no turn, and the solid closes. The default mode drops such a corner
@@ -498,7 +498,7 @@ new `ADD` moves it on purpose.
 
 A change of the key is reported as `DocumentChange::ROAD_MODEL`, with the step,
 its undo and its redo, by the road model's comparison of its metadata keys
-after every command (`rust/crates/katana_cad/src/road/road_document.rs`, `road_design.md`).
+after every command (`crates/katana_cad/src/road/road_document.rs`, `road_design.md`).
 The store notified it from inside its command once; with the comparison it
 went out twice, the first time before the step was on the history.
 
@@ -506,17 +506,17 @@ went out twice, the first time before the step was on the history.
 
 The BIM menu (made beside Terrain, `road_design.md`) has a **Road
 Objects** section from the road objects' workbench
-(`rust/crates/katana_window/src/bim/road_object_workbench.rs`): Barrier, Guide Posts, Sign,
+(`crates/katana_window/src/bim/road_object_workbench.rs`): Barrier, Guide Posts, Sign,
 Light Poles, Culvert, Wall, Fence and Line Marking open one placing dialog
 (`roadObjectDialog`) on the kind's page, and Road Objects... opens the
 manager (`roadObjectManagerDialog`). The BIM toolbar has the ones placed
 most: barrier, sign, light poles, line marking and the manager. The icons
-are painted in `rust/crates/katana_window/src/bim/road_object_icons.rs` - each object as it
+are painted in `crates/katana_window/src/bim/road_object_icons.rs` - each object as it
 stands beside a road, what makes it that object in the accent - with a pen
 of their own rather than the tool catalogue's, since the icon contact sheet
 (`katana_make_icons`) compiles that file and has no catalogue.
 
-**The placing dialog** (`rust/crates/katana_window/src/bim/road_object_dialog.rs`) writes
+**The placing dialog** (`crates/katana_window/src/bim/road_object_dialog.rs`) writes
 the `ROADOBJECT ADD` line its fields describe, shown as it will run; Add hands
 it to the window's executor exactly as if typed, and Preview runs it with
 `PREVIEW`. The placement is along an alignment (its stations), along the
@@ -541,7 +541,7 @@ takes nothing (the verb reports it and records no undo step), "Added 2 - one
 undo step." for several lines, and the scope's own reason - a colour that does
 not read - in place of a generic one. Each button has its own mnemonic.
 
-**The manager** (`rust/crates/katana_window/src/bim/road_object_manager.rs`) lists the
+**The manager** (`crates/katana_window/src/bim/road_object_manager.rs`) lists the
 objects with their placement, layer, quantities and first problem; shows the
 chosen one's `INFO`; and Apply (`ROADOBJECT SET`), Copy, Delete and Zoom To
 (`ZOOM WINDOW` round the chosen objects' solids, 10 m across at the least)
@@ -569,7 +569,7 @@ chosen objects by `plan_extent`, the same extent the scope meets.
 The 3D and plan views draw the objects through `katana_cad::bim::bim_object::bim_model`, the road
 model's code (`road_design.md`), each in its colour on its layer. Help >
 Command Reference has a Road objects section: `HELP ROADOBJECT`'s text, read
-as every family's is (`rust/crates/katana_window/src/command_reference_dialog.rs`).
+as every family's is (`crates/katana_window/src/command_reference_dialog.rs`).
 
 ## For an agent
 
@@ -589,7 +589,7 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
 
 ## Tests
 
-- `rust/crates/katana_cad/tests/leaf/road_object_mesh.rs` - every solid closed, at the
+- `crates/katana_cad/tests/leaf/road_object_mesh.rs` - every solid closed, at the
   volume worked out by hand: a box, a mitred corner, a sheared hollow sweep,
   an inverted T capped (28 triangles, 1.96 m3), a straight run and a repeated
   corner keeping the cap closed, a polygon that cannot be capped adding nothing
@@ -599,13 +599,13 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
   a hollow sweep round a hairpin; a closed square swept as a loop (80 m3,
   off-centre 36) and closed midway along a side, a triangle, and a path that
   returns at another level not a loop.
-- `rust/crates/katana_geometry/tests/cases/polygon.rs` - the shared ear clipper's `Keep` mode
+- `crates/katana_geometry/tests/cases/polygon.rs` - the shared ear clipper's `Keep` mode
   (`PolygonTriangulate.KeepingCollinearVertices*`): every corner and every edge
   used, n - 2 triangles for a run of straight corners, a clockwise polygon, a
   repeated vertex, the same ears as the default where no corner is straight, and
   a property over random polygons with straight corners; both modes refusing an
   open polygon, a bow-tie, a NaN and an infinity.
-- `rust/crates/katana_cad/tests/road_sheet_verbs/road_objects.rs` - each kind at its hand-worked place
+- `crates/katana_cad/tests/road_sheet_verbs/road_objects.rs` - each kind at its hand-worked place
   and size: the sign at station 50 offset 4
   (`road_objects::a_sign_at_station50_offset4_stands_on_the_profile_facing_the_traffic`),
   a barrier's length and posts, the F-shape's area from its published angles,
@@ -620,7 +620,7 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
   the two guards handed their input
   (`road_objects::objects_made_of_nothing_or_of_a_part_with_no_faces_are_no_object_and_say_why`,
   `road_objects::a_built_object_with_an_open_part_or_a_problem_is_refused_before_it_is_stored`).
-- `rust/crates/katana_cad/tests/road_sheet_verbs/road_object_scope.rs` - the scope and filter through
+- `crates/katana_cad/tests/road_sheet_verbs/road_object_scope.rs` - the scope and filter through
   the interpreter, on four objects whose layers and extents are worked out in
   its header: the layers with and without sublayers, an area (corners either
   way round, one that takes nothing), a view (its hidden layer, its area, and
@@ -634,13 +634,13 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
   scope, a record the drawing cannot read; and the pieces on their own - the
   plan extent, the property keys with their values (absent is not zero), the
   filter check.
-- `rust/crates/katana_cad/tests/road_sheet_verbs/road_object_verbs.rs` - the verbs through the
+- `crates/katana_cad/tests/road_sheet_verbs/road_object_verbs.rs` - the verbs through the
   interpreter: one undo step with the layer and its parents, the RoadModel
   notification, a scope of lines all or nothing, preview, save and open; a
   wall's total, COPY's `to=` in either order, a repeated id, a word LIST does not
   take refused and not ignored, INFO on a record it cannot read, and
   `SURFACE RENAME` carrying a corridor and the objects with it.
-- `rust/crates/katana_window/tests/roads/road_object_dialogs.rs` - the line the dialog
+- `crates/katana_window/tests/roads/road_object_dialogs.rs` - the line the dialog
   writes, the dialogs by object name, the menu and toolbar, the icons; the
   status for a scope that takes nothing and for several lines, the scope's own
   refusal, no two mnemonics alike, the crossfall offered only on the profile,
@@ -650,7 +650,7 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
   drawing with the entity ones greyed, and Select Matching, Quantities and Delete
   Matching each handing the line a person would type to the executor, the
   controls that do not read refused with nothing run.
-- `rust/crates/katana_app/tests/mcp/mcp_server.rs` - `katana_road_objects`
+- `crates/katana_app/tests/mcp/mcp_server.rs` - `katana_road_objects`
   (`mcp_server::the_road_objects_tool_gives_each_definition_what_was_made_of_it_and_its_problems`)
   and with the shared scope and filter
   (`mcp_server::the_road_objects_tool_takes_the_shared_scope_and_filter_and_says_what_it_took`).
