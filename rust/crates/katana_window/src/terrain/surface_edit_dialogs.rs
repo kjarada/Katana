@@ -591,6 +591,11 @@ impl SurfaceLevelsDialog {
         }
     }
 
+    /// Its frame, to set what QDialog's own setters set (setMinimumHeight).
+    pub fn frame_mut(&mut self) -> &mut DialogFrame {
+        &mut self.frame
+    }
+
     /// One frame of the dialog, when it is shown: its drawing's changes delivered first.
     pub fn ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         if !self.visible {
@@ -945,6 +950,11 @@ impl SurfaceCombineDialog {
         if !preview {
             self.reload(&*host);
         }
+    }
+
+    /// Its frame, to set what QDialog's own setters set (setMinimumHeight).
+    pub fn frame_mut(&mut self) -> &mut DialogFrame {
+        &mut self.frame
     }
 
     /// One frame of the dialog, when it is shown: its drawing's changes delivered first.

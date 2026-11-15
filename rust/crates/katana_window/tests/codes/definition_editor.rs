@@ -2397,6 +2397,78 @@ mod definition_editor {
     }
 
     #[test]
+    fn the_window_is_not_closed_over_a_form_that_is_not_saved() {
+        let mut b = Window::new();
+        assert!(b.bench.confirm_close(&mut b.host));
+        assert!(
+            b.bench
+                .edit_definition(&mut b.host, DefinitionEdit::Edit, "TEST Kerb")
+        );
+        b.draw();
+        assert!(
+            b.bench.confirm_close(&mut b.host),
+            "open and untouched: nothing to lose"
+        );
+        b.fill(EDITOR, "definitionLength", "15");
+
+        // Headless: nobody to ask, so refused and said.
+        b.host.parts.logged.clear();
+        assert!(!b.bench.confirm_close(&mut b.host));
+        assert_eq!(b.host.parts.logged.len(), 1);
+        assert!(b.host.parts.logged[0].0.starts_with("Unsaved Definition: "));
+        assert!(b.host.parts.logged[0].1);
+
+        // Interactive: asked. No keeps the window and the edits.
+        b.host.parts.headless = false;
+        let asked = Rc::new(std::cell::RefCell::new(String::new()));
+        let questions = Rc::new(Cell::new(0));
+        let answer = Rc::new(Cell::new(false));
+        {
+            let (asked, questions, answer) =
+                (Rc::clone(&asked), Rc::clone(&questions), Rc::clone(&answer));
+            b.bench.confirm = Some(Box::new(move |question: &str| {
+                *asked.borrow_mut() = String::from(question);
+                questions.set(questions.get() + 1);
+                answer.get()
+            }));
+        }
+        assert!(!b.bench.confirm_close(&mut b.host));
+        assert_eq!(
+            *asked.borrow(),
+            "The definition editor has edits that are not saved. Discard them?"
+        );
+        assert_eq!(questions.get(), 1);
+        assert!(b.bench.definition_editor().expect("the editor").dirty());
+
+        // Yes lets the close go on - and discards NOTHING yet. The window asks more after this
+        // (the code manager's rules, the unsaved drawing), and a Cancel there keeps the window
+        // open: what was typed must still be in the form then. The edits go when the window does.
+        answer.set(true);
+        assert!(b.bench.confirm_close(&mut b.host));
+        assert_eq!(questions.get(), 2);
+        assert!(b.bench.definition_editor().expect("the editor").dirty());
+        b.draw();
+        assert_eq!(b.control(EDITOR, "definitionLength").value, "15");
+        assert!(b.in_library("TEST Kerb") == kerb());
+
+        // The answer is remembered for the form as it stands: the close asked for again after
+        // that Cancel does not ask this again.
+        assert!(b.bench.confirm_close(&mut b.host));
+        assert_eq!(questions.get(), 2);
+        // More typed is more to lose, and is asked about.
+        b.fill(EDITOR, "definitionLength", "16");
+        answer.set(false);
+        assert!(!b.bench.confirm_close(&mut b.host));
+        assert_eq!(questions.get(), 3);
+        b.draw();
+        assert_eq!(b.control(EDITOR, "definitionLength").value, "16");
+        // Saved, there is nothing to ask.
+        b.press(EDITOR, "definitionSave");
+        assert!(b.bench.confirm_close(&mut b.host));
+        assert_eq!(questions.get(), 3);
+    }
+
+    #[test]
     fn the_editor_goes_with_the_workbench_before_the_document() {
         // The editor holds the workbench's context, and with it the workbench's picture cache:
         // once the workbench has gone, nothing but this test holds the cache, so no editor is

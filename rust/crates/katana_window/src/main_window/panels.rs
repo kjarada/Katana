@@ -451,7 +451,7 @@ impl MainWindow {
     /// The four panels and the docks beside them, each in its dock of the window's chrome.
     fn panels_ui(&mut self, ui: &mut Ui, geometry: &Geometry) {
         if let Some(rect) = geometry.layers {
-            self.dock_at(ui, rect, "LayersDock", |window, ui| layers_ui(window, ui));
+            self.dock_at(ui, rect, "LayersDock", layers_ui);
         }
         if let Some(rect) = geometry.lower_left {
             let tabs = self.ui.docks.lower_left_tabs();
@@ -511,7 +511,7 @@ impl MainWindow {
                 let place = Rect::from_min_size(Pos2::new(rect.min.x, top), Vec2::new(rect.width(), each));
                 match dock {
                     "PropertiesDock" => {
-                        self.dock_at(ui, place, dock, |window, ui| properties_ui(window, ui));
+                        self.dock_at(ui, place, dock, properties_ui);
                     }
                     "VerticesDock" => self.dock_at(ui, place, dock, |window, ui| {
                         window.ui.drawing.dock_ui(ui, &mut window.exec.document);
@@ -524,7 +524,7 @@ impl MainWindow {
             }
         }
         if let Some(rect) = geometry.command_line {
-            self.dock_at(ui, rect, "CommandLineDock", |window, ui| command_line_ui(window, ui));
+            self.dock_at(ui, rect, "CommandLineDock", command_line_ui);
         }
     }
 
@@ -1197,7 +1197,7 @@ fn layers_ui(window: &mut MainWindow, ui: &mut Ui) {
                     if response.double_clicked() {
                         made_current = Some(path.clone());
                     }
-                    ui.label(document.model().entities.count_on_layer(&path).to_string());
+                    ui.label(format!("{}", document.model().entities.count_on_layer(&path)));
                 });
             }
         });
@@ -1362,7 +1362,7 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
         if cloud.is_decimated() {
             detail.push_str(&format!(
                 " of {}",
-                crate::format::grouped(cloud.source_point_count as u64)
+                crate::format::grouped(cloud.source_point_count)
             ));
         }
         rows.push(vec![

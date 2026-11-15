@@ -261,7 +261,16 @@ mod title_bar_buttons {
                 "at {ratio}"
             );
             let whole = headless.render();
-            let picture = whole.copy(crop_rect(kind.rect, ratio, whole.width(), whole.height()));
+            // QWidget::grab: the button's own pixels. At 1.25 its edges fall inside pixels it shares
+            // with the bar, whose blend is neither ink nor ground, so only the pixels wholly inside
+            // it are taken (crop_rect's rounding out would take them).
+            let inner = IntRect::new(
+                (kind.rect.min.x * ratio).ceil() as i32,
+                (kind.rect.min.y * ratio).ceil() as i32,
+                ((kind.rect.max.x * ratio).floor() - (kind.rect.min.x * ratio).ceil()) as i32,
+                ((kind.rect.max.y * ratio).floor() - (kind.rect.min.y * ratio).ceil()) as i32,
+            );
+            let picture = whole.copy(inner);
             // Nothing is under the pointer, so the button has no fill: its corner is the bar's
             // ground.
             let ground = picture.pixel(0, 0);
@@ -282,8 +291,10 @@ mod title_bar_buttons {
             );
             // Apart, not merely not over: 4 px at a ratio of 1, and at any ratio at least 3 px
             // times it, taken down.
+            // The pixels between two inclusive edges, as the C++ counts them.
+            let gap = sign.x - icon.right() - 1;
             assert!(
-                sign.x - icon.right() - 1 >= whole_device_pixels(3, ratio),
+                gap >= whole_device_pixels(3, ratio),
                 "arrow {} and icon {} at {ratio}",
                 text(&sign),
                 text(&icon)

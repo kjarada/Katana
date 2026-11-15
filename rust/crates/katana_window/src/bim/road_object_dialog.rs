@@ -1270,6 +1270,11 @@ impl RoadObjectDialog {
         );
     }
 
+    /// Its frame, to set what QDialog's own setters set (setMinimumHeight).
+    pub fn frame_mut(&mut self) -> &mut DialogFrame {
+        &mut self.frame
+    }
+
     /// Draws the dialog for this frame, when it is shown: the edits of the frame refresh the line
     /// before the footer draws it. Then the watcher's delivery, as the C++'s event loop delivered
     /// it after a click (corridor_dialog's `ui` says why).

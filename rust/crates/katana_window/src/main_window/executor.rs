@@ -1,7 +1,7 @@
 //! The main window's EXECUTOR (the plan's section 4.2): the drawing, the interpreter, the reference
 //! data, the geo scratch folder and front end, the workbenches whose verbs the dispatcher runs,
-//! the command log, the jobs, the clipboard and the person's settings - everything a line reaches
-//! - and the dispatcher, ported as main_window.cpp has it (runTypedLine, runVerbLine,
+//! the command log, the jobs, the clipboard and the person's settings, everything a line
+//! reaches; and the dispatcher, ported as main_window.cpp has it (runTypedLine, runVerbLine,
 //! runWorkbenchLine, dispatchLine, runInterpreterLine), in its order:
 //!
 //! ```text
@@ -1092,7 +1092,7 @@ impl Executor {
             .map(|home| PathBuf::from(home).join("Documents"))
             .map(|folder| String::from_utf8_lossy(&path_to_utf8(&folder)).into_owned())
             .unwrap_or_default();
-        path_from_utf8(&crate::project_folder::project_dialog_folder(
+        path_from_utf8(crate::project_folder::project_dialog_folder(
             &parent,
             &remembered,
             &documents,
@@ -1159,7 +1159,7 @@ impl Executor {
         };
         let kept = environment_variable(Some(KEPT_CUSTOMISATION_VARIABLE));
         if !kept.is_empty() {
-            host.kept_file = path_from_utf8(&String::from_utf8_lossy(&kept));
+            host.kept_file = path_from_utf8(String::from_utf8_lossy(&kept).as_bytes());
         } else if !self.headless {
             // The per-user place, beside the window's own settings file.
             if let Some(folder) = UserSettings::default_path().parent()
@@ -2064,7 +2064,7 @@ pub fn echoed(line: &str) -> String {
 
 /// A ViewId's text, as the records write it.
 pub fn view_text(id: ViewId) -> String {
-    id.to_string()
+    format!("{id}")
 }
 
 /// A point as the status bar's coordinate label shows it (planPoint): four decimals each.

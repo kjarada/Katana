@@ -5,7 +5,7 @@
 # A directory goes into `ported` in the commit that ports its last case; from
 # then on every case there - a new one too, from a fix made in C++ - needs its
 # twin, or the test fails.
-ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands", "terrain", "survey", "storage", "dxf", "ifc", "surveyio", "update", "cad", "io", "interop", "app", "geo"]
+ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands", "terrain", "survey", "storage", "dxf", "ifc", "surveyio", "update", "cad", "io", "interop", "app", "geo", "gpu", "qt_widgets"]
 
 [exempt]
 # "Suite.CaseName" = "why it has no Rust twin"
@@ -53,3 +53,10 @@ ported = ["core", "math", "geometry", "geodesy", "render", "entity", "commands",
 "GpuRender.SerializedShadersDrawWhatTheRuntimeShadersDraw" = "wgpu takes WGSL at run time; there are no serialized shaders to compare"
 "SerializedShaderLibrary.ReportsABlobThatDoesNotDeserialize" = "there is no serialized shader library: the WGSL is compiled by naga at run time"
 "GpuRender.BytecodeCompiledHereDrawsWhatQRhiCompilingTheSourceDraws" = "naga is the one shader compiler; there is no second to compare with"
+# The window's native file dialogs (step 7, wave 4). These cases read the text of the Qt file
+# dialogs the managers open; the Rust window opens the operating system's own through rfd, which
+# no test may open, and whose texts are the system's, not Katana's.
+"GeneralTexts.NoTextTheStyleManagerShowsNamesAnotherProgram" = "the style manager's file dialogs are the system's (rfd), which no test may open; the manager's own texts are its other twins'"
+"GeneralTexts.NoTextTheSymbolLibraryOrItsFileDialogsShowNamesAnotherProgram" = "the symbol library's file dialogs are the system's (rfd), which no test may open; the library's own texts are its other twins'"
+"GeneralTexts.NoTextTheSurveyCodeManagerOrItsFileDialogsShowNamesAnotherProgram" = "the code manager's file dialogs are the system's (rfd), which no test may open; the manager's own texts are its other twins'"
+"FileDialogAnswer.TheFileIsChosenWhenTheNameBoxAlreadyHasTheFocus" = "it tests the test helper that answers a QFileDialog; the Rust window has no file dialog of its own to answer"

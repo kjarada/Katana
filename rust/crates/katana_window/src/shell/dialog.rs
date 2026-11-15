@@ -114,6 +114,7 @@ pub struct DialogFrame {
     footer_height: Option<f32>,
     scrolled: bool,
     rect: Option<Rect>,
+    minimum_height: Option<f32>,
 }
 
 impl DialogFrame {
@@ -128,6 +129,7 @@ impl DialogFrame {
             footer_height: None,
             scrolled: false,
             rect: None,
+            minimum_height: None,
         }
     }
 
@@ -163,6 +165,13 @@ impl DialogFrame {
     /// Where it was put by hand, as the last frame kept it on the screen; None when it is centred.
     pub fn placed(&self) -> Option<Pos2> {
         self.placed
+    }
+
+    /// QWidget::setMinimumHeight: the dialog, its title bar and footer included, no shorter than
+    /// `height` points. Its body is made up to it, and scrolls as any other body does where the
+    /// screen has not the room.
+    pub fn set_minimum_height(&mut self, height: f32) {
+        self.minimum_height = Some(height);
     }
 
     /// The whole dialog as the last frame drew it.
@@ -249,6 +258,11 @@ impl DialogFrame {
         let spec = TargetSpec::new(&self.name, TargetKind::Dialog, &self.title).modal(self.modal);
         let title = self.title.clone();
         let mut footer = footer;
+        // The body's part of a minimum height: what the frame takes beyond it, as last measured,
+        // taken off.
+        let least_content = self
+            .minimum_height
+            .map(|height| (height - chrome.y).max(0.0));
 
         let shown = area.show(ctx, |ui| {
             let origin = ui.max_rect().min;
@@ -278,6 +292,12 @@ impl DialogFrame {
                             let answer = body(ui, &mut *state);
                             if footer_in_body && let Some(footer) = footer.take() {
                                 footer(ui, &mut *state);
+                            }
+                            if let Some(least) = least_content {
+                                let short = least - ui.min_rect().height();
+                                if short > 0.0 {
+                                    ui.add_space(short);
+                                }
                             }
                             answer
                         })

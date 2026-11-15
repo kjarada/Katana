@@ -2052,7 +2052,7 @@ impl DrivenWindow for MainWindow {
             request.line_weight_scale = scale;
         }
         let report = self.exec.plot_sheets(&set, &request)?;
-        Ok(report.files.iter().map(|file| path_from_utf8(file)).collect())
+        Ok(report.files.iter().map(path_from_utf8).collect())
     }
 
     fn plot_format_known(format: &str) -> bool {

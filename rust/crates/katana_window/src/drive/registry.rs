@@ -418,6 +418,19 @@ pub fn begin_target(ui: &Ui, spec: TargetSpec) {
             });
             return;
         }
+        // The window's own target is opened by every frame (on_begin_pass), first; the window
+        // beginning it - to give it its title - takes that one record rather than adding a second.
+        if spec.name == WINDOW && spec.kind == TargetKind::Window {
+            if let Some(window) = drive.current.targets.first_mut() {
+                window.title = spec.title;
+                window.modal = spec.modal;
+            }
+            drive.open.push(Open {
+                target: 0,
+                part: Part::None,
+            });
+            return;
+        }
         if drive.current.target(&spec.name).is_some() {
             drive.current.duplicates.push(format!(
                 "the target {} is drawn twice in one frame",

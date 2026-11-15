@@ -309,6 +309,34 @@ mod named_controls {
         );
     }
 
+    // Not a twin: the window (wave 4) begins its own target to give it its title, and every frame
+    // has opened that target already. Found by the window gate's first run, where all but a few of
+    // its 267 tests failed on "the target  is drawn twice in one frame".
+    #[test]
+    fn the_window_beginning_its_own_target_titles_the_one_record_rather_than_adding_a_second() {
+        use katana_window::drive::registry::{
+            TargetKind, TargetSpec, WINDOW, begin_target, end_target,
+        };
+        let mut harness = Harness::new();
+        harness
+            .run(|ui| {
+                begin_target(ui, TargetSpec::new(WINDOW, TargetKind::Window, "Katana - site"));
+                let _ = drive::controls::button(ui, "inWindow", "In the window");
+                end_target(ui, ui.max_rect());
+            })
+            .expect("one window target, drawn once");
+        let frame = harness.snapshot();
+        assert_eq!(
+            frame.targets.iter().filter(|target| target.name == WINDOW).count(),
+            1
+        );
+        assert_eq!(
+            frame.target(WINDOW).map(|target| target.title.as_str()),
+            Some("Katana - site")
+        );
+        assert!(frame.control(WINDOW, "inWindow").is_some());
+    }
+
     #[test]
     fn an_act_for_a_target_that_is_not_drawn_is_refused_as_closed() {
         let mut bench = Bench::new();

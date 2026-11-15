@@ -617,14 +617,14 @@ pub fn menu_gaps(composed: &Composed) -> (Vec<String>, usize) {
             let (text, icon, tip, sub) = match item {
                 MenuItem::Action(action) => (
                     action.text.clone(),
-                    action.icon.to_string(),
+                    String::from(action.icon),
                     action.tip.clone(),
                     None,
                 ),
                 MenuItem::Menu(sub) => {
                     let (icon, tip) = signs
                         .get(&sub.name)
-                        .map(|(icon, tip)| (icon.to_string(), tip.clone()))
+                        .map(|(icon, tip)| (String::from(*icon), tip.clone()))
                         .unwrap_or_default();
                     (sub.title.clone(), icon, tip, Some(sub))
                 }

@@ -63,7 +63,7 @@ the step's own run is the evidence, not this table.
 | 4 | done in WSL: cad whole, in five waves (F to J) - all 3,011 cases twinned but three exempt (text that is not UTF-8, which a Rust String cannot hold), `tests/cad` held as ported; the 46 aliases of the C++'s table accepted, compared entry by entry; the gate's run below |
 | 5 | done in WSL but its online half: in three waves (K, L, M) - the GDAL core (the adapter, formats, reprojection, zip, raster sampling), the point-cloud engine, the online catalogue and the colour ramps, the geoprocessing bridge and the drawing bindings, web access and the online requests and discovery, and interop's core (reference data, import, export, the archive, dataset descriptions, terrain I/O, raster products, table reprojection) with online fetch and its verbs; tests/io and tests/interop held as ported; 374 of the geo suite's cases drive the app layer and moved to step 6. The cases that reach real hosts (`KATANA_ONLINE_TESTS=1`) have not been run on the port |
 | 6 | done in WSL: the session, katana_cli and katana_mcp, the update, survey, IFC and DXF verbs, the MCP server, and the geo executor with every family of its verbs, in a foundation and two waves; all 616 cases twinned (app 242, geo 374; 27 of the update verbs' cases are Windows-only, written and not compiled until step 8), `tests/app` and `tests/geo` held as ported; the cli gate: all 376 cli tests pass against the Rust katana_cli and katana_mcp with replies identical to the C++'s, and it is part of the whole WSL run; the round-trip gate runs the real katana_cli. Its Windows half waits for step 8 |
-| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases; 1,563 of the window's 1,609 twinned) |
+| 7 | in progress: planned in a foundation and four waves of agents; the third-party crates declared, fetched and pinned at releases two weeks old; wave 0 done - the window's foundation (named controls, the drive harness, the canvas, the host, the dialog frame), katana_gpu whole on wgpu (its device cases on lavapipe in WSL) and the window gate's tools (79 cases, 15 exempt by the plan); wave 1 done - the raster and PDF canvases and their text, the drive programs and the docks' chrome, the jobs and command log, the plan painters, the icons and tool bars, and the annotation, roads, utilities and survey dialogs (440 cases); wave 2 done - the plan view and its tool host, the sheet painter and plot output, the style, layer and Global Modify managers, the survey code manager and symbol library, the GIS vector and terrain dialogs, and the surface dialogs (about 590 cases); wave 3 done - the update and settings dialogs, the 3D, elevation and section views and the GPU scene view, the annotation and road workbenches, the sheet editor with its plot, arrange, checks and Sheet Set menu, the view workspace and its Layers popup, the start screen and the customisation workbench (about 450 cases); wave 4 done - the main window, its dispatcher, menus, toolbars, panels and checks, the IFC, surface display and GIS menu parts, and the `katana` program, with the last 32 window cases (every window case twinned or exempt: tests/qt_widgets and tests/gpu held to parity); the window gate 236 of 267 at its first sound run, its fix-up round in progress |
 | 8-9 | not started |
 
 ### Step 1: the foundation crates
@@ -1059,6 +1059,56 @@ they now write only to a folder named.
 
 Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 3: in the commit that merged it, the C++ suite 9,923 of 9,923 with this record in place (9,922 before it, the one failure the docs check finding wave 2's note on the code manager's seams after the seams had gone), cargo test 9,144 passed and 0 failed, the cli gate 379 of 379; the window's twins 1,563 of 1,609 (`tests/qt_widgets` 1,506 of 1,548, `tests/gpu` 57 of 61).
 
+**Wave 4** ported the main window and the `katana` program in one agent
+(K), beside one (S) that twinned the 18 window cases the earlier waves
+left. K's window is two halves, as the plan's borrow split has it: the
+executor (the drawing, the interpreter, the reference data, the
+workbenches the dispatcher runs, the log and the jobs; it is the `Host`)
+and the UI state (menus, toolbars, panels, the views' workspace). The
+dispatcher keeps the C++'s order; `rust/crates/katana_window/src/bin/katana/main.rs` is the only file
+that names eframe and hands the window to wave 1's program driver. Decisions:
+
+- **The window's settings keep the C++'s QSettings names** (`window/layout`,
+  `appearance/textSize`, `start/showAtStart`, `scripts/recent`,
+  `files/projectFolder` and the rest); the dock layout is the window's own
+  JSON, version 2, and a version 1 layout (an older build's, with Surface
+  Edit and BIM on the second toolbar row) is carried over.
+- **The panels are laid out to the C++'s headless geometry** (the probe's
+  numbers, above), not by egui_dock: Minimise and Close hide a panel, which
+  cannot float or be resized yet.
+- **A question the C++ waited on is asked without waiting**: a text or
+  choice in a small dialog named `inputDialog`, Yes/No/Cancel in the
+  system's box (rfd); a headless run is never asked.
+- **A dialog's minimum height** (`DialogFrame::set_minimum_height`,
+  QWidget::setMinimumHeight) pads its body, so the screen-fit twins make a
+  dialog taller than an 800 x 600 screen as the C++ does, where K's first
+  twins shrank the screen and the frame's rule for a footer over half the
+  room then put the buttons in the scroll.
+- **The window's own target is opened once a frame.** The drive registry
+  opens it at every frame's start; the window beginning it to give it its
+  title takes that record. The gate's first run failed 244 of 267 tests on
+  "the target  is drawn twice in one frame"; a foundation test now holds it.
+- **`tests/qt_widgets` and `tests/gpu` are held to parity**, every case
+  twinned or exempt: 1,548 and 61. Four exemptions were added: the three
+  GeneralTexts cases, which read the Qt file dialogs a manager opens (the
+  Rust opens the system's own, which no test may open), and
+  FileDialogAnswer's case, which tests the C++ test helper that answers a
+  QFileDialog.
+
+Wave 4 compiled with one type error and 15 Clippy findings, and its first
+run failed 5 twins: four screen-fit twins (the minimum height, above, and a
+scroll to a record of a region rather than a control) and the kind
+switcher's arrow at 125 %, measured from a crop that took the pixels the
+button shares with the bar (now only its own, as QWidget::grab).
+
+Evidence, 2026-11-15, `tools/build_visible.sh wsl` after wave 4: the C++
+suite 9,923 of 9,923, the cli gate 379 of 379, cargo test 9,168 passed and
+3 failed - the two intermittent twins under Not done and one screen-fit
+twin since fixed (8 of 8 after); the parity check every window case. The
+window gate (`wsl wgate`), first sound run: 267 tests, 236 passed, 198 with
+the C++'s streams, 69 differing; the fix-up round is grouping the 31
+failures and 69 differences by area.
+
 ## The workspace
 
 `rust/Cargo.toml` is one Cargo workspace, with one crate per layer of
@@ -1923,13 +1973,13 @@ pin classifies every algorithm GDAL lists.
   it hold a mutex; the sheet editor's source provider is given only the
   Document (reference data, meshes, surfaces and the logo must reach it
   another way, in wave 4).
-- **The window's cases still without a twin** (46 of 1,609, by name): the
-  screen-fit cases (16) and the general texts (3), whose tooltips and
-  native file dialogs need the main window (wave 4); the definition editor
-  (6), the 3D surface legend (4), the GPU render cases (4), the symbol
-  library (3), the view image export (2), the Surfaces panel (2), and one
-  each of the Sheet Set menu, the road dialogs, the import placement, the GIS
-  menus, the flyout button and the customisation workbench.
+- **The corpus round trip failed once under the whole suite's load**
+  (`every_file_of_the_corpus_is_read_and_written_alike_by_the_cpp_and_the_rust`,
+  wave 4's run) and passed on its own: the schema-9 project's backups
+  differed, the Rust side's backup of the migrated file named 6 s before its
+  backup of the schema-9 file, so the dump's name order put them the other
+  way. Both programs name a backup by the time it is made; the cause is not
+  found yet.
 - **One workspace twin fails now and then**:
   `view_chrome::a_maximised_view_fills_the_workspace_and_restore_gives_every_view_back_its_place`
   failed in 2 of 6 runs at wave 3's integration ("view 2 is docked": the
