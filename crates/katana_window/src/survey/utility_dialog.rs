@@ -113,7 +113,7 @@ use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{DocumentWatcher, ScopeChoice, ScopeFilterView, ScopeFilterWidget};
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::drive::registry::{ControlKind, ControlRecord};
-use crate::geo::terrain_dialog_parts::RunStatus;
+use crate::geo::terrain_dialog_parts::{RunStatus, why_status};
 use crate::host::Host;
 use crate::ifc_dialogs::{get_open_file_name, get_save_file_name, to_native_separators};
 use crate::shell::DialogFrame;
@@ -1216,8 +1216,10 @@ impl UtilityToolsDialog {
         let drawing = utility_source_of(&self.form()) == UtilitySource::Drawing;
 
         // ---- where the services come from, above the tabs ----
-        let source_group = ui.group(|ui| {
-            ui.label("Services from");
+        // A headed section, as every group of a dialog is (shell::dialog::section): a bordered
+        // box here and headed sections under it read as two conventions in one dialog.
+        crate::shell::dialog::section(ui, "Services from");
+        let source_group = ui.scope(|ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(chooses, |ui| {
                     if controls::radio(
@@ -1300,10 +1302,7 @@ impl UtilityToolsDialog {
         let line = self.command();
         let (mut shown, why) = match &line {
             Ok(line) => (line.clone(), String::new()),
-            Err(error) => (
-                String::new(),
-                format!("Nothing to run yet: {}", error.message),
-            ),
+            Err(error) => (String::new(), why_status(&error.message)),
         };
         self.status.read_line(why);
         crate::shell::dialog::labelled(ui, "Command", |ui| {
@@ -1333,7 +1332,9 @@ impl UtilityToolsDialog {
         crate::shell::dialog::reply(ui, "utilityOutput", &mut reply, UTILITY_REPLY_ROWS);
         let has_output = !self.output.is_empty();
         let (status, is_error) = self.status.shown();
-        let colour = crate::shell::dialog::status_colour(is_error);
+        // Run is greyed while the fields write no line, as every run dialog's primary is; the
+        // status beside it says why.
+        let can_run = self.command().is_ok();
         let ((copy, save), (close, run)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
@@ -1344,19 +1345,16 @@ impl UtilityToolsDialog {
                         (copy, save)
                     })
                     .inner;
-                controls::label_as(
-                    ui,
-                    "utilityStatus",
-                    &status,
-                    egui::Label::new(RichText::new(status.as_str()).color(colour))
-                        .wrap()
-                        .selectable(true),
-                );
+                crate::shell::dialog::status(ui, "utilityStatus", &status, is_error);
                 acted
             },
             |ui| {
                 let close = controls::button(ui, "utilityClose", "Close").clicked();
-                let run = controls::primary(ui, "utilityRun", "Run").clicked();
+                let run = ui
+                    .add_enabled_ui(can_run, |ui| {
+                        controls::primary(ui, "utilityRun", "Run").clicked()
+                    })
+                    .inner;
                 (close, run)
             },
         );
@@ -1389,6 +1387,7 @@ impl UtilityToolsDialog {
         // The placeholders show the library's own defaults, read from its settings, so what they
         // say cannot drift from what a blank option gets.
         let grading = GradingSettings::default();
+        hold_label_column(ui);
         ui.add_enabled_ui(grades, |ui| {
             labelled(ui, "Detected spacing (m):", |ui| {
                 plain_line(
@@ -1526,9 +1525,9 @@ impl UtilityToolsDialog {
             );
         });
         // What the geometry cannot say is asked only of a draw of the geometry.
+        crate::shell::dialog::section(ui, "Drawn geometry as services (Draw of what is drawn)");
         ui.add_enabled_ui(drawing, |ui| {
-            let group = ui.group(|ui| {
-                ui.label("Drawn geometry as services (Draw of what is drawn)");
+            let group = ui.scope(|ui| {
                 note(
                     ui,
                     "Each line or open polyline in the scope is a service, named by its code; a \
@@ -1779,29 +1778,19 @@ impl UtilityToolsDialog {
             },
             |ui| {
                 ui.add_enabled_ui(source == UtilityDesignSource::Alignment, |ui| {
-                    if self.alignments.is_empty() {
-                        // An empty choice says nothing; the choice is there for a driver still.
-                        ui.weak("the drawing has no alignment");
-                        super::survey_dialogs::hidden(ui, "utilityDesignAlignmentNone", |ui| {
-                            controls::choice(
-                                ui,
-                                "utilityDesignAlignmentName",
-                                &self.alignments,
-                                &mut self.alignment,
-                            );
-                        });
-                    } else {
-                        controls::choice(
-                            ui,
-                            "utilityDesignAlignmentName",
-                            &self.alignments,
-                            &mut self.alignment,
-                        )
-                        .on_hover_text(
-                            "One of the drawing's alignments: its horizontal geometry, at the \
-                             levels of its design profile where it has one",
-                        );
-                    }
+                    // An empty choice says what is missing in the control, muted, as every
+                    // empty choice does (it was a muted sentence over a hidden choice).
+                    controls::choice_with_hint(
+                        ui,
+                        "utilityDesignAlignmentName",
+                        &self.alignments,
+                        &mut self.alignment,
+                        "No alignment",
+                    )
+                    .on_hover_text(
+                        "One of the drawing's alignments: its horizontal geometry, at the levels \
+                         of its design profile where it has one",
+                    );
                 });
             },
         );
@@ -1846,6 +1835,44 @@ impl UtilityToolsDialog {
                  clearance, is Unconfirmed - its drawn position is not a measurement",
             );
         });
+    }
+}
+
+/// The captions of every tab's rows in the tools' column, the radio buttons' and the words'.
+const TAB_RADIO_CAPTIONS: [&str; 3] = ["Design file", "Drawn line or polyline", "Alignment"];
+const TAB_CAPTIONS: [&str; 12] = [
+    "Detected spacing (m)",
+    "Minimum cover (m)",
+    "Layer prefix",
+    "Fields",
+    "Schema",
+    "Write to",
+    "Schema (optional)",
+    "Level (m)",
+    "Works width (m)",
+    "Horizontal clearance (m)",
+    "Vertical clearance (m)",
+    "Unverified margin (m)",
+];
+
+/// Measures every tab's captions into the label column of the tools' column (THE LABEL COLUMN,
+/// shell::dialog::labelled), drawn nowhere and taking no room: the column is measured from the
+/// rows a pass draws, and only the tab in front is drawn, so the shared fields - Detected spacing
+/// and Minimum cover, over the tabs - moved 25 points as the tab changed (556 on Draw, 581 on
+/// Clearance, whose radio rows are the widest).
+fn hold_label_column(ui: &mut Ui) {
+    let at = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 0.0));
+    let mut measure = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("utilityLabelColumn")
+            .max_rect(at)
+            .invisible(),
+    );
+    for caption in TAB_CAPTIONS {
+        crate::shell::dialog::labelled(&mut measure, caption, |_| {});
+    }
+    for caption in TAB_RADIO_CAPTIONS {
+        crate::shell::dialog::row_with_check(&mut measure, caption, |_| {}, |_| {});
     }
 }
 

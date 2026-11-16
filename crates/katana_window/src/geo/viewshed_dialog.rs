@@ -32,18 +32,18 @@ use katana_geometry::Point2;
 use super::drape_dialog::{PICK_TIP, point_words};
 use super::point_pick::PointPick;
 use super::terrain_dialog_parts::{
-    Framed, command_field, field, host_views, invalid, number_of, one_column, remove_current, row,
-    run_buttons, show_framed, why_no_line, without_blanks,
+    Framed, NO_SURFACE_OR_RASTER, command_field, field, host_views, invalid, number_of, one_column,
+    remove_current, row, run_buttons, show_framed, why_no_line, without_blanks,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
     terrain_reply_field, terrain_sources,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::{button, check, rows, tabs};
+use crate::drive::{button, check, tabs};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
-use crate::survey::survey_dialogs::offstage;
+use crate::survey::survey_dialogs::{hidden, offstage};
 
 /// The Viewshed tab's fields, as its line is written from them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,8 +142,10 @@ fn curvature_field(text: &str) -> Result<String> {
     Ok(String::from(value))
 }
 
-const NO_SOURCE: &str =
-    "Source: there is no surface or raster to look over; build a surface or import a DEM first";
+const NO_SOURCE: &str = NO_SURFACE_OR_RASTER;
+
+/// How many observers the list shows before it scrolls: a viewshed is mostly of a point or two.
+const OBSERVER_ROWS: f32 = 3.0;
 
 /// ```text
 /// RASTER VIEWSHED <source> (OBSERVER x,y)... | OBSERVERS <scope>
@@ -499,32 +501,50 @@ impl ViewshedDialog {
                 .inner;
             (add, pick)
         });
+        // The observers a list in a well under the Observer field, saying so while it is empty;
+        // Remove under it only once there is a row to remove, and lit only with one chosen. A
+        // list of no rows drew nothing, over a lone disabled Remove.
         let listed = one_column(&self.observers);
-        ui.add_enabled_ui(!from_scope, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("viewshedObserversScroll")
-                .max_height(90.0)
-                .show(ui, |ui| {
-                    rows(
+        let current = &mut self.observers_current;
+        row(ui, "Observers:", |ui| {
+            ui.add_enabled_ui(!from_scope, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    let height = crate::dialog_layout::rows_height(ui, OBSERVER_ROWS) + 6.0;
+                    crate::dialog_layout::list_well(
                         ui,
                         "viewshedObservers",
                         &listed,
-                        &mut self.observers_current,
+                        current,
+                        height,
+                        "No observers yet: type one and Add, or Pick one in a view",
                     );
                 });
+            });
         });
-        let removable = !from_scope && !self.observers.is_empty();
-        let remove = ui
-            .add_enabled_ui(removable, |ui| {
-                button(ui, "viewshedRemove", "Remove").clicked()
+        let removable = !from_scope && self.observers_current.is_some();
+        let remove = if self.observers.is_empty() {
+            hidden(ui, "viewshedRemoveNone", |ui| {
+                ui.add_enabled_ui(false, |ui| button(ui, "viewshedRemove", "Remove"));
+            });
+            false
+        } else {
+            row(ui, "", |ui| {
+                ui.add_enabled_ui(removable, |ui| {
+                    button(ui, "viewshedRemove", "Remove").clicked()
+                })
+                .inner
             })
-            .inner;
-        check(
-            ui,
-            "viewshedUseScope",
-            "The observers are the points these take instead",
-            &mut self.use_scope,
-        );
+        };
+        // At the fields' edge, as every check box of a form is (a row with no label).
+        row(ui, "", |ui| {
+            check(
+                ui,
+                "viewshedUseScope",
+                "The observers are the points these take instead",
+                &mut self.use_scope,
+            )
+        });
         let use_scope = self.use_scope;
         ui.add_enabled_ui(use_scope, |ui| {
             self.scope.ui(ui);

@@ -61,7 +61,8 @@ mod viewshed_line {
     #[test]
     fn what_cannot_be_written_is_refused_naming_the_field() {
         let mut form = ViewshedForm::default();
-        assert!(message(&form).contains("Source"));
+        // No source: the one sentence every dialog reading a surface or a raster says it in.
+        assert!(message(&form).contains("There is no surface or raster"));
         form.source = String::from("SURFACE ground");
         assert!(message(&form).contains("Observers"));
         form.observers = vec![String::from("1,2")];
@@ -205,7 +206,11 @@ mod viewshed_dialog {
         }
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.text("viewshedStatus").contains("Source"));
+        assert!(
+            bench
+                .text("viewshedStatus")
+                .contains("There is no surface or raster")
+        );
         assert!(bench.placeholder("viewshedCommand").is_empty());
     }
 }

@@ -34,7 +34,7 @@ use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{Choice, check, choice};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 
 /// What the dialog's fields hold, as typed.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -370,7 +370,7 @@ impl GridDemDialog {
     }
 
     fn options(&mut self, ui: &mut Ui) {
-        ui.label("Grid");
+        dialog::section(ui, "Grid");
         let method_changed = row(ui, "Method:", |ui| {
             choice(ui, "gridMethod", &self.methods, &mut self.method)
                 .on_hover_text(
@@ -441,17 +441,22 @@ impl GridDemDialog {
             field(ui, "gridName", &mut self.name, "dem")
                 .on_hover_text("NAME: the reference raster's name; a name taken becomes <name>-2");
         });
-        check(
-            ui,
-            "gridToSurface",
-            "Keep as a named surface (TO SURFACE)",
-            &mut self.to_surface,
-        )
-        .on_hover_text(
+        // Words, not the verb's token (the tooltip names TO SURFACE), at the fields' edge as
+        // every check box of a form is.
+        row(ui, "", |ui| {
+            check(
+                ui,
+                "gridToSurface",
+                "Keep as a named surface",
+                &mut self.to_surface,
+            )
+            .on_hover_text(
             "TO SURFACE: keep the grid as a named surface (SURFACE LIST) instead of a reference \
              raster, named by Name (dem when blank)",
-        );
-        ui.label(
+            )
+        });
+        dialog::note(
+            ui,
             "The points in the scope, and the vertices of its lines and areas, gridded by GDAL \
              into a DEM kept as a reference raster (REFS lists it). Cells no point reaches hold \
              no data, never 0.",
@@ -469,9 +474,9 @@ impl Framed for GridDemDialog {
         // The scope and the options side by side, each half the body.
         ui.columns(2, |columns| {
             self.scope.ui(&mut columns[0]);
-            let options = columns[1].group(|ui| {
-                ui.vertical(|ui| self.options(ui));
-            });
+            // A headed section beside the scope's, as every group of a dialog is
+            // (shell::dialog::section), where it was a bordered box beside an unbordered one.
+            let options = columns[1].vertical(|ui| self.options(ui));
             custom(
                 &columns[1],
                 &options.response,

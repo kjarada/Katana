@@ -92,10 +92,11 @@ pub fn gis_problems_summary(reply: &str, none: &str) -> String {
     if problems == 0 {
         return String::from(none);
     }
+    // The right number of each, never "1 problems on 1 entities".
     format!(
-        "{problems} problems on {} entities: each is a row of the table, and a problem record in \
-         the reply.",
-        entities.len()
+        "{} on {}: each is a row of the table, and a problem record in the reply.",
+        katana_cad::tools::everyday_support::counted(problems, "problem", "problems"),
+        katana_cad::tools::everyday_support::counted(entities.len(), "entity", "entities")
     )
 }
 

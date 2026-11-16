@@ -38,7 +38,7 @@ use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{Choice, check, choice, label, radio, tabs};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::offstage;
 
 /// The tools, in the order of the tabs.
@@ -187,9 +187,7 @@ pub fn dem_tool_command_line(form: &DemToolForm) -> Result<String> {
             )));
         }
         if numeric(key) && parse_finite_double(value).is_none() {
-            return Err(invalid(format!(
-                "{key} must be a number, not '{value}'"
-            )));
+            return Err(invalid(format!("{key} must be a number, not '{value}'")));
         }
         line.push_str(&format!(" {key}={value}"));
     }
@@ -535,7 +533,8 @@ impl DemToolsDialog {
     fn options(&mut self, ui: &mut Ui, host: &dyn Host, tool: DemTool) {
         match tool {
             DemTool::Mosaic => {
-                ui.label(
+                dialog::note(
+                    ui,
                     "Tiles joined into one DEM, kept as a reference raster reading them where \
                      they are (a VRT); SAVE writes the mosaic to a file of its own and keeps \
                      that. A folder is every raster in it, a pattern (tiles/*.tif) every file it \
@@ -602,7 +601,8 @@ impl DemToolsDialog {
                 });
             }
             DemTool::Fill => {
-                ui.label(
+                dialog::note(
+                    ui,
                     "The raster's cells with no value filled by inverse-distance weighting from \
                      the cells round them; the reply counts what was empty and what was filled.",
                 );
@@ -631,7 +631,8 @@ impl DemToolsDialog {
                 });
             }
             DemTool::Reproject => {
-                ui.label(
+                dialog::note(
+                    ui,
                     "The raster into the project's coordinate system, another (an EPSG code), or \
                      another raster's grid. A raster that says nothing of where it is is \
                      refused: say it with From.",
@@ -690,7 +691,8 @@ impl DemToolsDialog {
                 });
             }
             DemTool::Footprint => {
-                ui.label(
+                dialog::note(
+                    ui,
                     "Where the raster has data, drawn as closed polylines on a layer, as one undo \
                      step.",
                 );
@@ -705,15 +707,14 @@ impl DemToolsDialog {
                 });
             }
             DemTool::Difference => {
-                ui.label(
+                dialog::note(
+                    ui,
                     "The first minus the second, the second aligned to the first's grid where \
                      they differ: a raster of the difference, and the volumes of fill (the first \
                      above) and cut (below) by the grid method.",
                 );
-                ui.group(|ui| {
-                    ui.label("Second");
-                    self.difference_second.ui(ui, host);
-                });
+                dialog::section(ui, "Second");
+                self.difference_second.ui(ui, host);
                 if let Some(text) = self.difference_second.take_said() {
                     self.panels[tool.index()].set_status(&text, true);
                 }
@@ -758,23 +759,27 @@ impl DemToolsDialog {
         let page = ui.vertical(|ui| {
             // The raster and the options side by side, each half the page: a form fills what it is
             // given, and laid out in a row the first would leave the second no room.
+            // Headed sections, as every group of a dialog is (shell::dialog::section): two
+            // bordered boxes side by side ended 10 points apart, short of one edge.
             ui.columns(2, |columns| {
-                columns[0].group(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(if tool == DemTool::Difference {
+                columns[0].vertical(|ui| {
+                    dialog::section(
+                        ui,
+                        if tool == DemTool::Difference {
                             "First (minus the second)"
                         } else {
                             "Raster"
-                        });
-                        if tool == DemTool::Mosaic {
-                            self.mosaic_tiles.ui(ui, &*host);
-                        } else {
-                            self.sources[tool.index() - 1].ui(ui, &*host);
-                        }
-                    });
+                        },
+                    );
+                    if tool == DemTool::Mosaic {
+                        self.mosaic_tiles.ui(ui, &*host);
+                    } else {
+                        self.sources[tool.index() - 1].ui(ui, &*host);
+                    }
                 });
-                let options = columns[1].group(|ui| {
-                    ui.vertical(|ui| self.options(ui, &*host, tool));
+                let options = columns[1].vertical(|ui| {
+                    dialog::section(ui, "Options");
+                    self.options(ui, &*host, tool);
                 });
                 custom(
                     &columns[1],

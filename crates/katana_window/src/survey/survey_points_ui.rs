@@ -279,7 +279,8 @@ impl SurveyExportDialog {
             choice_of(ui, "delimiter", &names_of(&DELIMITERS), &mut form.delimiter)
                 .on_hover_text("What separates the fields")
         });
-        drive::check(
+        // At the fields' edge, as every check box of a form is.
+        crate::shell::dialog::check_row(
             ui,
             "header",
             "A header line naming the columns",
@@ -423,17 +424,21 @@ impl SurveyExportDialog {
         let bytes = write_delimited_points(&survey_points, &layout, &options)?;
         write_file(path, bytes.as_bytes())?;
         let mut report = format!(
-            "Exported {} point(s) to {} - layout {}, {decimals} decimals, in {}.",
-            points.len(),
+            "Exported {} to {} - layout {}, {decimals} decimals, in {}.",
+            katana_cad::tools::everyday_support::counted(points.len(), "point", "points"),
             file_name_of(path),
             layout_template(&layout),
             unit_name(options.unit)
         );
         if without_elevation != 0 {
-            report.push_str(&format!(
-                "\n{without_elevation} point(s) have no elevation and were written with an \
-                 empty field."
-            ));
+            report.push_str(&if without_elevation == 1 {
+                String::from("\n1 point has no elevation and was written with an empty field.")
+            } else {
+                format!(
+                    "\n{without_elevation} points have no elevation and were written with an \
+                     empty field."
+                )
+            });
         }
         if not_points != 0 {
             report.push_str(&format!(
@@ -945,7 +950,7 @@ impl SurveyPointReportDialog {
                             &[
                                 ("refresh", "Refresh"),
                                 ("copy", "Copy"),
-                                ("saveCsv", "Save As CSV..."),
+                                ("saveCsv", "Save CSV..."),
                             ],
                         )
                     },
@@ -984,9 +989,23 @@ impl SurveyPointReportDialog {
             drawing_survey_points(document, &SurveyImportOptions::default())
         };
         self.form.scope = if selected {
-            format!("The {} selected survey point(s).", self.points.len())
+            format!(
+                "The {} selected.",
+                katana_cad::tools::everyday_support::counted(
+                    self.points.len(),
+                    "survey point",
+                    "survey points"
+                )
+            )
         } else {
-            format!("All {} survey point(s) in the drawing.", self.points.len())
+            format!(
+                "All {} in the drawing.",
+                katana_cad::tools::everyday_support::counted(
+                    self.points.len(),
+                    "survey point",
+                    "survey points"
+                )
+            )
         };
         self.form.report = format_point_report(&self.points, REPORT_DECIMALS);
         let fixed = |value: f64| katana_core::text::format_fixed(value, REPORT_DECIMALS);
@@ -1006,7 +1025,10 @@ impl SurveyPointReportDialog {
             })
             .collect();
         host.log(
-            &format!("Point Report: {} point(s)", self.points.len()),
+            &format!(
+                "Point Report: {}",
+                katana_cad::tools::everyday_support::counted(self.points.len(), "point", "points")
+            ),
             false,
         );
     }
@@ -1032,8 +1054,8 @@ impl SurveyPointReportDialog {
         }
         host.log(
             &format!(
-                "Point Report: {} point(s) saved to {}",
-                self.points.len(),
+                "Point Report: {} saved to {}",
+                katana_cad::tools::everyday_support::counted(self.points.len(), "point", "points"),
                 file_name_of(&path)
             ),
             false,

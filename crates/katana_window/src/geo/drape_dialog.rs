@@ -24,8 +24,8 @@ use katana_core::Result;
 
 use super::point_pick::PointPick;
 use super::terrain_dialog_parts::{
-    Framed, WordChoice, command_field, field, host_views, invalid, one_column, remove_current, row,
-    run_buttons, show_framed, why_no_line, without_blanks,
+    Framed, NO_SURFACE_OR_RASTER, WordChoice, command_field, field, host_views, invalid,
+    one_column, remove_current, row, run_buttons, show_framed, why_no_line, without_blanks,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, number_list, terrain_reply_field,
@@ -112,10 +112,7 @@ pub fn point_words(x: f64, y: f64) -> String {
 pub fn drape_line(form: &DrapeForm) -> Result<String> {
     let source = form.source.trim();
     if source.is_empty() {
-        return Err(invalid(
-            "Source: there is no surface or raster to drape on; build a surface or import a DEM \
-             first",
-        ));
+        return Err(invalid(NO_SURFACE_OR_RASTER));
     }
     if !form.scope_error.is_empty() {
         return Err(invalid(format!("Drape: {}", form.scope_error)));
@@ -139,10 +136,7 @@ pub fn drape_line(form: &DrapeForm) -> Result<String> {
 pub fn sample_line(form: &SampleForm) -> Result<String> {
     let source = form.source.trim();
     if source.is_empty() {
-        return Err(invalid(
-            "Source: there is no surface or raster to sample; build a surface or import a DEM \
-             first",
-        ));
+        return Err(invalid(NO_SURFACE_OR_RASTER));
     }
     if form.points.is_empty() {
         return Err(invalid("Points: add a point to sample, typed or picked"));

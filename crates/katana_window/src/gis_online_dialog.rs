@@ -72,11 +72,10 @@ use crate::drive::controls::custom;
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::drive::{
-    Choice, LineOptions, SpinRange, button, check, choice, label, label_as, line_with, spin, whole,
+    Choice, LineOptions, SpinRange, button, check, choice, label_as, line_with, spin, whole,
 };
 use crate::shell::DialogFrame;
 use crate::survey::survey_dialogs::hidden;
-use crate::theme::palette;
 
 /// What a headless import gives a service before it cancels (gis_online's
 /// HEADLESS_DEADLINE_SECONDS): the Advanced group's starting value, so ticking it changes nothing
@@ -1200,15 +1199,33 @@ impl OnlineDataDialog {
         let typed = self.area_kind() == OnlineAreaKind::Box;
         crate::shell::dialog::labelled(ui, "Box:", |ui| {
             ui.add_enabled_ui(typed, |ui| {
+                // The box and its choice of coordinates share the row and end where the fields
+                // under them do: the box filling the row pushed the choice 300 points past the
+                // column's edge, and every row under it - widened to it - ended there too, where
+                // Area and Box ended at the column's (the third look audit's D).
+                let crs_width = self
+                    .box_crs_items
+                    .iter()
+                    .map(|item| crate::shell::dialog::one_line_width(ui, item))
+                    .fold(0.0, f32::max)
+                    // As egui sizes a ComboBox: its text, its margins, the icon's spacing and
+                    // the chevron's square.
+                    + 2.0 * ui.spacing().button_padding.x
+                    + ui.spacing().icon_spacing
+                    + crate::drive::controls::list_arrow_width(ui);
+                let box_width =
+                    (ui.available_width() - crs_width - ui.spacing().item_spacing.x).max(0.0);
                 line_with(
                     ui,
                     "onlineBox",
                     &mut self.typed_box,
                     LineOptions {
                         placeholder: "x0,y0,x1,y1",
+                        width: Some(box_width),
                         ..LineOptions::default()
                     },
                 );
+                crate::shell::dialog::fixed_fields(ui, crs_width);
                 choice(ui, "onlineBoxCrs", &self.box_crs_items, &mut self.box_crs);
             });
         });
@@ -1258,10 +1275,14 @@ impl OnlineDataDialog {
         });
         crate::shell::dialog::labelled(ui, "Scene dates:", |ui| {
             ui.add_enabled_ui(applies.dates, |ui| {
-                check(ui, "onlineUseDates", "Between", &mut self.use_dates);
-                self.from.ui(ui, "onlineFrom");
-                ui.label("and");
-                self.to.ui(ui, "onlineTo");
+                // A row centred down a control's height, so "and" stands on the dates' line: in
+                // the form's row, whose items sit at its top, it stood 5 points above them.
+                ui.horizontal(|ui| {
+                    check(ui, "onlineUseDates", "Between", &mut self.use_dates);
+                    self.from.ui(ui, "onlineFrom");
+                    ui.label("and");
+                    self.to.ui(ui, "onlineTo");
+                });
             });
         });
         crate::shell::dialog::labelled(ui, "Cloud:", |ui| {
@@ -1293,9 +1314,23 @@ impl OnlineDataDialog {
         // Rows of the form, their labels in its column without a colon: a bare "Project CRS:"
         // and "Key:" stood at the column's left edge with their fields off the fields' edge.
         let set_crs = crate::shell::dialog::labelled(ui, "Project CRS", |ui| {
-            crate::shell::dialog::text_value(ui, |ui| {
-                label(ui, "onlineProjectCrs", &self.project_crs);
-            });
+            // The value in what the row leaves its button, cut short with the whole of it in
+            // its tooltip, the button at the row's end as Save Key is: as long as it liked, the
+            // value and its button ran 90 points past the column's edge.
+            let room = crate::shell::dialog::beside_a_button(ui, "Set Project CRS...");
+            ui.allocate_ui_with_layout(
+                egui::vec2(room, ui.spacing().interact_size.y),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_width(room);
+                    label_as(
+                        ui,
+                        "onlineProjectCrs",
+                        &self.project_crs,
+                        egui::Label::new(self.project_crs.as_str()).truncate(),
+                    );
+                },
+            );
             ui.add_enabled_ui(context.can_choose_project_crs(), |ui| {
                 button(ui, "onlineSetProjectCrs", "Set Project CRS...").clicked()
             })
@@ -1333,14 +1368,20 @@ impl OnlineDataDialog {
 
         // Advanced: a deadline. A person can always cancel from the status bar; this is for an
         // import left to run, and for a script's.
-        let advanced = ui.group(|ui| {
-            ui.label("Advanced");
-            ui.horizontal(|ui| {
-                check(ui, "onlineTimeoutOn", "Give up after", &mut self.timeout_on);
-                ui.add_enabled_ui(self.timeout_on, |ui| {
-                    // The range ONLINE IMPORT's timeout= takes (parse_online_command).
-                    whole(ui, "onlineTimeout", &mut self.timeout, 1..=86_400);
-                    ui.label("s");
+        // A headed section, as every group of a dialog is (shell::dialog::section), where it was a
+        // bordered box under rows of a form.
+        crate::shell::dialog::section(ui, "Advanced");
+        let advanced = ui.scope(|ui| {
+            // Under the fields, a row centred down a control's height so "s" stands on the
+            // box's line.
+            crate::shell::dialog::labelled(ui, "", |ui| {
+                ui.horizontal(|ui| {
+                    check(ui, "onlineTimeoutOn", "Give up after", &mut self.timeout_on);
+                    ui.add_enabled_ui(self.timeout_on, |ui| {
+                        // The range ONLINE IMPORT's timeout= takes (parse_online_command).
+                        whole(ui, "onlineTimeout", &mut self.timeout, 1..=86_400);
+                        ui.label("s");
+                    });
                 });
             });
         });
@@ -1368,8 +1409,8 @@ impl OnlineDataDialog {
     fn catalogue_ui(&mut self, ui: &mut Ui) -> (bool, bool) {
         let mut search = false;
         let mut add = false;
-        let group = ui.group(|ui| {
-            ui.label("Search this catalogue for services");
+        crate::shell::dialog::section(ui, "Search this catalogue for services");
+        let group = ui.scope(|ui| {
             ui.horizontal(|ui| {
                 let typed = line_with(
                     ui,
@@ -1442,11 +1483,7 @@ impl OnlineDataDialog {
         let ((), (close, import)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
-                let mut text = RichText::new(status.as_str());
-                if is_error {
-                    text = text.color(palette::error().to_egui());
-                }
-                label_as(ui, "onlineStatus", &status, egui::Label::new(text).wrap());
+                crate::shell::dialog::status(ui, "onlineStatus", &status, is_error);
             },
             |ui| {
                 let close = button(ui, "onlineClose", "Close").clicked();

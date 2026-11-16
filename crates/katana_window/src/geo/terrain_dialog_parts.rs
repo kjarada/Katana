@@ -16,9 +16,31 @@ use crate::customisation::scope_filter_views;
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
-use crate::drive::{Choice, LineOptions, button, choice, label_as, line_with, primary};
+use crate::drive::{Choice, LineOptions, button, choice, line_with, primary};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
+
+/// Why a dialog that reads a surface writes no line while the drawing has none: one sentence in
+/// every such dialog, where three said it three ways ("there is no surface; make one first
+/// (Terrain > Surface From)", "the drawing has no surface yet; make one with ...", "there is no
+/// surface to export; build one from the Terrain menu"). No field's name before it: the
+/// condition is the drawing's, not a field's.
+pub(crate) const NO_SURFACE: &str = "There is no surface: make one with Terrain > Surface From";
+
+/// What a choice of the drawing's surfaces says while the drawing has none
+/// (drive::controls::choice_with_hint), muted in the control: the Surface Edit toolbar's, the
+/// surface edit dialogs', Volumes', Combine Surfaces' and Export Surface as DEM's.
+pub(crate) const NO_SURFACE_HINT: &str = "No surface";
+
+/// What a choice of the drawing's surfaces and reference rasters says while it has neither
+/// (terrain_dialog_support::SourcePicker).
+pub(crate) const NO_SOURCE_HINT: &str = "No surface or raster";
+
+/// Why a dialog that reads a surface or a raster writes no line while the drawing has neither,
+/// in the same words in each (Contours, Drape and Sample, Slope, Shading, Viewshed, Statistics
+/// by Area), where each said it with its own verb.
+pub(crate) const NO_SURFACE_OR_RASTER: &str =
+    "There is no surface or raster: make a surface with Terrain > Surface From, or import a DEM";
 
 /// InvalidArgument saying `message`: why a dialog's fields write no line.
 pub(crate) fn invalid(message: impl Into<String>) -> Error {
@@ -116,6 +138,19 @@ pub(crate) fn why_no_line(made: &Result<String>) -> String {
     }
 }
 
+/// Why a dialog's fields write no line, as its footer's status says it: `message` - an error's
+/// words, which start in lower case to follow a field's name ("the scope: ...") - begun with a
+/// capital, and nothing put before it. The GIS and utility dialogs put "Nothing to run yet: "
+/// before it, and with the field prefixes their errors already carry a status read as three
+/// prefixes in a row (Clip's "Nothing to run yet: the boundary: the scope: tick ...").
+pub(crate) fn why_status(message: &str) -> String {
+    let mut characters = message.trim().chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => String::new(),
+    }
+}
+
 /// A run dialog's status (its footer's left): the last thing said - what a run answered, a
 /// refusal - and, while nothing has been said, why the fields write no line, as a hint in the
 /// secondary text. Why there was no line was the Command field's placeholder, where a sentence
@@ -199,13 +234,7 @@ pub(crate) fn run_buttons(
                     .inner
             });
             let (name, text) = status;
-            label_as(
-                ui,
-                name,
-                text,
-                egui::Label::new(egui::RichText::new(text).color(dialog::status_colour(false)))
-                    .wrap(),
-            );
+            dialog::status(ui, name, text, false);
             previewed
         },
         |ui| {

@@ -199,6 +199,7 @@ pub struct VectorExportDialog {
 impl VectorExportDialog {
     pub fn new(context: GisDialogContext, host: &dyn Host) -> Self {
         let mut frame = GisToolFrame::new("vectorExport", "Export Drawing", context, host, true);
+        frame.set_run_text("Export");
         // A file handed to someone is usually the whole drawing.
         if let Some(scope) = frame.scope_controls_mut() {
             scope.set_choice(ScopeChoice::Drawing);

@@ -60,7 +60,8 @@ mod contour_line {
             interval: String::from("1"),
             ..ContourForm::default()
         };
-        assert!(message(&form).contains("Source"));
+        // No source: the one sentence every dialog reading a surface or a raster says it in.
+        assert!(message(&form).contains("There is no surface or raster"));
         form.source = String::from("SURFACE ground");
         for interval in ["", "0", "-1", "one"] {
             form.interval = String::from(interval);
@@ -170,7 +171,11 @@ mod contours_dialog {
         assert!(!bench.enabled("contourRun"));
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.text("contourStatus").contains("Source"));
+        assert!(
+            bench
+                .text("contourStatus")
+                .contains("There is no surface or raster")
+        );
         assert!(bench.text("contourCommand").is_empty());
         assert!(bench.placeholder("contourCommand").is_empty());
         assert!(bench.host.lines().is_empty());

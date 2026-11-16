@@ -47,7 +47,7 @@
 //! dialog among the window's children, is the window keeping this model between frames and calling
 //! `show`.
 
-use egui::{RichText, Ui};
+use egui::Ui;
 use katana_core::error::make_error;
 use katana_core::text::{format_exact_real, parse_finite_double, read_reply_record};
 use katana_core::{ErrorCode, Result};
@@ -61,11 +61,12 @@ use crate::customisation::{DocumentWatcher, ScopeFilterWidget};
 use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{
-    Choice, LineOptions, SpinRange, button, check, choice, label_as, line_with, primary, radio,
-    spin, tabs,
+    Choice, LineOptions, SpinRange, button, check, choice, line_with, primary, radio, spin, tabs,
 };
 use crate::geo::geo_dialog_support::line_word;
-use crate::geo::terrain_dialog_parts::{Framed, WordChoice, host_views, row, show_framed};
+use crate::geo::terrain_dialog_parts::{
+    Framed, NO_SURFACE, NO_SURFACE_HINT, WordChoice, host_views, row, show_framed,
+};
 use crate::host::{Host, VerbOutcome};
 use crate::icons::{IconMode, show_icon};
 use crate::ifc_dialogs::get_save_file_name;
@@ -78,7 +79,6 @@ fn number(value: f64) -> String {
     format_exact_real(value)
 }
 
-const NO_SURFACE: &str = "the drawing has no surface yet; make one with Terrain > Surface From";
 const NO_ALIGNMENT: &str =
     "the drawing has no alignment yet; define one in Terrain > Alignment Manager";
 const BASE_TIP: &str = "The existing surface: cut is where it is above the top";
@@ -122,11 +122,14 @@ const CHART_HEIGHT: f32 = 140.0;
 fn chosen(list: &Choice, items: &[String], field: &str, missing: &str) -> Result<String> {
     let text = list.current_text(items);
     if text.is_empty() {
-        return Err(make_error(
-            ErrorCode::InvalidArgument,
-            format!("{field}: {missing}"),
-            "",
-        ));
+        // With nothing to choose from, the drawing's lack is the reason, said as every dialog
+        // that reads a surface says it, with no field's name before it.
+        let message = if items.is_empty() {
+            String::from(missing)
+        } else {
+            format!("{field}: {missing}")
+        };
+        return Err(make_error(ErrorCode::InvalidArgument, message, ""));
     }
     line_word(&text, field)
 }
@@ -1078,18 +1081,38 @@ impl VolumesDialog {
     fn surfaces_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Base:", |ui| {
-            choice(ui, "volumesBase", surfaces, &mut self.base).on_hover_text(BASE_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesBase",
+                surfaces,
+                &mut self.base,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(BASE_TIP);
         });
         row(ui, "Top:", |ui| {
-            choice(ui, "volumesTop", surfaces, &mut self.top).on_hover_text(TOP_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesTop",
+                surfaces,
+                &mut self.top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(TOP_TIP);
         });
     }
 
     fn level_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Surface:", |ui| {
-            choice(ui, "volumesLevelSurface", surfaces, &mut self.level_surface)
-                .on_hover_text("The surface measured against the level");
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesLevelSurface",
+                surfaces,
+                &mut self.level_surface,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text("The surface measured against the level");
         });
         row(ui, "Level:", |ui| {
             spin(ui, "volumesLevel", &mut self.level, LEVEL).on_hover_text(
@@ -1136,12 +1159,24 @@ impl VolumesDialog {
     fn sections_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Base:", |ui| {
-            choice(ui, "volumesSectionsBase", surfaces, &mut self.sections_base)
-                .on_hover_text(BASE_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesSectionsBase",
+                surfaces,
+                &mut self.sections_base,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(BASE_TIP);
         });
         row(ui, "Top:", |ui| {
-            choice(ui, "volumesSectionsTop", surfaces, &mut self.sections_top)
-                .on_hover_text(TOP_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesSectionsTop",
+                surfaces,
+                &mut self.sections_top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(TOP_TIP);
         });
         row(ui, "Alignment:", |ui| {
             choice(
@@ -1237,10 +1272,24 @@ impl VolumesDialog {
     fn grid_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Base:", |ui| {
-            choice(ui, "volumesGridBase", surfaces, &mut self.grid_base).on_hover_text(BASE_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesGridBase",
+                surfaces,
+                &mut self.grid_base,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(BASE_TIP);
         });
         row(ui, "Top:", |ui| {
-            choice(ui, "volumesGridTop", surfaces, &mut self.grid_top).on_hover_text(TOP_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesGridTop",
+                surfaces,
+                &mut self.grid_top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(TOP_TIP);
         });
         row(ui, "Cell:", |ui| {
             spin(ui, "volumesCell", &mut self.cell, CELL)
@@ -1281,10 +1330,12 @@ impl VolumesDialog {
     /// The boundary: none, the shared scope and filter, or typed corners.
     fn boundary_group(&mut self, ui: &mut Ui) {
         let showing = self.method();
+        // A headed section, as every group of a dialog is (shell::dialog::section), where it was a
+        // bordered box among headed sections.
+        dialog::section(ui, "Inside");
         let group = ui
             .add_enabled_ui(showing != VolumeMethod::Sections, |ui| {
-                ui.group(|ui| {
-                    ui.label("Inside");
+                ui.scope(|ui| {
                     ui.horizontal(|ui| {
                         for (name, text, tip, which) in [
                             (
@@ -1406,7 +1457,7 @@ impl VolumesDialog {
 
     fn file_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
         dialog::labelled(ui, "Results:", |ui| {
-            let width = dialog::beside_buttons(ui, &["Copy", "Browse...", "Save CSV"]);
+            let width = dialog::beside_buttons(ui, &["Copy", "Browse...", "Save CSV..."]);
             if button(ui, "volumesCopy", "Copy")
                 .on_hover_text("The table on the clipboard, tab-separated with its header")
                 .clicked()
@@ -1427,7 +1478,8 @@ impl VolumesDialog {
             if button(ui, "volumesCsvBrowse", "Browse...").clicked() {
                 *asked = Some(Asked::Browse);
             }
-            if button(ui, "volumesSaveCsv", "Save CSV")
+            // "Save CSV...", as every dialog's is: with no file named it asks for one.
+            if button(ui, "volumesSaveCsv", "Save CSV...")
                 .on_hover_text(
                     "The line run again with csv= the file: the quantities as a table, with the \
                      method and its inputs on every row. Nothing is written when nothing is \
@@ -1567,22 +1619,22 @@ impl Framed for VolumesDialog {
         } else {
             (self.status.clone(), self.status_is_error)
         };
+        // Measure is greyed while the fields write no line - no surface, no boundary - as every
+        // run dialog's primary is; the status says why. It was lit beside "the drawing has no
+        // surface".
+        let can_measure = self.line().is_ok();
         let ((), (close, measure)) = dialog::button_row(
             ui,
             |ui| {
-                label_as(
-                    ui,
-                    "volumesStatus",
-                    &status,
-                    egui::Label::new(
-                        RichText::new(status.as_str()).color(dialog::status_colour(is_error)),
-                    )
-                    .wrap(),
-                );
+                dialog::status(ui, "volumesStatus", &status, is_error);
             },
             |ui| {
                 let close = button(ui, "volumesClose", "Close").clicked();
-                let measure = primary(ui, "volumesRun", "Measure").clicked();
+                let measure = ui
+                    .add_enabled_ui(can_measure, |ui| {
+                        primary(ui, "volumesRun", "Measure").clicked()
+                    })
+                    .inner;
                 (close, measure)
             },
         );

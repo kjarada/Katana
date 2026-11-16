@@ -19,14 +19,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use egui::{RichText, Ui};
+use egui::Ui;
 use katana_app::geo::replies;
 use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 
 use super::geo_workbench::started_job;
-use super::terrain_dialog_parts::RunStatus;
-use crate::drive::{LineOptions, button, label_as, line_with, primary};
+use super::terrain_dialog_parts::{RunStatus, why_status};
+use crate::drive::{LineOptions, button, line_with, primary};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 use crate::shell::dialog;
 
@@ -121,13 +121,10 @@ impl GeoRunPanel {
         let why = if self.ready {
             String::new()
         } else {
-            format!(
-                "Nothing to run yet: {}",
-                match made {
-                    Ok(_) => String::from("the fields say no line"),
-                    Err(error) => error.message.clone(),
-                }
-            )
+            match made {
+                Ok(_) => String::from("The fields say no line yet"),
+                Err(error) => why_status(&error.message),
+            }
         };
         self.status.read_line(why);
     }
@@ -328,7 +325,6 @@ impl GeoRunPanel {
         let preview_name = self.name("Preview");
         let run_name = self.name("Run");
         let (status, is_error) = self.status.shown();
-        let colour = dialog::status_colour(is_error);
         let ready = self.ready;
         let offers_preview = self.preview;
         let (preview_clicked, (closed, run_clicked)) = dialog::button_row(
@@ -345,8 +341,7 @@ impl GeoRunPanel {
                                 .clicked()
                         })
                         .inner;
-                let text = RichText::new(status.as_str()).color(colour);
-                label_as(ui, &status_name, &status, egui::Label::new(text).wrap());
+                dialog::status(ui, &status_name, &status, is_error);
                 preview
             },
             |ui| {

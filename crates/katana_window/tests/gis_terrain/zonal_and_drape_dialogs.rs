@@ -65,7 +65,8 @@ mod zonal_line {
             stats: strings(&["mean"]),
             ..ZonalForm::default()
         };
-        assert!(message(&form).contains("Source"));
+        // No source: the one sentence every dialog reading a surface or a raster says it in.
+        assert!(message(&form).contains("There is no surface or raster"));
         form.source = String::from("SURFACE ground");
         form.stats.clear();
         assert!(message(&form).contains("Statistics"));
@@ -142,7 +143,11 @@ mod zonal_stats_dialog {
         assert!(!bench.enabled("zonalRun"));
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.text("zonalStatus").contains("Source"));
+        assert!(
+            bench
+                .text("zonalStatus")
+                .contains("There is no surface or raster")
+        );
         assert!(bench.text("zonalCommand").is_empty());
         assert!(bench.placeholder("zonalCommand").is_empty());
     }

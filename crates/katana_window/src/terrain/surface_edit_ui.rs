@@ -27,8 +27,8 @@ use katana_cad::terrain::surface_edit_verbs::{
 use super::surface_edit_dialogs::{
     SurfaceCombineDialog, SurfaceLevelsDialog, SurfaceLevelsKind, surface_levels_prefix,
 };
+use crate::drive::Choice;
 use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem};
-use crate::drive::{Choice, choice};
 use crate::host::Host;
 
 /// One of the dialogs' items: its icon, text, status tip, object name and what it opens.
@@ -264,12 +264,18 @@ impl SurfaceEditUi {
         let has_surfaces = !self.surfaces.is_empty();
         let changed = ui
             .add_enabled_ui(has_surfaces, |ui| {
-                choice(ui, ACTIVE_NAME, &self.surfaces, &mut self.active)
-                    .on_hover_text(
-                        "Active surface: the surface the Edit Surface tools act on. A tool's own \
+                crate::drive::controls::choice_with_hint(
+                    ui,
+                    ACTIVE_NAME,
+                    &self.surfaces,
+                    &mut self.active,
+                    crate::geo::terrain_dialog_parts::NO_SURFACE_HINT,
+                )
+                .on_hover_text(
+                    "Active surface: the surface the Edit Surface tools act on. A tool's own \
                          S option chooses it too.",
-                    )
-                    .changed()
+                )
+                .changed()
             })
             .inner;
         if changed && let Some(index) = self.active.index {

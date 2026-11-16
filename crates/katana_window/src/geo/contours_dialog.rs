@@ -34,14 +34,15 @@ use egui::Ui;
 use katana_core::Result;
 
 use super::terrain_dialog_parts::{
-    Framed, WordChoice, command_field, field, host_views, invalid, number_of, row, run_buttons,
-    show_framed, why_no_line,
+    Framed, NO_SURFACE_OR_RASTER, WordChoice, command_field, field, host_views, invalid, number_of,
+    row, run_buttons, show_framed, why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
     terrain_reply_field, terrain_sources,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
+use crate::drive::controls::number_line;
 use crate::drive::{check, whole};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
@@ -94,10 +95,7 @@ fn is_surface(source: &str) -> bool {
 pub fn contour_line(form: &ContourForm) -> Result<String> {
     let source = form.source.trim();
     if source.is_empty() {
-        return Err(invalid(
-            "Source: there is no surface or raster to contour; build a surface or import a DEM \
-             first",
-        ));
+        return Err(invalid(NO_SURFACE_OR_RASTER));
     }
     let interval = form.interval.trim();
     if !number_list(interval, 1, false) || !(number_of(interval) > 0.0) {
@@ -269,14 +267,15 @@ impl Framed for ContoursDialog {
                  resolution.",
             );
         });
+        // Numbers are short wells, as Major every's number box is (drive::controls::number_line).
         row(ui, "Interval:", |ui| {
-            field(ui, "contourInterval", &mut self.interval, "");
+            number_line(ui, "contourInterval", &mut self.interval, "");
         });
         row(ui, "Major every:", |ui| {
             whole(ui, "contourMajorEvery", &mut self.major_every, 0..=1000);
         });
         row(ui, "Counted from:", |ui| {
-            field(ui, "contourBase", &mut self.base, "0");
+            number_line(ui, "contourBase", &mut self.base, "0");
         });
         row(ui, "Layer:", |ui| {
             field(ui, "contourLayer", &mut self.layer, "")

@@ -876,16 +876,18 @@ impl PipelineBuilder {
         let mut down = false;
         let mut remove = false;
         let mut step_changed = false;
+        // Three headed columns, as every group of a dialog is (shell::dialog::section), where
+        // they were bordered boxes.
         ui.horizontal_top(|ui| {
-            ui.group(|ui| {
+            ui.scope(|ui| {
                 ui.vertical(|ui| {
-                    ui.label("Read");
+                    crate::shell::dialog::section(ui, "Read");
                     source_changed = self.source.ui(ui, &*host);
                 });
             });
-            ui.group(|ui| {
+            ui.scope(|ui| {
                 ui.vertical(|ui| {
-                    ui.label("Steps");
+                    crate::shell::dialog::section(ui, "Steps");
                     let listed = one_column(&self.rows());
                     let mut row = self.row;
                     if rows(ui, "gdalPipelineSteps", &listed, &mut row)
@@ -932,9 +934,9 @@ impl PipelineBuilder {
                     }
                 });
             });
-            ui.group(|ui| {
+            ui.scope(|ui| {
                 ui.vertical(|ui| {
-                    ui.label("The step's arguments");
+                    crate::shell::dialog::section(ui, "The step's arguments");
                     step_changed = if self.step_form_visible {
                         self.step_form.ui(ui)
                     } else {

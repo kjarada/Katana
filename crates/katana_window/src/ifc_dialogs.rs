@@ -234,14 +234,7 @@ fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> 
 /// The check label: what stops the line, or what the last run did, in the error colour or the
 /// muted one.
 fn check_label(ui: &mut Ui, name: &str, text: &str, is_error: bool) {
-    controls::label_as(
-        ui,
-        name,
-        text,
-        egui::Label::new(RichText::new(text).color(dialog::status_colour(is_error)))
-            .wrap()
-            .selectable(true),
-    );
+    dialog::status(ui, name, text, is_error);
 }
 
 /// A note in the muted colour, wrapped.
@@ -1477,14 +1470,9 @@ impl IfcImportDialog {
                 .changed();
         });
         labelled(ui, "Place", |ui| {
-            changed |= controls::check(
-                ui,
-                "ifcImportLocal",
-                "Move to the origin (LOCAL)",
-                &mut self.local,
-            )
-            .on_hover_text("Move everything to sit at the origin, as one piece")
-            .changed();
+            changed |= controls::check(ui, "ifcImportLocal", "Move to the origin", &mut self.local)
+                .on_hover_text("Move everything to sit at the origin, as one piece (LOCAL)")
+                .changed();
         });
         // Moved to the origin, the data is no longer in the file's system.
         labelled(ui, "", |ui| {

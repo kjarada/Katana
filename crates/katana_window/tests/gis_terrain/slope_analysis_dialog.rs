@@ -60,7 +60,8 @@ mod slope_line {
     #[test]
     fn what_cannot_be_written_is_refused_naming_the_field() {
         let mut form = SlopeForm::default();
-        assert!(message(&form).contains("Source"));
+        // No source: the one sentence every dialog reading a surface or a raster says it in.
+        assert!(message(&form).contains("There is no surface or raster"));
         form.source = String::from("SURFACE ground");
         form.classes = String::from("five");
         assert!(message(&form).contains("Classes"));
@@ -146,7 +147,11 @@ mod slope_analysis_dialog {
         assert!(!bench.enabled("slopeRun"));
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.text("slopeStatus").contains("Source"));
+        assert!(
+            bench
+                .text("slopeStatus")
+                .contains("There is no surface or raster")
+        );
         assert!(bench.text("slopeCommand").is_empty());
         assert!(bench.placeholder("slopeCommand").is_empty());
     }

@@ -736,7 +736,11 @@ impl ReductionOptionsWidget {
         self.pick_tip = if ids.is_empty() {
             format!("{} has no positioned points to hold", self.source_text())
         } else {
-            format!("{} point(s) of {}", ids.len(), self.source_text())
+            format!(
+                "{} of {}",
+                katana_cad::tools::everyday_support::counted(ids.len(), "point", "points"),
+                self.source_text()
+            )
         };
         self.pick_items = ids;
     }
@@ -927,8 +931,9 @@ impl ReductionOptionsWidget {
 
     fn basic_ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
-        ui.group(|ui| {
-            ui.strong("Adjustment and corrections");
+        // Headed sections, as every group of a dialog is (shell::dialog::section), where they
+        // were bordered boxes.
+        crate::shell::dialog::section_with(ui, "Adjustment and corrections", |ui| {
             let method = chosen(&METHODS, &self.method);
             form_row(ui, "Adjustment:", |ui| {
                 changed |= choice_of(ui, "method", &labels(&METHODS), &mut self.method)
@@ -1019,8 +1024,7 @@ impl ReductionOptionsWidget {
 
     fn control_ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
-        ui.group(|ui| {
-            ui.strong("Control");
+        crate::shell::dialog::section_with(ui, "Control", |ui| {
             // Two rows, so the options fit the narrow pane of Survey Jobs as well as the wizard's
             // page: which point, then how it is held.
             crate::shell::dialog::labelled(ui, "Point from", |ui| {
@@ -1131,8 +1135,7 @@ impl ReductionOptionsWidget {
         let combined = self.use_combined_factor;
         let grid_factor = !combined && chosen(&GRID_SCALE, &self.grid_scale) == GridScale::Fixed;
         let testing = chosen(&OUTLIER_TESTS, &self.outlier_test) != OutlierTest::None;
-        ui.group(|ui| {
-            ui.strong("Face tolerances");
+        crate::shell::dialog::section_with(ui, "Face tolerances", |ui| {
             form_row(ui, "Horizontal (\"):", |ui| {
                 changed |= number_ui(
                     ui,
@@ -1168,8 +1171,7 @@ impl ReductionOptionsWidget {
             )
             .changed();
         });
-        ui.group(|ui| {
-            ui.strong("A-priori standard deviations");
+        crate::shell::dialog::section_with(ui, "A-priori standard deviations", |ui| {
             form_row(ui, "Direction (\"):", |ui| {
                 changed |= number_ui(
                     ui,
@@ -1268,8 +1270,7 @@ impl ReductionOptionsWidget {
             )
             .changed();
         });
-        ui.group(|ui| {
-            ui.strong("Corrections and scale");
+        crate::shell::dialog::section_with(ui, "Corrections and scale", |ui| {
             form_row(ui, "Refraction k:", |ui| {
                 changed |= number_ui(
                     ui,
@@ -1346,8 +1347,7 @@ impl ReductionOptionsWidget {
                     .inner;
             });
         });
-        ui.group(|ui| {
-            ui.strong("Statistics");
+        crate::shell::dialog::section_with(ui, "Statistics", |ui| {
             form_row(ui, "Confidence (%):", |ui| {
                 changed |= number_ui(
                     ui,

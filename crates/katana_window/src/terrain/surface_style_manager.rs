@@ -92,7 +92,7 @@ use crate::drive::{
 use crate::geo::terrain_dialog_parts::{Framed, row, show_framed};
 use crate::host::Host;
 use crate::shell::DialogFrame;
-use crate::survey::survey_dialogs::{message_colour, offstage};
+use crate::survey::survey_dialogs::offstage;
 use crate::terrain::surface_plan_painter::{
     SurfacePaintOptions, paint_surface_legend, paint_surface_plan,
 };
@@ -537,8 +537,6 @@ enum Asked {
     Rename,
     Delete,
     SetDefault,
-    Apply,
-    Revert,
     Assign,
 }
 
@@ -1384,7 +1382,9 @@ impl SurfaceStyleManagerDialog {
         let mut edited =
             check(ui, "surfaceStyleContours", "Contours", &mut form.contours).changed();
         edited |= row(ui, "Interval", |ui| {
-            line(ui, "surfaceStyleInterval", &mut form.interval).changed()
+            // A number kept as text: a short well, as Major every's box beside it.
+            crate::drive::controls::number_line(ui, "surfaceStyleInterval", &mut form.interval, "")
+                .changed()
         });
         edited |= row(ui, "Major every", |ui| {
             whole(
@@ -1451,8 +1451,8 @@ impl SurfaceStyleManagerDialog {
         edited
     }
 
-    /// The chosen style's fields, the line they make, and Apply and Revert.
-    fn form_column(&mut self, ui: &mut Ui, host: &mut dyn Host, asked: &mut Option<Asked>) {
+    /// The chosen style's fields and the line they make; Apply and Revert are the footer's.
+    fn form_column(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         tabs(ui, "surfaceStyleTabs", &TABS, &mut self.tab);
         // The page in front takes the room; the others are still there, as a QTabWidget's are:
         // what they hold can be filled and read.
@@ -1481,30 +1481,13 @@ impl SurfaceStyleManagerDialog {
             &line,
             egui::Label::new(line.as_str()).wrap(),
         );
-        let can_apply = !self.apply_line(host.document()).is_empty();
-        let style_chosen = self.chosen(host.document()).is_some();
-        ui.horizontal(|ui| {
-            let apply = ui
-                .add_enabled_ui(can_apply, |ui| {
-                    button(ui, "surfaceStyleApply", "Apply")
-                        .on_hover_text("Run the SURFACESTYLE SET line: one undo step")
-                        .clicked()
-                })
-                .inner;
-            let revert = ui
-                .add_enabled_ui(style_chosen, |ui| {
-                    button(ui, "surfaceStyleRevert", "Revert")
-                        .on_hover_text("The form back to the drawing's style")
-                        .clicked()
-                })
-                .inner;
-            if apply {
-                *asked = Some(Asked::Apply);
-            }
-            if revert {
-                *asked = Some(Asked::Revert);
-            }
-        });
+    }
+
+    /// Revert: the form back to the drawing's style, the drawing unchanged.
+    fn revert_form(&mut self, host: &mut dyn Host) {
+        if let Some(style) = self.chosen(host.document()).cloned() {
+            self.fill(&style, host.document());
+        }
     }
 
     /// The preview: painted again when the form's style changed, or the screen's ratio did.
@@ -1598,7 +1581,7 @@ impl Framed for SurfaceStyleManagerDialog {
             });
             ui.vertical(|ui| {
                 ui.set_max_width(380.0);
-                self.form_column(ui, host, &mut asked);
+                self.form_column(ui, host);
             });
             self.preview_ui(ui);
         });
@@ -1609,37 +1592,53 @@ impl Framed for SurfaceStyleManagerDialog {
             Some(Asked::Rename) => self.rename_style(host),
             Some(Asked::Delete) => self.delete_style(host),
             Some(Asked::SetDefault) => self.default_style(host),
-            Some(Asked::Apply) => self.apply_form(host),
-            Some(Asked::Revert) => {
-                if let Some(style) = self.chosen(host.document()).cloned() {
-                    self.fill(&style, host.document());
-                }
-            }
             Some(Asked::Assign) => self.assign_style(host),
             None => {}
         }
     }
 
-    fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    /// The design's one footer (shell::dialog::button_row): Revert - which puts the form back and
+    /// changes nothing in the drawing - and the status at the left; Close, then Apply, the
+    /// dialog's act, last in the accent. Apply and Revert stood under the form in the body, in a
+    /// button's grey, with Close alone in the footer.
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
-        let colour = message_colour(self.status_is_error);
-        // The status at the left, Close at the right.
-        let ((), close) = crate::shell::dialog::button_row(
+        let is_error = self.status_is_error;
+        let can_apply = !self.apply_line(host.document()).is_empty();
+        let style_chosen = self.chosen(host.document()).is_some();
+        let (revert, (close, apply)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
-                label_as(
-                    ui,
-                    "surfaceStyleStatus",
-                    &status,
-                    egui::Label::new(RichText::new(status.as_str()).color(colour)).wrap(),
-                );
+                let revert = ui
+                    .add_enabled_ui(style_chosen, |ui| {
+                        button(ui, "surfaceStyleRevert", "Revert")
+                            .on_hover_text("The form back to the drawing's style")
+                            .clicked()
+                    })
+                    .inner;
+                crate::shell::dialog::status(ui, "surfaceStyleStatus", &status, is_error);
+                revert
             },
             |ui| {
-                button(ui, "surfaceStyleClose", "Close")
+                let close = button(ui, "surfaceStyleClose", "Close")
                     .on_hover_text("Close the window; unapplied edits are kept")
-                    .clicked()
+                    .clicked();
+                let apply = ui
+                    .add_enabled_ui(can_apply, |ui| {
+                        crate::drive::primary(ui, "surfaceStyleApply", "Apply")
+                            .on_hover_text("Run the SURFACESTYLE SET line: one undo step")
+                            .clicked()
+                    })
+                    .inner;
+                (close, apply)
             },
         );
+        if apply {
+            self.apply_form(host);
+        }
+        if revert {
+            self.revert_form(host);
+        }
         if close {
             self.hide();
         }

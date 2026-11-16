@@ -265,14 +265,28 @@ mod volumes_dialog {
     }
 
     #[test]
-    fn a_stockpile_with_no_boundary_is_refused_naming_what_is_missing_and_runs_nothing() {
+    fn a_stockpile_with_no_boundary_greys_measure_naming_what_is_missing_and_runs_nothing() {
+        // Measure is greyed while there is no line, as every run dialog's primary is (the third
+        // look audit); the status names what is missing, and measure() itself still refuses.
         let mut bench = bench(wedge_host());
         set_method(&mut bench, VolumeMethod::Stockpile);
         bench.press("volumesBoundaryNone");
         assert!(command(&bench).is_empty());
-        bench.press("volumesRun");
+        assert!(!bench.enabled("volumesRun"));
+        assert!(bench.text("volumesStatus").contains("boundary"));
+        assert!(!bench.dialog.measure(&mut bench.host));
         assert!(bench.host.lines().is_empty());
         assert!(bench.text("volumesStatus").contains("boundary"));
+    }
+
+    #[test]
+    fn with_no_surface_measure_is_greyed_and_the_status_says_how_to_make_one() {
+        let bench = bench(interpreter_host());
+        assert!(!bench.enabled("volumesRun"));
+        assert_eq!(
+            bench.text("volumesStatus"),
+            "There is no surface: make one with Terrain > Surface From"
+        );
     }
 
     #[test]

@@ -21,8 +21,8 @@ use egui::Ui;
 use katana_core::Result;
 
 use super::terrain_dialog_parts::{
-    Framed, WordChoice, check_list, command_field, field, host_views, invalid, row, run_buttons,
-    show_framed, why_no_line,
+    Framed, NO_SURFACE_OR_RASTER, WordChoice, check_list, command_field, field, host_views,
+    invalid, row, run_buttons, show_framed, why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, terrain_reply_field,
@@ -95,10 +95,7 @@ fn is_key(text: &str) -> bool {
 pub fn zonal_line(form: &ZonalForm) -> Result<String> {
     let source = form.source.trim();
     if source.is_empty() {
-        return Err(invalid(
-            "Source: there is no surface or raster to measure; build a surface or import a DEM \
-             first",
-        ));
+        return Err(invalid(NO_SURFACE_OR_RASTER));
     }
     if !form.scope_error.is_empty() {
         return Err(invalid(format!("Zones: {}", form.scope_error)));
@@ -302,7 +299,9 @@ impl Framed for ZonalStatsDialog {
         );
         row(ui, "Statistics:", |ui| {
             ui.vertical(|ui| {
-                check_list(ui, "zonalStats", &mut self.stats, 120.0);
+                // The list as tall as its ten rows, so it never scrolls: held to 120 it was a
+                // scroll area inside the body's, two bars side by side.
+                check_list(ui, "zonalStats", &mut self.stats, f32::INFINITY);
             });
         });
         row(ui, "Property prefix:", |ui| {

@@ -27,8 +27,8 @@ use super::gis_tool_dialog::{
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
 use crate::drive::radio;
 use crate::host::Host;
-use crate::shell::dialog;
 use crate::ifc_dialogs::{get_open_file_name, to_native_separators};
+use crate::shell::dialog;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GisClipForm {
@@ -77,7 +77,7 @@ pub fn gis_clip_line(form: &GisClipForm) -> Result<String> {
         let by = gis_scope(&form.by).map_err(|error| {
             make_error(
                 ErrorCode::InvalidArgument,
-                format!("the boundary: {}", error.message),
+                format!("for the boundary, {}", error.message),
                 String::new(),
             )
         })?;
