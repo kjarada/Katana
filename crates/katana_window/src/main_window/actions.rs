@@ -171,7 +171,7 @@ pub fn plot_action() -> Action {
 pub fn export_image_action() -> Action {
     act(
         "fileExportViewImage",
-        "Export",
+        "ExportImage",
         "Export View as I&mage...",
         "Save the plan or 3D view as a PNG, JPEG or TIFF, at the view's size or larger",
     )
@@ -190,7 +190,7 @@ pub fn run_script_action() -> Action {
 pub fn import_ifc_action() -> Action {
     act(
         "fileImportIfc",
-        "Import",
+        "ImportIfc",
         "Import I&FC...",
         "Import an IFC file: alignments as PIs and PVIs, elements and annotations with their \
          property sets, terrain as surfaces",
@@ -200,7 +200,7 @@ pub fn import_ifc_action() -> Action {
 pub fn export_ifc_action() -> Action {
     act(
         "fileExportIfc",
-        "Export",
+        "ExportIfc",
         "Export I&FC...",
         "Export IFC 4.3: alignments, the drawing by class and an AS 5488 utility investigation, \
          with a preview of the class each object becomes",
@@ -210,7 +210,7 @@ pub fn export_ifc_action() -> Action {
 pub fn sheets_action() -> Action {
     act(
         "fileSheets",
-        "Plot",
+        "Sheets",
         "S&heets...",
         "Lay the drawing out on sheets with a title block, and plot them",
     )
@@ -220,7 +220,7 @@ pub fn sheets_action() -> Action {
 pub fn plot_sheets_action() -> Action {
     act(
         "filePlotSheets",
-        "Plot",
+        "PlotSheets",
         "Plot Sheets to P&DF...",
         "Plot every sheet of the project to one PDF",
     )
@@ -229,7 +229,7 @@ pub fn plot_sheets_action() -> Action {
 pub fn apply_codes_action() -> Action {
     act(
         "applySurveyCodes",
-        "Import",
+        "ApplyCodes",
         "Appl&y Survey Codes",
         "Give the selected entities that carry a field code - every one in the drawing when \
          nothing is selected - the layer, style and attributes the loaded survey codes say: the \
@@ -251,7 +251,7 @@ pub fn linework_action() -> Action {
 pub fn start_screen_action() -> Action {
     act(
         "fileStartScreen",
-        "Properties",
+        "StartScreen",
         "Start Screen...",
         "Choose the customisation and the coordinate system this session works with, as a new \
          session does",
@@ -262,7 +262,7 @@ pub fn start_screen_action() -> Action {
 pub fn project_crs_action() -> Action {
     act(
         "fileProjectCrs",
-        "Properties",
+        "ProjectCrs",
         "Project &Coordinate System...",
         "Set the coordinate system the project is in (EPSG code, WKT or PROJ); online data and \
          reprojection need one",
@@ -273,7 +273,7 @@ pub fn project_crs_action() -> Action {
 pub fn summary_action() -> Action {
     act(
         "fileDrawingSummary",
-        "Properties",
+        "DrawingSummary",
         "Drawing S&ummary...",
         "The drawing at a glance: project, contents, what is current, the history and the \
          customisation loaded, and what it leaves undefined",
@@ -504,12 +504,12 @@ fn snap_mode_action(mode: katana_cad::snapping::SnapMode, modes: SnapModes) -> A
         "Nearest" => ("SnapNearest", "Snap to the nearest point on any entity"),
         _ => ("SnapGrid", "Snap to the grid's points"),
     };
-    act(
-        &format!("viewSnapMode{}", mode.name()),
-        icon,
-        mode.name(),
-        tip,
-    )
+    // The mode's name is the cad layer's, and the action's; what a person reads is British.
+    let text = match mode.name() {
+        "Center" => "Centre",
+        name => name,
+    };
+    act(&format!("viewSnapMode{}", mode.name()), icon, text, tip)
     .checkable(modes & (mode as SnapModes) != 0)
 }
 
@@ -1206,7 +1206,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(import_cloud_action())
         .action(export_cloud_action())
         .action(copc_action())
-        .separator()
+        // Dataset Information reads a vector file, a raster or a point cloud, so it is under none
+        // of the three: a section of its own, where a bare rule left it under Point Cloud's.
+        .section("Any Dataset")
         .action(dataset_info_action())
         .section("Online - Web Services")
         .action(online.clone());
@@ -1217,8 +1219,8 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(
             act(
                 "helpCommandReference",
-                "Help",
-                "&Command Reference",
+                "CommandReference",
+                "&Command Reference...",
                 "Every command the command line accepts, searchable",
             )
             .shortcut(plain(Key::F1))
@@ -1228,7 +1230,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             act(
                 "helpSheetCommands",
                 "Help",
-                "&Sheets and Plotting Commands",
+                "&Sheets and Plotting Commands...",
                 "The sheet verbs and every option they take (HELP SHEETS)",
             )
             .opens("commandReferenceDialog"),
@@ -1236,7 +1238,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(
             act(
                 "helpKeyboardShortcuts",
-                "Help",
+                "Keyboard",
                 "&Keyboard Shortcuts...",
                 "Every key the window answers to, where its command is and what it does",
             )
@@ -1247,7 +1249,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(act(
             "helpAbout",
             "About",
-            "&About Katana",
+            "&About Katana...",
             "Version and build information",
         ));
 
@@ -1600,12 +1602,14 @@ pub fn history_menus(document: &katana_cad::Document) -> [Menu; 2] {
     ]
 }
 
-/// Gives every submenu of `menu`, at any depth, the status tip `signs` keeps for it by its name.
+/// Gives every submenu of `menu`, at any depth, the icon and the status tip `signs` keeps for it
+/// by its name: the icon its item shows in the menu, as every action's item shows its own.
 fn tip_submenus(menu: &mut Menu, signs: &BTreeMap<String, (&'static str, String)>) {
     for item in &mut menu.items {
         if let MenuItem::Menu(sub) = item {
-            if let Some((_, tip)) = signs.get(&sub.name) {
+            if let Some((icon, tip)) = signs.get(&sub.name) {
                 sub.tip.clone_from(tip);
+                sub.icon = icon;
             }
             tip_submenus(sub, signs);
         }

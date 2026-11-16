@@ -19,6 +19,7 @@ pub mod window_support;
 
 mod hosts;
 
+mod about_dialog;
 mod command_reference;
 mod geo_workbench;
 mod gis_verbs_window;

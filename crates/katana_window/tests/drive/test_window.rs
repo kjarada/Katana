@@ -92,6 +92,8 @@ pub struct TestWindow {
     pub wheel: Vec<f32>,
     /// What run_command and run_verb_line refuse: a line holding it.
     pub refusing: String,
+    /// Everything selected (select_all): each frame drawn since says so in the log.
+    pub all_selected: bool,
 }
 
 impl TestWindow {
@@ -113,6 +115,7 @@ impl TestWindow {
             draw_twice: false,
             wheel: Vec::new(),
             refusing: String::from("BAD"),
+            all_selected: false,
         }
     }
 
@@ -141,6 +144,9 @@ impl DrivenWindow for TestWindow {
             ui.ctx().request_repaint();
         }
         drive::label(ui, "statusLabel", "ready   now");
+        if self.all_selected {
+            self.said("frame drawn with everything selected");
+        }
         if self.draw_twice {
             drive::label(ui, "twice", "one");
             drive::label(ui, "twice", "two");
@@ -311,6 +317,7 @@ impl DrivenWindow for TestWindow {
     }
 
     fn select_all(&mut self) {
+        self.all_selected = true;
         self.said("selectAll");
     }
 

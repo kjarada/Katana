@@ -195,7 +195,7 @@ impl SurveyWorkbench {
             action(
                 "surveyParcelReport",
                 "Parcel Report...",
-                "SurveyArea",
+                "SurveyParcelReport",
                 "A closed polyline's courses, area and legal description, and course labels",
             ),
             action(

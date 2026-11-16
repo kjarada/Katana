@@ -242,6 +242,22 @@ mod program {
     }
 
     #[test]
+    fn select_all_alone_is_drawn_before_the_window_is_grabbed() {
+        // With no action or step after it, the grab once read the frame drawn before the
+        // selection: the window must be drawn again, with everything selected, first.
+        let scratch = Scratch::new("drive-program-select-all-shot");
+        let shot = path_text(&scratch.path("selected.png"));
+        let (code, console, log) = run_headless(&["katana", "--select-all", "--screenshot", &shot]);
+        assert_eq!(code, 0, "{}", console.err);
+        assert!(logged(&log, "selectAll"));
+        assert!(
+            logged(&log, "frame drawn with everything selected"),
+            "{:?}",
+            log.borrow()
+        );
+    }
+
+    #[test]
     fn a_screenshot_run_needs_a_path_and_a_target_a_step_closed_leaves_the_window() {
         let (code, console, _) = run_headless(&["katana", "--screenshot", ""]);
         assert_eq!(code, 2);

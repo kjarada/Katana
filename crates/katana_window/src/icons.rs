@@ -327,11 +327,45 @@ pub enum Icon {
     // brings the new version down out of it. Not Import's tray and arrow:
     // that is a file coming into the drawing, and this is the program itself.
     Download,
+    // ---- icons of their own (the look of 2026-11-16, round two) ----
+    // Items that shared another's icon - two printers side by side on the File
+    // toolbar, three Properties sliders in File's Project section, Import's and
+    // Export's trays three times each - each given its own, in the same line
+    // language: what the item works on in the quiet tone, what it does in the
+    // bright one.
+    // File > Sheets: a stack of sheets, the front one's title block bright.
+    Sheets,
+    // File > Plot Sheets to PDF: Plot's printer, a stack of pages coming out.
+    PlotSheets,
+    // File > Drawing Summary: a clipboard, its rows' marks bright.
+    DrawingSummary,
+    // File > Project Coordinate System: a north and an east axis, a point and its
+    // coordinates bright.
+    ProjectCrs,
+    // File > Start Screen: a window, its first tile bright.
+    StartScreen,
+    // Help > Command Reference: a page, the command line's prompt bright on it.
+    CommandReference,
+    // Help > Keyboard Shortcuts: a keyboard, its space bar bright.
+    Keyboard,
+    // File > Import IFC and Export IFC: a building element (a block in
+    // isometric), with Import's and Export's arrow down the right as the GIS
+    // data's icons have it.
+    ImportIfc,
+    ExportIfc,
+    // File > Export View as Image: a picture, and Export's arrow.
+    ExportImage,
+    // Survey > Apply Survey Codes: a code's tag, and the bright arrow to the
+    // point it is applied to.
+    ApplyCodes,
+    // Survey > Parcel Report: the parcel, and the report's page beside it (Area of
+    // Selection keeps the parcel alone).
+    SurveyParcelReport,
 }
 
 /// Every value of Icon, in declaration order, for the contact sheet and for the test that every
 /// icon paints something.
-pub const ALL_ICONS: [Icon; 154] = [
+pub const ALL_ICONS: [Icon; 166] = [
     Icon::New,
     Icon::Open,
     Icon::Save,
@@ -486,6 +520,18 @@ pub const ALL_ICONS: [Icon; 154] = [
     Icon::RoadModel,
     Icon::SurfaceStyles,
     Icon::Download,
+    Icon::Sheets,
+    Icon::PlotSheets,
+    Icon::DrawingSummary,
+    Icon::ProjectCrs,
+    Icon::StartScreen,
+    Icon::CommandReference,
+    Icon::Keyboard,
+    Icon::ImportIfc,
+    Icon::ExportIfc,
+    Icon::ExportImage,
+    Icon::ApplyCodes,
+    Icon::SurveyParcelReport,
 ];
 
 /// Every value of Icon, in declaration order (allIcons).
@@ -651,6 +697,18 @@ impl Icon {
             Self::RoadModel => "RoadModel",
             Self::SurfaceStyles => "SurfaceStyles",
             Self::Download => "Download",
+            Self::Sheets => "Sheets",
+            Self::PlotSheets => "PlotSheets",
+            Self::DrawingSummary => "DrawingSummary",
+            Self::ProjectCrs => "ProjectCrs",
+            Self::StartScreen => "StartScreen",
+            Self::CommandReference => "CommandReference",
+            Self::Keyboard => "Keyboard",
+            Self::ImportIfc => "ImportIfc",
+            Self::ExportIfc => "ExportIfc",
+            Self::ExportImage => "ExportImage",
+            Self::ApplyCodes => "ApplyCodes",
+            Self::SurveyParcelReport => "SurveyParcelReport",
         }
     }
 
@@ -2902,6 +2960,224 @@ pub fn paint_icon_weighted(
                     true,
                     STROKE,
                 );
+            }
+            // ---- icons of their own (the look of 2026-11-16, round two) ----
+            Icon::Sheets => {
+                // The sheet behind shows its top and right edges only, so the two
+                // outlines never cross at 16 px; the front sheet's title block - what
+                // makes a page a sheet of a set - is the bright part.
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(7.5, 6.5),
+                            pt(7.5, 3.0),
+                            pt(20.5, 3.0),
+                            pt(20.5, 17.0),
+                            pt(16.5, 17.0),
+                        ],
+                        false,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.stroke(&rounded(3.5, 6.5, 13.0, 15.0, 0.8), false, STROKE);
+                ink.line(3.5, 17.0, 16.5, 17.0, true, FINE);
+                ink.line(10.5, 17.0, 10.5, 21.5, true, FINE);
+                ink.line(6.0, 10.0, 14.0, 10.0, false, FINE);
+                ink.line(6.0, 13.0, 11.5, 13.0, false, FINE);
+            }
+            Icon::PlotSheets => {
+                // Plot's printer and its paper; out of it, where Plot has one page, a
+                // page with another behind it.
+                ink.stroke(
+                    &polyline(
+                        &[pt(7.0, 9.0), pt(7.0, 4.0), pt(17.0, 4.0), pt(17.0, 9.0)],
+                        false,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(5.5, 16.0),
+                            pt(3.0, 16.0),
+                            pt(3.0, 9.0),
+                            pt(21.0, 9.0),
+                            pt(21.0, 16.0),
+                            pt(19.5, 16.0),
+                        ],
+                        false,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(9.5, 13.0),
+                            pt(9.5, 11.5),
+                            pt(18.5, 11.5),
+                            pt(18.5, 19.0),
+                            pt(16.5, 19.0),
+                        ],
+                        false,
+                    ),
+                    true,
+                    STROKE,
+                );
+                ink.stroke(&rectangle(5.5, 13.0, 11.0, 8.0), true, STROKE);
+                ink.line(8.0, 17.0, 14.0, 17.0, true, FINE);
+            }
+            Icon::DrawingSummary => {
+                // A clipboard of rows, each with its mark: the drawing at a glance.
+                ink.stroke(&rounded(4.5, 4.0, 15.0, 17.5, 1.5), false, STROKE);
+                ink.stroke(&rounded(9.0, 2.5, 6.0, 3.5, 1.0), false, STROKE);
+                for y in [10.0, 14.0, 18.0] {
+                    ink.dot(8.0, y, 1.2, true);
+                    ink.line(10.5, y, 16.5, y, false, FINE);
+                }
+            }
+            Icon::ProjectCrs => {
+                // A north axis and an east axis from their origin, and in the bright tone
+                // a point and the lines down to its two coordinates.
+                ink.line(5.0, 19.5, 5.0, 4.0, false, STROKE);
+                ink.stroke(
+                    &polyline(&[pt(2.6, 6.6), pt(5.0, 4.0), pt(7.4, 6.6)], false),
+                    false,
+                    STROKE,
+                );
+                ink.line(4.5, 19.0, 20.0, 19.0, false, STROKE);
+                ink.stroke(
+                    &polyline(&[pt(17.4, 16.6), pt(20.0, 19.0), pt(17.4, 21.4)], false),
+                    false,
+                    STROKE,
+                );
+                ink.line(5.0, 10.0, 14.5, 10.0, true, FINE);
+                ink.line(14.5, 10.0, 14.5, 19.0, true, FINE);
+                ink.dot(14.5, 10.0, 2.2, true);
+            }
+            Icon::StartScreen => {
+                // A window, a tile to start from in the bright tone, and the choices
+                // listed beside it.
+                draw_frame(ink);
+                ink.line(2.5, 8.0, 21.5, 8.0, false, FINE);
+                ink.stroke(&rounded(5.0, 10.5, 6.5, 6.5, 1.0), true, STROKE);
+                ink.line(14.0, 11.5, 19.0, 11.5, false, FINE);
+                ink.line(14.0, 14.0, 19.0, 14.0, false, FINE);
+                ink.line(14.0, 16.5, 17.0, 16.5, false, FINE);
+            }
+            Icon::CommandReference => {
+                // A page, the command line's prompt on it in the bright tone, then the
+                // lines that say what the command does.
+                ink.stroke(&rounded(4.0, 2.5, 16.0, 19.0, 0.8), false, STROKE);
+                ink.stroke(
+                    &polyline(&[pt(7.0, 6.5), pt(9.5, 8.75), pt(7.0, 11.0)], false),
+                    true,
+                    STROKE,
+                );
+                ink.line(11.0, 11.0, 16.0, 11.0, true, STROKE);
+                ink.line(7.0, 15.0, 17.0, 15.0, false, FINE);
+                ink.line(7.0, 18.0, 14.0, 18.0, false, FINE);
+            }
+            Icon::Keyboard => {
+                ink.stroke(&rounded(2.5, 6.5, 19.0, 11.0, 1.5), false, STROKE);
+                for x in [6.0, 9.0, 12.0, 15.0, 18.0] {
+                    ink.dot(x, 9.8, 0.9, false);
+                }
+                for x in [7.5, 10.5, 13.5, 16.5] {
+                    ink.dot(x, 12.4, 0.9, false);
+                }
+                ink.line(8.0, 15.0, 16.0, 15.0, true, STROKE);
+            }
+            Icon::ImportIfc | Icon::ExportIfc => {
+                // A building element - a block, seen from above a corner - in the lower
+                // left 15 units, as the GIS data's icons draw theirs, and the arrow down
+                // the right.
+                let top = polyline(
+                    &[pt(8.5, 8.0), pt(14.5, 11.0), pt(8.5, 14.0), pt(2.5, 11.0)],
+                    true,
+                );
+                ink.fill(&top, false, TINT);
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(8.5, 8.0),
+                            pt(14.5, 11.0),
+                            pt(14.5, 17.5),
+                            pt(8.5, 20.5),
+                            pt(2.5, 17.5),
+                            pt(2.5, 11.0),
+                        ],
+                        true,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.line(8.5, 14.0, 8.5, 20.5, false, STROKE);
+                ink.stroke(&top, false, STROKE);
+                if which == Icon::ImportIfc {
+                    draw_arrow_in(ink);
+                } else {
+                    draw_arrow_out(ink);
+                }
+            }
+            Icon::ExportImage => {
+                // A picture - its frame, a hill and the sun - and Export's arrow.
+                ink.stroke(&rectangle(3.0, 8.0, 12.0, 12.0), false, STROKE);
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(3.0, 18.0),
+                            pt(7.0, 13.5),
+                            pt(10.0, 16.5),
+                            pt(12.0, 14.5),
+                            pt(15.0, 17.5),
+                        ],
+                        false,
+                    ),
+                    false,
+                    FINE,
+                );
+                ink.dot(11.5, 11.2, 1.2, false);
+                draw_arrow_out(ink);
+            }
+            Icon::ApplyCodes => {
+                // A field code's tag, and the bright arrow to the point it gives a
+                // layer, a style and attributes.
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(3.0, 4.0),
+                            pt(11.0, 4.0),
+                            pt(14.5, 7.5),
+                            pt(11.0, 11.0),
+                            pt(3.0, 11.0),
+                        ],
+                        true,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.dot(6.0, 7.5, 1.0, false);
+                let unit = 1.0 / 2.0_f64.sqrt();
+                ink.line(12.0, 13.0, 16.4, 17.4, true, STROKE);
+                draw_head(ink, 16.4, 17.4, unit, unit);
+                draw_mark(ink, 19.3, 20.3, true);
+            }
+            Icon::SurveyParcelReport => {
+                // The report's page, and the parcel it is on in front of it.
+                ink.stroke(&rounded(10.0, 2.5, 11.0, 14.0, 0.8), false, STROKE);
+                for y in [6.0, 9.0, 12.0] {
+                    ink.line(12.5, y, 18.5, y, false, FINE);
+                }
+                let corners = [pt(3.0, 21.0), pt(4.0, 11.0), pt(10.5, 9.5), pt(14.0, 20.0)];
+                let parcel = polyline(&corners, true);
+                ink.fill(&parcel, true, TINT);
+                ink.stroke(&parcel, false, STROKE);
+                for p in corners {
+                    ink.node(p.x, p.y, true);
+                }
             }
         }
     }
