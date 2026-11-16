@@ -70,7 +70,10 @@ mod update_dialog {
         let mut bench = UpdateBench::new(f.context());
         bench.set_view(view_of(UpdateDialogState::Idle));
         bench.dialog.show();
-        bench.press("updateClose");
+        bench.draw();
+        // Not one of the nine (UpdateButton): pressed through the harness, as --press does.
+        bench.harness.press("updateClose");
+        bench.draw();
         assert!(!bench.dialog.is_visible());
         assert!(f.called().is_empty(), "{}", f.called());
     }

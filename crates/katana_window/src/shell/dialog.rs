@@ -395,7 +395,7 @@ pub fn row_with_text<R>(
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let natural = one_line_width(ui, text);
-    row_inner(ui, natural, label, add)
+    row_inner(ui, text, natural, label, add)
 }
 
 /// A form's row whose label cell is a check box or a radio button reading `text`, which `label`
@@ -415,7 +415,7 @@ pub fn row_with_check<R>(
 ) -> R {
     let spacing = ui.spacing();
     let natural = spacing.icon_width + spacing.icon_spacing + one_line_width(ui, text);
-    row_inner(ui, natural, label, add)
+    row_inner(ui, text, natural, label, add)
 }
 
 /// How wide `text` is in the body text style laid out on one line: what a label's cell needs, and
@@ -533,9 +533,10 @@ fn widen_label_column(ui: &Ui, key: Id, reach: f32, edge: f32) {
     }
 }
 
-/// A labelled row whose label `label` draws, `natural` wide on one line.
+/// A labelled row whose label `label` draws, reading `text`, `natural` wide on one line.
 fn row_inner<R>(
     ui: &mut Ui,
+    text: &str,
     natural: f32,
     label: impl FnOnce(&mut Ui),
     add: impl FnOnce(&mut Ui) -> R,
@@ -547,37 +548,40 @@ fn row_inner<R>(
     let offset = body.map_or(0.0, |(_, offset)| offset);
     let (key, edge) = label_column(ui, body.map(|(key, _)| key), offset);
     let width = (edge - offset).max(0.0);
+    // Where the label's height is kept between passes: by the Ui the row is drawn in and the
+    // label's words, not by the row's own Ui, whose id is counted from what is drawn before it
+    // and so moved whenever a list above the row grew; each such frame was measured again and
+    // laid out twice, and a press in it taken in the pass thrown away (the Corridor Quantities'
+    // Copy).
+    let label_key = ui.id().with(("katanaRowLabelHeight", text));
     ui.horizontal_top(|ui| {
         let spacing = ui.spacing().item_spacing.x;
         ui.spacing_mut().item_spacing.x = FORM_SPACING.x;
-        // The label's cell: as high as the first line of what is beside it, so a one-line label
-        // sits level with a field (a control's height) and on the line of a plain value (a line
-        // of text's), and at the top of a taller one (a text box) rather than at its middle. A
-        // cell a control high beside a value of one line of text centred the label 5 points below
-        // the value's words (Drawing Summary, Zoom To's "Line"). What is beside it is drawn after
-        // the label, so its height is the last pass's, as the label column's width is.
-        let beside_key = ui.id().with("katanaRowFieldHeight");
+        // The label's cell: a control high, the label centred in it, so a one-line label sits
+        // level with the field beside it, and at the top of a taller one (a text box) rather than
+        // at its middle. Centred by a gap above it worked out from the label's own height (the
+        // last pass's, as the column's width is): egui centres a wrapping row in the room it was
+        // given, not in the line it lays out, which stood a label up to 2 points off its field's
+        // middle. A value that is text is drawn by `text_value`, the same gap above it.
         let control = ui.spacing().interact_size.y;
-        let height = ui
-            .data(|data| data.get_temp::<f32>(beside_key))
-            .filter(|beside| *beside >= 1.0)
-            .map_or(control, |beside| beside.min(control));
-        // Beside a control, centred in its height; beside a line of text, at its top as the text
-        // is, so the two lines' words share a baseline (a wrapping layout centres in the room it
-        // was given, not in the line it lays out, and stood the label 1.5 points low).
-        let align = if height < control - 0.5 {
-            Align::Min
-        } else {
-            Align::Center
-        };
+
+        let above = ui
+            .data(|data| data.get_temp::<f32>(label_key))
+            .map_or(0.0, |drawn| ((control - drawn) / 2.0).max(0.0));
         ui.allocate_ui_with_layout(
-            Vec2::new(width, height),
-            Layout::left_to_right(align).with_main_wrap(true),
+            Vec2::new(width, control),
+            Layout::top_down(Align::Min),
             |ui| {
                 // The cell's size first: set after the label, egui would add it beyond the label
                 // as the room for the next widget.
-                ui.set_min_size(Vec2::new(width, height));
-                ui.scope(label);
+                ui.set_min_size(Vec2::new(width, control));
+                ui.add_space(above);
+                let drawn = ui.scope(label).response.rect.height();
+                let before: Option<f32> = ui.data(|data| data.get_temp(label_key));
+                if before.is_none_or(|before| (before - drawn).abs() > 0.5) {
+                    ui.data_mut(|data| data.insert_temp(label_key, drawn));
+                    ui.ctx().request_discard("a dialog's row measured its label");
+                }
             },
         );
         if let Some(key) = key {
@@ -585,22 +589,23 @@ fn row_inner<R>(
             widen_label_column(ui, key, reach, edge);
         }
         ui.spacing_mut().item_spacing.x = spacing;
-        // What is beside the label, measured for the next pass's cell; a change is laid out again
-        // at once, so the row a person sees is the measured one.
-        let beside = ui.scope(|ui| {
-            fill_fields(ui);
-            add(ui)
-        });
-        let measured = beside.response.rect.height();
-        let before: Option<f32> = ui.data(|data| data.get_temp(beside_key));
-        if before.is_none_or(|before| (before - measured).abs() > 0.5) {
-            ui.data_mut(|data| data.insert_temp(beside_key, measured));
-            if before.is_some() || measured < control - 0.5 {
-                ui.ctx()
-                    .request_discard("a dialog's row measured what is beside its label");
-            }
-        }
-        beside.inner
+        fill_fields(ui);
+        add(ui)
+    })
+    .inner
+}
+
+/// A form's value that is text - a summary's figure, the line a dialog will zoom to - drawn by
+/// `add` (a `drive::label`, so it keeps its name) on its label's line: in a row a control high, its
+/// first line the gap from the row's top that a one-line label has (`labelled`), and a long value
+/// wrapping down from there. Drawn at the row's top as egui draws it, a value stood 5 points
+/// above its label's words (Drawing Summary, Zoom To's "Line", Export Surface as DEM's "Grid").
+pub fn text_value<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let line = ui.text_style_height(&TextStyle::Body);
+    let above = ((ui.spacing().interact_size.y - line) / 2.0).max(0.0);
+    ui.vertical(|ui| {
+        ui.add_space(above);
+        add(ui)
     })
     .inner
 }
@@ -1188,10 +1193,15 @@ pub struct MenuShown {
 /// more (theme.cpp's SH_Menu_Scrollable): Fusion laid a menu taller than its screen out in several
 /// columns side by side, which a menu of sections and submenus turns into a wall nobody can read
 /// down. For a menu's contents wherever a menu is drawn; the wheel and the keys scroll it.
+///
+/// The column is as tall as the screen leaves it BELOW where it starts, less the menu frame's
+/// bottom: a menu bar's popup starts under the bar, and a column the screen's whole height (the
+/// Annotate menu, some 855 points in a window of 860) was taller than the room under the bar, so
+/// egui shifted the popup up over the bar it hangs from and its last item was still cut.
 pub fn menu_column(ui: &mut Ui, add: impl FnOnce(&mut Ui)) -> ScrollRecord {
     let screen = ui.ctx().content_rect();
-    let frame = Frame::menu(ui.style()).total_margin().sum();
-    let height = (screen.height() - frame.y).max(0.0);
+    let below = Frame::menu(ui.style()).total_margin().bottom;
+    let height = (screen.bottom() - ui.max_rect().top() - below).max(0.0);
     let output = ScrollArea::vertical()
         .id_salt("katanaMenuColumn")
         .max_height(height)

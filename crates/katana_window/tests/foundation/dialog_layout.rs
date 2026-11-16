@@ -18,7 +18,7 @@ use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
     BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, REPLY_ROWS, SECTION_GAP,
     beside_a_button, button_row, fixed_fields, form_panel, labelled, note, reply, row_with_check,
-    row_with_text, section,
+    row_with_text, section, text_value,
 };
 
 use crate::window_support::offscreen_harness;
@@ -475,7 +475,7 @@ mod dialog_layout {
     fn a_plain_value_sits_on_its_labels_line_and_a_field_level_with_its_label() {
         // Drawing Summary's values and Zoom To's "Line": a value drawn as text beside its label
         // was 5 points above the label's words, the label centred in a cell a control high and
-        // the value at the top of the row.
+        // the value at the top of the row. A text value is drawn with text_value.
         let mut harness = offscreen_harness();
         let mut frame = DialogFrame::new("valueDialog", "Value");
         let mut field = String::new();
@@ -489,7 +489,7 @@ mod dialog_layout {
                         |ui| {
                             drive::label(ui, "valueCaption", "Line");
                         },
-                        |ui| drive::label(ui, "value", "3 of 7"),
+                        |ui| text_value(ui, |ui| drive::label(ui, "value", "3 of 7")),
                     );
                     row_with_text(
                         ui,
@@ -503,9 +503,8 @@ mod dialog_layout {
             })
             .expect("the dialog is drawn");
         let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
-        // Two labels of one font, each drawn from the top of its rectangle: their words share a
-        // line when their tops do. (Their rectangles differ in height - a label in the wrapping
-        // label cell is as high as the cell's line - so their middles are no measure.)
+        // Two labels of one font, each a line of it high: their words share a line when their
+        // tops do.
         let (caption, value) = (control("valueCaption"), control("value"));
         assert!(
             (caption.top() - value.top()).abs() <= HALF_A_POINT,

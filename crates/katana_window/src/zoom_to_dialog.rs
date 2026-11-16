@@ -355,15 +355,18 @@ impl ZoomToDialog {
                 Ok(line) => line,
                 Err(error) => error.describe(),
             };
-            form.row("Line:", |ui| {
-                controls::label_as(
-                    ui,
-                    "zoomToLine",
-                    &line,
-                    egui::Label::new(RichText::new(line.as_str()).monospace())
-                        .wrap()
-                        .selectable(true),
-                )
+            form.row("Line", |ui| {
+                // On its label's line, as a field's text is.
+                dialog::text_value(ui, |ui| {
+                    controls::label_as(
+                        ui,
+                        "zoomToLine",
+                        &line,
+                        egui::Label::new(RichText::new(line.as_str()).monospace())
+                            .wrap()
+                            .selectable(true),
+                    )
+                })
             });
         });
     }

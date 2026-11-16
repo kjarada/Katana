@@ -669,8 +669,9 @@ impl Framed for SurfaceRasterDialog {
             spin(ui, "surfaceRasterCell", &mut self.cell_size, CELL_RANGE);
         });
         let (grid, _) = self.grid(&*host);
-        row(ui, "Grid:", |ui| {
-            label(ui, "surfaceRasterGrid", &grid);
+        row(ui, "Grid", |ui| {
+            // On its label's line, as a field's text is.
+            crate::shell::dialog::text_value(ui, |ui| label(ui, "surfaceRasterGrid", &grid));
         });
         ui.label(
             RichText::new(

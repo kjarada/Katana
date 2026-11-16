@@ -247,7 +247,7 @@ pub(crate) fn check_list_with_current(
             for (at, (label, on)) in items.iter_mut().enumerate() {
                 if shows_current {
                     ui.horizontal(|ui| {
-                        if ui.checkbox(on, "").changed() {
+                        if crate::drive::controls::check_box(ui, on, "").changed() {
                             changed = true;
                         }
                         if ui
@@ -257,7 +257,7 @@ pub(crate) fn check_list_with_current(
                             *current = Some(at);
                         }
                     });
-                } else if ui.checkbox(on, label.as_str()).changed() {
+                } else if crate::drive::controls::check_box(ui, on, label.as_str()).changed() {
                     changed = true;
                 }
             }

@@ -923,7 +923,7 @@ impl ScopeFilterWidget {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for (layer, on) in &mut self.layers {
-                    if ui.checkbox(on, layer.as_str()).changed() {
+                    if crate::drive::controls::check_box(ui, on, layer.as_str()).changed() {
                         changed = true;
                     }
                 }
