@@ -669,7 +669,8 @@ impl SheetEditor {
     /// (its items sheetMatchScale_<viewport id>, or sheetMatchScaleNone, listed as the menu is
     /// made), sheetFitToContent and sheetRotateToBestFit.
     pub fn arrange_menu(&self, host: &dyn Host) -> Menu {
-        let mut menu = Menu::new("sheetArrangeMenu", "Arrange").action(
+        // Its own icon on the sheet editor's toolbar, as Add View and Tile have.
+        let mut menu = Menu::new("sheetArrangeMenu", "Arrange").icon("ArrangeLeaders").action(
             Action::new("sheetArrangeAuto", "Auto Arrange")
                 .tip("Move the views apart so none overlaps, the main view keeping its place"),
         );

@@ -191,7 +191,7 @@ pub fn paint_template_preview(
         let said = if road_template.is_some() {
             "No components yet: Add one below"
         } else {
-            "No template chosen"
+            "Choose a template to see its typical section"
         };
         canvas.draw_text_in(rect, TextFlags::CENTER, said);
         return;
@@ -1236,7 +1236,9 @@ impl Body {
         let width = ui.available_width().max(220.0);
         let road_template = self.preview_template.as_ref();
         let section = self.preview_section.as_ref();
-        let drawn = preview(
+        // With no template it says so in the pane (paint_template_preview), as an empty table
+        // does: a section heading over an empty box read as a preview that failed.
+        preview(
             ui,
             "roadTemplatePreview",
             egui::vec2(width, 110.0),
@@ -1252,17 +1254,6 @@ impl Body {
                 );
             },
         );
-        // A section heading over an empty box read as a preview that failed: with nothing to
-        // draw it says why, as an empty table does.
-        if road_template.is_none() {
-            ui.painter().text(
-                drawn.rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Choose a template to see its typical section",
-                egui::TextStyle::Body.resolve(ui.style()),
-                crate::theme::palette::text_muted().to_egui(),
-            );
-        }
     }
 
     /// The one footer (shell::dialog::button_row): what the last line replied at the left, Close

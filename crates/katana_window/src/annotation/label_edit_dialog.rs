@@ -36,7 +36,7 @@
 //! labelEditCommand    the line OK and Apply run (read-only)
 //! labelEditOk         run the line, and close when it worked
 //! labelEditApply      run the line and stay open
-//! labelEditCancel     close without running anything
+//! labelEditCancel     Close: close without running anything
 //! labelEditStatus     what happened last
 //! ```
 
@@ -649,8 +649,10 @@ impl LabelEditDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let enabled = self.current.id != 0;
         let status = self.status.clone();
-        // The one footer (shell::dialog::button_row): the status at the left; Apply, Cancel (the
-        // dialog's Close), then OK, the primary, last at the right.
+        // The one footer (shell::dialog::button_row): the status at the left; Apply (the
+        // secondary, before Close as Edit Text's Revert is), Close, then OK, the primary, last at
+        // the right. Close is labelEditCancel, as it was: it closes without running anything,
+        // which every other dialog's footer calls Close (the look audits' T5).
         let (_, (ok, cancel, apply)) = dialog::button_row(
             ui,
             |ui| {
@@ -665,13 +667,19 @@ impl LabelEditDialog {
             |ui| {
                 let apply = ui
                     .add_enabled_ui(enabled, |ui| {
-                        controls::button(ui, "labelEditApply", "Apply").clicked()
+                        controls::button(ui, "labelEditApply", "Apply")
+                            .on_hover_text("Run the line and keep the dialog open")
+                            .clicked()
                     })
                     .inner;
-                let cancel = controls::button(ui, "labelEditCancel", "Cancel").clicked();
+                let cancel = controls::button(ui, "labelEditCancel", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
+                    .clicked();
                 let ok = ui
                     .add_enabled_ui(enabled, |ui| {
-                        controls::primary(ui, "labelEditOk", "OK").clicked()
+                        controls::primary(ui, "labelEditOk", "OK")
+                            .on_hover_text("Run the line, and close the dialog when it worked")
+                            .clicked()
                     })
                     .inner;
                 (ok, cancel, apply)

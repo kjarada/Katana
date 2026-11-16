@@ -229,6 +229,13 @@ mod sheet_painter {
         );
         // Drawn while editing: a hairline centred on the edge, half of it on the paper.
         assert!(ink_in(&editing, &bx(0.0, 100.0, 1.0, 200.0)) > 0);
+        // In the chrome's border token, a neutral grey: the frame's own orange (#FF8000) was a
+        // second accent in the window (the look audits' T15). Orange on white keeps its blue
+        // channel well under its red, however faint its antialiased edge; a grey's are equal.
+        let orange = crate::support::pixels_in(&editing, &bx(0.0, 100.0, 1.0, 200.0), |c| {
+            c.r.abs_diff(c.b) > 40
+        });
+        assert_eq!(orange, 0, "the guide is drawn in an orange");
     }
 
     #[test]

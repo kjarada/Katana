@@ -403,3 +403,75 @@ mod annotation_managers {
         assert_eq!(bench.document().model().entities.size(), entities + 1);
     }
 }
+
+// ---- the look (the second look audit of 2026-11-16) ---------------------------------------------
+
+mod annotation_managers_look {
+    use super::*;
+
+    /// egui rounds a widget's rectangle to the pixel grid (the offscreen screen's one pixel a
+    /// point).
+    const HALF_A_POINT: f32 = 0.5;
+
+    fn themed<D: crate::support::Dialog>(mut bench: Bench<D>) -> Bench<D> {
+        katana_window::theme::style::apply(bench.harness.context());
+        bench.draw();
+        bench
+    }
+
+    #[test]
+    fn label_styles_apply_is_the_footers_primary_after_close_and_delete_is_at_its_left() {
+        // T5: Delete, Add Standard Set and an accent Apply stood under the form, in the body.
+        let bench = themed(Bench::new(interpreter_host(), LabelStyleManagerDialog::new));
+        let rect = |name: &str| bench.control(name).rect;
+        let (close, apply) = (rect("labelStyleClose"), rect("labelStyleApply"));
+        assert!(apply.left() >= close.right(), "Apply is after Close");
+        assert!((apply.center().y - close.center().y).abs() <= HALF_A_POINT);
+        for name in ["labelStyleDelete", "labelStyleDefaults"] {
+            let button = rect(name);
+            assert!(button.right() <= close.left(), "{name} is before Close");
+            assert!(
+                (button.center().y - close.center().y).abs() <= HALF_A_POINT,
+                "{name} is on the footer's row"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_template_check_takes_no_row_between_template_and_text_style() {
+        // N15: an empty row stood between Template and Text style.
+        let bench = themed(Bench::new(interpreter_host(), LabelStyleManagerDialog::new));
+        assert_eq!(bench.report("labelStyleTemplateCheck"), "");
+        let template = bench.control("labelStyleTemplate").rect;
+        let text_style = bench.control("labelStyleTextStyle").rect;
+        let spacing = katana_window::shell::dialog::FORM_SPACING.y;
+        assert!(
+            (text_style.top() - template.bottom() - spacing).abs() <= HALF_A_POINT,
+            "the template ends at {} and the text style starts at {}",
+            template.bottom(),
+            text_style.top()
+        );
+        let check = bench.control("labelStyleTemplateCheck").rect;
+        assert!(check.height() <= HALF_A_POINT, "{check:?}");
+    }
+
+    #[test]
+    fn a_style_managers_list_rows_span_its_column_not_their_words() {
+        // N10: the chosen name was a pill as wide as "Standard"; the row spans the list, which is
+        // as wide as the New row under it less the well's border.
+        let mut bench = themed(Bench::new(interpreter_host(), TextStyleManagerDialog::new));
+        bench.dialog.select(bench.host.document(), "Standard");
+        bench.draw();
+        let list = bench.control("textStyleList").rect;
+        let name = bench.control("textStyleNewName").rect;
+        let new = bench.control("textStyleNew").rect;
+        // The well's border and margin, a point and two each side, and a scroll bar's room.
+        let room = new.right() - name.left() - list.width();
+        assert!(
+            (0.0..=20.0).contains(&room),
+            "the list is {} wide in a column of {}",
+            list.width(),
+            new.right() - name.left()
+        );
+    }
+}

@@ -2177,3 +2177,90 @@ mod survey_code_manager {
         assert_eq!(bench.value("ruleSymbolSize"), "1.5");
     }
 }
+
+// ---- the look (the second look audit of 2026-11-16) ---------------------------------------------
+
+mod survey_code_manager_look {
+    use super::*;
+
+    /// The Issues tab's title as the strip shows it, its count in it: the third of five.
+    fn issues_tab(bench: &Manager) -> String {
+        bench.items("codeManagerTabs")[2].clone()
+    }
+
+    #[test]
+    fn no_tab_makes_the_dialog_smaller_or_narrower_than_the_code_table() {
+        // T10: 1226 by 750 on the Code Table, 1194 by 256 on Issues - the dialog jumped as its
+        // tabs were turned, and on the Code Table its filter bar ran the body 32 past the width
+        // the tab strip's rule was drawn across. Every tab is the body's one width; Issues, a
+        // table and a line, is the Code Table's size; the scope's pages are no smaller (taller
+        // than a laptop's screen, they may be taller and scroll).
+        let mut bench = manager(fixture_host());
+        katana_window::theme::style::apply(bench.harness.context());
+        let size = |bench: &mut Manager, tab: &str| {
+            bench.fill("codeManagerTabs", tab);
+            bench
+                .harness
+                .target_record("surveyCodeManagerDialog")
+                .expect("the dialog is drawn")
+                .rect
+                .size()
+        };
+        // The Issues tab's title counts them ("Issues (2)").
+        let issues_title = issues_tab(&bench);
+        let code_table = size(&mut bench, "Code Table");
+        // On the Code Table the body ends where the page does, the footer's padding and rule
+        // under it: the body's least height once counted from the page's foot and left a void a
+        // page high under it, which the sizes alone, equal on both tabs, did not show.
+        let page = bench.control("codeTableTab").rect;
+        let close = bench.control("closeManager").rect;
+        let room = katana_window::shell::dialog::PADDING;
+        assert!(
+            close.top() - page.bottom() <= 3.0 * room,
+            "the page ends at {} and the footer's Close starts at {}",
+            page.bottom(),
+            close.top()
+        );
+        let issues = size(&mut bench, &issues_title);
+        assert!(
+            (issues - code_table).length() <= 0.5,
+            "Issues is {issues:?} where the Code Table is {code_table:?}"
+        );
+        for tab in ["Codes in Drawing", "Apply Codes", "Linework"] {
+            let shown = size(&mut bench, tab);
+            assert!(
+                (shown.x - code_table.x).abs() <= 0.5 && shown.y >= code_table.y - 0.5,
+                "{tab} is {shown:?} where the Code Table is {code_table:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_issues_table_spans_its_page() {
+        // T9: its header stood 350 points of a page some 1200 wide.
+        let mut bench = manager(fixture_host());
+        katana_window::theme::style::apply(bench.harness.context());
+        let issues_title = issues_tab(&bench);
+        bench.fill("codeManagerTabs", &issues_title);
+        let table = bench.control("issuesTable").rect;
+        let filter = bench
+            .harness
+            .target_record("issuesFilter")
+            .expect("the filter bar is a target of its own")
+            .rect;
+        let dialog = bench
+            .harness
+            .target_record("surveyCodeManagerDialog")
+            .expect("the dialog is drawn")
+            .rect;
+        // The body's right edge: the frame's pixel of border and its padding in from the dialog's.
+        // (A body that scrolled, as it did while its least height was counted from the wrong
+        // place, gave its scroll bar 6 points of the table's width.)
+        let body_right = dialog.right() - 1.0 - katana_window::shell::dialog::PADDING;
+        assert!(
+            (table.left() - filter.left()).abs() <= 0.5
+                && (table.right() - body_right).abs() <= 0.5,
+            "the table is {table:?} in a body ending at {body_right}"
+        );
+    }
+}

@@ -23,7 +23,7 @@
 use egui::{Response, RichText, Ui};
 
 use crate::drive::controls;
-use crate::drive::mailbox::{Act, fill_disabled, no_button};
+use crate::drive::mailbox::{Act, fill_disabled, no_button, no_field};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::shell::dialog;
 use crate::theme;
@@ -164,7 +164,8 @@ pub fn reply_text(
             .1
     } else {
         ui.add(
-            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error))).wrap(),
+            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error)))
+                .wrap(),
         )
     };
     if let Some(taken) = &taken
@@ -177,6 +178,135 @@ pub fn reply_text(
     record.value = value.clone();
     controls::custom(ui, &response, record);
     response
+}
+
+/// A label a dialog keeps for its drivers - a template's check, a scope's count - that takes no
+/// room while it has nothing to say: an empty label in a form's row still took the row, a
+/// control high, and left a blank band in the form (Leaders' 30 points above "Says", Label
+/// Styles' row between Template and Text style; the second look audit's N13 and N15). Recorded
+/// as the label it is (ControlKind::Label), its text the text, empty or not; a fill or a press is
+/// refused as a label refuses them.
+pub fn quiet_label(ui: &mut Ui, name: &str, text: &str, colour: egui::Color32) -> Response {
+    if !text.is_empty() {
+        return controls::label_as(
+            ui,
+            name,
+            text,
+            egui::Label::new(RichText::new(text).color(colour)).wrap(),
+        );
+    }
+    let taken = take(ui, name);
+    // Where it will be, its row's width and no height, without moving the cursor: a place of no
+    // height still took the spacing after it, and a form's rows round it stood two gaps apart.
+    let at = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 0.0));
+    let response = ui.interact(
+        at,
+        ui.id().with(("katanaQuietLabel", name)),
+        egui::Sense::hover(),
+    );
+    if let Some(taken) = &taken {
+        match &taken.posted.act {
+            // As controls::label_as refuses one.
+            Act::Fill(text) => {
+                if controls::accept_fill(ui, taken) {
+                    settle(ui, taken, Err(no_field(name, text)));
+                }
+            }
+            Act::Press => settle(ui, taken, Err(no_button(&taken.posted))),
+            Act::ScrollTo => settle(ui, taken, Ok(())),
+        }
+    }
+    controls::custom(ui, &response, ControlRecord::new(name, ControlKind::Label));
+    response
+}
+
+/// A list a person picks one row of (`controls::rows`), each row as wide as the column it is
+/// drawn in, as a table's chosen row is: egui sizes a selectable to its text, so a list's chosen
+/// row was a pill as wide as its words ("Standard" in Text Styles, the Settings pages, the sheet
+/// list) beside tables whose chosen row spans them - two looks of one thing (the second look
+/// audit's N10). The column must have a width of its own (`Ui::set_width`): a justified row
+/// takes all the room it is lent.
+pub fn pick_list(
+    ui: &mut Ui,
+    name: &str,
+    rows: &[Vec<String>],
+    current: &mut Option<usize>,
+) -> Response {
+    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+        controls::rows(ui, name, rows, current)
+    })
+    .inner
+}
+
+/// A `pick_list` in a well `height` high - a field's fill under a border, its rows scrolling in
+/// it - the list beside a form (Text Styles, Label Styles): a list of one name over a column of
+/// nothing beside a form of twenty rows read as a void (the second look audit's N15). While it has
+/// no rows it says `empty` in it, muted, as an empty table does. The column it is drawn in must
+/// have a width of its own, as `pick_list`'s.
+pub fn list_well(
+    ui: &mut Ui,
+    name: &str,
+    rows: &[Vec<String>],
+    current: &mut Option<usize>,
+    height: f32,
+    empty: &str,
+) -> Response {
+    egui::Frame::new()
+        .fill(theme::palette::input().to_egui())
+        .stroke(egui::Stroke::new(1.0, theme::border().to_egui()))
+        .corner_radius(egui::CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(2))
+        .show(ui, |ui| {
+            let inner = (height - 6.0).max(rows_height(ui, 1.0));
+            egui::ScrollArea::vertical()
+                .id_salt((name, "listWell"))
+                .max_height(inner)
+                .min_scrolled_height(inner)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let list = pick_list(ui, name, rows, current);
+                    if rows.is_empty() {
+                        empty_table(ui, empty);
+                    }
+                    list
+                })
+                .inner
+        })
+        .inner
+}
+
+/// The height a part of a dialog was drawn at the last frame, kept under `id` - what a column
+/// beside it is made as tall as (`list_well` beside its form). None before it is first drawn.
+pub fn last_height(ui: &Ui, id: egui::Id) -> Option<f32> {
+    ui.data(|data| data.get_temp::<f32>(id))
+}
+
+/// Keeps `height` under `id` for `last_height`; a change has the frame laid out again at once
+/// (Context::request_discard), as the dialog frame does for its own measure, so what is drawn
+/// beside the part is never a frame behind it.
+pub fn keep_height(ui: &Ui, id: egui::Id, height: f32) {
+    if last_height(ui, id).is_none_or(|before| (before - height).abs() > 0.5) {
+        ui.data_mut(|data| data.insert_temp(id, height));
+        ui.ctx()
+            .request_discard("a column was measured for what is beside it");
+    }
+}
+
+/// A preview's place with nothing in it yet says so: `text`, muted and centred in `rect`, wrapped
+/// to its width less a margin - where an empty dark box read as a preview that failed to draw
+/// (the look audits' T6).
+pub fn preview_placeholder(ui: &Ui, rect: egui::Rect, text: &str) {
+    let margin = theme::style::GROUP_GAP;
+    let width = (rect.width() - 2.0 * margin).max(1.0);
+    let galley = ui.painter().layout(
+        String::from(text),
+        egui::TextStyle::Body.resolve(ui.style()),
+        theme::text_muted().to_egui(),
+        width,
+    );
+    let at = rect.center() - galley.size() / 2.0;
+    ui.painter()
+        .galley(at, galley, theme::text_muted().to_egui());
 }
 
 /// `edit` - a one-line field a table or a grid draws in a cell of its own, which drive::controls'

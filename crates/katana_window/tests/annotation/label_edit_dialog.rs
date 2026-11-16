@@ -486,3 +486,56 @@ mod label_layout_report {
         assert!(bench.lines().is_empty());
     }
 }
+
+// ---- the look (the second look audit of 2026-11-16) ---------------------------------------------
+
+mod label_dialogs_look {
+    use super::*;
+
+    /// egui rounds a widget's rectangle to the pixel grid (the offscreen screen's one pixel a
+    /// point): two places laid out as one are within half a point of each other.
+    const HALF_A_POINT: f32 = 0.5;
+
+    #[test]
+    fn the_layout_reports_counts_stand_on_their_labels_lines() {
+        // T7: each count was centred twice - by its row's wrapping layout and by text_value's gap
+        // above - and stood 5 points under its label. The rows are a form's: a control high and
+        // FORM_SPACING apart, a label centred in its row; so the last count's middle is the
+        // Command field's top less the spacing and half a control.
+        let mut bench = Bench::new(interpreter_host(), |_| LabelLayoutReportDialog::new());
+        katana_window::theme::style::apply(bench.harness.context());
+        bench.draw();
+        let control = bench
+            .harness
+            .context()
+            .global_style()
+            .spacing
+            .interact_size
+            .y;
+        let spacing = katana_window::shell::dialog::FORM_SPACING.y;
+        let command = bench.control("labelLayoutCommand").rect;
+        let orphaned = bench.control("labelLayoutOrphaned").rect;
+        let row_middle = command.top() - spacing - control / 2.0;
+        assert!(
+            (orphaned.center().y - row_middle).abs() <= HALF_A_POINT,
+            "the count's middle is at {} and its row's at {row_middle}",
+            orphaned.center().y
+        );
+    }
+
+    #[test]
+    fn edit_labels_footer_is_apply_then_close_then_ok_the_primary() {
+        // T5: the dismissing button read Cancel where every other footer's reads Close; its name
+        // and what it does are kept.
+        let bench = edit_label();
+        assert_eq!(bench.report("labelEditCancel"), "Close");
+        let rect = |name: &str| bench.control(name).rect;
+        let (apply, close, ok) = (
+            rect("labelEditApply"),
+            rect("labelEditCancel"),
+            rect("labelEditOk"),
+        );
+        assert!(apply.right() <= close.left(), "Apply is before Close");
+        assert!(close.right() <= ok.left(), "OK is last");
+    }
+}
