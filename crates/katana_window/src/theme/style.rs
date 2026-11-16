@@ -342,6 +342,11 @@ fn spacing() -> Spacing {
         icon_width_inner: 8.0,
         icon_spacing: 6.0,
         menu_spacing: 2.0,
+        // egui's thin bars: a handle always shown, 6 points of room, widening under the pointer.
+        // egui's default (floating) shows no bar until the pointer is over the area, so a menu, a
+        // list or a dialog's body cut at the fold gave no sign there was more (the second look
+        // audit, 2026-11-16: Volumes' Measure under the fold, every menu's tail).
+        scroll: egui::style::ScrollStyle::thin(),
         ..Spacing::default()
     }
 }

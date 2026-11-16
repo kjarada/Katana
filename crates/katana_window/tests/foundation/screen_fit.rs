@@ -445,6 +445,45 @@ mod screen_fit {
     }
 
     #[test]
+    fn a_menu_taller_than_the_room_fills_the_room_below_it_not_egui_s_first_pass_size() {
+        // A popup is an egui Area laid out first in a sizing pass offering it egui's default area
+        // size (400 points high); a column held to that measured 390 and the Area kept it, so
+        // every menu was cut at 390 points whatever the room (the second look audit, 2026-11-16:
+        // File's Quit below the fold). The column's least height when it scrolls is the room.
+        let mut harness = offscreen_harness();
+        let room = screen_room(&harness);
+        assert!(room.height() > 500.0, "the premise: a screen with room past 400");
+        let actions: Vec<Action> = (0..120)
+            .map(|at| Action::new(&format!("tall{at}"), &format!("Tall {at}")))
+            .collect();
+        let at = room.left_top() + Vec2::new(20.0, 30.0);
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            popup_menu(&ctx, "tallMenu", at, |ui| {
+                for action in &actions {
+                    action_item(ui, action);
+                }
+            });
+        };
+        harness.show(&mut draw).expect("the menu is drawn");
+        harness.show(&mut draw).expect("the menu is drawn again");
+        let menu = harness
+            .target_record("tallMenu")
+            .expect("the menu is a target");
+        // To the screen's bottom less the menu frame's bottom (its margin, 4 to 6 points with its
+        // stroke, as the theme or egui sets it) and a point of rounding: within 8 points. Cut at
+        // the first pass's 390, it ended near 420.
+        const FRAME_BOTTOM: f32 = 8.0;
+        assert!(
+            menu.rect.bottom() >= room.bottom() - FRAME_BOTTOM,
+            "the menu ends at {} of a room to {}: cut short",
+            menu.rect.bottom(),
+            room.bottom()
+        );
+        assert!(menu.rect.height() > 420.0, "taller than egui's first-pass 400");
+    }
+
+    #[test]
     fn a_menu_taller_than_the_screen_is_one_scrolling_column() {
         // Every menu's items are drawn in the one scrolling column (shell::dialog::menu_column):
         // Qt's style hint and stylesheet have no counterpart to check.

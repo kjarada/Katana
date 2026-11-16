@@ -1200,6 +1200,13 @@ pub struct MenuShown {
 /// bottom: a menu bar's popup starts under the bar, and a column the screen's whole height (the
 /// Annotate menu, some 855 points in a window of 860) was taller than the room under the bar, so
 /// egui shifted the popup up over the bar it hangs from and its last item was still cut.
+///
+/// The room is the column's least height too, when it scrolls (`min_scrolled_height`): a popup is
+/// an egui Area, laid out first in a sizing pass that offers it no more than egui's default area
+/// size (400 points high), and a ScrollArea held to what it is offered measured 390 there, which
+/// the Area then kept - every menu was cut at 390 points, File's Quit and the ends of Draw,
+/// Modify and the rest below its fold (the second look audit, 2026-11-16). A menu shorter than
+/// the room still shrinks to its items (auto_shrink).
 pub fn menu_column(ui: &mut Ui, add: impl FnOnce(&mut Ui)) -> ScrollRecord {
     let screen = ui.ctx().content_rect();
     let below = Frame::menu(ui.style()).total_margin().bottom;
@@ -1207,6 +1214,7 @@ pub fn menu_column(ui: &mut Ui, add: impl FnOnce(&mut Ui)) -> ScrollRecord {
     let output = ScrollArea::vertical()
         .id_salt("katanaMenuColumn")
         .max_height(height)
+        .min_scrolled_height(height)
         .auto_shrink([true, true])
         .animated(false)
         .show(ui, |ui| {

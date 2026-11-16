@@ -902,7 +902,13 @@ where the dialog's do, and keeps `WIDGET_WIDTH` in a column of a row
 (`in_a_column`). A table with no rows keeps its header and says so under it,
 muted (`table_or_empty` over the one table look). A menu's column is the room
 below the menu, so a tall menu hung under the bar scrolls there rather than
-being moved up over it.
+being moved up over it - and that room is also the column's least height when
+it scrolls (`min_scrolled_height`): a popup is laid out first in egui's sizing
+pass, which offers 400 points, and a column held to that kept 390, cutting
+every menu there (File's Quit among the lost). Scroll bars are egui's thin
+ones (`ScrollStyle::thin`, a handle always shown in 6 points of room): egui's
+default showed none until the pointer was over the area, so a body or a
+menu cut at its fold gave no sign of more.
 
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
