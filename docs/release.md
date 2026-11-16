@@ -1517,14 +1517,12 @@ not exist in it, and with the plain note "Katana X.Y.Z".
   only the system's DLLs is read by the runner's
   `katana_updater_imports_only_os_dlls` on Windows, in the native run and in
   the job's. A run with the tag left empty is the way to try it.
-* **The Windows programs carry no icon and no version resource.** The C++
-  `katana.exe` had both (`resources/katana.ico`, a `.rc` file); the Rust
-  programs are built without, so Settings > Apps, the Start menu entry and
-  the Desktop shortcut - which take the program's own icon - show Windows'
-  generic one, and the file's properties name no publisher. The installer's
-  own icon is unchanged (`CPACK_NSIS_MUI_ICON`). Not added yet: it is a
-  build script for the window crate (a resource compiled with the
-  toolchain's `windres`), to be tried once the native Windows build passes.
+* **The ARM64 Windows job's resource compiler is untried.** `katana.exe`
+  carries its icon and version again (`crates/katana_window/build.rs`,
+  `docs/desktop.md`), compiled by UCRT64's `windres` and proven natively on
+  x86-64. CLANGARM64 has LLVM's `llvm-windres`, which the build script falls
+  back on; whether it is on that job's PATH, and takes `--output-format=coff`
+  as binutils' does, is first seen in a release run.
 * **The packaging's own configure is checked by nobody.** The C++ build ran
   `tools/check_install_rules.cmake` and `tools/check_installer_licence.cmake`
   on its own configure, and built a real NSIS installer from its CPack

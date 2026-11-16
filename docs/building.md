@@ -76,6 +76,20 @@ own disk, in `~/katana-build/<worktree>/`: cargo's target in
 never run inside WSL: a worktree made by Windows git names its repository by a
 `D:/` path that Linux cannot open, and the build needs no git.
 
+A worktree's first WSL build starts from a copy of the main checkout's
+`cargo/` folder (`seed_from_main_checkout`): the worktree's `.git` file names
+the main checkout, and the copy keeps its timestamps, so cargo finds every
+third-party crate fresh and compiles only the workspace's own. Before it, each
+new worktree compiled all of them again (the 515 third-party crates of `Cargo.lock`, several minutes of
+every core) - the cost of an agent's first build. Measured on 2026-11-16: in a
+checkout that has built once, a whole `wsl cargo` run compiles no third-party
+crate at all (cargo's fingerprint log, `CARGO_LOG=cargo::core::compiler::fingerprint=info`,
+which the script passes into WSL); the copy is skipped while a run is going in
+the main checkout. Rejected: one cargo folder for every checkout, whose lock
+would queue the agents' builds one behind another; sccache, a tool more to
+install for what one copy does. `bash tools/build_visible.sh prune` deletes
+the build folders of worktrees that are gone (each about 3 GB).
+
 What `all` runs, in order, stopping after a build step that fails:
 
 1. `cargo clippy --locked --workspace --all-targets --release --keep-going -- -D warnings`,
