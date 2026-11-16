@@ -45,7 +45,8 @@ use crate::drive::registry::{
     ControlKind, ControlRecord, TargetKind, TargetSpec, begin_target, end_target,
 };
 use crate::host::{Host, VerbOutcome};
-use crate::icons::IconMode;
+// A row of the tree is the Layers panel's list row, and its eye the panel's switch.
+use crate::main_window::panels::LIST_ROW;
 use crate::theme::{palette, style};
 use crate::view_workspace::ViewWorkspace;
 
@@ -53,18 +54,8 @@ use crate::view_workspace::ViewWorkspace;
 /// least width once; the note took the room egui lends an area and held the popup wider.)
 pub const MINIMUM_WIDTH: f32 = 300.0;
 
-/// A row of the tree, in points: the Layers panel's list row (main_window/panels.rs, LIST_ROW),
-/// denser than a form's control.
-const LIST_ROW: f32 = 22.0;
-
 /// How far a row is stepped in for each level of the tree, as the Layers panel steps its rows.
 const DEPTH_STEP: f32 = 14.0;
-
-/// The side of a row's eye, in points: the Layers panel's switch icon.
-const EYE: f32 = 14.0;
-
-/// How much of the eye is left while the row is hidden: the Layers panel's faint switch.
-const HIDDEN_EYE_ALPHA: u8 = 70;
 
 /// The VIEWS line that does `action` - HIDE, SHOW or ISOLATE - to `layers` in view `view`: what a
 /// click in the popup runs. A name with a blank is quoted (command_word), and a name no line can
@@ -866,29 +857,10 @@ impl ViewLayersPopup {
     }
 }
 
-/// A row's switch of what this view shows, as the Layers panel's eye is drawn (its `row_switch`,
-/// main_window/panels.rs): the eye in the text colour while the row is shown here, faint while it
-/// is hidden, framed only under the pointer; a click is a press of it.
+/// A row's switch of what this view shows: the Layers panel's eye (its `row_switch`), lit while
+/// the row is shown here and faint while it is hidden.
 fn eye(ui: &mut Ui, on: bool, tip: &str) -> egui::Response {
-    let response = match crate::icons::texture(ui.ctx(), "LayerVisible", EYE, IconMode::Normal) {
-        Some(texture) => ui.add(
-            egui::Button::image(egui::Image::new((texture.id(), Vec2::splat(EYE))).tint(
-                if on {
-                    egui::Color32::WHITE
-                } else {
-                    egui::Color32::from_white_alpha(HIDDEN_EYE_ALPHA)
-                },
-            ))
-            .frame_when_inactive(false)
-            .min_size(Vec2::splat(LIST_ROW)),
-        ),
-        // No icon painter (a test's context): a word in the eye's place.
-        None => ui.add(
-            egui::Button::selectable(on, if on { "x" } else { "-" })
-                .min_size(Vec2::splat(LIST_ROW)),
-        ),
-    };
-    response.on_hover_text(tip)
+    crate::main_window::panels::row_switch(ui, "LayerVisible", on, tip)
 }
 
 /// What a refused line says, as the Status the popup's buttons answer with.

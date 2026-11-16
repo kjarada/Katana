@@ -778,15 +778,16 @@ impl NamePicker {
         let shown = ui.vertical(|ui| {
             let row = ui.horizontal(|ui| {
                 // The field and its list button together as wide as a form's field, the list
-                // button a control's height square, as drive::controls::choice draws an editable
-                // choice's arrow.
-                let arrow = ui.spacing().interact_size.y;
+                // button as wide as egui draws an empty one (drive::controls::list_arrow_width),
+                // as drive::controls::choice draws an editable choice's arrow.
+                let arrow = crate::drive::controls::list_arrow_width(ui);
                 let field_width =
                     (ui.spacing().text_edit_width - arrow - ui.spacing().item_spacing.x).max(arrow);
                 let mut edit = egui::TextEdit::singleline(&mut self.text)
                     .id_salt(name)
                     .desired_width(field_width)
-                    .hint_text(placeholder);
+                    .hint_text(placeholder)
+                    .min_size(egui::vec2(0.0, ui.spacing().interact_size.y));
                 if marked {
                     edit = edit.text_color(UNDEFINED_NAME_COLOUR.to_egui());
                 }

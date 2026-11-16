@@ -296,6 +296,17 @@ pub fn line(ui: &mut Ui, name: &str, value: &mut String) -> Response {
     line_with(ui, name, value, LineOptions::default())
 }
 
+/// The width an empty ComboBox takes in `ui` - an editable choice's list arrow beside its field:
+/// egui gives one its icon, the icon's spacing and the button's padding on both sides at least
+/// (combo_box.rs, egui 0.36: 16 + 6 + 2 x 8 = 38 in the window's style), whatever `width` it is
+/// asked for. Reserving only a control's height (24) for it ran the arrow 14 past its row, and
+/// egui lent that room to every row under it.
+pub fn list_arrow_width(ui: &Ui) -> f32 {
+    let spacing = ui.spacing();
+    (spacing.icon_width + spacing.icon_spacing + 2.0 * spacing.button_padding.x)
+        .max(spacing.interact_size.y)
+}
+
 /// QLineEdit over `value`, drawn as `options` say: a fill writes the text as given.
 pub fn line_with(
     ui: &mut Ui,
@@ -318,11 +329,15 @@ pub fn line_with(
             Act::ScrollTo => {}
         }
     }
+    // A control's height (theme::style::CONTROL_HEIGHT): egui sizes a one-line field to its text
+    // (19 points at 13 px), and beside the 24-point buttons of its row - a Browse, a Measure - it
+    // stood shorter than they did.
     let mut edit = egui::TextEdit::singleline(value)
         .id_salt(name)
         .hint_text(String::from(options.placeholder))
         .password(options.password)
-        .interactive(!options.read_only);
+        .interactive(!options.read_only)
+        .min_size(egui::vec2(0.0, ui.spacing().interact_size.y));
     if let Some(width) = options.width {
         edit = edit.desired_width(width);
     }
@@ -513,13 +528,14 @@ pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) ->
         let text = &mut chosen.text;
         ui.horizontal(|ui| {
             // The field and the list's arrow beside it, the two as wide as a field alone.
-            let arrow = ui.spacing().interact_size.y;
+            let arrow = list_arrow_width(ui);
             let room = ui.available_width() - arrow - ui.spacing().item_spacing.x;
             let width = ui.spacing().text_edit_width.min(room);
             let edit = ui.add(
                 egui::TextEdit::singleline(text)
                     .id_salt(name)
-                    .desired_width(width),
+                    .desired_width(width)
+                    .min_size(egui::vec2(0.0, ui.spacing().interact_size.y)),
             );
             let list = egui::ComboBox::from_id_salt((name, "items"))
                 .width(arrow)

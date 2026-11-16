@@ -1192,8 +1192,9 @@ fn menu_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
 
 // ---- a panel's own tools -------------------------------------------------------------------------
 
-/// A row of a list or tree in a panel (the Layers tree): denser than a form's control.
-const LIST_ROW: f32 = 22.0;
+/// A row of a list or tree in a panel (the Layers tree, a view's layers popup): denser than a
+/// form's control.
+pub(crate) const LIST_ROW: f32 = 22.0;
 
 /// The side of a panel tool's icon: the design's 16 point grid, in a control-high square.
 const PANEL_ICON: f32 = 16.0;
@@ -1238,9 +1239,10 @@ fn group_rule(ui: &mut Ui) {
     );
 }
 
-/// A two-state switch of a list row (a layer's eye or padlock): the icon full while `on`, faint
-/// while off, a click a press of it.
-fn row_switch(ui: &mut Ui, icon: &str, on: bool, tip: &str) -> egui::Response {
+/// A two-state switch of a list row (a layer's eye or padlock, the eye of a view's layers popup):
+/// the icon full while `on`, faint while off, framed only under the pointer, a click a press of
+/// it. With no icon painter (a test's context) a word stands in the icon's place.
+pub(crate) fn row_switch(ui: &mut Ui, icon: &str, on: bool, tip: &str) -> egui::Response {
     let side = 14.0;
     let response = match crate::icons::texture(ui.ctx(), icon, side, crate::icons::IconMode::Normal) {
         Some(texture) => ui.add(

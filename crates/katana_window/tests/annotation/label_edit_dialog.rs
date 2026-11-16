@@ -197,14 +197,12 @@ mod label_edit_dialog {
             if *name != "labelEditNorthing" && (rect.left() - start).abs() > HALF_A_POINT {
                 wrong.push(format!("{name} starts at {}", rect.left()));
             }
-            // Not the layer's end, nor the command's under it: the layer is an editable choice,
-            // whose list arrow drive::controls::choice draws icon_spacing and icon_width_inner
-            // (14 points) wider than the room it leaves it, and that pushes the body out for the
-            // rows under it (docs/desktop.md, "Not done").
-            let ends_here = !matches!(
-                *name,
-                "labelEditEasting" | "labelEditLayer" | "labelEditCommand"
-            );
+            // The layer is an editable choice, its field and list arrow ending together at the
+            // body's edge since the arrow is given the room egui draws it in
+            // (drive::controls::list_arrow_width): reserved a control's height, it ran 14 past
+            // the row and pushed the body out for the command under it. The easting ends at
+            // half the row, where the northing starts.
+            let ends_here = *name != "labelEditEasting";
             if ends_here && (rect.right() - body_right).abs() > HALF_A_POINT {
                 wrong.push(format!("{name} ends at {}", rect.right()));
             }
