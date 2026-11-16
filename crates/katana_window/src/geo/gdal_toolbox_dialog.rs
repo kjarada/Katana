@@ -1021,6 +1021,8 @@ impl GdalToolboxDialog {
                         &mut self.search,
                         LineOptions {
                             placeholder: "search: a name, an alias or a word of the description",
+                            // As wide as the tree under it, whose header spans the column.
+                            width: Some(f32::INFINITY),
                             ..LineOptions::default()
                         },
                     )

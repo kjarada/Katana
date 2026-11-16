@@ -801,7 +801,9 @@ impl VectorImportDialog {
                 );
             });
             // A headed column, as every group of a dialog is (shell::dialog::section), where it
-            // was a bordered box beside an unbordered form.
+            // was a bordered box beside an unbordered form; parted from the form by a gap, as
+            // columns side by side are, now no border does.
+            ui.add_space(crate::shell::dialog::PADDING);
             ui.vertical(|ui| {
                 crate::shell::dialog::section(ui, "Only what lies within");
                 check(
