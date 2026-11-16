@@ -31,9 +31,13 @@ use crate::theme;
 /// A one-line field or a spin box in a form's row made as wide as the row, as a choice beside it
 /// is: egui sizes a number box to its figures, so a form of choices and numbers had two right
 /// edges (the Leaders' Look group: 400 against 75; the second look audit's N13). Draws `add` in a
-/// row whose one widget is justified across it.
+/// row whose one widget is justified across it, the row a control high: laid out in all the room
+/// left below it, a row centred its widget in that room, and the Leaders' Along box stood 250
+/// points under its label.
 pub fn full_width<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.with_layout(
+    let room = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(
+        room,
         egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
         add,
     )

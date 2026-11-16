@@ -1423,6 +1423,29 @@ mod leader_manager_look {
     }
 
     #[test]
+    fn a_number_box_made_as_wide_as_its_row_stays_in_its_row() {
+        // A number box spanning its row (dialog_layout::full_width) was centred in all the room
+        // left under it: Along stood 250 points below its label, the form a void between. Each
+        // row is a control high and FORM_SPACING above the next, so a box in its row ends that
+        // gap above the next row's field, and the Look's three boxes are one row's pitch apart.
+        let bench = shown_leader();
+        let spacing = katana_window::shell::dialog::FORM_SPACING.y;
+        let rect = |name: &str| bench.control(name).rect;
+        let mut wrong = Vec::new();
+        for (box_name, next) in [
+            ("leaderAlong", "leaderNoteKind"),
+            ("leaderPaperHeight", "leaderArrowSize"),
+            ("leaderArrowSize", "leaderLanding"),
+        ] {
+            let gap = rect(next).top() - rect(box_name).bottom();
+            if (gap - spacing).abs() > HALF_A_POINT {
+                wrong.push(format!("{box_name} ends {gap} above {next}"));
+            }
+        }
+        assert!(wrong.is_empty(), "rows {spacing} apart: {wrong:?}");
+    }
+
+    #[test]
     fn an_empty_check_takes_no_row_of_the_form() {
         // N13: with no leader shown the check says nothing, and its row stood blank, a control
         // high, above "Says". (A leader's plain note is checked aloud: "Plain text: ...".)
