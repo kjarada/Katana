@@ -38,7 +38,7 @@ use katana_cad::{CrsChoice, Document, DocumentChange, ListenerHandle};
 use katana_core::text::parse_finite_double;
 use katana_gis::reproject::transform_point;
 
-use crate::command_reference_dialog::{cell_text, whole_row};
+use crate::dialog_layout::{cell_text, whole_row};
 use crate::drive::controls::{self, LineOptions};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};

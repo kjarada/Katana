@@ -31,11 +31,12 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Align, Rect, RichText, Sense, Ui, UiBuilder, Vec2};
+use egui::{Rect, RichText, Sense, Ui, UiBuilder, Vec2};
 use katana_cad::CommandInterpreter;
 use katana_cad::interactive_tool::tool_catalog;
 
 use crate::command_log::contains_ignoring_case;
+use crate::dialog_layout::{cell_text, whole_row};
 use crate::drive::{
     ControlKind, ControlRecord, LineOptions, button, custom, label, line_with, simplified,
 };
@@ -737,48 +738,6 @@ const DETAIL_ROWS: f32 = 6.0;
 /// The dialog's body: the title column and a summary of most help lines, which run to about 95
 /// characters.
 const BODY_WIDTH: f32 = 760.0;
-
-/// One whole row of a tree, `height` high across what holds it: lit when `chosen`, the faint
-/// stripe when `striped`, the hover colour under the pointer (dialog_layout::table_row_colour's
-/// look). Its rectangle and its response to a click. The Command Reference's and the Project
-/// Coordinate System's trees: a selectable label in a row is a pill the size of its text.
-pub(crate) fn whole_row(
-    ui: &mut Ui,
-    height: f32,
-    chosen: bool,
-    striped: bool,
-) -> (Rect, egui::Response) {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
-    let fill = if chosen {
-        Some(crate::dialog_layout::selected_row_colour())
-    } else if response.hovered() {
-        Some(theme::hover().to_egui())
-    } else if striped {
-        Some(ui.visuals().faint_bg_color)
-    } else {
-        None
-    };
-    if let Some(fill) = fill {
-        ui.painter().rect_filled(rect, 0.0, fill);
-    }
-    (rect, response)
-}
-
-/// `text` on one line in `row` from `left`, cut short with an ellipsis at `right`, centred in the
-/// row's height.
-pub(crate) fn cell_text(ui: &Ui, row: Rect, left: f32, right: f32, text: RichText) {
-    let room = (right - left - crate::dialog_layout::TABLE_COLUMN_GAP / 2.0).max(0.0);
-    let mut job = std::sync::Arc::unwrap_or_clone(egui::WidgetText::from(text).into_layout_job(
-        ui.style(),
-        egui::FontSelection::Default,
-        Align::Center,
-    ));
-    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
-    let galley = ui.painter().layout_job(job);
-    let at = egui::pos2(left, row.center().y - galley.size().y / 2.0);
-    ui.painter().galley(at, galley, theme::text().to_egui());
-}
 
 /// Help > Command Reference (see the module comment).
 pub struct CommandReferenceDialog {

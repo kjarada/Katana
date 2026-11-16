@@ -238,6 +238,49 @@ pub fn pick_list(
     .inner
 }
 
+/// One whole row of a tree, `height` high across what holds it: lit when `chosen`, the faint
+/// stripe when `striped`, the hover colour under the pointer (dialog_layout::table_row_colour's
+/// look). Its rectangle and its response to a click. A tree's rows (the Command Reference's, the
+/// Project Coordinate System's): a selectable label in a row is a pill the size of its text; a
+/// flat list a person picks from is `pick_list`.
+pub fn whole_row(
+    ui: &mut Ui,
+    height: f32,
+    chosen: bool,
+    striped: bool,
+) -> (egui::Rect, Response) {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::click());
+    let fill = if chosen {
+        Some(selected_row_colour())
+    } else if response.hovered() {
+        Some(theme::hover().to_egui())
+    } else if striped {
+        Some(ui.visuals().faint_bg_color)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, 0.0, fill);
+    }
+    (rect, response)
+}
+
+/// `text` on one line in `row` from `left`, cut short with an ellipsis at `right`, centred in the
+/// row's height.
+pub fn cell_text(ui: &Ui, row: egui::Rect, left: f32, right: f32, text: RichText) {
+    let room = (right - left - TABLE_COLUMN_GAP / 2.0).max(0.0);
+    let mut job = std::sync::Arc::unwrap_or_clone(egui::WidgetText::from(text).into_layout_job(
+        ui.style(),
+        egui::FontSelection::Default,
+        egui::Align::Center,
+    ));
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+    let galley = ui.painter().layout_job(job);
+    let at = egui::pos2(left, row.center().y - galley.size().y / 2.0);
+    ui.painter().galley(at, galley, theme::text().to_egui());
+}
+
 /// A `pick_list` in a well `height` high - a field's fill under a border, its rows scrolling in
 /// it - the list beside a form (Text Styles, Label Styles): a list of one name over a column of
 /// nothing beside a form of twenty rows read as a void (the second look audit's N15). While it has

@@ -980,6 +980,42 @@ Viewshed and Grid Points to DEM end their fields at one edge. Not done:
 Utilities' "What is drawn" note wraps beside its radio; Viewshed's observers
 list has no empty state; Surface Styles' Apply and Revert are in its body.
 
+**The fourth round: the Format, annotation, BIM and sheet dialogs.** A dialog of tabs shows the
+front tab's actions in the footer: Leaders' Freeze Note and Detach Tip at the left, Close, Apply
+last in the accent; For Selection's Close and Make for Selection; Label Styles' Delete and Add
+Standard Set at the left, Close, Apply - where they stood under the forms, the accent in the body.
+Layers' Revert and Save Changes are its footer's, and the rename prompt's OK is a plain button: one
+accent a dialog. Edit Label's Cancel reads Close (labelEditCancel, as it was). Leaders is one form
+of sections (Position, Note, Look, Attribute of the entity it is on) where it was three boxes with
+four right edges; the values a note may use are a table under the note, as wide as the fields,
+where it was a strip 100 points wide beside the Look box. A label kept for drivers takes no room
+while it is empty (`dialog_layout::quiet_label`, which records it without moving the cursor): an
+empty check's row left a band a control high in the form. A list a person picks one row of spans
+its column as a table's chosen row does (`dialog_layout::pick_list`), where a selectable sized to
+its words was a pill (Text Styles' "Standard", the Settings pages, the sheet list); beside a form
+it is a well as tall as the form, saying so when it is empty (`list_well`, the form's height kept
+from the last frame by `last_height` / `keep_height`). A preview with nothing to show says what to
+choose (`StylePreview::set_placeholder`, `dialog_layout::preview_placeholder`); the road dialogs'
+previews had never been painted - their `set_raster` had no caller - and paint through the
+window's raster canvas when none is lent. An empty road grid is as tall as its note. The Label
+Layout Report's counts were centred twice (a wrapped row centres its first line in a control's
+height, and `text_value` adds the same gap) and stood 5 points under their labels. The Survey Code
+Manager's body is at least as tall as its Code Table page (measured each frame, every page being
+laid out), so Issues no longer shrinks it to a strip; rejected: the tallest page's height - the
+scope pages are taller than a laptop's screen, and every tab then scrolled over a void. Its code
+table's column is 640, the filter bar's width, so the tab strip's rule spans the body. The
+Linetypes page's library details are a label column; Styles and Linetypes' least height is 720
+for it (the page's 719). The Hatch Patterns page is as tall as the Styles page, its buttons at
+its foot. The Definition Editor's hint is a muted line, a refusal a box as high as its lines. The
+sheet editor's toolbar is one row of icons and words (Add View, Tile, Arrange and Check Sheets were
+words beside icons, and a word without a gutter stood closer to its neighbours); the sheet list's
+rows span the list, one line cut short with an ellipsis and whole in its tooltip; New, Copy and
+Remove are squares, Copy the copy icon; the paper's construction guide wears the border token
+rather than the frame's orange (it never plots); the Checks dock is as tall as what it holds, up
+to the 170 it was; the panel's own number box is a field well (`drive::controls::number_field_look`).
+Rejected: number boxes spanning their form rows for one right edge (a `full_width` helper, tried
+and removed) - a number box is one short well in every dialog (drive::controls::number_field). Tested in `crates/katana_window/tests/annotation/leader_manager.rs`, `label_edit_dialog.rs` and `annotation_ui.rs`, `crates/katana_window/tests/codes/code_manager.rs` and `crates/katana_window/tests/sheets/sheet_painter.rs`.
+
 **The view's Layers popup** is drawn as the Layers panel is: a panel's
 padding, one width of 300 hung by its top right corner under the view's
 Layers button, rows 22 high (`main_window::panels::LIST_ROW`) with the
