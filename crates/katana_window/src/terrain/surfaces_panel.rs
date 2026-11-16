@@ -581,6 +581,10 @@ impl SurfacesPanel {
     }
 }
 
+/// The least a row's style choice is given in a panel narrowed past its room: a short style name
+/// and the choice's arrow (drive::controls::list_arrow_width).
+const STYLE_LEAST_WIDTH: f32 = 96.0;
+
 /// One row of the table, its five cells: shown (the Layers panel's eye), the name - typed into
 /// only while it is being renamed, a click picks the row and a double click renames it - the
 /// style, where it came from, and its triangles.
@@ -629,6 +633,22 @@ fn table_row(
         asked.push(Asked::Renamed(at, typed));
     }
     let mut style = Choice::at(row.style);
+    // The choice ends at the panel's edge: the table's visible width (its scroll area's clip)
+    // less where the cell starts in the table, a pixel short for its border, whatever the table
+    // is scrolled to. At the style's width it ran past the edge and was cut mid-word with its
+    // arrow ("Default (Standard)", the second look audit's T8); Source and Triangles follow it,
+    // scrolled to. Not the room the grid lends the cell, nor the room to its Ui's right edge:
+    // each grows with what is drawn in it, so the choice widened the room it was sized by, frame
+    // after frame, and the window never settled.
+    let into_the_table = ui.cursor().left() - ui.min_rect().left();
+    let to_the_edge = ui.clip_rect().width() - into_the_table - 1.0;
+    ui.spacing_mut().combo_width = to_the_edge.max(STYLE_LEAST_WIDTH);
+    // A style's name longer than that is cut short with an ellipsis, as a long value is in the
+    // Properties panel: a horizontal scroll area lays its text out on one line however long, and
+    // the choice grew to its text past the edge it was sized to. Only the choice's: Source and
+    // Triangles after it are read whole, scrolled to.
+    let wrap = ui.style().wrap_mode;
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let changed = if current == Some(at) {
         choice(ui, "surfaceStyle", &row.style_texts, &mut style)
             .on_hover_text("The style the surface is drawn in (SURFACE STYLE)")
@@ -637,6 +657,15 @@ fn table_row(
         let mut changed = false;
         egui::ComboBox::from_id_salt(("surfaceStyle", at))
             .selected_text(row.style_text())
+            // The named choice's chevron (drive::controls::choice), so the rows read alike.
+            .icon(|ui, rect, _, open| {
+                let ink = if open {
+                    palette::text()
+                } else {
+                    palette::text_muted()
+                };
+                crate::drive::controls::paint_list_arrow(ui.painter(), rect, ink.to_egui());
+            })
             .show_ui(ui, |ui| {
                 for (index, text) in row.style_texts.iter().enumerate() {
                     if ui
@@ -650,6 +679,7 @@ fn table_row(
             });
         changed
     };
+    ui.style_mut().wrap_mode = wrap;
     if changed && let Some(index) = style.index {
         asked.push(Asked::Style(at, index));
     }

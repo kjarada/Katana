@@ -326,6 +326,38 @@ pub fn row_rooms(naturals: &[i32], row: f32) -> Vec<f32> {
         .collect()
 }
 
+/// The room each toolbar of a side column is given, in order, from the column's `room`, as a
+/// row's are (`row_rooms`) - its natural length while the column has it, the rest to the bar
+/// that does not fit, its last tools behind its overflow arrow - but every bar after it keeps
+/// `collapsed`, the room of an overflow arrow alone (`collapsed_bar`), while the column has that:
+/// a bar left no room at all was not drawn, and its tools were reached by no button of the
+/// column. At 1360 x 860 the left column's Draw took it all and Annotate under it was not there
+/// (the second look audit's T18). Rejected: sharing the column by the bars' lengths, which left
+/// Draw - the most used - eight tools of its seventeen to show Annotate's first eight.
+pub fn column_rooms(naturals: &[i32], room: f32, collapsed: f32) -> Vec<f32> {
+    let mut left = room.max(0.0);
+    let mut rooms = Vec::with_capacity(naturals.len());
+    for (at, natural) in naturals.iter().enumerate() {
+        // What the bars after this one keep, while there is room for it.
+        let after = (naturals.len() - at - 1) as f32 * collapsed;
+        let given = if (*natural as f32) <= left - after {
+            *natural as f32
+        } else {
+            (left - after).max(collapsed.min(left)).max(0.0)
+        };
+        rooms.push(given);
+        left -= given;
+    }
+    rooms
+}
+
+/// The room a side column's toolbar takes with all its tools behind its overflow arrow: the arrow
+/// and the strip's padding at either end (tools::flyout_button's strip layout).
+pub fn collapsed_bar() -> f32 {
+    use crate::tools::flyout_button::{EXTENSION_EXTENT, TOOL_BAR_PADDING_ALONG};
+    (2 * TOOL_BAR_PADDING_ALONG + EXTENSION_EXTENT) as f32
+}
+
 /// The height of a toolbar across it at `icon_size`.
 pub fn bar_breadth(icon_size: i32) -> f32 {
     (ToolButtonLook::TOOL.button_size(icon_size).1 + 2 * TOOL_BAR_PADDING_ACROSS) as f32
@@ -996,7 +1028,7 @@ pub fn check_tool_bar_fit(
 ) -> bool {
     let mut ok = true;
     let Some(&first) = sizes.first() else {
-        err.err("--check-toolbar-fit needs sizes like 1366x768, a comma between\n");
+        err.err(crate::drive::run::TOOL_BAR_FIT_SIZES);
         return false;
     };
     let mut as_built = 0;
