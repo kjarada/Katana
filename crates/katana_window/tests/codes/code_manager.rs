@@ -2189,12 +2189,12 @@ mod survey_code_manager_look {
     }
 
     #[test]
-    fn the_dialog_is_one_size_on_every_tab() {
+    fn no_tab_makes_the_dialog_smaller_or_narrower_than_the_code_table() {
         // T10: 1226 by 750 on the Code Table, 1194 by 256 on Issues - the dialog jumped as its
         // tabs were turned, and on the Code Table its filter bar ran the body 32 past the width
-        // the tab strip's rule was drawn across. The Issues tab holds a table and a line, far
-        // less than the body's width and height, so its size is the body's own; the Code Table's
-        // must be the same.
+        // the tab strip's rule was drawn across. Every tab is the body's one width; Issues, a
+        // table and a line, is the Code Table's size; the scope's pages are no smaller (taller
+        // than a laptop's screen, they may be taller and scroll).
         let mut bench = manager(fixture_host());
         katana_window::theme::style::apply(bench.harness.context());
         let size = |bench: &mut Manager, tab: &str| {
@@ -2208,12 +2208,17 @@ mod survey_code_manager_look {
         };
         // The Issues tab's title counts them ("Issues (2)").
         let issues_title = issues_tab(&bench);
+        let code_table = size(&mut bench, "Code Table");
         let issues = size(&mut bench, &issues_title);
-        for tab in ["Code Table", "Codes in Drawing", "Apply Codes", "Linework"] {
+        assert!(
+            (issues - code_table).length() <= 0.5,
+            "Issues is {issues:?} where the Code Table is {code_table:?}"
+        );
+        for tab in ["Codes in Drawing", "Apply Codes", "Linework"] {
             let shown = size(&mut bench, tab);
             assert!(
-                (shown - issues).length() <= 0.5,
-                "{tab} is {shown:?} where Issues is {issues:?}"
+                (shown.x - code_table.x).abs() <= 0.5 && shown.y >= code_table.y - 0.5,
+                "{tab} is {shown:?} where the Code Table is {code_table:?}"
             );
         }
     }

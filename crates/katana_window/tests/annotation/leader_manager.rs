@@ -1397,34 +1397,45 @@ mod leader_manager_look {
     }
 
     #[test]
-    fn every_field_of_the_leader_tab_ends_at_one_right_edge() {
-        // N13: the Position box, the Look box and the number boxes ended at four places.
+    fn every_field_of_the_leader_tab_starts_at_one_edge_and_every_choice_ends_at_one() {
+        // N13: the Position box and the Look box beside a table had fields at four places. The
+        // fields start at the form's one edge, and its choices end at its one right edge; a number
+        // box is a short well of its own width (drive::controls::number_field, every dialog's).
         let bench = shown_leader();
-        let edge = bench.control("leaderNote").rect.right();
+        let note = bench.control("leaderNote").rect;
         let mut wrong = Vec::new();
         for name in [
             "leaderPositionPoint",
-            "leaderAlong",
             "leaderNoteKind",
             "leaderLabelStyle",
             "leaderArrow",
             "leaderTextStyle",
+            "leaderLandingAngle",
+        ] {
+            let rect = bench.control(name).rect;
+            if (rect.left() - note.left()).abs() > HALF_A_POINT
+                || (rect.right() - note.right()).abs() > HALF_A_POINT
+            {
+                wrong.push(format!("{name} is {rect:?}"));
+            }
+        }
+        for name in [
+            "leaderAlong",
             "leaderPaperHeight",
             "leaderArrowSize",
             "leaderLanding",
-            "leaderLandingAngle",
         ] {
-            let right = bench.control(name).rect.right();
-            if (right - edge).abs() > HALF_A_POINT {
-                wrong.push(format!("{name} ends at {right}"));
+            let left = bench.control(name).rect.left();
+            if (left - note.left()).abs() > HALF_A_POINT {
+                wrong.push(format!("{name} starts at {left}"));
             }
         }
-        assert!(wrong.is_empty(), "the note ends at {edge}: {wrong:?}");
+        assert!(wrong.is_empty(), "the note is {note:?}: {wrong:?}");
     }
 
     #[test]
-    fn a_number_box_made_as_wide_as_its_row_stays_in_its_row() {
-        // A number box spanning its row (dialog_layout::full_width) was centred in all the room
+    fn a_number_box_stays_in_its_row() {
+        // A number box made to span its row (a helper since removed) was centred in all the room
         // left under it: Along stood 250 points below its label, the form a void between. Each
         // row is a control high and FORM_SPACING above the next, so a box in its row ends that
         // gap above the next row's field, and the Look's three boxes are one row's pitch apart.

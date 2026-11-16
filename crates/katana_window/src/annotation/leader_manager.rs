@@ -2735,9 +2735,7 @@ impl LeaderManagerDialog {
         dialog::form(ui, |form| {
             form.row("Along", |ui| {
                 ui.add_enabled_ui(self.along_enabled, |ui| {
-                    preview |= layout::full_width(ui, |ui| {
-                        controls::spin(ui, "leaderAlong", &mut self.along, ALONG)
-                    })
+                    preview |= controls::spin(ui, "leaderAlong", &mut self.along, ALONG)
                     .on_hover_text(
                         "How far along what it is on the tip is: of the line or the arc from its \
                          start, of the polyline segment, of a turn of the circle (LEADER SET id \
@@ -2849,9 +2847,7 @@ impl LeaderManagerDialog {
                 ];
                 for (title, name, value) in boxes {
                     form.row(title, |ui| {
-                        preview |=
-                            layout::full_width(ui, |ui| controls::spin(ui, name, value, SIZE))
-                                .changed();
+                        preview |= controls::spin(ui, name, value, SIZE).changed();
                     });
                 }
                 named_row(
@@ -3099,9 +3095,7 @@ impl LeaderManagerDialog {
                     ];
                     for (title, name, value, range) in boxes {
                         form.row(title, |ui| {
-                            preview |=
-                                layout::full_width(ui, |ui| controls::spin(ui, name, value, range))
-                                    .changed();
+                            preview |= controls::spin(ui, name, value, range).changed();
                         });
                     }
                     form.under(|ui| {

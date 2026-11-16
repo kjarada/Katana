@@ -579,7 +579,15 @@ impl TextStyleManagerDialog {
                 ui.set_width(LIST_COLUMN_WIDTH);
                 let rows = name_rows(&self.names);
                 let well = form_height - new_height - ui.spacing().item_spacing.y;
-                if layout::list_well(ui, "textStyleList", &rows, &mut self.current, well).changed()
+                if layout::list_well(
+                    ui,
+                    "textStyleList",
+                    &rows,
+                    &mut self.current,
+                    well,
+                    "No text styles: New makes one",
+                )
+                .changed()
                 {
                     let name = self.current_name();
                     if let Some(style) = host.document().model().text_styles.find(&name) {
@@ -632,11 +640,9 @@ impl TextStyleManagerDialog {
                             TEXT_OBLIQUE,
                         ),
                     ];
-                    // A number as wide as the fields above and below it: one right edge.
                     for (title, name, value, range) in boxes {
                         form.row(title, |ui| {
-                            let shown =
-                                layout::full_width(ui, |ui| controls::spin(ui, name, value, range));
+                            let shown = controls::spin(ui, name, value, range);
                             if name == "textStylePaperHeight" {
                                 shown.on_hover_text("0: the text's own height");
                             }
@@ -657,9 +663,7 @@ impl TextStyleManagerDialog {
                     });
                     form.row("Mask", |ui| {
                         check(ui, "textStyleMask", "Background mask", &mut self.mask);
-                        layout::full_width(ui, |ui| {
-                            controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN)
-                        });
+                        controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN);
                     });
                     form.under(|ui| {
                         check(
@@ -670,14 +674,7 @@ impl TextStyleManagerDialog {
                         );
                     });
                     form.row("Line spacing", |ui| {
-                        layout::full_width(ui, |ui| {
-                            controls::spin(
-                                ui,
-                                "textStyleLineSpacing",
-                                &mut self.spacing,
-                                TEXT_SPACING,
-                            )
-                        });
+                        controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
                     });
                     form.row("Sample", |ui| {
                         let mut sample = RichText::new("AaBb 123.456");
@@ -1626,7 +1623,15 @@ impl LabelStyleManagerDialog {
                 ui.set_width(LIST_COLUMN_WIDTH);
                 let rows = name_rows(&self.names);
                 let well = form_height - new_height - ui.spacing().item_spacing.y;
-                if layout::list_well(ui, "labelStyleList", &rows, &mut self.current, well).changed()
+                if layout::list_well(
+                    ui,
+                    "labelStyleList",
+                    &rows,
+                    &mut self.current,
+                    well,
+                    "No label styles: New makes one, or Add Standard Set",
+                )
+                .changed()
                 {
                     let name = self.current_name();
                     if let Some(style) = host.document().model().label_styles.find(&name) {
@@ -1742,9 +1747,7 @@ impl LabelStyleManagerDialog {
             });
 
             form.row("Height on paper (0: the text style's)", |ui| {
-                layout::full_width(ui, |ui| {
-                    controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER)
-                });
+                controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER);
             });
             form.row("Placement", |ui| {
                 combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
@@ -1758,9 +1761,7 @@ impl LabelStyleManagerDialog {
                 );
             });
             form.row("Offset", |ui| {
-                layout::full_width(ui, |ui| {
-                    controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET)
-                });
+                controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
             });
             // The two boxes under the fields, as a check box under a form's fields is.
             form.under(|ui| {
@@ -1778,14 +1779,12 @@ impl LabelStyleManagerDialog {
                 );
             });
             form.row("Priority", |ui| {
-                layout::full_width(ui, |ui| {
-                    controls::whole(
-                        ui,
-                        "labelStylePriority",
-                        &mut self.priority,
-                        PRIORITY_LOWEST..=PRIORITY_HIGHEST,
-                    )
-                });
+                controls::whole(
+                    ui,
+                    "labelStylePriority",
+                    &mut self.priority,
+                    PRIORITY_LOWEST..=PRIORITY_HIGHEST,
+                );
             });
             form.row("Marker", |ui| {
                 combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
@@ -1822,10 +1821,9 @@ impl LabelStyleManagerDialog {
                     LABEL_TICK_LENGTH,
                 ),
             ];
-            // Each number as wide as the choices between them: one right edge for the form.
             for (title, name, value, range) in boxes {
                 form.row(title, |ui| {
-                    layout::full_width(ui, |ui| controls::spin(ui, name, value, range));
+                    controls::spin(ui, name, value, range);
                 });
             }
         });

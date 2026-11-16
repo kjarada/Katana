@@ -3716,17 +3716,46 @@ fn whole_with_special(
     }
     let minimum = *range.start();
     let label = String::from(special);
-    let mut response = ui.add(
-        egui::DragValue::new(value)
-            .range(range)
-            .custom_formatter(move |number, _| {
-                if number as i64 == minimum {
-                    label.clone()
-                } else {
-                    format!("{number}")
-                }
-            }),
-    );
+    let shown = if *value == minimum {
+        String::from(special)
+    } else {
+        format!("{value}")
+    };
+    // A field's well a control high, its text inset and centred down, as every number box's
+    // (drive::controls::number_field_look, which spin and whole draw through): a DragValue of
+    // egui's own look was the raised grey of a button among the panel's fields.
+    let font = ui.style().drag_value_text_style.resolve(ui.style());
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(shown, font, egui::Color32::PLACEHOLDER)
+        .size()
+        .x;
+    let width = (text_width + 2.0 * controls::FIELD_INSET).max(controls::NUMBER_FIELD_WIDTH);
+    let height = ui.spacing().interact_size.y;
+    let mut response = ui
+        .scope(|ui| {
+            controls::number_field_look(ui);
+            ui.spacing_mut().interact_size.x = width;
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, height),
+                egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Min),
+                |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut *value)
+                            .range(range)
+                            .custom_formatter(move |number, _| {
+                                if number as i64 == minimum {
+                                    label.clone()
+                                } else {
+                                    format!("{number}")
+                                }
+                            }),
+                    )
+                },
+            )
+            .inner
+        })
+        .inner;
     if changed {
         response.mark_changed();
     }

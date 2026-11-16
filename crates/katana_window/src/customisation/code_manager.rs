@@ -2181,11 +2181,14 @@ impl SurveyCodeManagerDialog {
             Self::linework_tab,
         ];
         let front = self.tab.min(pages.len() - 1);
-        // The body is as tall as the tallest page, so the dialog is one size on every tab: on
-        // Issues it was a strip 256 high where the Code Table made it 750 (the look audits' T10).
-        // Every page is laid out each frame, the ones behind offstage, so each is measured.
+        // The body is at least as tall as the Code Table page, the dialog's first and the one it
+        // is sized for, so the dialog keeps that size on the other tabs: on Issues it was a strip
+        // 256 high where the Code Table made it 750 (the look audits' T10). Every page is laid
+        // out each frame, the ones behind offstage, so the Code Table is measured whichever tab
+        // is in front. Rejected: the tallest page's height - the scope's pages are taller than a
+        // laptop's screen, and every tab then scrolled over a void.
         let top = ui.cursor().min.y;
-        let mut tallest: f32 = 0.0;
+        let mut least: f32 = 0.0;
         for (at, page) in pages.into_iter().enumerate() {
             let mut draw = |ui: &mut Ui| {
                 let drawn = ui.vertical(|ui| page(self, ui, document));
@@ -2201,9 +2204,11 @@ impl SurveyCodeManagerDialog {
             } else {
                 offstage(ui, TAB_PAGES[at], draw)
             };
-            tallest = tallest.max(height);
+            if at == 0 {
+                least = height;
+            }
         }
-        ui.set_min_height(top + tallest - ui.min_rect().top());
+        ui.set_min_height(top + least - ui.min_rect().top());
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {

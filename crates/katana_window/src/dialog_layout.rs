@@ -28,22 +28,6 @@ use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::shell::dialog;
 use crate::theme;
 
-/// A one-line field or a spin box in a form's row made as wide as the row, as a choice beside it
-/// is: egui sizes a number box to its figures, so a form of choices and numbers had two right
-/// edges (the Leaders' Look group: 400 against 75; the second look audit's N13). Draws `add` in a
-/// row whose one widget is justified across it, the row a control high: laid out in all the room
-/// left below it, a row centred its widget in that room, and the Leaders' Along box stood 250
-/// points under its label.
-pub fn full_width<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let room = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
-    ui.allocate_ui_with_layout(
-        room,
-        egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
-        add,
-    )
-    .inner
-}
-
 pub use crate::shell::dialog::{SECTION_GAP, form_label};
 
 /// The gap between groups (a section and the next, a table and its buttons).
@@ -256,14 +240,16 @@ pub fn pick_list(
 
 /// A `pick_list` in a well `height` high - a field's fill under a border, its rows scrolling in
 /// it - the list beside a form (Text Styles, Label Styles): a list of one name over a column of
-/// nothing beside a form of twenty rows read as a void (the second look audit's N15). The column
-/// it is drawn in must have a width of its own, as `pick_list`'s.
+/// nothing beside a form of twenty rows read as a void (the second look audit's N15). While it has
+/// no rows it says `empty` in it, muted, as an empty table does. The column it is drawn in must
+/// have a width of its own, as `pick_list`'s.
 pub fn list_well(
     ui: &mut Ui,
     name: &str,
     rows: &[Vec<String>],
     current: &mut Option<usize>,
     height: f32,
+    empty: &str,
 ) -> Response {
     egui::Frame::new()
         .fill(theme::palette::input().to_egui())
@@ -277,7 +263,13 @@ pub fn list_well(
                 .max_height(inner)
                 .min_scrolled_height(inner)
                 .auto_shrink([false, false])
-                .show(ui, |ui| pick_list(ui, name, rows, current))
+                .show(ui, |ui| {
+                    let list = pick_list(ui, name, rows, current);
+                    if rows.is_empty() {
+                        empty_table(ui, empty);
+                    }
+                    list
+                })
                 .inner
         })
         .inner

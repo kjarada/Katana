@@ -729,19 +729,11 @@ impl HatchPatternsTab {
                 {
                     self.run(host, "PURGE HATCHES");
                 }
-                let colour = if self.status_is_error {
-                    palette::error()
-                } else {
-                    palette::text_muted()
-                };
-                controls::label_as(
+                crate::shell::dialog::status(
                     ui,
                     "hatchPatternStatus",
                     &self.status,
-                    egui::Label::new(
-                        egui::RichText::new(self.status.as_str()).color(colour.to_egui()),
-                    )
-                    .wrap(),
+                    self.status_is_error,
                 );
                 ui.add_enabled_ui(enabled.chosen, |ui| {
                     if controls::button(ui, "hatchPatternSelectUsers", "Select Users")

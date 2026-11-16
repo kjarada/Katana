@@ -61,10 +61,6 @@ const TITLE: &str = "Layers";
 const DEFAULT_DIMENSION_STYLE: &str = "(default)";
 /// The dialog's body width: the layer table's nine columns, its buttons, and the form under them.
 const BODY_WIDTH: f32 = 620.0;
-/// The colour a refusal is said in: the theme's error token.
-fn error_colour() -> egui::Color32 {
-    crate::theme::error().to_egui()
-}
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 2).with_suffix(" mm on paper");
 const HEADERS: [&str; 8] = [
     "Layer", "On", "Locked", "Colour", "Linetype", "Weight", "Hatch", "Entities",
@@ -873,11 +869,8 @@ impl LayerManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        let mut said = egui::RichText::new(self.status.as_str());
-        if self.status_is_error {
-            said = said.color(error_colour());
-        }
         let status = self.status.clone();
+        let is_error = self.status_is_error;
         // The one footer (shell::dialog::button_row): the status at the left; Revert, Close, then
         // Save Changes, the primary, last at the right. Revert and Save stood under the form with
         // Save in the accent in the body (the look audits' T5). Like the body, the form's two
@@ -885,7 +878,7 @@ impl LayerManagerDialog {
         let orphan = self.orphan;
         let (_, (reverted, close, saved)) = dialog::button_row(
             ui,
-            |ui| controls::label_as(ui, "layerStatus", &status, egui::Label::new(said).wrap()),
+            |ui| dialog::status(ui, "layerStatus", &status, is_error),
             |ui| {
                 let reverted = ui
                     .add_enabled_ui(!orphan, |ui| {

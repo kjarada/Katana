@@ -14,12 +14,6 @@ use katana_entity::entity::to_string;
 
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 
-/// The colour of a problem line: the theme's error token (the managers' stylesheet had a red of
-/// its own, #d9534f, before the theme had one).
-fn problem_colour() -> egui::Color32 {
-    crate::theme::error().to_egui()
-}
-
 /// A number box named `name`: from `minimum` to `maximum`, stepped by `step`, shown to `decimals`
 /// places with `suffix` after.
 #[allow(
@@ -68,14 +62,10 @@ pub fn button(ui: &mut Ui, name: &str, text: &str) -> Response {
     controls::button(ui, name, text)
 }
 
-/// The line a manager says what it refused on: named `name`, wrapped, in the problem colour.
+/// The line a manager says what it refused on: named `name`, wrapped, in the error token - a
+/// dialog's status line (shell::dialog::status) that is always a refusal.
 pub fn problem_line(ui: &mut Ui, name: &str, text: &str) -> Response {
-    controls::label_as(
-        ui,
-        name,
-        text,
-        egui::Label::new(egui::RichText::new(text).color(problem_colour())).wrap(),
-    )
+    crate::shell::dialog::status(ui, name, text, true)
 }
 
 /// An enumeration's names in a choice named `name`, by value: `values` in their order, each shown

@@ -122,9 +122,11 @@ const STYLE_PREVIEW: egui::Vec2 = egui::vec2(360.0, 150.0);
 pub(crate) const DETAIL_WIDTH: f32 = STYLE_PREVIEW.x + 14.0;
 /// The least height of the dialog, its title bar and footer included, so it keeps one height
 /// whichever tab is in front rather than jumping from 223 points (Diagnostics) to 844 (Linetypes):
-/// the tallest page's, the Styles page's form and preview over its buttons (689 at the Standard
-/// text size, measured from the dialog's shot).
-const LEAST_HEIGHT: f32 = 690.0;
+/// the tallest page's. It was the Styles page's form and preview over its buttons (689 at the
+/// Standard text size, measured from the dialog's shot); since a library linestyle's details are a
+/// form (a row a control high where a line of prose was a text line), the Linetypes page's, 719
+/// in the second look audit's after shot.
+const LEAST_HEIGHT: f32 = 720.0;
 
 /// A page's table column: the body less the detail pane and the gap between them. A table wider
 /// than its column (a long linetype group at a large text size) scrolls across in it rather than
