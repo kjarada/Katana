@@ -17,6 +17,7 @@ use katana_cad::plotting::sheet_set::{LegendScope, SheetSet, Viewport};
 use crate::drive::controls::{self, Choice};
 use crate::plotting::legend_painter::gather_legend;
 use crate::sheet_painter::SheetSource;
+use crate::shell::dialog;
 
 fn counted(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
@@ -66,7 +67,6 @@ pub fn add_legend_properties(
     legend: &Viewport,
     source: &SheetSource<'_>,
 ) -> Option<LegendScope> {
-    ui.label("Lists");
     let items: Vec<String> = SCOPES.iter().map(|(name, _)| String::from(*name)).collect();
     let mut scope = Choice {
         index: SCOPES
@@ -74,10 +74,12 @@ pub fn add_legend_properties(
             .position(|(_, value)| *value == legend.legend_scope),
         ..Choice::default()
     };
-    let picked = controls::choice(ui, "sheetLegendScope", &items, &mut scope).on_hover_text(
-        "A sheet with no plan lists what the set's plans show, and a set with none the whole \
-         drawing",
-    );
+    let picked = dialog::labelled(ui, "Lists", |ui| {
+        controls::choice(ui, "sheetLegendScope", &items, &mut scope).on_hover_text(
+            "A sheet with no plan lists what the set's plans show, and a set with none the whole \
+             drawing",
+        )
+    });
     let chosen = if picked.changed() {
         scope
             .index
@@ -86,19 +88,18 @@ pub fn add_legend_properties(
     } else {
         None
     };
-    ui.end_row();
 
-    ui.label("");
     let summary = match gather_legend(set, sheet_index, legend, source) {
         Ok(gathered) => legend_summary(&gathered, legend.legend_scope),
         Err(error) => error.describe(),
     };
-    controls::label_as(
-        ui,
-        "sheetLegendSummary",
-        &summary,
-        egui::Label::new(summary.as_str()).wrap(),
-    );
-    ui.end_row();
+    dialog::labelled(ui, "", |ui| {
+        controls::label_as(
+            ui,
+            "sheetLegendSummary",
+            &summary,
+            egui::Label::new(summary.as_str()).wrap(),
+        );
+    });
     chosen
 }

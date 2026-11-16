@@ -41,6 +41,7 @@
     reason = "A table of pages, each a label and the function drawing it, read more plainly inline."
 )]
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use egui::{Context, Ui};
@@ -65,6 +66,7 @@ use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::offstage;
 
 const DIALOG: &str = "globalModifyDialog";
@@ -852,11 +854,38 @@ impl GlobalModifyDialog {
         }
     }
 
-    /// The tick in front of a field, which enables its editors.
-    fn tick(ui: &mut Ui, name: &str, label: &str, on: &mut bool, due: &mut bool) {
-        if controls::check(ui, name, label, on).changed() {
-            *due = true;
-        }
+    /// A row of a tab: the tick `name` reading `label` as the row's label, in the column the
+    /// dialog's form shares (shell::dialog::row_with_check), and the field `field` draws beside it,
+    /// used only while it is ticked. `field` says whether it changed; a tick changed or a field
+    /// changed makes the preview due. `tip`, when not empty, is the tick's tooltip.
+    ///
+    /// The tick and the field share `on` through a cell: the field is drawn after the tick, so it
+    /// follows a tick in the same frame, as it did in the Grid this replaced.
+    fn ticked_row(
+        ui: &mut Ui,
+        (name, label, tip): (&str, &str, &str),
+        on: &mut bool,
+        due: &mut bool,
+        field: impl FnOnce(&mut Ui) -> bool,
+    ) {
+        let ticked = Cell::new(*on);
+        let mut tick_changed = false;
+        let field_changed = dialog::row_with_check(
+            ui,
+            label,
+            |ui| {
+                let mut now = ticked.get();
+                let mut response = controls::check(ui, name, label, &mut now);
+                if !tip.is_empty() {
+                    response = response.on_hover_text(tip);
+                }
+                tick_changed = response.changed();
+                ticked.set(now);
+            },
+            |ui| ui.add_enabled_ui(ticked.get(), field).inner,
+        );
+        *on = ticked.get();
+        *due |= tick_changed || field_changed;
     }
 
     fn line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, due: &mut bool) {
@@ -875,7 +904,8 @@ impl GlobalModifyDialog {
         }
     }
 
-    /// A colour typed as text, with a Choose... button beside it showing a colour to pick.
+    /// A colour typed as text, with a Choose... button beside it showing a colour to pick. Whether
+    /// it changed.
     fn colour_row(
         ui: &mut Ui,
         name: &'static str,
@@ -883,15 +913,23 @@ impl GlobalModifyDialog {
         value: &mut String,
         by_layer: bool,
         picking: &mut Option<&'static str>,
-        due: &mut bool,
-    ) {
+    ) -> bool {
+        let mut due = false;
         ui.horizontal(|ui| {
             let placeholder = if by_layer {
                 "#RRGGBB or ByLayer"
             } else {
                 "#RRGGBB"
             };
-            Self::line(ui, name, value, placeholder, due);
+            // The field leaves Choose... its room at the row's end, and the swatch beside it its
+            // room while it is open (egui 0.36's color_picker.rs: a swatch is two controls' height
+            // wide).
+            let mut width = dialog::beside_a_button(ui, "Choose...");
+            if *picking == Some(name) {
+                width -= 2.0 * ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
+            }
+            dialog::fixed_fields(ui, width);
+            Self::line(ui, name, value, placeholder, &mut due);
             if controls::button(ui, choose, "Choose...").clicked() {
                 *picking = if *picking == Some(name) {
                     None
@@ -907,37 +945,35 @@ impl GlobalModifyDialog {
                 let mut rgb = [current.r, current.g, current.b];
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
                     *value = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
-                    *due = true;
+                    due = true;
                 }
             }
         });
+        due
+    }
+
+    /// A number box of `range` as a tab's field, which `ticked_row` enables. Whether it changed.
+    fn number(ui: &mut Ui, name: &str, value: &mut f64, range: SpinRange) -> bool {
+        controls::spin(ui, name, value, range).changed()
     }
 
     fn entities_tab(&mut self, ui: &mut Ui) {
         let mut due = false;
-        egui::Grid::new("globalModifyEntitiesTab")
-            .num_columns(2)
-            .show(ui, |ui| {
-                Self::tick(
-                    ui,
-                    "globalModifySetLayer",
-                    "Layer",
-                    &mut self.set_layer,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer, |ui| {
-                    due |= self.layer.ui(ui, "globalModifyLayer");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetColour",
-                    "Colour",
-                    &mut self.set_colour,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_colour, |ui| {
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayer", "Layer", ""),
+                &mut self.set_layer,
+                &mut due,
+                |ui| self.layer.ui(ui, "globalModifyLayer"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetColour", "Colour", ""),
+                &mut self.set_colour,
+                &mut due,
+                |ui| {
                     Self::colour_row(
                         ui,
                         "globalModifyColour",
@@ -945,46 +981,37 @@ impl GlobalModifyDialog {
                         &mut self.colour,
                         true,
                         &mut self.picking,
-                        &mut due,
-                    );
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetStyle",
-                    "Style",
-                    &mut self.set_style,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style, |ui| {
-                    due |= self.style.ui(ui, "globalModifyStyle");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetVisible",
-                    "Shown",
-                    &mut self.set_visible,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_visible, |ui| {
-                    due |= self.visible.ui(ui, "globalModifyVisible");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetSymbol",
-                    "Symbol (points)",
-                    &mut self.set_symbol,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_symbol, |ui| {
+                    )
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyle", "Style", ""),
+                &mut self.set_style,
+                &mut due,
+                |ui| self.style.ui(ui, "globalModifyStyle"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetVisible", "Shown", ""),
+                &mut self.set_visible,
+                &mut due,
+                |ui| self.visible.ui(ui, "globalModifyVisible"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetSymbol", "Symbol (points)", ""),
+                &mut self.set_symbol,
+                &mut due,
+                |ui| {
                     ui.horizontal(|ui| {
-                        due |= self.symbol.ui(ui, "globalModifySymbol");
-                        due |= controls::spin(
+                        // The symbol's name leaves its size its room at the row's end, a box
+                        // holding the widest size it shows. A width given an editable choice is
+                        // its field's, the list's arrow beside it (controls::choice).
+                        let arrow = controls::list_arrow_width(ui) + ui.spacing().item_spacing.x;
+                        dialog::fixed_fields(ui, dialog::beside_a_button(ui, "000000.000") - arrow);
+                        let named = self.symbol.ui(ui, "globalModifySymbol");
+                        let sized = controls::spin(
                             ui,
                             "globalModifySymbolSize",
                             &mut self.symbol_size,
@@ -992,50 +1019,49 @@ impl GlobalModifyDialog {
                         )
                         .on_hover_text("Width in model units; 0 is the symbol's own size")
                         .changed();
-                    });
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetTextHeight",
-                    "Text height",
-                    &mut self.set_text_height,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_text_height, |ui| {
-                    due |= controls::spin(
+                        named || sized
+                    })
+                    .inner
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetTextHeight", "Text height", ""),
+                &mut self.set_text_height,
+                &mut due,
+                |ui| {
+                    Self::number(
                         ui,
                         "globalModifyTextHeight",
                         &mut self.text_height,
                         size_range(1e6, 3),
                     )
-                    .changed();
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetProperty",
-                    "Set property",
-                    &mut self.set_property,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_property, |ui| {
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetProperty", "Set property", ""),
+                &mut self.set_property,
+                &mut due,
+                |ui| {
                     ui.horizontal(|ui| {
+                        // The key, its value and its kind share the row, a third each.
+                        let gap = ui.spacing().item_spacing.x;
+                        dialog::fixed_fields(ui, (ui.available_width() - 2.0 * gap) / 3.0);
+                        let mut changed = false;
                         Self::line(
                             ui,
                             "globalModifyPropertyKey",
                             &mut self.property_key,
                             "key",
-                            &mut due,
+                            &mut changed,
                         );
                         Self::line(
                             ui,
                             "globalModifyPropertyValue",
                             &mut self.property_value,
                             "value",
-                            &mut due,
+                            &mut changed,
                         );
                         let kinds: Vec<String> = ["text", "integer", "real", "boolean"]
                             .iter()
@@ -1045,56 +1071,52 @@ impl GlobalModifyDialog {
                         if controls::choice(ui, "globalModifyPropertyType", &kinds, &mut kind)
                             .changed()
                         {
-                            due = true;
+                            changed = true;
                         }
                         if let Some(index) = kind.index {
                             self.property_type = index;
                         }
-                    });
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifyRemoveProperty",
-                    "Remove property",
-                    &mut self.remove_property,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.remove_property, |ui| {
+                        changed
+                    })
+                    .inner
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifyRemoveProperty", "Remove property", ""),
+                &mut self.remove_property,
+                &mut due,
+                |ui| {
+                    let mut changed = false;
                     Self::line(
                         ui,
                         "globalModifyRemoveKey",
                         &mut self.remove_key,
                         "key",
-                        &mut due,
+                        &mut changed,
                     );
-                });
-                ui.end_row();
-            });
+                    changed
+                },
+            );
+        });
         self.preview_due |= due;
     }
 
     fn layers_tab(&mut self, ui: &mut Ui) {
         let mut due = false;
-        ui.add(
-            egui::Label::new(
-                "The layers the matched entities are on - or, when applying to layers, the \
-                 checked layers themselves.",
-            )
-            .wrap(),
+        dialog::note(
+            ui,
+            "The layers the matched entities are on - or, when applying to layers, the checked \
+             layers themselves.",
         );
-        egui::Grid::new("globalModifyLayersTab")
-            .num_columns(2)
-            .show(ui, |ui| {
-                Self::tick(
-                    ui,
-                    "globalModifySetLayerColour",
-                    "Colour",
-                    &mut self.set_layer_colour,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer_colour, |ui| {
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayerColour", "Colour", ""),
+                &mut self.set_layer_colour,
+                &mut due,
+                |ui| {
                     Self::colour_row(
                         ui,
                         "globalModifyLayerColour",
@@ -1102,119 +1124,82 @@ impl GlobalModifyDialog {
                         &mut self.layer_colour,
                         false,
                         &mut self.picking,
-                        &mut due,
-                    );
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetLayerLinetype",
-                    "Linetype",
-                    &mut self.set_layer_linetype,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer_linetype, |ui| {
-                    due |= self.layer_linetype.ui(ui, "globalModifyLayerLinetype");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetLayerWeight",
-                    "Line weight",
-                    &mut self.set_layer_weight,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer_weight, |ui| {
-                    due |= controls::spin(
+                    )
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayerLinetype", "Linetype", ""),
+                &mut self.set_layer_linetype,
+                &mut due,
+                |ui| self.layer_linetype.ui(ui, "globalModifyLayerLinetype"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayerWeight", "Line weight", ""),
+                &mut self.set_layer_weight,
+                &mut due,
+                |ui| {
+                    Self::number(
                         ui,
                         "globalModifyLayerWeight",
                         &mut self.layer_weight,
                         size_range(10.0, 2).with_suffix(" mm"),
                     )
-                    .changed();
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetLayerHatch",
-                    "Hatch",
-                    &mut self.set_layer_hatch,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer_hatch, |ui| {
-                    due |= self.layer_hatch.ui(ui, "globalModifyLayerHatch");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetLayerDimStyle",
-                    "Dimension style",
-                    &mut self.set_layer_dim_style,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer_dim_style, |ui| {
-                    due |= self.layer_dim_style.ui(ui, "globalModifyLayerDimStyle");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetLayerVisible",
-                    "Shown",
-                    &mut self.set_layer_visible,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_layer_visible, |ui| {
-                    due |= self.layer_visible.ui(ui, "globalModifyLayerVisible");
-                });
-                ui.end_row();
-
-                if controls::check(
-                    ui,
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayerHatch", "Hatch", ""),
+                &mut self.set_layer_hatch,
+                &mut due,
+                |ui| self.layer_hatch.ui(ui, "globalModifyLayerHatch"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayerDimStyle", "Dimension style", ""),
+                &mut self.set_layer_dim_style,
+                &mut due,
+                |ui| self.layer_dim_style.ui(ui, "globalModifyLayerDimStyle"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetLayerVisible", "Shown", ""),
+                &mut self.set_layer_visible,
+                &mut due,
+                |ui| self.layer_visible.ui(ui, "globalModifyLayerVisible"),
+            );
+            Self::ticked_row(
+                ui,
+                (
                     "globalModifySetLayerLocked",
                     "Locked",
-                    &mut self.set_layer_locked,
-                )
-                .on_hover_text(
                     "An unlock comes first, so what is on the layer can be changed; a lock comes \
                      last",
-                )
-                .changed()
-                {
-                    due = true;
-                }
-                ui.add_enabled_ui(self.set_layer_locked, |ui| {
-                    due |= self.layer_locked.ui(ui, "globalModifyLayerLocked");
-                });
-                ui.end_row();
-            });
+                ),
+                &mut self.set_layer_locked,
+                &mut due,
+                |ui| self.layer_locked.ui(ui, "globalModifyLayerLocked"),
+            );
+        });
         self.preview_due |= due;
     }
 
     fn styles_tab(&mut self, ui: &mut Ui) {
         let mut due = false;
-        ui.add(
-            egui::Label::new(
-                "The styles the matched entities wear. A style is shared: everything wearing it \
-                 is redrawn, in the scope or not, and the summary counts those.",
-            )
-            .wrap(),
+        dialog::note(
+            ui,
+            "The styles the matched entities wear. A style is shared: everything wearing it is \
+             redrawn, in the scope or not, and the summary counts those.",
         );
-        egui::Grid::new("globalModifyStylesTab")
-            .num_columns(2)
-            .show(ui, |ui| {
-                Self::tick(
-                    ui,
-                    "globalModifySetStyleColour",
-                    "Colour",
-                    &mut self.set_style_colour,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_colour, |ui| {
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyleColour", "Colour", ""),
+                &mut self.set_style_colour,
+                &mut due,
+                |ui| {
                     Self::colour_row(
                         ui,
                         "globalModifyStyleColour",
@@ -1222,95 +1207,72 @@ impl GlobalModifyDialog {
                         &mut self.style_colour,
                         true,
                         &mut self.picking,
-                        &mut due,
-                    );
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetStyleLinetype",
-                    "Linetype",
-                    &mut self.set_style_linetype,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_linetype, |ui| {
-                    due |= self.style_linetype.ui(ui, "globalModifyStyleLinetype");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetStyleWeight",
-                    "Line weight",
-                    &mut self.set_style_weight,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_weight, |ui| {
-                    due |= controls::spin(
+                    )
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyleLinetype", "Linetype", ""),
+                &mut self.set_style_linetype,
+                &mut due,
+                |ui| self.style_linetype.ui(ui, "globalModifyStyleLinetype"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyleWeight", "Line weight", ""),
+                &mut self.set_style_weight,
+                &mut due,
+                |ui| {
+                    Self::number(
                         ui,
                         "globalModifyStyleWeight",
                         &mut self.style_weight,
                         size_range(10.0, 2).with_suffix(" mm"),
                     )
-                    .changed();
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetStyleHatch",
-                    "Hatch",
-                    &mut self.set_style_hatch,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_hatch, |ui| {
-                    due |= self.style_hatch.ui(ui, "globalModifyStyleHatch");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetStyleSymbol",
-                    "Symbol",
-                    &mut self.set_style_symbol,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_symbol, |ui| {
-                    due |= self.style_symbol.ui(ui, "globalModifyStyleSymbol");
-                });
-                ui.end_row();
-
-                Self::tick(
-                    ui,
-                    "globalModifySetStyleSymbolSize",
-                    "Symbol size",
-                    &mut self.set_style_symbol_size,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_symbol_size, |ui| {
-                    due |= controls::spin(
+                },
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyleHatch", "Hatch", ""),
+                &mut self.set_style_hatch,
+                &mut due,
+                |ui| self.style_hatch.ui(ui, "globalModifyStyleHatch"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyleSymbol", "Symbol", ""),
+                &mut self.set_style_symbol,
+                &mut due,
+                |ui| self.style_symbol.ui(ui, "globalModifyStyleSymbol"),
+            );
+            Self::ticked_row(
+                ui,
+                ("globalModifySetStyleSymbolSize", "Symbol size", ""),
+                &mut self.set_style_symbol_size,
+                &mut due,
+                |ui| {
+                    Self::number(
                         ui,
                         "globalModifyStyleSymbolSize",
                         &mut self.style_symbol_size,
                         size_range(1e6, 3),
                     )
-                    .changed();
-                });
-                ui.end_row();
-
-                // A factor on each style's own number (StyleModify::symbol_scale): 2 doubles every
-                // symbol, 0.5 halves them. 1000 is only the box's reach; MODIFY ... SET
-                // STYLE.SYMBOLSCALE= takes any factor above 0.
-                Self::tick(
-                    ui,
+                },
+            );
+            // A factor on each style's own number (StyleModify::symbol_scale): 2 doubles every
+            // symbol, 0.5 halves them. 1000 is only the box's reach; MODIFY ... SET
+            // STYLE.SYMBOLSCALE= takes any factor above 0.
+            Self::ticked_row(
+                ui,
+                (
                     "globalModifySetStyleSymbolScale",
                     "Scale symbol size by",
-                    &mut self.set_style_symbol_scale,
-                    &mut due,
-                );
-                ui.add_enabled_ui(self.set_style_symbol_scale, |ui| {
-                    due |= controls::spin(
+                    "",
+                ),
+                &mut self.set_style_symbol_scale,
+                &mut due,
+                |ui| {
+                    controls::spin(
                         ui,
                         "globalModifyStyleSymbolScale",
                         &mut self.style_symbol_scale,
@@ -1320,10 +1282,10 @@ impl GlobalModifyDialog {
                         "Multiplies each style's symbol size: 2 doubles them, 0.5 halves them. A \
                          symbol at its own size has no size to multiply and is left as it is",
                     )
-                    .changed();
-                });
-                ui.end_row();
-            });
+                    .changed()
+                },
+            );
+        });
         self.preview_due |= due;
     }
 }

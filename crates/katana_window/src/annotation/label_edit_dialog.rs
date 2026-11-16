@@ -548,8 +548,9 @@ impl LabelEditDialog {
             // it, and the field is drawn after the box, so it follows a tick in the same frame.
             let r#override = Cell::new(self.r#override);
             let mut ticked = false;
-            dialog::row_with(
+            dialog::row_with_check(
                 form.ui(),
+                "Own text",
                 |ui| {
                     ui.add_enabled_ui(enabled, |ui| {
                         let mut on = r#override.get();
@@ -575,8 +576,9 @@ impl LabelEditDialog {
 
             let pinned = Cell::new(self.pinned);
             let mut ticked = false;
-            dialog::row_with(
+            dialog::row_with_check(
                 form.ui(),
+                "Pinned at",
                 |ui| {
                     ui.add_enabled_ui(enabled, |ui| {
                         let mut on = pinned.get();

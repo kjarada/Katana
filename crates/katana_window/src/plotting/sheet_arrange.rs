@@ -337,19 +337,19 @@ impl SuggestPaperDialog {
             &mut (&mut *self, &mut answer),
             |ui, (dialog, _)| {
                 ui.label(egui::RichText::new(dialog.note.as_str()));
-                egui::Grid::new("sheetSuggestPaperForm").num_columns(2).show(ui, |ui| {
-                    ui.label("Scale");
-                    let items = SuggestPaperDialog::items();
-                    controls::choice(ui, "sheetSuggestPaperScale", &items, &mut dialog.scale);
-                    ui.end_row();
-                    ui.label("Paper");
-                    controls::label_as(
-                        ui,
-                        "sheetSuggestPaperAdvice",
-                        &dialog.advice,
-                        egui::Label::new(dialog.advice.as_str()).wrap(),
-                    );
-                    ui.end_row();
+                crate::shell::dialog::form(ui, |form| {
+                    form.row("Scale", |ui| {
+                        let items = SuggestPaperDialog::items();
+                        controls::choice(ui, "sheetSuggestPaperScale", &items, &mut dialog.scale);
+                    });
+                    form.row("Paper", |ui| {
+                        controls::label_as(
+                            ui,
+                            "sheetSuggestPaperAdvice",
+                            &dialog.advice,
+                            egui::Label::new(dialog.advice.as_str()).wrap(),
+                        );
+                    });
                 });
             },
             |ui, (dialog, answer)| {
