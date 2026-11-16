@@ -134,6 +134,8 @@ use crate::sheet_painter::{
     ResolvedViewport, SheetPaintCache, SheetPaintOptions, SheetPaintStats, SheetSource,
     paint_sheet, resolve_plan_viewport_on_sheet, resolve_section_viewport, sheet_frame,
 };
+use crate::shell::dialog;
+use crate::survey::survey_dialogs::offstage;
 use crate::viewport_widget::{KeyModifiers, MouseButton};
 
 // ---- constants ---------------------------------------------------------------------------------
@@ -2039,245 +2041,255 @@ impl GenerateDialog {
             self.sections,
             self.area.clone(),
         );
-        egui::Grid::new("sheetGenerateForm").num_columns(2).show(ui, |ui| {
-            ui.label("Layout");
-            let layouts: Vec<String> = GENERATE_LAYOUTS
-                .iter()
-                .map(|(_, text)| String::from(*text))
-                .collect();
-            controls::choice(ui, "sheetGenerateLayout", &layouts, &mut self.layout);
-            ui.end_row();
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            dialog::labelled(ui, "Layout", |ui| {
+                let layouts: Vec<String> = GENERATE_LAYOUTS
+                    .iter()
+                    .map(|(_, text)| String::from(*text))
+                    .collect();
+                controls::choice(ui, "sheetGenerateLayout", &layouts, &mut self.layout);
+            });
 
             // The paper, for every layout but the plot frames', which bring their own.
-            ui.label("Paper");
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(on.paper, |ui| {
-                    controls::choice(ui, "sheetGeneratePaper", &paper_items(), &mut self.paper);
-                    let orientations = [String::from("Landscape"), String::from("Portrait")];
-                    controls::choice(
-                        ui,
-                        "sheetGenerateOrientation",
-                        &orientations,
-                        &mut self.orientation,
-                    );
+            dialog::labelled(ui, "Paper", |ui| {
+                ui.horizontal(|ui| {
+                    // The paper and its orientation a word's width each, the frame's box beside.
+                    dialog::fixed_fields(ui, dialog::SHORT_FIELD_WIDTH);
+                    ui.add_enabled_ui(on.paper, |ui| {
+                        controls::choice(ui, "sheetGeneratePaper", &paper_items(), &mut self.paper);
+                        let orientations = [String::from("Landscape"), String::from("Portrait")];
+                        controls::choice(
+                            ui,
+                            "sheetGenerateOrientation",
+                            &orientations,
+                            &mut self.orientation,
+                        );
+                    });
+                    controls::check(ui, "sheetGenerateFrame", "Frame and title block", &mut self.frame_on)
+                        .on_hover_text(
+                            "A portrait sheet has no frame: the title block is laid out for landscape",
+                        );
                 });
-                controls::check(ui, "sheetGenerateFrame", "Frame and title block", &mut self.frame_on)
-                    .on_hover_text(
-                        "A portrait sheet has no frame: the title block is laid out for landscape",
-                    );
             });
-            ui.end_row();
 
             // What a fit or the tiles cover.
-            ui.label("Area");
-            let areas: Vec<String> = self.areas.iter().map(|(text, _)| String::from(*text)).collect();
-            ui.add_enabled_ui(on.area, |ui| {
-                controls::choice(ui, "sheetGenerateArea", &areas, &mut self.area);
-            });
-            ui.end_row();
-            ui.label("Window");
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(on.corners, |ui| {
-                    let names = [
-                        ("sheetGenerateAreaX0", "West edge (E)"),
-                        ("sheetGenerateAreaY0", "South edge (N)"),
-                        ("sheetGenerateAreaX1", "East edge (E)"),
-                        ("sheetGenerateAreaY1", "North edge (N)"),
-                    ];
-                    for (at, (name, tip)) in names.iter().enumerate() {
-                        controls::spin(
-                            ui,
-                            name,
-                            &mut self.corners[at],
-                            SpinRange::new(-1e9, 1e9, 1.0, 3),
-                        )
-                        .on_hover_text(*tip);
-                    }
+            dialog::labelled(ui, "Area", |ui| {
+                let areas: Vec<String> = self.areas.iter().map(|(text, _)| String::from(*text)).collect();
+                ui.add_enabled_ui(on.area, |ui| {
+                    controls::choice(ui, "sheetGenerateArea", &areas, &mut self.area);
                 });
             });
-            ui.end_row();
+            dialog::labelled(ui, "Window", |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(on.corners, |ui| {
+                        let names = [
+                            ("sheetGenerateAreaX0", "West edge (E)"),
+                            ("sheetGenerateAreaY0", "South edge (N)"),
+                            ("sheetGenerateAreaX1", "East edge (E)"),
+                            ("sheetGenerateAreaY1", "North edge (N)"),
+                        ];
+                        for (at, (name, tip)) in names.iter().enumerate() {
+                            controls::spin(
+                                ui,
+                                name,
+                                &mut self.corners[at],
+                                SpinRange::new(-1e9, 1e9, 1.0, 3),
+                            )
+                            .on_hover_text(*tip);
+                        }
+                    });
+                });
+            });
 
-            ui.label("Scale");
-            ui.add_enabled_ui(on.scale, |ui| {
-                controls::choice(ui, "sheetGenerateScale", &scale_items(true), &mut self.scale);
+            dialog::labelled(ui, "Scale", |ui| {
+                ui.add_enabled_ui(on.scale, |ui| {
+                    controls::choice(ui, "sheetGenerateScale", &scale_items(true), &mut self.scale);
+                });
             });
-            ui.end_row();
-            ui.label("Alignment");
-            ui.add_enabled_ui(on.alignment, |ui| {
-                controls::choice(ui, "sheetGenerateAlignment", &self.alignments, &mut self.alignment)
-                    .on_hover_text("None: the drawing's only alignment, or for a fit the area");
+            dialog::labelled(ui, "Alignment", |ui| {
+                ui.add_enabled_ui(on.alignment, |ui| {
+                    controls::choice(ui, "sheetGenerateAlignment", &self.alignments, &mut self.alignment)
+                        .on_hover_text("None: the drawing's only alignment, or for a fit the area");
+                });
             });
-            ui.end_row();
-            ui.label("Chainages");
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(on.range, |ui| {
-                    controls::line_with(
+            dialog::labelled(ui, "Chainages", |ui| {
+                ui.horizontal(|ui| {
+                    // The two chainages share the row, half each, either side of the "to".
+                    let gap = ui.spacing().item_spacing.x;
+                    let between = dialog::one_line_width(ui, "to") + 2.0 * gap;
+                    dialog::fixed_fields(ui, (ui.available_width() - between) / 2.0);
+                    ui.add_enabled_ui(on.range, |ui| {
+                        controls::line_with(
+                            ui,
+                            "sheetGenerateFrom",
+                            &mut self.from,
+                            LineOptions {
+                                placeholder: "the start",
+                                ..LineOptions::default()
+                            },
+                        );
+                        ui.label("to");
+                        controls::line_with(
+                            ui,
+                            "sheetGenerateTo",
+                            &mut self.to,
+                            LineOptions {
+                                placeholder: "the end",
+                                ..LineOptions::default()
+                            },
+                        );
+                    });
+                });
+            });
+            dialog::labelled(ui, "Overlap", |ui| {
+                ui.add_enabled_ui(on.overlap, |ui| {
+                    controls::spin(
                         ui,
-                        "sheetGenerateFrom",
-                        &mut self.from,
-                        LineOptions {
-                            placeholder: "the start",
-                            ..LineOptions::default()
-                        },
-                    );
-                    ui.label("to");
-                    controls::line_with(
-                        ui,
-                        "sheetGenerateTo",
-                        &mut self.to,
-                        LineOptions {
-                            placeholder: "the end",
-                            ..LineOptions::default()
-                        },
+                        "sheetGenerateOverlap",
+                        &mut self.overlap,
+                        SpinRange::new(0.0, 1000.0, 1.0, 1).with_suffix(" m"),
                     );
                 });
             });
-            ui.end_row();
-            ui.label("Overlap");
-            ui.add_enabled_ui(on.overlap, |ui| {
-                controls::spin(
-                    ui,
-                    "sheetGenerateOverlap",
-                    &mut self.overlap,
-                    SpinRange::new(0.0, 1000.0, 1.0, 1).with_suffix(" m"),
-                );
+            dialog::labelled(ui, "", |ui| {
+                ui.add_enabled_ui(on.key_plan, |ui| {
+                    controls::check(ui, "sheetGenerateKeyPlan", "A key plan sheet first", &mut self.key_plan);
+                });
             });
-            ui.end_row();
-            ui.label("");
-            ui.add_enabled_ui(on.key_plan, |ui| {
-                controls::check(ui, "sheetGenerateKeyPlan", "A key plan sheet first", &mut self.key_plan);
+            dialog::labelled(ui, "", |ui| {
+                ui.add_enabled_ui(on.drawn_only, |ui| {
+                    controls::check(
+                        ui,
+                        "sheetGenerateDrawnOnly",
+                        "Only tiles with something drawn in them",
+                        &mut self.drawn_only,
+                    )
+                    .on_hover_text(
+                        "A tile over empty ground is left out, and the key plan shows the tiles kept",
+                    );
+                });
             });
-            ui.end_row();
-            ui.label("");
-            ui.add_enabled_ui(on.drawn_only, |ui| {
-                controls::check(
-                    ui,
-                    "sheetGenerateDrawnOnly",
-                    "Only tiles with something drawn in them",
-                    &mut self.drawn_only,
-                )
-                .on_hover_text(
-                    "A tile over empty ground is left out, and the key plan shows the tiles kept",
-                );
-            });
-            ui.end_row();
 
             // Cross sections: after a fit's or a profile's plan, or the whole of a sections
             // layout; every so many metres or at the chainages listed.
-            ui.label("Cross sections");
-            ui.horizontal(|ui| {
-                let none = self.sections == GenerateSections::None;
-                if ui
-                    .add_enabled_ui(on.no_sections, |ui| {
-                        controls::radio(ui, "sheetGenerateNoSections", "None", none)
-                    })
-                    .inner
-                    .clicked()
-                {
-                    self.sections = GenerateSections::None;
-                }
-                let every = self.sections == GenerateSections::Every;
-                if ui
-                    .add_enabled_ui(on.every, |ui| controls::radio(ui, "sheetGenerateEvery", "Every", every))
-                    .inner
-                    .clicked()
-                {
-                    self.sections = GenerateSections::Every;
-                }
-                ui.add_enabled_ui(on.interval, |ui| {
+            dialog::labelled(ui, "Cross sections", |ui| {
+                ui.horizontal(|ui| {
+                    let none = self.sections == GenerateSections::None;
+                    if ui
+                        .add_enabled_ui(on.no_sections, |ui| {
+                            controls::radio(ui, "sheetGenerateNoSections", "None", none)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        self.sections = GenerateSections::None;
+                    }
+                    let every = self.sections == GenerateSections::Every;
+                    if ui
+                        .add_enabled_ui(on.every, |ui| controls::radio(ui, "sheetGenerateEvery", "Every", every))
+                        .inner
+                        .clicked()
+                    {
+                        self.sections = GenerateSections::Every;
+                    }
+                    ui.add_enabled_ui(on.interval, |ui| {
+                        controls::spin(
+                            ui,
+                            "sheetGenerateInterval",
+                            &mut self.interval,
+                            SpinRange::new(0.5, 10000.0, 1.0, 2).with_suffix(" m"),
+                        );
+                    });
+                    let at = self.sections == GenerateSections::AtStations;
+                    if ui
+                        .add_enabled_ui(on.at_stations, |ui| {
+                            controls::radio(ui, "sheetGenerateAtStations", "At chainages", at)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        self.sections = GenerateSections::AtStations;
+                    }
+                    ui.add_enabled_ui(on.stations, |ui| {
+                        // The list fills what the radio buttons leave of the row.
+                        let width = ui.available_width();
+                        controls::line_with(
+                            ui,
+                            "sheetGenerateStations",
+                            &mut self.stations,
+                            LineOptions {
+                                placeholder: "e.g. 20, 40, 60",
+                                width: Some(width),
+                                ..LineOptions::default()
+                            },
+                        );
+                    });
+                });
+            });
+            dialog::labelled(ui, "Section half width", |ui| {
+                ui.add_enabled_ui(on.half_width, |ui| {
                     controls::spin(
                         ui,
-                        "sheetGenerateInterval",
-                        &mut self.interval,
-                        SpinRange::new(0.5, 10000.0, 1.0, 2).with_suffix(" m"),
-                    );
-                });
-                let at = self.sections == GenerateSections::AtStations;
-                if ui
-                    .add_enabled_ui(on.at_stations, |ui| {
-                        controls::radio(ui, "sheetGenerateAtStations", "At chainages", at)
-                    })
-                    .inner
-                    .clicked()
-                {
-                    self.sections = GenerateSections::AtStations;
-                }
-                ui.add_enabled_ui(on.stations, |ui| {
-                    controls::line_with(
-                        ui,
-                        "sheetGenerateStations",
-                        &mut self.stations,
-                        LineOptions {
-                            placeholder: "e.g. 20, 40, 60",
-                            ..LineOptions::default()
-                        },
+                        "sheetGenerateHalfWidth",
+                        &mut self.half_width,
+                        SpinRange::new(0.5, 1000.0, 1.0, 2).with_suffix(" m"),
                     );
                 });
             });
-            ui.end_row();
-            ui.label("Section half width");
-            ui.add_enabled_ui(on.half_width, |ui| {
-                controls::spin(
-                    ui,
-                    "sheetGenerateHalfWidth",
-                    &mut self.half_width,
-                    SpinRange::new(0.5, 1000.0, 1.0, 2).with_suffix(" m"),
-                );
+            dialog::labelled(ui, "Sections down", |ui| {
+                ui.add_enabled_ui(on.sections_grid, |ui| {
+                    controls::whole(ui, "sheetGenerateRows", &mut self.rows, 1..=8);
+                });
             });
-            ui.end_row();
-            ui.label("Sections down");
-            ui.add_enabled_ui(on.sections_grid, |ui| {
-                controls::whole(ui, "sheetGenerateRows", &mut self.rows, 1..=8);
+            dialog::labelled(ui, "Sections across", |ui| {
+                ui.add_enabled_ui(on.sections_grid, |ui| {
+                    controls::whole(ui, "sheetGenerateColumns", &mut self.columns, 1..=6);
+                });
             });
-            ui.end_row();
-            ui.label("Sections across");
-            ui.add_enabled_ui(on.sections_grid, |ui| {
-                controls::whole(ui, "sheetGenerateColumns", &mut self.columns, 1..=6);
+            dialog::labelled(ui, "Vertical exaggeration", |ui| {
+                let mut ves = vec![String::from("Auto")];
+                ves.extend(EXAGGERATIONS.iter().map(|x| format!("{} x", verb_number(*x))));
+                ui.add_enabled_ui(on.sections_grid, |ui| {
+                    controls::choice(ui, "sheetGenerateVe", &ves, &mut self.ve)
+                        .on_hover_text("Auto: fitted to the ground each section cuts");
+                });
             });
-            ui.end_row();
-            ui.label("Vertical exaggeration");
-            let mut ves = vec![String::from("Auto")];
-            ves.extend(EXAGGERATIONS.iter().map(|x| format!("{} x", verb_number(*x))));
-            ui.add_enabled_ui(on.sections_grid, |ui| {
-                controls::choice(ui, "sheetGenerateVe", &ves, &mut self.ve)
-                    .on_hover_text("Auto: fitted to the ground each section cuts");
-            });
-            ui.end_row();
 
-            ui.label("");
-            ui.add_enabled_ui(on.snapshot, |ui| {
-                controls::check(ui, "sheetGenerateModel3d", "A 3D snapshot beside the plan", &mut self.snapshot);
+            dialog::labelled(ui, "", |ui| {
+                ui.add_enabled_ui(on.snapshot, |ui| {
+                    controls::check(ui, "sheetGenerateModel3d", "A 3D snapshot beside the plan", &mut self.snapshot);
+                });
             });
-            ui.end_row();
-            ui.label("");
-            ui.add_enabled_ui(on.snapshot, |ui| {
-                controls::check(ui, "sheetGenerateLegend", "A legend beside the plan", &mut self.legend);
+            dialog::labelled(ui, "", |ui| {
+                ui.add_enabled_ui(on.snapshot, |ui| {
+                    controls::check(ui, "sheetGenerateLegend", "A legend beside the plan", &mut self.legend);
+                });
             });
-            ui.end_row();
-            ui.label("");
-            ui.add_enabled_ui(on.rotate, |ui| {
-                controls::check(
-                    ui,
-                    "sheetGenerateRotate",
-                    "Rotate the drawing to fill the sheet",
-                    &mut self.rotate,
-                )
-                .on_hover_text(
-                    "Turn the plan when that shows the drawing at a larger scale, or on fewer \
-                     sheets, and no further than it needs",
-                );
+            dialog::labelled(ui, "", |ui| {
+                ui.add_enabled_ui(on.rotate, |ui| {
+                    controls::check(
+                        ui,
+                        "sheetGenerateRotate",
+                        "Rotate the drawing to fill the sheet",
+                        &mut self.rotate,
+                    )
+                    .on_hover_text(
+                        "Turn the plan when that shows the drawing at a larger scale, or on fewer \
+                         sheets, and no further than it needs",
+                    );
+                });
             });
-            ui.end_row();
-            ui.label("");
-            ui.add_enabled_ui(on.replace, |ui| {
-                controls::check(
-                    ui,
-                    "sheetGenerateReplace",
-                    "Replace the sheets there are now",
-                    &mut self.replace,
-                );
+            dialog::labelled(ui, "", |ui| {
+                ui.add_enabled_ui(on.replace, |ui| {
+                    controls::check(
+                        ui,
+                        "sheetGenerateReplace",
+                        "Replace the sheets there are now",
+                        &mut self.replace,
+                    );
+                });
             });
-            ui.end_row();
         });
         // The line OK runs, as it will be typed into the log: what a person learns the verb from,
         // and what an agent would type instead.
@@ -2527,64 +2539,70 @@ impl TitleBlockDialog {
         };
         // Every page drawn, the ones behind the front one invisible, so a driver can fill a
         // control on any of them (docs/rust.md, wave 1).
-        page(ui, self.tab == 0, |ui| {
-            egui::Grid::new("sheetTitleBlockProject").num_columns(2).show(ui, |ui| {
-                ui.label("Organisation");
-                line(ui, "sheetTitleBlockOrganisation", &mut self.organisation, "your organisation's name");
-                ui.end_row();
+        page(ui, 0, self.tab, |ui| {
+            dialog::form(ui, |form| {
+                let ui = form.ui();
+                dialog::labelled(ui, "Organisation", |ui| {
+                    line(ui, "sheetTitleBlockOrganisation", &mut self.organisation, "your organisation's name");
+                });
                 for i in 0..4 {
-                    ui.label(format!("Project line {}", i + 1));
-                    let placeholder = if i < 2 { self.placeholders[i].clone() } else { String::new() };
-                    line(
-                        ui,
-                        &format!("sheetTitleBlockProjectLine{}", i + 1),
-                        &mut self.project_lines[i],
-                        &placeholder,
-                    );
-                    ui.end_row();
+                    dialog::labelled(ui, &format!("Project line {}", i + 1), |ui| {
+                        let placeholder = if i < 2 { self.placeholders[i].clone() } else { String::new() };
+                        line(
+                            ui,
+                            &format!("sheetTitleBlockProjectLine{}", i + 1),
+                            &mut self.project_lines[i],
+                            &placeholder,
+                        );
+                    });
                 }
-                ui.label("Client");
-                line(ui, "sheetTitleBlockClient", &mut self.client, "");
-                ui.end_row();
-                ui.label("Drawing set number");
-                line(ui, "sheetTitleBlockSetNumber", &mut self.set_number, "");
-                ui.end_row();
-                ui.label("Sheet numbering");
-                line(ui, "sheetTitleBlockNumbering", &mut self.numbering, "{n}");
-                ui.end_row();
-                ui.label("Coordinate system");
-                let placeholder = self.placeholders[2].clone();
-                line(ui, "sheetTitleBlockCoordinates", &mut self.coordinates, &placeholder);
-                ui.end_row();
-                ui.label("Height datum");
-                line(ui, "sheetTitleBlockDatum", &mut self.datum, "");
-                ui.end_row();
-                ui.label("Model name");
-                line(ui, "sheetTitleBlockModelName", &mut self.model_name, "");
-                ui.end_row();
+                dialog::labelled(ui, "Client", |ui| {
+                    line(ui, "sheetTitleBlockClient", &mut self.client, "");
+                });
+                dialog::labelled(ui, "Drawing set number", |ui| {
+                    line(ui, "sheetTitleBlockSetNumber", &mut self.set_number, "");
+                });
+                dialog::labelled(ui, "Sheet numbering", |ui| {
+                    line(ui, "sheetTitleBlockNumbering", &mut self.numbering, "{n}");
+                });
+                dialog::labelled(ui, "Coordinate system", |ui| {
+                    let placeholder = self.placeholders[2].clone();
+                    line(ui, "sheetTitleBlockCoordinates", &mut self.coordinates, &placeholder);
+                });
+                dialog::labelled(ui, "Height datum", |ui| {
+                    line(ui, "sheetTitleBlockDatum", &mut self.datum, "");
+                });
+                dialog::labelled(ui, "Model name", |ui| {
+                    line(ui, "sheetTitleBlockModelName", &mut self.model_name, "");
+                });
             });
         });
-        page(ui, self.tab == 1, |ui| {
-            egui::Grid::new("sheetTitleBlockSignOffs").num_columns(3).show(ui, |ui| {
+        page(ui, 1, self.tab, |ui| {
+            dialog::form(ui, |form| {
                 for (i, label) in SIGN_OFF_LABELS.iter().enumerate() {
-                    ui.label(*label);
-                    let (name, date) = &mut self.sign_offs[i];
-                    line(ui, &format!("sheetTitleBlockSignOffName{}", i + 1), name, "name");
-                    line(
-                        ui,
-                        &format!("sheetTitleBlockSignOffDate{}", i + 1),
-                        date,
-                        "dd/mm/yy (blank: the plot date)",
-                    );
-                    ui.end_row();
+                    form.row(label, |ui| {
+                        ui.horizontal(|ui| {
+                            // The name a name's width, the date the rest of the row.
+                            let (name, date) = &mut self.sign_offs[i];
+                            dialog::fixed_fields(ui, dialog::SHORT_FIELD_WIDTH);
+                            line(ui, &format!("sheetTitleBlockSignOffName{}", i + 1), name, "name");
+                            dialog::fill_fields(ui);
+                            line(
+                                ui,
+                                &format!("sheetTitleBlockSignOffDate{}", i + 1),
+                                date,
+                                "dd/mm/yy (blank: the plot date)",
+                            );
+                        });
+                    });
                 }
             });
         });
-        page(ui, self.tab == 2, |ui| {
+        page(ui, 2, self.tab, |ui| {
             ui.label("Printed in the title block's notes cell, wrapped to fit:");
             controls::text(ui, "sheetTitleBlockNotes", &mut self.notes);
         });
-        page(ui, self.tab == 3, |ui| {
+        page(ui, 3, self.tab, |ui| {
             let rows: Vec<Vec<String>> = self.revisions.iter().map(|row| row.to_vec()).collect();
             controls::rows(ui, "sheetTitleBlockRevisions", &rows, &mut self.current_revision);
             egui::Grid::new("sheetTitleBlockRevisionCells").num_columns(4).show(ui, |ui| {
@@ -2621,7 +2639,7 @@ impl TitleBlockDialog {
                 }
             });
         });
-        page(ui, self.tab == 4, |ui| {
+        page(ui, 4, self.tab, |ui| {
             ui.label(
                 "Your organisation's logo, printed in the title block's logo slot (53 x 12 mm), \
                  its shape kept. PNG, JPEG, GIF or BMP.",
@@ -3520,15 +3538,21 @@ impl SheetEditor {
     }
 }
 
-/// A page of a tabbed dialog: drawn always, shown only when it is in front, so a driver can fill a
-/// control on a page behind (docs/rust.md, wave 1).
-fn page(ui: &mut Ui, shown: bool, add: impl FnOnce(&mut Ui)) {
-    ui.scope(|ui| {
-        if !shown {
+/// The page `index` of a tabbed dialog whose page `front` is in front: drawn always, shown only
+/// when it is in front, so a driver can fill a control on a page behind (docs/rust.md, wave 1).
+fn page(ui: &mut Ui, index: usize, front: usize, add: impl FnOnce(&mut Ui)) {
+    if index == front {
+        ui.scope(add);
+    } else {
+        // Drawn where the page in front is and clipped away, taking no room: an invisible page
+        // drawn in its turn took its height, so the Sign-offs page was drawn under the Project
+        // page's empty room and the dialog was as tall as all its pages. Still invisible, so a
+        // press of a button on a page behind is refused as it was.
+        offstage(ui, &format!("sheetTitleBlockPage{index}"), |ui| {
             ui.set_invisible();
-        }
-        add(ui);
-    });
+            add(ui);
+        });
+    }
 }
 
 // ---- the panel's fields --------------------------------------------------------------------------
@@ -3765,170 +3789,171 @@ impl SheetEditor {
         let section = v.kind == ViewportKind::LongSection || v.kind == ViewportKind::CrossSections;
         let cross = v.kind == ViewportKind::CrossSections;
         ui.strong(format!("{}  ({})", kind_name(v.kind), v.id));
-        egui::Grid::new("sheetViewportForm").num_columns(2).show(ui, |ui| {
-            ui.label("Title");
-            if let Some(title) = self.fields.line(ui, "sheetViewportTitle", &v.title, &automatic_title(v))
-                && title != v.title
-            {
-                self.edit(&id, "EDIT_VIEWPORT", move |e| e.title = title);
-            }
-            ui.end_row();
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            dialog::labelled(ui, "Title", |ui| {
+                if let Some(title) = self.fields.line(ui, "sheetViewportTitle", &v.title, &automatic_title(v))
+                    && title != v.title
+                {
+                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.title = title);
+                }
+            });
 
             // An automatic section's exaggeration is the fitted one, shown as such and kept when a
             // fixed scale is chosen, so choosing one does not redraw the section at the stale
             // stored exaggeration.
             let mut fitted_exaggeration: Option<f64> = None;
             if plan || section {
-                ui.label(if section { "Horizontal scale" } else { "Scale" });
-                let items = scale_items(true);
-                let automatic = Choice {
-                    index: Some(0),
-                    text: String::from("Auto"),
-                    editable: true,
-                };
-                let (start, tip) = if plan && v.auto_scale {
-                    let resolved = resolve_plan_viewport_on_sheet(v, &source, set, index);
-                    (automatic, Some(format!("Automatic: now {}", scale_label(resolved.scale))))
-                } else if v.auto_scale {
-                    // A section fits both its scale and its exaggeration.
-                    let fit: SectionFit =
-                        resolve_section_viewport(v, &source, self.canvas.paint_cache());
-                    let mut fitted = v.clone();
-                    fitted.scale = fit.scale;
-                    fitted.vertical_exaggeration = fit.exaggeration;
-                    fitted_exaggeration = Some(fit.exaggeration);
-                    (automatic, Some(format!("Automatic: now {}", scale_text(&fitted))))
-                } else {
-                    let label = scale_label(v.scale);
-                    (
-                        Choice {
-                            index: items.iter().position(|item| *item == label),
-                            text: label,
-                            editable: true,
-                        },
-                        None,
-                    )
-                };
-                let (chosen, response) = self.fields.choice(ui, "sheetViewportScale", &items, start);
-                if let Some(tip) = &tip {
-                    response.on_hover_text(tip.as_str());
-                    self.fields
-                        .tips
-                        .insert(String::from("sheetViewportScale"), tip.clone());
-                }
-                if let Some(text) = chosen {
-                    if text == "Auto" {
-                        self.edit(&id, "EDIT_VIEWPORT", |e| e.auto_scale = true);
-                    } else if let Some(value) = parse_scale(&text) {
-                        self.edit(&id, "EDIT_VIEWPORT", move |e| {
-                            e.scale = value;
-                            if e.auto_scale
-                                && let Some(fitted) = fitted_exaggeration
-                            {
-                                e.vertical_exaggeration = fitted;
-                            }
-                            e.auto_scale = false;
-                        });
+                dialog::labelled(ui, if section { "Horizontal scale" } else { "Scale" }, |ui| {
+                    let items = scale_items(true);
+                    let automatic = Choice {
+                        index: Some(0),
+                        text: String::from("Auto"),
+                        editable: true,
+                    };
+                    let (start, tip) = if plan && v.auto_scale {
+                        let resolved = resolve_plan_viewport_on_sheet(v, &source, set, index);
+                        (automatic, Some(format!("Automatic: now {}", scale_label(resolved.scale))))
+                    } else if v.auto_scale {
+                        // A section fits both its scale and its exaggeration.
+                        let fit: SectionFit =
+                            resolve_section_viewport(v, &source, self.canvas.paint_cache());
+                        let mut fitted = v.clone();
+                        fitted.scale = fit.scale;
+                        fitted.vertical_exaggeration = fit.exaggeration;
+                        fitted_exaggeration = Some(fit.exaggeration);
+                        (automatic, Some(format!("Automatic: now {}", scale_text(&fitted))))
                     } else {
-                        self.fields.choices.remove("sheetViewportScale");
+                        let label = scale_label(v.scale);
+                        (
+                            Choice {
+                                index: items.iter().position(|item| *item == label),
+                                text: label,
+                                editable: true,
+                            },
+                            None,
+                        )
+                    };
+                    let (chosen, response) = self.fields.choice(ui, "sheetViewportScale", &items, start);
+                    if let Some(tip) = &tip {
+                        response.on_hover_text(tip.as_str());
+                        self.fields
+                            .tips
+                            .insert(String::from("sheetViewportScale"), tip.clone());
                     }
-                }
-                ui.end_row();
+                    if let Some(text) = chosen {
+                        if text == "Auto" {
+                            self.edit(&id, "EDIT_VIEWPORT", |e| e.auto_scale = true);
+                        } else if let Some(value) = parse_scale(&text) {
+                            self.edit(&id, "EDIT_VIEWPORT", move |e| {
+                                e.scale = value;
+                                if e.auto_scale
+                                    && let Some(fitted) = fitted_exaggeration
+                                {
+                                    e.vertical_exaggeration = fitted;
+                                }
+                                e.auto_scale = false;
+                            });
+                        } else {
+                            self.fields.choices.remove("sheetViewportScale");
+                        }
+                    }
+                });
             }
             if plan || v.kind == ViewportKind::Model3D {
-                ui.label("Rotation");
-                if let Some(degrees) = self.fields.number(
-                    ui,
-                    "sheetViewportRotation",
-                    v.rotation * RAD_TO_DEG,
-                    SpinRange::new(-360.0, 360.0, 1.0, 3).with_suffix(" \u{b0}"),
-                ) {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.rotation = degrees * DEG_TO_RAD);
-                }
-                ui.end_row();
+                dialog::labelled(ui, "Rotation", |ui| {
+                    if let Some(degrees) = self.fields.number(
+                        ui,
+                        "sheetViewportRotation",
+                        v.rotation * RAD_TO_DEG,
+                        SpinRange::new(-360.0, 360.0, 1.0, 3).with_suffix(" \u{b0}"),
+                    ) {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.rotation = degrees * DEG_TO_RAD);
+                    }
+                });
             }
             if plan || section {
-                ui.label("");
-                if let Some(on) =
-                    self.fields
-                        .check(ui, "sheetViewportAutoCentre", "Centre on what it shows", v.auto_centre)
-                {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.auto_centre = on);
-                }
-                ui.end_row();
-                ui.label(if plan { "Centre E" } else { "Centre (ch/offset)" });
-                let x = ui
-                    .add_enabled_ui(!v.auto_centre, |ui| {
+                ui.scope(|ui| {
+                    if let Some(on) =
                         self.fields
-                            .number(ui, "sheetViewportCentreX", v.centre.x, SpinRange::new(-1e9, 1e9, 1.0, 3))
-                    })
-                    .inner;
-                if let Some(x) = x {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.centre.x = x);
-                }
-                ui.end_row();
-                ui.label(if plan { "Centre N" } else { "Centre level" });
-                let y = ui
-                    .add_enabled_ui(!v.auto_centre, |ui| {
-                        self.fields
-                            .number(ui, "sheetViewportCentreY", v.centre.y, SpinRange::new(-1e9, 1e9, 1.0, 3))
-                    })
-                    .inner;
-                if let Some(y) = y {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.centre.y = y);
-                }
-                ui.end_row();
+                            .check(ui, "sheetViewportAutoCentre", "Centre on what it shows", v.auto_centre)
+                    {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.auto_centre = on);
+                    }
+                });
+                dialog::labelled(ui, if plan { "Centre E" } else { "Centre (ch/offset)" }, |ui| {
+                    let x = ui
+                        .add_enabled_ui(!v.auto_centre, |ui| {
+                            self.fields
+                                .number(ui, "sheetViewportCentreX", v.centre.x, SpinRange::new(-1e9, 1e9, 1.0, 3))
+                        })
+                        .inner;
+                    if let Some(x) = x {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.centre.x = x);
+                    }
+                });
+                dialog::labelled(ui, if plan { "Centre N" } else { "Centre level" }, |ui| {
+                    let y = ui
+                        .add_enabled_ui(!v.auto_centre, |ui| {
+                            self.fields
+                                .number(ui, "sheetViewportCentreY", v.centre.y, SpinRange::new(-1e9, 1e9, 1.0, 3))
+                        })
+                        .inner;
+                    if let Some(y) = y {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.centre.y = y);
+                    }
+                });
             }
             if section {
-                ui.label("Vertical exaggeration");
-                let ve = ui
-                    .add_enabled_ui(!v.auto_scale, |ui| {
-                        self.fields.number(
-                            ui,
-                            "sheetViewportExaggeration",
-                            fitted_exaggeration.unwrap_or(v.vertical_exaggeration),
-                            SpinRange::new(0.1, 100.0, 1.0, 2).with_suffix(" x"),
-                        )
-                    })
-                    .inner;
-                if v.auto_scale {
-                    self.fields.tips.insert(
-                        String::from("sheetViewportExaggeration"),
-                        String::from("Chosen with the automatic scale"),
-                    );
-                }
-                if let Some(x) = ve {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.vertical_exaggeration = x);
-                }
-                ui.end_row();
+                dialog::labelled(ui, "Vertical exaggeration", |ui| {
+                    let ve = ui
+                        .add_enabled_ui(!v.auto_scale, |ui| {
+                            self.fields.number(
+                                ui,
+                                "sheetViewportExaggeration",
+                                fitted_exaggeration.unwrap_or(v.vertical_exaggeration),
+                                SpinRange::new(0.1, 100.0, 1.0, 2).with_suffix(" x"),
+                            )
+                        })
+                        .inner;
+                    if v.auto_scale {
+                        self.fields.tips.insert(
+                            String::from("sheetViewportExaggeration"),
+                            String::from("Chosen with the automatic scale"),
+                        );
+                    }
+                    if let Some(x) = ve {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.vertical_exaggeration = x);
+                    }
+                });
             }
             if section || plan {
-                ui.label("Alignment");
-                let mut items = vec![String::from(if plan { "(the drawing)" } else { "(none)" })];
-                items.extend(document.model().alignments.names());
-                let start = Choice::at(
-                    items
-                        .iter()
-                        .skip(1)
-                        .position(|name| *name == v.source.alignment)
-                        .map_or(0, |at| at + 1),
-                );
-                let (chosen, _) = self.fields.choice(ui, "sheetViewportAlignment", &items, start);
-                if chosen.is_some() {
-                    let at = self
-                        .fields
-                        .choices
-                        .get("sheetViewportAlignment")
-                        .and_then(|choice| choice.index)
-                        .unwrap_or(0);
-                    let name = if at == 0 {
-                        String::new()
-                    } else {
-                        items[at].clone()
-                    };
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.source.alignment = name);
-                }
-                ui.end_row();
+                dialog::labelled(ui, "Alignment", |ui| {
+                    let mut items = vec![String::from(if plan { "(the drawing)" } else { "(none)" })];
+                    items.extend(document.model().alignments.names());
+                    let start = Choice::at(
+                        items
+                            .iter()
+                            .skip(1)
+                            .position(|name| *name == v.source.alignment)
+                            .map_or(0, |at| at + 1),
+                    );
+                    let (chosen, _) = self.fields.choice(ui, "sheetViewportAlignment", &items, start);
+                    if chosen.is_some() {
+                        let at = self
+                            .fields
+                            .choices
+                            .get("sheetViewportAlignment")
+                            .and_then(|choice| choice.index)
+                            .unwrap_or(0);
+                        let name = if at == 0 {
+                            String::new()
+                        } else {
+                            items[at].clone()
+                        };
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.source.alignment = name);
+                    }
+                });
             }
             if v.kind == ViewportKind::LongSection || cross || (plan && !v.source.alignment.is_empty()) {
                 let (from_tip, to_tip) = if cross {
@@ -3939,33 +3964,33 @@ impl SheetEditor {
                         "From equal to To: the whole alignment",
                     )
                 };
-                ui.label("Chainage from");
-                // What the box shows, rounded: a box left as it was writes nothing.
-                if let Some(from) = self.fields.number(
-                    ui,
-                    "sheetChainageFrom",
-                    v.source.chainage_from,
-                    SpinRange::new(-1e9, 1e9, 1.0, 3),
-                ) {
-                    self.view_set(&id, &format!("from={}", verb_number(from)));
-                }
-                self.fields
-                    .tips
-                    .insert(String::from("sheetChainageFrom"), String::from(from_tip));
-                ui.end_row();
-                ui.label("Chainage to");
-                if let Some(to) = self.fields.number(
-                    ui,
-                    "sheetChainageTo",
-                    v.source.chainage_to,
-                    SpinRange::new(-1e9, 1e9, 1.0, 3),
-                ) {
-                    self.view_set(&id, &format!("to={}", verb_number(to)));
-                }
-                self.fields
-                    .tips
-                    .insert(String::from("sheetChainageTo"), String::from(to_tip));
-                ui.end_row();
+                dialog::labelled(ui, "Chainage from", |ui| {
+                    // What the box shows, rounded: a box left as it was writes nothing.
+                    if let Some(from) = self.fields.number(
+                        ui,
+                        "sheetChainageFrom",
+                        v.source.chainage_from,
+                        SpinRange::new(-1e9, 1e9, 1.0, 3),
+                    ) {
+                        self.view_set(&id, &format!("from={}", verb_number(from)));
+                    }
+                    self.fields
+                        .tips
+                        .insert(String::from("sheetChainageFrom"), String::from(from_tip));
+                });
+                dialog::labelled(ui, "Chainage to", |ui| {
+                    if let Some(to) = self.fields.number(
+                        ui,
+                        "sheetChainageTo",
+                        v.source.chainage_to,
+                        SpinRange::new(-1e9, 1e9, 1.0, 3),
+                    ) {
+                        self.view_set(&id, &format!("to={}", verb_number(to)));
+                    }
+                    self.fields
+                        .tips
+                        .insert(String::from("sheetChainageTo"), String::from(to_tip));
+                });
             }
             if cross {
                 // Cut at the chainages listed, or every so many metres from one chainage to
@@ -3976,23 +4001,34 @@ impl SheetEditor {
                     v.source.stations.iter().map(|s| qt_fixed(*s, 3)).collect();
                 let by_interval = v.source.stations.is_empty() && v.source.section_interval > 0.0;
                 let listed_text = stations.join(", ");
-                if controls::radio(ui, "sheetSectionsAtChainages", "At chainages", !by_interval).clicked()
-                    && by_interval
-                {
+                // Each way of cutting is its row's label, a radio button, with its field beside
+                // it; what the button and the field ask is done once the row is drawn, the
+                // button's first, as it was.
+                let mut at_clicked = false;
+                let typed = dialog::row_with_check(
+                    ui,
+                    "At chainages",
+                    |ui| {
+                        at_clicked =
+                            controls::radio(ui, "sheetSectionsAtChainages", "At chainages", !by_interval)
+                                .clicked();
+                    },
+                    |ui| {
+                        ui.add_enabled_ui(!by_interval, |ui| {
+                            self.fields
+                                .line(ui, "sheetSectionStations", &listed_text, "e.g. 20, 40, 60")
+                        })
+                        .inner
+                    },
+                );
+                if at_clicked && by_interval {
                     self.listed(&id, &listed_text);
                 }
-                let typed = ui
-                    .add_enabled_ui(!by_interval, |ui| {
-                        self.fields
-                            .line(ui, "sheetSectionStations", &listed_text, "e.g. 20, 40, 60")
-                    })
-                    .inner;
                 if let Some(typed) = typed
                     && typed != listed_text
                 {
                     self.listed(&id, &typed);
                 }
-                ui.end_row();
                 let whole = document
                     .model()
                     .alignments
@@ -4000,22 +4036,30 @@ impl SheetEditor {
                     .and_then(|a| solve_alignment(&a.horizontal).ok())
                     .map(|solved| (solved.start_station(), solved.end_station()));
                 let ranged = v.source.chainage_to > v.source.chainage_from;
-                let every_clicked =
-                    controls::radio(ui, "sheetSectionsEvery", "Every", by_interval).clicked();
-                let interval = ui
-                    .add_enabled_ui(by_interval, |ui| {
-                        self.fields.number(
-                            ui,
-                            "sheetSectionInterval",
-                            if by_interval {
-                                v.source.section_interval
-                            } else {
-                                20.0
-                            },
-                            SpinRange::new(0.5, 10000.0, 1.0, 2).with_suffix(" m"),
-                        )
-                    })
-                    .inner;
+                let mut every_clicked = false;
+                let interval = dialog::row_with_check(
+                    ui,
+                    "Every",
+                    |ui| {
+                        every_clicked =
+                            controls::radio(ui, "sheetSectionsEvery", "Every", by_interval).clicked();
+                    },
+                    |ui| {
+                        ui.add_enabled_ui(by_interval, |ui| {
+                            self.fields.number(
+                                ui,
+                                "sheetSectionInterval",
+                                if by_interval {
+                                    v.source.section_interval
+                                } else {
+                                    20.0
+                                },
+                                SpinRange::new(0.5, 10000.0, 1.0, 2).with_suffix(" m"),
+                            )
+                        })
+                        .inner
+                    },
+                );
                 if every_clicked && !by_interval {
                     let value = self.fields.number_now("sheetSectionInterval").unwrap_or(20.0);
                     let mut options = format!("stations=\"\" interval={}", verb_number(value));
@@ -4031,51 +4075,50 @@ impl SheetEditor {
                 if let Some(interval) = interval {
                     self.view_set(&id, &format!("interval={}", verb_number(interval)));
                 }
-                ui.end_row();
-                ui.label("Half width");
-                if let Some(w) = self.fields.number(
-                    ui,
-                    "sheetSectionHalfWidth",
-                    if v.source.section_half_width > 0.0 {
-                        v.source.section_half_width
-                    } else {
-                        20.0
-                    },
-                    SpinRange::new(0.5, 1000.0, 1.0, 2).with_suffix(" m"),
-                ) {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.source.section_half_width = w);
-                }
-                ui.end_row();
+                dialog::labelled(ui, "Half width", |ui| {
+                    if let Some(w) = self.fields.number(
+                        ui,
+                        "sheetSectionHalfWidth",
+                        if v.source.section_half_width > 0.0 {
+                            v.source.section_half_width
+                        } else {
+                            20.0
+                        },
+                        SpinRange::new(0.5, 1000.0, 1.0, 2).with_suffix(" m"),
+                    ) {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.source.section_half_width = w);
+                    }
+                });
             }
             if v.kind == ViewportKind::Model3D {
-                ui.label("Camera height angle");
-                if let Some(t) = self.fields.number(
-                    ui,
-                    "sheetViewportTilt",
-                    v.tilt_degrees,
-                    SpinRange::new(1.0, 89.0, 1.0, 1).with_suffix(" \u{b0}"),
-                ) {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.tilt_degrees = t);
-                }
-                ui.end_row();
+                dialog::labelled(ui, "Camera height angle", |ui| {
+                    if let Some(t) = self.fields.number(
+                        ui,
+                        "sheetViewportTilt",
+                        v.tilt_degrees,
+                        SpinRange::new(1.0, 89.0, 1.0, 1).with_suffix(" \u{b0}"),
+                    ) {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.tilt_degrees = t);
+                    }
+                });
             }
             if plan {
-                ui.label("");
-                if let Some(on) = self
-                    .fields
-                    .check(ui, "sheetViewportNorthArrow", "North arrow", v.north_arrow)
-                {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.north_arrow = on);
-                }
-                ui.end_row();
-                ui.label("");
-                if let Some(on) = self
-                    .fields
-                    .check(ui, "sheetViewportScaleBar", "Scale bar", v.scale_bar)
-                {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.scale_bar = on);
-                }
-                ui.end_row();
+                ui.scope(|ui| {
+                    if let Some(on) = self
+                        .fields
+                        .check(ui, "sheetViewportNorthArrow", "North arrow", v.north_arrow)
+                    {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.north_arrow = on);
+                    }
+                });
+                ui.scope(|ui| {
+                    if let Some(on) = self
+                        .fields
+                        .check(ui, "sheetViewportScaleBar", "Scale bar", v.scale_bar)
+                    {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.scale_bar = on);
+                    }
+                });
                 let automatic = automatic_grid_interval(
                     resolve_plan_viewport_on_sheet(v, &source, set, index).scale,
                 );
@@ -4099,79 +4142,84 @@ impl SheetEditor {
             // The painter leaves a section's hidden layers out as it does a plan's
             // (section_painter), so both offer the list.
             if plan || section {
-                ui.label("");
-                let text = format!("Hidden layers ({})...", v.hidden_layers.size());
-                if controls::button(ui, "sheetViewportHiddenLayers", &text).clicked() {
-                    self.queued.push(Queued::HiddenLayers(id.clone()));
-                }
-                ui.end_row();
-            }
-            if v.kind == ViewportKind::Notes {
-                ui.label("Text");
-                let value = self
-                    .fields
-                    .texts
-                    .entry(String::from("sheetViewportText"))
-                    .or_insert_with(|| v.text.clone());
-                controls::text(ui, "sheetViewportText", value);
-                let typed = value.clone();
-                ui.end_row();
-                ui.label("");
-                if controls::button(ui, "sheetViewportApplyText", "Apply text").clicked() {
-                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.text = typed);
-                }
-                ui.end_row();
-            }
-            if v.kind == ViewportKind::Revisions {
-                ui.label("Newest revisions");
-                // One step per value settled on, not per digit typed.
-                let mut limit = i64::try_from(v.revision_limit.min(999)).unwrap_or(999);
-                let response = whole_with_special(ui, "sheetRevisionLimit", &mut limit, 0..=999, "All")
-                    .on_hover_text("Only the newest so many revisions; All shows every one");
-                if response.changed() && !response.has_focus() && !response.dragged() {
-                    let n = usize::try_from(limit).unwrap_or(0);
-                    self.edit(&id, "VIEWPORT_REVISION_LIMIT", move |e| e.revision_limit = n);
-                }
-                ui.end_row();
-            }
-            if v.kind == ViewportKind::Image {
-                ui.label("Image");
-                ui.horizontal(|ui| {
-                    if let Some(file) = self.fields.line(
-                        ui,
-                        "sheetImageName",
-                        &v.text,
-                        "a file in the project's assets folder",
-                    ) && file != v.text
-                    {
-                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.text = file);
-                    }
-                    // Another picture: copied into the project's assets as VIEW SET file= copies it
-                    // (cad's import_image_asset, up to 32 MB), and named in the same step.
-                    if controls::button(ui, "sheetImageBrowse", "Browse...")
-                        .on_hover_text("Choose the picture: it is copied into the project's assets")
-                        .clicked()
-                    {
-                        self.queued.push(Queued::BrowseImage(id.clone()));
+                ui.scope(|ui| {
+                    let text = format!("Hidden layers ({})...", v.hidden_layers.size());
+                    if controls::button(ui, "sheetViewportHiddenLayers", &text).clicked() {
+                        self.queued.push(Queued::HiddenLayers(id.clone()));
                     }
                 });
-                ui.end_row();
+            }
+            if v.kind == ViewportKind::Notes {
+                dialog::labelled(ui, "Text", |ui| {
+                    let value = self
+                        .fields
+                        .texts
+                        .entry(String::from("sheetViewportText"))
+                        .or_insert_with(|| v.text.clone());
+                    controls::text(ui, "sheetViewportText", value);
+                });
+                let typed = self
+                    .fields
+                    .texts
+                    .get("sheetViewportText")
+                    .cloned()
+                    .unwrap_or_default();
+                ui.scope(|ui| {
+                    if controls::button(ui, "sheetViewportApplyText", "Apply text").clicked() {
+                        self.edit(&id, "EDIT_VIEWPORT", move |e| e.text = typed);
+                    }
+                });
+            }
+            if v.kind == ViewportKind::Revisions {
+                dialog::labelled(ui, "Newest revisions", |ui| {
+                    // One step per value settled on, not per digit typed.
+                    let mut limit = i64::try_from(v.revision_limit.min(999)).unwrap_or(999);
+                    let response = whole_with_special(ui, "sheetRevisionLimit", &mut limit, 0..=999, "All")
+                        .on_hover_text("Only the newest so many revisions; All shows every one");
+                    if response.changed() && !response.has_focus() && !response.dragged() {
+                        let n = usize::try_from(limit).unwrap_or(0);
+                        self.edit(&id, "VIEWPORT_REVISION_LIMIT", move |e| e.revision_limit = n);
+                    }
+                });
+            }
+            if v.kind == ViewportKind::Image {
+                dialog::labelled(ui, "Image", |ui| {
+                    ui.horizontal(|ui| {
+                        if let Some(file) = self.fields.line(
+                            ui,
+                            "sheetImageName",
+                            &v.text,
+                            "a file in the project's assets folder",
+                        ) && file != v.text
+                        {
+                            self.edit(&id, "EDIT_VIEWPORT", move |e| e.text = file);
+                        }
+                        // Another picture: copied into the project's assets as VIEW SET file= copies it
+                        // (cad's import_image_asset, up to 32 MB), and named in the same step.
+                        if controls::button(ui, "sheetImageBrowse", "Browse...")
+                            .on_hover_text("Choose the picture: it is copied into the project's assets")
+                            .clicked()
+                        {
+                            self.queued.push(Queued::BrowseImage(id.clone()));
+                        }
+                    });
+                });
             }
             if v.kind == ViewportKind::Legend
                 && let Some(scope) = add_legend_properties(ui, set, index, v, &source)
             {
                 self.queued.push(Queued::LegendScope(id.clone(), scope));
             }
-            ui.label("");
-            if let Some(on) = self.fields.check(
-                ui,
-                "sheetViewportLocked",
-                "Locked (tiling and dragging leave it)",
-                v.locked,
-            ) {
-                self.edit(&id, "EDIT_VIEWPORT", move |e| e.locked = on);
-            }
-            ui.end_row();
+            ui.scope(|ui| {
+                if let Some(on) = self.fields.check(
+                    ui,
+                    "sheetViewportLocked",
+                    "Locked (tiling and dragging leave it)",
+                    v.locked,
+                ) {
+                    self.edit(&id, "EDIT_VIEWPORT", move |e| e.locked = on);
+                }
+            });
         });
 
         // Where the view is on the paper, in paper millimetres from its lower-left corner: typed,
@@ -4180,7 +4228,8 @@ impl SheetEditor {
         let exact = [v.rect.min.x, v.rect.min.y, v.rect.width(), v.rect.height()];
         let names = ["sheetViewportX", "sheetViewportY", "sheetViewportW", "sheetViewportH"];
         let mut finished = false;
-        egui::Grid::new("sheetViewportPlace").num_columns(2).show(ui, |ui| {
+        dialog::form(ui, |form| {
+            let ui = form.ui();
             let rows = [
                 ("Left", -10000.0, "The left edge, from the paper's left edge"),
                 ("Bottom", -10000.0, "The bottom edge, from the paper's bottom edge"),
@@ -4188,18 +4237,18 @@ impl SheetEditor {
                 ("Height", 1.0, ""),
             ];
             for (at, (label, minimum, tip)) in rows.iter().enumerate() {
-                ui.label(*label);
-                let response = self.fields.number(
-                    ui,
-                    names[at],
-                    exact[at],
-                    SpinRange::new(*minimum, 10000.0, 1.0, 1).with_suffix(" mm"),
-                );
-                finished |= response.is_some();
-                if !tip.is_empty() {
-                    self.fields.tips.insert(String::from(names[at]), String::from(*tip));
-                }
-                ui.end_row();
+                dialog::labelled(ui, label, |ui| {
+                    let response = self.fields.number(
+                        ui,
+                        names[at],
+                        exact[at],
+                        SpinRange::new(*minimum, 10000.0, 1.0, 1).with_suffix(" mm"),
+                    );
+                    finished |= response.is_some();
+                    if !tip.is_empty() {
+                        self.fields.tips.insert(String::from(names[at]), String::from(*tip));
+                    }
+                });
             }
         });
         if finished {
@@ -4270,84 +4319,85 @@ impl SheetEditor {
             });
         };
         ui.strong("Sheet");
-        egui::Grid::new("sheetSheetForm").num_columns(2).show(ui, |ui| {
-            ui.label("Name");
-            if let Some(name) = self.fields.line(ui, "sheetName", &sheet.name, "")
-                && name != sheet.name
-            {
-                edit(&mut self.queued, "RENAME_SHEET", Box::new(move |s: &mut Sheet| s.name = name));
-            }
-            ui.end_row();
-            ui.label("Paper");
-            let papers = paper_items();
-            let at = PAPERS.iter().position(|p| *p == sheet.paper).unwrap_or(3);
-            let (chosen, _) = self.fields.choice(ui, "sheetPaper", &papers, Choice::at(at));
-            if chosen.is_some() {
-                let picked = self
-                    .fields
-                    .choices
-                    .get("sheetPaper")
-                    .and_then(|choice| choice.index)
-                    .unwrap_or(at);
-                if picked != at {
-                    let paper = PAPERS[picked];
-                    edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s: &mut Sheet| s.paper = paper));
+        dialog::form(ui, |form| {
+            let ui = form.ui();
+            dialog::labelled(ui, "Name", |ui| {
+                if let Some(name) = self.fields.line(ui, "sheetName", &sheet.name, "")
+                    && name != sheet.name
+                {
+                    edit(&mut self.queued, "RENAME_SHEET", Box::new(move |s: &mut Sheet| s.name = name));
                 }
-            }
-            ui.end_row();
-            ui.label("Orientation");
-            let orientations = [String::from("Landscape"), String::from("Portrait")];
-            let was = usize::from(!sheet.landscape);
-            let (chosen, _) =
-                self.fields
-                    .choice(ui, "sheetOrientation", &orientations, Choice::at(was));
-            if chosen.is_some() {
-                let picked = self
-                    .fields
-                    .choices
-                    .get("sheetOrientation")
-                    .and_then(|choice| choice.index)
-                    .unwrap_or(was);
-                if picked != was {
+            });
+            dialog::labelled(ui, "Paper", |ui| {
+                let papers = paper_items();
+                let at = PAPERS.iter().position(|p| *p == sheet.paper).unwrap_or(3);
+                let (chosen, _) = self.fields.choice(ui, "sheetPaper", &papers, Choice::at(at));
+                if chosen.is_some() {
+                    let picked = self
+                        .fields
+                        .choices
+                        .get("sheetPaper")
+                        .and_then(|choice| choice.index)
+                        .unwrap_or(at);
+                    if picked != at {
+                        let paper = PAPERS[picked];
+                        edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s: &mut Sheet| s.paper = paper));
+                    }
+                }
+            });
+            dialog::labelled(ui, "Orientation", |ui| {
+                let orientations = [String::from("Landscape"), String::from("Portrait")];
+                let was = usize::from(!sheet.landscape);
+                let (chosen, _) =
+                    self.fields
+                        .choice(ui, "sheetOrientation", &orientations, Choice::at(was));
+                if chosen.is_some() {
+                    let picked = self
+                        .fields
+                        .choices
+                        .get("sheetOrientation")
+                        .and_then(|choice| choice.index)
+                        .unwrap_or(was);
+                    if picked != was {
+                        edit(
+                            &mut self.queued,
+                            "EDIT_SHEET",
+                            Box::new(move |s: &mut Sheet| s.landscape = picked == 0),
+                        );
+                    }
+                }
+            });
+            ui.scope(|ui| {
+                if let Some(on) =
+                    self.fields
+                        .check(ui, "sheetFrame", "Frame and title block", !sheet.frame.is_empty())
+                {
                     edit(
                         &mut self.queued,
                         "EDIT_SHEET",
-                        Box::new(move |s: &mut Sheet| s.landscape = picked == 0),
+                        Box::new(move |s: &mut Sheet| {
+                            s.frame = if on {
+                                String::from(BUILT_IN_FRAME_ID)
+                            } else {
+                                String::new()
+                            };
+                        }),
                     );
                 }
-            }
-            ui.end_row();
-            ui.label("");
-            if let Some(on) =
-                self.fields
-                    .check(ui, "sheetFrame", "Frame and title block", !sheet.frame.is_empty())
-            {
-                edit(
-                    &mut self.queued,
-                    "EDIT_SHEET",
-                    Box::new(move |s: &mut Sheet| {
-                        s.frame = if on {
-                            String::from(BUILT_IN_FRAME_ID)
-                        } else {
-                            String::new()
-                        };
-                    }),
-                );
-            }
-            ui.end_row();
-            ui.label("");
-            if let Some(on) = self
-                .fields
-                .check(ui, "sheetFrameLegend", "Utility legend block", sheet.frame_legend)
-            {
-                edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s: &mut Sheet| s.frame_legend = on));
-            }
-            ui.end_row();
-            ui.label("");
-            if choose_paper_button(ui, set, index) {
-                self.queued.push(Queued::ChoosePaper);
-            }
-            ui.end_row();
+            });
+            ui.scope(|ui| {
+                if let Some(on) = self
+                    .fields
+                    .check(ui, "sheetFrameLegend", "Utility legend block", sheet.frame_legend)
+                {
+                    edit(&mut self.queued, "EDIT_SHEET", Box::new(move |s: &mut Sheet| s.frame_legend = on));
+                }
+            });
+            ui.scope(|ui| {
+                if choose_paper_button(ui, set, index) {
+                    self.queued.push(Queued::ChoosePaper);
+                }
+            });
         });
 
         // Title-block values: what each field prints, and what this sheet overrides.
@@ -4370,32 +4420,44 @@ impl SheetEditor {
             .collect();
         let mut current = None;
         controls::rows(ui, "sheetFieldTable", &rows, &mut current);
-        egui::Grid::new("sheetFieldCells").num_columns(2).show(ui, |ui| {
+        dialog::form(ui, |form| {
+            let ui = form.ui();
             for field in &names {
                 let printed = resolved.get(field).cloned().unwrap_or_default();
-                let label = if sheet.fields.contains_key(field) {
-                    egui::RichText::new(field.as_str()).strong()
-                } else {
-                    egui::RichText::new(field.as_str())
-                };
-                ui.label(label);
-                if let Some(value) = self.fields.line(ui, &format!("sheetField_{field}"), &printed, "")
-                    && value != printed
-                {
-                    let field = field.clone();
-                    edit(
-                        &mut self.queued,
-                        "SHEET_FIELD",
-                        Box::new(move |s: &mut Sheet| {
-                            if value.is_empty() {
-                                s.fields.remove(&field);
-                            } else {
-                                s.fields.insert(field, value);
-                            }
-                        }),
-                    );
-                }
-                ui.end_row();
+                let overridden = sheet.fields.contains_key(field);
+                dialog::row_with_text(
+                    ui,
+                    field,
+                    |ui| {
+                        // A value this sheet overrides is named in strong text; the others in a
+                        // form label's muted text.
+                        let text = egui::RichText::new(field.as_str());
+                        ui.label(if overridden {
+                            text.strong()
+                        } else {
+                            text.color(crate::theme::text_muted().to_egui())
+                        });
+                    },
+                    |ui| {
+                        if let Some(value) =
+                            self.fields.line(ui, &format!("sheetField_{field}"), &printed, "")
+                            && value != printed
+                        {
+                            let field = field.clone();
+                            edit(
+                                &mut self.queued,
+                                "SHEET_FIELD",
+                                Box::new(move |s: &mut Sheet| {
+                                    if value.is_empty() {
+                                        s.fields.remove(&field);
+                                    } else {
+                                        s.fields.insert(field, value);
+                                    }
+                                }),
+                            );
+                        }
+                    },
+                );
             }
         });
         let clear = ui
@@ -5048,7 +5110,11 @@ impl SheetEditor {
             .exact_size(PROPERTIES_WIDTH)
             .show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("sheetProperties").show(ui, |ui| {
-                self.properties_ui(ui, &*host);
+                // Its rows share one label column, as a dialog's do. Its boxes and buttons are
+                // drawn across the panel rather than under the fields: at PROPERTIES_WIDTH a box's
+                // words, or "Choose paper for this scale", beside the label column ran past the
+                // panel's edge, and the panel's content with them.
+                dialog::form_panel(ui, |ui| self.properties_ui(ui, &*host));
             });
         });
         self.canvas_ui(ui, host);

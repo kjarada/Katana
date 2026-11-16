@@ -97,6 +97,7 @@ use crate::format::qt_fixed;
 use crate::host::Host;
 use crate::kept_name_combo::{KeptChoice, KeptNameCombo, VARIES};
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::{hidden, offstage};
 
 /// The dialog's object name.
@@ -110,6 +111,8 @@ fn error_colour() -> egui::Color32 {
 /// The dialog's body width, the same on every page: the style table and the definition form side
 /// by side, with room for the preview.
 const BODY_WIDTH: f32 = 940.0;
+/// The size of the Styles page's preview, beside the table under the definition's form.
+const STYLE_PREVIEW: egui::Vec2 = egui::vec2(360.0, 150.0);
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 3).with_suffix(" mm on paper");
 const SYMBOL_SIZE: SpinRange =
     SpinRange::new(0.0, 10000.0, 1.0, 4).with_suffix(" m wide (0 = its own size)");
@@ -2442,15 +2445,14 @@ impl StyleManagerDialog {
                 }
             });
             ui.vertical(|ui| {
+                // The form's group as wide as the preview's under it: its fields fill the column
+                // rather than the dialog's width.
+                ui.set_width(STYLE_PREVIEW.x + dialog::group_margins(ui));
                 self.style_form(ui, host);
                 ui.group(|ui| {
                     ui.strong("Preview");
-                    self.style_preview.ui(
-                        ui,
-                        "stylePreview",
-                        host.document(),
-                        egui::vec2(360.0, 150.0),
-                    );
+                    self.style_preview
+                        .ui(ui, "stylePreview", host.document(), STYLE_PREVIEW);
                     ui.horizontal(|ui| {
                         if Self::preview_controls(
                             ui,
@@ -2489,87 +2491,86 @@ impl StyleManagerDialog {
             );
             let enabled = self.fields_enabled;
             ui.add_enabled_ui(enabled, |ui| {
-                egui::Grid::new("styleForm").num_columns(2).show(ui, |ui| {
-                    ui.label("Linetype");
-                    if let Some(name) = self.linetype_picker.ui(ui, "styleLinetype")
-                        && self.live()
-                    {
-                        self.edited.linetype = Some(name);
-                        self.after_edit(host.document());
-                    }
-                    ui.end_row();
-
-                    ui.label("Line weight");
-                    ui.horizontal(|ui| {
-                        if controls::spin(ui, "styleWeight", &mut self.weight, WEIGHT).changed()
+                dialog::form(ui, |form| {
+                    form.row("Linetype", |ui| {
+                        if let Some(name) = self.linetype_picker.ui(ui, "styleLinetype")
                             && self.live()
                         {
-                            self.weight_varies = false;
-                            self.edited.line_weight = Some(self.weight);
+                            self.edited.linetype = Some(name);
                             self.after_edit(host.document());
                         }
-                        if self.weight_varies {
-                            ui.weak(VARIES);
+                    });
+                    form.row("Line weight", |ui| {
+                        ui.horizontal(|ui| {
+                            if controls::spin(ui, "styleWeight", &mut self.weight, WEIGHT).changed()
+                                && self.live()
+                            {
+                                self.weight_varies = false;
+                                self.edited.line_weight = Some(self.weight);
+                                self.after_edit(host.document());
+                            }
+                            if self.weight_varies {
+                                ui.weak(VARIES);
+                            }
+                        });
+                    });
+                    form.row("Colour", |ui| {
+                        ui.vertical(|ui| self.colour_row(ui, host));
+                    });
+                    form.row("Hatch", |ui| {
+                        if self.hatch.ui(ui, "styleHatch").changed() && self.live() {
+                            // Choosing <varies> again means "leave each as it is".
+                            self.edited.hatch_pattern = self.hatch.current();
+                            self.after_edit(host.document());
                         }
                     });
-                    ui.end_row();
-
-                    ui.label("Colour");
-                    ui.vertical(|ui| self.colour_row(ui, host));
-                    ui.end_row();
-
-                    ui.label("Hatch");
-                    if self.hatch.ui(ui, "styleHatch").changed() && self.live() {
-                        // Choosing <varies> again means "leave each as it is".
-                        self.edited.hatch_pattern = self.hatch.current();
-                        self.after_edit(host.document());
-                    }
-                    ui.end_row();
-
-                    ui.label("Symbol");
-                    if let Some(name) = self.symbol_picker.ui(ui, "styleSymbol")
-                        && self.live()
-                    {
-                        self.edited.symbol = Some(name);
-                        self.after_edit(host.document());
-                    }
-                    ui.end_row();
-
-                    ui.label("Symbol size");
-                    ui.horizontal(|ui| {
-                        if controls::spin(ui, "styleSymbolSize", &mut self.symbol_size, SYMBOL_SIZE)
+                    form.row("Symbol", |ui| {
+                        if let Some(name) = self.symbol_picker.ui(ui, "styleSymbol")
+                            && self.live()
+                        {
+                            self.edited.symbol = Some(name);
+                            self.after_edit(host.document());
+                        }
+                    });
+                    form.row("Symbol size", |ui| {
+                        ui.horizontal(|ui| {
+                            if controls::spin(
+                                ui,
+                                "styleSymbolSize",
+                                &mut self.symbol_size,
+                                SYMBOL_SIZE,
+                            )
                             .changed()
+                                && self.live()
+                            {
+                                self.symbol_size_varies = false;
+                                self.edited.symbol_size = Some(self.symbol_size);
+                                self.after_edit(host.document());
+                            }
+                            if self.symbol_size_varies {
+                                ui.weak(VARIES);
+                            }
+                        });
+                    });
+                    form.row("Description", |ui| {
+                        let placeholder = self.description_placeholder.clone();
+                        if controls::line_with(
+                            ui,
+                            "styleDescription",
+                            &mut self.description,
+                            controls::LineOptions {
+                                placeholder: &placeholder,
+                                ..controls::LineOptions::default()
+                            },
+                        )
+                        .changed()
                             && self.live()
                         {
-                            self.symbol_size_varies = false;
-                            self.edited.symbol_size = Some(self.symbol_size);
+                            self.description_placeholder.clear();
+                            self.edited.description = Some(self.description.clone());
                             self.after_edit(host.document());
                         }
-                        if self.symbol_size_varies {
-                            ui.weak(VARIES);
-                        }
                     });
-                    ui.end_row();
-
-                    ui.label("Description");
-                    let placeholder = self.description_placeholder.clone();
-                    if controls::line_with(
-                        ui,
-                        "styleDescription",
-                        &mut self.description,
-                        controls::LineOptions {
-                            placeholder: &placeholder,
-                            ..controls::LineOptions::default()
-                        },
-                    )
-                    .changed()
-                        && self.live()
-                    {
-                        self.description_placeholder.clear();
-                        self.edited.description = Some(self.description.clone());
-                        self.after_edit(host.document());
-                    }
-                    ui.end_row();
                 });
             });
             ui.horizontal(|ui| {

@@ -881,8 +881,9 @@ impl Body {
             // A radio button is its row's label, and the row's two closures are drawn together:
             // what it chose is said as `picked`, the change counted once both are drawn.
             let mut picked = false;
-            dialog::row_with(
+            dialog::row_with_check(
                 ui,
+                "Along an alignment",
                 |ui| {
                     if radio(
                         ui,
@@ -943,8 +944,9 @@ impl Body {
                     });
                 }
             });
-            dialog::row_with(
+            dialog::row_with_check(
                 ui,
+                "At points typed",
                 |ui| {
                     if radio(
                         ui,

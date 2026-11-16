@@ -41,6 +41,7 @@ use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::theme::palette;
 
 const DIALOG: &str = "textEditDialog";
@@ -409,10 +410,8 @@ impl TextEditDialog {
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         controls::label(ui, "textEditStatus", &self.status);
         ui.add_enabled_ui(self.editable, |ui| {
-            egui::Grid::new("textEditFields")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("Text");
+            dialog::form(ui, |form| {
+                form.row("Text", |ui| {
                     controls::text_with(
                         ui,
                         "textEditText",
@@ -423,33 +422,31 @@ impl TextEditDialog {
                         },
                     )
                     .on_hover_text("The words, a line a line: one text of several lines");
-                    ui.end_row();
-                    ui.label("Style");
+                });
+                form.row("Style", |ui| {
                     controls::choice(ui, "textEditStyle", &self.styles, &mut self.style)
                         .on_hover_text("The text style it is set in; (none) for the plain face");
-                    ui.end_row();
-                    let lines = [
-                        (
-                            "Height on paper (mm)",
-                            "textEditPaper",
-                            &mut self.paper,
-                            "Height on paper in mm, drawn at the annotation scale; 0 for the \
-                             style's, or a model height with no style",
-                        ),
-                        (
-                            "Model height",
-                            "textEditHeight",
-                            &mut self.height,
-                            "Height in model units; a paper-sized text's is worked out for the \
-                             annotation scale",
-                        ),
-                    ];
-                    for (title, name, value, tip) in lines {
-                        ui.label(title);
+                });
+                let lines = [
+                    (
+                        "Height on paper (mm)",
+                        "textEditPaper",
+                        &mut self.paper,
+                        "Height on paper in mm, drawn at the annotation scale; 0 for the                          style's, or a model height with no style",
+                    ),
+                    (
+                        "Model height",
+                        "textEditHeight",
+                        &mut self.height,
+                        "Height in model units; a paper-sized text's is worked out for the                          annotation scale",
+                    ),
+                ];
+                for (title, name, value, tip) in lines {
+                    form.row(title, |ui| {
                         controls::line(ui, name, value).on_hover_text(tip);
-                        ui.end_row();
-                    }
-                    ui.label("Justification");
+                    });
+                }
+                form.row("Justification", |ui| {
                     controls::choice(
                         ui,
                         "textEditJustify",
@@ -457,30 +454,29 @@ impl TextEditDialog {
                         &mut self.justify,
                     )
                     .on_hover_text(
-                        "The point the position is: T, M or B for top, middle or bottom (the \
-                         baseline), then L, C or R for left, centre or right",
+                        "The point the position is: T, M or B for top, middle or bottom (the                          baseline), then L, C or R for left, centre or right",
                     );
-                    ui.end_row();
-                    let lines = [
-                        (
-                            "Rotation (degrees)",
-                            "textEditRotation",
-                            &mut self.rotation,
-                            "Degrees counter-clockwise from east",
-                        ),
-                        (
-                            "Position (E,N)",
-                            "textEditPosition",
-                            &mut self.position,
-                            "The justification point, as E,N",
-                        ),
-                    ];
-                    for (title, name, value, tip) in lines {
-                        ui.label(title);
-                        controls::line(ui, name, value).on_hover_text(tip);
-                        ui.end_row();
-                    }
                 });
+                let lines = [
+                    (
+                        "Rotation (degrees)",
+                        "textEditRotation",
+                        &mut self.rotation,
+                        "Degrees counter-clockwise from east",
+                    ),
+                    (
+                        "Position (E,N)",
+                        "textEditPosition",
+                        &mut self.position,
+                        "The justification point, as E,N",
+                    ),
+                ];
+                for (title, name, value, tip) in lines {
+                    form.row(title, |ui| {
+                        controls::line(ui, name, value).on_hover_text(tip);
+                    });
+                }
+            });
         });
     }
 

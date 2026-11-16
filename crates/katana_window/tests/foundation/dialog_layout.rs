@@ -1,8 +1,9 @@
 //! The dialog frame's look (shell::dialog; the design of 2026-11-16, docs/desktop.md "The rules a
 //! dialog or panel follows"): a footer's buttons end at the dialog's right edge less its padding,
 //! the primary last and every button one least width; every labelled row of a body starts its
-//! field at one edge, a field of a width of its own and one beside a button included; a section's
-//! heading has a gap above it; a body is no wider than the width it is laid out at, so a note
+//! field at one edge, a field of a width of its own, one beside a button and one whose label is a
+//! check box included, and a panel's rows share a column as a body's do; a section's heading has a
+//! gap above it; a body is no wider than the width it is laid out at, so a note
 //! wraps in it. shell::dialog's form is the window's one form layout (dialog_layout's grid was
 //! folded into it), so these are the rules every dialog's form keeps.
 //!
@@ -14,7 +15,8 @@ use katana_window::drive::{self, LineOptions};
 use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
     BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, SECTION_GAP,
-    beside_a_button, button_row, fixed_fields, labelled, note, row_with_text, section,
+    beside_a_button, button_row, fixed_fields, form_panel, labelled, note, row_with_check,
+    row_with_text, section,
 };
 
 use crate::window_support::offscreen_harness;
@@ -217,7 +219,7 @@ mod dialog_layout {
     #[test]
     fn a_named_label_shown_after_its_column_was_measured_widens_it_to_one_line() {
         // The Leaders dialog's "Landing direction" (a label that is a control of its own, drawn
-        // with row_with) wrapped to the width of the shorter labels measured before it, a word to
+        // with the removed row_with) wrapped to the width of the shorter labels measured before it, a word to
         // a line: measured as drawn, it was measured in the narrow cell it was given.
         let mut harness = offscreen_harness();
         let mut frame = DialogFrame::new("namedDialog", "Named");
@@ -260,6 +262,92 @@ mod dialog_layout {
             "the label is {} high beside a field {} high",
             label.height(),
             named.height()
+        );
+    }
+
+    #[test]
+    fn a_check_box_or_a_radio_button_as_a_rows_label_takes_the_column_on_one_line() {
+        // Global Modify's ticks and the label editor's "Own text" are the labels of their rows. A
+        // box measured by its text alone left the column short by the box, and the text wrapped.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("checkDialog", "Checks");
+        let mut values = [String::new(), String::new(), String::new()];
+        // Longer than "Ids:", so the boxes are what the column is measured by.
+        let ticked_text = "A longer check box:";
+        let picked_text = "A longer radio button:";
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut values, |ui, values| {
+                    let [short, ticked, picked] = values;
+                    labelled(ui, "Ids:", |ui| drive::line(ui, "short", short));
+                    let mut on = true;
+                    row_with_check(
+                        ui,
+                        ticked_text,
+                        |ui| {
+                            drive::check(ui, "tick", ticked_text, &mut on);
+                        },
+                        |ui| drive::line(ui, "ticked", ticked),
+                    );
+                    row_with_check(
+                        ui,
+                        picked_text,
+                        |ui| {
+                            drive::radio(ui, "pick", picked_text, true);
+                        },
+                        |ui| drive::line(ui, "picked", picked),
+                    );
+                });
+            })
+            .expect("the dialog is drawn");
+        let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
+        let short = control("short");
+        for (label, field) in [("tick", "ticked"), ("pick", "picked")] {
+            let (label, field) = (control(label), control(field));
+            assert!((field.left() - short.left()).abs() <= HALF_A_POINT);
+            assert!(
+                label.right() <= field.left(),
+                "the box runs to {} past its field at {}",
+                label.right(),
+                field.left()
+            );
+            // One line: no taller than the field beside it (a second line would make it some 34).
+            assert!(
+                label.height() <= field.height() + HALF_A_POINT,
+                "the box is {} high beside a field {} high",
+                label.height(),
+                field.height()
+            );
+        }
+    }
+
+    #[test]
+    fn a_panels_rows_share_a_label_column_as_wide_as_its_widest_label() {
+        // The Sheets editor's properties are a dock, not a dialog's body: outside one, every row's
+        // column was LABEL_WIDTH from its own start.
+        let mut harness = offscreen_harness();
+        let mut values = [String::new(), String::new(), String::new()];
+        harness
+            .show(|ui| {
+                let [first, second, outside] = &mut values;
+                form_panel(ui, |ui| {
+                    labelled(ui, "Ids:", |ui| drive::line(ui, "first", first));
+                    labelled(ui, "Name:", |ui| drive::line(ui, "second", second));
+                });
+                labelled(ui, "Ids:", |ui| drive::line(ui, "outside", outside));
+            })
+            .expect("the panel is drawn");
+        let field = |name: &str| harness.control(name).expect("each field is drawn").rect;
+        let (first, second, outside) = (field("first"), field("second"), field("outside"));
+        assert!((first.left() - second.left()).abs() <= HALF_A_POINT);
+        // The row outside starts its field LABEL_WIDTH and a gap in; the panel's, after "Name:",
+        // far nearer its start.
+        let start = outside.left() - LABEL_WIDTH - FORM_SPACING.x;
+        assert!(
+            first.left() - start < LABEL_WIDTH / 2.0,
+            "the panel's fields start {} in",
+            first.left() - start
         );
     }
 

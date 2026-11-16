@@ -4,15 +4,16 @@
 //! plotting/grid_properties.
 //!
 //! The C++ added two rows to a form and called back with the style and the spacing. Here the rows
-//! are drawn each frame into the editor's form (an egui Grid of two columns) and the change, when
-//! there is one, is answered: the editor makes it, as one undoable step, and the rows are drawn
-//! from the edited viewport at the next frame.
+//! are drawn each frame into the editor's form (shell::dialog's labelled rows, in the column the
+//! properties' other rows share) and the change, when there is one, is answered: the editor makes
+//! it, as one undoable step, and the rows are drawn from the edited viewport at the next frame.
 
 use egui::Ui;
 use katana_cad::plotting::sheet_set::{GridStyle, Viewport};
 use katana_core::text::format_general;
 
 use crate::drive::controls::{self, Choice, SpinRange};
+use crate::shell::dialog;
 
 /// The styles, in the order of the list: each item's wording, and the style it stands for. The
 /// wording can change without touching what is saved.
@@ -57,7 +58,6 @@ impl GridRows {
         }
         let mut chosen = None;
 
-        ui.label("Grid");
         let items: Vec<String> = STYLES.iter().map(|(name, _)| String::from(*name)).collect();
         let mut style = Choice::at(
             STYLES
@@ -65,9 +65,11 @@ impl GridRows {
                 .position(|(_, value)| *value == viewport.grid_style)
                 .unwrap_or(0),
         );
-        let picked = controls::choice(ui, "sheetGridStyle", &items, &mut style).on_hover_text(
-            "The ground's eastings and northings, labelled where they meet the view's edges",
-        );
+        let picked = dialog::labelled(ui, "Grid", |ui| {
+            controls::choice(ui, "sheetGridStyle", &items, &mut style).on_hover_text(
+                "The ground's eastings and northings, labelled where they meet the view's edges",
+            )
+        });
         let style_now = style
             .index
             .and_then(|at| STYLES.get(at))
@@ -75,11 +77,9 @@ impl GridRows {
         if picked.changed() {
             chosen = Some((style_now, self.interval));
         }
-        ui.end_row();
 
-        ui.label("Grid interval");
-        let spacing = ui
-            .add_enabled_ui(viewport.grid_style != GridStyle::None, |ui| {
+        let spacing = dialog::labelled(ui, "Grid interval", |ui| {
+            ui.add_enabled_ui(viewport.grid_style != GridStyle::None, |ui| {
                 controls::spin(
                     ui,
                     "sheetGridInterval",
@@ -91,14 +91,15 @@ impl GridRows {
                 )
             })
             .inner
-            .on_hover_text(if automatic_interval_m > 0.0 {
-                format!(
-                    "The spacing in metres; Auto is about 50 mm apart on the paper - {} m now",
-                    format_general(automatic_interval_m, 6)
-                )
-            } else {
-                String::from("The spacing in metres; Auto is about 50 mm apart on the paper")
-            });
+        })
+        .on_hover_text(if automatic_interval_m > 0.0 {
+            format!(
+                "The spacing in metres; Auto is about 50 mm apart on the paper - {} m now",
+                format_general(automatic_interval_m, 6)
+            )
+        } else {
+            String::from("The spacing in metres; Auto is about 50 mm apart on the paper")
+        });
         if spacing.changed() {
             self.typing = true;
         }
@@ -109,7 +110,6 @@ impl GridRows {
                 chosen = Some((style_now, self.interval));
             }
         }
-        ui.end_row();
         chosen
     }
 }
