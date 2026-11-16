@@ -113,6 +113,7 @@ use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{DocumentWatcher, ScopeChoice, ScopeFilterView, ScopeFilterWidget};
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::drive::registry::{ControlKind, ControlRecord};
+use crate::geo::terrain_dialog_parts::RunStatus;
 use crate::host::Host;
 use crate::ifc_dialogs::{get_open_file_name, get_save_file_name, to_native_separators};
 use crate::shell::DialogFrame;
@@ -701,8 +702,8 @@ pub struct UtilityToolsDialog {
     schedule_out: String,
     schedule_schema: String,
     output: String,
-    status: String,
-    status_error: bool,
+    /// What happened last, or why there is no line yet (geo::terrain_dialog_parts::RunStatus).
+    status: RunStatus,
 }
 
 /// The dialog and the window, lent together to the dialog frame's body and footer.
@@ -815,8 +816,7 @@ impl UtilityToolsDialog {
             schedule_out: String::new(),
             schedule_schema: String::new(),
             output: String::new(),
-            status: String::new(),
-            status_error: false,
+            status: RunStatus::default(),
         };
         dialog.reload(host);
         dialog
@@ -1080,17 +1080,17 @@ impl UtilityToolsDialog {
     }
 
     /// What utilityStatus says, and whether it says it as an error.
+    /// The last thing the status said; "" when it says only why there is no line.
     pub fn status(&self) -> &str {
-        &self.status
+        self.status.said()
     }
 
     pub fn status_is_error(&self) -> bool {
-        self.status_error
+        self.status.is_error()
     }
 
     pub fn set_status(&mut self, text: &str, is_error: bool) {
-        self.status = String::from(text);
-        self.status_error = is_error;
+        self.status.set(text, is_error);
     }
 
     /// The file name Save As offers, "utility_draw.txt": named for the tool whose reply
@@ -1296,21 +1296,22 @@ impl UtilityToolsDialog {
         });
 
         // ---- the line, as it will run: read again, after what this frame's controls changed ----
+        // Why there is no line is the footer's status (RunStatus), not the field's placeholder.
         let line = self.command();
-        let (mut shown, placeholder) = match &line {
+        let (mut shown, why) = match &line {
             Ok(line) => (line.clone(), String::new()),
             Err(error) => (
                 String::new(),
-                format!("nothing to run yet: {}", error.message),
+                format!("Nothing to run yet: {}", error.message),
             ),
         };
+        self.status.read_line(why);
         crate::shell::dialog::labelled(ui, "Command", |ui| {
             controls::line_with(
                 ui,
                 "utilityCommand",
                 &mut shown,
                 LineOptions {
-                    placeholder: &placeholder,
                     read_only: true,
                     ..LineOptions::default()
                 },
@@ -1331,8 +1332,8 @@ impl UtilityToolsDialog {
         let mut reply = self.output.clone();
         crate::shell::dialog::reply(ui, "utilityOutput", &mut reply, UTILITY_REPLY_ROWS);
         let has_output = !self.output.is_empty();
-        let status = self.status.clone();
-        let colour = crate::shell::dialog::status_colour(self.status_error);
+        let (status, is_error) = self.status.shown();
+        let colour = crate::shell::dialog::status_colour(is_error);
         let ((copy, save), (close, run)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
@@ -1390,7 +1391,7 @@ impl UtilityToolsDialog {
         let grading = GradingSettings::default();
         ui.add_enabled_ui(grades, |ui| {
             labelled(ui, "Detected spacing (m):", |ui| {
-                path_line(
+                plain_line(
                     ui,
                     "utilitySpacing",
                     &mut self.spacing,
@@ -1401,7 +1402,7 @@ impl UtilityToolsDialog {
                 );
             });
             labelled(ui, "Minimum cover (m):", |ui| {
-                path_line(
+                plain_line(
                     ui,
                     "utilityMinCover",
                     &mut self.min_cover,
@@ -1416,7 +1417,6 @@ impl UtilityToolsDialog {
         if controls::tabs(ui, "utilityTabs", &TAB_TITLES, &mut current).changed() {
             self.tool = UtilityTool::from_index(current);
         }
-        ui.separator();
         match self.tool {
             UtilityTool::Draw => self.draw_page(ui, drawing),
             UtilityTool::Report => note(
@@ -1516,7 +1516,7 @@ impl UtilityToolsDialog {
              as it is.",
         );
         labelled(ui, "Layer prefix:", |ui| {
-            path_line(
+            plain_line(
                 ui,
                 "utilityLayerPrefix",
                 &mut self.layer_prefix,
@@ -1672,99 +1672,145 @@ impl UtilityToolsDialog {
              nearby: locate it first), Within tolerance, or Clear. The clearances are the asset \
              owners' rules, not AS 5488's.",
         );
+        // The three sources are rows of the page's form, their buttons in its label column, so
+        // their fields start where Works width's does and end at the column's edge. The drawn
+        // line's Level, beside Use Selected on one row, ran 120 past the body's edge.
         let source = self.design_source;
-        ui.horizontal(|ui| {
-            if controls::radio(
-                ui,
-                "utilityDesignFile",
-                "Design file",
-                source == UtilityDesignSource::File,
-            )
-            .clicked()
-            {
-                self.design_source = UtilityDesignSource::File;
-            }
-            ui.add_enabled_ui(source == UtilityDesignSource::File, |ui| {
-                path_line(
+        let mut chosen = None;
+        crate::shell::dialog::row_with_check(
+            ui,
+            "Design file",
+            |ui| {
+                if controls::radio(
                     ui,
-                    "utilityDesign",
-                    &mut self.design,
-                    "the proposed works: a .csv of the centre line",
-                    "The design centre line (docs/subsurface_utilities.md): easting, northing and \
-                     an optional level at each vertex",
-                );
-                if controls::button(ui, "utilityDesignBrowse", "Browse...").clicked() {
-                    self.browse(host, PathField::Design, "Proposed Works", false);
-                }
-            });
-        });
-        ui.horizontal(|ui| {
-            if controls::radio(
-                ui,
-                "utilityDesignEntity",
-                "Drawn line or polyline",
-                source == UtilityDesignSource::Entity,
-            )
-            .clicked()
-            {
-                self.design_source = UtilityDesignSource::Entity;
-            }
-            ui.add_enabled_ui(source == UtilityDesignSource::Entity, |ui| {
-                path_line(
-                    ui,
-                    "utilityDesignEntityId",
-                    &mut self.design_entity,
-                    "#id of its centre line",
-                    "A line or polyline in the drawing as the works' centre line: #id, or select \
-                     it and press Use Selected",
-                );
-                if controls::button(ui, "utilityDesignUseSelected", "Use Selected")
-                    .on_hover_text("The one entity selected in the drawing")
-                    .clicked()
+                    "utilityDesignFile",
+                    "Design file",
+                    source == UtilityDesignSource::File,
+                )
+                .clicked()
                 {
-                    self.use_selected_design(host);
+                    chosen = Some(UtilityDesignSource::File);
                 }
-                ui.label("Level (m)");
-                path_line(
+            },
+            |ui| {
+                ui.add_enabled_ui(source == UtilityDesignSource::File, |ui| {
+                    path_line(
+                        ui,
+                        "utilityDesign",
+                        &mut self.design,
+                        "the proposed works: a .csv of the centre line",
+                        "The design centre line (docs/subsurface_utilities.md): easting, northing \
+                         and an optional level at each vertex",
+                    );
+                    if controls::button(ui, "utilityDesignBrowse", "Browse...").clicked() {
+                        self.browse(host, PathField::Design, "Proposed Works", false);
+                    }
+                });
+            },
+        );
+        let mut use_selected = false;
+        crate::shell::dialog::row_with_check(
+            ui,
+            "Drawn line or polyline",
+            |ui| {
+                if controls::radio(
+                    ui,
+                    "utilityDesignEntity",
+                    "Drawn line or polyline",
+                    source == UtilityDesignSource::Entity,
+                )
+                .clicked()
+                {
+                    chosen = Some(UtilityDesignSource::Entity);
+                }
+            },
+            |ui| {
+                ui.add_enabled_ui(source == UtilityDesignSource::Entity, |ui| {
+                    let width = crate::shell::dialog::beside_a_button(ui, "Use Selected");
+                    controls::line_with(
+                        ui,
+                        "utilityDesignEntityId",
+                        &mut self.design_entity,
+                        LineOptions {
+                            placeholder: "#id of its centre line",
+                            width: Some(width),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .on_hover_text(
+                        "A line or polyline in the drawing as the works' centre line: #id, or \
+                         select it and press Use Selected",
+                    );
+                    use_selected = controls::button(ui, "utilityDesignUseSelected", "Use Selected")
+                        .on_hover_text("The one entity selected in the drawing")
+                        .clicked();
+                });
+            },
+        );
+        if use_selected {
+            self.use_selected_design(host);
+        }
+        ui.add_enabled_ui(source == UtilityDesignSource::Entity, |ui| {
+            labelled(ui, "Level (m)", |ui| {
+                plain_line(
                     ui,
                     "utilityDesignLevel",
                     &mut self.design_level,
                     "its own heights, if it has them",
-                    "LEVEL: the works' level, metres; left blank, the levels the line or polyline \
-                     carries, or none",
+                    "LEVEL: the works' level, metres; left blank, the levels the line or \
+                     polyline carries, or none",
                 );
             });
         });
-        ui.horizontal(|ui| {
-            if controls::radio(
-                ui,
-                "utilityDesignAlignment",
-                "Alignment",
-                source == UtilityDesignSource::Alignment,
-            )
-            .clicked()
-            {
-                self.design_source = UtilityDesignSource::Alignment;
-            }
-            ui.add_enabled_ui(source == UtilityDesignSource::Alignment, |ui| {
-                controls::choice(
+        crate::shell::dialog::row_with_check(
+            ui,
+            "Alignment",
+            |ui| {
+                if controls::radio(
                     ui,
-                    "utilityDesignAlignmentName",
-                    &self.alignments,
-                    &mut self.alignment,
+                    "utilityDesignAlignment",
+                    "Alignment",
+                    source == UtilityDesignSource::Alignment,
                 )
-                .on_hover_text(
-                    "One of the drawing's alignments: its horizontal geometry, at the levels of \
-                     its design profile where it has one",
-                );
-                if self.alignments.is_empty() {
-                    ui.weak("the drawing has no alignment");
+                .clicked()
+                {
+                    chosen = Some(UtilityDesignSource::Alignment);
                 }
-            });
-        });
+            },
+            |ui| {
+                ui.add_enabled_ui(source == UtilityDesignSource::Alignment, |ui| {
+                    if self.alignments.is_empty() {
+                        // An empty choice says nothing; the choice is there for a driver still.
+                        ui.weak("the drawing has no alignment");
+                        super::survey_dialogs::hidden(ui, "utilityDesignAlignmentNone", |ui| {
+                            controls::choice(
+                                ui,
+                                "utilityDesignAlignmentName",
+                                &self.alignments,
+                                &mut self.alignment,
+                            );
+                        });
+                    } else {
+                        controls::choice(
+                            ui,
+                            "utilityDesignAlignmentName",
+                            &self.alignments,
+                            &mut self.alignment,
+                        )
+                        .on_hover_text(
+                            "One of the drawing's alignments: its horizontal geometry, at the \
+                             levels of its design profile where it has one",
+                        );
+                    }
+                });
+            },
+        );
+        if let Some(chosen) = chosen {
+            self.design_source = chosen;
+        }
         let requirement = ClearanceRequirement::default();
         labelled(ui, "Works width (m):", |ui| {
-            path_line(
+            plain_line(
                 ui,
                 "utilityWidth",
                 &mut self.width,
@@ -1773,7 +1819,7 @@ impl UtilityToolsDialog {
             );
         });
         labelled(ui, "Horizontal clearance (m):", |ui| {
-            path_line(
+            plain_line(
                 ui,
                 "utilityH",
                 &mut self.horizontal,
@@ -1782,7 +1828,7 @@ impl UtilityToolsDialog {
             );
         });
         labelled(ui, "Vertical clearance (m):", |ui| {
-            path_line(
+            plain_line(
                 ui,
                 "utilityV",
                 &mut self.vertical,
@@ -1791,7 +1837,7 @@ impl UtilityToolsDialog {
             );
         });
         labelled(ui, "Unverified margin (m):", |ui| {
-            path_line(
+            plain_line(
                 ui,
                 "utilityMargin",
                 &mut self.margin,

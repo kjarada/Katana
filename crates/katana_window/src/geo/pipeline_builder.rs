@@ -483,7 +483,10 @@ impl PipelineBuilder {
             steps: Vec::new(),
             source: BindingPicker::new(
                 "gdalPipeline",
-                BindingKind::DRAWING | BindingKind::RASTER | BindingKind::SURFACE | BindingKind::FILE,
+                BindingKind::DRAWING
+                    | BindingKind::RASTER
+                    | BindingKind::SURFACE
+                    | BindingKind::FILE,
                 host,
             ),
             row: None,
@@ -577,8 +580,7 @@ impl PipelineBuilder {
 
     /// Whether the row selected is a step: neither read nor write.
     fn middle(&self) -> Option<usize> {
-        self.row
-            .filter(|row| *row >= 1 && *row <= self.steps.len())
+        self.row.filter(|row| *row >= 1 && *row <= self.steps.len())
     }
 
     /// Where a step added now goes: after the step selected; after the last when read or write is.
@@ -606,10 +608,7 @@ impl PipelineBuilder {
         let kind = self.kind_after(at);
         let Some(chosen) = step_reading(name, kind) else {
             self.panel.set_status(
-                &format!(
-                    "No pipeline step {name} reads {} there.",
-                    kind_word(kind)
-                ),
+                &format!("No pipeline step {name} reads {} there.", kind_word(kind)),
                 true,
             );
             return false;
@@ -733,10 +732,7 @@ impl PipelineBuilder {
                     Err(refused) => format!(". It cannot run: {}.", refused.message),
                 };
                 self.panel.set_status(
-                    &format!(
-                        "The text is not read into steps: {}{ending}",
-                        error.message
-                    ),
+                    &format!("The text is not read into steps: {}{ending}", error.message),
                     true,
                 );
             }
@@ -835,14 +831,41 @@ impl PipelineBuilder {
         self.source.reload(host);
     }
 
-    /// Draws the tab, running its line when Run or Preview is pressed.
+    /// Draws the tab whole - its fields, its Command row, its reply and its row of buttons -
+    /// running its line when Run or Preview is pressed: the builder on its own.
     pub fn ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        let outer = ui.vertical(|ui| {
+            self.contents(ui, host);
+            let _ = self.footer_ui(ui, host, None);
+        });
+        custom(
+            ui,
+            &outer.response,
+            ControlRecord::new("gdalPipeline", ControlKind::Other),
+        );
+    }
+
+    /// Draws the tab's fields and its Command row, as a page of the GDAL Toolbox's body: its reply
+    /// and its buttons are the toolbox's footer (`footer_ui`).
+    pub fn page_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let outer = ui.vertical(|ui| self.contents(ui, host));
         custom(
             ui,
             &outer.response,
             ControlRecord::new("gdalPipeline", ControlKind::Other),
         );
+    }
+
+    /// The tab's reply, once there is one, and its row of buttons (GeoRunPanel::footer_ui), Close
+    /// named `close` when the row has one; runs the line when Run or Preview is pressed. Whether
+    /// Close was clicked.
+    pub fn footer_ui(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
+        let made = pipeline_line(&self.form());
+        let (finished, closed) = self.panel.footer_ui(ui, host, &made, close);
+        if finished.is_some() {
+            self.reload(&*host);
+        }
+        closed
     }
 
     fn contents(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -922,9 +945,7 @@ impl PipelineBuilder {
         });
         let text_changed = row(ui, "Pipeline:", |ui| {
             line(ui, "gdalPipelineText", &mut self.text)
-                .on_hover_text(
-                    "The pipeline as GDAL reads it; an edit is read back into the steps",
-                )
+                .on_hover_text("The pipeline as GDAL reads it; an edit is read back into the steps")
                 .changed()
         });
         let kind_changed = row(ui, "Write to:", |ui| {
@@ -984,8 +1005,6 @@ impl PipelineBuilder {
             self.save(&*host);
         }
         let made = pipeline_line(&self.form());
-        if self.panel.ui(ui, host, &made).is_some() {
-            self.reload(&*host);
-        }
+        self.panel.command_ui(ui, &made);
     }
 }

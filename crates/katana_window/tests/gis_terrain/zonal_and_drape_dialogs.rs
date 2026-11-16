@@ -137,10 +137,14 @@ mod zonal_stats_dialog {
     }
 
     #[test]
-    fn with_nothing_to_measure_run_is_off_and_the_command_says_why() {
+    fn with_nothing_to_measure_run_is_off_and_the_status_says_why() {
         let bench = zonal_bench(ran_host());
         assert!(!bench.enabled("zonalRun"));
-        assert!(bench.placeholder("zonalCommand").contains("Source"));
+        // Why there is no line is the footer's status; the Command field holds the line only,
+        // and shows no sentence in its place.
+        assert!(bench.text("zonalStatus").contains("Source"));
+        assert!(bench.text("zonalCommand").is_empty());
+        assert!(bench.placeholder("zonalCommand").is_empty());
     }
 }
 

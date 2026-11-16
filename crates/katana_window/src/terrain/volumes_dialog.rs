@@ -61,8 +61,8 @@ use crate::customisation::{DocumentWatcher, ScopeFilterWidget};
 use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{
-    Choice, LineOptions, SpinRange, TextOptions, button, check, choice, label_as, line_with,
-    primary, radio, spin, tabs, text_with,
+    Choice, LineOptions, SpinRange, button, check, choice, label_as, line_with, primary, radio,
+    spin, tabs,
 };
 use crate::geo::geo_dialog_support::line_word;
 use crate::geo::terrain_dialog_parts::{Framed, WordChoice, host_views, row, show_framed};
@@ -432,7 +432,6 @@ enum Boundary {
 /// What a frame's clicks ask for, done after the dialog's body is drawn.
 #[derive(Clone, Copy)]
 enum Asked {
-    Measure,
     Copy,
     Browse,
     SaveCsv,
@@ -502,7 +501,9 @@ impl VolumesDialog {
         scope.views = host_views(host);
         let mut dialog = Self {
             watcher: DocumentWatcher::new(host.document()),
-            frame: DialogFrame::new("volumesDialog", "Volumes"),
+            // The Inside group's row of three ways and its tick (535 wide) held in the body: at
+            // the frame's 520 it ran past the tabs' rule and the fields' right edge.
+            frame: DialogFrame::new("volumesDialog", "Volumes").width(VOLUMES_WIDTH),
             visible: false,
             page: 0,
             surfaces: Vec::new(),
@@ -719,7 +720,8 @@ impl VolumesDialog {
                     chosen(&self.sections_base, surfaces, "Base", NO_SURFACE),
                     chosen(&self.sections_top, surfaces, "Top", NO_SURFACE),
                 )?;
-                let alignment = chosen(&self.alignment, &self.alignments, "Alignment", NO_ALIGNMENT)?;
+                let alignment =
+                    chosen(&self.alignment, &self.alignments, "Alignment", NO_ALIGNMENT)?;
                 words.extend([
                     String::from("SECTIONS"),
                     base,
@@ -919,10 +921,7 @@ impl VolumesDialog {
             self.csv_path.clone_from(&path);
         }
         if path.is_empty() {
-            self.set_status(
-                "Give the file to save the table to in the CSV field.",
-                true,
-            );
+            self.set_status("Give the file to save the table to in the CSV field.", true);
             return false;
         }
         let made = match self.line() {
@@ -1145,8 +1144,13 @@ impl VolumesDialog {
                 .on_hover_text(TOP_TIP);
         });
         row(ui, "Alignment:", |ui| {
-            choice(ui, "volumesAlignment", &self.alignments, &mut self.alignment)
-                .on_hover_text("The alignment the sections are cut square to");
+            choice(
+                ui,
+                "volumesAlignment",
+                &self.alignments,
+                &mut self.alignment,
+            )
+            .on_hover_text("The alignment the sections are cut square to");
         });
         row(ui, "Interval:", |ui| {
             spin(ui, "volumesInterval", &mut self.interval, INTERVAL).on_hover_text(
@@ -1154,18 +1158,19 @@ impl VolumesDialog {
                  stations",
             );
         });
-        let station = |ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip: &str| {
-            line_with(
-                ui,
-                name,
-                value,
-                LineOptions {
-                    placeholder,
-                    ..LineOptions::default()
-                },
-            )
-            .on_hover_text(tip);
-        };
+        let station =
+            |ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip: &str| {
+                line_with(
+                    ui,
+                    name,
+                    value,
+                    LineOptions {
+                        placeholder,
+                        ..LineOptions::default()
+                    },
+                )
+                .on_hover_text(tip);
+            };
         row(ui, "From station:", |ui| {
             station(
                 ui,
@@ -1184,10 +1189,8 @@ impl VolumesDialog {
                 "The last station; blank for the alignment's end",
             );
         });
-        let left_tip =
-            format!("How far each section reaches left of the centreline{REACH_TIP}");
-        let right_tip =
-            format!("How far each section reaches right of the centreline{REACH_TIP}");
+        let left_tip = format!("How far each section reaches left of the centreline{REACH_TIP}");
+        let right_tip = format!("How far each section reaches right of the centreline{REACH_TIP}");
         row(ui, "Left:", |ui| {
             station(
                 ui,
@@ -1364,29 +1367,26 @@ impl VolumesDialog {
         });
     }
 
-    /// The line as it will run, and Measure - the dialog's act, in the accent.
-    fn command_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
+    /// The line as it will run, filling its row; Measure, the dialog's act, is the footer's last
+    /// button (`footer`). It stood beside the line in the body, below the fold, with only Close
+    /// in the footer.
+    fn command_row(&mut self, ui: &mut Ui) {
         let made = self.line();
         let (mut shown, tip) = match &made {
             Ok(line) => (line.clone(), String::from("The line Measure runs")),
             Err(error) => (String::new(), error.message.clone()),
         };
-        dialog::labelled(ui, "Command:", |ui| {
-            let width = dialog::beside_a_button(ui, "Measure");
+        dialog::labelled(ui, "Command", |ui| {
             line_with(
                 ui,
                 "volumesCommand",
                 &mut shown,
                 LineOptions {
                     read_only: true,
-                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
             .on_hover_text(tip);
-            if primary(ui, "volumesRun", "Measure").clicked() {
-                *asked = Some(Asked::Measure);
-            }
         });
     }
 
@@ -1506,6 +1506,12 @@ impl VolumesDialog {
     }
 }
 
+/// The body's width: the Inside group's ways and its tick on one row.
+const VOLUMES_WIDTH: f32 = 600.0;
+
+/// The most lines the reply shows before it scrolls: a polygon's records and the total.
+const VOLUMES_REPLY_ROWS: usize = 4;
+
 /// The width of the envelope's Higher / Lower choice, beside its name.
 const ENVELOPE_SIDE_WIDTH: f32 = 96.0;
 
@@ -1521,39 +1527,17 @@ impl Framed for VolumesDialog {
         self.boundary_group(ui);
         ui.add_space(dialog::GROUP_GAP);
         self.factors(ui);
-        self.command_row(ui, &mut asked);
+        self.command_row(ui);
         ui.add_space(dialog::GROUP_GAP);
         self.results(ui);
         self.file_row(ui, &mut asked);
         self.map_row(ui, &mut asked);
         self.envelope_row(ui, &mut asked);
+        // The reply once there is one, taking no room until then (an empty box four lines high
+        // stood under the results).
         ui.add_space(dialog::GROUP_GAP);
-        let colour = if self.status_is_error {
-            palette::error()
-        } else {
-            palette::text()
-        };
-        let status = self.status.clone();
-        label_as(
-            ui,
-            "volumesStatus",
-            &status,
-            egui::Label::new(RichText::new(status.as_str()).color(colour.to_egui())).wrap(),
-        );
-        text_with(
-            ui,
-            "volumesReply",
-            &mut self.reply,
-            TextOptions {
-                read_only: true,
-                rows: 4,
-                monospace: true,
-            },
-        );
+        dialog::reply(ui, "volumesReply", &mut self.reply, VOLUMES_REPLY_ROWS);
         match asked {
-            Some(Asked::Measure) => {
-                self.measure(host);
-            }
             Some(Asked::Copy) => self.copy(host),
             Some(Asked::Browse) => self.browse(host),
             Some(Asked::SaveCsv) => {
@@ -1569,12 +1553,42 @@ impl Framed for VolumesDialog {
         }
     }
 
-    fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        let ((), close) = dialog::button_row(
+    /// The design's one footer (shell::dialog::button_row): the status at the left - what the
+    /// last act said, or why there is no line yet - then Close, then Measure in the accent.
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        let (status, is_error) = if self.status.is_empty() {
+            (
+                self.line()
+                    .err()
+                    .map(|error| error.message)
+                    .unwrap_or_default(),
+                false,
+            )
+        } else {
+            (self.status.clone(), self.status_is_error)
+        };
+        let ((), (close, measure)) = dialog::button_row(
             ui,
-            |_| {},
-            |ui| button(ui, "volumesClose", "Close").clicked(),
+            |ui| {
+                label_as(
+                    ui,
+                    "volumesStatus",
+                    &status,
+                    egui::Label::new(
+                        RichText::new(status.as_str()).color(dialog::status_colour(is_error)),
+                    )
+                    .wrap(),
+                );
+            },
+            |ui| {
+                let close = button(ui, "volumesClose", "Close").clicked();
+                let measure = primary(ui, "volumesRun", "Measure").clicked();
+                (close, measure)
+            },
         );
+        if measure {
+            self.measure(host);
+        }
         if close {
             self.hide();
         }

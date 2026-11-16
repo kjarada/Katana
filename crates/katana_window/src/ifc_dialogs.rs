@@ -56,7 +56,7 @@ use katana_ifc::{
 };
 use katana_survey::subsurface::GradingSettings;
 
-use crate::drive::controls::{self, LineOptions, TextOptions};
+use crate::drive::controls::{self, LineOptions};
 use crate::format::grouped;
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -210,6 +210,9 @@ fn command_field(ui: &mut Ui, name: &str, line: &str) {
     )
     .on_hover_text(COMMAND_TIP);
 }
+
+/// The most lines Import IFC's summary shows before it scrolls (the C++ box's ten).
+const IMPORT_SUMMARY_ROWS: usize = 10;
 
 /// A path field with its placeholder, leaving its row the room for the Browse button after it;
 /// true when it changed.
@@ -1435,23 +1438,16 @@ impl IfcImportDialog {
         if std::mem::take(&mut self.pending_describe) {
             self.describe(&mut *host);
         }
+        // What the file holds, once Describe has said: an empty well ten lines high stood here
+        // before (shell::dialog::reply, which takes no room until there is something to show).
         let mut summary = self.summary.clone();
-        controls::text_with(
-            ui,
-            "ifcImportSummary",
-            &mut summary,
-            TextOptions {
-                read_only: true,
-                rows: 10,
-                monospace: true,
-            },
-        );
         if self.summary.is_empty() {
             ui.weak(
                 "What the file holds - its schema, coordinate system, classes, alignments and \
                  surfaces - shown by Describe.",
             );
         }
+        dialog::reply(ui, "ifcImportSummary", &mut summary, IMPORT_SUMMARY_ROWS);
         let mut changed = false;
         labelled(ui, "Bring in", |ui| {
             changed |= controls::check(

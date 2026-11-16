@@ -52,7 +52,6 @@ use katana_interop::{
 };
 use katana_pointcloud::point_cloud_engine::PointCloudEngine;
 
-use crate::annotation::dialog_support::table;
 use crate::customisation::ScopeFilterWidget;
 use crate::customisation::scope_filter_widget::WIDGET_WIDTH;
 use crate::drive::{
@@ -60,7 +59,7 @@ use crate::drive::{
 };
 use crate::format::grouped;
 use crate::geo::gis_tool_dialog::GisDialogContext;
-use crate::gis_dialog_support::{ok_cancel, ok_cancel_beside};
+use crate::gis_dialog_support::ok_cancel_beside;
 use crate::host::{Host, VerbOutcome};
 use crate::import_placement::{DialogResult, ImportPlacementBox};
 use crate::shell::DialogFrame;
@@ -95,11 +94,13 @@ fn stem_of(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// The line a dialog shows, and whether there is one for Import to run.
+/// The line a dialog shows, whether there is one for Import to run, and why not when there is
+/// none - said at the footer's left (`status`), not as the Command field's placeholder, where a
+/// sentence read as the command.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct CommandShown {
     text: String,
-    placeholder: String,
+    why: String,
     ready: bool,
 }
 
@@ -108,15 +109,28 @@ impl CommandShown {
         match line {
             Ok(line) => Self {
                 text: line.clone(),
-                placeholder: String::new(),
+                why: String::new(),
                 ready: true,
             },
             Err(error) => Self {
                 text: String::new(),
-                placeholder: format!("nothing to import yet: {}", error.message),
+                why: format!("Nothing to import yet: {}", error.message),
                 ready: false,
             },
         }
+    }
+
+    /// Why there is no line, muted at the footer's left as `name`; "" when there is one.
+    fn status(&self, ui: &mut Ui, name: &str) {
+        label_as(
+            ui,
+            name,
+            &self.why,
+            egui::Label::new(
+                RichText::new(self.why.as_str()).color(crate::shell::dialog::status_colour(false)),
+            )
+            .wrap(),
+        );
     }
 
     /// The read-only line, under "Command".
@@ -127,7 +141,6 @@ impl CommandShown {
                 name,
                 &mut self.text,
                 LineOptions {
-                    placeholder: &self.placeholder,
                     read_only: true,
                     width: Some(f32::INFINITY),
                     ..LineOptions::default()
@@ -162,8 +175,14 @@ struct DataChoice {
 impl DataChoice {
     fn new(entries: &[(&str, &str)]) -> Self {
         Self {
-            items: entries.iter().map(|(shown, _)| String::from(*shown)).collect(),
-            data: entries.iter().map(|(_, data)| String::from(*data)).collect(),
+            items: entries
+                .iter()
+                .map(|(shown, _)| String::from(*shown))
+                .collect(),
+            data: entries
+                .iter()
+                .map(|(_, data)| String::from(*data))
+                .collect(),
             chosen: Choice::at(0),
         }
     }
@@ -372,10 +391,7 @@ impl VectorImportDialog {
             crs: DataChoice::new(&[
                 ("As the file has them", ""),
                 ("Into the project's coordinate system", "project"),
-                (
-                    "Set the project's from the file, if it has none",
-                    "adopt",
-                ),
+                ("Set the project's from the file, if it has none", "adopt"),
             ]),
             assume_crs: String::new(),
             placement,
@@ -582,9 +598,8 @@ impl VectorImportDialog {
                 continue;
             }
             if record.get("ran") == Some("no") {
-                self.match_count = String::from(
-                    "The scope takes nothing of the drawing: nothing would be read.",
-                );
+                self.match_count =
+                    String::from("The scope takes nothing of the drawing: nothing would be read.");
                 return;
             }
             let text = |key: &str| record.get(key).unwrap_or("?");
@@ -627,12 +642,8 @@ impl VectorImportDialog {
                     // Preview and what it counted at the left: they read the file and import
                     // nothing.
                     let said = lent.0.match_count.clone();
-                    let (previewed, buttons) = ok_cancel_beside(
-                        ui,
-                        "vectorImportDialog",
-                        "Import",
-                        ready,
-                        |ui| {
+                    let (previewed, buttons) =
+                        ok_cancel_beside(ui, "vectorImportDialog", "Import", ready, |ui| {
                             let previewed = ui
                                 .add_enabled_ui(ready, |ui| {
                                     button(ui, "vectorImportPreview", "Preview")
@@ -645,6 +656,7 @@ impl VectorImportDialog {
                                 .inner;
                             // GDAL's words, shown as they are: read as markup, a "<code>" in a
                             // message was taken for a tag and vanished.
+                            lent.1.status(ui, "vectorImportStatus");
                             label_as(
                                 ui,
                                 "vectorImportMatchCount",
@@ -656,8 +668,7 @@ impl VectorImportDialog {
                                 .wrap(),
                             );
                             previewed
-                        },
-                    );
+                        });
                     if previewed {
                         *lent.3 = true;
                     }
@@ -704,7 +715,9 @@ impl VectorImportDialog {
                     .max_height(110.0)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        table(
+                        // The header spans the column, as the fields under it do (the table
+                        // look's fill): sized to its word it stood 147 wide over a column of 380.
+                        crate::annotation::dialog_support::table_look(
                             ui,
                             "vectorImportFileLayers",
                             &["Layer"],
@@ -712,6 +725,10 @@ impl VectorImportDialog {
                             None,
                             &[],
                             Some((0, &ticks)),
+                            crate::annotation::dialog_support::TableLook {
+                                fill: true,
+                                empty: "The file has no vector layers.",
+                            },
                         )
                     })
                     .inner;
@@ -877,10 +894,7 @@ impl RasterImportDialog {
             has_subdatasets: !source.subdatasets.is_empty(),
             crs: DataChoice::new(&[
                 ("Keep the project's coordinate system", ""),
-                (
-                    "Set the project's from the raster, if it has none",
-                    "adopt",
-                ),
+                ("Set the project's from the raster, if it has none", "adopt"),
             ]),
             result: None,
         }
@@ -940,7 +954,10 @@ impl RasterImportDialog {
                 &mut lent,
                 |ui, lent| lent.0.body(ui, &mut *lent.1),
                 |ui, lent| {
-                    let buttons = ok_cancel(ui, "rasterImportDialog", "Import", ready);
+                    let ((), buttons) =
+                        ok_cancel_beside(ui, "rasterImportDialog", "Import", ready, |ui| {
+                            lent.1.status(ui, "rasterImportStatus");
+                        });
                     if buttons.accepted {
                         *lent.2 = Some(DialogResult::Accepted);
                     }
@@ -1113,7 +1130,10 @@ impl PointCloudImportDialog {
                 &mut lent,
                 |ui, lent| lent.0.body(ui, &mut *lent.1),
                 |ui, lent| {
-                    let buttons = ok_cancel(ui, "pointCloudImportDialog", "Import", ready);
+                    let ((), buttons) =
+                        ok_cancel_beside(ui, "pointCloudImportDialog", "Import", ready, |ui| {
+                            lent.1.status(ui, "pointCloudImportStatus");
+                        });
                     if buttons.accepted {
                         *lent.2 = Some(DialogResult::Accepted);
                     }
@@ -1145,12 +1165,13 @@ impl PointCloudImportDialog {
         });
         self.classification
             .ui(ui, "pointCloudImportClasses", "Classification:", "");
-        ui.horizontal(|ui| {
-            ui.label(if self.copc {
-                "Level of detail:"
-            } else {
-                "Level of detail (COPC only):"
-            });
+        // A row of the form: its label in the column, without a colon.
+        let detail = if self.copc {
+            "Level of detail"
+        } else {
+            "Level of detail (COPC only)"
+        };
+        crate::shell::dialog::labelled(ui, detail, |ui| {
             ui.add_enabled_ui(self.copc, |ui| {
                 check(
                     ui,

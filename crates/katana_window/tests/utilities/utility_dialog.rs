@@ -465,14 +465,13 @@ mod utility_dialog {
         let mut bench = dialog_bench(executor.context(), host(false));
         bench.dialog.show_tool(UtilityTool::Report);
         bench.draw();
-        // Nothing to run yet, and the field says why rather than showing a line.
+        // Nothing to run yet: the field shows no line, and the footer's status says why (it was
+        // the field's placeholder, a sentence read as the command).
         let command = bench.control("utilityCommand");
         assert!(command.value.is_empty());
-        assert!(
-            command.text.contains("utility schedule"),
-            "{}",
-            command.text
-        );
+        assert!(command.text.is_empty(), "{}", command.text);
+        let status = bench.text("utilityStatus");
+        assert!(status.contains("utility schedule"), "{status}");
 
         bench.fill("utilitySchedule", "C:/survey/schedule.csv");
         bench.fill("utilityMinCover", "0.6");
@@ -983,13 +982,10 @@ mod utility_dialog {
         // Schedule names what it writes first.
         bench.dialog.show_tool(UtilityTool::Schedule);
         bench.draw();
-        let command = bench.control("utilityCommand");
-        assert!(command.value.is_empty());
-        assert!(
-            command.text.contains("schedule to write"),
-            "{}",
-            command.text
-        );
+        // Nothing to run until it does: the field empty, and the footer's status says why.
+        assert!(bench.control("utilityCommand").value.is_empty());
+        let status = bench.text("utilityStatus");
+        assert!(status.contains("schedule to write"), "{status}");
         bench.fill("utilityScheduleOut", "C:/Deliverables/as built.csv");
         assert_eq!(
             bench.text("utilityCommand"),

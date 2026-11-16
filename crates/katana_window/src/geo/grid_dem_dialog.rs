@@ -65,9 +65,7 @@ fn number_option(key: &str, text: &str, field: &str) -> Result<String> {
         return Ok(String::new());
     }
     if !reads_as_number(value) {
-        return Err(invalid(format!(
-            "{field} must be a number, not '{value}'"
-        )));
+        return Err(invalid(format!("{field} must be a number, not '{value}'")));
     }
     Ok(format!(" {key}={value}"))
 }
@@ -132,10 +130,7 @@ fn is_number(value: &PropertyValue) -> bool {
 /// method with a blank or an '=' in it (an option's value is one word), and a double quote.
 pub fn grid_dem_command_line(form: &GridDemForm) -> Result<String> {
     if !form.scope_error.is_empty() {
-        return Err(invalid(format!(
-            "the points' scope: {}",
-            form.scope_error
-        )));
+        return Err(invalid(format!("the points' scope: {}", form.scope_error)));
     }
     let scope = form.scope.trim();
     if scope.is_empty() {
@@ -393,13 +388,21 @@ impl GridDemDialog {
         let cell_given = !self.cell.trim().is_empty();
         let size_given = !self.size.trim().is_empty();
         row(ui, "Cell (m):", |ui| {
+            // Two fields and the word between them share the row half and half: the cell field
+            // filled it, and the size field and its word ran 85 past the body's edge.
+            let between = crate::shell::dialog::one_line_width(ui, "or size");
+            let half =
+                ((ui.available_width() - between) / 2.0 - ui.spacing().item_spacing.x).max(0.0);
+            crate::shell::dialog::fixed_fields(ui, half);
             ui.add_enabled_ui(!size_given, |ui| {
                 field(ui, "gridCell", &mut self.cell, "suggested for the extent").on_hover_text(
                     "cell=: each cell's side, metres. The extent grows outwards to whole cells, \
                      so every cell is this size and grids of one cell size line up",
                 );
             });
-            ui.label("or size");
+            // On its fields' line, as a form's label is (dialog::text_value).
+            crate::shell::dialog::text_value(ui, |ui| ui.label("or size"));
+            crate::shell::dialog::fill_fields(ui);
             ui.add_enabled_ui(!cell_given, |ui| {
                 field(ui, "gridSize", &mut self.size, "or columns x rows: 400x300").on_hover_text(
                     "size=: the grid's columns and rows over the extent as it is, instead of a \
@@ -423,23 +426,20 @@ impl GridDemDialog {
         let takes_power = self.takes_power;
         row(ui, "Power:", |ui| {
             ui.add_enabled_ui(takes_power, |ui| {
-                field(ui, "gridPower", &mut self.power, "GDAL's default").on_hover_text(
-                    "power=: the weighting power of the inverse-distance methods",
-                );
+                field(ui, "gridPower", &mut self.power, "GDAL's default")
+                    .on_hover_text("power=: the weighting power of the inverse-distance methods");
             });
         });
         let takes_radius = self.takes_radius;
         row(ui, "Search radius (m):", |ui| {
             ui.add_enabled_ui(takes_radius, |ui| {
-                field(ui, "gridRadius", &mut self.radius, "GDAL's default").on_hover_text(
-                    "radius=: how far from a cell a point may be and count, metres",
-                );
+                field(ui, "gridRadius", &mut self.radius, "GDAL's default")
+                    .on_hover_text("radius=: how far from a cell a point may be and count, metres");
             });
         });
         row(ui, "Name:", |ui| {
-            field(ui, "gridName", &mut self.name, "dem").on_hover_text(
-                "NAME: the reference raster's name; a name taken becomes <name>-2",
-            );
+            field(ui, "gridName", &mut self.name, "dem")
+                .on_hover_text("NAME: the reference raster's name; a name taken becomes <name>-2");
         });
         check(
             ui,

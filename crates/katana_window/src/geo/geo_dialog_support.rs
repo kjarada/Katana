@@ -25,6 +25,7 @@ use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 
 use super::geo_workbench::started_job;
+use super::terrain_dialog_parts::RunStatus;
 use crate::drive::{LineOptions, button, label_as, line_with, primary};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 use crate::shell::dialog;
@@ -81,10 +82,9 @@ pub struct GeoRunPanel {
     prefix: String,
     preview: bool,
     command: String,
-    placeholder: String,
     ready: bool,
-    status: String,
-    status_is_error: bool,
+    /// What happened last, or why there is no line yet.
+    status: RunStatus,
     reply: String,
     /// A job this panel started and has not heard the end of.
     pending: JobId,
@@ -98,10 +98,8 @@ impl GeoRunPanel {
             prefix: String::from(prefix),
             preview,
             command: String::new(),
-            placeholder: String::new(),
             ready: false,
-            status: String::new(),
-            status_is_error: false,
+            status: RunStatus::default(),
             reply: String::new(),
             pending: NO_JOB,
             heard: Rc::new(RefCell::new(None)),
@@ -113,24 +111,25 @@ impl GeoRunPanel {
     }
 
     /// Reads the line again into the Command field; Run and Preview are enabled only when there is
-    /// a line.
+    /// a line. While there is none, the status says why (RunStatus).
     pub fn refresh(&mut self, made: &Result<String>) {
         self.ready = matches!(made, Ok(line) if !line.is_empty());
         self.command = match made {
             Ok(line) if self.ready => line.clone(),
             _ => String::new(),
         };
-        self.placeholder = if self.ready {
+        let why = if self.ready {
             String::new()
         } else {
             format!(
-                "nothing to run yet: {}",
+                "Nothing to run yet: {}",
                 match made {
                     Ok(_) => String::from("the fields say no line"),
                     Err(error) => error.message.clone(),
                 }
             )
         };
+        self.status.read_line(why);
     }
 
     /// What Run (`preview` false) and Preview do: the line handed to the executor and its reply
@@ -260,8 +259,9 @@ impl GeoRunPanel {
         &self.reply
     }
 
+    /// The last thing the status said; "" when it says only why there is no line.
     pub fn status(&self) -> &str {
-        &self.status
+        self.status.said()
     }
 
     pub fn command(&self) -> &str {
@@ -269,8 +269,7 @@ impl GeoRunPanel {
     }
 
     pub fn set_status(&mut self, text: &str, is_error: bool) {
-        self.status = String::from(text);
-        self.status_is_error = is_error;
+        self.status.set(text, is_error);
     }
 
     /// Draws the panel with the line `made` where it is - its Command row, its reply and its row
@@ -287,18 +286,17 @@ impl GeoRunPanel {
         self.footer_ui(ui, host, made, None).0
     }
 
-    /// The Command row: the exact line Run runs, read-only, or why there is none.
+    /// The Command row: the exact line Run runs, read-only; empty while there is none, the status
+    /// saying why.
     pub fn command_ui(&mut self, ui: &mut Ui, made: &Result<String>) {
         self.refresh(made);
         let command_name = self.name("Command");
-        let placeholder = self.placeholder.clone();
         dialog::labelled(ui, "Command", |ui| {
             line_with(
                 ui,
                 &command_name,
                 &mut self.command,
                 LineOptions {
-                    placeholder: &placeholder,
                     read_only: true,
                     ..LineOptions::default()
                 },
@@ -329,8 +327,8 @@ impl GeoRunPanel {
         let status_name = self.name("Status");
         let preview_name = self.name("Preview");
         let run_name = self.name("Run");
-        let status = self.status.clone();
-        let colour = dialog::status_colour(self.status_is_error);
+        let (status, is_error) = self.status.shown();
+        let colour = dialog::status_colour(is_error);
         let ready = self.ready;
         let offers_preview = self.preview;
         let (preview_clicked, (closed, run_clicked)) = dialog::button_row(

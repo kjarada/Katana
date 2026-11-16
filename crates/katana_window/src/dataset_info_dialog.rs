@@ -344,6 +344,21 @@ impl DatasetInfoDialog {
         if copy && let Err(error) = host.clipboard().set_text(&self.json) {
             self.reply = error.describe();
         }
+        // The line last run in the body under the pages, as every dialog shows its line; in the
+        // footer it stood over the buttons, and the footer read as part of the body.
+        ui.add_space(crate::shell::dialog::GROUP_GAP);
+        crate::shell::dialog::labelled(ui, "Command", |ui| {
+            line_with(
+                ui,
+                "datasetInfoCommand",
+                &mut self.command,
+                LineOptions {
+                    read_only: true,
+                    ..LineOptions::default()
+                },
+            )
+            .on_hover_text("The line last run, as it would be typed");
+        });
     }
 
     /// One tab's page; true when Copy as JSON was pressed.
@@ -394,19 +409,8 @@ impl DatasetInfoDialog {
         }
     }
 
-    /// The line last run, what it said, and the buttons: kept below the scrolling body.
+    /// What the last line said, and the buttons: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        line_with(
-            ui,
-            "datasetInfoCommand",
-            &mut self.command,
-            LineOptions {
-                read_only: true,
-                width: Some(f32::INFINITY),
-                ..LineOptions::default()
-            },
-        )
-        .on_hover_text("The line last run, as it would be typed");
         let reply = self.reply.clone();
         // Statistics and Check at the left, what they read, and what the last said beside them
         // in the muted status text (a line of its own over the buttons stood empty until one

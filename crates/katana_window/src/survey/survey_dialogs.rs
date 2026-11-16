@@ -390,21 +390,16 @@ impl SurveyToolFrame {
                 ui.add_space(dialog::GROUP_GAP);
                 dialog::form(ui, |rows| draw(rows.ui(), &mut **form));
                 ui.add_space(dialog::GROUP_GAP);
-                coloured_label(
-                    ui,
-                    "message",
-                    &pane.message,
-                    message_colour(pane.message_is_error),
-                );
                 // The answer, once there is one: an empty box ten lines high stood under the form
                 // of every survey tool before anything was computed.
                 dialog::reply(ui, "result", &mut pane.result, SURVEY_RESULT_ROWS);
             },
             |ui, parts| {
-                let (_, _, pressed) = parts;
+                let (pane, _, pressed) = parts;
                 let (filled, acted) = dialog::button_row(
                     ui,
-                    // At the left: the fillers, which read the drawing into the form.
+                    // At the left: the fillers, which read the drawing into the form, and the
+                    // message line - the design's one home for a status (it stood in the body).
                     |ui| {
                         let mut clicked: Option<&'static str> = None;
                         for filler in fillers {
@@ -412,15 +407,19 @@ impl SurveyToolFrame {
                                 clicked = Some(filler.name);
                             }
                         }
+                        coloured_label(
+                            ui,
+                            "message",
+                            &pane.message,
+                            message_colour(pane.message_is_error),
+                        );
                         clicked
                     },
-                    // At the right: Close, the other verbs, and the first verb - the dialog's own
-                    // act - last, in the accent.
+                    // At the right: the other verbs, Close, and the first verb - the dialog's own
+                    // act - last, in the accent. A verb right of Close (Traverse's Add to Drawing,
+                    // Forward's Add Point) broke the one footer's order.
                     |ui| {
                         let mut clicked: Option<&'static str> = None;
-                        if drive::button(ui, "close", "Close").clicked() {
-                            clicked = Some("close");
-                        }
                         let (first, others) = match verbs.split_first() {
                             Some((first, others)) => (Some(first), others),
                             None => (None, verbs),
@@ -429,6 +428,9 @@ impl SurveyToolFrame {
                             if drive::button(ui, verb.name, verb.text).clicked() {
                                 clicked = Some(verb.name);
                             }
+                        }
+                        if drive::button(ui, "close", "Close").clicked() {
+                            clicked = Some("close");
                         }
                         if let Some(verb) = first
                             && drive::primary(ui, verb.name, verb.text).clicked()

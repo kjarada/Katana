@@ -140,13 +140,14 @@ mod pipeline_builder {
             "read ! external --command=calc.exe ! write",
         );
         assert!(bench.text("gdalPipelineCommand").is_empty());
-        let why = bench.placeholder("gdalPipelineCommand");
-        assert!(why.contains("external"), "{why}");
         assert!(!bench.enabled("gdalPipelineRun"));
-        // The status says it does not run: it said "It runs as typed" beside a disabled Run.
+        // The status says it does not run, and why: it said "It runs as typed" beside a disabled
+        // Run. Why was the Command field's placeholder until the status became its one home.
         let status = bench.text("gdalPipelineStatus");
         assert!(!status.contains("runs as typed"), "{status}");
         assert!(status.contains("cannot run"), "{status}");
+        assert!(status.contains("external"), "{status}");
+        assert!(bench.placeholder("gdalPipelineCommand").is_empty());
         // Run is off: the harness refuses a press of it, where Qt's click did nothing.
         assert!(bench.host.lines().is_empty());
     }

@@ -35,7 +35,7 @@ use katana_core::Result;
 
 use super::terrain_dialog_parts::{
     Framed, WordChoice, command_field, field, host_views, invalid, number_of, row, run_buttons,
-    show_framed,
+    show_framed, why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -279,9 +279,8 @@ impl Framed for ContoursDialog {
             field(ui, "contourBase", &mut self.base, "0");
         });
         row(ui, "Layer:", |ui| {
-            field(ui, "contourLayer", &mut self.layer, "").on_hover_text(
-                "Major contours go to <layer>/major, the others to <layer>/minor.",
-            );
+            field(ui, "contourLayer", &mut self.layer, "")
+                .on_hover_text("Major contours go to <layer>/major, the others to <layer>/minor.");
         });
         let surface = is_surface(self.source.words().unwrap_or(""));
         row(ui, "Smoothing:", |ui| {
@@ -311,11 +310,14 @@ impl Framed for ContoursDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
-        let ready = self.command().is_ok();
+        let made = self.command();
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "contourReply", self.runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("contourPreview", ready)),
+            ("contourStatus", &why),
             ("contourRun", "Draw Contours", ready),
             Some("contourClose"),
         );

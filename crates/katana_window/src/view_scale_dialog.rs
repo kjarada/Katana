@@ -281,24 +281,22 @@ impl ViewScaleDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
-        let colour = if self.status_error {
-            theme::error()
-        } else {
-            theme::text()
-        };
-        controls::label_as(
-            ui,
-            "viewScaleStatus",
-            &status,
-            egui::Label::new(RichText::new(status.as_str()).color(colour.to_egui()))
-                .wrap()
-                .selectable(true),
-        );
-        // Close, then Apply - the dialog's act - last, in the accent.
+        let colour = dialog::status_colour(self.status_error);
+        // The status at the left (it stood on a line of its own over the buttons); Close, then
+        // Apply - the dialog's act - last, in the accent.
         let buttons = ui.scope(|ui| {
             crate::shell::dialog::button_row(
                 ui,
-                |_| {},
+                |ui| {
+                    controls::label_as(
+                        ui,
+                        "viewScaleStatus",
+                        &status,
+                        egui::Label::new(RichText::new(status.as_str()).color(colour))
+                            .wrap()
+                            .selectable(true),
+                    );
+                },
                 |ui| {
                     let close = controls::button(ui, "viewScaleClose", "Close").clicked();
                     let apply = controls::button_as(
@@ -332,14 +330,20 @@ impl ViewScaleDialog {
 /// A form's row whose label is the caption `name` reading `text`, and what `add` draws beside it:
 /// the column is measured by the caption as it is shown.
 fn captioned<R>(ui: &mut Ui, name: &str, text: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    dialog::row_with_text(ui, &shown_caption(text), |ui| caption(ui, name, text), add)
+}
+
+/// A caption as it is shown: without the '&' and without a trailing colon, as `labelled` shows
+/// every label (the design's labels end in no colon; "Command:" here read unlike its neighbours).
+fn shown_caption(text: &str) -> String {
     let shown = text.replace('&', "");
-    dialog::row_with_text(ui, &shown, |ui| caption(ui, name, text), add)
+    String::from(shown.strip_suffix(':').unwrap_or(&shown))
 }
 
 /// A form's caption, named, its text as Qt holds it ('&' before the letter Alt reaches its field
-/// by) and shown without the '&'.
+/// by) and shown without the '&' or a trailing colon.
 fn caption(ui: &mut Ui, name: &str, text: &str) {
-    let shown = text.replace('&', "");
+    let shown = shown_caption(text);
     controls::label_as(
         ui,
         name,
