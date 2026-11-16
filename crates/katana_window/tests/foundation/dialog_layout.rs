@@ -10,17 +10,18 @@
 //! Nothing here is a pixel of ink: rectangles are compared with each other and with the frame's
 //! own constants. Within HALF_A_POINT where egui rounds a widget to the pixel grid.
 
-use egui::{Rect, Ui};
+use egui::{Rect, Shape, TextStyle, Ui};
 use katana_window::customisation::ScopeFilterWidget;
 use katana_window::customisation::scope_filter_widget::WIDGET_WIDTH;
 use katana_window::drive::{self, ControlKind, LineOptions};
 use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
     BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, REPLY_ROWS, SECTION_GAP,
-    beside_a_button, body_span, button_row, fixed_fields, form_panel, labelled, note, reply,
-    row_with_check, row_with_text, section, status, text_value,
+    beside_a_button, body_span, button_row, check_row, fixed_fields, form, form_panel, labelled,
+    note, reply, row_with_check, row_with_text, section, section_with, status, text_value,
 };
 
+use crate::control_look::{flat, inside};
 use crate::window_support::offscreen_harness;
 
 mod dialog_layout {
@@ -469,6 +470,198 @@ mod dialog_layout {
             "the second heading is {} under what is above it",
             second.top() - between.bottom()
         );
+    }
+
+    #[test]
+    fn a_section_heading_is_in_the_heading_style_larger_than_the_body_and_its_rows_follow_it() {
+        // The third look audit (B): headings ("Apply to", "Corridor", "Look") were body text at
+        // the body's size, only brighter, and read as one more line of the form. A heading is the
+        // Heading text style, and section_with draws its rows under it, the gap above it kept.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("headingDialog", "Headings");
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            frame.show_body(&ctx, &mut (), |ui, _| {
+                drive::label(ui, "above", "A line above the group");
+                section_with(ui, "Grouped", |ui| {
+                    drive::label(ui, "groupedRow", "A row of the group");
+                });
+            });
+        };
+        harness.show(&mut draw).expect("the dialog is drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let ctx = harness.context().clone();
+        let size = |style: TextStyle| ctx.global_style().text_styles[&style].size;
+        let heading = shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Text(text) if text.galley.text() == "Grouped" => Some(text.clone()),
+                _ => None,
+            })
+            .expect("the heading is painted");
+        let font = &heading.galley.job.sections[0].format.font_id;
+        assert_eq!(font.size, size(TextStyle::Heading), "the heading's size");
+        assert!(size(TextStyle::Heading) > size(TextStyle::Body), "the premise: a heading is larger");
+        let above = harness.control("above").expect("drawn").rect;
+        let rows = harness.control("groupedRow").expect("drawn").rect;
+        let heading = heading.galley.rect.translate(heading.pos.to_vec2());
+        assert!(
+            (heading.top() - above.bottom() - SECTION_GAP).abs() <= HALF_A_POINT,
+            "the heading is {} under the line above it",
+            heading.top() - above.bottom()
+        );
+        assert!(
+            rows.top() >= heading.bottom() - HALF_A_POINT,
+            "the group's rows are under its heading"
+        );
+        assert!((rows.left() - heading.left()).abs() <= HALF_A_POINT, "and start where it does");
+    }
+
+    #[test]
+    fn a_status_beside_the_buttons_is_one_line_cut_short_and_whole_in_its_tooltip() {
+        // The third look audit (A): 21 terrain dialogs wrapped their status to two lines beside
+        // the buttons, a 55 point footer against the standard 49. A status there is one line in
+        // the room the buttons leave, cut short, its whole text in its tooltip and its record -
+        // whether drawn by shell::dialog::status or by a dialog's own wrapped named label.
+        let long = "the drawing has no surface yet; make one with Terrain > Surface From, then \
+                    choose it here, set the interval and run this again";
+        let mut harness = offscreen_harness();
+        let mut frames = [
+            DialogFrame::new("shortStatusDialog", "Short"),
+            DialogFrame::new("statusDialog", "Status"),
+            DialogFrame::new("ownLabelDialog", "Own Label"),
+        ];
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            let [short, helper, own] = &mut frames;
+            let footer = |ui: &mut Ui, prefix: &str, text: &str, by_helper: bool| {
+                button_row(
+                    ui,
+                    |ui| {
+                        if by_helper {
+                            status(ui, &format!("{prefix}Status"), text, false);
+                        } else {
+                            drive::label_as(
+                                ui,
+                                &format!("{prefix}Status"),
+                                text,
+                                egui::Label::new(text).wrap(),
+                            );
+                        }
+                    },
+                    |ui| {
+                        drive::button(ui, &format!("{prefix}Close"), "Close");
+                        drive::primary(ui, &format!("{prefix}Run"), "Run");
+                    },
+                );
+            };
+            for (frame, prefix, text, by_helper, at) in [
+                (short, "short", "nothing to run yet", true, 0.0),
+                (helper, "helper", long, true, 200.0),
+                (own, "own", long, false, 400.0),
+            ] {
+                frame.place(egui::pos2(0.0, at));
+                frame.show(
+                    &ctx,
+                    &mut (),
+                    |ui, _| {
+                        drive::label(ui, &format!("{prefix}Body"), "A body");
+                    },
+                    |ui, _| footer(ui, prefix, text, by_helper),
+                );
+            }
+        };
+        harness.show(&mut draw).expect("the dialogs are drawn");
+        ctx_show_every_tooltip(&harness);
+        harness.frame(&mut draw).drop_without_applying_deltas();
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let one_line = harness.control("shortStatus").expect("drawn").rect.height();
+        for prefix in ["helper", "own"] {
+            let status = harness.control(&format!("{prefix}Status")).expect("drawn");
+            let close = harness.control(&format!("{prefix}Close")).expect("drawn").rect;
+            assert!(
+                (status.rect.height() - one_line).abs() <= HALF_A_POINT,
+                "{prefix}: the status is {} high, a line is {one_line}",
+                status.rect.height()
+            );
+            assert!(
+                status.rect.right() <= close.left(),
+                "{prefix}: the status runs to {} past Close at {}",
+                status.rect.right(),
+                close.left()
+            );
+            assert_eq!(harness.report(&format!("{prefix}Status")).expect("read"), long);
+            // Painted cut short in its place; whole, uncut, in its tooltip elsewhere.
+            let painted = inside(&shapes, status.rect);
+            assert!(
+                painted.iter().any(|shape| matches!(
+                    shape,
+                    Shape::Text(text) if text.galley.elided && text.galley.rows.len() == 1
+                )),
+                "{prefix}: the status is one line cut short"
+            );
+            assert!(
+                shapes.iter().any(|shape| matches!(
+                    shape,
+                    Shape::Text(text) if !text.galley.elided
+                        && text.galley.text() == long
+                        && !status.rect.contains_rect(text.visual_bounding_rect())
+                )),
+                "{prefix}: the whole text is in its tooltip"
+            );
+        }
+        // A footer of a long status is the height of one of a short one.
+        let height = |name: &str| harness.target_record(name).expect("a target").rect.height();
+        assert!((height("statusDialog") - height("shortStatusDialog")).abs() <= HALF_A_POINT);
+    }
+
+    /// Every tooltip shown whether hovered or not (egui's Memory::everything_is_visible), so a
+    /// test reads one without a pointer's timing.
+    fn ctx_show_every_tooltip(harness: &katana_window::drive::Harness) {
+        harness
+            .context()
+            .memory_mut(|memory| memory.set_everything_is_visible(true));
+    }
+
+    #[test]
+    fn a_check_row_stands_in_the_field_column_where_a_check_alone_stands_at_the_labels() {
+        // The third look audit (C): Settings' "Show Notice" at the label column and "Replace
+        // instead of merging" at the field column on one page. check_row and Form::check put a
+        // check box where the fields start.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("checkRowDialog", "Check Rows");
+        let mut state = (String::new(), [false; 3]);
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut state, |ui, (value, on)| {
+                    labelled(ui, "A label", |ui| drive::line(ui, "field", value));
+                    check_row(ui, "underField", "Replace instead of merging", &mut on[0]);
+                    form(ui, |form| {
+                        form.check("inForm", "Show the notice", &mut on[1]);
+                    });
+                    drive::check(ui, "alone", "A check box alone", &mut on[2]);
+                });
+            })
+            .expect("the dialog is drawn");
+        let control = |name: &str| harness.control(name).expect("drawn");
+        let field = control("field").rect;
+        let alone = control("alone").rect;
+        assert!(alone.left() < field.left() - LABEL_WIDTH / 4.0, "the premise: alone, at the labels");
+        for name in ["underField", "inForm"] {
+            let check = control(name);
+            assert_eq!(check.kind, ControlKind::Check);
+            assert!(
+                (check.rect.left() - field.left()).abs() <= HALF_A_POINT,
+                "{name} starts at {}, the field at {}",
+                check.rect.left(),
+                field.left()
+            );
+        }
     }
 
     #[test]
