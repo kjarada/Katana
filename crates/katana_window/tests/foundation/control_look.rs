@@ -465,26 +465,44 @@ mod control_look {
     #[test]
     fn a_primary_drawn_disabled_is_greyed_not_lit() {
         // The third look audit (A): a primary lit with nothing to run invited the click. Drawn in
-        // a disabled Ui (add_enabled_ui(can_run, ..)) it wears no accent, and a press is refused.
+        // a disabled Ui (add_enabled_ui(can_run, ..)) it is any disabled button - the fill a
+        // plain button disabled beside it has, which egui fades with the Ui - and a press of it
+        // is refused. (Compared with that button, not with the accent: a disabled Ui fades every
+        // colour it paints, so a lit primary greyed by egui alone is not the accent either.)
         let mut harness = Harness::new();
         apply(harness.context());
         let mut draw = |ui: &mut Ui| {
             drive::primary(ui, "lit", "Run");
-            ui.add_enabled_ui(false, |ui| drive::primary(ui, "greyed", "Measure"));
+            ui.add_enabled_ui(false, |ui| {
+                drive::primary(ui, "greyed", "Measure");
+                drive::button(ui, "plain", "Close");
+            });
         };
         harness.show(&mut draw).expect("drawn");
         let output = harness.frame(&mut draw);
         let shapes = flat(&output.shapes);
         output.drop_without_applying_deltas();
-        let accent = palette::accent().to_egui();
-        let lit = |name: &str| {
+        let fills = |name: &str| -> Vec<egui::Color32> {
             let rect = harness.control(name).expect("drawn").rect;
             inside(&shapes, rect)
                 .iter()
-                .any(|shape| matches!(shape, Shape::Rect(rect) if rect.fill == accent))
+                .filter_map(|shape| match shape {
+                    Shape::Rect(rect) if rect.fill != egui::Color32::TRANSPARENT => {
+                        Some(rect.fill)
+                    }
+                    _ => None,
+                })
+                .collect()
         };
-        assert!(lit("lit"), "the premise: an enabled primary is in the accent");
-        assert!(!lit("greyed"), "a disabled one is not");
+        let accent = palette::accent().to_egui();
+        assert!(
+            fills("lit").contains(&accent),
+            "the premise: an enabled primary is in the accent: {:?}",
+            fills("lit")
+        );
+        let plain = fills("plain");
+        assert!(!plain.is_empty(), "the premise: a disabled button has a fill");
+        assert_eq!(fills("greyed"), plain, "a disabled primary is a disabled button");
         assert!(!harness.control("greyed").expect("drawn").enabled);
         harness.press("greyed");
         assert!(harness.run(&mut draw).is_err(), "a press of it is refused");
