@@ -59,6 +59,7 @@ use crate::drive::{
 };
 use crate::format::grouped;
 use crate::geo::gis_tool_dialog::GisDialogContext;
+use crate::geo::terrain_dialog_parts::why_status;
 use crate::gis_dialog_support::ok_cancel_beside;
 use crate::host::{Host, VerbOutcome};
 use crate::import_placement::{DialogResult, ImportPlacementBox};
@@ -114,7 +115,7 @@ impl CommandShown {
             },
             Err(error) => Self {
                 text: String::new(),
-                why: format!("Nothing to import yet: {}", error.message),
+                why: why_status(&error.message),
                 ready: false,
             },
         }
@@ -122,15 +123,7 @@ impl CommandShown {
 
     /// Why there is no line, muted at the footer's left as `name`; "" when there is one.
     fn status(&self, ui: &mut Ui, name: &str) {
-        label_as(
-            ui,
-            name,
-            &self.why,
-            egui::Label::new(
-                RichText::new(self.why.as_str()).color(crate::shell::dialog::status_colour(false)),
-            )
-            .wrap(),
-        );
+        crate::shell::dialog::status(ui, name, &self.why, false);
     }
 
     /// The read-only line, under "Command".
@@ -807,25 +800,25 @@ impl VectorImportDialog {
                     "The coordinate system of a file that declares none (srs=)",
                 );
             });
-            ui.group(|ui| {
-                ui.vertical(|ui| {
-                    ui.strong("Only what lies within");
+            // A headed column, as every group of a dialog is (shell::dialog::section), where it
+            // was a bordered box beside an unbordered form.
+            ui.vertical(|ui| {
+                crate::shell::dialog::section(ui, "Only what lies within");
+                check(
+                    ui,
+                    "vectorImportUseScope",
+                    "Limit the import to this part of the drawing",
+                    &mut self.use_scope,
+                );
+                let limited = self.use_scope;
+                ui.add_enabled_ui(limited, |ui| {
+                    self.scope.ui(ui);
                     check(
                         ui,
-                        "vectorImportUseScope",
-                        "Limit the import to this part of the drawing",
-                        &mut self.use_scope,
+                        "vectorImportClip",
+                        "Cut features at its edge (clip)",
+                        &mut self.clip,
                     );
-                    let limited = self.use_scope;
-                    ui.add_enabled_ui(limited, |ui| {
-                        self.scope.ui(ui);
-                        check(
-                            ui,
-                            "vectorImportClip",
-                            "Cut features at its edge (clip)",
-                            &mut self.clip,
-                        );
-                    });
                 });
             });
         });

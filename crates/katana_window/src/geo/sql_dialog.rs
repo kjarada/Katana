@@ -318,9 +318,12 @@ impl GisTool for GisSqlDialog {
             &["Table / column", "Type"],
             &listed,
             None,
-            "List the tables for this scope to see what a statement can read.",
+            "List Tables shows what a statement can read in this scope.",
         );
-        let refresh = button(ui, "gisSqlTablesRefresh", "List the tables for this scope").clicked();
+        // A button's words in Title Case, as a menu item's; what it lists is in its tip.
+        let refresh = button(ui, "gisSqlTablesRefresh", "List Tables")
+            .on_hover_text("List the tables and columns the scope gives a statement to read")
+            .clicked();
         dialog::section(ui, "Statement");
         text_with(
             ui,
@@ -351,7 +354,7 @@ impl GisTool for GisSqlDialog {
             gis_field(
                 ui,
                 "gisSqlLayer",
-                "Layer (AS LAYER)",
+                "Layer",
                 &mut self.layer,
                 "the layer to draw on",
                 "AS LAYER: where the rows' geometry is drawn",

@@ -1,5 +1,5 @@
 //! What the GIS menu's option dialogs share (gis_dialog_support.hpp; gis_import_dialogs,
-//! gis_export_dialog): their OK and Cancel row.
+//! gis_export_dialog): their row of Close and the act.
 
 use egui::Ui;
 
@@ -22,8 +22,11 @@ pub fn ok_cancel_names(dialog: &str) -> (String, String) {
     (format!("{prefix}Run"), format!("{prefix}Cancel"))
 }
 
-/// OK, named for what it does ("Import", "Export") and enabled as `ok_enabled` says, and Cancel,
-/// for the dialog whose object name is `dialog`.
+/// OK, named for what it does ("Import", "Export") and enabled as `ok_enabled` says, and Close
+/// (the Cancel of the C++, named so still), for the dialog whose object name is `dialog`. It reads
+/// "Close" as every dialog's way out does: an option dialog changes nothing until its act is
+/// pressed, so there is nothing for a Cancel to undo, and five words for leaving a dialog read as
+/// five conventions (the third look audit).
 pub fn ok_cancel(ui: &mut Ui, dialog: &str, ok_text: &str, ok_enabled: bool) -> OkCancel {
     ok_cancel_beside(ui, dialog, ok_text, ok_enabled, |_| {}).1
 }
@@ -38,9 +41,9 @@ pub fn ok_cancel_beside<L>(
     leading: impl FnOnce(&mut Ui) -> L,
 ) -> (L, OkCancel) {
     let (run, cancel) = ok_cancel_names(dialog);
-    // At the right: Cancel, then OK - the dialog's act - last, in the accent.
+    // At the right: Close, then OK - the dialog's act - last, in the accent.
     crate::shell::dialog::button_row(ui, leading, |ui| {
-        let rejected = button(ui, &cancel, "Cancel").clicked();
+        let rejected = button(ui, &cancel, "Close").clicked();
         let accepted = ui
             .add_enabled_ui(ok_enabled, |ui| primary(ui, &run, ok_text).clicked())
             .inner;

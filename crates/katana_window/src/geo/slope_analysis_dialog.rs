@@ -36,8 +36,8 @@ use egui::Ui;
 use katana_core::Result;
 
 use super::terrain_dialog_parts::{
-    Framed, WordChoice, command_field, field, host_views, invalid, number_of, row, run_buttons,
-    show_framed, why_no_line, without_blanks,
+    Framed, NO_SURFACE_OR_RASTER, WordChoice, command_field, field, host_views, invalid, number_of,
+    row, run_buttons, show_framed, why_no_line, without_blanks,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -95,10 +95,7 @@ impl Default for SlopeForm {
 pub fn slope_line(form: &SlopeForm) -> Result<String> {
     let source = form.source.trim();
     if source.is_empty() {
-        return Err(invalid(
-            "Source: there is no surface or raster to analyse; build a surface or import a DEM \
-             first",
-        ));
+        return Err(invalid(NO_SURFACE_OR_RASTER));
     }
     let mut line = format!(
         "{}{source}",

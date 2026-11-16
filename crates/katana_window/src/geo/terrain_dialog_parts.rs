@@ -16,9 +16,22 @@ use crate::customisation::scope_filter_views;
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
-use crate::drive::{Choice, LineOptions, button, choice, label_as, line_with, primary};
+use crate::drive::{Choice, LineOptions, button, choice, line_with, primary};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
+
+/// Why a dialog that reads a surface writes no line while the drawing has none: one sentence in
+/// every such dialog, where three said it three ways ("there is no surface; make one first
+/// (Terrain > Surface From)", "the drawing has no surface yet; make one with ...", "there is no
+/// surface to export; build one from the Terrain menu"). No field's name before it: the
+/// condition is the drawing's, not a field's.
+pub(crate) const NO_SURFACE: &str = "There is no surface: make one with Terrain > Surface From";
+
+/// Why a dialog that reads a surface or a raster writes no line while the drawing has neither,
+/// in the same words in each (Contours, Drape and Sample, Slope, Shading, Viewshed, Statistics
+/// by Area), where each said it with its own verb.
+pub(crate) const NO_SURFACE_OR_RASTER: &str =
+    "There is no surface or raster: make a surface with Terrain > Surface From, or import a DEM";
 
 /// InvalidArgument saying `message`: why a dialog's fields write no line.
 pub(crate) fn invalid(message: impl Into<String>) -> Error {
@@ -87,6 +100,33 @@ pub(crate) fn field(ui: &mut Ui, name: &str, value: &mut String, placeholder: &s
     )
 }
 
+/// A one-line field for a number written into the line as typed - an interval, a weight, a
+/// height that may be left blank - drawn as a number box is (drive::controls::NUMBER_FIELD_WIDTH,
+/// wider only for what it holds): a field filling its row beside a number box read as two kinds of
+/// control for one kind of value (Contours' Interval beside Major every, Smooth's Weight beside
+/// Passes). Text, not a DragValue: the line carries the number as typed ("interval=0.25"), a blank
+/// is the verb's own default, and a number box can be neither.
+pub(crate) fn number_text_field(
+    ui: &mut Ui,
+    name: &str,
+    value: &mut String,
+    placeholder: &str,
+) -> Response {
+    let widest = dialog::one_line_width(ui, value).max(dialog::one_line_width(ui, placeholder));
+    let width = (widest + 2.0 * crate::drive::controls::FIELD_INSET)
+        .max(crate::drive::controls::NUMBER_FIELD_WIDTH);
+    line_with(
+        ui,
+        name,
+        value,
+        LineOptions {
+            placeholder,
+            width: Some(width),
+            ..LineOptions::default()
+        },
+    )
+}
+
 /// The Command row: the line Run will run, read-only, and empty while the fields write none. Why
 /// they write none is the footer's status (`run_buttons`), not the field's placeholder: a
 /// sentence in the field read as the command, and was cut with "..." at the field's end ("Surface:
@@ -113,6 +153,19 @@ pub(crate) fn why_no_line(made: &Result<String>) -> String {
     match made {
         Ok(_) => String::new(),
         Err(error) => error.message.clone(),
+    }
+}
+
+/// Why a dialog's fields write no line, as its footer's status says it: `message` - an error's
+/// words, which start in lower case to follow a field's name ("the scope: ...") - begun with a
+/// capital, and nothing put before it. The GIS and utility dialogs put "Nothing to run yet: "
+/// before it, and with the field prefixes their errors already carry a status read as three
+/// prefixes in a row (Clip's "Nothing to run yet: the boundary: the scope: tick ...").
+pub(crate) fn why_status(message: &str) -> String {
+    let mut characters = message.trim().chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => String::new(),
     }
 }
 
@@ -199,13 +252,7 @@ pub(crate) fn run_buttons(
                     .inner
             });
             let (name, text) = status;
-            label_as(
-                ui,
-                name,
-                text,
-                egui::Label::new(egui::RichText::new(text).color(dialog::status_colour(false)))
-                    .wrap(),
-            );
+            dialog::status(ui, name, text, false);
             previewed
         },
         |ui| {

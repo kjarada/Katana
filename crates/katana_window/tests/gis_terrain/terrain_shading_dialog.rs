@@ -85,7 +85,8 @@ mod shading_line {
     #[test]
     fn what_cannot_be_written_is_refused_naming_the_field() {
         let mut form = ShadingForm::default();
-        assert!(message(&form).contains("Source"));
+        // No source: the one sentence every dialog reading a surface or a raster says it in.
+        assert!(message(&form).contains("There is no surface or raster"));
         form.source = String::from("RASTER 1");
         form.style = String::from("slope");
         form.range_min = String::from("0");
@@ -184,7 +185,11 @@ mod terrain_shading_dialog {
         assert!(!bench.enabled("shadingRun"));
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.text("shadingStatus").contains("Source"));
+        assert!(
+            bench
+                .text("shadingStatus")
+                .contains("There is no surface or raster")
+        );
         assert!(bench.text("shadingCommand").is_empty());
         assert!(bench.placeholder("shadingCommand").is_empty());
     }

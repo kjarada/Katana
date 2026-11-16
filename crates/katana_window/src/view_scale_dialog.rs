@@ -259,43 +259,44 @@ impl ViewScaleDialog {
                     .on_hover_text("Positive finite N in 1:N; this is not the camera zoom");
                 });
             });
-            let line = match self.line() {
-                Ok(line) => line,
-                Err(error) => error.message,
-            };
+            // The line Apply runs in a read-only field, as every dialog's Command is: it was bold
+            // fixed-pitch text, the one dialog that showed its line so. Empty while the fields
+            // write none; why is the footer's status.
+            let mut line = self.line().unwrap_or_default();
             captioned(ui, "viewScaleLineLabel", "Command:", |ui| {
-                // On its caption's line, as a field's text is (dialog::text_value).
-                dialog::text_value(ui, |ui| {
-                    controls::label_as(
-                        ui,
-                        "viewScaleLine",
-                        &line,
-                        egui::Label::new(RichText::new(line.as_str()).monospace())
-                            .wrap()
-                            .selectable(true),
-                    );
-                });
+                controls::line_with(
+                    ui,
+                    "viewScaleLine",
+                    &mut line,
+                    LineOptions {
+                        read_only: true,
+                        ..LineOptions::default()
+                    },
+                );
             });
         });
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        let status = self.status.clone();
-        let colour = dialog::status_colour(self.status_error);
+        // What the last Apply said, or - before anything was said - why the fields write no line.
+        let (status, is_error) = if self.status.is_empty() {
+            (
+                self.line()
+                    .err()
+                    .map(|error| error.message)
+                    .unwrap_or_default(),
+                false,
+            )
+        } else {
+            (self.status.clone(), self.status_error)
+        };
         // The status at the left (it stood on a line of its own over the buttons); Close, then
         // Apply - the dialog's act - last, in the accent.
         let buttons = ui.scope(|ui| {
             crate::shell::dialog::button_row(
                 ui,
                 |ui| {
-                    controls::label_as(
-                        ui,
-                        "viewScaleStatus",
-                        &status,
-                        egui::Label::new(RichText::new(status.as_str()).color(colour))
-                            .wrap()
-                            .selectable(true),
-                    );
+                    dialog::status(ui, "viewScaleStatus", &status, is_error);
                 },
                 |ui| {
                     let close = controls::button(ui, "viewScaleClose", "Close").clicked();

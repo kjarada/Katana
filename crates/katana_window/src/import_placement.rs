@@ -35,7 +35,7 @@ use katana_cad::import_placement::{
 use katana_geometry::{Box2, Vec2};
 use katana_interop::import::advise_placement;
 
-use crate::drive::{SpinRange, button, label_as, radio, spin};
+use crate::drive::{SpinRange, button, label_as, primary, radio, spin};
 use crate::format::qt_fixed;
 use crate::host::{Host, UserSettings};
 use crate::shell::DialogFrame;
@@ -176,8 +176,10 @@ impl ImportPlacementBox {
     /// The group drawn; true when the choice changed.
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
         let before = self.placement();
-        ui.group(|ui| {
-            ui.strong("Placement");
+        // A headed section, as every group of a dialog is (shell::dialog::section): a bordered
+        // box here, under the import dialogs' unbordered forms, read as a second convention.
+        crate::shell::dialog::section(ui, "Placement");
+        ui.vertical(|ui| {
             for (name, text, mode, tip) in [
                 (
                     "importPlacementKeep",
@@ -229,7 +231,12 @@ impl ImportPlacementBox {
                 ui,
                 "importPlacementShift",
                 &said,
-                egui::Label::new(said.as_str()).wrap(),
+                // A note of what the choice does, muted as a dialog's notes are.
+                egui::Label::new(
+                    egui::RichText::new(said.as_str())
+                        .color(crate::theme::palette::text_muted().to_egui()),
+                )
+                .wrap(),
             );
         });
         self.placement() != before
@@ -315,14 +322,25 @@ impl ImportPlacementDialog {
                 parts.0.ui(ui);
             },
             |ui, parts| {
-                ui.horizontal(|ui| {
-                    if button(ui, "importPlacementImport", "Import").clicked() {
-                        *parts.1 = Some(DialogResult::Accepted);
-                    }
-                    if button(ui, "importPlacementCancel", "Cancel").clicked() {
-                        *parts.1 = Some(DialogResult::Rejected);
-                    }
-                });
+                // The design's one footer (shell::dialog::button_row): Close, then Import - the
+                // step's act - last in the accent, where both stood at the left in a button's
+                // grey. Close, not Cancel (importPlacementCancel, as it was): nothing is imported
+                // until Import is pressed, so there is nothing to cancel.
+                let ((), (import, close)) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        let close = button(ui, "importPlacementCancel", "Close").clicked();
+                        let import = primary(ui, "importPlacementImport", "Import").clicked();
+                        (import, close)
+                    },
+                );
+                if import {
+                    *parts.1 = Some(DialogResult::Accepted);
+                }
+                if close {
+                    *parts.1 = Some(DialogResult::Rejected);
+                }
             },
         );
         match pressed {
@@ -391,17 +409,31 @@ impl FarApartBox {
                 ui.add(egui::Label::new(informative.as_str()).wrap());
             },
             |ui, answer| {
-                ui.horizontal(|ui| {
-                    if button(ui, "importFarApartShift", "Shift Alongside").clicked() {
-                        *answer = Some(FarApartAnswer::ShiftAlongside);
-                    }
-                    if button(ui, "importFarApartKeep", "Keep Survey Coordinates").clicked() {
-                        *answer = Some(FarApartAnswer::Keep);
-                    }
-                    if button(ui, "importFarApartCancel", "Cancel").clicked() {
-                        *answer = Some(FarApartAnswer::Cancel);
-                    }
-                });
+                // A question, so Cancel (it discards the import); its answers at the right as the
+                // design's one footer has them (shell::dialog::button_row), the advised one -
+                // Shift Alongside - last in the accent.
+                let ((), chosen) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        let cancel = button(ui, "importFarApartCancel", "Cancel").clicked();
+                        let keep =
+                            button(ui, "importFarApartKeep", "Keep Survey Coordinates").clicked();
+                        let shift = primary(ui, "importFarApartShift", "Shift Alongside").clicked();
+                        if shift {
+                            Some(FarApartAnswer::ShiftAlongside)
+                        } else if keep {
+                            Some(FarApartAnswer::Keep)
+                        } else if cancel {
+                            Some(FarApartAnswer::Cancel)
+                        } else {
+                            None
+                        }
+                    },
+                );
+                if chosen.is_some() {
+                    *answer = chosen;
+                }
             },
         );
         if answer.is_none() && shown.closed {

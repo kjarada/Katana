@@ -318,6 +318,13 @@ impl SurveyToolFrame {
         }
     }
 
+    /// The dialog's body `width` wide (DialogFrame::width): for a tool whose footer holds more
+    /// buttons than the default body's width has room for.
+    pub fn wide(mut self, width: f32) -> Self {
+        self.frame = self.frame.clone().width(width);
+        self
+    }
+
     pub fn title(&self) -> &str {
         self.frame.title()
     }
@@ -407,12 +414,7 @@ impl SurveyToolFrame {
                                 clicked = Some(filler.name);
                             }
                         }
-                        coloured_label(
-                            ui,
-                            "message",
-                            &pane.message,
-                            message_colour(pane.message_is_error),
-                        );
+                        dialog::status(ui, "message", &pane.message, pane.message_is_error);
                         clicked
                     },
                     // At the right: the other verbs, Close, and the first verb - the dialog's own
@@ -992,7 +994,7 @@ impl SurveyTraverseDialog {
                 "The backsight - for a loop, the station the first leg runs to",
             )
         });
-        form_row(ui, "or its azimuth:", |ui| {
+        form_row(ui, "Start azimuth:", |ui| {
             field(
                 ui,
                 "startAzimuth",
@@ -1058,7 +1060,7 @@ impl SurveyTraverseDialog {
                 "",
             )
         });
-        form_row(ui, "or its azimuth:", |ui| {
+        form_row(ui, "Closing azimuth:", |ui| {
             field_if(
                 ui,
                 link,

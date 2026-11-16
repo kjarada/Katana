@@ -103,7 +103,7 @@ mod gis_check_dialog {
             bench
                 .dialog
                 .status_text()
-                .starts_with("1 problems on 1 entities"),
+                .starts_with("1 problem on 1 entity"),
             "{}",
             bench.dialog.status_text()
         );
@@ -144,12 +144,13 @@ mod gis_check_dialog {
             repair.reply_text()
         );
         let mut area = 0.0;
-        host.document().model().entities.for_each(|entity| {
-            match &entity.geometry {
+        host.document()
+            .model()
+            .entities
+            .for_each(|entity| match &entity.geometry {
                 Geometry::Polyline(polyline) => area += polyline.area(),
                 _ => panic!("a repaired piece is not a polyline"),
-            }
-        });
+            });
         assert!((area - 50.0_f64).abs() <= 1e-9, "{area}");
         check.run(&mut host);
         assert_eq!(check.frame().problems().map(<[Vec<String>]>::len), Some(0));

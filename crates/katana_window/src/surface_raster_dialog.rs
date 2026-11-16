@@ -36,7 +36,7 @@
 
 use std::path::Path;
 
-use egui::{RichText, Ui};
+use egui::Ui;
 use katana_core::Result;
 use katana_core::text::format_exact_real;
 use katana_interop::SurfaceRasterOptions;
@@ -47,8 +47,8 @@ use crate::customisation::{ScopeChoice, ScopeFilterWidget};
 use crate::drive::{Choice, SpinRange, button, check, choice, label, spin};
 use crate::format::grouped;
 use crate::geo::terrain_dialog_parts::{
-    Framed, WordChoice, command_field, field, host_views, invalid, row, run_buttons, show_framed,
-    why_no_line, without_blanks,
+    Framed, NO_SURFACE, WordChoice, command_field, field, host_views, invalid, row, run_buttons,
+    show_framed, why_no_line, without_blanks,
 };
 use crate::geo::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -57,7 +57,6 @@ use crate::geo::terrain_dialog_support::{
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name};
 use crate::shell::DialogFrame;
-use crate::theme::palette;
 
 // ---- Surface From -------------------------------------------------------------------------------
 
@@ -423,9 +422,7 @@ impl Default for SurfaceExportForm {
 pub fn surface_export_line(form: &SurfaceExportForm) -> Result<String> {
     let surface = form.surface.trim();
     if surface.is_empty() {
-        return Err(invalid(
-            "Surface: there is no surface to export; build one from the Terrain menu",
-        ));
+        return Err(invalid(NO_SURFACE));
     }
     let file = form.file.trim();
     if file.is_empty() {
@@ -676,22 +673,26 @@ impl Framed for SurfaceRasterDialog {
             // On its label's line, as a field's text is.
             crate::shell::dialog::text_value(ui, |ui| label(ui, "surfaceRasterGrid", &grid));
         });
-        ui.label(
-            RichText::new(
+        // Under the grid it speaks of, at the fields' edge.
+        row(ui, "", |ui| {
+            crate::shell::dialog::note(
+                ui,
                 "Each cell holds the surface's elevation at its centre; a cell whose centre is \
                  off the surface is no-data.",
             )
-            .color(palette::text_muted().to_egui()),
-        );
+        });
         row(ui, "Stored as:", |ui| {
             choice(ui, "surfaceRasterType", &self.types, &mut self.data_type);
         });
-        check(
-            ui,
-            "surfaceRasterCog",
-            "Cloud Optimised GeoTIFF",
-            &mut self.cog,
-        );
+        // Check boxes at the fields' edge, as every check box of a form is (a row with no label).
+        row(ui, "", |ui| {
+            check(
+                ui,
+                "surfaceRasterCog",
+                "Cloud Optimised GeoTIFF",
+                &mut self.cog,
+            )
+        });
         let browse = row(ui, "File:", |ui| {
             ui.spacing_mut().text_edit_width =
                 crate::shell::dialog::beside_a_button(ui, "Browse...");
@@ -706,12 +707,14 @@ impl Framed for SurfaceRasterDialog {
         if browse {
             self.browse(&*host);
         }
-        check(
-            ui,
-            "surfaceRasterOverwrite",
-            "Replace a file already there",
-            &mut self.overwrite,
-        );
+        row(ui, "", |ui| {
+            check(
+                ui,
+                "surfaceRasterOverwrite",
+                "Replace a file already there",
+                &mut self.overwrite,
+            )
+        });
         command_field(ui, "surfaceRasterCommand", &self.command());
     }
 

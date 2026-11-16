@@ -859,12 +859,6 @@ impl SurveyImportWizard {
         if form.task.ui(ui) {
             form.task_cancelled = true;
         }
-        coloured_label(
-            ui,
-            "message",
-            &form.message,
-            message_colour(form.message_is_error),
-        );
     }
 
     fn draw_footer(ui: &mut Ui, form: &mut WizardForm) {
@@ -872,10 +866,16 @@ impl SurveyImportWizard {
         // pressed; Cancel is.
         let busy = form.task.busy();
         let page = form.page;
-        // At the right: Close, Back and Next, and Import - the wizard's act - last, in the accent.
+        // At the left the message line, the design's one home for a status (it stood in the
+        // body, under the page); at the right Close, Back and Next, and Import - the wizard's act -
+        // last, in the accent.
+        let message = form.message.clone();
+        let message_is_error = form.message_is_error;
         let pressed = dialog::button_row(
             ui,
-            |_| {},
+            |ui| {
+                dialog::status(ui, "message", &message, message_is_error);
+            },
             |ui| {
                 let buttons = [
                     ("close", "Close", true),
@@ -1264,7 +1264,7 @@ impl SurveyImportWizard {
             .on_hover_text(per_code_tip.as_str())
         });
         let policies: Vec<&str> = POLICIES.iter().map(|policy| policy.name()).collect();
-        form_row(ui, "Ids already in the drawing:", |ui| {
+        form_row(ui, "IDs already in the drawing:", |ui| {
             choice_of(ui, "existing", &policies, &mut form.existing).on_hover_text(
                 "What happens to a point whose id a survey point in the drawing already has",
             )
@@ -2192,14 +2192,26 @@ impl SurveyImportWizard {
         // layers their rules name, which the sentences after say.
         let line = if finished.codes_ran() || finished.linework_ran() {
             format!(
-                "Imported {} point(s) from {}, drawn on {} and then finished by the survey codes \
-                 as follows: one command - Undo removes it all.",
-                report.import.points, self.file_name, options.layer
+                "Imported {} from {}, drawn on {} and then finished by the survey codes as \
+                 follows: one command - Undo removes it all.",
+                katana_cad::tools::everyday_support::counted(
+                    report.import.points,
+                    "point",
+                    "points"
+                ),
+                self.file_name,
+                options.layer
             )
         } else {
             format!(
-                "Imported {} point(s) from {} on {}: one command - Undo removes it.",
-                report.import.points, self.file_name, options.layer
+                "Imported {} from {} on {}: one command - Undo removes it.",
+                katana_cad::tools::everyday_support::counted(
+                    report.import.points,
+                    "point",
+                    "points"
+                ),
+                self.file_name,
+                options.layer
             )
         };
         host.log(&line, false);
@@ -2352,10 +2364,18 @@ impl SurveyImportWizard {
                     self.form.preview_report.set_report_html(&html);
                     self.form.import_report.set_report_html(&html);
                     self.show_message(&format!(
-                        "Preview: {} point(s); {}; {} observation(s) rejected.",
-                        outcome.points.len(),
+                        "Preview: {}; {}; {} rejected.",
+                        katana_cad::tools::everyday_support::counted(
+                            outcome.points.len(),
+                            "point",
+                            "points"
+                        ),
                         adjustment_summary(&outcome.report),
-                        rejected_observations(&outcome.report)
+                        katana_cad::tools::everyday_support::counted(
+                            rejected_observations(&outcome.report),
+                            "observation",
+                            "observations"
+                        )
                     ));
                     self.outcome = Some(outcome);
                     match then {
@@ -2381,9 +2401,9 @@ impl SurveyImportWizard {
             |descriptor| descriptor.human_name,
         );
         self.form.content_summary = format!(
-            "{format} (parser {}) read {} record(s) of {}; {}",
+            "{format} (parser {}) read {} of {}; {}",
             read.parser_version,
-            read.records_read,
+            katana_cad::tools::everyday_support::counted(read.records_read, "record", "records"),
             self.file_name,
             if read.records_skipped == 0 {
                 String::from("none skipped.")
@@ -2429,7 +2449,7 @@ impl SurveyImportWizard {
             .iter()
             .map(|session| {
                 let mut detail = format!(
-                    "receiver {}, antenna {}, {} epoch(s)",
+                    "receiver {}, antenna {}, {}",
                     if session.receiver_type.is_empty() {
                         "not stated"
                     } else {
@@ -2440,7 +2460,11 @@ impl SurveyImportWizard {
                     } else {
                         session.antenna.r#type.as_str()
                     },
-                    session.epoch_count
+                    katana_cad::tools::everyday_support::counted(
+                        session.epoch_count,
+                        "epoch",
+                        "epochs"
+                    )
                 );
                 if session.first_epoch.year != 0 {
                     detail.push_str(&format!(
@@ -2456,7 +2480,11 @@ impl SurveyImportWizard {
                 };
                 (
                     format!("{marker}: {detail}"),
-                    format!("{} epoch(s)", session.epoch_count),
+                    katana_cad::tools::everyday_support::counted(
+                        session.epoch_count,
+                        "epoch",
+                        "epochs",
+                    ),
                 )
             })
             .collect();
@@ -2640,7 +2668,7 @@ impl SurveyImportWizard {
             .preview_report
             .show_note("Reducing and adjusting...");
         let started = self.form.task.run(
-            &format!("Reducing and adjusting {size} observation(s) and point(s)"),
+            &format!("Reducing and adjusting {size} observations and points"),
             size > BACKGROUND_OBSERVATIONS,
             ctx,
             move || {
@@ -2708,7 +2736,7 @@ impl SurveyImportWizard {
             }
         ));
         text.push_str(&format!(
-            "Ids the drawing already has: {}\n",
+            "IDs the drawing already has: {}\n",
             self.policy().name()
         ));
         text.push_str(&finish_plan(&finish, true).join("\n"));
@@ -2798,18 +2826,26 @@ impl SurveyImportWizard {
             .as_ref()
             .map_or(0, |outcome| outcome.points.len());
         let summary = format!(
-            "Imported survey job {} from {} ({format}, parser {}): {points} point(s) on {}; {}; {} \
-             observation(s) rejected; {} warning(s). One command - Undo removes it; the reduction \
-             report is in Survey > Survey Jobs.",
+            "Imported survey job {} from {} ({format}, parser {}): {} on {}; {}; {} rejected; {}. \
+             One command - Undo removes it; the reduction report is in Survey > Survey Jobs.",
             results.job_id(),
             self.file_name,
             read.parser_version,
+            katana_cad::tools::everyday_support::counted(points, "point", "points"),
             options.layer,
             report
                 .as_ref()
                 .map_or_else(|| String::from("-"), adjustment_summary),
-            report.as_ref().map_or(0, rejected_observations),
-            read.warnings.len() + report.as_ref().map_or(0, |report| report.warnings.len())
+            katana_cad::tools::everyday_support::counted(
+                report.as_ref().map_or(0, rejected_observations),
+                "observation",
+                "observations"
+            ),
+            katana_cad::tools::everyday_support::counted(
+                read.warnings.len() + report.as_ref().map_or(0, |report| report.warnings.len()),
+                "warning",
+                "warnings"
+            )
         );
         host.log(&summary, false);
         // What the job's finish did; None for a job that asked for neither.

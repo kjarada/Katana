@@ -126,7 +126,8 @@ mod gdal_toolbox {
         assert!(bench.text("gdalToolboxCommand").is_empty());
         // Why is the footer's status, not a sentence in the Command field.
         let why = bench.text("gdalToolboxStatus");
-        assert!(why.contains("interval must be above 0"), "{why}");
+        // A status is a sentence: the argument's message begun with a capital (why_status).
+        assert!(why.contains("Interval must be above 0"), "{why}");
         assert!(bench.placeholder("gdalToolboxCommand").is_empty());
         // Run is off, so nothing can be run: the harness refuses a press of it, where Qt's click
         // did nothing.
@@ -191,7 +192,7 @@ mod gdal_toolbox {
         assert!(
             bench
                 .text("gdalToolboxStatus")
-                .contains("distance is required")
+                .contains("Distance is required")
         );
     }
 

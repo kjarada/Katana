@@ -37,7 +37,7 @@ use katana_cad::CommandInterpreter;
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result};
 
-use crate::drive::{LineOptions, TextOptions, button, check, label_as, line_with, text_with};
+use crate::drive::{LineOptions, TextOptions, button, check, line_with, text_with};
 use crate::host::{Host, VerbOutcome};
 use crate::shell::DialogFrame;
 
@@ -330,6 +330,8 @@ struct ScriptRunState {
     command: String,
     ready: bool,
     status: String,
+    /// Whether the status is a refusal or a run that stopped (shell::dialog::status_colour).
+    status_error: bool,
     close: bool,
     /// The path and the check the preview and the command were made for.
     shown_for: Option<(String, bool)>,
@@ -382,10 +384,12 @@ impl ScriptRunState {
             Ok(line) => line,
             Err(error) => {
                 self.status = error.message;
+                self.status_error = true;
                 return;
             }
         };
         let outcome = host.run(&line);
+        self.status_error = !outcome.ok;
         // The record the run ended with is the reply's last line; what each line said is in the
         // command log.
         let last = outcome.reply.rsplit('\n').next().unwrap_or("");
@@ -403,6 +407,7 @@ impl ScriptRunState {
 
     fn browse(&mut self, host: &mut dyn Host) {
         if host.headless() {
+            self.status_error = false;
             self.status = String::from(
                 "A headless session opens no file dialog: fill scriptPath with the path instead.",
             );
@@ -496,16 +501,12 @@ impl ScriptRunState {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // The status at the left; Close, then Run - the dialog's act, in the accent - at the right.
         let status = self.status.clone();
+        let status_error = self.status_error;
         let ready = self.ready;
         let ((), (close, run)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
-                label_as(
-                    ui,
-                    "scriptStatus",
-                    &status,
-                    egui::Label::new(status.as_str()).wrap(),
-                );
+                crate::shell::dialog::status(ui, "scriptStatus", &status, status_error);
             },
             |ui| {
                 let close = button(ui, "scriptClose", "Close").clicked();

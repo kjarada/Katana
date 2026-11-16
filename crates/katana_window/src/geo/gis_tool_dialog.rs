@@ -47,20 +47,20 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use egui::{RichText, Ui};
+use egui::Ui;
 use katana_app::geo::replies::{line_word, parse_records};
 use katana_core::error::make_error;
 use katana_core::text::parse_finite_double;
 use katana_core::{Error, ErrorCode, Result};
 
 use super::geo_workbench::{GeoMenus, started_job};
-use super::terrain_dialog_parts::RunStatus;
+use super::terrain_dialog_parts::{RunStatus, why_status};
 
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{
     DocumentWatcher, ScopeFilterView, ScopeFilterWidget, scope_filter_views,
 };
-use crate::drive::{Action, LineOptions, button, label_as, line_with, primary};
+use crate::drive::{Action, LineOptions, button, line_with, primary};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 use crate::shell::{DialogFrame, dialog};
 
@@ -160,7 +160,9 @@ pub fn gis_word(text: &str, field: &str) -> Result<String> {
 /// The scope words, or InvalidArgument saying why there are none.
 pub fn gis_scope(scope: &GisScopeWords) -> Result<String> {
     if !scope.error.is_empty() {
-        return Err(invalid(format!("the scope: {}", scope.error)));
+        // The scope's own words say what to do ("tick at least one layer ..."): a prefix naming
+        // the scope read as one more label before them.
+        return Err(invalid(scope.error.clone()));
     }
     if scope.words.trim().is_empty() {
         return Err(invalid(String::from(
@@ -255,6 +257,8 @@ pub struct GisToolFrame {
     problems: Option<Vec<Vec<String>>>,
     problem: Option<usize>,
     pending: JobId,
+    /// The primary's words: "Run", or the verb the dialog does ("Export").
+    run_text: &'static str,
     /// Where the end of a job this dialog's line started is told (`Host::await_job`'s done), for
     /// the next frame to take.
     heard: Rc<RefCell<Vec<(JobId, VerbOutcome)>>>,
@@ -295,6 +299,7 @@ impl GisToolFrame {
             problems: None,
             problem: None,
             pending: NO_JOB,
+            run_text: "Run",
             heard: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -403,6 +408,12 @@ impl GisToolFrame {
         self.visible
     }
 
+    /// The primary's words, where the dialog's act has a verb of its own (Export Drawing's
+    /// "Export", as every other export's primary reads); its control name stays <d>Run.
+    pub fn set_run_text(&mut self, text: &'static str) {
+        self.run_text = text;
+    }
+
     /// QDialog::isModal: never.
     pub fn is_modal(&self) -> bool {
         self.frame.is_modal()
@@ -419,7 +430,7 @@ impl GisToolFrame {
             Err(error) => {
                 self.command.clear();
                 self.ready = false;
-                format!("Nothing to run yet: {}", error.message)
+                why_status(&error.message)
             }
         };
         self.status.read_line(why);
@@ -716,8 +727,7 @@ fn footer<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui) -> (bool, bool) {
     );
     let (status, is_error) = frame.status.shown();
     let ready = frame.ready;
-    // A refusal's words, never markup; red only for a refusal.
-    let text = RichText::new(status.as_str()).color(dialog::status_colour(is_error));
+    let run_text = frame.run_text;
     let (preview, (close, run)) = dialog::button_row(
         ui,
         |ui| {
@@ -730,19 +740,14 @@ fn footer<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui) -> (bool, bool) {
                         .clicked()
                 })
                 .inner;
-            label_as(
-                ui,
-                &format!("{prefix}Status"),
-                &status,
-                egui::Label::new(text).wrap(),
-            );
+            dialog::status(ui, &format!("{prefix}Status"), &status, is_error);
             preview
         },
         |ui| {
             let close = button(ui, &format!("{prefix}Close"), "Close").clicked();
             let run = ui
                 .add_enabled_ui(ready, |ui| {
-                    primary(ui, &format!("{prefix}Run"), "Run").clicked()
+                    primary(ui, &format!("{prefix}Run"), run_text).clicked()
                 })
                 .inner;
             (close, run)
