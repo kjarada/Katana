@@ -43,7 +43,6 @@ use super::road_dialog_support::{
     word,
 };
 use crate::customisation::document_watcher::DocumentWatcher;
-use crate::dialog_layout as layout;
 use crate::drive::controls::check;
 use crate::host::Host;
 use crate::shell::dialog::{self, DialogFrame};
@@ -265,7 +264,7 @@ impl Body {
     }
 
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        dialog::labelled(ui, "Corridor:", |ui| {
+        dialog::labelled(ui, "Corridor", |ui| {
             // The choice leaves List Quantities its room beside it.
             ui.spacing_mut().combo_width = dialog::beside_a_button(ui, "List Quantities");
             self.corridor.ui(ui, "corridorQuantitiesCorridor");
@@ -284,7 +283,7 @@ impl Body {
         self.table.ui(ui);
         muted(ui, "corridorQuantitiesTotals", &self.totals);
         ui.add_space(dialog::GROUP_GAP);
-        dialog::labelled(ui, "CSV file:", |ui| {
+        dialog::labelled(ui, "CSV file", |ui| {
             // The path leaves its three buttons their room beside it.
             ui.spacing_mut().text_edit_width =
                 dialog::beside_buttons(ui, &["Browse...", "Save CSV", "Copy"]);
@@ -346,7 +345,7 @@ impl Body {
         // What the last line replied at the left, as the Alignment Manager's footer has it;
         // Close at the right.
         let status = &self.status;
-        let ((), close) = layout::footer(
+        let ((), close) = dialog::button_row(
             ui,
             |ui| {
                 status.ui(ui, "corridorQuantitiesStatus");
@@ -386,7 +385,9 @@ impl CorridorQuantitiesDialog {
                     "Volume (m3)",
                 ],
             )
-            .max_height(320.0),
+            .max_height(320.0)
+            .filling()
+            .empty_text("Nothing listed yet: choose a corridor, then List Quantities"),
             totals: String::new(),
             csv_path: String::new(),
             overwrite: false,

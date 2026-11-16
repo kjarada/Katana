@@ -393,14 +393,10 @@ impl DrawingSummaryDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        controls::label_as(
-            ui,
-            "drawingSummaryStatus",
-            &self.status,
-            egui::Label::new(self.status.as_str()).wrap(),
-        );
-        // Copy and Refresh at the left; Close, the only way out, at the right.
-        let ((copied, refreshed), closed) = layout::footer(
+        let status = self.status.clone();
+        // The one footer (shell::dialog::button_row): Copy, Refresh and the status at the left;
+        // Close, the only way out, at the right.
+        let ((copied, refreshed), closed) = dialog::button_row(
             ui,
             |ui| {
                 let copied = controls::button(ui, "drawingSummaryCopyJson", "Copy as JSON")
@@ -409,10 +405,16 @@ impl DrawingSummaryDialog {
                 let refreshed = controls::button(ui, "drawingSummaryRefresh", "Refresh")
                     .on_hover_text("Read the drawing's state again")
                     .clicked();
+                controls::label_as(
+                    ui,
+                    "drawingSummaryStatus",
+                    &status,
+                    egui::Label::new(status.as_str()).wrap(),
+                );
                 (copied, refreshed)
             },
             |ui| {
-                layout::button(ui, "drawingSummaryClose", "Close")
+                controls::button(ui, "drawingSummaryClose", "Close")
                     .on_hover_text("Close the summary")
                     .clicked()
             },

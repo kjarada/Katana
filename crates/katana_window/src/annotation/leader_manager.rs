@@ -112,7 +112,9 @@ use crate::customisation::scope_filter_widget::WIDGET_WIDTH;
 use crate::customisation::{
     DocumentChanges, DocumentWatcher, ScopeChoice, ScopeFilterView, ScopeFilterWidget,
 };
-use crate::drive::controls::{self, Choice, LineOptions, SpinRange, TextOptions};
+use crate::dialog_layout as layout;
+use crate::drive::controls::{self, Choice, SpinRange, TextOptions};
+use crate::drive::registry::ControlKind;
 use crate::format::qt_fixed;
 use crate::host::{Host, VerbOutcome};
 use crate::shell::DialogFrame;
@@ -834,11 +836,14 @@ enum Pressed {
     Make,
     Align,
     Renumber,
+    Close,
 }
 
 /// The manager's body width on every tab (the look of 2026-11-16): the list or the scope
-/// beside the form.
-const BODY_WIDTH: f32 = 900.0;
+/// beside the form - the widest tab's, For Selection's, whose Look group (its long choices,
+/// "Automatic (a dot inside an outline)", beside "Note distance on paper") needs 946. At 900 that
+/// tab ran 46 past it and the dialog was 926 wide on one tab and 972 on another.
+const BODY_WIDTH: f32 = 950.0;
 
 /// The Leaders manager (see the module comment).
 pub struct LeaderManagerDialog {
@@ -2477,7 +2482,8 @@ impl LeaderManagerDialog {
             self.refresh(host.document(), changes);
         }
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, TITLE));
-        let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
+        frame.set_body_width(BODY_WIDTH);
+        let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         match self.pressed.take() {
             Some(Pressed::Apply) => {
@@ -2507,6 +2513,7 @@ impl LeaderManagerDialog {
             Some(Pressed::Renumber) => {
                 self.renumber_balloons(host);
             }
+            Some(Pressed::Close) => closed = true,
             None => {}
         }
         !closed
@@ -2528,7 +2535,7 @@ impl LeaderManagerDialog {
                 scope.reload_views();
             }
         }
-        ui.separator();
+        // The strip's own rule parts it from the page (a separator under it drew a second).
         let document = host.document();
         match self.tab {
             0 => self.leader_tab(ui, document),
@@ -3213,18 +3220,28 @@ impl LeaderManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        // The line the last action handed to the command line, as it ran.
-        controls::line_with(
+        let problem = self.problem.clone();
+        // The one footer (shell::dialog::button_row): the last refusal at the left, Close at the
+        // right; each tab's own actions stay on its tab. The footer held a blank read-only field
+        // 220 wide on a fresh dialog, and no Close.
+        let (_, closed) = dialog::button_row(
             ui,
-            "leaderLine",
-            &mut self.line,
-            LineOptions {
-                read_only: true,
-                ..LineOptions::default()
+            |ui| {
+                problem_line(ui, "leaderProblem", &problem);
             },
-        )
-        .on_hover_text("The command the last action ran, as you could type it");
-        problem_line(ui, "leaderProblem", &self.problem);
+            |ui| {
+                controls::button(ui, "leaderClose", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
+                    .clicked()
+            },
+        );
+        if closed {
+            self.pressed = Some(Pressed::Close);
+        }
+        // The line the last action handed to the command line, as it ran: muted text under the
+        // row, no room until there is one (dialog_layout::reply_text).
+        layout::reply_text(ui, "leaderLine", &mut self.line, ControlKind::Line, false)
+            .on_hover_text("The command the last action ran, as you could type it");
     }
 }
 

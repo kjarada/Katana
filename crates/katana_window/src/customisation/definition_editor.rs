@@ -105,11 +105,10 @@ use katana_entity::{LineStyle, StyleUnits};
 use katana_geometry::Point2;
 
 use super::customisation_context::{CustomisationContext, DefinitionEdit};
-use super::style_preview::{DefinitionAs, StylePreview};
+use super::style_preview::{DefinitionAs, PreviewGround, StylePreview};
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use crate::annotation::dialog_support::show_dialog;
 use crate::command_word::exact_number;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -509,6 +508,10 @@ impl DefinitionEditorDialog {
             logs: Vec::new(),
             watcher: DocumentWatcher::new(document),
         };
+        // On the viewport's dark ground, as the plan view draws it: a white pane of paper was the
+        // brightest thing on the screen (the look of 2026-11-16).
+        dialog.preview.set_ground(PreviewGround::Screen);
+        dialog.line_preview.set_ground(PreviewGround::Screen);
         dialog.load(
             Some(document),
             fields_of(&LineStyle::default()),
@@ -1360,7 +1363,11 @@ impl DefinitionEditorDialog {
                 match &reading.definition {
                     None => {
                         parts.push(reading.problem.clone());
-                        is_error = true;
+                        // A new form nobody has touched yet is told what it needs ("Type a name"),
+                        // muted, as a hint; it is a refusal, in the error's colour, once there is
+                        // something typed or a definition loaded to refuse. The editor opened in
+                        // red, as if it had already refused something.
+                        is_error |= changed || self.existing.is_some();
                     }
                     Some(definition) => {
                         let name = &definition.name;
@@ -1837,16 +1844,26 @@ impl DefinitionEditorDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         // What is wrong, or what names it; then the buttons.
         let mut issues = self.issues.clone();
-        let shown = controls::text_with(
-            ui,
-            "definitionIssues",
-            &mut issues,
-            TextOptions {
-                read_only: true,
-                rows: 5,
-                monospace: false,
-            },
-        );
+        let issues_error = self.issues_error;
+        // A hint or a note in the secondary text colour; a refusal in the text colour, framed in
+        // the error's.
+        let shown = ui
+            .scope(|ui| {
+                if !issues_error {
+                    ui.visuals_mut().override_text_color = Some(palette::text_muted().to_egui());
+                }
+                controls::text_with(
+                    ui,
+                    "definitionIssues",
+                    &mut issues,
+                    TextOptions {
+                        read_only: true,
+                        rows: 5,
+                        monospace: false,
+                    },
+                )
+            })
+            .inner;
         if self.issues_error {
             ui.painter().rect_stroke(
                 shown.rect,
@@ -1892,9 +1909,9 @@ impl DefinitionEditorDialog {
         let in_library = self.in_library;
         let save_enabled = self.save_enabled;
         let revert_enabled = self.revert_enabled;
-        // New, Duplicate and Delete at the left; at the right, drawn from the right edge in, Save,
-        // the primary, last, then Close and Revert.
-        let (left, right) = layout::footer(
+        // The one footer (shell::dialog::button_row): New, Duplicate and Delete at the left;
+        // Revert, Close, then Save, the primary, last at the right.
+        let (left, right) = dialog::button_row(
             ui,
             |ui| {
                 let mut pressed = None;
@@ -1927,8 +1944,19 @@ impl DefinitionEditorDialog {
             },
             |ui| {
                 let mut pressed = None;
+                ui.add_enabled_ui(revert_enabled, |ui| {
+                    if controls::button(ui, "definitionRevert", "Revert")
+                        .on_hover_text("Forget what was changed here")
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Revert);
+                    }
+                });
+                if controls::button(ui, "definitionClose", "Close").clicked() {
+                    pressed = Some(Pressed::Close);
+                }
                 ui.add_enabled_ui(save_enabled, |ui| {
-                    if layout::primary(ui, "definitionSave", "Save")
+                    if controls::primary(ui, "definitionSave", "Save")
                         .on_hover_text(
                             "Put the definition into the session's library, in place of the one \
                              of its name",
@@ -1936,17 +1964,6 @@ impl DefinitionEditorDialog {
                         .clicked()
                     {
                         pressed = Some(Pressed::Save);
-                    }
-                });
-                if layout::button(ui, "definitionClose", "Close").clicked() {
-                    pressed = Some(Pressed::Close);
-                }
-                ui.add_enabled_ui(revert_enabled, |ui| {
-                    if layout::button(ui, "definitionRevert", "Revert")
-                        .on_hover_text("Forget what was changed here")
-                        .clicked()
-                    {
-                        pressed = Some(Pressed::Revert);
                     }
                 });
                 pressed

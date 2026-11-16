@@ -57,7 +57,6 @@ use katana_core::text::{format_general, parse_finite_double, parse_integer};
 use katana_core::{Error, ErrorCode, Result, Status};
 
 use crate::canvas::{Image, encode_png};
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name, to_native_separators};
@@ -696,7 +695,9 @@ impl ViewImageDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
         let ready = self.request().is_ok();
-        let (_, (pressed, closed)) = layout::footer(
+        // The one footer (shell::dialog::button_row): the status at the left; Close, then Export, the
+        // primary, last at the right.
+        let (_, (closed, pressed)) = dialog::button_row(
             ui,
             |ui| {
                 controls::label_as(
@@ -706,15 +707,14 @@ impl ViewImageDialog {
                     egui::Label::new(status.as_str()).wrap().selectable(true),
                 );
             },
-            // Drawn from the right: Export, the primary, last.
             |ui| {
+                let closed = controls::button(ui, "viewImageClose", "Close").clicked();
                 let pressed = ui
                     .add_enabled_ui(ready, |ui| {
-                        layout::primary(ui, "viewImageExport", "Export").clicked()
+                        controls::primary(ui, "viewImageExport", "Export").clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "viewImageClose", "Close").clicked();
-                (pressed, closed)
+                (closed, pressed)
             },
         );
         if pressed {

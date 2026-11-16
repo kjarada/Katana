@@ -52,7 +52,6 @@ use katana_entity::{EntityId, Geometry, Model};
 
 use super::dialog_support::{Followed, show_dialog};
 use crate::command_word::{annotation_text_word, command_word, exact_number};
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -528,11 +527,11 @@ impl LabelEditDialog {
         // One form: the labels in the dialog's label column, the two boxes in it as the labels of
         // the fields they switch, every field from one edge to the body's.
         dialog::form(ui, |form| {
-            form.row("Label:", |ui| {
+            form.row("Label", |ui| {
                 controls::label(ui, "labelEditTarget", &self.target);
             });
 
-            form.row("Style:", |ui| {
+            form.row("Style", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     changed |=
                         controls::choice(ui, "labelEditStyle", &self.styles, &mut self.style)
@@ -618,7 +617,7 @@ impl LabelEditDialog {
             self.pinned = pinned.get();
             changed |= ticked;
 
-            form.row("Layer:", |ui| {
+            form.row("Layer", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     changed |=
                         controls::choice(ui, "labelEditLayer", &self.layers, &mut self.layer)
@@ -626,7 +625,7 @@ impl LabelEditDialog {
                 });
             });
 
-            form.row("Command:", |ui| {
+            form.row("Command", |ui| {
                 controls::line_with(
                     ui,
                     "labelEditCommand",
@@ -646,22 +645,35 @@ impl LabelEditDialog {
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let enabled = self.current.id != 0;
-        controls::label(ui, "labelEditStatus", &self.status);
-        // Drawn from the right: OK, the primary, last; then Cancel and Apply.
-        let (ok, cancel, apply) = layout::footer_buttons(ui, |ui| {
-            let ok = ui
-                .add_enabled_ui(enabled, |ui| {
-                    layout::primary(ui, "labelEditOk", "OK").clicked()
-                })
-                .inner;
-            let cancel = layout::button(ui, "labelEditCancel", "Cancel").clicked();
-            let apply = ui
-                .add_enabled_ui(enabled, |ui| {
-                    layout::button(ui, "labelEditApply", "Apply").clicked()
-                })
-                .inner;
-            (ok, cancel, apply)
-        });
+        let status = self.status.clone();
+        // The one footer (shell::dialog::button_row): the status at the left; Apply, Cancel (the
+        // dialog's Close), then OK, the primary, last at the right.
+        let (_, (ok, cancel, apply)) = dialog::button_row(
+            ui,
+            |ui| {
+                controls::label_as(
+                    ui,
+                    "labelEditStatus",
+                    &status,
+                    // The text colour, not muted: the status is also where a refusal is said.
+                    egui::Label::new(status.as_str()).wrap(),
+                );
+            },
+            |ui| {
+                let apply = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        controls::button(ui, "labelEditApply", "Apply").clicked()
+                    })
+                    .inner;
+                let cancel = controls::button(ui, "labelEditCancel", "Cancel").clicked();
+                let ok = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        controls::primary(ui, "labelEditOk", "OK").clicked()
+                    })
+                    .inner;
+                (ok, cancel, apply)
+            },
+        );
         if ok {
             self.ok_pressed = true;
         }

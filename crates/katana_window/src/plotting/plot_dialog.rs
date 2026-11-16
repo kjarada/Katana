@@ -40,7 +40,6 @@ use katana_core::path_text::generic_path_utf8;
 use katana_core::{ErrorCode, Result, Status};
 use katana_entity::EnumName;
 
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::ifc_dialogs::{get_save_file_name, to_native_separators};
 use crate::plotting::plot_output::{
@@ -448,20 +447,25 @@ impl PlotDialog {
             |ui, (dialog, _)| dialog.body(ui, headless),
             |ui, (dialog, answer)| {
                 let ok = dialog.check().is_ok();
-                // Drawn from the right: Plot (or Save), the primary, last.
+                // The one footer (shell::dialog::button_row): Cancel, then Plot (or Save), the
+                // primary, last at the right.
                 let (name, text) = if dialog.mode == PlotDialogMode::PageSetup {
                     ("pageSetupSave", "Save")
                 } else {
                     ("plotRun", "Plot")
                 };
-                let (accepted, cancelled) = layout::footer_buttons(ui, |ui| {
-                    let accepted = ui
-                        .add_enabled_ui(ok, |ui| layout::primary(ui, name, text))
-                        .inner
-                        .clicked();
-                    let cancelled = layout::button(ui, "plotCancel", "Cancel").clicked();
-                    (accepted, cancelled)
-                });
+                let ((), (cancelled, accepted)) = dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        let cancelled = controls::button(ui, "plotCancel", "Cancel").clicked();
+                        let accepted = ui
+                            .add_enabled_ui(ok, |ui| controls::primary(ui, name, text))
+                            .inner
+                            .clicked();
+                        (cancelled, accepted)
+                    },
+                );
                 if accepted {
                     **answer = PlotAnswer::Accepted;
                 }

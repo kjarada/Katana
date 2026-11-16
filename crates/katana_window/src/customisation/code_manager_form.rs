@@ -305,7 +305,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
         MAP_PAGE => {
             edited |= field(
                 ui,
-                "Layer:",
+                "Layer",
                 "ruleModel",
                 &mut form.model,
                 "The layer the code's entities go on",
@@ -322,36 +322,36 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                     egui::Label::new(status).wrap(),
                 );
             });
-            dialog::labelled(ui, "Colour:", |ui| {
+            dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.colour.ui(ui, "ruleColour").changed();
             });
             edited |= pick(
                 ui,
-                "Line / point:",
+                "Line / point",
                 "ruleBreakline",
                 &["(not set)", "Line", "Point"],
                 &mut form.breakline,
             );
-            dialog::labelled(ui, "Linestyle:", |ui| {
+            dialog::labelled(ui, "Linestyle", |ui| {
                 ui.add_enabled_ui(form.pickers_loaded, |ui| {
                     edited |= picker_edited(&mut form.linestyle, ui, "ruleLinestyle");
                 });
             });
-            edited |= field(ui, "Weight:", "ruleWeight", &mut form.weight, "", "");
-            edited |= field(ui, "Group:", "ruleGroup", &mut form.group, "", "");
+            edited |= field(ui, "Weight", "ruleWeight", &mut form.weight, "", "");
+            edited |= field(ui, "Group", "ruleGroup", &mut form.group, "", "");
         }
         SYMBOL_PAGE => {
-            dialog::labelled(ui, "Symbol:", |ui| {
+            dialog::labelled(ui, "Symbol", |ui| {
                 ui.add_enabled_ui(form.pickers_loaded, |ui| {
                     edited |= picker_edited(&mut form.symbol, ui, "ruleSymbol");
                 });
             });
-            dialog::labelled(ui, "Colour:", |ui| {
+            dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.symbol_colour.ui(ui, "ruleSymbolColour").changed();
             });
             edited |= field(
                 ui,
-                "Size:",
+                "Size",
                 "ruleSymbolSize",
                 &mut form.symbol_size,
                 "",
@@ -359,7 +359,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             edited |= field(
                 ui,
-                "Rotation:",
+                "Rotation",
                 "ruleSymbolRotation",
                 &mut form.symbol_rotation,
                 "",
@@ -367,7 +367,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             edited |= field(
                 ui,
-                "Offset:",
+                "Offset",
                 "ruleSymbolOffset",
                 &mut form.symbol_offset,
                 "",
@@ -375,7 +375,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             edited |= field(
                 ui,
-                "Raise:",
+                "Raise",
                 "ruleSymbolRaise",
                 &mut form.symbol_raise,
                 "",
@@ -383,7 +383,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             edited |= pick(
                 ui,
-                "Hide the line:",
+                "Hide the line",
                 "ruleHide",
                 &["(not set)", "no", "yes"],
                 &mut form.hide,
@@ -392,26 +392,26 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
         TEXT_PAGE => {
             edited |= field(
                 ui,
-                "Text style:",
+                "Text style",
                 "ruleTextStyle",
                 &mut form.text_style,
                 "",
                 "",
             );
-            dialog::labelled(ui, "Colour:", |ui| {
+            dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.text_colour.ui(ui, "ruleTextColour").changed();
             });
             edited |= typed(
                 ui,
-                "Size type:",
+                "Size type",
                 "ruleTextType",
                 &TEXT_TYPES,
                 &mut form.text_type,
             );
-            edited |= field(ui, "Size:", "ruleTextSize", &mut form.text_size, "", "");
+            edited |= field(ui, "Size", "ruleTextSize", &mut form.text_size, "", "");
             edited |= field(
                 ui,
-                "Justify across:",
+                "Justify across",
                 "ruleTextJustifyX",
                 &mut form.text_justify_x,
                 "",
@@ -419,7 +419,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             edited |= field(
                 ui,
-                "Justify up:",
+                "Justify up",
                 "ruleTextJustifyY",
                 &mut form.text_justify_y,
                 "",
@@ -429,27 +429,27 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
         PIPE_PAGE => {
             edited |= typed(
                 ui,
-                "Justify:",
+                "Justify",
                 "rulePipeJustify",
                 &PIPE_JUSTIFIES,
                 &mut form.pipe_justify,
             );
             edited |= typed(
                 ui,
-                "Shape:",
+                "Shape",
                 "rulePipeShape",
                 &PIPE_SHAPES,
                 &mut form.pipe_shape,
             );
             edited |= field(
                 ui,
-                "Size 1:",
+                "Size 1",
                 "rulePipeSize1",
                 &mut form.pipe_size1,
                 "A number, or another attribute's name: $PipeDiameter",
                 "",
             );
-            edited |= field(ui, "Size 2:", "rulePipeSize2", &mut form.pipe_size2, "", "");
+            edited |= field(ui, "Size 2", "rulePipeSize2", &mut form.pipe_size2, "", "");
             // Under the fields, lined up with them.
             edited |= dialog::labelled(ui, "", |ui| {
                 controls::check(ui, "rulePipeActive", "Active", &mut form.pipe_active).changed()
@@ -468,7 +468,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
         _ => {
             edited |= pick(
                 ui,
-                "Goes into a surface:",
+                "Goes into a surface",
                 "ruleTinable",
                 &["(not set)", "yes", "no"],
                 &mut form.tinable,
@@ -800,7 +800,7 @@ impl SurveyCodeManagerDialog {
             );
             edited |= field(
                 ui,
-                "Key:",
+                "Key",
                 "ruleKey",
                 &mut form.key,
                 "An exact code (PABB) or a prefix ending in * (WM*); matching is exact, letter \
@@ -808,10 +808,10 @@ impl SurveyCodeManagerDialog {
                 "",
             );
             let words: Vec<&str> = SECTIONS.iter().map(|section| to_string(*section)).collect();
-            if pick(ui, "Section:", "ruleSection", &words, &mut form.section) {
+            if pick(ui, "Section", "ruleSection", &words, &mut form.section) {
                 self.events.push(Event::SectionChosen);
             }
-            edited |= field(ui, "Description:", "ruleComment", &mut form.comment, "", "");
+            edited |= field(ui, "Description", "ruleComment", &mut form.comment, "", "");
 
             let front = page_for(form.the_section());
             let pages = ui.vertical(|ui| {

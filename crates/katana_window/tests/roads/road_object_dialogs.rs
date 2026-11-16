@@ -706,6 +706,25 @@ mod road_object_manager {
     use super::*;
 
     #[test]
+    fn the_scope_column_has_its_width_beside_the_list_not_what_the_list_leaves() {
+        // The look audit of 2026-11-16 (T1): at the frame's 520-point body the list took it all
+        // and the scope's column, beside it, was drawn in nothing - its heading "Road objects by
+        // scope" a letter a line down 300 points. The body is the list's and the scope's widths.
+        let d = scoped_manager();
+        let by_scope = d.control("roadObjectManagerByScope");
+        // The shared widget's own width (scope_filter_widget::WIDGET_WIDTH, 400), less nothing.
+        assert!(
+            by_scope.rect.width() >= 399.0,
+            "the scope's column is {} points wide",
+            by_scope.rect.width()
+        );
+        // Beside the list, not under it.
+        let count = d.control("roadObjectCount");
+        assert!(by_scope.rect.left() > count.rect.right());
+        assert!(by_scope.rect.top() < count.rect.bottom() + 40.0);
+    }
+
+    #[test]
     fn it_lists_the_objects_and_each_edit_is_the_line_a_person_would_type() {
         let mut host = site();
         ok(

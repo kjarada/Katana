@@ -35,11 +35,11 @@ use katana_core::text::{format_exact_real, parse_finite_double};
 use katana_entity::EntityId;
 
 use super::dialog_support::show_dialog;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
+use crate::theme::palette;
 
 /// The dialog's object name and title.
 const DIALOG: &str = "labelLayoutDialog";
@@ -342,21 +342,21 @@ impl LabelLayoutReportDialog {
             // secondary text: "Displaced (moved to find room)" as a label was wider than the
             // column and wrapped, and pushed every figure out to its edge.
             let counts = [
-                ("Placed:", "", "labelLayoutPlaced", &self.placed),
+                ("Placed", "", "labelLayoutPlaced", &self.placed),
                 (
-                    "Displaced:",
+                    "Displaced",
                     "moved to find room",
                     "labelLayoutDisplaced",
                     &self.displaced,
                 ),
                 (
-                    "Suppressed:",
+                    "Suppressed",
                     "no room",
                     "labelLayoutSuppressed",
                     &self.suppressed,
                 ),
                 (
-                    "Orphaned:",
+                    "Orphaned",
                     "label nothing",
                     "labelLayoutOrphaned",
                     &self.orphaned,
@@ -370,7 +370,7 @@ impl LabelLayoutReportDialog {
                     }
                 });
             }
-            form.row("Command:", |ui| {
+            form.row("Command", |ui| {
                 controls::line_with(
                     ui,
                     "labelLayoutCommand",
@@ -396,26 +396,37 @@ impl LabelLayoutReportDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        controls::label(ui, "labelLayoutStatus", &self.status);
         let select_enabled = self.select_enabled;
-        // Select Suppressed at the left; Run, the primary, last at the right.
-        let (select, (run, close)) = layout::footer(
+        let status = self.status.clone();
+        // The one footer (shell::dialog::button_row): Select Suppressed and the status at the left;
+        // Close, then Run, the primary, last at the right.
+        let (select, (close, run)) = dialog::button_row(
             ui,
             |ui| {
-                ui.add_enabled_ui(select_enabled, |ui| {
-                    controls::button(ui, "labelLayoutSelectSuppressed", "Select Suppressed")
-                        .on_hover_text(
-                            "Select the labels that found no room, to move them (Edit Label) or \
-                             give them another style",
-                        )
-                        .clicked()
-                })
-                .inner
+                let select = ui
+                    .add_enabled_ui(select_enabled, |ui| {
+                        controls::button(ui, "labelLayoutSelectSuppressed", "Select Suppressed")
+                            .on_hover_text(
+                                "Select the labels that found no room, to move them (Edit Label)                                  or give them another style",
+                            )
+                            .clicked()
+                    })
+                    .inner;
+                controls::label_as(
+                    ui,
+                    "labelLayoutStatus",
+                    &status,
+                    egui::Label::new(
+                        egui::RichText::new(status.as_str()).color(palette::text_muted().to_egui()),
+                    )
+                    .wrap(),
+                );
+                select
             },
             |ui| {
-                let run = layout::primary(ui, "labelLayoutRun", "Run").clicked();
-                let close = layout::button(ui, "labelLayoutClose", "Close").clicked();
-                (run, close)
+                let close = controls::button(ui, "labelLayoutClose", "Close").clicked();
+                let run = controls::primary(ui, "labelLayoutRun", "Run").clicked();
+                (close, run)
             },
         );
         if run {

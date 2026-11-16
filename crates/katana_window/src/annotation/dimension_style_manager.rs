@@ -188,6 +188,7 @@ enum Pressed {
     Delete,
     Revert,
     Apply,
+    Close,
 }
 
 /// The width of a value field in the three forms (the look of 2026-11-16): a number's, so the
@@ -666,7 +667,7 @@ impl DimensionStyleManagerDialog {
         self.look(host.document());
         let mut frame =
             std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG_NAME, "Dimension Styles"));
-        let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
+        let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         let pressed = self.pressed.take();
         match pressed {
@@ -683,6 +684,7 @@ impl DimensionStyleManagerDialog {
             Some(Pressed::Apply) => {
                 self.apply(host);
             }
+            Some(Pressed::Close) => closed = true,
             None => {}
         }
         // The preview follows the form as it is typed in: worked out after the frame took its
@@ -927,17 +929,33 @@ impl DimensionStyleManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        problem_line(ui, "dimStyleProblem", &self.problem);
-        // Drawn from the right: Apply, the primary, last.
-        let (applied, reverted) = layout::footer_buttons(ui, |ui| {
-            let applied = layout::primary(ui, "dimStyleApply", "Apply")
-                .on_hover_text("Store the fields the form changed, as one undo step (DIMSTYLE SET)")
-                .clicked();
-            let reverted = layout::button(ui, "dimStyleRevert", "Revert")
-                .on_hover_text("Throw the form's edits away")
-                .clicked();
-            (applied, reverted)
-        });
+        let problem = self.problem.clone();
+        // The one footer (shell::dialog::button_row): the last refusal at the left; Revert, Close,
+        // then Apply, the primary, last at the right. Close is the footer's own: the dialog had
+        // only its title bar's cross to dismiss it.
+        let (_, (closed, reverted, applied)) = dialog::button_row(
+            ui,
+            |ui| {
+                problem_line(ui, "dimStyleProblem", &problem);
+            },
+            |ui| {
+                let reverted = controls::button(ui, "dimStyleRevert", "Revert")
+                    .on_hover_text("Throw the form's edits away")
+                    .clicked();
+                let closed = controls::button(ui, "dimStyleClose", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
+                    .clicked();
+                let applied = controls::primary(ui, "dimStyleApply", "Apply")
+                    .on_hover_text(
+                        "Store the fields the form changed, as one undo step (DIMSTYLE SET)",
+                    )
+                    .clicked();
+                (closed, reverted, applied)
+            },
+        );
+        if closed {
+            self.pressed = Some(Pressed::Close);
+        }
         if reverted {
             self.pressed = Some(Pressed::Revert);
         }

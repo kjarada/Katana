@@ -98,6 +98,7 @@ use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
 use crate::format::{grouped, qt_fixed};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::{hidden, open_file_dialog, save_file_dialog};
 use crate::theme::palette;
 
@@ -117,6 +118,60 @@ const LISTS_HEIGHT: f32 = 420.0;
 const GRID_HEADER_HEIGHT: f32 = 56.0;
 /// A grid cell's room under its picture: a caption of two lines.
 const CAPTION_HEIGHT: f32 = 40.0;
+
+/// The lines a tile's caption is shown in at most, under its picture.
+const CAPTION_ROWS: usize = 2;
+
+/// `text` broken into lines `width` points wide at most, at its spaces only, `rows` lines at most:
+/// a word wider than a line, and the last line where more words follow, end in an ellipsis. The
+/// lines joined by line feeds, and whether anything was left out.
+fn caption_lines(ui: &Ui, text: &str, width: f32, rows: usize) -> (String, bool) {
+    let measure = |text: &str| dialog::one_line_width(ui, text);
+    // The longest start of `word` that fits with an ellipsis after it.
+    let elide = |word: &str| {
+        let mut kept = String::new();
+        for letter in word.chars() {
+            let mut tried = kept.clone();
+            tried.push(letter);
+            tried.push('\u{2026}');
+            if measure(&tried) > width {
+                break;
+            }
+            kept.push(letter);
+        }
+        kept.push('\u{2026}');
+        kept
+    };
+    let mut lines: Vec<String> = Vec::new();
+    let mut elided = false;
+    for word in text.split_whitespace() {
+        let word = if measure(word) > width {
+            elided = true;
+            elide(word)
+        } else {
+            String::from(word)
+        };
+        match lines.last_mut() {
+            Some(line) if measure(&format!("{line} {word}")) <= width => {
+                line.push(' ');
+                line.push_str(&word);
+            }
+            _ => lines.push(word),
+        }
+    }
+    if lines.len() > rows.max(1) {
+        lines.truncate(rows.max(1));
+        if let Some(last) = lines.last_mut() {
+            let mut ended = elide(&format!("{last} "));
+            if measure(&ended) > width {
+                ended = elide(last);
+            }
+            *last = ended;
+        }
+        elided = true;
+    }
+    (lines.join("\n"), elided)
+}
 
 /// The secondary text: what the grid's count line says it in.
 fn muted_colour() -> egui::Color32 {
@@ -473,7 +528,10 @@ impl SymbolLibraryDialog {
             count_label: String::new(),
             preview,
             plot_scale,
-            ground: 0,
+            // On screen first: the dark ground the rest of the dialog is on (the look of
+            // 2026-11-16), where a white pane of paper was the brightest thing on the screen.
+            // On paper - how it prints - is a choice away.
+            ground: 1,
             details: Details::default(),
             size: 0.0,
             target_styles: Vec::new(),
@@ -486,6 +544,7 @@ impl SymbolLibraryDialog {
             logs: Vec::new(),
             watcher: DocumentWatcher::new(document),
         };
+        dialog.preview.set_ground(PreviewGround::Screen);
         dialog.reload_in(Some(document));
         dialog
     }
@@ -1696,13 +1755,26 @@ impl SymbolLibraryDialog {
                                     egui::Color32::WHITE,
                                 );
                             }
-                            let mut text = RichText::new(caption.as_str());
+                            // Broken between words, two lines at most: egui broke a word longer
+                            // than the cell inside it ("Communication / s Main Pit"). A word or a
+                            // line that does not fit ends in an ellipsis, and the whole name is
+                            // the tooltip's first line.
+                            let (shown, elided) =
+                                caption_lines(ui, &caption, side + 44.0 - 8.0, CAPTION_ROWS);
+                            let mut text = RichText::new(shown);
                             if missing {
                                 text = text.color(amber);
                             }
+                            let tip = if elided {
+                                format!("{caption}\n{tip}")
+                            } else {
+                                tip
+                            };
                             if ui
-                                .selectable_label(selected, text)
-                                .on_hover_text(tip)
+                                .add(egui::Button::selectable(selected, text).wrap_mode(
+                                    egui::TextWrapMode::Extend,
+                                ))
+                                .on_hover_text(tip.trim_end())
                                 .clicked()
                             {
                                 clicked = Some(row);
@@ -1760,8 +1832,9 @@ impl SymbolLibraryDialog {
     fn detail(ui: &mut Ui, name: &str, title: &str, text: &str, warned: bool) {
         let row = |ui: &mut Ui| {
             ui.horizontal_wrapped(|ui| {
+                // The title in the label colour, so the value reads first, as a form's does.
                 if !title.is_empty() {
-                    ui.label(title);
+                    dialog::form_label(ui, title);
                 }
                 let mut shown = RichText::new(text);
                 if warned {
@@ -2045,7 +2118,7 @@ impl SymbolLibraryDialog {
         ];
         let actions = &self.actions;
         let events = &mut self.events;
-        let (_, close) = layout::footer(
+        let (_, close) = dialog::button_row(
             ui,
             |ui| {
                 for (name, label, tip, what) in doors {
@@ -2064,7 +2137,7 @@ impl SymbolLibraryDialog {
                     });
                 }
             },
-            |ui| layout::button(ui, "closeButton", "Close").clicked(),
+            |ui| controls::button(ui, "closeButton", "Close").clicked(),
         );
         if close {
             self.events.push(Event::Close);

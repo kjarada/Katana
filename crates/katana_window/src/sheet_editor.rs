@@ -105,7 +105,9 @@ use crate::canvas::{
     Brush, Canvas, Color, Image, IntRect, Pen, PenCap, PenJoin, PenStyle, PointF,
     RasterCanvas, RectF, RenderHint, SizeF, TextFlags,
 };
-use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item};
+use crate::drive::action::{
+    Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item, menu_items_ui, shortcut_text,
+};
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::drive::mailbox::{Act, no_button, no_field, whole_out_of_range};
 use crate::drive::registry::{
@@ -2002,24 +2004,34 @@ impl GenerateDialog {
             |ui, (dialog, _)| dialog.body(ui, plan_view),
             |ui, (dialog, answer)| {
                 let line = dialog.build_line(plan_view);
-                ui.horizontal(|ui| {
-                    let ok = ui
-                        .add_enabled_ui(line.is_ok(), |ui| {
-                            controls::button(ui, "sheetGenerateOk", "Generate")
-                        })
-                        .inner;
-                    if ok.clicked() {
-                        let k = dialog.kind();
-                        **answer = GenerateAnswer::Accepted {
-                            line: dialog.build_line(plan_view),
-                            cover: k == "register",
-                            replace: dialog.replace,
-                        };
-                    }
-                    if controls::button(ui, "sheetGenerateCancel", "Cancel").clicked() {
-                        **answer = GenerateAnswer::Cancelled;
-                    }
-                });
+                // The one footer (shell::dialog::button_row): Cancel, then Generate, the primary,
+                // last at the right - where the two sat at the left, Generate first and plain.
+                let ((), (cancelled, ok)) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        let cancelled =
+                            controls::button(ui, "sheetGenerateCancel", "Cancel").clicked();
+                        let ok = ui
+                            .add_enabled_ui(line.is_ok(), |ui| {
+                                controls::primary(ui, "sheetGenerateOk", "Generate")
+                            })
+                            .inner
+                            .clicked();
+                        (cancelled, ok)
+                    },
+                );
+                if ok {
+                    let k = dialog.kind();
+                    **answer = GenerateAnswer::Accepted {
+                        line: dialog.build_line(plan_view),
+                        cover: k == "register",
+                        replace: dialog.replace,
+                    };
+                }
+                if cancelled {
+                    **answer = GenerateAnswer::Cancelled;
+                }
             },
         );
         self.frame = frame;
@@ -2383,7 +2395,7 @@ impl HiddenLayersDialog {
                 let response = ui
                     .vertical(|ui| {
                         for (layer, _, shown) in &mut dialog.layers {
-                            ui.checkbox(shown, layer.as_str());
+                            controls::check_box(ui, shown, layer.as_str());
                         }
                     })
                     .response;
@@ -2396,14 +2408,23 @@ impl HiddenLayersDialog {
                 controls::custom(ui, &response, record);
             },
             |ui, (_, answer)| {
-                ui.horizontal(|ui| {
-                    if controls::button(ui, "sheetHiddenLayersOk", "OK").clicked() {
-                        **answer = Some(true);
-                    }
-                    if controls::button(ui, "sheetHiddenLayersCancel", "Cancel").clicked() {
-                        **answer = Some(false);
-                    }
-                });
+                // The one footer (shell::dialog::button_row): Cancel, then OK, the primary, last.
+                let ((), (cancelled, ok)) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        (
+                            controls::button(ui, "sheetHiddenLayersCancel", "Cancel").clicked(),
+                            controls::primary(ui, "sheetHiddenLayersOk", "OK").clicked(),
+                        )
+                    },
+                );
+                if ok {
+                    **answer = Some(true);
+                }
+                if cancelled {
+                    **answer = Some(false);
+                }
             },
         );
         self.frame = frame;
@@ -2501,14 +2522,24 @@ impl TitleBlockDialog {
             &mut (&mut *self, &mut answer),
             |ui, (dialog, answer)| dialog.body(ui, logo, answer),
             |ui, (_, answer)| {
-                ui.horizontal(|ui| {
-                    if controls::button(ui, "sheetTitleBlockOk", "OK").clicked() {
-                        **answer = TitleBlockAnswer::Ok;
-                    }
-                    if controls::button(ui, "sheetTitleBlockCancel", "Cancel").clicked() {
-                        **answer = TitleBlockAnswer::Cancel;
-                    }
-                });
+                // The one footer (shell::dialog::button_row): Cancel, then OK, the primary, last
+                // at the right - where the two sat at the left, OK plain.
+                let ((), (cancelled, ok)) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        (
+                            controls::button(ui, "sheetTitleBlockCancel", "Cancel").clicked(),
+                            controls::primary(ui, "sheetTitleBlockOk", "OK").clicked(),
+                        )
+                    },
+                );
+                if ok {
+                    **answer = TitleBlockAnswer::Ok;
+                }
+                if cancelled {
+                    **answer = TitleBlockAnswer::Cancel;
+                }
             },
         );
         self.frame = frame;
@@ -4419,19 +4450,26 @@ impl SheetEditor {
             .map(|field| vec![field.clone(), resolved.get(field).cloned().unwrap_or_default()])
             .collect();
         let mut current = None;
-        controls::rows(ui, "sheetFieldTable", &rows, &mut current);
+        // The cells as a list for a driver, not drawn: the form under it shows each cell and its
+        // value in a column, where the list drew them again as snake_case keys in the text colour.
+        offstage(ui, "sheetFieldTable", |ui| {
+            controls::rows(ui, "sheetFieldTable", &rows, &mut current);
+        });
         dialog::form(ui, |form| {
             let ui = form.ui();
             for field in &names {
                 let printed = resolved.get(field).cloned().unwrap_or_default();
                 let overridden = sheet.fields.contains_key(field);
+                // The cell's key in words ("approver_date" is "Approver date"), as every form's
+                // labels are.
+                let words = field_words(field);
                 dialog::row_with_text(
                     ui,
-                    field,
+                    &words,
                     |ui| {
                         // A value this sheet overrides is named in strong text; the others in a
                         // form label's muted text.
-                        let text = egui::RichText::new(field.as_str());
+                        let text = egui::RichText::new(words.as_str());
                         ui.label(if overridden {
                             text.strong()
                         } else {
@@ -5033,10 +5071,32 @@ impl SheetEditor {
                     ui,
                     TargetSpec::new(&tool_bar.name, TargetKind::ToolBar, &tool_bar.title),
                 );
+                tool_bar_look(ui);
                 for item in &tool_bar.items {
                     match item {
                         ToolBarItem::Action(action) => {
-                            if action_item(ui, action).clicked() {
+                            // The shortcut in the tooltip, as the window's toolbars name theirs:
+                            // drawn in the button ("Fit Page  Home", "Plot All...  Ctrl+P") it
+                            // read as a second word of the button's.
+                            let mut shown = action.clone();
+                            let tip = match shown.shortcut.take() {
+                                Some(key) => {
+                                    let said = if action.tip.is_empty() {
+                                        action.display_text()
+                                    } else {
+                                        action.tip.clone()
+                                    };
+                                    format!("{said} ({})", shortcut_text(&key))
+                                }
+                                None => action.tip.clone(),
+                            };
+                            let response = action_item(ui, &shown);
+                            let response = if tip.is_empty() {
+                                response
+                            } else {
+                                response.on_hover_text(tip)
+                            };
+                            if response.clicked() {
                                 chosen = Some(action.name.clone());
                             }
                         }
@@ -5123,10 +5183,12 @@ impl SheetEditor {
         // The context menu, and the dialogs, each a target of its own.
         if let Some((at, id)) = self.context_menu.clone() {
             let items = self.context_menu_items(&*host, &id);
+            let menu = Menu {
+                items,
+                ..Menu::new("sheetContextMenu", "")
+            };
             let shown = crate::shell::popup_menu(&ctx, "sheetContextMenu", at, |ui| {
-                for item in &items {
-                    menu_item_ui(ui, item, &mut chosen);
-                }
+                menu_items_ui(ui, &menu, &mut chosen);
             });
             // Closed by an item chosen, Escape, or a click away from it.
             let away = ctx.input(|input| {
@@ -5248,18 +5310,35 @@ impl SheetEditor {
                 ("sheetListNew", "+", "A new blank sheet"),
                 ("sheetListCopy", "Copy", "Duplicate this sheet"),
                 ("sheetListRemove", "\u{2212}", "Remove this sheet"),
-                ("sheetListUp", "\u{2191}", "Move this sheet up"),
-                ("sheetListDown", "\u{2193}", "Move this sheet down"),
             ];
             for (name, text, tip) in buttons {
                 if controls::button(ui, name, text).on_hover_text(tip).clicked() {
                     self.queued.push(Queued::Trigger(String::from(name)));
                 }
             }
+            // Up and Down are arrows painted, not characters: the window's font has no U+2191 or
+            // U+2193, and they were drawn as two empty boxes.
+            for (name, text, tip, up) in [
+                ("sheetListUp", "Move Up", "Move this sheet up", true),
+                ("sheetListDown", "Move Down", "Move this sheet down", false),
+            ] {
+                let side = ui.spacing().interact_size.y;
+                let response = controls::button_as(
+                    ui,
+                    name,
+                    text,
+                    egui::Button::new("").min_size(egui::vec2(side, side)),
+                )
+                .on_hover_text(tip);
+                paint_arrow(ui, response.rect, up);
+                if response.clicked() {
+                    self.queued.push(Queued::Trigger(String::from(name)));
+                }
+            }
         });
         if let Some((at, mut name)) = self.rename.take() {
             ui.horizontal(|ui| {
-                ui.label("Name:");
+                ui.label("Name");
                 controls::line(ui, "sheetRenameName", &mut name);
                 let ok = controls::button(ui, "sheetRenameOk", "OK").clicked();
                 let cancel = controls::button(ui, "sheetRenameCancel", "Cancel").clicked();
@@ -5509,29 +5588,52 @@ impl SheetEditor {
 }
 
 /// A menu drawn as a menu button with its items: a click on an action is the action chosen.
+/// A menu of the editor's menu bar, drawn as the main window draws its own: its items by
+/// drive::action::menu_items_ui (a tick or icon gutter, titled sections, inset separators,
+/// submenus beside it) in one column that scrolls when it is taller than the screen.
 fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
     ui.menu_button(menu.title.replace('&', ""), |ui| {
-        for item in &menu.items {
-            menu_item_ui(ui, item, chosen);
-        }
+        crate::shell::dialog::menu_column(ui, |ui| {
+            menu_items_ui(ui, menu, chosen);
+        });
     });
 }
 
-fn menu_item_ui(ui: &mut Ui, item: &MenuItem, chosen: &mut Option<String>) {
-    match item {
-        MenuItem::Action(action) => {
-            if action_item(ui, action).clicked() {
-                *chosen = Some(action.name.clone());
-            }
-        }
-        MenuItem::Section(title) => {
-            ui.weak(title.as_str());
-        }
-        MenuItem::Separator => {
-            ui.separator();
-        }
-        MenuItem::Menu(menu) => menu_ui(ui, menu, chosen),
+/// A title block cell's key ("approver_date") as a form's label says it: words, in sentence case
+/// ("Approver date").
+fn field_words(key: &str) -> String {
+    let spaced = key.replace('_', " ");
+    let mut letters = spaced.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
     }
+}
+
+/// An arrow up or down, centred in `rect`, in the text colour: a stem and a head, in the line
+/// weight of the window's icons.
+fn paint_arrow(ui: &Ui, rect: egui::Rect, up: bool) {
+    let centre = rect.center();
+    let half = rect.height().min(rect.width()) * 0.25;
+    let sign = if up { -1.0 } else { 1.0 };
+    let tip = centre + egui::vec2(0.0, sign * half);
+    let tail = centre - egui::vec2(0.0, sign * half);
+    let ink = egui::Stroke::new(1.5, ui.visuals().text_color());
+    let painter = ui.painter();
+    painter.line_segment([tail, tip], ink);
+    let head = half * 0.7;
+    painter.line_segment([tip, tip + egui::vec2(-head, -sign * head)], ink);
+    painter.line_segment([tip, tip + egui::vec2(head, -sign * head)], ink);
+}
+
+/// The editor's toolbar drawn as the window's toolbars are: a button is flat at rest, its text
+/// on the bar's own ground, and lit only under the pointer - where every button was a framed box,
+/// a row of boxes unlike any other toolbar of the window.
+fn tool_bar_look(ui: &mut Ui) {
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+    widgets.inactive.bg_stroke = egui::Stroke::NONE;
 }
 
 /// A toolbar button that opens its menu (QToolButton::InstantPopup), named `name`.
@@ -5539,9 +5641,9 @@ fn tool_button_menu(ui: &mut Ui, name: &str, menu: &Menu, chosen: &mut Option<St
     let taken = take(ui, name);
     let response = ui
         .menu_button(menu.title.replace('&', ""), |ui| {
-            for item in &menu.items {
-                menu_item_ui(ui, item, chosen);
-            }
+            crate::shell::dialog::menu_column(ui, |ui| {
+                menu_items_ui(ui, menu, chosen);
+            });
         })
         .response;
     if let Some(taken) = &taken {

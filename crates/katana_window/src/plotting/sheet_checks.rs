@@ -38,6 +38,9 @@ use crate::canvas::{
     Brush, Canvas, Color, FillRule, Image, Pen, PenCap, PenJoin, PenStyle, PointF, RasterCanvas,
     RectF, RenderHint,
 };
+use crate::dialog_layout::{
+    TABLE_COLUMN_GAP, TABLE_ROW_GAP, empty_table, table_header, table_row_colour,
+};
 use crate::drive::controls;
 use crate::drive::mailbox::{Act, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -552,14 +555,24 @@ impl SheetChecksDock {
             }
         }
         let mut activated = None;
+        // The window's one table look (dialog_layout): the raised header across the pane, faint
+        // stripes, the chosen row lit; and with nothing found, a line saying so where a header
+        // floated over an empty pane.
+        let chosen: Vec<bool> = (0..self.rows.len())
+            .map(|at| self.current == Some(at))
+            .collect();
+        let empty = self.rows.is_empty();
         let response = egui::ScrollArea::vertical()
             .id_salt(name)
             .max_height(180.0)
             .show(ui, |ui| {
-                egui::Grid::new(name).striped(true).show(ui, |ui| {
-                    for header in ["", "Sheet", "View", "Problem", "Fix"] {
-                        ui.strong(header);
-                    }
+                egui::Grid::new(name)
+                    .num_columns(5)
+                    .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
+                    .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+                    .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
+                    .show(ui, |ui| {
+                    table_header(ui, &["", "Sheet", "View", "Problem", "Fix"], true);
                     ui.end_row();
                     for (at, row) in self.rows.iter().enumerate() {
                         let colour = match row.severity {
@@ -587,6 +600,12 @@ impl SheetChecksDock {
                         ui.end_row();
                     }
                 });
+                if empty {
+                    empty_table(
+                        ui,
+                        "Nothing to list: Check Sheets lists what a plot would get wrong",
+                    );
+                }
             })
             .inner_rect;
         let response = ui.interact(response, ui.id().with(name), egui::Sense::hover());
