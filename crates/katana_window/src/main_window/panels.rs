@@ -63,6 +63,9 @@ pub struct Panels {
     pub reference_colour: Choice,
     pub current_style: Choice,
     pub property_style: Choice,
+    /// The selection's styles the Style row last showed: the row is emptied when they change to
+    /// none or to several, and left alone while a person picks from it.
+    pub property_styles_seen: Vec<String>,
     /// The status bar's message: a running tool's prompt, a view's status, an error.
     pub status: String,
     pub coordinates: String,
@@ -98,6 +101,7 @@ impl Default for Panels {
             reference_colour: Choice::at(0),
             current_style: Choice::at(0),
             property_style: Choice::editable(""),
+            property_styles_seen: Vec::new(),
             status: String::new(),
             coordinates: String::from("0.0000, 0.0000"),
             snap: String::new(),
@@ -667,20 +671,10 @@ impl MainWindow {
                     false
                 }
                 "surfaceEditActive" => {
+                    // Its empty state ("No surface") is the choice's own hint
+                    // (controls::choice_with_hint, in surface_edit_ui): painted here as well, it
+                    // stood over the choice's "None".
                     ui_state.surface_edit.active_ui(&mut child, exec);
-                    // An empty choice says what it is waiting for, as a field's placeholder
-                    // does: a blank box on the toolbar read as a control that failed to fill
-                    // (the second look audit's T18). Painted, so the choice keeps its value "".
-                    if ui_state.surface_edit.active_text().is_empty() {
-                        let place = child.min_rect();
-                        child.painter().text(
-                            egui::pos2(place.left() + controls::FIELD_INSET, place.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            "No surface",
-                            egui::TextStyle::Body.resolve(child.style()),
-                            palette::text_muted().to_egui(),
-                        );
-                    }
                     false
                 }
                 _ => false,
@@ -1647,7 +1641,8 @@ fn properties_ui(window: &mut MainWindow, ui: &mut Ui) {
         // Muted, as every label beside a field is, the property tree's under it included.
         crate::shell::dialog::form_label(ui, "Style");
         ui.add_enabled_ui(any, |ui| {
-            if !ui.memory(|memory| memory.has_focus(ui.id())) && styles.len() == 1 {
+            let focused = ui.memory(|memory| memory.has_focus(ui.id()));
+            if !focused && styles.len() == 1 {
                 let style = styles.iter().next().cloned().unwrap_or_default();
                 if panels.property_style.text.is_empty() {
                     panels.property_style.text = if style.is_empty() {
@@ -1656,14 +1651,33 @@ fn properties_ui(window: &mut MainWindow, ui: &mut Ui) {
                         style
                     };
                 }
+            } else if !focused
+                && styles.len() != 1
+                && !styles.iter().eq(panels.property_styles_seen.iter())
+            {
+                // Nothing selected, or a selection of several styles: no one style is the
+                // selection's, so the choice is empty and its hint says why.
+                panels.property_style.text.clear();
+                panels.property_style.index = None;
             }
+            // What an empty choice says (controls::choice_with_hint): "No selection" with nothing
+            // selected and "Varies" when the selection's styles differ - not "ByLayer", which
+            // claims a style of a selection that is not there, nor the bare "None".
+            let hint = if any { "Varies" } else { "No selection" };
+            panels.property_styles_seen = styles.iter().cloned().collect();
             // The choice - one framed control, its list's arrow inside its right end
             // (drive::controls::editable_choice_frame) - takes the row's width less Apply, so
             // Apply is on the panel at its 240 points and the two end at its edge.
             let apply_width = 56.0;
             ui.spacing_mut().text_edit_width =
                 (ui.available_width() - apply_width - ui.spacing().item_spacing.x).max(40.0);
-            let response = controls::choice(ui, "PropertyStyle", &items, &mut panels.property_style);
+            let response = controls::choice_with_hint(
+                ui,
+                "PropertyStyle",
+                &items,
+                &mut panels.property_style,
+                hint,
+            );
             if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                 apply = true;
             }
