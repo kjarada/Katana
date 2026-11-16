@@ -20,7 +20,7 @@ use katana_math::cpp;
 
 use crate::dialog_layout::{
     EMPTY_TABLE, TABLE_COLUMN_GAP, TABLE_ROW_GAP, TABLE_ROWS, empty_table, rows_height,
-    table_header, table_row_colour,
+    table_cell, table_header, table_row_colour,
 };
 use crate::drive::controls::{self, SpinRange, custom};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
@@ -216,12 +216,7 @@ pub(crate) fn table_look(
                                     }
                                     continue;
                                 }
-                                let response = ui.add(
-                                    egui::Label::new(cell.as_str())
-                                        .sense(egui::Sense::click())
-                                        .selectable(false)
-                                        .extend(),
-                                );
+                                let response = table_cell(ui, cell);
                                 if response.double_clicked() {
                                     shown.double_clicked = Some(at);
                                 }

@@ -1585,6 +1585,13 @@ impl PropertyTreePanel {
                     if node.data.muted || node.is_more {
                         value = value.color(if node.is_more { accent } else { muted });
                     }
+                    // A colour's swatch before its text (Colour #FF0000), as a table's colour
+                    // cell has (dialog_layout::table_cell); a word (ByLayer) alone.
+                    if let Some(colour) =
+                        crate::drive::controls::colour_of_text(node.data.value.as_str())
+                    {
+                        crate::drive::controls::colour_swatch(ui, colour);
+                    }
                     // Cut short at the panel's edge, the whole value in its tooltip.
                     ui.add(egui::Label::new(value).truncate());
                 });

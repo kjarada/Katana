@@ -15,7 +15,7 @@ use katana_window::theme::palette;
 use katana_window::theme::style::apply;
 
 /// Every shape of `shapes`, nested ones too, as painted.
-fn flat(shapes: &[ClippedShape]) -> Vec<Shape> {
+pub(crate) fn flat(shapes: &[ClippedShape]) -> Vec<Shape> {
     fn add(shape: &Shape, into: &mut Vec<Shape>) {
         match shape {
             Shape::Vec(inner) => {
@@ -34,7 +34,7 @@ fn flat(shapes: &[ClippedShape]) -> Vec<Shape> {
 }
 
 /// The shapes drawn inside `area`, give or take half a point.
-fn inside(shapes: &[Shape], area: Rect) -> Vec<Shape> {
+pub(crate) fn inside(shapes: &[Shape], area: Rect) -> Vec<Shape> {
     let room = area.expand(0.5);
     shapes
         .iter()
@@ -302,6 +302,229 @@ mod control_look {
         );
         let other = discs("other");
         assert!(!other.iter().any(|(fill, _)| *fill == accent), "{other:?}");
+    }
+
+    /// The colour `text` is painted in: its own, or the fallback a placeholder colour takes.
+    fn ink(text: &egui::epaint::TextShape) -> egui::Color32 {
+        let own = text
+            .galley
+            .job
+            .sections
+            .first()
+            .map_or(egui::Color32::PLACEHOLDER, |section| section.format.color);
+        if own == egui::Color32::PLACEHOLDER {
+            text.fallback_color
+        } else {
+            own
+        }
+    }
+
+    /// The text shapes painted inside `area`: their words and their colour.
+    fn words_in(shapes: &[Shape], area: Rect) -> Vec<(String, egui::Color32)> {
+        inside(shapes, area)
+            .iter()
+            .filter_map(|shape| match shape {
+                Shape::Text(text) if !text.galley.is_empty() => {
+                    Some((String::from(text.galley.text()), ink(text)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_empty_choice_says_what_is_missing_muted_while_its_value_reads_empty() {
+        // The third look audit (I): an empty choice was an empty well (Thin's Surface, Global
+        // Modify's Layer and Style, Properties' Style with nothing selected). It says NO_CHOICE,
+        // or the caller's words, muted - and records "", as the tests and drivers read it.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let items = vec![String::from("alpha"), String::from("beta")];
+        let none: Vec<String> = Vec::new();
+        let mut empty = Choice::default();
+        let mut surface = Choice::default();
+        let mut typed = Choice::editable("");
+        let mut chosen = Choice::at(0);
+        let mut draw = |ui: &mut Ui| {
+            ui.spacing_mut().text_edit_width = 200.0;
+            ui.spacing_mut().combo_width = 200.0;
+            drive::choice(ui, "empty", &none, &mut empty);
+            drive::controls::choice_with_hint(ui, "surface", &items, &mut surface, "No surface");
+            drive::choice(ui, "typed", &items, &mut typed);
+            drive::controls::choice_with_hint(ui, "chosen", &items, &mut chosen, "No surface");
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let muted = palette::text_muted().to_egui();
+        for (name, hint) in [
+            ("empty", drive::controls::NO_CHOICE),
+            ("surface", "No surface"),
+            ("typed", drive::controls::NO_CHOICE),
+        ] {
+            let control = harness.control(name).expect("drawn");
+            assert_eq!(control.value, "", "{name} reads empty");
+            let words = words_in(&shapes, control.rect);
+            assert!(
+                words.contains(&(String::from(hint), muted)),
+                "{name} says \"{hint}\" muted: {words:?}"
+            );
+        }
+        // A choice made shows it, and not the hint.
+        let made = harness.control("chosen").expect("drawn");
+        assert_eq!(made.value, "alpha");
+        let words = words_in(&shapes, made.rect);
+        assert!(words.iter().any(|(text, _)| text == "alpha"), "{words:?}");
+        assert!(!words.iter().any(|(text, _)| text == "No surface"), "{words:?}");
+        // The hint is not an item: a fill of its words is refused, and the choice stays empty.
+        harness.fill("surface", "No surface");
+        assert!(harness.run(&mut draw).is_err(), "a fill of the hint is refused");
+        assert_eq!(harness.control("surface").expect("drawn").value, "");
+    }
+
+    #[test]
+    fn a_colour_written_as_text_shows_its_swatch_in_a_table_a_field_and_a_value() {
+        // The third look audit (H): Layers, Surface Styles and Text Styles showed a colour as six
+        // digits. A table's cell (dialog_layout::table_cell, every table's), a one-line field
+        // with the room, and a colour value each paint the colour's swatch; a word does not.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let green = egui::Color32::from_rgb(0x3C, 0xA0, 0x3C);
+        let red = egui::Color32::from_rgb(0xC8, 0x3C, 0x3C);
+        let blue = egui::Color32::from_rgb(0x4F, 0xC3, 0xF7);
+        let mut field = String::from("#C83C3C");
+        let mut narrow = String::from("#C83C3C");
+        let mut word = String::from("ByLayer");
+        let cells = Cell::new([Rect::NOTHING; 2]);
+        let mut draw = |ui: &mut Ui| {
+            let colour = katana_window::dialog_layout::table_cell(ui, "#3CA03C").rect;
+            let words = katana_window::dialog_layout::table_cell(ui, "ByLayer").rect;
+            cells.set([colour, words]);
+            for (name, value, width) in [
+                ("field", &mut field, 110.0),
+                ("narrow", &mut narrow, 60.0),
+                ("word", &mut word, 110.0),
+            ] {
+                drive::line_with(
+                    ui,
+                    name,
+                    value,
+                    LineOptions {
+                        width: Some(width),
+                        ..LineOptions::default()
+                    },
+                );
+            }
+            drive::controls::colour_value(ui, "value", "#4FC3F7");
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let swatch = |area: Rect, colour: egui::Color32| -> Option<Rect> {
+            inside(&shapes, area).iter().find_map(|shape| match shape {
+                Shape::Rect(rect) if rect.fill == colour => Some(rect.rect),
+                _ => None,
+            })
+        };
+        let [colour_cell, word_cell] = cells.get();
+        let cell = swatch(colour_cell, green).expect("the colour cell has its swatch");
+        assert!(
+            (cell.width() - drive::controls::SWATCH_SIZE).abs() <= HALF_A_POINT,
+            "{cell:?}"
+        );
+        assert!(
+            inside(&shapes, word_cell)
+                .iter()
+                .all(|shape| !matches!(shape, Shape::Rect(_))),
+            "a word's cell has none"
+        );
+        let field_rect = harness.control("field").expect("drawn").rect;
+        let in_field = swatch(field_rect, red).expect("the field shows its colour");
+        assert!(
+            in_field.center().x > field_rect.center().x,
+            "at the field's right end: {in_field:?} in {field_rect:?}"
+        );
+        assert_eq!(harness.control("field").expect("drawn").value, "#C83C3C");
+        let narrow_rect = harness.control("narrow").expect("drawn").rect;
+        assert!(swatch(narrow_rect, red).is_none(), "no room beside its text: no swatch");
+        let value = harness.control("value").expect("drawn");
+        assert_eq!(value.kind, drive::ControlKind::Label);
+        assert_eq!(harness.report("value").expect("read"), "#4FC3F7");
+        let value_swatch = shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Rect(rect) if rect.fill == blue => Some(rect.rect),
+                _ => None,
+            })
+            .expect("the value has its swatch");
+        assert!(value_swatch.right() <= value.rect.left(), "before its text");
+    }
+
+    #[test]
+    fn a_primary_drawn_disabled_is_greyed_not_lit() {
+        // The third look audit (A): a primary lit with nothing to run invited the click. Drawn in
+        // a disabled Ui (add_enabled_ui(can_run, ..)) it wears no accent, and a press is refused.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let mut draw = |ui: &mut Ui| {
+            drive::primary(ui, "lit", "Run");
+            ui.add_enabled_ui(false, |ui| drive::primary(ui, "greyed", "Measure"));
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let accent = palette::accent().to_egui();
+        let lit = |name: &str| {
+            let rect = harness.control(name).expect("drawn").rect;
+            inside(&shapes, rect)
+                .iter()
+                .any(|shape| matches!(shape, Shape::Rect(rect) if rect.fill == accent))
+        };
+        assert!(lit("lit"), "the premise: an enabled primary is in the accent");
+        assert!(!lit("greyed"), "a disabled one is not");
+        assert!(!harness.control("greyed").expect("drawn").enabled);
+        harness.press("greyed");
+        assert!(harness.run(&mut draw).is_err(), "a press of it is refused");
+    }
+
+    #[test]
+    fn a_number_typed_as_text_is_a_number_boxs_width_not_its_rows() {
+        // The third look audit (C): Contours' Interval filled its row beside a short Major every.
+        // number_line keeps a typed number to a number box's width, wider only for its text.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let mut short = String::from("0.5");
+        let mut empty = String::new();
+        let mut long = String::from("123456789012.345678");
+        let mut size = 2.5;
+        let mut draw = |ui: &mut Ui| {
+            ui.spacing_mut().text_edit_width = 300.0;
+            drive::controls::number_line(ui, "short", &mut short, "");
+            drive::controls::number_line(ui, "empty", &mut empty, "auto");
+            drive::controls::number_line(ui, "long", &mut long, "");
+            drive::spin(ui, "box", &mut size, SpinRange::new(0.0, 100.0, 0.1, 2));
+        };
+        harness.show(&mut draw).expect("drawn");
+        let width = |name: &str| harness.control(name).expect("drawn").rect.width();
+        assert!(
+            (width("short") - drive::controls::NUMBER_FIELD_WIDTH).abs() <= HALF_A_POINT,
+            "a short number is a box's least width: {}",
+            width("short")
+        );
+        assert!((width("short") - width("box")).abs() <= HALF_A_POINT, "as wide as a box");
+        assert!((width("empty") - width("short")).abs() <= HALF_A_POINT);
+        assert!(
+            width("long") > drive::controls::NUMBER_FIELD_WIDTH && width("long") < 300.0,
+            "a long one is as wide as its text: {}",
+            width("long")
+        );
+        assert_eq!(
+            harness.control("short").expect("drawn").kind,
+            drive::ControlKind::Line
+        );
     }
 
     #[test]
