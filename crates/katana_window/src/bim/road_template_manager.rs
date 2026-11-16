@@ -86,7 +86,6 @@ use crate::canvas::{
 };
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
-use crate::dialog_layout as layout;
 use crate::drive::controls::check;
 use crate::format::qt_fixed;
 use crate::host::Host;
@@ -1237,7 +1236,7 @@ impl Body {
         let width = ui.available_width().max(220.0);
         let road_template = self.preview_template.as_ref();
         let section = self.preview_section.as_ref();
-        preview(
+        let drawn = preview(
             ui,
             "roadTemplatePreview",
             egui::vec2(width, 110.0),
@@ -1253,13 +1252,29 @@ impl Body {
                 );
             },
         );
-        self.status.ui(ui, "roadTemplateStatus");
+        // A section heading over an empty box read as a preview that failed: with nothing to
+        // draw it says why, as an empty table does.
+        if road_template.is_none() {
+            ui.painter().text(
+                drawn.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Choose a template to see its typical section",
+                egui::TextStyle::Body.resolve(ui.style()),
+                crate::theme::palette::text_muted().to_egui(),
+            );
+        }
     }
 
+    /// The one footer (shell::dialog::button_row): what the last line replied at the left, Close
+    /// at the right.
     fn footer_ui(&mut self, ui: &mut Ui) {
-        if layout::footer_buttons(ui, |ui| {
-            button(ui, "roadTemplateClose", "Close", "Close the manager").clicked()
-        }) {
+        let status = &self.status;
+        let (_, close) = dialog::button_row(
+            ui,
+            |ui| status.ui(ui, "roadTemplateStatus"),
+            |ui| button(ui, "roadTemplateClose", "Close", "Close the manager").clicked(),
+        );
+        if close {
             self.close = true;
         }
     }
@@ -1303,7 +1318,9 @@ impl RoadTemplateManagerDialog {
                 "roadTemplateList",
                 &["Template", "Left", "Right", "Courses", "Description"],
             )
-            .max_height(150.0),
+            .max_height(150.0)
+            .filling()
+            .empty_text("No templates: New, or Add Standard Templates, makes one"),
             name: String::new(),
             file: String::new(),
             overwrite: false,
@@ -1320,7 +1337,9 @@ impl RoadTemplateManagerDialog {
                     "What else",
                 ],
             )
-            .editing(),
+            .editing()
+            .filling()
+            .empty_text("Choose a template to see its components"),
             add_side,
             add_kind,
             keys: String::new(),
@@ -1328,7 +1347,9 @@ impl RoadTemplateManagerDialog {
                 "roadTemplateCourses",
                 &["Course", "Thickness (m)", "Material", "IFC type"],
             )
-            .editing(),
+            .editing()
+            .filling()
+            .empty_text("Choose a component to see its courses"),
             course_name: String::new(),
             course_thickness: String::new(),
             course_material: String::new(),

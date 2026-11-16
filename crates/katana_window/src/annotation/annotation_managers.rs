@@ -57,7 +57,9 @@ use katana_entity::{
 };
 use katana_math::numerics::{DEG_TO_RAD, RAD_TO_DEG};
 
-use super::dialog_support::{Followed, LineCursor, TableShown, show_dialog, spin_value, table};
+use super::dialog_support::{
+    Followed, LineCursor, TableLook, TableShown, show_dialog, spin_value, table_look,
+};
 use super::form_widgets::{button, check, combo, describe, edit, problem_line};
 use crate::command_word::{annotation_text_word, command_word, exact_number};
 use crate::dialog_layout as layout;
@@ -240,6 +242,7 @@ enum TextPressed {
     New,
     Delete,
     Apply,
+    Close,
 }
 
 /// Format > Text Styles... (see the module comment).
@@ -541,9 +544,10 @@ impl TextStyleManagerDialog {
             &mut self.frame,
             DialogFrame::new("textStyleManagerDialog", "Text Styles"),
         );
-        let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
+        let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         match self.pressed.take() {
+            Some(TextPressed::Close) => closed = true,
             Some(TextPressed::New) => {
                 self.add_style(host);
             }
@@ -667,13 +671,28 @@ impl TextStyleManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        problem_line(ui, "textStyleProblem", &self.problem);
-        // Delete at the left, away from Apply, the primary, at the right.
-        let (deleted, applied) = layout::footer(
+        let problem = self.problem.clone();
+        // The one footer (shell::dialog::button_row): Delete and the last refusal at the left, away
+        // from Apply; Close, then Apply, the primary, last at the right. Close is the footer's
+        // own: the dialog had only its title bar's cross to dismiss it.
+        let (deleted, (closed, applied)) = dialog::button_row(
             ui,
-            |ui| button(ui, "textStyleDelete", "Delete").clicked(),
-            |ui| layout::primary(ui, "textStyleApply", "Apply").clicked(),
+            |ui| {
+                let deleted = button(ui, "textStyleDelete", "Delete").clicked();
+                problem_line(ui, "textStyleProblem", &problem);
+                deleted
+            },
+            |ui| {
+                let closed = controls::button(ui, "textStyleClose", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
+                    .clicked();
+                let applied = controls::primary(ui, "textStyleApply", "Apply").clicked();
+                (closed, applied)
+            },
         );
+        if closed {
+            self.pressed = Some(TextPressed::Close);
+        }
         if deleted {
             self.pressed = Some(TextPressed::Delete);
         }
@@ -698,6 +717,7 @@ enum LabelPressed {
     Preview,
     Run,
     Clear,
+    Close,
 }
 
 /// The label style manager's body width on both its tabs.
@@ -1496,9 +1516,10 @@ impl LabelStyleManagerDialog {
             &mut self.frame,
             DialogFrame::new("labelStyleManagerDialog", "Label Styles and Rules"),
         );
-        let closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
+        let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         match self.pressed.take() {
+            Some(LabelPressed::Close) => closed = true,
             Some(LabelPressed::New) => {
                 self.add_style(host);
             }
@@ -1543,7 +1564,7 @@ impl LabelStyleManagerDialog {
             &["Label Styles", "Auto-Label Rules"],
             &mut self.tab,
         );
-        ui.separator();
+        // The strip's own rule parts it from the page (a separator under it drew a second).
         if self.tab == 0 {
             self.styles_tab(ui, host);
         } else {
@@ -1591,7 +1612,7 @@ impl LabelStyleManagerDialog {
                     if button(ui, "labelStyleDefaults", "Add Standard Set").clicked() {
                         self.pressed = Some(LabelPressed::Defaults);
                     }
-                    if layout::primary(ui, "labelStyleApply", "Apply").clicked() {
+                    if controls::primary(ui, "labelStyleApply", "Apply").clicked() {
                         self.pressed = Some(LabelPressed::Apply);
                     }
                 });
@@ -1768,7 +1789,7 @@ impl LabelStyleManagerDialog {
             .iter()
             .map(|row| self.chosen.contains(&row[RULE_NAME]))
             .collect();
-        let shown: TableShown = table(
+        let shown: TableShown = table_look(
             ui,
             "labelRuleTable",
             &RULE_HEADERS,
@@ -1776,6 +1797,10 @@ impl LabelStyleManagerDialog {
             self.rule_current,
             &highlighted,
             Some((RULE_ENABLED, self.rule_enabled_states.as_slice())),
+            TableLook {
+                fill: true,
+                empty: "No rules: fill the fields below and Add Rule",
+            },
         );
         if let Some(at) = shown.chosen {
             let name = self.rule_rows[at][RULE_NAME].clone();
@@ -1876,6 +1901,23 @@ impl LabelStyleManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        problem_line(ui, "labelStyleProblem", &self.problem);
+        let problem = self.problem.clone();
+        // The one footer (shell::dialog::button_row): the last refusal at the left, Close at the
+        // right. Each tab's own actions stay on its tab; the footer held the refusal alone, an
+        // empty band on a fresh dialog.
+        let (_, closed) = dialog::button_row(
+            ui,
+            |ui| {
+                problem_line(ui, "labelStyleProblem", &problem);
+            },
+            |ui| {
+                controls::button(ui, "labelStyleClose", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
+                    .clicked()
+            },
+        );
+        if closed {
+            self.pressed = Some(LabelPressed::Close);
+        }
     }
 }

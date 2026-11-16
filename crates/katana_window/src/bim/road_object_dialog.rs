@@ -85,7 +85,7 @@ use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
 use crate::dialog_layout as layout;
 use crate::drive::controls::{
-    LineOptions, TextOptions, button_as, custom, label, line_with, tabs, text_with,
+    LineOptions, button_as, custom, label_as, line_with, primary_look, tabs,
 };
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -511,12 +511,12 @@ pub fn paint_object_preview(
 /// text size, whose fields and source note it holds.
 const PAGE_WIDTH: f32 = 600.0;
 
-/// The preview's size, in points: an elevation of the kind, beside its page.
+/// The preview's size, in points: an elevation of the kind, under its page beside the source.
 const PREVIEW_SIZE: (f32, f32) = (220.0, 160.0);
 
-/// The width the body is laid out at: the page and the preview beside it, parted by twice
-/// GROUP_GAP (the row's own gap and one more), the columns of the rest of the body as wide.
-const BODY_WIDTH: f32 = PAGE_WIDTH + 2.0 * dialog::GROUP_GAP + PREVIEW_SIZE.0;
+/// The width the body is laid out at: a page's, every field of the dialog ending at its one right
+/// edge; the kind's source and the preview share the row under the page.
+const BODY_WIDTH: f32 = PAGE_WIDTH;
 
 /// One page's parameter field: a text field, or a choice whose first item is the default (no
 /// data) and the rest the kind's words.
@@ -796,8 +796,7 @@ impl Body {
         };
         dialog::form(ui, |form| {
             for parameter in page.iter_mut() {
-                let label = format!("{}:", parameter.label);
-                form.row(&label, |ui| {
+                form.row(&parameter.label, |ui| {
                     let response = match &mut parameter.choice {
                         Some(choice) => {
                             let edited = choice.ui(ui, &parameter.object_name);
@@ -829,22 +828,23 @@ impl Body {
     fn body_ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
         // ---- the pages and the preview ----
+        // The page is the body's width, so its fields end where the placement's do: beside the
+        // preview they ended 236 points short of every field under them (612 against 848). The
+        // kind's source and the preview share the row under the page.
+        let titles: Vec<&str> = road_object_kinds()
+            .iter()
+            .map(|&kind| kind_title(kind))
+            .collect();
+        if tabs(ui, "roadObjectKinds", &titles, &mut self.kind_index).changed() {
+            changed = true;
+        }
+        if self.page_ui(ui) {
+            changed = true;
+        }
+        ui.add_space(dialog::GROUP_GAP);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                // The page's own width, so its fields run to one edge on every kind's page and
-                // the kind's source wraps there, the preview beside it.
-                ui.set_width(PAGE_WIDTH);
-                let titles: Vec<&str> = road_object_kinds()
-                    .iter()
-                    .map(|&kind| kind_title(kind))
-                    .collect();
-                if tabs(ui, "roadObjectKinds", &titles, &mut self.kind_index).changed() {
-                    changed = true;
-                }
-                if self.page_ui(ui) {
-                    changed = true;
-                }
-                ui.add_space(dialog::GROUP_GAP);
+                ui.set_width(PAGE_WIDTH - PREVIEW_SIZE.0 - 2.0 * dialog::GROUP_GAP);
                 muted(ui, "roadObjectKindSource", &self.source);
             });
             // The columns are parted by a gap, never a rule: the row's own GROUP_GAP and this.
@@ -911,28 +911,28 @@ impl Body {
             ui.indent("roadObjectAlongAlignment", |ui| {
                 for (label_text, enabled, name, value, placeholder) in [
                     (
-                        "Station:",
+                        "Station",
                         self.enabled.station,
                         "roadObjectStation",
                         &mut self.station,
                         "chainage",
                     ),
                     (
-                        "To:",
+                        "To",
                         self.enabled.to,
                         "roadObjectTo",
                         &mut self.to,
                         "end chainage",
                     ),
                     (
-                        "Offset:",
+                        "Offset",
                         self.enabled.offset,
                         "roadObjectOffset",
                         &mut self.offset,
                         "0 (left of the centreline +)",
                     ),
                     (
-                        "Spacing:",
+                        "Spacing",
                         self.enabled.spacing,
                         "roadObjectSpacing",
                         &mut self.spacing,
@@ -1019,17 +1019,17 @@ impl Body {
             let heights = ui.vertical(|ui| {
                 ui.set_width(column);
                 dialog::section(ui, "Heights");
-                dialog::labelled(ui, "Heights from:", |ui| {
+                dialog::labelled(ui, "Heights from", |ui| {
                     if self.heights.ui(ui, "roadObjectHeights") {
                         changed = true;
                     }
                 });
-                dialog::labelled(ui, "Surface:", |ui| {
+                dialog::labelled(ui, "Surface", |ui| {
                     if self.surface.ui(ui, "roadObjectSurface") {
                         changed = true;
                     }
                 });
-                dialog::labelled(ui, "Crossfall (%):", |ui| {
+                dialog::labelled(ui, "Crossfall (%)", |ui| {
                     changed |= enabled_field(
                         ui,
                         self.enabled.crossfall,
@@ -1038,7 +1038,7 @@ impl Body {
                         "0 %",
                     );
                 });
-                dialog::labelled(ui, "Raised by (m):", |ui| {
+                dialog::labelled(ui, "Raised by (m)", |ui| {
                     changed |= enabled_field(ui, true, "roadObjectDz", &mut self.dz, "0 m");
                 });
             });
@@ -1053,31 +1053,31 @@ impl Body {
                 dialog::section(ui, "Object");
                 for (label_text, name, value, placeholder) in [
                     (
-                        "Name:",
+                        "Name",
                         "roadObjectName",
                         &mut self.name,
                         "the kind and its id",
                     ),
                     (
-                        "Layer:",
+                        "Layer",
                         "roadObjectLayer",
                         &mut self.layer,
                         "road/objects/<kind>",
                     ),
                     (
-                        "Colour:",
+                        "Colour",
                         "roadObjectColour",
                         &mut self.colour,
                         "#RRGGBB or a colour name",
                     ),
                     (
-                        "Material:",
+                        "Material",
                         "roadObjectMaterial",
                         &mut self.material,
                         "the kind's",
                     ),
                     (
-                        "Road:",
+                        "Road",
                         "roadObjectFacility",
                         &mut self.facility,
                         "the road it is part of",
@@ -1098,41 +1098,40 @@ impl Body {
     }
 
     fn footer_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        line_with(
-            ui,
-            "roadObjectLine",
-            &mut self.line,
-            LineOptions {
-                read_only: true,
-                // Across the footer, as wide as the body above it.
-                width: Some(ui.available_width()),
-                ..LineOptions::default()
-            },
-        );
         let enabled = self.enabled.add;
-        // Preview at the left; Add, the primary, last at the right.
-        let (preview, (add, close)) = layout::footer(
+        let status = self.status.clone();
+        // The one footer (shell::dialog::button_row): Preview, which reads the drawing, and the
+        // status at the left; Close, then Add, the primary, last at the right.
+        let (preview, (close, add)) = dialog::button_row(
             ui,
             |ui| {
-                ui.add_enabled_ui(enabled, |ui| {
-                    button(ui, "roadObjectPreviewRun", "&Preview", "").clicked()
-                })
-                .inner
+                let preview = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        button(ui, "roadObjectPreviewRun", "&Preview", "").clicked()
+                    })
+                    .inner;
+                label_as(
+                    ui,
+                    "roadObjectStatus",
+                    &status,
+                    egui::Label::new(status.as_str()).wrap(),
+                );
+                preview
             },
             |ui| {
+                let close = button(ui, "roadObjectClose", "&Close", "").clicked();
                 let add = ui
                     .add_enabled_ui(enabled, |ui| {
                         button_as(
                             ui,
                             "roadObjectAdd",
                             "A&dd",
-                            layout::primary_button(&shown_text("A&dd"), ui.is_enabled()),
+                            primary_look(&shown_text("A&dd"), ui.is_enabled()),
                         )
                         .clicked()
                     })
                     .inner;
-                let close = button(ui, "roadObjectClose", "&Close", "").clicked();
-                (add, close)
+                (close, add)
             },
         );
         if preview {
@@ -1144,17 +1143,32 @@ impl Body {
         if close {
             self.close = true;
         }
-        text_with(
-            ui,
-            "roadObjectReply",
-            &mut self.reply,
-            TextOptions {
-                read_only: true,
-                rows: 4,
-                monospace: false,
-            },
-        );
-        label(ui, "roadObjectStatus", &self.status);
+        // The line Add runs, and what the last run replied, under the buttons: muted text that
+        // takes no room until there is something to say (dialog_layout::reply_text), where an
+        // empty field and an empty four-row reply box made the footer 160 px high.
+        layout::reply_text(ui, "roadObjectLine", &mut self.line, ControlKind::Line, false);
+        layout::reply_text(ui, "roadObjectReply", &mut self.reply, ControlKind::Text, false);
+    }
+}
+
+/// A parameter's key (the verb's word, "plateheight") as a form's label says it: in words and
+/// sentence case ("Plate height"), as every other form's labels are. The keys run their words
+/// together for the command line; read as labels they were the raw keys the audit found.
+fn parameter_words(key: &str) -> String {
+    let words = match key {
+        "cellgap" => "cell gap",
+        "footingdepth" => "footing depth",
+        "plateheight" => "plate height",
+        "polesize" => "pole size",
+        "postsize" => "post size",
+        "postspacing" => "post spacing",
+        "topwidth" => "top width",
+        other => other,
+    };
+    let mut letters = words.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
     }
 }
 
@@ -1186,7 +1200,7 @@ impl RoadObjectDialog {
         for &kind in road_object_kinds() {
             let mut fields = Vec::new();
             for spec in parameters_of(kind) {
-                let mut label_text = String::from(spec.key);
+                let mut label_text = parameter_words(spec.key);
                 if !spec.unit.is_empty() {
                     label_text.push_str(&format!(" ({})", spec.unit));
                 }

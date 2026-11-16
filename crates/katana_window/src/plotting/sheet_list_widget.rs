@@ -131,7 +131,16 @@ impl SheetListWidget {
                             if let Some(picture) = row.picture {
                                 ui.image(picture);
                             }
-                            ui.selectable_label(self.current == Some(at), row.text.as_str())
+                            // Wrapped at its words in what the picture leaves of the list's
+                            // width: on one line a name of three words ran past the list's edge
+                            // ("PLAN TILE 1" cut at the 220 column).
+                            ui.add(
+                                egui::Button::selectable(
+                                    self.current == Some(at),
+                                    row.text.as_str(),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            )
                         })
                         .response;
                     let held = ui.interact(

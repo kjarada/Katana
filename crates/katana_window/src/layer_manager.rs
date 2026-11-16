@@ -801,7 +801,7 @@ impl LayerManagerDialog {
             {
                 self.revert(host.document());
             }
-            if layout::primary(ui, "layerSave", "Save Changes")
+            if controls::primary(ui, "layerSave", "Save Changes")
                 .on_hover_text("Write the form to the layer")
                 .clicked()
             {
@@ -823,7 +823,7 @@ impl LayerManagerDialog {
                 if controls::button(ui, "layerPromptCancel", "Cancel").clicked() {
                     self.cancel_prompt();
                 }
-                if layout::primary(ui, "layerPromptOk", "OK").clicked() || entered {
+                if controls::primary(ui, "layerPromptOk", "OK").clicked() || entered {
                     self.accept_prompt(host);
                 }
             });
@@ -892,10 +892,10 @@ impl LayerManagerDialog {
             said = said.color(error_colour());
         }
         let status = self.status.clone();
-        let (_, close) = layout::footer(
+        let (_, close) = dialog::button_row(
             ui,
             |ui| controls::label_as(ui, "layerStatus", &status, egui::Label::new(said).wrap()),
-            |ui| layout::button(ui, "closeButton", "Close").clicked(),
+            |ui| controls::button(ui, "closeButton", "Close").clicked(),
         );
         if close {
             self.closing = true;

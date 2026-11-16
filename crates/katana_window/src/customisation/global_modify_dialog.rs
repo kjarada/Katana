@@ -820,8 +820,9 @@ impl GlobalModifyDialog {
             &self.summary,
             egui::Label::new(said).wrap(),
         );
-        // Preview and Select Matches look; Apply changes, so it is the primary, at the right.
-        let ((previewed, selected), (applied, closed)) = layout::footer(
+        // The one footer (shell::dialog::button_row): Preview and Select Matches read the drawing,
+        // at the left; Close, then Apply, which changes it - the primary - last at the right.
+        let ((previewed, selected), (closed, applied)) = dialog::button_row(
             ui,
             |ui| {
                 let previewed = controls::button(ui, "globalModifyPreview", "Preview")
@@ -833,11 +834,11 @@ impl GlobalModifyDialog {
                 (previewed, selected)
             },
             |ui| {
-                let applied = layout::primary(ui, "globalModifyApply", "Apply")
+                let closed = controls::button(ui, "globalModifyClose", "Close").clicked();
+                let applied = controls::primary(ui, "globalModifyApply", "Apply")
                     .on_hover_text("Make the change: one Undo puts everything back")
                     .clicked();
-                let closed = layout::button(ui, "globalModifyClose", "Close").clicked();
-                (applied, closed)
+                (closed, applied)
             },
         );
         if previewed {

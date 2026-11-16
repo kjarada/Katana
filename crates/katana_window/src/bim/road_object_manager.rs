@@ -62,13 +62,13 @@ use katana_math::cpp;
 use super::road_dialog_support::{Table, button, cell, field, same_ignoring_case};
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
-use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
+use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget, WIDGET_WIDTH};
 use crate::dialog_layout as layout;
 use crate::drive::controls::{TextOptions, custom, label_as, text_with};
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::format::qt_fixed;
 use crate::host::{Host, VerbOutcome};
-use crate::shell::dialog::DialogFrame;
+use crate::shell::dialog::{self, DialogFrame};
 
 /// The table's columns.
 pub const ID: usize = 0;
@@ -158,6 +158,13 @@ pub fn road_objects_frame(document: &Document, ids: &[String]) -> Option<Box2> {
 
 /// The list column's width (the look of 2026-11-16): the object table's columns.
 const LIST_WIDTH: f32 = 600.0;
+
+/// The manager's body width: the list's column and the scope's (the shared widget's own width,
+/// scope_filter_widget::WIDGET_WIDTH) side by side, parted by a section's gap and the row's own
+/// spacing (theme::style's GROUP_GAP across). At the frame's own 520 the list took the whole body
+/// and the scope's heading, "Road objects by scope", was drawn in what was left, a letter a line
+/// down 300 points.
+const BODY_WIDTH: f32 = LIST_WIDTH + dialog::SECTION_GAP + dialog::GROUP_GAP + WIDGET_WIDTH;
 
 struct Body {
     watcher: DocumentWatcher,
@@ -558,6 +565,7 @@ impl Body {
             // A column of its own: in the row above, a group would lay its title, the scope
             // and its buttons side by side.
             let by_scope = ui.vertical(|ui| {
+                ui.set_width(WIDGET_WIDTH);
                 ui.strong("Road objects by scope");
                 self.scope.ui(ui);
                 ui.horizontal(|ui| {
@@ -604,10 +612,14 @@ impl Body {
         });
     }
 
+    /// The one footer (shell::dialog::button_row): Close at the right.
     fn footer_ui(&mut self, ui: &mut Ui) {
-        if layout::footer_buttons(ui, |ui| {
-            button(ui, "roadObjectManagerClose", "&Close", "").clicked()
-        }) {
+        let ((), close) = dialog::button_row(
+            ui,
+            |_| {},
+            |ui| button(ui, "roadObjectManagerClose", "&Close", "").clicked(),
+        );
+        if close {
             self.close = true;
         }
     }
@@ -661,7 +673,7 @@ impl RoadObjectManagerDialog {
         };
         body.reload(document);
         Self {
-            frame: DialogFrame::new("roadObjectManagerDialog", "Road Objects"),
+            frame: DialogFrame::new("roadObjectManagerDialog", "Road Objects").width(BODY_WIDTH),
             open: true,
             body,
         }

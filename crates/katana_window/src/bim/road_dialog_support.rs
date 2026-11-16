@@ -22,7 +22,9 @@ use katana_core::text::parse_finite_double;
 
 use crate::canvas::{Canvas, Image};
 use crate::command_word::command_word;
-use crate::dialog_layout::{TABLE_COLUMN_GAP, TABLE_ROW_GAP, table_row_colour};
+use crate::dialog_layout::{
+    EMPTY_TABLE, TABLE_COLUMN_GAP, TABLE_ROW_GAP, empty_table, table_header, table_row_colour,
+};
 use crate::drive::controls::{
     Choice, LineOptions, accept_fill, accept_press, button_as, choice, custom, label_as, line_with,
 };
@@ -424,6 +426,11 @@ pub struct Table {
     max_height: Option<f32>,
     /// A height it keeps whatever it holds (setMinimumHeight with room for rows).
     fixed_height: Option<f32>,
+    /// Spans the width of what holds it (dialog_layout::table_header), so the tables of one column
+    /// are one width.
+    fill: bool,
+    /// What it says, muted, under its header while it has no rows.
+    empty: String,
 }
 
 impl Table {
@@ -439,7 +446,22 @@ impl Table {
             editing: false,
             max_height: None,
             fixed_height: None,
+            fill: false,
+            empty: String::from(EMPTY_TABLE),
         }
+    }
+
+    /// The same, spanning the width of what holds it: for a table alone across its column, never
+    /// one beside another column, whose room it would take.
+    pub fn filling(mut self) -> Self {
+        self.fill = true;
+        self
+    }
+
+    /// The same, saying `text` under its header while it has no rows.
+    pub fn empty_text(mut self, text: &str) -> Self {
+        self.empty = String::from(text);
+        self
     }
 
     /// The same, several rows chosen at once (ExtendedSelection).
@@ -641,23 +663,22 @@ impl Table {
             (None, None) => area.auto_shrink([true, true]),
         };
         let editing = self.editing;
+        let fill = self.fill;
+        let empty = self.empty.as_str();
         let headers = &self.headers;
         let rows = &mut self.rows;
         let selected = &self.selected;
         let chosen_rows: Vec<bool> = (0..rows.len()).map(|row| selected.contains(&row)).collect();
         let output = area.show(ui, |ui| {
             egui::Grid::new((name.as_str(), "grid"))
+                // Its column count, so the last column is known as the last: a filling table's
+                // last header cell takes the room to the right edge (dialog_layout::table_header).
+                .num_columns(headers.len())
                 .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
                 .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
                 .with_row_color(move |row, style| table_row_colour(row, &chosen_rows, style))
                 .show(ui, |ui| {
-                    for header in headers {
-                        ui.label(
-                            RichText::new(header.as_str())
-                                .strong()
-                                .color(palette::text_muted().to_egui()),
-                        );
-                    }
+                    table_header(ui, headers, fill);
                     ui.end_row();
                     for (row, cells) in rows.iter_mut().enumerate() {
                         for (column, cell) in cells.iter_mut().enumerate() {
@@ -687,6 +708,9 @@ impl Table {
                         ui.end_row();
                     }
                 });
+            if rows.is_empty() {
+                empty_table(ui, empty);
+            }
         });
         if let Some(row) = clicked
             && self.select_row(row)
@@ -764,6 +788,12 @@ pub fn preview(
     paint: &mut dyn FnMut(&mut dyn Canvas),
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    // On the view's dark ground in a border, as the dimension and surface style previews are, so
+    // the place reads as a preview before (and without) anything painted in it.
+    if ui.is_rect_visible(rect) {
+        ui.painter()
+            .rect_filled(rect, 0.0, palette::viewport().to_egui());
+    }
     if let Some(raster) = raster
         && ui.is_rect_visible(rect)
     {
@@ -781,6 +811,14 @@ pub fn preview(
             egui::Color32::WHITE,
         );
         *texture = Some(handle);
+    }
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            egui::Stroke::new(1.0, palette::border().to_egui()),
+            egui::StrokeKind::Inside,
+        );
     }
     custom(ui, &response, ControlRecord::new(name, ControlKind::Other));
     response

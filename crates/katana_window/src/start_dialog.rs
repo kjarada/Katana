@@ -30,7 +30,6 @@ use katana_core::{ErrorCode, Result};
 use crate::canvas::Image;
 use crate::command_word::command_word;
 use crate::customisation::code_manager_support::typed_customisation_file_word;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::{Host, VerbOutcome};
 use crate::icons::{CanvasRasteriser, application_icon_image};
@@ -691,23 +690,24 @@ impl StartDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let can_start = self.start_enabled(host.document());
         let show_at_start = &mut self.show_at_start;
-        let (_, (pressed, skipped)) = layout::footer(
+        // The one footer (shell::dialog::button_row): the box at the left; Skip, then Start, the
+        // primary, last at the right.
+        let (_, (skipped, pressed)) = dialog::button_row(
             ui,
             |ui| {
                 controls::check(ui, "startShowAtStart", "Show this at start", show_at_start)
                     .on_hover_text("File > Start Screen opens it at any time");
             },
-            // Drawn from the right: Start, the primary, last.
             |ui| {
-                let pressed = ui
-                    .add_enabled_ui(can_start, |ui| {
-                        layout::primary(ui, "startOk", "Start").clicked()
-                    })
-                    .inner;
-                let skipped = layout::button(ui, "startSkip", "Skip")
+                let skipped = controls::button(ui, "startSkip", "Skip")
                     .on_hover_text("Start with the session as it is")
                     .clicked();
-                (pressed, skipped)
+                let pressed = ui
+                    .add_enabled_ui(can_start, |ui| {
+                        controls::primary(ui, "startOk", "Start").clicked()
+                    })
+                    .inner;
+                (skipped, pressed)
             },
         );
         if pressed {

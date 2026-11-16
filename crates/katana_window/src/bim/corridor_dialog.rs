@@ -712,7 +712,15 @@ impl Body {
         ui.add_space(layout::SECTION_GAP);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().text_edit_width = dialog::SHORT_FIELD_WIDTH / 2.0;
+            // Two columns of one width: at the frame's 520 the second had what the first left,
+            // its heading four lines and its table's header clipped.
+            let column = ((ui.available_width()
+                - layout::SECTION_GAP
+                - 2.0 * ui.spacing().item_spacing.x)
+                / 2.0)
+                .max(0.0);
             ui.vertical(|ui| {
+                ui.set_width(column);
                 ui.vertical(|ui| {
                     ui.strong("Regions: another template between two stations");
                     self.regions.ui(ui);
@@ -752,6 +760,7 @@ impl Body {
             });
             ui.add_space(layout::SECTION_GAP);
             ui.vertical(|ui| {
+                ui.set_width(column);
                 ui.vertical(|ui| {
                     ui.strong("Superelevation: crossfall each side, percent outward");
                     self.superelevation.ui(ui);
@@ -837,18 +846,27 @@ impl Body {
             }
         });
         muted(ui, "corridorProblems", &self.problems);
-        self.status.ui(ui, "corridorStatus");
     }
 
-    /// The row of buttons the dialog frame keeps in sight: Close.
+    /// The row the dialog frame keeps in sight (shell::dialog::button_row, the one footer): what
+    /// the last line replied at the left, Close at the right.
     fn footer_ui(&mut self, ui: &mut Ui) {
-        if layout::footer_buttons(ui, |ui| {
-            button(ui, "corridorClose", "Close", "Close the dialog").clicked()
-        }) {
+        let status = &self.status;
+        let (_, close) = dialog::button_row(
+            ui,
+            |ui| status.ui(ui, "corridorStatus"),
+            |ui| button(ui, "corridorClose", "Close", "Close the dialog").clicked(),
+        );
+        if close {
             self.close = true;
         }
     }
 }
+
+/// The dialog's body width: two columns, the corridor's fields and later the regions beside the
+/// superelevation, and the corridor table's ten columns across (some 560 points at the Standard
+/// text size, clipped at the frame's 520 at "Su...").
+const BODY_WIDTH: f32 = dialog::TWO_COLUMN_WIDTH;
 
 /// The Corridors dialog (see the module comment).
 pub struct CorridorDialog {
@@ -878,7 +896,9 @@ impl CorridorDialog {
                     "Curve tolerance",
                 ],
             )
-            .max_height(140.0),
+            .max_height(140.0)
+            .filling()
+            .empty_text("No corridors: New makes one from the fields below"),
             name: String::new(),
             alignment: Combo::new(),
             road_template: Combo::new(),
@@ -887,14 +907,18 @@ impl CorridorDialog {
             curve_tolerance: exact_number(DEFAULT_CURVE_TOLERANCE),
             from: String::new(),
             to: String::new(),
-            regions: Table::new("corridorRegions", &["From", "To", "Template"]),
+            regions: Table::new("corridorRegions", &["From", "To", "Template"])
+                .filling()
+                .empty_text("No regions: the corridor's template runs its whole length"),
             region_from: String::new(),
             region_to: String::new(),
             region_template: Combo::new(),
             superelevation: Table::new(
                 "corridorSuperelevation",
                 &["Station", "Left (%)", "Right (%)"],
-            ),
+            )
+            .filling()
+            .empty_text("None: the template's own crossfalls"),
             super_station: String::new(),
             super_left: String::new(),
             super_right: String::new(),
@@ -912,7 +936,7 @@ impl CorridorDialog {
             body.fill_chosen(document, true);
         }
         Self {
-            frame: DialogFrame::new("corridorDialog", "Corridors"),
+            frame: DialogFrame::new("corridorDialog", "Corridors").width(BODY_WIDTH),
             open: true,
             body,
         }

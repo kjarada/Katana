@@ -81,7 +81,7 @@ use katana_entity::style_library::style_groups;
 use katana_entity::tables::CONTINUOUS_LINETYPE;
 use katana_entity::{Color, EntityId, Linetype, LinetypeElement, Style, validate};
 
-use crate::annotation::dialog_support::{show_dialog, spin_value, table};
+use crate::annotation::dialog_support::{TableLook, show_dialog, spin_value, table_look};
 use crate::customisation::customisation_context::{CustomisationContext, DefinitionEdit};
 use crate::customisation::definition_thumbnails::DefinitionThumbnails;
 use crate::customisation::document_watcher::{DocumentChanges, DocumentWatcher};
@@ -108,11 +108,40 @@ const TITLE: &str = "Styles and Linetypes";
 fn error_colour() -> egui::Color32 {
     crate::theme::error().to_egui()
 }
-/// The dialog's body width, the same on every page: the style table and the definition form side
-/// by side, with room for the preview.
-const BODY_WIDTH: f32 = 940.0;
+/// The dialog's body width, the same on every page, so it does not change size as its tabs are
+/// turned: the widest page's, the Linetypes table (its seven columns, 908 points at the Standard
+/// text size) beside the detail pane (DETAIL_WIDTH) and a gap. At 940 the Linetypes page ran its
+/// table to 908 and squeezed the detail pane to some 40 points, a letter or two a line, and the
+/// dialog was 966, 1316, 1344 and 966 wide on its four tabs.
+const BODY_WIDTH: f32 = 1296.0;
 /// The size of the Styles page's preview, beside the table under the definition's form.
 const STYLE_PREVIEW: egui::Vec2 = egui::vec2(360.0, 150.0);
+/// The width of a page's detail pane - the style's form and preview, a linetype's pattern or
+/// library details, a hatch pattern's editor - at the right of its table: the preview's, in its
+/// group (shell::dialog::group_margins, 14 in the window's style).
+pub(crate) const DETAIL_WIDTH: f32 = STYLE_PREVIEW.x + 14.0;
+/// The least height of the dialog, its title bar and footer included, so it keeps one height
+/// whichever tab is in front rather than jumping from 223 points (Diagnostics) to 844 (Linetypes):
+/// the tallest page's, the Styles page's form and preview over its buttons (689 at the Standard
+/// text size, measured from the dialog's shot).
+const LEAST_HEIGHT: f32 = 690.0;
+
+/// A page's table column: the body less the detail pane and the gap between them. A table wider
+/// than its column (a long linetype group at a large text size) scrolls across in it rather than
+/// pushing the detail pane off the dialog.
+fn table_column<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let width = (ui.available_width() - DETAIL_WIDTH - dialog::GROUP_GAP).max(0.0);
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        egui::ScrollArea::horizontal()
+            .id_salt((salt, "tableColumn"))
+            .max_width(width)
+            .auto_shrink([false, true])
+            .show(ui, add)
+            .inner
+    })
+    .inner
+}
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 3).with_suffix(" mm on paper");
 const SYMBOL_SIZE: SpinRange =
     SpinRange::new(0.0, 10000.0, 1.0, 4).with_suffix(" m wide (0 = its own size)");
@@ -485,7 +514,10 @@ impl StyleManagerDialog {
             style_preview: StylePreview::new(document),
             preview_note: String::new(),
             preview_scale: scale,
-            preview_screen: false,
+            // On the viewport's dark ground first, as the rest of the dialog is (the look of
+            // 2026-11-16): a white pane of paper was the brightest thing on the screen. Unticking
+            // Screen shows it on paper, as it prints.
+            preview_screen: true,
             form_styles: Vec::new(),
             edited: StyleFields::default(),
             picked_colour: None,
@@ -508,7 +540,7 @@ impl StyleManagerDialog {
             library_details: String::new(),
             linetype_preview: StylePreview::new(document),
             linetype_preview_scale: scale,
-            linetype_preview_screen: false,
+            linetype_preview_screen: true,
             pattern_for: String::new(),
             working_pattern: Vec::new(),
             pattern_edited: false,
@@ -536,6 +568,8 @@ impl StyleManagerDialog {
             watcher: DocumentWatcher::new(document),
             context,
         };
+        Self::apply_preview_controls(&mut dialog.style_preview, scale, true);
+        Self::apply_preview_controls(&mut dialog.linetype_preview, scale, true);
         dialog.reload(document, true);
         dialog
     }
@@ -2249,6 +2283,8 @@ impl StyleManagerDialog {
             self.on_document_changed(host.document(), changes);
         }
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(STYLE_MANAGER, TITLE));
+        frame.set_body_width(BODY_WIDTH);
+        frame.set_minimum_height(LEAST_HEIGHT);
         let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         closed |= std::mem::take(&mut self.closing);
@@ -2256,7 +2292,8 @@ impl StyleManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        // One width for every page, so the dialog does not change size as its tabs are turned.
+        // One width for every page, so the dialog does not change size as its tabs are turned,
+        // and the tab strip's rule runs across the whole body.
         ui.set_width(BODY_WIDTH);
         ui.add_enabled_ui(!self.orphan, |ui| {
             let diagnostics = self.diagnostics_title.clone();
@@ -2266,8 +2303,8 @@ impl StyleManagerDialog {
                 "Hatch Patterns",
                 diagnostics.as_str(),
             ];
+            // The strip's own rule parts it from the page (a separator under it drew a second).
             controls::tabs(ui, "managerTabs", &titles, &mut self.tab);
-            ui.separator();
             // A page not in front is still there, as a QTabWidget's is: what it holds can be
             // filled, pressed and read. Only its filter bar is not (see the module comment).
             let pages: [(&str, fn(&mut Self, &mut Ui, &mut dyn Host, bool)); 4] = [
@@ -2289,7 +2326,7 @@ impl StyleManagerDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        let (_, close) = layout::footer(
+        let (_, close) = dialog::button_row(
             ui,
             |ui| {
                 ui.add_enabled_ui(self.buttons.undo && !self.orphan, |ui| {
@@ -2321,7 +2358,7 @@ impl StyleManagerDialog {
             },
             // Close alone is not held back by a Document that has gone: it is how a person
             // dismisses a dialog that has nothing left to edit.
-            |ui| layout::button(ui, "closeButton", "Close").clicked(),
+            |ui| controls::button(ui, "closeButton", "Close").clicked(),
         );
         if close {
             self.closing = true;
@@ -2417,7 +2454,7 @@ impl StyleManagerDialog {
             }
         }
         ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
+            table_column(ui, "styleTable", |ui| {
                 let rows: Vec<Vec<String>> = self
                     .style_view
                     .iter()
@@ -2428,7 +2465,7 @@ impl StyleManagerDialog {
                     .iter()
                     .map(|row| self.style_selected.contains(row))
                     .collect();
-                let shown = table(
+                let shown = table_look(
                     ui,
                     "styleTable",
                     &STYLE_HEADERS,
@@ -2436,6 +2473,10 @@ impl StyleManagerDialog {
                     None,
                     &highlighted,
                     None,
+                    TableLook {
+                        fill: true,
+                        empty: "No style matches: New makes one",
+                    },
                 );
                 if let Some(&row) = shown.chosen.and_then(|at| self.style_view.get(at))
                     && self.live()
@@ -2444,10 +2485,11 @@ impl StyleManagerDialog {
                     self.load_style_form(host.document());
                 }
             });
+            ui.add_space(dialog::GROUP_GAP - ui.spacing().item_spacing.x);
             ui.vertical(|ui| {
                 // The form's group as wide as the preview's under it: its fields fill the column
                 // rather than the dialog's width.
-                ui.set_width(STYLE_PREVIEW.x + dialog::group_margins(ui));
+                ui.set_width(DETAIL_WIDTH);
                 self.style_form(ui, host);
                 ui.group(|ui| {
                     ui.strong("Preview");
@@ -2786,7 +2828,7 @@ impl StyleManagerDialog {
             self.update_buttons(host.document());
         }
         ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
+            table_column(ui, "linetypeTable", |ui| {
                 let rows: Vec<Vec<String>> = self
                     .linetype_view
                     .iter()
@@ -2797,7 +2839,7 @@ impl StyleManagerDialog {
                     .iter()
                     .map(|row| self.linetype_selected.contains(row))
                     .collect();
-                let shown = table(
+                let shown = table_look(
                     ui,
                     "linetypeTable",
                     &LINETYPE_HEADERS,
@@ -2805,6 +2847,10 @@ impl StyleManagerDialog {
                     None,
                     &highlighted,
                     None,
+                    TableLook {
+                        fill: true,
+                        empty: "No linetype matches the filter",
+                    },
                 );
                 if let Some(&row) = shown.chosen.and_then(|at| self.linetype_view.get(at))
                     && self.live()
@@ -2814,7 +2860,11 @@ impl StyleManagerDialog {
                     self.update_buttons(host.document());
                 }
             });
+            ui.add_space(dialog::GROUP_GAP - ui.spacing().item_spacing.x);
             ui.vertical(|ui| {
+                // The detail pane's own width: a library linestyle's details wrapped in what was
+                // left of the row, some 40 points, a letter or two a line.
+                ui.set_width(DETAIL_WIDTH);
                 // The three faces of the detail pane; those not shown are there all the same.
                 let faces: [(Detail, &str, fn(&mut Self, &mut Ui, &mut dyn Host)); 3] = [
                     (Detail::None, "noLinetypeFace", Self::no_linetype_face),
@@ -2834,7 +2884,7 @@ impl StyleManagerDialog {
                         ui,
                         "linetypePreview",
                         host.document(),
-                        egui::vec2(360.0, 120.0),
+                        egui::vec2(STYLE_PREVIEW.x, 120.0),
                     );
                     ui.horizontal(|ui| {
                         if Self::preview_controls(
@@ -3275,7 +3325,7 @@ impl StyleManagerDialog {
         let highlighted: Vec<bool> = (0..rows.len())
             .map(|row| self.diagnostic_selected.contains(&row))
             .collect();
-        let shown = table(
+        let shown = table_look(
             ui,
             "diagnosticTable",
             &DIAGNOSTIC_HEADERS,
@@ -3283,6 +3333,10 @@ impl StyleManagerDialog {
             None,
             &highlighted,
             None,
+            TableLook {
+                fill: true,
+                empty: "No problems to list",
+            },
         );
         if let Some(row) = shown.chosen
             && self.live()
@@ -3334,7 +3388,7 @@ impl StyleManagerDialog {
                 if controls::button(ui, "promptCancel", "Cancel").clicked() {
                     self.prompt = None;
                 }
-                if layout::primary(ui, "promptOk", "OK").clicked() || entered {
+                if controls::primary(ui, "promptOk", "OK").clicked() || entered {
                     self.accept_prompt(host);
                 }
             });
@@ -3374,7 +3428,7 @@ impl StyleManagerDialog {
                     if controls::button(ui, "purgeCancel", "Cancel").clicked() {
                         self.purge_open = false;
                     }
-                    if layout::primary(ui, "purgeOk", "Purge Checked")
+                    if controls::primary(ui, "purgeOk", "Purge Checked")
                         .on_hover_text("Delete the checked items as one undo step")
                         .clicked()
                     {

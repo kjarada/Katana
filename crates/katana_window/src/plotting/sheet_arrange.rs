@@ -353,20 +353,30 @@ impl SuggestPaperDialog {
                 });
             },
             |ui, (dialog, answer)| {
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled_ui(dialog.apply_enabled, |ui| {
-                            controls::button(ui, "sheetSuggestPaperApply", "Apply")
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        **answer = Some(true);
-                    }
-                    if controls::button(ui, "sheetSuggestPaperCancel", "Cancel").clicked() {
-                        **answer = Some(false);
-                    }
-                });
+                // The one footer (shell::dialog::button_row): Cancel, then Apply, the primary,
+                // last at the right.
+                let apply_enabled = dialog.apply_enabled;
+                let ((), (cancelled, applied)) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        let cancelled =
+                            controls::button(ui, "sheetSuggestPaperCancel", "Cancel").clicked();
+                        let applied = ui
+                            .add_enabled_ui(apply_enabled, |ui| {
+                                controls::primary(ui, "sheetSuggestPaperApply", "Apply")
+                            })
+                            .inner
+                            .clicked();
+                        (cancelled, applied)
+                    },
+                );
+                if applied {
+                    **answer = Some(true);
+                }
+                if cancelled {
+                    **answer = Some(false);
+                }
             },
         );
         self.frame = frame;

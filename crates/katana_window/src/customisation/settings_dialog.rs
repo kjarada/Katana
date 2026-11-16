@@ -255,14 +255,6 @@ pub const NOTICE_BOX: TextOptions = TextOptions {
     monospace: false,
 };
 
-/// How the status is drawn. A box, not a label: a load answers with several records and a refusal
-/// may list every reason, and a label that grew with them would push the page about.
-pub const STATUS_BOX: TextOptions = TextOptions {
-    read_only: true,
-    rows: 4,
-    monospace: false,
-};
-
 const STATUS_PLACEHOLDER: &str = "The line each button runs is shown here, with what it answered.";
 const IMPORT_PLACEHOLDER: &str = "a Katana customisation file to load";
 const EXPORT_PLACEHOLDER: &str = "the file to write the customisation to";
@@ -838,9 +830,6 @@ fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
 /// The width of the page beside the list of pages.
 const PAGE_WIDTH: f32 = 560.0;
 
-/// The width of a path field: with its Browse button and one more button, the page's width.
-const PATH_WIDTH: f32 = 380.0;
-
 impl SettingsDialog {
     /// The dialog over `context`, filled from `host`'s drawing when the context reads one.
     pub fn new(context: SettingsContext, host: &dyn Host) -> Self {
@@ -985,17 +974,18 @@ impl SettingsDialog {
         let mut words: Vec<String> = [
             self.frame.title(),
             "What is active",
-            "Name:",
-            "Origin:",
-            "Built-in:",
-            "Definitions:",
-            "Symbols among them:",
-            "Survey code rules:",
-            "Kept:",
+            "Name",
+            "Origin",
+            "Built-in",
+            "Definitions",
+            "Symbols among them",
+            "Survey code rules",
+            "Kept",
             "Import",
             "Export",
+            "File",
             "Built-in and kept",
-            "Built-in library:",
+            "Built-in library",
             "When survey data comes in",
             "Editors",
             "Linework control codes",
@@ -1736,8 +1726,12 @@ impl SettingsDialog {
         });
 
         // Import.
+        // The file rows are labelled rows of the page's one label column, their fields filling
+        // to the page's edge less their buttons: a path field 380 wide from the page's left edge
+        // gave the page two field edges (173 and 310) and three right edges.
         group(ui, "Import", |ui| {
-            ui.horizontal(|ui| {
+            dialog::labelled(ui, "File", |ui| {
+                let width = dialog::beside_a_button(ui, "Browse...");
                 ui.add_enabled_ui(self.enabled.import_path, |ui| {
                     controls::line_with(
                         ui,
@@ -1745,7 +1739,7 @@ impl SettingsDialog {
                         &mut self.import_path,
                         LineOptions {
                             placeholder: IMPORT_PLACEHOLDER,
-                            width: Some(PATH_WIDTH),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
@@ -1756,7 +1750,7 @@ impl SettingsDialog {
                     }
                 });
             });
-            ui.horizontal(|ui| {
+            dialog::labelled(ui, "", |ui| {
                 ui.add_enabled_ui(self.enabled.import_replace, |ui| {
                     controls::check(
                         ui,
@@ -1779,7 +1773,8 @@ impl SettingsDialog {
 
         // Export.
         group(ui, "Export", |ui| {
-            ui.horizontal(|ui| {
+            dialog::labelled(ui, "File", |ui| {
+                let width = dialog::beside_buttons(ui, &["Browse...", "Export"]);
                 ui.add_enabled_ui(self.enabled.export_path, |ui| {
                     controls::line_with(
                         ui,
@@ -1787,7 +1782,7 @@ impl SettingsDialog {
                         &mut self.export_path,
                         LineOptions {
                             placeholder: EXPORT_PLACEHOLDER,
-                            width: Some(PATH_WIDTH),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
@@ -1863,7 +1858,8 @@ impl SettingsDialog {
             if used {
                 self.use_built_in(&mut *host);
             }
-            ui.horizontal(|ui| {
+            // Under the fields, at their edge, as the Import row's box and button are.
+            dialog::labelled(ui, "", |ui| {
                 ui.add_enabled_ui(self.enabled.reset, |ui| {
                     if controls::button(ui, "settingsReset", "Reset to Built-in")
                         .on_hover_text(self.reset_tip.as_str())
@@ -2081,31 +2077,31 @@ impl SettingsDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui) {
-        // Read, never typed into: what is drawn is a copy the frame throws away. A refusal is in
-        // the error colour. As wide as the dialog, so the reply of a load is read without
-        // scrolling sideways.
-        let mut status = self.status.clone();
-        ui.add_space(layout::INNER);
-        ui.scope(|ui| {
-            if self.status_error {
-                ui.visuals_mut().override_text_color = Some(theme::error().to_egui());
-            }
-            if !ui.is_sizing_pass() {
-                ui.spacing_mut().text_edit_width = ui.available_width();
-            }
-            controls::text_with(ui, "settingsStatus", &mut status, STATUS_BOX);
-        });
         let placeholder = if self.status.is_empty() {
             STATUS_PLACEHOLDER
         } else {
             ""
         };
-        let close = layout::footer(
+        // The one footer (shell::dialog::button_row): what the reply box is for, muted, at the
+        // left until there is a reply; Close at the right.
+        let close = dialog::button_row(
             ui,
             |ui| ui.weak(placeholder),
-            |ui| layout::button(ui, "settingsClose", "Close").clicked(),
+            |ui| controls::button(ui, "settingsClose", "Close").clicked(),
         )
         .1;
+        // The reply under the row, read and never typed into: what is drawn is a copy the frame
+        // throws away. Muted text, a refusal in the error colour, as wide as the dialog so the
+        // reply of a load is read whole - and no room at all until there is one, where an empty
+        // four-row box was a third of the footer.
+        let mut status = self.status.clone();
+        layout::reply_text(
+            ui,
+            "settingsStatus",
+            &mut status,
+            ControlKind::Text,
+            self.status_error,
+        );
         if close {
             self.close();
         }

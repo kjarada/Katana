@@ -61,12 +61,12 @@ use katana_math::numerics::DEG_TO_RAD;
 
 use super::customisation_context::CustomisationContext;
 use super::document_watcher::DocumentWatcher;
-use crate::annotation::dialog_support::table;
+use crate::annotation::dialog_support::{TableLook, table_look};
 use crate::command_word::command_word;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
+use crate::shell::dialog;
 use crate::theme::palette;
 
 /// The tab's object name.
@@ -613,9 +613,16 @@ impl HatchPatternsTab {
             ControlRecord::new(HATCH_PATTERNS_PAGE, ControlKind::Other),
         );
         let enabled = self.enabled(host.document());
+        // The table in the page's table column and the editor in the detail pane beside it, as
+        // wide as the other pages' (style_manager::DETAIL_WIDTH): the editor was drawn into the
+        // row it was given, left to right - Pattern, Solid fill, the grid, its buttons, the swatch,
+        // Revert and Save - a strip that ran past the dialog's edge ("Save" cut).
+        let detail = crate::style_manager::DETAIL_WIDTH;
         ui.horizontal_top(|ui| {
+            let column = (ui.available_width() - detail - dialog::GROUP_GAP).max(0.0);
             ui.vertical(|ui| {
-                let shown = table(
+                ui.set_width(column);
+                let shown = table_look(
                     ui,
                     "hatchPatternTable",
                     &["Name", "Kind", "Used by", "Description"],
@@ -623,18 +630,29 @@ impl HatchPatternsTab {
                     self.current,
                     &[],
                     None,
+                    TableLook {
+                        fill: true,
+                        empty: "No hatch patterns: New or New Solid makes one",
+                    },
                 );
                 if let Some(row) = shown.chosen {
                     self.choose_row(host.document(), row);
                 }
             });
-            ui.add_enabled_ui(enabled.editable, |ui| {
-                ui.group(|ui| self.editor(ui, host, enabled));
+            ui.add_space(dialog::GROUP_GAP - ui.spacing().item_spacing.x);
+            ui.vertical(|ui| {
+                ui.set_width(detail);
+                ui.add_enabled_ui(enabled.editable, |ui| {
+                    ui.group(|ui| {
+                        ui.set_width(detail - dialog::group_margins(ui));
+                        self.editor(ui, host, enabled);
+                    });
+                });
             });
         });
 
         ui.horizontal(|ui| {
-            ui.label("Name:");
+            ui.label("Name");
             controls::line_with(
                 ui,
                 "hatchPatternName",
@@ -799,7 +817,7 @@ impl HatchPatternsTab {
                 {
                     self.revert(host.document());
                 }
-                if layout::primary(ui, "hatchPatternSave", "Save")
+                if controls::primary(ui, "hatchPatternSave", "Save")
                     .on_hover_text("HATCH SET name angle spacing ... (or SOLID): one undo step")
                     .clicked()
                 {
@@ -814,8 +832,12 @@ impl HatchPatternsTab {
     /// widest spacing across, so a handful of lines show whatever the pattern's size; the
     /// world-origin anchoring the hatcher keeps is why the square is centred on the origin.
     fn swatch_ui(&self, ui: &mut Ui) {
-        let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(140.0, 140.0), egui::Sense::hover());
+        // As wide as the pane, so its note ("Choose a hatch pattern") is never cut at its edge as
+        // it was in a 140-point square.
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width().max(140.0), 140.0),
+            egui::Sense::hover(),
+        );
         let mut record = ControlRecord::new("hatchPatternPreview", ControlKind::Other);
         record.text.clone_from(&self.swatch_note);
         custom(ui, &response, record);
