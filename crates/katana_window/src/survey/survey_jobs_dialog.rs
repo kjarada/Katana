@@ -366,12 +366,30 @@ impl SurveyJobsDialog {
              can be reduced and adjusted again with other settings: Edit Adjustment, Preview, \
              Apply - one undo step.",
         );
-        ui.weak("Job | File | Format | Imported | Method | Points | Variance factor | Global test");
         egui::ScrollArea::vertical()
             .id_salt("surveyJobsList")
             .max_height(120.0)
             .show(ui, |ui| {
-                if drive::rows(ui, "jobs", &form.jobs, &mut form.current).changed() {
+                if crate::shell::dialog::pick_table(
+                    ui,
+                    "jobs",
+                    &[
+                        "Job",
+                        "File",
+                        "Format",
+                        "Imported",
+                        "Method",
+                        "Points",
+                        "Variance factor",
+                        "Global test",
+                    ],
+                    &form.jobs,
+                    &mut form.current,
+                    // The job summary under it says so already.
+                    "",
+                )
+                .inner
+                {
                     form.job_changed = true;
                 }
             });
@@ -549,15 +567,25 @@ impl SurveyJobsDialog {
                         muted_colour
                     },
                 );
-                ui.weak(
-                    "Point | Shift N (mm) | Shift E (mm) | Shift H (mm) | Horizontal (mm) | In \
-                     the drawing",
-                );
                 egui::ScrollArea::vertical()
                     .id_salt("surveyJobsShifts")
                     .max_height(150.0)
                     .show(ui, |ui| {
-                        drive::rows(ui, "shifts", &form.shifts, &mut form.shift);
+                        crate::shell::dialog::pick_table(
+                            ui,
+                            "shifts",
+                            &[
+                                "Point",
+                                "Shift N (mm)",
+                                "Shift E (mm)",
+                                "Shift H (mm)",
+                                "Horizontal (mm)",
+                                "In the drawing",
+                            ],
+                            &form.shifts,
+                            &mut form.shift,
+                            "Preview lists how far each point the adjustment moves would move.",
+                        );
                     });
                 ui.columns(2, |columns| {
                     muted(&mut columns[0], "The job's last run");

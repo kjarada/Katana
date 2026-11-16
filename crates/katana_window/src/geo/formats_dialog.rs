@@ -35,7 +35,7 @@ use katana_app::geo::replies::{Record, parse_records};
 use super::buffer_dialog::Words;
 use super::geo_workbench::GeoMenus;
 use crate::annotation::dialog_support::table;
-use crate::drive::{Action, LineOptions, button, label, line_with};
+use crate::drive::{Action, LineOptions, button, label, line_with, primary};
 use crate::host::{Host, with_geo};
 use crate::shell::DialogFrame;
 
@@ -413,7 +413,8 @@ impl FormatsDialog {
 
     /// The count, the line, Run and Close: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        // The count and the line at the left; Close and Run in Command Line at the right.
+        // The count and the line at the left; Close and Run in Command Line - the dialog's act,
+        // in the accent - at the right.
         let count = self.count.clone();
         let command = self.command.clone();
         let ((), (close, run)) = crate::shell::dialog::button_row(
@@ -427,7 +428,7 @@ impl FormatsDialog {
             },
             |ui| {
                 let close = button(ui, "gisFormatsClose", "Close").clicked();
-                let run = button(ui, "gisFormatsRun", "Run in Command Line")
+                let run = primary(ui, "gisFormatsRun", "Run in Command Line")
                     .on_hover_text(
                         "Run the line through the command line, so the records are in its log",
                     )

@@ -54,17 +54,16 @@ use katana_core::text::parse_finite_double;
 use katana_core::{Error, ErrorCode, Result};
 
 use super::geo_workbench::{GeoMenus, started_job};
-use crate::annotation::dialog_support::table;
+
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{
     DocumentWatcher, ScopeFilterView, ScopeFilterWidget, scope_filter_views,
 };
 use crate::drive::{
-    Action, LineOptions, TextOptions, button, label_as, line_with, primary, text_with,
+    Action, LineOptions, button, label_as, line_with, primary,
 };
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 use crate::shell::{DialogFrame, dialog};
-use crate::theme::palette;
 
 /// The workspace's open views, asked afresh each time a scope's View choice is filled; shared, as
 /// a dialog with two scopes hands it to both.
@@ -667,22 +666,14 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
             if let Some(problems) = frame.problems.as_ref() {
                 let name = format!("{}Problems", frame.name);
                 ui.add_space(dialog::GROUP_GAP);
-                let shown = egui::ScrollArea::vertical()
-                    .id_salt(name.as_str())
-                    .max_height(160.0)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        table(
-                            ui,
-                            &name,
-                            &PROBLEM_HEADERS,
-                            problems,
-                            frame.problem,
-                            &[],
-                            None,
-                        )
-                    })
-                    .inner;
+                let shown = dialog::table_or_empty(
+                    ui,
+                    &name,
+                    &PROBLEM_HEADERS,
+                    problems,
+                    frame.problem,
+                    "The problems a run finds are listed here, one a row.",
+                );
                 if shown.chosen.is_some() {
                     frame.problem = shown.chosen;
                 }
@@ -694,7 +685,7 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
     let frame = tool.frame_mut();
     let prefix = frame.name.clone();
     let placeholder = frame.placeholder.clone();
-    dialog::labelled(ui, "Command:", |ui| {
+    dialog::labelled(ui, "Command", |ui| {
         line_with(
             ui,
             &format!("{prefix}Command"),
@@ -711,63 +702,59 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
              or katana_mcp, and it does the same",
         );
     });
-    ui.add_space(dialog::GROUP_GAP);
-    // Records are one to a line: the box is fixed pitch and not wrapped.
-    text_with(
-        ui,
-        &format!("{prefix}Reply"),
-        &mut frame.reply,
-        TextOptions {
-            read_only: true,
-            rows: 7,
-            monospace: true,
-        },
-    );
 }
 
-/// The status, and under it Close, Preview and Run - Run the dialog's act, in the accent. Answers
-/// whether Preview and Run were pressed.
+/// The reply, once there is one (records one to a line, fixed pitch and not wrapped), and under
+/// it the design's one footer row (shell::dialog::button_row): Preview - it reads the drawing and
+/// changes nothing - and the status at the left, Close and Run - the dialog's act, in the accent -
+/// at the right. Answers whether Preview and Run were pressed.
 fn footer<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui) -> (bool, bool) {
     let frame = tool.frame_mut();
     let prefix = frame.name.clone();
+    dialog::reply(
+        ui,
+        &format!("{prefix}Reply"),
+        &mut frame.reply,
+        dialog::REPLY_ROWS,
+    );
     let status = frame.status.clone();
     let ready = frame.ready;
-    let is_error = frame.status_error;
-    let mut text = RichText::new(status.as_str());
-    if is_error {
-        text = text.color(palette::error().to_egui());
-    }
-    let ((), (close, pressed)) = dialog::button_row(
+    // A refusal's words, never markup; red only for a refusal.
+    let text = RichText::new(status.as_str()).color(dialog::status_colour(frame.status_error));
+    let (preview, (close, run)) = dialog::button_row(
         ui,
-        // The status at the left of the buttons; a refusal's words, never markup.
         |ui| {
+            let preview = ui
+                .add_enabled_ui(ready, |ui| {
+                    button(ui, &format!("{prefix}Preview"), "Preview")
+                        .on_hover_text(
+                            "Run the line with PREVIEW: what the scope takes, and nothing changed",
+                        )
+                        .clicked()
+                })
+                .inner;
             label_as(
                 ui,
                 &format!("{prefix}Status"),
                 &status,
                 egui::Label::new(text).wrap(),
             );
+            preview
         },
         |ui| {
             let close = button(ui, &format!("{prefix}Close"), "Close").clicked();
-            let pressed = ui
+            let run = ui
                 .add_enabled_ui(ready, |ui| {
-                    let preview = button(ui, &format!("{prefix}Preview"), "Preview")
-                        .on_hover_text(
-                            "Run the line with PREVIEW: what the scope takes, and nothing changed",
-                        )
-                        .clicked();
-                    let run = primary(ui, &format!("{prefix}Run"), "Run").clicked();
-                    (preview, run)
+                    primary(ui, &format!("{prefix}Run"), "Run").clicked()
                 })
                 .inner;
-            (close, pressed)
+            (close, run)
         },
     );
     if close {
         frame.visible = false;
     }
-    pressed
+    (preview, run)
 }
 
 /// A line edit named `name` with a placeholder and a tip, beside its label in the form's label

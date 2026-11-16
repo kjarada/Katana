@@ -933,12 +933,18 @@ impl SurveyImportWizard {
             &form.detection_summary,
             message_colour(form.detection_is_error),
         );
-        ui.weak("Format | Confidence | Evidence | Record");
         egui::ScrollArea::vertical()
             .id_salt("surveyImportCandidates")
             .max_height(240.0)
             .show(ui, |ui| {
-                drive::rows(ui, "candidates", &form.candidates, &mut form.candidate_row);
+                crate::shell::dialog::pick_table(
+                    ui,
+                    "candidates",
+                    &["Format", "Confidence", "Evidence", "Record"],
+                    &form.candidates,
+                    &mut form.candidate_row,
+                    "No reader recognises the file: choose the format to read it as.",
+                );
             });
         form_row(ui, "Read the file as:", |ui| {
             if drive::choice(ui, "format", &form.format_items, &mut form.format)
@@ -1075,12 +1081,26 @@ impl SurveyImportWizard {
         } else {
             hidden(ui, "confirmOrder", confirm);
         }
-        ui.weak("Line | Point | Easting | Northing | Elevation | Code | Description");
         egui::ScrollArea::vertical()
             .id_salt("surveyImportPreview")
             .max_height(240.0)
             .show(ui, |ui| {
-                drive::rows(ui, "preview", &form.preview, &mut form.preview_row);
+                crate::shell::dialog::pick_table(
+                    ui,
+                    "preview",
+                    &[
+                        "Line",
+                        "Point",
+                        "Easting",
+                        "Northing",
+                        "Elevation",
+                        "Code",
+                        "Description",
+                    ],
+                    &form.preview,
+                    &mut form.preview_row,
+                    "The file's first records, as they are read, are listed here.",
+                );
             });
         coloured_label(
             ui,
@@ -1109,12 +1129,18 @@ impl SurveyImportWizard {
                 );
             }
         }
-        ui.weak("In the file | What was read");
         egui::ScrollArea::vertical()
             .id_salt("surveyImportContent")
             .max_height(360.0)
             .show(ui, |ui| {
-                drive::rows(ui, "content", &rows, &mut form.content_row);
+                crate::shell::dialog::pick_table(
+                    ui,
+                    "content",
+                    &["In the file", "What was read"],
+                    &rows,
+                    &mut form.content_row,
+                    "Nothing has been read from the file yet.",
+                );
             });
         muted(
             ui,

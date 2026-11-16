@@ -365,17 +365,21 @@ impl Framed for SurfaceFromDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
-        let (preview, run) = run_buttons(
+        terrain_reply_field(ui, "surfaceFromReply", self.runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("surfaceFromPreview", ready)),
             ("surfaceFromRun", "Build Surface", ready),
+            Some("surfaceFromClose"),
         );
-        terrain_reply_field(ui, "surfaceFromReply", self.runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }
@@ -665,8 +669,9 @@ impl Framed for SurfaceRasterDialog {
             spin(ui, "surfaceRasterCell", &mut self.cell_size, CELL_RANGE);
         });
         let (grid, _) = self.grid(&*host);
-        row(ui, "Grid:", |ui| {
-            label(ui, "surfaceRasterGrid", &grid);
+        row(ui, "Grid", |ui| {
+            // On its label's line, as a field's text is.
+            crate::shell::dialog::text_value(ui, |ui| label(ui, "surfaceRasterGrid", &grid));
         });
         ui.label(
             RichText::new(
@@ -711,17 +716,21 @@ impl Framed for SurfaceRasterDialog {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
         let (_, over_limit) = self.grid(&*host);
-        let (preview, run) = run_buttons(
+        terrain_reply_field(ui, "surfaceRasterReply", self.runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("surfaceRasterPreview", ready)),
             ("surfaceRasterRun", "Export", ready && !over_limit),
+            Some("surfaceRasterClose"),
         );
-        terrain_reply_field(ui, "surfaceRasterReply", self.runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }

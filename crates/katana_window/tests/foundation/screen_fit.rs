@@ -411,6 +411,40 @@ mod screen_fit {
     // ---- menus ----------------------------------------------------------------------------------
 
     #[test]
+    fn a_menu_hung_low_scrolls_in_the_room_below_it_rather_than_moving_up() {
+        // A menu bar's popup hangs under the bar: its column is the room below it, so a tall
+        // menu (Annotate) scrolls there instead of being shifted up over the bar it hangs from.
+        let mut harness = offscreen_harness();
+        let room = screen_room(&harness);
+        let actions: Vec<Action> = (0..120)
+            .map(|at| Action::new(&format!("low{at}"), &format!("Low {at}")))
+            .collect();
+        let at = room.left_top() + Vec2::new(20.0, room.height() / 3.0);
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            popup_menu(&ctx, "lowMenu", at, |ui| {
+                for action in &actions {
+                    action_item(ui, action);
+                }
+            });
+        };
+        harness.show(&mut draw).expect("the menu is drawn");
+        let menu = harness
+            .target_record("lowMenu")
+            .expect("the menu is a target");
+        assert!(
+            (menu.rect.top() - at.y).abs() <= 0.5,
+            "the menu was moved from {} to {}",
+            at.y,
+            menu.rect.top()
+        );
+        let screen = harness.screen();
+        assert!(menu.rect.bottom() <= screen.bottom() + 0.5);
+        let column = menu.scroll.expect("its column is recorded");
+        assert!(column.scrolls(), "it scrolls in the room below it");
+    }
+
+    #[test]
     fn a_menu_taller_than_the_screen_is_one_scrolling_column() {
         // Every menu's items are drawn in the one scrolling column (shell::dialog::menu_column):
         // Qt's style hint and stylesheet have no counterpart to check.

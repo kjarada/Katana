@@ -331,7 +331,7 @@ impl DrapeDialog {
         }
     }
 
-    fn drape_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+    fn drape_page(&mut self, ui: &mut Ui) {
         let _ = self.drape_runner.poll();
         row(ui, "Ground:", |ui| {
             self.drape_source.ui(ui, "drapeSource");
@@ -348,19 +348,26 @@ impl DrapeDialog {
         self.scope.ui(ui);
         let made = drape_line(&self.drape_form());
         command_field(ui, "drapeCommand", &made);
-        let ready = made.is_ok();
-        let (preview, run) = run_buttons(
+    }
+
+    /// The Drape page's reply and buttons, in the dialog's footer: Close only while the page is in
+    /// front (`close`). Whether Close was clicked.
+    fn drape_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
+        let ready = drape_line(&self.drape_form()).is_ok();
+        terrain_reply_field(ui, "drapeReply", self.drape_runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("drapePreview", ready)),
             ("drapeRun", "Drape", ready),
+            close,
         );
-        terrain_reply_field(ui, "drapeReply", self.drape_runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run_drape(host, true);
         }
-        if run {
+        if pressed.run {
             self.run_drape(host, false);
         }
+        pressed.close
     }
 
     fn sample_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -403,8 +410,6 @@ impl DrapeDialog {
             .inner;
         let made = sample_line(&self.sample_form());
         command_field(ui, "sampleCommand", &made);
-        let (_, run) = run_buttons(ui, None, ("sampleRun", "Sample", made.is_ok()));
-        terrain_reply_field(ui, "sampleReply", self.sample_runner.reply_mut());
         if add {
             let text = self.sample_point.clone();
             if self.add_sample_point(&text) {
@@ -422,9 +427,18 @@ impl DrapeDialog {
         if remove {
             remove_current(&mut self.sample_points, &mut self.sample_current);
         }
-        if run {
+    }
+
+    /// The Sample page's reply and Sample, in the dialog's footer: Close only while the page is
+    /// in front (`close`). Whether Close was clicked.
+    fn sample_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
+        let ready = sample_line(&self.sample_form()).is_ok();
+        terrain_reply_field(ui, "sampleReply", self.sample_runner.reply_mut());
+        let pressed = run_buttons(ui, None, ("sampleRun", "Sample", ready), close);
+        if pressed.run {
             self.run_sample(host);
         }
+        pressed.close
     }
 }
 
@@ -433,20 +447,34 @@ impl Framed for DrapeDialog {
         &mut self.frame
     }
 
-    // Each tab holds its own buttons and reply, as the C++ pages do, so the dialog has no footer
-    // of its own and everything scrolls together.
+    // Each tab has its own fields, line, reply and run button, as the C++ pages do; the page in
+    // front's reply and buttons are the dialog's footer, so they stay in sight below its fields
+    // as every dialog's do.
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         tabs(ui, "drapeTabs", &["Drape", "Sample"], &mut self.tab);
         // The page not in front is still there, as a QTabWidget's is: what it holds can be filled,
         // pressed and read.
         if self.tab == 0 {
-            self.drape_page(ui, host);
+            self.drape_page(ui);
             offstage(ui, "drapeSamplePage", |ui| self.sample_page(ui, host));
         } else {
-            offstage(ui, "drapeDrapePage", |ui| self.drape_page(ui, host));
+            offstage(ui, "drapeDrapePage", |ui| self.drape_page(ui));
             self.sample_page(ui, host);
         }
     }
 
-    fn footer(&mut self, _ui: &mut Ui, _host: &mut dyn Host) {}
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The page not in front keeps its buttons and reply, off the dialog, as its fields are.
+        let closed = if self.tab == 0 {
+            let closed = self.drape_footer(ui, host, Some("drapeClose"));
+            offstage(ui, "drapeSampleFooter", |ui| self.sample_footer(ui, host, None));
+            closed
+        } else {
+            offstage(ui, "drapeDrapeFooter", |ui| self.drape_footer(ui, host, None));
+            self.sample_footer(ui, host, Some("drapeClose"))
+        };
+        if closed {
+            self.hide();
+        }
+    }
 }

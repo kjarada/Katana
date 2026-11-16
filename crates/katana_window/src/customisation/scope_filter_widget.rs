@@ -68,8 +68,11 @@ use crate::drive::mailbox::{Act, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
 use crate::shell::dialog;
 
-/// The widget's width, the same in every dialog that holds it (the look of 2026-11-16): the four
-/// type boxes a row and a filter's label and field.
+/// The widget's width in a column of a row - beside a dialog's fields, or a second form - the same
+/// in every dialog that holds it so (the look of 2026-11-16): the four type boxes a row and a
+/// filter's label and field. Held to its column where the column is narrower. In the body's own
+/// column it fills the column instead (`ScopeFilterWidget::ui`), so its fields end where the
+/// dialog's do.
 pub const WIDGET_WIDTH: f32 = 400.0;
 
 /// One open view, as the View scope offers it: its id, its title, its own hidden layers and, for a
@@ -634,9 +637,18 @@ impl ScopeFilterWidget {
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = std::mem::take(&mut self.pending);
         let outer = ui.vertical(|ui| {
-            // One width wherever it is shown: its layer list fills it, and a list that filled the
-            // dialog's room made every dialog holding it as wide as the screen.
-            ui.set_width(WIDGET_WIDTH);
+            // Under a dialog's fields it fills the body's column, so its fields end at the edge
+            // theirs do: at WIDGET_WIDTH there they stopped 120 short of the dialog's (Drape,
+            // Statistics by Area). Beside them, in a column of a row, it keeps WIDGET_WIDTH held to
+            // the column: "what is left" there is the rest of the row, and a list that filled it
+            // left the columns after it no room. The body itself is held to its width
+            // (shell::dialog::BODY_WIDTH), so filling it never widens a dialog to the screen.
+            let width = if dialog::in_a_column(ui) {
+                WIDGET_WIDTH.min(ui.available_width())
+            } else {
+                ui.available_width()
+            };
+            ui.set_width(width.max(0.0));
             // ---- Apply to ----
             let scope_group = ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
@@ -911,7 +923,7 @@ impl ScopeFilterWidget {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for (layer, on) in &mut self.layers {
-                    if ui.checkbox(on, layer.as_str()).changed() {
+                    if crate::drive::controls::check_box(ui, on, layer.as_str()).changed() {
                         changed = true;
                     }
                 }

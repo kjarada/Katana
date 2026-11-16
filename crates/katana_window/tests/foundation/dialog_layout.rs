@@ -11,12 +11,14 @@
 //! own constants. Within HALF_A_POINT where egui rounds a widget to the pixel grid.
 
 use egui::{Rect, Ui};
-use katana_window::drive::{self, LineOptions};
+use katana_window::customisation::ScopeFilterWidget;
+use katana_window::customisation::scope_filter_widget::WIDGET_WIDTH;
+use katana_window::drive::{self, ControlKind, LineOptions};
 use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
-    BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, SECTION_GAP,
-    beside_a_button, button_row, fixed_fields, form_panel, labelled, note, row_with_check,
-    row_with_text, section,
+    BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, REPLY_ROWS, SECTION_GAP,
+    beside_a_button, button_row, fixed_fields, form_panel, labelled, note, reply, row_with_check,
+    row_with_text, section, text_value,
 };
 
 use crate::window_support::offscreen_harness;
@@ -467,6 +469,203 @@ mod dialog_layout {
             "the second heading is {} under what is above it",
             second.top() - between.bottom()
         );
+    }
+
+    #[test]
+    fn a_plain_value_sits_on_its_labels_line_and_a_field_level_with_its_label() {
+        // Drawing Summary's values and Zoom To's "Line": a value drawn as text beside its label
+        // was 5 points above the label's words, the label centred in a cell a control high and
+        // the value at the top of the row. A text value is drawn with text_value.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("valueDialog", "Value");
+        let mut field = String::new();
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut field, |ui, field| {
+                    row_with_text(
+                        ui,
+                        "Line",
+                        |ui| {
+                            drive::label(ui, "valueCaption", "Line");
+                        },
+                        |ui| text_value(ui, |ui| drive::label(ui, "value", "3 of 7")),
+                    );
+                    row_with_text(
+                        ui,
+                        "Name",
+                        |ui| {
+                            drive::label(ui, "fieldCaption", "Name");
+                        },
+                        |ui| drive::line(ui, "field", field),
+                    );
+                });
+            })
+            .expect("the dialog is drawn");
+        let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
+        // Two labels of one font, each a line of it high: their words share a line when their
+        // tops do.
+        let (caption, value) = (control("valueCaption"), control("value"));
+        assert!(
+            (caption.top() - value.top()).abs() <= HALF_A_POINT,
+            "the label is at {:?} and the value at {:?}",
+            caption,
+            value
+        );
+        let (caption, field) = (control("fieldCaption"), control("field"));
+        assert!(
+            (caption.center().y - field.center().y).abs() <= HALF_A_POINT,
+            "the label's middle is at {} and the field's at {}",
+            caption.center().y,
+            field.center().y
+        );
+    }
+
+    #[test]
+    fn a_label_is_shown_without_its_colon_and_takes_the_column_the_word_alone_would() {
+        // The design's labels have no colon: "Name:" and "Name" lay their fields out at one edge,
+        // the edge of the word alone.
+        let mut harness = offscreen_harness();
+        let mut with = DialogFrame::new("colonDialog", "Colon");
+        let mut without = DialogFrame::new("plainDialog", "Plain");
+        let mut values = [String::new(), String::new()];
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                let [first, second] = &mut values;
+                with.show_body(&ctx, first, |ui, value| {
+                    labelled(ui, "Name:", |ui| drive::line(ui, "withColon", value));
+                });
+                without.place(egui::pos2(0.0, 0.0));
+                without.show_body(&ctx, second, |ui, value| {
+                    labelled(ui, "Name", |ui| drive::line(ui, "withoutColon", value));
+                });
+            })
+            .expect("the dialogs are drawn");
+        let dialog = |name: &str| harness.target_record(name).expect("a target").rect;
+        let field = |name: &str| harness.control(name).expect("drawn").rect;
+        let with_start = field("withColon").left() - dialog("colonDialog").left();
+        let without_start = field("withoutColon").left() - dialog("plainDialog").left();
+        assert!(
+            (with_start - without_start).abs() <= HALF_A_POINT,
+            "after \"Name:\" the field starts {with_start} in, after \"Name\" {without_start}"
+        );
+    }
+
+    #[test]
+    fn a_reply_takes_no_room_until_there_is_one_and_then_shows_its_lines() {
+        // A run dialog's reply was an empty box six lines high over its buttons, the largest
+        // thing on a fresh dialog. Empty, it is recorded where it will be, reads "" and is 0
+        // high; with a reply it shows each line, up to REPLY_ROWS.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("replyDialog", "Reply");
+        let mut said = String::new();
+        let mut draw = |ui: &mut Ui, said: &mut String| {
+            let ctx = ui.ctx().clone();
+            frame.show(
+                &ctx,
+                said,
+                |ui, _| {
+                    drive::label(ui, "bodyText", "A body");
+                },
+                |ui, said| {
+                    reply(ui, "reply", said, REPLY_ROWS);
+                    button_row(
+                        ui,
+                        |_| {},
+                        |ui| {
+                            drive::primary(ui, "run", "Run");
+                        },
+                    );
+                },
+            );
+        };
+        harness
+            .show(|ui| draw(ui, &mut said))
+            .expect("the dialog is drawn");
+        let empty = harness.control("reply").expect("the reply is recorded");
+        assert_eq!(empty.kind, ControlKind::Text);
+        assert!(empty.visible);
+        assert_eq!(harness.report("reply").expect("it reads"), "");
+        assert!(empty.rect.height() <= HALF_A_POINT, "{}", empty.rect.height());
+        let run_before = harness.control("run").expect("drawn").rect;
+        assert!(
+            run_before.top() - empty.rect.top() <= HALF_A_POINT,
+            "the button row starts where the empty reply is"
+        );
+
+        said.push_str("check code=0\nproblems=0");
+        harness
+            .show(|ui| draw(ui, &mut said))
+            .expect("the dialog is drawn again");
+        let shown = harness.control("reply").expect("drawn").rect;
+        let run = harness.control("run").expect("drawn").rect;
+        assert_eq!(
+            harness.report("reply").expect("it reads"),
+            "check code=0\nproblems=0"
+        );
+        assert!(shown.height() > run.height(), "two lines are shown");
+        assert!(run.top() >= shown.bottom(), "the buttons are under the reply");
+    }
+
+    #[test]
+    fn a_scope_under_a_dialogs_fields_ends_where_they_do() {
+        // Drape, Statistics by Area, Delete Triangles: the scope and filter widget's fields
+        // stopped at its own 400, 120 short of the dialog's.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("scopeDialog", "Scope");
+        let mut state = (String::new(), ScopeFilterWidget::new("under"));
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut state, |ui, (name, scope)| {
+                    labelled(ui, "Name", |ui| drive::line(ui, "name", name));
+                    scope.ui(ui);
+                });
+            })
+            .expect("the dialog is drawn");
+        let field = |name: &str| harness.control(name).expect("drawn").rect;
+        let (own, filter) = (field("name"), field("underFilterLayer"));
+        assert!(
+            (own.right() - filter.right()).abs() <= HALF_A_POINT,
+            "the dialog's field ends at {}, the filter's at {}",
+            own.right(),
+            filter.right()
+        );
+        assert!((own.left() - filter.left()).abs() <= HALF_A_POINT);
+    }
+
+    #[test]
+    fn a_scope_beside_a_dialogs_fields_keeps_its_own_width_and_leaves_them_room() {
+        // In a column of a row - Buffer's, the leaders' - "the rest of the row" is every column
+        // after it too: it keeps WIDGET_WIDTH and the fields beside it are drawn.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("besideDialog", "Beside").width(800.0);
+        let mut state = (String::new(), ScopeFilterWidget::new("beside"));
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut state, |ui, (name, scope)| {
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            scope.ui(ui);
+                        });
+                        ui.vertical(|ui| {
+                            labelled(ui, "Name", |ui| drive::line(ui, "besideName", name));
+                        });
+                    });
+                });
+            })
+            .expect("the dialog is drawn");
+        let widget = harness.control("besideScope").expect("drawn").rect;
+        let name = harness.control("besideName").expect("drawn").rect;
+        assert!(
+            (widget.width() - WIDGET_WIDTH).abs() <= HALF_A_POINT,
+            "the scope is {} wide",
+            widget.width()
+        );
+        assert!(name.left() >= widget.right(), "the field is beside the scope");
+        assert!(name.width() > LABEL_WIDTH, "the field has room: {}", name.width());
     }
 
     #[test]

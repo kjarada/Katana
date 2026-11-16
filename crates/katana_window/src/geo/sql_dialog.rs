@@ -34,9 +34,9 @@ use super::gis_tool_dialog::{
     GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_field, gis_scope, gis_summary,
     gis_word,
 };
-use crate::annotation::dialog_support::table;
 use crate::drive::{TextOptions, button, text_with};
 use crate::host::Host;
+use crate::shell::dialog;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GisSqlForm {
@@ -310,25 +310,18 @@ impl GisTool for GisSqlDialog {
     }
 
     fn fields_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.label("Tables:");
+        dialog::section(ui, "Tables");
         let listed = self.table_rows();
-        egui::ScrollArea::vertical()
-            .id_salt("gisSqlTables")
-            .max_height(150.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                table(
-                    ui,
-                    "gisSqlTables",
-                    &["Table / column", "Type"],
-                    &listed,
-                    None,
-                    &[],
-                    None,
-                );
-            });
+        dialog::table_or_empty(
+            ui,
+            "gisSqlTables",
+            &["Table / column", "Type"],
+            &listed,
+            None,
+            "List the tables for this scope to see what a statement can read.",
+        );
         let refresh = button(ui, "gisSqlTablesRefresh", "List the tables for this scope").clicked();
-        ui.label("Statement:");
+        dialog::section(ui, "Statement");
         text_with(
             ui,
             "gisSqlText",
@@ -358,7 +351,7 @@ impl GisTool for GisSqlDialog {
             gis_field(
                 ui,
                 "gisSqlLayer",
-                "Layer (AS LAYER):",
+                "Layer (AS LAYER)",
                 &mut self.layer,
                 "the layer to draw on",
                 "AS LAYER: where the rows' geometry is drawn",
@@ -368,22 +361,29 @@ impl GisTool for GisSqlDialog {
             gis_field(
                 ui,
                 "gisSqlCsv",
-                "Rows to CSV:",
+                "Rows to CSV",
                 &mut self.csv,
                 "none",
                 "csv=: AS REPORT - the rows written to this file too",
             );
         });
-        ui.label("Rows:");
+        dialog::section(ui, "Rows");
         let headers: Vec<&str> = self.headers.iter().map(String::as_str).collect();
         let results = &self.results;
         let current = self.result;
-        let shown = egui::ScrollArea::both()
+        // Wide rows scroll across in their own place rather than widening the dialog.
+        let shown = egui::ScrollArea::horizontal()
             .id_salt("gisSqlResults")
-            .max_height(160.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                table(ui, "gisSqlResults", &headers, results, current, &[], None)
+                dialog::table_or_empty(
+                    ui,
+                    "gisSqlResults",
+                    &headers,
+                    results,
+                    current,
+                    "A report's rows are listed here once the statement has run.",
+                )
             })
             .inner;
         if shown.chosen.is_some() {

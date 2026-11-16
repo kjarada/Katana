@@ -54,12 +54,13 @@ use katana_pointcloud::point_cloud_engine::PointCloudEngine;
 
 use crate::annotation::dialog_support::table;
 use crate::customisation::ScopeFilterWidget;
+use crate::customisation::scope_filter_widget::WIDGET_WIDTH;
 use crate::drive::{
     Choice, LineOptions, SpinRange, button, check, choice, label_as, line_with, spin, whole,
 };
 use crate::format::grouped;
 use crate::geo::gis_tool_dialog::GisDialogContext;
-use crate::gis_dialog_support::ok_cancel;
+use crate::gis_dialog_support::{ok_cancel, ok_cancel_beside};
 use crate::host::{Host, VerbOutcome};
 use crate::import_placement::{DialogResult, ImportPlacementBox};
 use crate::shell::DialogFrame;
@@ -118,9 +119,9 @@ impl CommandShown {
         }
     }
 
-    /// The read-only line, under "Command:".
+    /// The read-only line, under "Command".
     fn ui(&mut self, ui: &mut Ui, name: &str) {
-        crate::shell::dialog::labelled(ui, "Command:", |ui| {
+        crate::shell::dialog::labelled(ui, "Command", |ui| {
             line_with(
                 ui,
                 name,
@@ -341,10 +342,13 @@ impl VectorImportDialog {
         }
         let placement = ImportPlacementBox::new(drawing, "", host.settings());
         Self {
+            // The options and the scope side by side: at the frame's 520 the options filled it
+            // and left the scope's group a letter wide, its heading a letter a line.
             frame: DialogFrame::new(
                 "vectorImportDialog",
                 &format!("Import Vector Data - {}", file_name_of(&source.path)),
             )
+            .width(crate::shell::dialog::TWO_COLUMN_WIDTH)
             .modal(true),
             path: source.path.clone(),
             summary: String::from(format_description(source).trim()),
@@ -618,9 +622,45 @@ impl VectorImportDialog {
             frame.show(
                 &ctx,
                 &mut lent,
-                |ui, lent| lent.0.body(ui, &mut *lent.1, &mut *lent.3),
+                |ui, lent| lent.0.body(ui, &mut *lent.1),
                 |ui, lent| {
-                    let buttons = ok_cancel(ui, "vectorImportDialog", "Import", ready);
+                    // Preview and what it counted at the left: they read the file and import
+                    // nothing.
+                    let said = lent.0.match_count.clone();
+                    let (previewed, buttons) = ok_cancel_beside(
+                        ui,
+                        "vectorImportDialog",
+                        "Import",
+                        ready,
+                        |ui| {
+                            let previewed = ui
+                                .add_enabled_ui(ready, |ui| {
+                                    button(ui, "vectorImportPreview", "Preview")
+                                        .on_hover_text(
+                                            "Run the line with PREVIEW: how many features the \
+                                             filters take, and nothing imported",
+                                        )
+                                        .clicked()
+                                })
+                                .inner;
+                            // GDAL's words, shown as they are: read as markup, a "<code>" in a
+                            // message was taken for a tag and vanished.
+                            label_as(
+                                ui,
+                                "vectorImportMatchCount",
+                                &said,
+                                egui::Label::new(
+                                    RichText::new(said.as_str())
+                                        .color(palette::text_muted().to_egui()),
+                                )
+                                .wrap(),
+                            );
+                            previewed
+                        },
+                    );
+                    if previewed {
+                        *lent.3 = true;
+                    }
                     if buttons.accepted {
                         *lent.2 = Some(DialogResult::Accepted);
                     }
@@ -642,11 +682,17 @@ impl VectorImportDialog {
         self.result
     }
 
-    fn body(&mut self, ui: &mut Ui, command: &mut CommandShown, preview: &mut bool) {
+    fn body(&mut self, ui: &mut Ui, command: &mut CommandShown) {
         summary_label(ui, &self.summary);
         ui.horizontal_top(|ui| {
+            // The options take what the scope's group, at the scope's own width, leaves them.
+            let options_width = ui.available_width()
+                - WIDGET_WIDTH
+                - crate::shell::dialog::group_margins(ui)
+                - ui.spacing().item_spacing.x;
             ui.vertical(|ui| {
-                ui.label("Layers:");
+                ui.set_width(options_width.max(0.0));
+                crate::shell::dialog::section(ui, "Layers");
                 let rows: Vec<Vec<String>> = self
                     .layers
                     .iter()
@@ -746,7 +792,7 @@ impl VectorImportDialog {
             });
             ui.group(|ui| {
                 ui.vertical(|ui| {
-                    ui.label("Only what lies within");
+                    ui.strong("Only what lies within");
                     check(
                         ui,
                         "vectorImportUseScope",
@@ -768,29 +814,6 @@ impl VectorImportDialog {
         });
         self.placement.ui(ui);
         command.ui(ui, "vectorImportCommand");
-        let ready = command.ready;
-        ui.horizontal(|ui| {
-            // GDAL's words, shown as they are: read as markup, a "<code>" in a message was taken
-            // for a tag and vanished.
-            let said = self.match_count.clone();
-            label_as(
-                ui,
-                "vectorImportMatchCount",
-                &said,
-                egui::Label::new(said.as_str()).wrap(),
-            );
-            ui.add_enabled_ui(ready, |ui| {
-                if button(ui, "vectorImportPreview", "Preview")
-                    .on_hover_text(
-                        "Run the line with PREVIEW: how many features the filters take, and \
-                         nothing imported",
-                    )
-                    .clicked()
-                {
-                    *preview = true;
-                }
-            });
-        });
     }
 }
 

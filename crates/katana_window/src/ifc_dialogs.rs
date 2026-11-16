@@ -56,7 +56,6 @@ use katana_ifc::{
 };
 use katana_survey::subsurface::GradingSettings;
 
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::format::grouped;
 use crate::host::Host;
@@ -232,16 +231,11 @@ fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> 
 /// The check label: what stops the line, or what the last run did, in the error colour or the
 /// muted one.
 fn check_label(ui: &mut Ui, name: &str, text: &str, is_error: bool) {
-    let colour = if is_error {
-        theme::error()
-    } else {
-        theme::text_muted()
-    };
     controls::label_as(
         ui,
         name,
         text,
-        egui::Label::new(RichText::new(text).color(colour.to_egui()))
+        egui::Label::new(RichText::new(text).color(dialog::status_colour(is_error)))
             .wrap()
             .selectable(true),
     );
@@ -531,9 +525,12 @@ impl IfcExportDialog {
         let problem = self.check();
         if !problem.is_empty() {
             // What stops the export is said, even over the last result: a disabled button with a
-            // stale "Wrote ..." beside it says nothing.
+            // stale "Wrote ..." beside it says nothing. A file not yet named is where every export
+            // starts, so that is a hint, in the muted text; in red, a fresh dialog read as one that
+            // had already refused something.
             self.showing_result = false;
-            self.say(&problem, true);
+            let named = !path_of(&self.file).is_empty();
+            self.say(&problem, named);
             return;
         }
         if self.showing_result {
@@ -1063,40 +1060,53 @@ impl IfcExportDialog {
             let line = self.line();
             command_field(ui, "ifcExportCommand", &line);
         });
-        ui.label("From | Objects | IFC class | System | Why");
+        // What the file holds, by where it came from: the writer's own account, from Preview or
+        // the export just written.
         let rows = self.table();
-        controls::rows(ui, "ifcExportClasses", &rows, &mut self.current_row).on_hover_text(
-            "What the file holds, by where it came from: the writer's own account, from Preview or \
-             the export just written",
+        let shown = dialog::table_or_empty(
+            ui,
+            "ifcExportClasses",
+            &["From", "Objects", "IFC class", "System", "Why"],
+            &rows,
+            self.current_row,
+            "Preview lists what the file will hold, class by class, before anything is written.",
         );
+        if shown.chosen.is_some() {
+            self.current_row = shown.chosen;
+        }
     }
 
-    /// The check under the table and the buttons: kept below the scrolling body.
+    /// The check and the buttons: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let check = self.check_text.clone();
-        check_label(ui, "ifcExportCheck", &check, self.check_error);
+        let check_error = self.check_error;
         // A preview needs everything but the file.
         let preview_live = self.check_without_file().is_empty();
         let export_live = self.check().is_empty();
-        // Preview at the left; Export, the primary, last at the right.
-        let (previewed, (exported, closed)) = layout::footer(
+        // Preview and the check at the left; Close, then Export - the primary - last at the right.
+        let (previewed, (closed, exported)) = dialog::button_row(
             ui,
             |ui| {
-                ui.add_enabled_ui(preview_live, |ui| {
-                    controls::button(ui, "ifcExportPreview", "Preview")
-                        .on_hover_text("What would be written, class by class; no file is written")
-                        .clicked()
-                })
-                .inner
-            },
-            |ui| {
-                let exported = ui
-                    .add_enabled_ui(export_live, |ui| {
-                        layout::primary(ui, "ifcExportExport", "Export").clicked()
+                let previewed = ui
+                    .add_enabled_ui(preview_live, |ui| {
+                        controls::button(ui, "ifcExportPreview", "Preview")
+                            .on_hover_text(
+                                "What would be written, class by class; no file is written",
+                            )
+                            .clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "ifcExportClose", "Close").clicked();
-                (exported, closed)
+                check_label(ui, "ifcExportCheck", &check, check_error);
+                previewed
+            },
+            |ui| {
+                let closed = controls::button(ui, "ifcExportClose", "Close").clicked();
+                let exported = ui
+                    .add_enabled_ui(export_live, |ui| {
+                        controls::primary(ui, "ifcExportExport", "Export").clicked()
+                    })
+                    .inner;
+                (closed, exported)
             },
         );
         if previewed {
@@ -1231,8 +1241,10 @@ impl IfcImportDialog {
     fn recheck(&mut self) {
         let problem = self.check();
         if !problem.is_empty() {
+            // A file not yet named is a hint, in the muted text, as Export IFC's is.
             self.showing_result = false;
-            self.say(&problem, true);
+            let named = !path_of(&self.file).is_empty();
+            self.say(&problem, named);
             return;
         }
         if self.showing_result {
@@ -1514,24 +1526,27 @@ impl IfcImportDialog {
     /// The check and the buttons: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let check = self.check_text.clone();
-        check_label(ui, "ifcImportCheck", &check, self.check_error);
+        let check_error = self.check_error;
         let import_live = self.check().is_empty();
-        // Describe at the left; Import, the primary, last at the right.
-        let (described, (imported, closed)) = layout::footer(
+        // Describe - it reads the file and changes nothing - and the check at the left; Close,
+        // then Import - the primary - last at the right.
+        let (described, (closed, imported)) = dialog::button_row(
             ui,
             |ui| {
-                controls::button(ui, "ifcImportDescribe", "Describe")
+                let described = controls::button(ui, "ifcImportDescribe", "Describe")
                     .on_hover_text("Read the file and say what it holds; nothing is imported")
-                    .clicked()
+                    .clicked();
+                check_label(ui, "ifcImportCheck", &check, check_error);
+                described
             },
             |ui| {
+                let closed = controls::button(ui, "ifcImportClose", "Close").clicked();
                 let imported = ui
                     .add_enabled_ui(import_live, |ui| {
-                        layout::primary(ui, "ifcImportImport", "Import").clicked()
+                        controls::primary(ui, "ifcImportImport", "Import").clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "ifcImportClose", "Close").clicked();
-                (imported, closed)
+                (closed, imported)
             },
         );
         if described {

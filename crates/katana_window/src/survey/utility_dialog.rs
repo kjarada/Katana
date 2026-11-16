@@ -111,7 +111,7 @@ use katana_survey::subsurface::{ClearanceRequirement, GradingSettings, UtilityTy
 
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{DocumentWatcher, ScopeChoice, ScopeFilterView, ScopeFilterWidget};
-use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
+use crate::drive::controls::{self, Choice, LineOptions};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
 use crate::ifc_dialogs::{get_open_file_name, get_save_file_name, to_native_separators};
@@ -648,6 +648,10 @@ const CSV_FILTER: &str = "CSV files (*.csv);;All files (*)";
 
 /// The body's width: the C++ dialog's 1120 less its frame.
 const BODY_WIDTH: f32 = 1090.0;
+
+/// The most lines the reply shows before it scrolls: a report is a table of a line a service, and
+/// eight rows of it are read at once (the C++ box's height).
+const UTILITY_REPLY_ROWS: usize = 8;
 
 /// The scope and filter column's width, two fifths of the body beside the tabs' three (the C++
 /// layout's stretch of 2 to 3).
@@ -1193,7 +1197,7 @@ impl UtilityToolsDialog {
             &ctx,
             &mut lent,
             |ui, lent| lent.dialog.body(ui, &mut *lent.host),
-            |ui, lent| lent.dialog.footer(ui),
+            |ui, lent| lent.dialog.footer(ui, &mut *lent.host),
         );
         self.frame = frame;
         if shown.closed {
@@ -1202,7 +1206,9 @@ impl UtilityToolsDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.set_max_width(BODY_WIDTH);
+        // One width whichever tool is in front: held only at most, the dialog was as wide as the
+        // page in front and changed width by a hundred points from tab to tab.
+        ui.set_width(BODY_WIDTH);
         let tool = self.tool;
         // The source is chosen where a tool reads either; Regrade and Schedule read the drawing
         // whatever is chosen.
@@ -1298,7 +1304,7 @@ impl UtilityToolsDialog {
                 format!("nothing to run yet: {}", error.message),
             ),
         };
-        crate::shell::dialog::labelled(ui, "Command:", |ui| {
+        crate::shell::dialog::labelled(ui, "Command", |ui| {
             controls::line_with(
                 ui,
                 "utilityCommand",
@@ -1306,7 +1312,6 @@ impl UtilityToolsDialog {
                 LineOptions {
                     placeholder: &placeholder,
                     read_only: true,
-                    width: Some(BODY_WIDTH - 90.0),
                     ..LineOptions::default()
                 },
             )
@@ -1315,66 +1320,56 @@ impl UtilityToolsDialog {
                  katana_cli, and it does the same",
             );
         });
-        // Run at the right edge and what happened last in the rest of the row, as the C++ row
-        // stretches its status: laid out from the right, so a long status wraps beside Run rather
-        // than pushing it off the row.
-        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-            if controls::button(ui, "utilityRun", "Run").clicked() {
-                self.run(&mut *host);
-                ui.ctx().request_repaint();
-            }
-            let colour = if self.status_error {
-                theme::error().to_egui()
-            } else {
-                theme::text().to_egui()
-            };
-            let status = self.status.clone();
-            controls::label_as(
-                ui,
-                "utilityStatus",
-                &status,
-                egui::Label::new(RichText::new(status.as_str()).color(colour))
-                    .wrap()
-                    .selectable(true),
-            );
-        });
-        // The reports are tables: shown as written, in a fixed pitch.
-        let mut reply = self.output.clone();
-        controls::text_with(
-            ui,
-            "utilityOutput",
-            &mut reply,
-            TextOptions {
-                read_only: true,
-                rows: 8,
-                monospace: true,
-            },
-        );
-        if self.output.is_empty() {
-            ui.weak("The reply appears here and in the command log.");
-        }
-        // Copy and Save act on the reply; they need the host, so they are in the body's last row.
-        let has_output = !self.output.is_empty();
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(has_output, |ui| {
-                if controls::button(ui, "utilityCopy", "Copy").clicked() {
-                    let _ = host.clipboard().set_text(&self.output);
-                    self.set_status("Copied.", false);
-                }
-                if controls::button(ui, "utilitySave", "Save As...").clicked() {
-                    self.save_output(&*host);
-                }
-            });
-        });
     }
 
-    /// The dialog's own last row: Close, kept below the scrolling body.
-    fn footer(&mut self, ui: &mut Ui) {
-        let ((), close) = crate::shell::dialog::button_row(
+    /// The reply, once there is one, and the design's one footer row (shell::dialog::button_row),
+    /// kept below the scrolling body: Copy and Save As - they act on the reply - and what happened
+    /// last at the left; Close, then Run - the dialog's act, in the accent - at the right. Run was
+    /// in the body, under the line, in a button's grey.
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The reports are tables: shown as written, in a fixed pitch.
+        let mut reply = self.output.clone();
+        crate::shell::dialog::reply(ui, "utilityOutput", &mut reply, UTILITY_REPLY_ROWS);
+        let has_output = !self.output.is_empty();
+        let status = self.status.clone();
+        let colour = crate::shell::dialog::status_colour(self.status_error);
+        let ((copy, save), (close, run)) = crate::shell::dialog::button_row(
             ui,
-            |_| {},
-            |ui| controls::button(ui, "utilityClose", "Close").clicked(),
+            |ui| {
+                let acted = ui
+                    .add_enabled_ui(has_output, |ui| {
+                        let copy = controls::button(ui, "utilityCopy", "Copy").clicked();
+                        let save = controls::button(ui, "utilitySave", "Save As...").clicked();
+                        (copy, save)
+                    })
+                    .inner;
+                controls::label_as(
+                    ui,
+                    "utilityStatus",
+                    &status,
+                    egui::Label::new(RichText::new(status.as_str()).color(colour))
+                        .wrap()
+                        .selectable(true),
+                );
+                acted
+            },
+            |ui| {
+                let close = controls::button(ui, "utilityClose", "Close").clicked();
+                let run = controls::primary(ui, "utilityRun", "Run").clicked();
+                (close, run)
+            },
         );
+        if copy {
+            let _ = host.clipboard().set_text(&self.output);
+            self.set_status("Copied.", false);
+        }
+        if save {
+            self.save_output(&*host);
+        }
+        if run {
+            self.run(&mut *host);
+            ui.ctx().request_repaint();
+        }
         if close {
             self.hide();
         }
@@ -1541,10 +1536,15 @@ impl UtilityToolsDialog {
                      (utility.method, utility.depth ... - Format > Global Modify sets them) wins \
                      over these.",
                 );
-                egui::Grid::new("utilityGeometryGrid")
-                    .num_columns(4)
-                    .show(ui, |ui| {
-                        ui.label("Type:");
+                // Two forms side by side, each with its own label column (shell::dialog's form),
+                // and Fields across both: a hand-built Grid gave each field the width of its cell
+                // less a Browse button it does not have, and cut the placeholders ("not
+                // assess...", "each line'...").
+                ui.columns(2, |columns| {
+                    let [left, right] = columns else {
+                        return;
+                    };
+                    labelled(left, "Type", |ui| {
                         word_choice(
                             ui,
                             "utilityServiceType",
@@ -1552,7 +1552,8 @@ impl UtilityToolsDialog {
                             "TYPE: the kind of service, where a line does not say (utility.type); \
                              not given, unknown",
                         );
-                        ui.label("Method:");
+                    });
+                    labelled(right, "Method", |ui| {
                         word_choice(
                             ui,
                             "utilityMethod",
@@ -1560,9 +1561,9 @@ impl UtilityToolsDialog {
                             "METHOD: how the services were located, where a point or a line does \
                              not say (utility.method). Needed at every vertex",
                         );
-                        ui.end_row();
-                        ui.label("H uncertainty (m):");
-                        path_line(
+                    });
+                    labelled(left, "H uncertainty (m)", |ui| {
+                        plain_line(
                             ui,
                             "utilityHUnc",
                             &mut self.horizontal_uncertainty,
@@ -1571,16 +1572,17 @@ impl UtilityToolsDialog {
                              metres. Not assessed is not assumed good: a detection without one is \
                              QL-C",
                         );
-                        ui.label("V uncertainty (m):");
-                        path_line(
+                    });
+                    labelled(right, "V uncertainty (m)", |ui| {
+                        plain_line(
                             ui,
                             "utilityVUnc",
                             &mut self.vertical_uncertainty,
                             "not assessed",
                             "V_UNC: the vertical uncertainty of each level or depth, +/- metres",
                         );
-                        ui.end_row();
-                        ui.label("Heights are:");
+                    });
+                    labelled(left, "Heights are", |ui| {
                         word_choice(
                             ui,
                             "utilityHeights",
@@ -1588,7 +1590,8 @@ impl UtilityToolsDialog {
                             "HEIGHTS: what the heights of the lines and points are; not given, the \
                              surface",
                         );
-                        ui.label("Level reference:");
+                    });
+                    labelled(right, "Level reference", |ui| {
                         word_choice(
                             ui,
                             "utilityLevelRef",
@@ -1596,8 +1599,8 @@ impl UtilityToolsDialog {
                             "LEVEL_REF: the part of the service a level or depth is on; not given, \
                              the top",
                         );
-                        ui.end_row();
-                        ui.label("Path:");
+                    });
+                    labelled(left, "Path", |ui| {
                         word_choice(
                             ui,
                             "utilityPath",
@@ -1605,50 +1608,53 @@ impl UtilityToolsDialog {
                             "PATH: what is known between each vertex and the next; not given, \
                              detected",
                         );
-                        ui.label("Status:");
+                    });
+                    labelled(right, "Status", |ui| {
                         word_choice(
                             ui,
                             "utilityServiceStatus",
                             &mut self.service_status,
                             "STATUS: the service's status",
                         );
-                        ui.end_row();
-                        ui.label("Owner:");
-                        path_line(
+                    });
+                    labelled(left, "Owner", |ui| {
+                        plain_line(
                             ui,
                             "utilityOwner",
                             &mut self.owner,
                             "each line's own",
                             "OWNER: the asset owner",
                         );
-                        ui.label("Material:");
-                        path_line(
+                    });
+                    labelled(right, "Material", |ui| {
+                        plain_line(
                             ui,
                             "utilityMaterial",
                             &mut self.material,
                             "each line's own",
                             "MATERIAL: what the service is made of",
                         );
-                        ui.end_row();
-                        ui.label("Diameter (mm):");
-                        path_line(
+                    });
+                    labelled(left, "Diameter (mm)", |ui| {
+                        plain_line(
                             ui,
                             "utilityDiameter",
                             &mut self.diameter,
                             "each line's own",
                             "DIAMETER_MM: the outside diameter, millimetres",
                         );
-                        ui.label("Fields:");
-                        path_line(
-                            ui,
-                            "utilityFields",
-                            &mut self.fields,
-                            "column=property, ... e.g. type=ASSET_TYPE,line=ASSET_ID",
-                            "FIELDS: an import's own attributes read as the schedule's columns - a \
-                             shapefile's ASSET_TYPE as the type, its ASSET_ID as the line",
-                        );
-                        ui.end_row();
                     });
+                });
+                labelled(ui, "Fields", |ui| {
+                    plain_line(
+                        ui,
+                        "utilityFields",
+                        &mut self.fields,
+                        "column=property, ... e.g. type=ASSET_TYPE,line=ASSET_ID",
+                        "FIELDS: an import's own attributes read as the schedule's columns - a \
+                         shapefile's ASSET_TYPE as the type, its ASSET_ID as the line",
+                    );
+                });
             });
             controls::custom(
                 ui,
@@ -1671,7 +1677,7 @@ impl UtilityToolsDialog {
             if controls::radio(
                 ui,
                 "utilityDesignFile",
-                "Design file:",
+                "Design file",
                 source == UtilityDesignSource::File,
             )
             .clicked()
@@ -1696,7 +1702,7 @@ impl UtilityToolsDialog {
             if controls::radio(
                 ui,
                 "utilityDesignEntity",
-                "Drawn line or polyline:",
+                "Drawn line or polyline",
                 source == UtilityDesignSource::Entity,
             )
             .clicked()
@@ -1718,7 +1724,7 @@ impl UtilityToolsDialog {
                 {
                     self.use_selected_design(host);
                 }
-                ui.label("Level (m):");
+                ui.label("Level (m)");
                 path_line(
                     ui,
                     "utilityDesignLevel",
@@ -1733,7 +1739,7 @@ impl UtilityToolsDialog {
             if controls::radio(
                 ui,
                 "utilityDesignAlignment",
-                "Alignment:",
+                "Alignment",
                 source == UtilityDesignSource::Alignment,
             )
             .clicked()
@@ -1808,6 +1814,21 @@ fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip
         LineOptions {
             placeholder,
             width: Some(width),
+            ..LineOptions::default()
+        },
+    )
+    .on_hover_text(tip);
+}
+
+/// A one-line field with its placeholder and tip, filling its row: a field with no Browse after
+/// it.
+fn plain_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip: &str) {
+    controls::line_with(
+        ui,
+        name,
+        value,
+        LineOptions {
+            placeholder,
             ..LineOptions::default()
         },
     )
