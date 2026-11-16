@@ -66,6 +66,7 @@ use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 /// The rule table's columns.
 const RULE_NAME: usize = 0;
@@ -586,10 +587,10 @@ impl TextStyleManagerDialog {
             });
             ui.add_space(layout::SECTION_GAP);
             ui.vertical(|ui| {
-                layout::form(ui, "textStyleForm", |ui| {
-                    layout::form_label(ui, "Font");
-                    edit(ui, "textStyleFont", &mut self.font, "the plain face");
-                    ui.end_row();
+                dialog::form(ui, |form| {
+                    form.row("Font", |ui| {
+                        edit(ui, "textStyleFont", &mut self.font, "the plain face");
+                    });
                     let boxes = [
                         (
                             "Height on paper",
@@ -611,45 +612,41 @@ impl TextStyleManagerDialog {
                         ),
                     ];
                     for (title, name, value, range) in boxes {
-                        layout::form_label(ui, title);
-                        let shown = controls::spin(ui, name, value, range);
-                        if name == "textStylePaperHeight" {
-                            shown.on_hover_text("0: the text's own height");
-                        }
-                        ui.end_row();
+                        form.row(title, |ui| {
+                            let shown = controls::spin(ui, name, value, range);
+                            if name == "textStylePaperHeight" {
+                                shown.on_hover_text("0: the text's own height");
+                            }
+                        });
                     }
                     // The boxes in the field column, under the fields they go with.
-                    layout::form_label(ui, "Face");
-                    ui.horizontal(|ui| {
+                    form.row("Face", |ui| {
                         check(ui, "textStyleBold", "Bold", &mut self.bold);
                         check(ui, "textStyleItalic", "Italic", &mut self.italic);
                     });
-                    ui.end_row();
-                    layout::form_label(ui, "Colour");
-                    edit(
-                        ui,
-                        "textStyleColour",
-                        &mut self.colour,
-                        "ByLayer, or #RRGGBB",
-                    );
-                    ui.end_row();
-                    layout::form_label(ui, "Mask");
-                    ui.horizontal(|ui| {
+                    form.row("Colour", |ui| {
+                        edit(
+                            ui,
+                            "textStyleColour",
+                            &mut self.colour,
+                            "ByLayer, or #RRGGBB",
+                        );
+                    });
+                    form.row("Mask", |ui| {
                         check(ui, "textStyleMask", "Background mask", &mut self.mask);
                         controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN);
                     });
-                    ui.end_row();
-                    ui.label("");
-                    check(
-                        ui,
-                        "textStyleReadable",
-                        "Keep readable (turn upside-down text)",
-                        &mut self.readable,
-                    );
-                    ui.end_row();
-                    layout::form_label(ui, "Line spacing");
-                    controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
-                    ui.end_row();
+                    form.under(|ui| {
+                        check(
+                            ui,
+                            "textStyleReadable",
+                            "Keep readable (turn upside-down text)",
+                            &mut self.readable,
+                        );
+                    });
+                    form.row("Line spacing", |ui| {
+                        controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
+                    });
                 });
                 ui.add_space(layout::GAP);
                 let mut sample = RichText::new("AaBb 123.456");
@@ -1604,100 +1601,100 @@ impl LabelStyleManagerDialog {
 
     fn style_form(&mut self, ui: &mut Ui) {
         let mut inserted: Option<String> = None;
-        egui::Grid::new("labelStyleForm")
-            .num_columns(2)
-            .show(ui, |ui| {
-                layout::form_label(ui, "Kind");
+        dialog::form(ui, |form| {
+            form.row("Kind", |ui| {
                 ui.add_enabled_ui(false, |ui| {
                     // Fixed once made; New asks for it.
                     combo(ui, "labelStyleKind", &KINDS, &mut self.kind);
                 });
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Template");
-                ui.horizontal(|ui| {
-                    if controls::line_with(
-                        ui,
-                        "labelStyleTemplate",
-                        &mut self.template,
-                        LineOptions {
-                            placeholder: "{bearing:dms} {distance:.3f}",
-                            ..LineOptions::default()
-                        },
-                    )
-                    .changed()
-                    {
-                        self.template_cursor.reset();
-                        self.check_template();
-                    }
-                    let menu = &self.insert_menu;
-                    let shown = ui.menu_button("Insert Value", |ui| {
-                        for item in &menu.items {
-                            match item {
-                                MenuItem::Menu(sub) => {
-                                    ui.menu_button(sub.title.as_str(), |ui| {
-                                        for action in sub.actions() {
-                                            if action_item(ui, action).clicked() {
-                                                inserted = Some(action.name.clone());
-                                                ui.close();
-                                            }
+            form.row("Template", |ui| {
+                // The template leaves its row room for Insert Value after it.
+                let width = dialog::beside_a_button(ui, "Insert Value");
+                if controls::line_with(
+                    ui,
+                    "labelStyleTemplate",
+                    &mut self.template,
+                    LineOptions {
+                        placeholder: "{bearing:dms} {distance:.3f}",
+                        width: Some(width),
+                        ..LineOptions::default()
+                    },
+                )
+                .changed()
+                {
+                    self.template_cursor.reset();
+                    self.check_template();
+                }
+                let menu = &self.insert_menu;
+                let shown = ui.menu_button("Insert Value", |ui| {
+                    for item in &menu.items {
+                        match item {
+                            MenuItem::Menu(sub) => {
+                                ui.menu_button(sub.title.as_str(), |ui| {
+                                    for action in sub.actions() {
+                                        if action_item(ui, action).clicked() {
+                                            inserted = Some(action.name.clone());
+                                            ui.close();
                                         }
-                                    });
-                                }
-                                MenuItem::Action(action) => {
-                                    if action_item(ui, action).clicked() {
-                                        inserted = Some(action.name.clone());
-                                        ui.close();
                                     }
-                                }
-                                MenuItem::Section(_) | MenuItem::Separator => {}
+                                });
                             }
+                            MenuItem::Action(action) => {
+                                if action_item(ui, action).clicked() {
+                                    inserted = Some(action.name.clone());
+                                    ui.close();
+                                }
+                            }
+                            MenuItem::Section(_) | MenuItem::Separator => {}
                         }
-                    });
-                    let mut record = ControlRecord::new("labelTemplateInsert", ControlKind::Button);
-                    record.text = String::from("Insert Value");
-                    controls::custom(
-                        ui,
-                        &shown.response.on_hover_text(
-                            "The values a template of this kind may use, each with the steps \
-                             that apply to it (LABELSTYLE VALUES); the choice goes in at the \
-                             cursor",
-                        ),
-                        record,
-                    );
+                    }
                 });
-                ui.end_row();
+                let mut record = ControlRecord::new("labelTemplateInsert", ControlKind::Button);
+                record.text = String::from("Insert Value");
+                controls::custom(
+                    ui,
+                    &shown.response.on_hover_text(
+                        "The values a template of this kind may use, each with the steps that \
+                         apply to it (LABELSTYLE VALUES); the choice goes in at the cursor",
+                    ),
+                    record,
+                );
+            });
 
-                ui.label("");
+            form.under(|ui| {
                 controls::label(ui, "labelStyleTemplateCheck", &self.template_check);
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Text style");
+            form.row("Text style", |ui| {
                 controls::choice(
                     ui,
                     "labelStyleTextStyle",
                     &self.text_styles,
                     &mut self.text_style,
                 );
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Height on paper (0: the text style's)");
+            form.row("Height on paper (0: the text style's)", |ui| {
                 controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER);
-                ui.end_row();
-                layout::form_label(ui, "Placement");
+            });
+            form.row("Placement", |ui| {
                 combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
-                ui.end_row();
-                layout::form_label(ui, "Orientation");
+            });
+            form.row("Orientation", |ui| {
                 combo(
                     ui,
                     "labelStyleOrientation",
                     &ORIENTATIONS,
                     &mut self.orientation,
                 );
-                ui.end_row();
-                layout::form_label(ui, "Offset");
+            });
+            form.row("Offset", |ui| {
                 controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
-                ui.end_row();
+            });
+            // The two boxes under the fields, as a check box under a form's fields is.
+            form.under(|ui| {
                 check(
                     ui,
                     "labelStyleLeader",
@@ -1710,56 +1707,56 @@ impl LabelStyleManagerDialog {
                     "May move to make room",
                     &mut self.displace,
                 );
-                ui.end_row();
-                layout::form_label(ui, "Priority");
+            });
+            form.row("Priority", |ui| {
                 controls::whole(
                     ui,
                     "labelStylePriority",
                     &mut self.priority,
                     PRIORITY_LOWEST..=PRIORITY_HIGHEST,
                 );
-                ui.end_row();
-                layout::form_label(ui, "Marker");
-                combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
-                ui.end_row();
-                let boxes = [
-                    (
-                        "Marker size",
-                        "labelStyleMarkerSize",
-                        &mut self.marker_size,
-                        LABEL_MARKER_SIZE,
-                    ),
-                    (
-                        "Shortest segment labelled",
-                        "labelStyleMinimumLength",
-                        &mut self.minimum_length,
-                        LABEL_MINIMUM_LENGTH,
-                    ),
-                    (
-                        "Chainage label interval",
-                        "labelStyleInterval",
-                        &mut self.interval,
-                        LABEL_INTERVAL,
-                    ),
-                    (
-                        "Chainage tick interval",
-                        "labelStyleTickInterval",
-                        &mut self.tick,
-                        LABEL_TICK,
-                    ),
-                    (
-                        "Tick length",
-                        "labelStyleTickLength",
-                        &mut self.tick_length,
-                        LABEL_TICK_LENGTH,
-                    ),
-                ];
-                for (title, name, value, range) in boxes {
-                    ui.label(title);
-                    controls::spin(ui, name, value, range);
-                    ui.end_row();
-                }
             });
+            form.row("Marker", |ui| {
+                combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
+            });
+            let boxes = [
+                (
+                    "Marker size",
+                    "labelStyleMarkerSize",
+                    &mut self.marker_size,
+                    LABEL_MARKER_SIZE,
+                ),
+                (
+                    "Shortest segment labelled",
+                    "labelStyleMinimumLength",
+                    &mut self.minimum_length,
+                    LABEL_MINIMUM_LENGTH,
+                ),
+                (
+                    "Chainage label interval",
+                    "labelStyleInterval",
+                    &mut self.interval,
+                    LABEL_INTERVAL,
+                ),
+                (
+                    "Chainage tick interval",
+                    "labelStyleTickInterval",
+                    &mut self.tick,
+                    LABEL_TICK,
+                ),
+                (
+                    "Tick length",
+                    "labelStyleTickLength",
+                    &mut self.tick_length,
+                    LABEL_TICK_LENGTH,
+                ),
+            ];
+            for (title, name, value, range) in boxes {
+                form.row(title, |ui| {
+                    controls::spin(ui, name, value, range);
+                });
+            }
+        });
         if let Some(name) = inserted {
             self.trigger_insert(&name);
         }

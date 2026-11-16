@@ -64,7 +64,7 @@ use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::dialog_layout as layout;
 use crate::host::Host;
-use crate::shell::dialog::DialogFrame;
+use crate::shell::dialog::{self, DialogFrame};
 
 /// What the surface choice shows for no target surface.
 pub const NO_SURFACE: &str = "(none)";
@@ -585,47 +585,68 @@ impl Body {
     // ---- drawing --------------------------------------------------------------------------------
 
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        // The fields a number's or a name's width: the form is two pairs of columns.
-        ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 2.0;
-        ui.spacing_mut().combo_width = layout::FIELD_WIDTH / 2.0;
+        // The fields of the rows under the tables a number's or a name's width; the definition's
+        // are a form's, and fill their rows.
+        ui.spacing_mut().text_edit_width = dialog::SHORT_FIELD_WIDTH;
+        ui.spacing_mut().combo_width = dialog::SHORT_FIELD_WIDTH;
         if self.list.ui(ui).selection_changed && !self.loading {
             self.fill_chosen(host.document(), true);
         }
 
         // ---- the definition ----
         ui.vertical(|ui| {
-            layout::heading(ui, "Corridor");
-            egui::Grid::new("corridorDefinition")
-                .spacing([layout::GAP, layout::INNER])
-                .min_col_width(layout::LABEL_WIDTH * 0.8)
-                .show(ui, |ui| {
-                    layout::form_label(ui, "Name");
-                    field(
-                        ui,
-                        "corridorName",
-                        &mut self.name,
-                        "name",
-                        "The name New and Rename give a corridor",
-                    );
-                    layout::form_label(ui, "Alignment");
-                    self.alignment.ui(ui, "corridorAlignment");
-                    ui.end_row();
-                    layout::form_label(ui, "Template");
-                    self.road_template.ui(ui, "corridorTemplate");
-                    layout::form_label(ui, "Target surface");
-                    self.surface.ui(ui, "corridorSurface");
-                    ui.end_row();
-                    layout::form_label(ui, "Interval (m)");
-                    field(
-                        ui,
-                        "corridorInterval",
-                        &mut self.interval,
-                        "10",
-                        "Metres between sections",
-                    );
-                    layout::form_label(ui, "Stations");
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 4.0;
+            dialog::section(ui, "Corridor");
+            // Two columns of labelled rows side by side, as the definition was laid out before: each
+            // column's fields start at one edge, its own (shell::dialog's THE LABEL COLUMN).
+            ui.columns(2, |columns| {
+                let [left, right] = columns else {
+                    return;
+                };
+                dialog::form(left, |form| {
+                    form.row("Name", |ui| {
+                        field(
+                            ui,
+                            "corridorName",
+                            &mut self.name,
+                            "name",
+                            "The name New and Rename give a corridor",
+                        );
+                    });
+                    form.row("Template", |ui| {
+                        self.road_template.ui(ui, "corridorTemplate");
+                    });
+                    form.row("Interval (m)", |ui| {
+                        field(
+                            ui,
+                            "corridorInterval",
+                            &mut self.interval,
+                            "10",
+                            "Metres between sections",
+                        );
+                    });
+                    form.row("Curve tolerance", |ui| {
+                        field(
+                            ui,
+                            "corridorCurveTolerance",
+                            &mut self.curve_tolerance,
+                            "0.001",
+                            "The most a course's area and volume on a curve may be out, as a \
+                             fraction (0.001 is 0.1 %): sections are added inside a curve until \
+                             the chords are that close. 0 adds none",
+                        );
+                    });
+                });
+                dialog::form(right, |form| {
+                    form.row("Alignment", |ui| {
+                        self.alignment.ui(ui, "corridorAlignment");
+                    });
+                    form.row("Target surface", |ui| {
+                        self.surface.ui(ui, "corridorSurface");
+                    });
+                    form.row("Stations", |ui| {
+                        // The two stations share the row.
+                        let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                        dialog::fixed_fields(ui, width);
                         field(
                             ui,
                             "corridorFrom",
@@ -641,19 +662,8 @@ impl Body {
                             "The last station; empty: where it ends",
                         );
                     });
-                    ui.end_row();
-                    layout::form_label(ui, "Curve tolerance");
-                    field(
-                        ui,
-                        "corridorCurveTolerance",
-                        &mut self.curve_tolerance,
-                        "0.001",
-                        "The most a course's area and volume on a curve may be out, as a fraction \
-                     (0.001 is 0.1 %): sections are added inside a curve until the chords are \
-                     that close. 0 adds none",
-                    );
-                    ui.end_row();
                 });
+            });
             ui.horizontal(|ui| {
                 if button(
                     ui,
@@ -701,7 +711,7 @@ impl Body {
         // ---- regions and superelevation, side by side ----
         ui.add_space(layout::SECTION_GAP);
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 4.0;
+            ui.spacing_mut().text_edit_width = dialog::SHORT_FIELD_WIDTH / 2.0;
             ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     ui.strong("Regions: another template between two stations");
@@ -793,7 +803,7 @@ impl Body {
         });
 
         // ---- what it builds ----
-        layout::heading(ui, "Build");
+        dialog::section(ui, "Build");
         ui.horizontal(|ui| {
             if button(
                 ui,

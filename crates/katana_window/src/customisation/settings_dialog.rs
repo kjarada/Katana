@@ -131,13 +131,14 @@ use super::document_watcher::DocumentWatcher;
 use super::linework_labels::linework_control_label;
 use crate::command_log::folded;
 use crate::command_word::command_word;
-use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
 use crate::dialog_layout as layout;
+use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::{Host, VerbOutcome};
 use crate::ifc_dialogs::{get_open_file_name, get_save_file_name};
 use crate::script_runner::from_native_separators;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::{hidden, offstage};
 use crate::theme;
 
@@ -830,7 +831,8 @@ fn value_label(ui: &mut Ui, name: &str, text: &str) -> egui::Response {
 /// A QGroupBox: its title over what it holds - drawn as a section (a heading, no box), so the page
 /// reads as one column rather than a stack of frames of different widths.
 fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
-    layout::section(ui, title, add);
+    dialog::section(ui, title);
+    add(ui);
 }
 
 /// The width of the page beside the list of pages.
@@ -1242,7 +1244,11 @@ impl SettingsDialog {
             return;
         }
         match command_word(&name, "Use Built-in") {
-            Ok(word) => self.run(host, &format!("CUSTOMISE BUILTIN {word}"), Then::KeepWhatWasKept),
+            Ok(word) => self.run(
+                host,
+                &format!("CUSTOMISE BUILTIN {word}"),
+                Then::KeepWhatWasKept,
+            ),
             Err(error) => self.refuse(host, &error.message),
         }
     }
@@ -1481,7 +1487,10 @@ impl SettingsDialog {
         // The box shows what the STATE has, as the automation boxes show the Document: a line
         // that was refused left it as it was, and the box goes back. With nobody to ask it is off
         // and disabled, never a guess.
-        page.auto = updates.automatic.as_ref().is_some_and(|automatic| automatic());
+        page.auto = updates
+            .automatic
+            .as_ref()
+            .is_some_and(|automatic| automatic());
         page.auto_enabled = lines && updates.automatic.is_some();
 
         let store = updates.credentials.as_deref();
@@ -1657,19 +1666,23 @@ impl SettingsDialog {
     fn customisation_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // What is active.
         group(ui, "What is active", |ui| {
-            layout::form(ui, "settingsActiveForm", |ui| {
+            dialog::form(ui, |form| {
                 for (caption, name, text) in [
                     ("Name", "settingsActiveName", &self.name),
                     ("Origin", "settingsActiveOrigin", &self.origin),
                     ("Built-in", "settingsActiveBuiltIn", &self.active_built_in),
-                    ("Definitions", "settingsActiveDefinitions", &self.definitions),
+                    (
+                        "Definitions",
+                        "settingsActiveDefinitions",
+                        &self.definitions,
+                    ),
                     ("Symbols among them", "settingsActiveSymbols", &self.symbols),
                     ("Survey code rules", "settingsActiveRules", &self.rules),
                     ("Kept", "settingsActiveKept", &self.kept),
                 ] {
-                    layout::form_label(ui, caption);
-                    value_label(ui, name, text);
-                    ui.end_row();
+                    form.row(caption, |ui| {
+                        value_label(ui, name, text);
+                    });
                 }
             });
             // The next three are hidden until refresh finds something for them to show: a page
@@ -1802,28 +1815,33 @@ impl SettingsDialog {
             let mut chosen = false;
             let mut used = false;
             let mut draw_row = |ui: &mut Ui| {
-                let row = ui.horizontal(|ui| {
-                    layout::form_label(ui, "Built-in library");
-                    ui.add_enabled_ui(self.enabled.built_in_choice, |ui| {
-                        let tip = self
-                            .built_in
-                            .index
-                            .and_then(|at| self.built_in_tips.get(at))
-                            .cloned()
-                            .unwrap_or_default();
-                        chosen = controls::choice(
-                            ui,
-                            "settingsBuiltIn",
-                            &self.built_in_items,
-                            &mut self.built_in,
-                        )
-                        .on_hover_text(tip)
-                        .changed();
-                    });
-                    ui.add_enabled_ui(self.enabled.built_in_use, |ui| {
-                        used = controls::button(ui, "settingsBuiltInUse", "Use")
-                            .on_hover_text(self.built_in_use_tip.as_str())
-                            .clicked();
+                // A scope round the row, whose rectangle is the row's record.
+                let row = ui.scope(|ui| {
+                    dialog::labelled(ui, "Built-in library", |ui| {
+                        // The choice leaves its row room for Use after it.
+                        let width = dialog::beside_a_button(ui, "Use");
+                        dialog::fixed_fields(ui, width);
+                        ui.add_enabled_ui(self.enabled.built_in_choice, |ui| {
+                            let tip = self
+                                .built_in
+                                .index
+                                .and_then(|at| self.built_in_tips.get(at))
+                                .cloned()
+                                .unwrap_or_default();
+                            chosen = controls::choice(
+                                ui,
+                                "settingsBuiltIn",
+                                &self.built_in_items,
+                                &mut self.built_in,
+                            )
+                            .on_hover_text(tip)
+                            .changed();
+                        });
+                        ui.add_enabled_ui(self.enabled.built_in_use, |ui| {
+                            used = controls::button(ui, "settingsBuiltInUse", "Use")
+                                .on_hover_text(self.built_in_use_tip.as_str())
+                                .clicked();
+                        });
                     });
                 });
                 controls::custom(
@@ -1913,24 +1931,24 @@ impl SettingsDialog {
             // The editors.
             group(ui, "Editors", |ui| {
                 ui.horizontal(|ui| {
-                ui.add_enabled_ui(self.enabled.open_codes, |ui| {
-                    if controls::button(ui, "settingsOpenCodes", "Survey Codes...")
-                        .on_hover_text(OPEN_CODES_TIP)
-                        .clicked()
-                        && let Some(open) = self.context.open_code_manager.as_mut()
-                    {
-                        open(&mut *host);
-                    }
-                });
-                ui.add_enabled_ui(self.enabled.open_symbols, |ui| {
-                    if controls::button(ui, "settingsOpenSymbols", "Symbol Library...")
-                        .on_hover_text(OPEN_SYMBOLS_TIP)
-                        .clicked()
-                        && let Some(open) = self.context.open_symbol_library.as_mut()
-                    {
-                        open(&mut *host);
-                    }
-                });
+                    ui.add_enabled_ui(self.enabled.open_codes, |ui| {
+                        if controls::button(ui, "settingsOpenCodes", "Survey Codes...")
+                            .on_hover_text(OPEN_CODES_TIP)
+                            .clicked()
+                            && let Some(open) = self.context.open_code_manager.as_mut()
+                        {
+                            open(&mut *host);
+                        }
+                    });
+                    ui.add_enabled_ui(self.enabled.open_symbols, |ui| {
+                        if controls::button(ui, "settingsOpenSymbols", "Symbol Library...")
+                            .on_hover_text(OPEN_SYMBOLS_TIP)
+                            .clicked()
+                            && let Some(open) = self.context.open_symbol_library.as_mut()
+                        {
+                            open(&mut *host);
+                        }
+                    });
                 });
             });
         }

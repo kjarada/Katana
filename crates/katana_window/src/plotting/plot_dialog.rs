@@ -32,8 +32,8 @@ use katana_cad::document::Document;
 use katana_cad::plot::{PlotColourMode, plot_colour_mode_from};
 use katana_cad::plotting::page_setup::{
     MAXIMUM_LINE_WEIGHT_SCALE, MAXIMUM_PLOT_DPI, MINIMUM_LINE_WEIGHT_SCALE, MINIMUM_PLOT_DPI,
-    PageSetup, format_sheet_selection, parse_sheet_selection, sanitise_file_name,
-    set_page_setup, sheet_file_name, validate_page_setup,
+    PageSetup, format_sheet_selection, parse_sheet_selection, sanitise_file_name, set_page_setup,
+    sheet_file_name, validate_page_setup,
 };
 use katana_cad::plotting::sheet_set::SheetSet;
 use katana_core::path_text::generic_path_utf8;
@@ -44,25 +44,21 @@ use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::ifc_dialogs::{get_save_file_name, to_native_separators};
 use crate::plotting::plot_output::{
-    NoPrinters, PlotFormat, PlotReport, PlotRequest, Printers, SheetSourceProvider,
-    page_setup_for, planned_files, plot_format_from, plot_sheets, plots_file_per_sheet,
-    print_sheets_on, validate_plot_request,
+    NoPrinters, PlotFormat, PlotReport, PlotRequest, Printers, SheetSourceProvider, page_setup_for,
+    planned_files, plot_format_from, plot_sheets, plots_file_per_sheet, print_sheets_on,
+    validate_plot_request,
 };
 use crate::sheet_painter::SheetPaintCache;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::hidden;
 
 /// The format list's item data, beside the PlotFormat names: the printer.
 const PRINTER_ITEM: &str = "printer";
 
-/// The dialog's body width (the look of 2026-11-16): the form's labels and FIELD_WIDTH fields.
+/// The dialog's body width (the look of 2026-11-16): the form's labels and the fields filling what
+/// they leave.
 const BODY_WIDTH: f32 = 480.0;
-
-/// The width of the form's fields.
-const FIELD_WIDTH: f32 = 340.0;
-
-/// A path field's width: the field column less its Browse button.
-const PATH_WIDTH: f32 = FIELD_WIDTH - 76.0;
 
 const FORMATS: [(&str, &str); 5] = [
     ("PDF, one file", "pdf"),
@@ -186,7 +182,11 @@ impl PlotDialog {
                 } else {
                     "plotDialog"
                 },
-                if page_setup { "Page Setup" } else { "Plot Sheets" },
+                if page_setup {
+                    "Page Setup"
+                } else {
+                    "Plot Sheets"
+                },
             )
             // Modal in both modes, as the C++'s open() (Page Setup) and exec() (Plot) make it. The
             // page setup is only ever sheet_set_menu's openPageSetupDialog, which deleted it on
@@ -259,7 +259,8 @@ impl PlotDialog {
     /// The page setup the controls describe.
     pub fn page_setup(&self) -> PageSetup {
         let mut setup = self.set.page_setup.clone();
-        setup.colour_mode = plot_colour_mode_from(self.colour_data()).unwrap_or(PlotColourMode::Colour);
+        setup.colour_mode =
+            plot_colour_mode_from(self.colour_data()).unwrap_or(PlotColourMode::Colour);
         setup.line_weight_scale = self.line_weight_scale;
         setup.dpi = self.dpi as f64;
         setup.file_name_pattern.clone_from(&self.pattern);
@@ -324,14 +325,14 @@ impl PlotDialog {
             PlotSheets::List => request.sheets.clone_from(&self.list_text),
             PlotSheets::All => {}
         }
-        request.format = plot_format_from(self.format_data()).unwrap_or(
-            if self.set.page_setup.file_per_sheet {
+        request.format =
+            plot_format_from(self.format_data()).unwrap_or(if self.set.page_setup.file_per_sheet {
                 PlotFormat::PdfPerSheet
             } else {
                 PlotFormat::Pdf
-            },
-        );
-        request.colour_mode = plot_colour_mode_from(self.colour_data()).unwrap_or(PlotColourMode::Colour);
+            });
+        request.colour_mode =
+            plot_colour_mode_from(self.colour_data()).unwrap_or(PlotColourMode::Colour);
         request.line_weight_scale = self.line_weight_scale;
         request.dpi = self.dpi as f64;
         request.file_name_pattern.clone_from(&self.pattern);
@@ -492,19 +493,18 @@ impl PlotDialog {
         // A row of the form shown or not: drawn either way, as `row`, but a hidden one takes no
         // room - its label is not drawn and its controls are drawn apart - so the page setup is
         // not a column of empty rows (the look of 2026-11-16).
-        let grid_row =
+        let form_row =
             |ui: &mut Ui, shown: bool, label: &str, salt: &str, add: &mut dyn FnMut(&mut Ui)| {
                 if shown {
-                    layout::form_label(ui, label);
-                    add(ui);
-                    ui.end_row();
+                    dialog::labelled(ui, label, |ui| add(ui));
                 } else {
                     hidden(ui, salt, |ui| add(ui));
                 }
             };
         let per_sheet = self.per_sheet();
         let printer = self.to_printer();
-        layout::form_with(ui, "plotForm", FIELD_WIDTH, |ui| {
+        dialog::form(ui, |form| {
+            let ui = form.ui();
             // Which sheets.
             let count = self.set.sheets.len();
             let current = match self.set.sheets.get(self.current) {
@@ -512,7 +512,7 @@ impl PlotDialog {
                 None => String::from("Current sheet"),
             };
             let summary = self.sheets_summary();
-            grid_row(ui, !page_setup, "Sheets", "plotRowSheets", &mut |ui| {
+            form_row(ui, !page_setup, "Sheets", "plotRowSheets", &mut |ui| {
                 ui.vertical(|ui| {
                     if controls::radio(
                         ui,
@@ -545,6 +545,8 @@ impl PlotDialog {
                         {
                             self.sheets = PlotSheets::List;
                         }
+                        // The list's field fills what the radio button leaves of the row.
+                        dialog::fill_fields(ui);
                         let listed = self.sheets == PlotSheets::List;
                         // Read-only rather than disabled while another choice is made (the
                         // C++ disabled it): a fill still writes it, as the C++ test's setText
@@ -569,55 +571,65 @@ impl PlotDialog {
             });
 
             // What is made.
-            let formats: Vec<String> = FORMATS.iter().map(|(text, _)| String::from(*text)).collect();
-            grid_row(ui, !page_setup, "Output", "plotRowOutput", &mut |ui| {
+            let formats: Vec<String> = FORMATS
+                .iter()
+                .map(|(text, _)| String::from(*text))
+                .collect();
+            form_row(ui, !page_setup, "Output", "plotRowOutput", &mut |ui| {
                 controls::choice(ui, "plotFormat", &formats, &mut self.format);
             });
-            layout::form_label(ui, "Colours");
-            let colours: Vec<String> =
-                COLOUR_MODES.iter().map(|(text, _)| String::from(*text)).collect();
-            controls::choice(ui, "plotColourMode", &colours, &mut self.colour_mode);
-            ui.end_row();
-            layout::form_label(ui, "Line weights");
-            controls::spin(
-                ui,
-                "plotLineWeightScale",
-                &mut self.line_weight_scale,
-                SpinRange::new(MINIMUM_LINE_WEIGHT_SCALE, MAXIMUM_LINE_WEIGHT_SCALE, 0.1, 2)
-                    .with_suffix(" x"),
-            )
-            .on_hover_text("Every line weight is multiplied by this");
-            ui.end_row();
-            layout::form_label(ui, "Resolution");
-            controls::whole(
-                ui,
-                "plotDpi",
-                &mut self.dpi,
-                (MINIMUM_PLOT_DPI as i64)..=(MAXIMUM_PLOT_DPI as i64),
-            )
-            .on_hover_text("The resolution of an image, and of a PDF's 3D snapshot");
-            ui.end_row();
+            dialog::labelled(ui, "Colours", |ui| {
+                let colours: Vec<String> = COLOUR_MODES
+                    .iter()
+                    .map(|(text, _)| String::from(*text))
+                    .collect();
+                controls::choice(ui, "plotColourMode", &colours, &mut self.colour_mode);
+            });
+            dialog::labelled(ui, "Line weights", |ui| {
+                controls::spin(
+                    ui,
+                    "plotLineWeightScale",
+                    &mut self.line_weight_scale,
+                    SpinRange::new(MINIMUM_LINE_WEIGHT_SCALE, MAXIMUM_LINE_WEIGHT_SCALE, 0.1, 2)
+                        .with_suffix(" x"),
+                )
+                .on_hover_text("Every line weight is multiplied by this");
+            });
+            dialog::labelled(ui, "Resolution", |ui| {
+                controls::whole(
+                    ui,
+                    "plotDpi",
+                    &mut self.dpi,
+                    (MINIMUM_PLOT_DPI as i64)..=(MAXIMUM_PLOT_DPI as i64),
+                )
+                .on_hover_text("The resolution of an image, and of a PDF's 3D snapshot");
+            });
             if page_setup {
                 // The page setup's own choice of output; a plot chooses its format itself.
-                ui.label("");
-                controls::check(
-                    ui,
-                    "pageSetupFilePerSheet",
-                    "A PDF per sheet, named by the pattern",
-                    &mut self.file_per_sheet,
-                );
-                ui.end_row();
+                dialog::labelled(ui, "", |ui| {
+                    controls::check(
+                        ui,
+                        "pageSetupFilePerSheet",
+                        "A PDF per sheet, named by the pattern",
+                        &mut self.file_per_sheet,
+                    );
+                });
             }
 
             // Where it goes.
-            grid_row(ui, !page_setup && !printer && !per_sheet, "File", "plotRowFile", &mut |ui| {
-                ui.horizontal(|ui| {
+            form_row(
+                ui,
+                !page_setup && !printer && !per_sheet,
+                "File",
+                "plotRowFile",
+                &mut |ui| {
+                    let width = dialog::beside_a_button(ui, "Browse...");
                     controls::line_with(
                         ui,
                         "plotFile",
                         &mut self.file,
                         LineOptions {
-                            width: Some(PATH_WIDTH),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
@@ -627,20 +639,26 @@ impl PlotDialog {
                             self.file = to_native_separators(&path);
                         }
                     }
-                });
-            });
-            grid_row(ui, !page_setup && per_sheet, "Folder", "plotRowFolder", &mut |ui| {
-                ui.horizontal(|ui| {
+                },
+            );
+            form_row(
+                ui,
+                !page_setup && per_sheet,
+                "Folder",
+                "plotRowFolder",
+                &mut |ui| {
+                    let width = dialog::beside_a_button(ui, "Browse...");
                     controls::line_with(
                         ui,
                         "plotFolder",
                         &mut self.folder,
                         LineOptions {
-                            width: Some(PATH_WIDTH),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
-                    if controls::button(ui, "plotBrowseFolder", "Browse...").clicked() && !headless
+                    if controls::button(ui, "plotBrowseFolder", "Browse...").clicked()
+                        && !headless
                         && let Some(path) = rfd::FileDialog::new()
                             .set_title("Plot into Folder")
                             .set_directory(&self.folder)
@@ -648,21 +666,39 @@ impl PlotDialog {
                     {
                         self.folder = to_native_separators(&path.to_string_lossy());
                     }
-                });
-            });
-            grid_row(ui, page_setup || per_sheet, "File names", "plotRowPattern", &mut |ui| {
-                controls::line(ui, "plotPattern", &mut self.pattern).on_hover_text(
+                },
+            );
+            form_row(
+                ui,
+                page_setup || per_sheet,
+                "File names",
+                "plotRowPattern",
+                &mut |ui| {
+                    controls::line(ui, "plotPattern", &mut self.pattern).on_hover_text(
                     "{n} the sheet's position, {n:02} padded to two, {N} the count, {set} the set \
                      number, {number} the sheet number, {name} the sheet's name, {id} its id",
                 );
-            });
+                },
+            );
             let preview = self.pattern_preview();
-            grid_row(ui, page_setup || per_sheet, "", "plotRowPatternPreview", &mut |ui| {
-                controls::label(ui, "plotPatternPreview", &preview);
-            });
-            grid_row(ui, !page_setup && printer, "Printer", "plotRowPrinter", &mut |ui| {
-                controls::choice(ui, "plotPrinter", &self.printers, &mut self.printer);
-            });
+            form_row(
+                ui,
+                page_setup || per_sheet,
+                "",
+                "plotRowPatternPreview",
+                &mut |ui| {
+                    controls::label(ui, "plotPatternPreview", &preview);
+                },
+            );
+            form_row(
+                ui,
+                !page_setup && printer,
+                "Printer",
+                "plotRowPrinter",
+                &mut |ui| {
+                    controls::choice(ui, "plotPrinter", &self.printers, &mut self.printer);
+                },
+            );
         });
         row(ui, !page_setup, &mut |ui| {
             ui.add_enabled_ui(!printer, |ui| {
@@ -938,7 +974,11 @@ impl crate::sheet_editor::SheetEditor {
     }
 
     /// The Plot and Page Setup dialogs, a frame each; an accepted one does its work.
-    pub(crate) fn plot_dialogs_ui(&mut self, ctx: &egui::Context, host: &mut dyn crate::host::Host) {
+    pub(crate) fn plot_dialogs_ui(
+        &mut self,
+        ctx: &egui::Context,
+        host: &mut dyn crate::host::Host,
+    ) {
         let Some(mut dialog) = self.plot_dialog.take() else {
             return;
         };
@@ -977,7 +1017,10 @@ impl crate::sheet_editor::SheetEditor {
             self.report(host, &text, error);
         }
         if let Some(target) = open {
-            ctx.open_url(egui::OpenUrl::new_tab(format!("file:///{}", target.trim_start_matches('/'))));
+            ctx.open_url(egui::OpenUrl::new_tab(format!(
+                "file:///{}",
+                target.trim_start_matches('/')
+            )));
         }
         self.observe(&*host);
     }

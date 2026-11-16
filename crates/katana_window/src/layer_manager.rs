@@ -52,6 +52,7 @@ use crate::format::qt_fixed;
 use crate::host::Host;
 use crate::kept_name_combo::{KeptChoice, KeptNameCombo};
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::hidden;
 
 /// The dialog's name as a drive target (see the module comment).
@@ -718,33 +719,38 @@ impl LayerManagerDialog {
     }
 
     fn form(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
-        let heading = ui.strong("Definition");
+        let heading = dialog::section(ui, "Definition");
         custom(
             ui,
             &heading,
             ControlRecord::new("layerForm", ControlKind::Other),
         );
-        layout::form(ui, "layerForm", |ui| {
-            layout::form_label(ui, "Linetype");
-            // A name chosen in the picker is read at Save: nothing runs from the choice.
-            let _ = self.linetype.ui(ui, "layerLinetype");
-            ui.end_row();
+        dialog::form(ui, |form| {
+            form.row("Linetype", |ui| {
+                // A name chosen in the picker is read at Save: nothing runs from the choice.
+                let _ = self.linetype.ui(ui, "layerLinetype");
+            });
 
-            layout::form_label(ui, "Line weight");
-            if controls::spin(ui, "layerWeight", &mut self.weight, WEIGHT).changed() {
-                self.weight_edited = true;
-            }
-            ui.end_row();
+            form.row("Line weight", |ui| {
+                if controls::spin(ui, "layerWeight", &mut self.weight, WEIGHT).changed() {
+                    self.weight_edited = true;
+                }
+            });
 
-            layout::form_label(ui, "Colour");
-            ui.horizontal(|ui| {
+            form.row("Colour", |ui| {
+                // The field leaves its row room for Choose... and, while it is open, the colour
+                // dialog's swatch (a button a control's size).
+                let mut width = dialog::beside_a_button(ui, "Choose...");
+                if self.colour_dialog_open {
+                    width -= ui.spacing().interact_size.x + ui.spacing().item_spacing.x;
+                }
                 let field = controls::line_with(
                     ui,
                     "layerColourText",
                     &mut self.colour_text,
                     LineOptions {
                         placeholder: "#RRGGBB",
+                        width: Some(width.max(0.0)),
                         ..LineOptions::default()
                     },
                 )
@@ -772,22 +778,19 @@ impl LayerManagerDialog {
                     }
                 }
             });
-            ui.end_row();
 
-            layout::form_label(ui, "Hatch");
-            self.hatch.ui(ui, "layerHatch");
-            ui.end_row();
+            form.row("Hatch", |ui| {
+                self.hatch.ui(ui, "layerHatch");
+            });
 
-            layout::form_label(ui, "Dimension style");
-            self.dimension.ui(ui, "layerDimensionStyle");
-            ui.end_row();
+            form.row("Dimension style", |ui| {
+                self.dimension.ui(ui, "layerDimensionStyle");
+            });
 
-            ui.label("");
-            ui.horizontal(|ui| {
+            form.under(|ui| {
                 controls::check(ui, "layerVisible", "Visible", &mut self.visible);
                 controls::check(ui, "layerLocked", "Locked", &mut self.locked);
             });
-            ui.end_row();
         });
         // The form's own two buttons under it: Save, the one that writes, last and in the accent.
         ui.add_space(layout::INNER);

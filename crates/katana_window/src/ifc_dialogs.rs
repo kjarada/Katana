@@ -61,6 +61,7 @@ use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::format::grouped;
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog::{self, labelled};
 use crate::theme;
 
 // ---- the system's file dialogs ------------------------------------------------------------------
@@ -195,7 +196,8 @@ const COMMAND_TIP: &str = "The command this runs, exactly as it could be typed o
                            line, given to katana_cli or sent by an agent";
 
 /// The read-only field showing the line the dialog runs, as it is edited: what a fill writes there
-/// is drawn over by the dialog's line at the next frame.
+/// is drawn over by the dialog's line at the next frame. It fills its row (dialog::labelled), so
+/// it ends where the path fields' Browse buttons do.
 fn command_field(ui: &mut Ui, name: &str, line: &str) {
     let mut shown = String::from(line);
     controls::line_with(
@@ -204,31 +206,23 @@ fn command_field(ui: &mut Ui, name: &str, line: &str) {
         &mut shown,
         LineOptions {
             read_only: true,
-            width: Some(COMMAND_WIDTH),
             ..LineOptions::default()
         },
     )
     .on_hover_text(COMMAND_TIP);
 }
 
-/// The width of a row's label in both dialogs, so their fields line up (the look of 2026-11-16).
-const LABEL_WIDTH: f32 = 140.0;
-
-/// A path field's width; with its Browse button, the command field's.
-const PATH_WIDTH: f32 = 420.0;
-
-/// The command field's width: a path field and its Browse button.
-const COMMAND_WIDTH: f32 = PATH_WIDTH + 80.0;
-
-/// A path field with its placeholder; true when it changed.
+/// A path field with its placeholder, leaving its row the room for the Browse button after it;
+/// true when it changed.
 fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> bool {
+    let width = dialog::beside_a_button(ui, "Browse...");
     controls::line_with(
         ui,
         name,
         value,
         LineOptions {
             placeholder,
-            width: Some(PATH_WIDTH),
+            width: Some(width),
             ..LineOptions::default()
         },
     )
@@ -860,8 +854,7 @@ impl IfcExportDialog {
              fences, pits, pipes - the road model as roads, their parts and elements, and an AS \
              5488 investigation graded and typed by its services. Nothing is written as a proxy.",
         );
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "File", LABEL_WIDTH);
+        labelled(ui, "File", |ui| {
             if path_line(
                 ui,
                 "ifcExportFile",
@@ -883,8 +876,7 @@ impl IfcExportDialog {
 
         let state = self.state.clone();
         let mut changed = false;
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Drawing", LABEL_WIDTH);
+        labelled(ui, "Drawing", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcExportEntities",
@@ -907,8 +899,8 @@ impl IfcExportDialog {
                 grouped(state.selected as u64)
             )
         };
-        let indent = LABEL_WIDTH + ui.spacing().item_spacing.x;
-        layout::indented(ui, indent, |ui| {
+        // The other kinds under the first, in the field column (a row with no label).
+        labelled(ui, "", |ui| {
             ui.add_enabled_ui(self.entities, |ui| {
                 changed |= controls::check(
                     ui,
@@ -920,19 +912,20 @@ impl IfcExportDialog {
                 .changed();
             });
         });
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             changed |= controls::check(
-            ui,
-            "ifcExportAlignments",
-            &format!("Alignments ({})", grouped(state.alignments as u64)),
-            &mut self.alignments,
-        )
-        .on_hover_text(
-            "Every alignment, as IfcAlignment: its PIs' design and its profile's, with stations",
-        )
-        .changed();
+                ui,
+                "ifcExportAlignments",
+                &format!("Alignments ({})", grouped(state.alignments as u64)),
+                &mut self.alignments,
+            )
+            .on_hover_text(
+                "Every alignment, as IfcAlignment: its PIs' design and its profile's, with \
+                 stations",
+            )
+            .changed();
         });
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcExportSurfaces",
@@ -946,28 +939,27 @@ impl IfcExportDialog {
             .changed();
         });
         // The road model: NOROADMODEL when unticked (docs/ifc.md, "Road model").
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             changed |= controls::check(
-            ui,
-            "ifcExportRoadModel",
-            &format!(
-                "Road model ({} objects)",
-                grouped(state.road_objects as u64)
-            ),
-            &mut self.road_model,
-        )
-        .on_hover_text(
-            "The road model's 3D objects - its corridors' courses, kerbs and earthworks, and the \
-             road objects - as IfcRoad, its parts and their elements",
-        )
-        .changed();
+                ui,
+                "ifcExportRoadModel",
+                &format!(
+                    "Road model ({} objects)",
+                    grouped(state.road_objects as u64)
+                ),
+                &mut self.road_model,
+            )
+            .on_hover_text(
+                "The road model's 3D objects - its corridors' courses, kerbs and earthworks, and \
+                 the road objects - as IfcRoad, its parts and their elements",
+            )
+            .changed();
         });
         if changed {
             self.choice_changed();
         }
 
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Utility schedule", LABEL_WIDTH);
+        labelled(ui, "Utility schedule", |ui| {
             if path_line(
                 ui,
                 "ifcExportSchedule",
@@ -987,8 +979,7 @@ impl IfcExportDialog {
             }
         });
         let schema_live = !path_of(&self.schedule).is_empty() || !path_of(&self.schema).is_empty();
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Delivery schema", LABEL_WIDTH);
+        labelled(ui, "Delivery schema", |ui| {
             ui.add_enabled_ui(schema_live, |ui| {
                 if path_line(
                     ui,
@@ -1009,8 +1000,7 @@ impl IfcExportDialog {
                 );
             }
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Detected spacing (m)", LABEL_WIDTH);
+        labelled(ui, "Detected spacing (m)", |ui| {
             if controls::line(ui, "ifcExportSpacing", &mut self.spacing)
                 .on_hover_text(
                     "The longest detected spacing that keeps QL-B, in metres: a path interpolated \
@@ -1021,15 +1011,15 @@ impl IfcExportDialog {
                 self.choice_changed();
             }
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Classification rules", LABEL_WIDTH);
+        labelled(ui, "Classification rules", |ui| {
+            let width = dialog::beside_buttons(ui, &["Browse...", "Save Default Rules..."]);
             let typed = controls::line_with(
                 ui,
                 "ifcExportRules",
                 &mut self.rules,
                 LineOptions {
                     placeholder: "optional: a project's classification rules (.csv)",
-                    width: Some(PATH_WIDTH - 160.0),
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
@@ -1069,8 +1059,7 @@ impl IfcExportDialog {
             egui::Label::new(RichText::new(crs.as_str()).color(theme::text_muted().to_egui()))
                 .wrap(),
         );
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Command", LABEL_WIDTH);
+        labelled(ui, "Command", |ui| {
             let line = self.line();
             command_field(ui, "ifcExportCommand", &line);
         });
@@ -1418,8 +1407,7 @@ impl IfcImportDialog {
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         ui.set_max_width(600.0);
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "File", LABEL_WIDTH);
+        labelled(ui, "File", |ui| {
             if path_line(
                 ui,
                 "ifcImportFile",
@@ -1453,8 +1441,7 @@ impl IfcImportDialog {
             );
         }
         let mut changed = false;
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Bring in", LABEL_WIDTH);
+        labelled(ui, "Bring in", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcImportAlignments",
@@ -1481,8 +1468,7 @@ impl IfcImportDialog {
                 )
                 .changed();
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Place", LABEL_WIDTH);
+        labelled(ui, "Place", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcImportLocal",
@@ -1493,24 +1479,22 @@ impl IfcImportDialog {
             .changed();
         });
         // Moved to the origin, the data is no longer in the file's system.
-        let indent = LABEL_WIDTH + ui.spacing().item_spacing.x;
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             ui.add_enabled_ui(!self.local, |ui| {
                 changed |= controls::check(
-                ui,
-                "ifcImportTakeCrs",
-                "Take the file's coordinate system when the project has none",
-                &mut self.take_crs,
-            )
-            .on_hover_text(
-                "When the file names an EPSG code and the project has no coordinate system, the \
-                 project takes the file's",
-            )
-            .changed();
+                    ui,
+                    "ifcImportTakeCrs",
+                    "Take the file's coordinate system when the project has none",
+                    &mut self.take_crs,
+                )
+                .on_hover_text(
+                    "When the file names an EPSG code and the project has no coordinate system, \
+                     the project takes the file's",
+                )
+                .changed();
             });
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Curves within (m)", LABEL_WIDTH);
+        labelled(ui, "Curves within (m)", |ui| {
             changed |= controls::line(ui, "ifcImportTolerance", &mut self.tolerance)
                 .on_hover_text(
                     "How far a chorded curve - an arc in a polycurve, a transition other than the \
@@ -1521,8 +1505,7 @@ impl IfcImportDialog {
         if changed {
             self.option_changed();
         }
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Command", LABEL_WIDTH);
+        labelled(ui, "Command", |ui| {
             let line = self.line();
             command_field(ui, "ifcImportCommand", &line);
         });

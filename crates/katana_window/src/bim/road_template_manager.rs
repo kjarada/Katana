@@ -90,7 +90,7 @@ use crate::dialog_layout as layout;
 use crate::drive::controls::check;
 use crate::format::qt_fixed;
 use crate::host::Host;
-use crate::shell::dialog::DialogFrame;
+use crate::shell::dialog::{self, DialogFrame};
 use crate::theme::palette;
 
 /// The components grid's columns.
@@ -960,9 +960,9 @@ impl Body {
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // One width, the grids' and the preview's; the fields a short word's unless said.
         ui.set_width(TEMPLATE_BODY_WIDTH);
-        ui.spacing_mut().text_edit_width = layout::FIELD_WIDTH / 2.0;
+        ui.spacing_mut().text_edit_width = dialog::SHORT_FIELD_WIDTH;
         // ---- the templates ----
-        layout::heading(ui, "Templates");
+        dialog::section(ui, "Templates");
         if self.list.ui(ui).selection_changed {
             self.list_selection_changed(host.document());
         }
@@ -1092,7 +1092,7 @@ impl Body {
         let height = grid_height(ui.style());
         self.components.set_fixed_height(height);
         self.courses.set_fixed_height(height);
-        layout::heading(ui, "Components");
+        dialog::section(ui, "Components");
         note(
             ui,
             "Components out from the centreline, each side in order. Width, crossfall (percent, \
@@ -1169,7 +1169,7 @@ impl Body {
                 self.press_set_keys(host);
             }
         });
-        layout::heading(ui, "Courses");
+        dialog::section(ui, "Courses");
         note(
             ui,
             "The chosen component's courses, top down. Thickness, material and IFC type are \
@@ -1233,7 +1233,7 @@ impl Body {
 
         // A drawing of a typical section reads at this height; the grids above it are the
         // dialog's purpose and get the room.
-        layout::heading(ui, "Typical section");
+        dialog::section(ui, "Typical section");
         let width = ui.available_width().max(220.0);
         let road_template = self.preview_template.as_ref();
         let section = self.preview_section.as_ref();

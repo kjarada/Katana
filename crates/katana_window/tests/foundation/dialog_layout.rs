@@ -1,16 +1,20 @@
 //! The dialog frame's look (shell::dialog; the design of 2026-11-16, docs/desktop.md "The rules a
 //! dialog or panel follows"): a footer's buttons end at the dialog's right edge less its padding,
 //! the primary last and every button one least width; every labelled row of a body starts its
-//! field at one edge; a body is no wider than the width it is laid out at, so a note wraps in it.
+//! field at one edge, a field of a width of its own and one beside a button included; a section's
+//! heading has a gap above it; a body is no wider than the width it is laid out at, so a note
+//! wraps in it. shell::dialog's form is the window's one form layout (dialog_layout's grid was
+//! folded into it), so these are the rules every dialog's form keeps.
 //!
 //! Nothing here is a pixel of ink: rectangles are compared with each other and with the frame's
 //! own constants. Within HALF_A_POINT where egui rounds a widget to the pixel grid.
 
-use egui::Ui;
+use egui::{Rect, Ui};
 use katana_window::drive::{self, LineOptions};
 use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
-    BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, button_row, labelled, note,
+    BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, SECTION_GAP,
+    beside_a_button, button_row, fixed_fields, labelled, note, row_with_text, section,
 };
 
 use crate::window_support::offscreen_harness;
@@ -208,6 +212,173 @@ mod dialog_layout {
         assert!(first.left() - body_left <= LABEL_WIDTH + FORM_SPACING.x + HALF_A_POINT);
         // The long label wrapped: its row is taller than a one-line row.
         assert!(second.top() - first.top() > first.height() + HALF_A_POINT);
+    }
+
+    #[test]
+    fn a_named_label_shown_after_its_column_was_measured_widens_it_to_one_line() {
+        // The Leaders dialog's "Landing direction" (a label that is a control of its own, drawn
+        // with row_with) wrapped to the width of the shorter labels measured before it, a word to
+        // a line: measured as drawn, it was measured in the narrow cell it was given.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("namedDialog", "Named");
+        let named_shown = std::cell::Cell::new(false);
+        let mut values = [String::new(), String::new()];
+        let caption = "A longer named label:";
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            frame.show_body(&ctx, &mut values, |ui, values| {
+                let [short, named] = values;
+                labelled(ui, "Ids:", |ui| drive::line(ui, "short", short));
+                if named_shown.get() {
+                    row_with_text(
+                        ui,
+                        caption,
+                        |ui| {
+                            drive::label(ui, "caption", caption);
+                        },
+                        |ui| drive::line(ui, "named", named),
+                    );
+                }
+            });
+        };
+        // The column measured with "Ids:" alone, then the named row shown in it.
+        harness.show(&mut draw).expect("the dialog is drawn");
+        named_shown.set(true);
+        harness.show(&mut draw).expect("the dialog is drawn again");
+        let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
+        let (short, named, label) = (control("short"), control("named"), control("caption"));
+        assert!((short.left() - named.left()).abs() <= HALF_A_POINT);
+        assert!(
+            label.right() <= named.left(),
+            "the label runs to {} past its field at {}",
+            label.right(),
+            named.left()
+        );
+        // One line: no taller than the field beside it (a second line would make it some 34).
+        assert!(
+            label.height() <= named.height() + HALF_A_POINT,
+            "the label is {} high beside a field {} high",
+            label.height(),
+            named.height()
+        );
+    }
+
+    #[test]
+    fn a_field_given_a_width_of_its_own_keeps_it_and_is_held_to_its_row() {
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("fixedDialog", "Fixed");
+        let mut values = [String::new(), String::new(), String::new()];
+        // Far narrower than the row (BODY_WIDTH less a label column), and far wider than it.
+        let short_width = 100.0;
+        let too_wide = 10.0 * BODY_WIDTH;
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut values, |ui, values| {
+                    let [short, wide, filled] = values;
+                    labelled(ui, "Short:", |ui| {
+                        fixed_fields(ui, short_width);
+                        drive::line(ui, "short", short)
+                    });
+                    labelled(ui, "Wide:", |ui| {
+                        fixed_fields(ui, too_wide);
+                        drive::line(ui, "wide", wide)
+                    });
+                    labelled(ui, "Filled:", |ui| drive::line(ui, "filled", filled));
+                });
+            })
+            .expect("the dialog is drawn");
+        let field = |name: &str| harness.control(name).expect("each field is drawn").rect;
+        let (short, wide, filled) = (field("short"), field("wide"), field("filled"));
+        assert!(
+            (short.width() - short_width).abs() <= HALF_A_POINT,
+            "the field is {} wide",
+            short.width()
+        );
+        // A fixed width does not move a field off the label column's edge.
+        assert!((short.left() - filled.left()).abs() <= HALF_A_POINT);
+        // Wider than its row, it is held to the row: it ends where a field filling the row does.
+        assert!(
+            (wide.right() - filled.right()).abs() <= HALF_A_POINT,
+            "the wide field ends at {}, the row at {}",
+            wide.right(),
+            filled.right()
+        );
+    }
+
+    #[test]
+    fn a_field_beside_a_button_leaves_the_button_its_room_at_the_rows_end() {
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("besideDialog", "Beside");
+        let mut values = [String::new(), String::new()];
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut values, |ui, values| {
+                    let [path, other] = values;
+                    labelled(ui, "File:", |ui| {
+                        let width = beside_a_button(ui, "Browse...");
+                        drive::line_with(
+                            ui,
+                            "path",
+                            path,
+                            LineOptions {
+                                width: Some(width),
+                                ..LineOptions::default()
+                            },
+                        );
+                        drive::button(ui, "browse", "Browse...");
+                    });
+                    labelled(ui, "Other:", |ui| drive::line(ui, "other", other));
+                });
+            })
+            .expect("the dialog is drawn");
+        let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
+        let (path, browse, other) = (control("path"), control("browse"), control("other"));
+        assert!((path.left() - other.left()).abs() <= HALF_A_POINT);
+        assert!(
+            path.right() < browse.left(),
+            "the button is after the field"
+        );
+        // The button ends the row where a field filling its row ends: inside the body, not past it.
+        assert!(
+            (browse.right() - other.right()).abs() <= HALF_A_POINT,
+            "the button ends at {}, the row at {}",
+            browse.right(),
+            other.right()
+        );
+    }
+
+    #[test]
+    fn a_section_heading_has_a_gap_above_it_unless_it_starts_its_body() {
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("sectionDialog", "Sections");
+        // The body's top, and the two headings, as the body drew them.
+        let mut drawn = [Rect::NOTHING; 3];
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut drawn, |ui, drawn| {
+                    drawn[0] = ui.max_rect();
+                    drawn[1] = section(ui, "First").rect;
+                    drive::label(ui, "between", "A line between the two");
+                    drawn[2] = section(ui, "Second").rect;
+                });
+            })
+            .expect("the dialog is drawn");
+        let [body, first, second] = drawn;
+        let between = harness.control("between").expect("drawn").rect;
+        assert!(
+            (first.top() - body.top()).abs() <= HALF_A_POINT,
+            "the first heading starts at {}, its body at {}",
+            first.top(),
+            body.top()
+        );
+        assert!(
+            (second.top() - between.bottom() - SECTION_GAP).abs() <= HALF_A_POINT,
+            "the second heading is {} under what is above it",
+            second.top() - between.bottom()
+        );
     }
 
     #[test]

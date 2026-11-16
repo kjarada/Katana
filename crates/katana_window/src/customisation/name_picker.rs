@@ -62,7 +62,6 @@ use super::style_painter::{
     CanvasRasterBackend, RasterBackend, StylePaintTarget, paint_style_drawing, painted_extent,
 };
 use crate::canvas::{Canvas, Color, Image, Pen, PenCap, PenJoin, PenStyle, RenderHint};
-use crate::dialog_layout as layout;
 use crate::drive::controls::custom;
 use crate::drive::mailbox::{Act, fill_disabled, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -627,9 +626,7 @@ impl NamePicker {
             // entity's resolved linetype: a Style's ByLayer inherits; a Layer's has no layer above
             // it, and draws what a missing layer does.
             return if self.offer_by_layer {
-                format!(
-                    "ByLayer, spelt \"{name}\": the entity is drawn in its layer's linetype"
-                )
+                format!("ByLayer, spelt \"{name}\": the entity is drawn in its layer's linetype")
             } else {
                 format!(
                     "ByLayer, spelt \"{name}\": a layer has no layer above it to inherit from, so \
@@ -780,12 +777,12 @@ impl NamePicker {
         let before = self.text.clone();
         let shown = ui.vertical(|ui| {
             let row = ui.horizontal(|ui| {
-                // The field and its list button together as wide as a form's field (the list
-                // button its arrow's width, as dialog_layout's editable choice is).
-                let field_width = (ui.spacing().text_edit_width
-                    - layout::EDITABLE_CHOICE_BUTTON
-                    - ui.spacing().item_spacing.x)
-                    .max(layout::EDITABLE_CHOICE_BUTTON);
+                // The field and its list button together as wide as a form's field, the list
+                // button a control's height square, as drive::controls::choice draws an editable
+                // choice's arrow.
+                let arrow = ui.spacing().interact_size.y;
+                let field_width =
+                    (ui.spacing().text_edit_width - arrow - ui.spacing().item_spacing.x).max(arrow);
                 let mut edit = egui::TextEdit::singleline(&mut self.text)
                     .id_salt(name)
                     .desired_width(field_width)
@@ -796,7 +793,7 @@ impl NamePicker {
                 let field = ui.add(edit);
                 let list = egui::ComboBox::from_id_salt((name, "items"))
                     .selected_text("")
-                    .width(layout::EDITABLE_CHOICE_BUTTON)
+                    .width(arrow)
                     .show_ui(ui, |ui| {
                         self.ensure_textures(ui, name);
                         for (at, item) in self.items.iter().enumerate() {

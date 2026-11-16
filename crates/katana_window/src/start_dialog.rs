@@ -36,6 +36,7 @@ use crate::host::{Host, VerbOutcome};
 use crate::icons::{CanvasRasteriser, application_icon_image};
 use crate::project_crs_dialog::crs_check_text;
 use crate::shell::DialogFrame;
+use crate::shell::dialog::{self, labelled};
 use crate::theme::palette;
 
 /// The body's width: the two forms, with room for the introduction to wrap in two lines.
@@ -43,9 +44,6 @@ const BODY_WIDTH: f32 = 520.0;
 
 /// The logo's side, in points: the program's mark beside its name, not a splash.
 const LOGO_SIZE: f32 = 48.0;
-
-/// A Browse button's width, beside a path in a form's field column.
-const BROWSE_WIDTH: f32 = 72.0;
 
 /// What the window gives the screen of what was chosen last.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -480,7 +478,12 @@ impl StartDialog {
                 self.status = said.join("\n");
                 return false;
             }
-            if let Some(first) = outcome.reply.lines().next().filter(|first| !first.is_empty()) {
+            if let Some(first) = outcome
+                .reply
+                .lines()
+                .next()
+                .filter(|first| !first.is_empty())
+            {
                 said.push(String::from(first));
             }
         }
@@ -521,7 +524,11 @@ impl StartDialog {
         self.logo
             .get_or_insert_with(|| {
                 let image: Image = application_icon_image(&CanvasRasteriser, 64);
-                ctx.load_texture("katanaStartLogo", image.to_color_image(), egui::TextureOptions::LINEAR)
+                ctx.load_texture(
+                    "katanaStartLogo",
+                    image.to_color_image(),
+                    egui::TextureOptions::LINEAR,
+                )
             })
             .id()
     }
@@ -531,7 +538,7 @@ impl StartDialog {
         let document = host.document();
         // Which program, and what is asked.
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = layout::SECTION_GAP;
+            ui.spacing_mut().item_spacing.x = dialog::SECTION_GAP;
             let logo = self.logo(ui.ctx());
             let shown = ui.image((logo, egui::vec2(LOGO_SIZE, LOGO_SIZE)));
             controls::custom(
@@ -560,10 +567,9 @@ impl StartDialog {
         });
 
         // The customisation.
-        layout::section(ui, "Customisation", |ui| {
-            layout::form(ui, "startCustomisationForm", |ui| {
-            layout::form_label(ui, "Start with");
-            ui.horizontal(|ui| {
+        dialog::section(ui, "Customisation");
+        dialog::form(ui, |form| {
+            form.row("Start with", |ui| {
                 let texts = self.customisation_items();
                 let before = self.customisation.index;
                 controls::choice(ui, "startCustomisation", &texts, &mut self.customisation);
@@ -574,45 +580,37 @@ impl StartDialog {
                     self.customisation.index = before;
                 }
             });
-            ui.end_row();
+            // The file's rows, their labels too, greyed while the choice is not a file.
             let from_file = self.file_enabled();
-            ui.add_enabled_ui(from_file, |ui| layout::form_label(ui, "File"));
-            ui.add_enabled_ui(from_file, |ui| {
-                layout::inline(ui, |ui| {
+            form.ui().add_enabled_ui(from_file, |ui| {
+                labelled(ui, "File", |ui| {
+                    let width = dialog::beside_a_button(ui, "Browse...");
                     controls::line_with(
                         ui,
                         "startCustomisationFile",
                         &mut self.file,
                         LineOptions {
                             placeholder: "a Katana customisation file (.json)",
-                            width: Some(layout::FIELD_WIDTH - BROWSE_WIDTH - layout::INNER),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
                     // A headless session opens no file dialog; Browse is the window's to answer.
-                    let _ = controls::button_as(
+                    let _ = controls::button(ui, "startCustomisationBrowse", "Browse...");
+                });
+                labelled(ui, "", |ui| {
+                    controls::check(
                         ui,
-                        "startCustomisationBrowse",
-                        "Browse...",
-                        egui::Button::new("Browse...").min_size(egui::vec2(BROWSE_WIDTH, 0.0)),
+                        "startCustomisationReplace",
+                        "Replace instead of merging",
+                        &mut self.replace,
+                    )
+                    .on_hover_text(
+                        "Without it the file's definitions and rules are merged onto the session's \
+                         (CUSTOMISE REPLACE)",
                     );
                 });
             });
-            ui.end_row();
-            ui.label("");
-            ui.add_enabled_ui(from_file, |ui| {
-                controls::check(
-                    ui,
-                    "startCustomisationReplace",
-                    "Replace instead of merging",
-                    &mut self.replace,
-                )
-                .on_hover_text(
-                    "Without it the file's definitions and rules are merged onto the session's \
-                     (CUSTOMISE REPLACE)",
-                );
-            });
-            ui.end_row();
             let keep_tip = if self.kept_file.is_empty() {
                 String::from("This window keeps no customisation between runs")
             } else {
@@ -621,35 +619,37 @@ impl StartDialog {
                     self.kept_file
                 )
             };
-            ui.label("");
-            ui.add_enabled_ui(self.keep_enabled(), |ui| {
-                controls::check(
-                    ui,
-                    "startCustomisationKeep",
-                    "Use it at every start",
-                    &mut self.keep,
-                )
-                .on_hover_text(keep_tip);
-            });
-            ui.end_row();
+            let keep_enabled = self.keep_enabled();
+            form.under(|ui| {
+                ui.add_enabled_ui(keep_enabled, |ui| {
+                    controls::check(
+                        ui,
+                        "startCustomisationKeep",
+                        "Use it at every start",
+                        &mut self.keep,
+                    )
+                    .on_hover_text(keep_tip);
+                });
             });
         });
 
         // The coordinate system.
-        layout::section(ui, "Coordinate system", |ui| {
-            layout::form(ui, "startCrsForm", |ui| {
-                layout::form_label(ui, "System");
-                ui.scope(|ui| {
-                    layout::editable_choice_width(ui, layout::FIELD_WIDTH);
-                    let texts: Vec<String> =
-                        self.crs_items.iter().map(|(text, _)| text.clone()).collect();
-                    controls::choice(ui, "startCrs", &texts, &mut self.crs).on_hover_text(
-                        "Pick a common system, or type an EPSG code, WKT or a PROJ string (CRS SET)",
-                    );
-                });
-                ui.end_row();
-                ui.label("");
-                let check = self.crs_check();
+        dialog::section(ui, "Coordinate system");
+        dialog::form(ui, |form| {
+            form.row("System", |ui| {
+                // An editable choice holds its field and its list's arrow to the row together
+                // (drive::controls::choice), so it fills the row as a field does.
+                let texts: Vec<String> = self
+                    .crs_items
+                    .iter()
+                    .map(|(text, _)| text.clone())
+                    .collect();
+                controls::choice(ui, "startCrs", &texts, &mut self.crs).on_hover_text(
+                    "Pick a common system, or type an EPSG code, WKT or a PROJ string (CRS SET)",
+                );
+            });
+            let check = self.crs_check();
+            form.under(|ui| {
                 controls::label_as(
                     ui,
                     "startCrsCheck",
@@ -659,10 +659,9 @@ impl StartDialog {
                     )
                     .wrap(),
                 );
-                ui.end_row();
             });
         });
-        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+        ui.add_space((dialog::SECTION_GAP - ui.spacing().item_spacing.y).max(0.0));
 
         // The lines Start runs, as they will be logged: what a person learns the verbs from, and
         // what an agent types instead.

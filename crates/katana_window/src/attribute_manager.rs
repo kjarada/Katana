@@ -41,6 +41,7 @@ use crate::drive::{
 };
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 /// Values that differ across the selection are shown as this rather than as one of them: a manager
 /// that showed the first entity's value and wrote it to all of them would quietly overwrite the
@@ -369,8 +370,8 @@ impl AttributeManagerDialog {
                 tree_ui(ui, state, &rows, chosen);
                 ui.add_space(layout::GAP);
                 let types: Vec<String> = TYPES.iter().map(|t| String::from(*t)).collect();
-                layout::form(ui, "attributeForm", |ui| {
-                    layout::row(ui, "Value", |ui| {
+                dialog::form(ui, |form| {
+                    form.row("Value", |ui| {
                         line_with(
                             ui,
                             "attributeValue",
@@ -378,10 +379,10 @@ impl AttributeManagerDialog {
                             LineOptions::default(),
                         );
                     });
-                    layout::row(ui, "Type", |ui| {
+                    form.row("Type", |ui| {
                         choice(ui, "attributeType", &types, &mut state.kind);
                     });
-                    layout::row(ui, "Name", |ui| {
+                    form.row("Name", |ui| {
                         line_with(
                             ui,
                             "attributeName",

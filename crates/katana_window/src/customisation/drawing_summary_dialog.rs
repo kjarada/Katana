@@ -55,6 +55,7 @@ use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 const DIALOG: &str = "drawingSummaryDialog";
 const TITLE: &str = "Drawing Summary";
@@ -226,7 +227,10 @@ impl DrawingSummaryDialog {
         self.selection = if status.selected == 0 {
             String::from("nothing selected")
         } else {
-            format!("{} selected", counted(status.selected, "entity", "entities"))
+            format!(
+                "{} selected",
+                counted(status.selected, "entity", "entities")
+            )
         };
         let next = |name: &str| {
             if name.is_empty() {
@@ -305,20 +309,20 @@ impl DrawingSummaryDialog {
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         ui.set_width(BODY_WIDTH);
-        layout::form(ui, "drawingSummaryForm", |ui| {
-                let rows = [
-                    ("Project", "drawingSummaryProject", &self.project),
-                    ("Drawing", "drawingSummaryDrawing", &self.drawing),
-                    ("Current", "drawingSummaryCurrent", &self.current),
-                    ("Selection", "drawingSummarySelection", &self.selection),
-                    ("History", "drawingSummaryHistory", &self.history),
-                ];
-                for (title, name, text) in rows {
-                    layout::form_label(ui, title);
+        dialog::form(ui, |form| {
+            let rows = [
+                ("Project", "drawingSummaryProject", &self.project),
+                ("Drawing", "drawingSummaryDrawing", &self.drawing),
+                ("Current", "drawingSummaryCurrent", &self.current),
+                ("Selection", "drawingSummarySelection", &self.selection),
+                ("History", "drawingSummaryHistory", &self.history),
+            ];
+            for (title, name, text) in rows {
+                form.row(title, |ui| {
                     controls::label_as(ui, name, text, egui::Label::new(text.as_str()).wrap());
-                    ui.end_row();
-                }
-            });
+                });
+            }
+        });
         // Says where the customisation is changed: the summary only shows it.
         ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
         controls::label_as(
