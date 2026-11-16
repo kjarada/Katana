@@ -511,7 +511,11 @@ impl StyleManagerDialog {
             hatch: KeptNameCombo::new(),
             description: String::new(),
             description_placeholder: String::new(),
-            style_preview: StylePreview::new(document),
+            style_preview: {
+                let mut preview = StylePreview::new(document);
+                preview.set_placeholder("Choose a style to preview it");
+                preview
+            },
             preview_note: String::new(),
             preview_scale: scale,
             // On the viewport's dark ground first, as the rest of the dialog is (the look of
@@ -538,7 +542,11 @@ impl StyleManagerDialog {
             pattern_status_is_error: false,
             linetype_description: String::new(),
             library_details: String::new(),
-            linetype_preview: StylePreview::new(document),
+            linetype_preview: {
+                let mut preview = StylePreview::new(document);
+                preview.set_placeholder("Choose a linetype to preview it");
+                preview
+            },
             linetype_preview_scale: scale,
             linetype_preview_screen: true,
             pattern_for: String::new(),

@@ -106,7 +106,7 @@ use katana_geometry::{Point2, Vec2};
 use katana_math::cpp;
 use katana_math::numerics::{DEG_TO_RAD, RAD_TO_DEG};
 
-use super::dialog_support::{show_dialog, spin_value, table};
+use super::dialog_support::{TableLook, show_dialog, spin_value, table_look};
 use super::form_widgets::{button, check, combo, describe, edit, problem_line};
 use crate::customisation::scope_filter_widget::WIDGET_WIDTH;
 use crate::customisation::{
@@ -844,6 +844,10 @@ enum Pressed {
 /// "Automatic (a dot inside an outline)", beside "Note distance on paper") needs 946. At 900 that
 /// tab ran 46 past it and the dialog was 926 wide on one tab and 972 on another.
 const BODY_WIDTH: f32 = 950.0;
+
+/// The width of the Leader tab's list of leaders: its rows span it, and the form has the rest of
+/// the body - a leader's line ("#12 IL 10.50") and the scope toggle's words with room to spare.
+const LIST_WIDTH: f32 = 240.0;
 
 /// The Leaders manager (see the module comment).
 pub struct LeaderManagerDialog {
@@ -2544,23 +2548,27 @@ impl LeaderManagerDialog {
         }
     }
 
-    fn checked_label(ui: &mut Ui, name: &str, text: &str, error: bool) {
-        if error {
-            controls::label_as(
-                ui,
-                name,
-                text,
-                egui::Label::new(RichText::new(text).color(palette::error().to_egui())).wrap(),
-            );
+    /// A note's check, a row of `form` under its field - none while it says nothing: an empty
+    /// check's row stood blank, a control high, above "Says" (dialog_layout::quiet_label).
+    fn checked_label(form: &mut dialog::Form<'_>, name: &str, text: &str, error: bool) {
+        let colour = if error {
+            palette::error().to_egui()
         } else {
-            controls::label_as(ui, name, text, egui::Label::new(text).wrap());
+            palette::text().to_egui()
+        };
+        if text.is_empty() {
+            layout::quiet_label(form.ui(), name, text, colour);
+        } else {
+            form.under(|ui| layout::quiet_label(ui, name, text, colour));
         }
     }
 
     fn leader_tab(&mut self, ui: &mut Ui, document: &Document) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_max_width(260.0);
+                // A column of its own width, which the list's rows span as a table's do; the form
+                // has the rest of the body.
+                ui.set_width(LIST_WIDTH);
                 if controls::toggle(
                     ui,
                     "leaderListScopeToggle",
@@ -2580,17 +2588,38 @@ impl LeaderManagerDialog {
                 if self.list_scope_toggle && self.list_scope.ui(ui) {
                     self.fill_list(document);
                 }
-                problem_line(ui, "leaderListScopeProblem", &self.list_scope_problem);
+                layout::quiet_label(
+                    ui,
+                    "leaderListScopeProblem",
+                    &self.list_scope_problem,
+                    palette::error().to_egui(),
+                );
                 let rows: Vec<Vec<String>> = self
                     .list
                     .iter()
                     .map(|(_, text)| vec![text.clone()])
                     .collect();
-                let mut current = self.list_current;
-                if controls::rows(ui, "leaderList", &rows, &mut current).changed()
-                    && let Some(&(id, _)) = current.and_then(|at| self.list.get(at))
+                // The list in the table look, its header over it and an empty state under it: a
+                // bare list of words under the toggle headed nothing when it was empty (the second
+                // look audit's N13).
+                let shown = table_look(
+                    ui,
+                    "leaderList",
+                    &["Leader"],
+                    &rows,
+                    self.list_current,
+                    &[],
+                    None,
+                    TableLook {
+                        fill: true,
+                        empty: "No leaders: draw one with the Leader tool",
+                    },
+                );
+                if let Some(at) = shown.chosen
+                    && self.list_current != Some(at)
+                    && let Some(&(id, _)) = self.list.get(at)
                 {
-                    self.list_current = current;
+                    self.list_current = Some(at);
                     self.show_leader(document, id);
                 }
             });
@@ -2601,9 +2630,11 @@ impl LeaderManagerDialog {
     fn leader_form(&mut self, ui: &mut Ui, document: &Document) {
         let enabled = self.fields_enabled;
         let mut preview = false;
-        // Position
-        ui.group(|ui| {
-            ui.strong("Position");
+        // One form, its sections under headings rather than in boxes, so every field of the tab
+        // starts at one edge and ends at one: a Position box, a Look box beside a table and an
+        // Attribute box had four right edges (the second look audit's N13).
+        dialog::section(ui, "Position");
+        {
             named_row(ui, "leaderPositionPointLabel", "Point", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     let mut point = Choice {
@@ -2648,20 +2679,32 @@ impl LeaderManagerDialog {
                     });
                 });
             });
-            controls::label_as(
-                ui,
-                "leaderPositionHint",
-                &self.position_hint,
-                egui::Label::new(self.position_hint.as_str()).wrap(),
-            );
-        });
+            // What the position rows do, under their fields in the secondary text.
+            dialog::labelled(ui, "", |ui| {
+                controls::label_as(
+                    ui,
+                    "leaderPositionHint",
+                    &self.position_hint,
+                    egui::Label::new(
+                        RichText::new(self.position_hint.as_str())
+                            .color(palette::text_muted().to_egui()),
+                    )
+                    .wrap(),
+                );
+            });
+        }
         // The note.
-        ui.scope(|ui| {
-            if !self.scope_visible {
-                ui.set_invisible();
-            }
+        dialog::section(ui, "Note");
+        // Hidden while there is no scope to say, taking no room: an invisible label kept its row
+        // and left a band above "On".
+        let scope_label = |ui: &mut Ui| {
             controls::label(ui, "leaderScope", &self.scope_text);
-        });
+        };
+        if self.scope_visible {
+            scope_label(ui);
+        } else {
+            crate::survey::survey_dialogs::hidden(ui, "leaderScope", scope_label);
+        }
         dialog::labelled(ui, "On", |ui| {
             // What it is on wraps in what Attach to Selected leaves of the row.
             let width = dialog::beside_a_button(ui, "Attach to Selected");
@@ -2692,13 +2735,15 @@ impl LeaderManagerDialog {
         dialog::form(ui, |form| {
             form.row("Along", |ui| {
                 ui.add_enabled_ui(self.along_enabled, |ui| {
-                    preview |= controls::spin(ui, "leaderAlong", &mut self.along, ALONG)
-                        .on_hover_text(
-                            "How far along what it is on the tip is: of the line or the arc from \
-                             its start, of the polyline segment, of a turn of the circle (LEADER \
-                             SET id tip=#on.alongN:T)",
-                        )
-                        .changed();
+                    preview |= layout::full_width(ui, |ui| {
+                        controls::spin(ui, "leaderAlong", &mut self.along, ALONG)
+                    })
+                    .on_hover_text(
+                        "How far along what it is on the tip is: of the line or the arc from its \
+                         start, of the polyline segment, of a turn of the circle (LEADER SET id \
+                         tip=#on.alongN:T)",
+                    )
+                    .changed();
                 });
             });
             form.row("Note is", |ui| {
@@ -2743,152 +2788,132 @@ impl LeaderManagerDialog {
                     .changed();
                 });
             });
-            form.under(|ui| {
-                Self::checked_label(
-                    ui,
-                    "leaderTemplateCheck",
-                    &self.leader.check,
-                    self.leader.check_error,
-                );
-            });
+            Self::checked_label(
+                form,
+                "leaderTemplateCheck",
+                &self.leader.check,
+                self.leader.check_error,
+            );
             form.row("Says", |ui| {
-                controls::label(ui, "leaderPreview", &self.leader.preview);
+                dialog::text_value(ui, |ui| {
+                    controls::label(ui, "leaderPreview", &self.leader.preview);
+                });
+            });
+            // The values the note may use, under the note in the field column and as wide as
+            // the fields: beside the Look box it was a strip 100 points wide (the look audits'
+            // T1).
+            form.under(|ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    let shown = table_look(
+                        ui,
+                        "leaderValues",
+                        &["Value", "Here"],
+                        &self.leader.values,
+                        self.leader.values_current,
+                        &[],
+                        None,
+                        TableLook {
+                            fill: true,
+                            empty: "No values: the tip is on nothing that offers any",
+                        },
+                    );
+                    if let Some(at) = shown.chosen {
+                        self.leader.values_current = Some(at);
+                    }
+                    if let Some(at) = shown.double_clicked {
+                        double_clicked = self.leader.values.get(at).map(|row| row[0].clone());
+                    }
+                });
             });
         });
-        ui.horizontal_top(|ui| {
-            ui.add_enabled_ui(enabled, |ui| {
-                let shown = table(
-                    ui,
-                    "leaderValues",
-                    &["Value", "Here"],
-                    &self.leader.values,
-                    self.leader.values_current,
-                    &[],
-                    None,
-                );
-                if let Some(at) = shown.chosen {
-                    self.leader.values_current = Some(at);
-                }
-                if let Some(at) = shown.double_clicked {
-                    double_clicked = self.leader.values.get(at).map(|row| row[0].clone());
-                }
-            });
-            ui.group(|ui| {
-                ui.strong("Look");
-                ui.add_enabled_ui(enabled, |ui| {
-                    dialog::form(ui, |form| {
-                        form.row("Arrow", |ui| {
-                            preview |= combo(ui, "leaderArrow", &ARROWS, &mut self.arrow).changed();
-                        });
-                        form.row("Note frame", |ui| {
-                            preview |=
-                                combo(ui, "leaderCallout", &CALLOUTS, &mut self.callout).changed();
-                        });
-                        form.row("Text style", |ui| {
-                            preview |= self.leader.text_style.ui(ui, "leaderTextStyle");
-                        });
-                        let boxes = [
-                            (
-                                "Text height",
-                                "leaderPaperHeight",
-                                &mut self.leader.paper_height,
-                            ),
-                            ("Arrow size", "leaderArrowSize", &mut self.arrow_size),
-                            ("Landing", "leaderLanding", &mut self.landing),
-                        ];
-                        for (title, name, value) in boxes {
-                            form.row(title, |ui| {
-                                preview |= controls::spin(ui, name, value, SIZE).changed();
-                            });
-                        }
-                        named_row(
-                            form.ui(),
-                            "leaderLandingAngleLabel",
-                            "Landing direction",
-                            |ui| {
-                                preview |= controls::choice(
-                                    ui,
-                                    "leaderLandingAngle",
-                                    &self.landing_angles,
-                                    &mut self.landing_angle,
-                                )
-                                .on_hover_text(
-                                    "Landing direction in degrees: 0 right, 180 left; Auto follows \
-                                     the last leader segment.",
-                                )
+        dialog::section(ui, "Look");
+        ui.add_enabled_ui(enabled, |ui| {
+            dialog::form(ui, |form| {
+                form.row("Arrow", |ui| {
+                    preview |= combo(ui, "leaderArrow", &ARROWS, &mut self.arrow).changed();
+                });
+                form.row("Note frame", |ui| {
+                    preview |= combo(ui, "leaderCallout", &CALLOUTS, &mut self.callout).changed();
+                });
+                form.row("Text style", |ui| {
+                    preview |= self.leader.text_style.ui(ui, "leaderTextStyle");
+                });
+                let boxes = [
+                    (
+                        "Text height",
+                        "leaderPaperHeight",
+                        &mut self.leader.paper_height,
+                    ),
+                    ("Arrow size", "leaderArrowSize", &mut self.arrow_size),
+                    ("Landing", "leaderLanding", &mut self.landing),
+                ];
+                for (title, name, value) in boxes {
+                    form.row(title, |ui| {
+                        preview |=
+                            layout::full_width(ui, |ui| controls::spin(ui, name, value, SIZE))
                                 .changed();
-                            },
-                        );
                     });
-                });
-            });
-        });
-        ui.group(|ui| {
-            ui.strong("Attribute of the entity it is on");
-            ui.horizontal(|ui| {
-                // The name, the value and the type share what Set and Remove leave of the row.
-                let width = (dialog::beside_buttons(ui, &["Set", "Remove"])
-                    - 2.0 * ui.spacing().item_spacing.x)
-                    / 3.0;
-                dialog::fixed_fields(ui, width);
-                ui.add_enabled_ui(enabled, |ui| {
-                    edit(
-                        ui,
-                        "leaderAttributeName",
-                        &mut self.attribute_name,
-                        "invert",
-                    );
-                    edit(
-                        ui,
-                        "leaderAttributeValue",
-                        &mut self.attribute_value,
-                        "10.25",
-                    );
-                    controls::choice(
-                        ui,
-                        "leaderAttributeType",
-                        &self.attribute_types,
-                        &mut self.attribute_type,
-                    );
-                });
-                ui.add_enabled_ui(self.attribute_enabled, |ui| {
-                    if button(ui, "leaderAttributeSet", "Set")
-                        .on_hover_text(
-                            "Set this attribute on the entity the tip is on (LEADER PROP)",
+                }
+                named_row(
+                    form.ui(),
+                    "leaderLandingAngleLabel",
+                    "Landing direction",
+                    |ui| {
+                        preview |= controls::choice(
+                            ui,
+                            "leaderLandingAngle",
+                            &self.landing_angles,
+                            &mut self.landing_angle,
                         )
-                        .clicked()
-                    {
-                        self.pressed = Some(Pressed::AttributeSet);
-                    }
-                    if button(ui, "leaderAttributeRemove", "Remove").clicked() {
-                        self.pressed = Some(Pressed::AttributeRemove);
-                    }
-                });
+                        .on_hover_text(
+                            "Landing direction in degrees: 0 right, 180 left; Auto follows the \
+                             last leader segment.",
+                        )
+                        .changed();
+                    },
+                );
             });
         });
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(self.freeze_enabled, |ui| {
-                if button(ui, "leaderFreeze", "Freeze Note")
-                    .on_hover_text(self.freeze_tip.as_str())
+        dialog::section(ui, "Attribute of the entity it is on");
+        dialog::labelled(ui, "Name, value, type", |ui| {
+            // The name, the value and the type share what Set and Remove leave of the row.
+            let width = (dialog::beside_buttons(ui, &["Set", "Remove"])
+                - 2.0 * ui.spacing().item_spacing.x)
+                / 3.0;
+            dialog::fixed_fields(ui, width);
+            ui.add_enabled_ui(enabled, |ui| {
+                edit(
+                    ui,
+                    "leaderAttributeName",
+                    &mut self.attribute_name,
+                    "invert",
+                );
+                edit(
+                    ui,
+                    "leaderAttributeValue",
+                    &mut self.attribute_value,
+                    "10.25",
+                );
+                controls::choice(
+                    ui,
+                    "leaderAttributeType",
+                    &self.attribute_types,
+                    &mut self.attribute_type,
+                );
+            });
+            ui.add_enabled_ui(self.attribute_enabled, |ui| {
+                if button(ui, "leaderAttributeSet", "Set")
+                    .on_hover_text("Set this attribute on the entity the tip is on (LEADER PROP)")
                     .clicked()
                 {
-                    self.pressed = Some(Pressed::Freeze);
+                    self.pressed = Some(Pressed::AttributeSet);
                 }
-            });
-            ui.add_enabled_ui(self.detach_enabled, |ui| {
-                if button(ui, "leaderDetach", "Detach Tip")
-                    .on_hover_text(self.detach_tip.as_str())
-                    .clicked()
-                {
-                    self.pressed = Some(Pressed::Detach);
-                }
-            });
-            ui.add_enabled_ui(self.apply_enabled, |ui| {
-                if button(ui, "leaderApply", "Apply").clicked() {
-                    self.pressed = Some(Pressed::Apply);
+                if button(ui, "leaderAttributeRemove", "Remove").clicked() {
+                    self.pressed = Some(Pressed::AttributeRemove);
                 }
             });
         });
+        // Freeze Note, Detach Tip and Apply, the tab's actions, are in the footer (`footer`).
 
         // What the changes mean, as the C++'s signals said it.
         if kind_chosen {
@@ -2988,114 +3013,128 @@ impl LeaderManagerDialog {
                             .changed();
                         });
                     });
-                    form.under(|ui| {
-                        Self::checked_label(
-                            ui,
-                            "leaderForCheck",
-                            &self.for_note.check,
-                            self.for_note.check_error,
-                        );
-                    });
-                    form.row("Says", |ui| {
-                        controls::label(ui, "leaderForPreview", &self.for_note.preview);
-                    });
-                });
-                ui.horizontal_top(|ui| {
-                    let shown = table(
-                        ui,
-                        "leaderForValues",
-                        &["Value", "Here"],
-                        &self.for_note.values,
-                        self.for_note.values_current,
-                        &[],
-                        None,
+                    Self::checked_label(
+                        form,
+                        "leaderForCheck",
+                        &self.for_note.check,
+                        self.for_note.check_error,
                     );
-                    if let Some(at) = shown.chosen {
-                        self.for_note.values_current = Some(at);
-                    }
-                    if let Some(at) = shown.double_clicked {
-                        double_clicked = self.for_note.values.get(at).map(|row| row[0].clone());
-                    }
-                    ui.group(|ui| {
-                        ui.strong("Look");
-                        dialog::form(ui, |form| {
-                            form.row("Arrow", |ui| {
-                                preview |= optional_box(
-                                    ui,
-                                    "leaderForArrow",
-                                    &for_arrow_texts(),
-                                    &ARROWS,
-                                    &mut self.for_arrow,
-                                );
-                            });
-                            form.row("Callout", |ui| {
-                                preview |= optional_box(
-                                    ui,
-                                    "leaderForCallout",
-                                    &for_callout_texts(),
-                                    &CALLOUTS,
-                                    &mut self.for_callout,
-                                );
-                            });
-                            form.row("Text style", |ui| {
-                                preview |= self.for_note.text_style.ui(ui, "leaderForTextStyle");
-                            });
-                            let boxes = [
-                                (
-                                    "Text height",
-                                    "leaderForPaperHeight",
-                                    &mut self.for_note.paper_height,
-                                    SIZE,
-                                ),
-                                (
-                                    "Arrow size",
-                                    "leaderForArrowSize",
-                                    &mut self.for_arrow_size,
-                                    SIZE,
-                                ),
-                                ("Landing", "leaderForLanding", &mut self.for_landing, SIZE),
-                                (
-                                    "Note direction",
-                                    "leaderForAngle",
-                                    &mut self.for_angle,
-                                    FOR_ANGLE,
-                                ),
-                                (
-                                    "Note distance on paper",
-                                    "leaderForLength",
-                                    &mut self.for_length,
-                                    FOR_LENGTH,
-                                ),
-                            ];
-                            for (title, name, value, range) in boxes {
-                                form.row(title, |ui| {
-                                    preview |= controls::spin(ui, name, value, range).changed();
-                                });
-                            }
-                            form.under(|ui| {
-                                preview |= check(
-                                    ui,
-                                    "leaderForBalloon",
-                                    "Balloons (numbered when no note)",
-                                    &mut self.for_balloon,
-                                )
-                                .changed();
-                            });
+                    form.row("Says", |ui| {
+                        dialog::text_value(ui, |ui| {
+                            controls::label(ui, "leaderForPreview", &self.for_note.preview);
                         });
                     });
+                    // The values under the note, as wide as its fields (the Leader tab's).
+                    form.under(|ui| {
+                        let shown = table_look(
+                            ui,
+                            "leaderForValues",
+                            &["Value", "Here"],
+                            &self.for_note.values,
+                            self.for_note.values_current,
+                            &[],
+                            None,
+                            TableLook {
+                                fill: true,
+                                empty: "No values: select an entity that offers some",
+                            },
+                        );
+                        if let Some(at) = shown.chosen {
+                            self.for_note.values_current = Some(at);
+                        }
+                        if let Some(at) = shown.double_clicked {
+                            double_clicked =
+                                self.for_note.values.get(at).map(|row| row[0].clone());
+                        }
+                    });
                 });
-                controls::label(ui, "leaderForReport", &self.for_report);
+                dialog::section(ui, "Look");
+                dialog::form(ui, |form| {
+                    form.row("Arrow", |ui| {
+                        preview |= optional_box(
+                            ui,
+                            "leaderForArrow",
+                            &for_arrow_texts(),
+                            &ARROWS,
+                            &mut self.for_arrow,
+                        );
+                    });
+                    form.row("Callout", |ui| {
+                        preview |= optional_box(
+                            ui,
+                            "leaderForCallout",
+                            &for_callout_texts(),
+                            &CALLOUTS,
+                            &mut self.for_callout,
+                        );
+                    });
+                    form.row("Text style", |ui| {
+                        preview |= self.for_note.text_style.ui(ui, "leaderForTextStyle");
+                    });
+                    let boxes = [
+                        (
+                            "Text height",
+                            "leaderForPaperHeight",
+                            &mut self.for_note.paper_height,
+                            SIZE,
+                        ),
+                        (
+                            "Arrow size",
+                            "leaderForArrowSize",
+                            &mut self.for_arrow_size,
+                            SIZE,
+                        ),
+                        ("Landing", "leaderForLanding", &mut self.for_landing, SIZE),
+                        (
+                            "Note direction",
+                            "leaderForAngle",
+                            &mut self.for_angle,
+                            FOR_ANGLE,
+                        ),
+                        (
+                            "Note distance on paper",
+                            "leaderForLength",
+                            &mut self.for_length,
+                            FOR_LENGTH,
+                        ),
+                    ];
+                    for (title, name, value, range) in boxes {
+                        form.row(title, |ui| {
+                            preview |=
+                                layout::full_width(ui, |ui| controls::spin(ui, name, value, range))
+                                    .changed();
+                        });
+                    }
+                    form.under(|ui| {
+                        preview |= check(
+                            ui,
+                            "leaderForBalloon",
+                            "Balloons (numbered when no note)",
+                            &mut self.for_balloon,
+                        )
+                        .changed();
+                    });
+                });
+                layout::quiet_label(
+                    ui,
+                    "leaderForReport",
+                    &self.for_report,
+                    palette::text().to_egui(),
+                );
             });
             ui.vertical(|ui| {
                 if self.for_scope.ui(ui) {
                     preview = true;
                 }
-                controls::label(ui, "leaderForScopeReport", &self.for_scope_report);
+                layout::quiet_label(
+                    ui,
+                    "leaderForScopeReport",
+                    &self.for_scope_report,
+                    palette::text().to_egui(),
+                );
             });
         });
-        if button(ui, "leaderForMake", "Make for Selection").clicked() {
-            self.pressed = Some(Pressed::Make);
-        }
+        // Make for Selection, the tab's action, is the footer's primary (`footer`).
 
         if kind_chosen {
             self.for_note_kind_chosen(document);
@@ -3142,8 +3181,10 @@ impl LeaderManagerDialog {
                 // What the scope and filter beside it leave of the body (as on For Selection).
                 let gap = ui.spacing().item_spacing.x;
                 ui.set_width(BODY_WIDTH - WIDGET_WIDTH - gap);
-                ui.group(|ui| {
-                    ui.strong("Line the notes up (the topmost sets x)");
+                // Sections under headings, as the other tabs' are; each keeps its own action, the
+                // tab having two that do not go together.
+                ui.vertical(|ui| {
+                    dialog::section(ui, "Line the notes up (the topmost sets x)");
                     ui.horizontal(|ui| {
                         check(ui, "leaderAlignUseX", "At x", &mut self.align_use_x);
                         ui.add_enabled_ui(self.align_use_x, |ui| {
@@ -3170,8 +3211,8 @@ impl LeaderManagerDialog {
                         self.pressed = Some(Pressed::Align);
                     }
                 });
-                ui.group(|ui| {
-                    ui.strong("Number the balloons again");
+                ui.vertical(|ui| {
+                    dialog::section(ui, "Number the balloons again");
                     dialog::labelled(ui, "From", |ui| {
                         controls::whole(
                             ui,
@@ -3211,7 +3252,12 @@ impl LeaderManagerDialog {
                         self.pressed = Some(Pressed::Renumber);
                     }
                 });
-                controls::label(ui, "leaderArrangeReport", &self.arrange_report);
+                layout::quiet_label(
+                    ui,
+                    "leaderArrangeReport",
+                    &self.arrange_report,
+                    palette::text().to_egui(),
+                );
             });
             ui.vertical(|ui| {
                 self.arrange_scope.ui(ui);
@@ -3221,20 +3267,72 @@ impl LeaderManagerDialog {
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let problem = self.problem.clone();
-        // The one footer (shell::dialog::button_row): the last refusal at the left, Close at the
-        // right; each tab's own actions stay on its tab. The footer held a blank read-only field
-        // 220 wide on a fresh dialog, and no Close.
-        let (_, closed) = dialog::button_row(
+        // The one footer (shell::dialog::button_row), the front tab's: on Leader, Freeze Note and
+        // Detach Tip at the left beside the last refusal, away from Apply (as Text Styles keeps
+        // Delete), then Close and Apply, the primary; on For Selection, Close and Make for
+        // Selection; on Arrange, whose two actions each belong to a section, Close alone. The
+        // tabs' actions stood in their bodies, under the forms, with the footer empty but for
+        // Close (the look audits' T5).
+        let tab = self.tab;
+        let (freeze, detach) = (self.freeze_enabled, self.detach_enabled);
+        let apply = self.apply_enabled;
+        let (freeze_tip, detach_tip) = (self.freeze_tip.clone(), self.detach_tip.clone());
+        let (left, (closed, primary)) = dialog::button_row(
             ui,
             |ui| {
+                let mut pressed = None;
+                if tab == 0 {
+                    ui.add_enabled_ui(freeze, |ui| {
+                        if button(ui, "leaderFreeze", "Freeze Note")
+                            .on_hover_text(freeze_tip.as_str())
+                            .clicked()
+                        {
+                            pressed = Some(Pressed::Freeze);
+                        }
+                    });
+                    ui.add_enabled_ui(detach, |ui| {
+                        if button(ui, "leaderDetach", "Detach Tip")
+                            .on_hover_text(detach_tip.as_str())
+                            .clicked()
+                        {
+                            pressed = Some(Pressed::Detach);
+                        }
+                    });
+                }
                 problem_line(ui, "leaderProblem", &problem);
+                pressed
             },
             |ui| {
-                controls::button(ui, "leaderClose", "Close")
+                let closed = controls::button(ui, "leaderClose", "Close")
                     .on_hover_text("Close the dialog; edits not applied are dropped")
-                    .clicked()
+                    .clicked();
+                let primary = match tab {
+                    0 => ui
+                        .add_enabled_ui(apply, |ui| {
+                            controls::primary(ui, "leaderApply", "Apply")
+                                .on_hover_text(
+                                    "Store what the form changed on the leaders shown, as one \
+                                     undo step (LEADER SET)",
+                                )
+                                .clicked()
+                        })
+                        .inner
+                        .then_some(Pressed::Apply),
+                    1 => controls::primary(ui, "leaderForMake", "Make for Selection")
+                        .on_hover_text(
+                            "A leader, or a balloon, to each entity the Apply to controls take \
+                             (LEADER FOR, BALLOON FOR)",
+                        )
+                        .clicked()
+                        .then_some(Pressed::Make),
+                    _ => None,
+                };
+                (closed, primary)
             },
         );
+        if let Some(pressed) = left.or(primary) {
+            self.pressed = Some(pressed);
+        }
         if closed {
             self.pressed = Some(Pressed::Close);
         }

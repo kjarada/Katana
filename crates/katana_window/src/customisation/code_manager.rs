@@ -691,6 +691,10 @@ impl SurveyCodeManagerDialog {
         // white panes of paper were the brightest things on the screen (the look of 2026-11-16).
         dialog.linestyle_preview.set_ground(PreviewGround::Screen);
         dialog.symbol_preview.set_ground(PreviewGround::Screen);
+        // A rule that draws no linestyle or no symbol says so in the pane rather than leaving an
+        // empty dark box (the look audits' T6).
+        dialog.linestyle_preview.set_placeholder("No linestyle");
+        dialog.symbol_preview.set_placeholder("No symbol");
         dialog
     }
 

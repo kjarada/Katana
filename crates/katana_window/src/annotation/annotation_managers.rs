@@ -69,6 +69,7 @@ use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
+use crate::theme::palette;
 
 /// The rule table's columns.
 const RULE_NAME: usize = 0;
@@ -544,6 +545,7 @@ impl TextStyleManagerDialog {
             &mut self.frame,
             DialogFrame::new("textStyleManagerDialog", "Text Styles"),
         );
+        frame.set_body_width(TEXT_BODY_WIDTH);
         let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
         self.frame = frame;
         match self.pressed.take() {
@@ -563,17 +565,31 @@ impl TextStyleManagerDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The list beside the form, each a width of its own: in the frame's 520 the form had 290
+        // and its fields stopped at 120 ("ByLayer, or #RR...").
+        ui.set_width(TEXT_BODY_WIDTH);
+        // The list is as tall as the form beside it less the New row under it, both as the last
+        // frame drew them (dialog_layout::list_well): a list of one name over a void.
+        let form_id = ui.id().with("textStyleFormHeight");
+        let new_id = ui.id().with("textStyleNewHeight");
+        let form_height = layout::last_height(ui, form_id).unwrap_or(0.0);
+        let new_height = layout::last_height(ui, new_id).unwrap_or(0.0);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                ui.set_width(LIST_COLUMN_WIDTH);
                 let rows = name_rows(&self.names);
-                if controls::rows(ui, "textStyleList", &rows, &mut self.current).changed() {
+                let well = form_height - new_height - ui.spacing().item_spacing.y;
+                if layout::list_well(ui, "textStyleList", &rows, &mut self.current, well).changed()
+                {
                     let name = self.current_name();
                     if let Some(style) = host.document().model().text_styles.find(&name) {
                         let style = style.clone();
                         self.show_style(&style);
                     }
                 }
-                ui.horizontal(|ui| {
+                let new_row = ui.horizontal(|ui| {
+                    // The name takes what New leaves of the column.
+                    dialog::fixed_fields(ui, dialog::beside_a_button(ui, "New"));
                     edit(
                         ui,
                         "textStyleNewName",
@@ -588,9 +604,10 @@ impl TextStyleManagerDialog {
                         self.pressed = Some(TextPressed::New);
                     }
                 });
+                layout::keep_height(ui, new_id, new_row.response.rect.height());
             });
             ui.add_space(layout::SECTION_GAP);
-            ui.vertical(|ui| {
+            let form = ui.vertical(|ui| {
                 dialog::form(ui, |form| {
                     form.row("Font", |ui| {
                         edit(ui, "textStyleFont", &mut self.font, "the plain face");
@@ -615,9 +632,11 @@ impl TextStyleManagerDialog {
                             TEXT_OBLIQUE,
                         ),
                     ];
+                    // A number as wide as the fields above and below it: one right edge.
                     for (title, name, value, range) in boxes {
                         form.row(title, |ui| {
-                            let shown = controls::spin(ui, name, value, range);
+                            let shown =
+                                layout::full_width(ui, |ui| controls::spin(ui, name, value, range));
                             if name == "textStylePaperHeight" {
                                 shown.on_hover_text("0: the text's own height");
                             }
@@ -638,7 +657,9 @@ impl TextStyleManagerDialog {
                     });
                     form.row("Mask", |ui| {
                         check(ui, "textStyleMask", "Background mask", &mut self.mask);
-                        controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN);
+                        layout::full_width(ui, |ui| {
+                            controls::spin(ui, "textStyleMaskMargin", &mut self.margin, TEXT_MARGIN)
+                        });
                     });
                     form.under(|ui| {
                         check(
@@ -649,24 +670,36 @@ impl TextStyleManagerDialog {
                         );
                     });
                     form.row("Line spacing", |ui| {
-                        controls::spin(ui, "textStyleLineSpacing", &mut self.spacing, TEXT_SPACING);
+                        layout::full_width(ui, |ui| {
+                            controls::spin(
+                                ui,
+                                "textStyleLineSpacing",
+                                &mut self.spacing,
+                                TEXT_SPACING,
+                            )
+                        });
+                    });
+                    form.row("Sample", |ui| {
+                        let mut sample = RichText::new("AaBb 123.456");
+                        if self.bold {
+                            sample = sample.strong();
+                        }
+                        if self.italic {
+                            sample = sample.italics();
+                        }
+                        // On its label's line (dialog::text_value).
+                        dialog::text_value(ui, |ui| {
+                            controls::label_as(
+                                ui,
+                                "textStyleSample",
+                                "AaBb 123.456",
+                                egui::Label::new(sample),
+                            );
+                        });
                     });
                 });
-                ui.add_space(layout::GAP);
-                let mut sample = RichText::new("AaBb 123.456");
-                if self.bold {
-                    sample = sample.strong();
-                }
-                if self.italic {
-                    sample = sample.italics();
-                }
-                controls::label_as(
-                    ui,
-                    "textStyleSample",
-                    "AaBb 123.456",
-                    egui::Label::new(sample),
-                );
             });
+            layout::keep_height(ui, form_id, form.response.rect.height());
         });
     }
 
@@ -722,6 +755,15 @@ enum LabelPressed {
 
 /// The label style manager's body width on both its tabs.
 const LABEL_BODY_WIDTH: f32 = 860.0;
+
+/// The width of the list of names beside a style manager's form (Text Styles, Label Styles): its
+/// rows span it, and the New rows under it fill it - the field a name of twenty characters, the
+/// kind's choice and New beside it.
+const LIST_COLUMN_WIDTH: f32 = 220.0;
+
+/// The text style manager's body width: the list's column, a gap, and a form whose fields hold a
+/// colour's "ByLayer, or #RRGGBB" and a face's name whole.
+const TEXT_BODY_WIDTH: f32 = 640.0;
 
 /// Format > Label Styles and Rules... (see the module comment).
 pub struct LabelStyleManagerDialog {
@@ -1573,50 +1615,55 @@ impl LabelStyleManagerDialog {
     }
 
     fn styles_tab(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The list is as tall as the form beside it less the New rows under it, both as the last
+        // frame drew them (dialog_layout::list_well): a list of one name over a void.
+        let form_id = ui.id().with("labelStyleFormHeight");
+        let new_id = ui.id().with("labelStyleNewHeight");
+        let form_height = layout::last_height(ui, form_id).unwrap_or(0.0);
+        let new_height = layout::last_height(ui, new_id).unwrap_or(0.0);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                ui.set_width(LIST_COLUMN_WIDTH);
                 let rows = name_rows(&self.names);
-                if controls::rows(ui, "labelStyleList", &rows, &mut self.current).changed() {
+                let well = form_height - new_height - ui.spacing().item_spacing.y;
+                if layout::list_well(ui, "labelStyleList", &rows, &mut self.current, well)
+                    .changed()
+                {
                     let name = self.current_name();
                     if let Some(style) = host.document().model().label_styles.find(&name) {
                         let style = style.clone();
                         self.show_style(&style);
                     }
                 }
-                edit(
-                    ui,
-                    "labelStyleNewName",
-                    &mut self.new_name,
-                    &self.new_name_placeholder,
-                )
-                .on_hover_text("The name New gives; blank for the one shown");
-                ui.horizontal(|ui| {
-                    combo(ui, "labelStyleNewKind", &KINDS, &mut self.new_kind)
-                        .on_hover_text("What the new style labels; fixed once it is made");
-                    if button(ui, "labelStyleNew", "New")
-                        .on_hover_text(
-                            "A new label style of the name and kind beside it (LABELSTYLE NEW)",
-                        )
-                        .clicked()
-                    {
-                        self.pressed = Some(LabelPressed::New);
-                    }
+                let new_rows = ui.vertical(|ui| {
+                    dialog::fill_fields(ui);
+                    edit(
+                        ui,
+                        "labelStyleNewName",
+                        &mut self.new_name,
+                        &self.new_name_placeholder,
+                    )
+                    .on_hover_text("The name New gives; blank for the one shown");
+                    ui.horizontal(|ui| {
+                        // The kind takes what New leaves of the row.
+                        dialog::fixed_fields(ui, dialog::beside_a_button(ui, "New"));
+                        combo(ui, "labelStyleNewKind", &KINDS, &mut self.new_kind)
+                            .on_hover_text("What the new style labels; fixed once it is made");
+                        if button(ui, "labelStyleNew", "New")
+                            .on_hover_text(
+                                "A new label style of the name and kind beside it (LABELSTYLE NEW)",
+                            )
+                            .clicked()
+                        {
+                            self.pressed = Some(LabelPressed::New);
+                        }
+                    });
                 });
+                layout::keep_height(ui, new_id, new_rows.response.rect.height());
             });
-            ui.vertical(|ui| {
-                self.style_form(ui);
-                ui.horizontal(|ui| {
-                    if button(ui, "labelStyleDelete", "Delete").clicked() {
-                        self.pressed = Some(LabelPressed::Delete);
-                    }
-                    if button(ui, "labelStyleDefaults", "Add Standard Set").clicked() {
-                        self.pressed = Some(LabelPressed::Defaults);
-                    }
-                    if controls::primary(ui, "labelStyleApply", "Apply").clicked() {
-                        self.pressed = Some(LabelPressed::Apply);
-                    }
-                });
-            });
+            ui.add_space(layout::GAP);
+            let form = ui.vertical(|ui| self.style_form(ui));
+            layout::keep_height(ui, form_id, form.response.rect.height());
         });
     }
 
@@ -1671,9 +1718,20 @@ impl LabelStyleManagerDialog {
                 );
             });
 
-            form.under(|ui| {
-                controls::label(ui, "labelStyleTemplateCheck", &self.template_check);
-            });
+            // The template's check under it, no row while it says nothing: an empty row stood
+            // between Template and Text style (the second look audit's N15).
+            if self.template_check.is_empty() {
+                layout::quiet_label(
+                    form.ui(),
+                    "labelStyleTemplateCheck",
+                    "",
+                    palette::text().to_egui(),
+                );
+            } else {
+                form.under(|ui| {
+                    controls::label(ui, "labelStyleTemplateCheck", &self.template_check);
+                });
+            }
 
             form.row("Text style", |ui| {
                 controls::choice(
@@ -1685,7 +1743,9 @@ impl LabelStyleManagerDialog {
             });
 
             form.row("Height on paper (0: the text style's)", |ui| {
-                controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER);
+                layout::full_width(ui, |ui| {
+                    controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER)
+                });
             });
             form.row("Placement", |ui| {
                 combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
@@ -1699,7 +1759,9 @@ impl LabelStyleManagerDialog {
                 );
             });
             form.row("Offset", |ui| {
-                controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
+                layout::full_width(ui, |ui| {
+                    controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET)
+                });
             });
             // The two boxes under the fields, as a check box under a form's fields is.
             form.under(|ui| {
@@ -1717,12 +1779,14 @@ impl LabelStyleManagerDialog {
                 );
             });
             form.row("Priority", |ui| {
-                controls::whole(
-                    ui,
-                    "labelStylePriority",
-                    &mut self.priority,
-                    PRIORITY_LOWEST..=PRIORITY_HIGHEST,
-                );
+                layout::full_width(ui, |ui| {
+                    controls::whole(
+                        ui,
+                        "labelStylePriority",
+                        &mut self.priority,
+                        PRIORITY_LOWEST..=PRIORITY_HIGHEST,
+                    )
+                });
             });
             form.row("Marker", |ui| {
                 combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
@@ -1759,9 +1823,10 @@ impl LabelStyleManagerDialog {
                     LABEL_TICK_LENGTH,
                 ),
             ];
+            // Each number as wide as the choices between them: one right edge for the form.
             for (title, name, value, range) in boxes {
                 form.row(title, |ui| {
-                    controls::spin(ui, name, value, range);
+                    layout::full_width(ui, |ui| controls::spin(ui, name, value, range));
                 });
             }
         });
@@ -1889,20 +1954,47 @@ impl LabelStyleManagerDialog {
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let problem = self.problem.clone();
-        // The one footer (shell::dialog::button_row): the last refusal at the left, Close at the
-        // right. Each tab's own actions stay on its tab; the footer held the refusal alone, an
-        // empty band on a fresh dialog.
-        let (_, closed) = dialog::button_row(
+        // The one footer (shell::dialog::button_row), the front tab's. On Label Styles, Delete and
+        // Add Standard Set at the left beside the last refusal, away from Apply (as Text Styles
+        // keeps Delete), then Close and Apply, the primary: the three stood under the form with
+        // Apply in the accent in the body (the look audits' T5). On Auto-Label Rules, whose
+        // actions each belong to the rules, Close alone.
+        let styles = self.tab == 0;
+        let (left, (closed, applied)) = dialog::button_row(
             ui,
             |ui| {
+                let mut pressed = None;
+                if styles {
+                    if button(ui, "labelStyleDelete", "Delete").clicked() {
+                        pressed = Some(LabelPressed::Delete);
+                    }
+                    if button(ui, "labelStyleDefaults", "Add Standard Set")
+                        .on_hover_text("Add the standard label styles the drawing lacks")
+                        .clicked()
+                    {
+                        pressed = Some(LabelPressed::Defaults);
+                    }
+                }
                 problem_line(ui, "labelStyleProblem", &problem);
+                pressed
             },
             |ui| {
-                controls::button(ui, "labelStyleClose", "Close")
+                let closed = controls::button(ui, "labelStyleClose", "Close")
                     .on_hover_text("Close the dialog; edits not applied are dropped")
-                    .clicked()
+                    .clicked();
+                let applied = styles
+                    && controls::primary(ui, "labelStyleApply", "Apply")
+                        .on_hover_text("Store the form over the style shown, as one undo step")
+                        .clicked();
+                (closed, applied)
             },
         );
+        if let Some(pressed) = left {
+            self.pressed = Some(pressed);
+        }
+        if applied {
+            self.pressed = Some(LabelPressed::Apply);
+        }
         if closed {
             self.pressed = Some(LabelPressed::Close);
         }

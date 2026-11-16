@@ -364,14 +364,16 @@ impl LabelLayoutReportDialog {
             ];
             for (title, meaning, name, value) in counts {
                 form.row(title, |ui| {
-                    // The figure and what it means, on the label's line (dialog::text_value).
-                    dialog::text_value(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            controls::label(ui, name, value);
-                            if !meaning.is_empty() {
-                                dialog::form_label(ui, meaning);
-                            }
-                        });
+                    // The figure and what it means, on the label's line. A wrapped row is a
+                    // control high and centres its first line in that height, as the label's
+                    // cell centres the label: level as it is. Inside dialog::text_value, whose gap
+                    // above does that centring for a value laid out top down, it was centred
+                    // twice and stood 5 points under its label (the look audits' T7).
+                    ui.horizontal_wrapped(|ui| {
+                        controls::label(ui, name, value);
+                        if !meaning.is_empty() {
+                            dialog::form_label(ui, meaning);
+                        }
                     });
                 });
             }
