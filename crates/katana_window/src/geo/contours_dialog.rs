@@ -35,13 +35,14 @@ use katana_core::Result;
 
 use super::terrain_dialog_parts::{
     Framed, NO_SURFACE_OR_RASTER, WordChoice, command_field, field, host_views, invalid, number_of,
-    number_text_field, row, run_buttons, show_framed, why_no_line,
+    row, run_buttons, show_framed, why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
     terrain_reply_field, terrain_sources,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
+use crate::drive::controls::number_line;
 use crate::drive::{check, whole};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
@@ -266,15 +267,15 @@ impl Framed for ContoursDialog {
                  resolution.",
             );
         });
-        // Numbers are short wells, as Major every's number box is (number_text_field).
+        // Numbers are short wells, as Major every's number box is (drive::controls::number_line).
         row(ui, "Interval:", |ui| {
-            number_text_field(ui, "contourInterval", &mut self.interval, "");
+            number_line(ui, "contourInterval", &mut self.interval, "");
         });
         row(ui, "Major every:", |ui| {
             whole(ui, "contourMajorEvery", &mut self.major_every, 0..=1000);
         });
         row(ui, "Counted from:", |ui| {
-            number_text_field(ui, "contourBase", &mut self.base, "0");
+            number_line(ui, "contourBase", &mut self.base, "0");
         });
         row(ui, "Layer:", |ui| {
             field(ui, "contourLayer", &mut self.layer, "")

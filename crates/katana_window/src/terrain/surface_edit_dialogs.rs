@@ -31,12 +31,12 @@ use katana_core::Result;
 use katana_core::text::{equals_ignoring_case, parse_finite_double};
 
 use crate::customisation::{DocumentWatcher, ScopeFilterWidget};
-use crate::drive::controls::custom;
+use crate::drive::controls::{custom, number_line};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{Choice, button, check, choice, line, whole};
 use crate::geo::terrain_dialog_parts::{
-    Framed, NO_SURFACE, check_list_with_current, command_field, field, host_views, invalid,
-    number_text_field, row, run_buttons, show_framed, why_no_line,
+    Framed, NO_SURFACE, NO_SURFACE_HINT, check_list_with_current, command_field, field, host_views,
+    invalid, row, run_buttons, show_framed, why_no_line,
 };
 use crate::geo::terrain_dialog_support::{line_word, terrain_reply_field};
 use crate::host::{Host, VerbOutcome};
@@ -619,8 +619,14 @@ impl Framed for SurfaceLevelsDialog {
         let p = surface_levels_prefix(self.kind);
         let named = |part: &str| format!("{p}{part}");
         row(ui, "Surface:", |ui| {
-            choice(ui, &named("Surface"), &self.surfaces, &mut self.surface)
-                .on_hover_text("The surface of the drawing the edit changes, as one undo step");
+            crate::drive::controls::choice_with_hint(
+                ui,
+                &named("Surface"),
+                &self.surfaces,
+                &mut self.surface,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text("The surface of the drawing the edit changes, as one undo step");
         });
         match self.kind {
             SurfaceLevelsKind::Heights => {
@@ -632,9 +638,9 @@ impl Framed for SurfaceLevelsDialog {
                         &mut self.operation,
                     );
                 });
-                // Numbers are short wells, as a number box is (number_text_field).
+                // Numbers are short wells, as a number box is (drive::controls::number_line).
                 row(ui, "By / to:", |ui| {
-                    number_text_field(ui, &named("Value"), &mut self.value, "").on_hover_text(
+                    number_line(ui, &named("Value"), &mut self.value, "").on_hover_text(
                         "How far to raise or lower, the level to set, or the factor to scale \
                          heights by",
                     );
@@ -642,13 +648,8 @@ impl Framed for SurfaceLevelsDialog {
                 let scales = self.operation.index == Some(3);
                 row(ui, "Scale about:", |ui| {
                     ui.add_enabled_ui(scales, |ui| {
-                        number_text_field(
-                            ui,
-                            &named("Base"),
-                            &mut self.base,
-                            "lowest level changed",
-                        )
-                        .on_hover_text("Scale only: the level that stays where it is");
+                        number_line(ui, &named("Base"), &mut self.base, "lowest level changed")
+                            .on_hover_text("Scale only: the level that stays where it is");
                     });
                 });
             }
@@ -657,7 +658,7 @@ impl Framed for SurfaceLevelsDialog {
                     whole(ui, &named("Passes"), &mut self.passes, 1..=1000);
                 });
                 row(ui, "Weight:", |ui| {
-                    number_text_field(ui, &named("Weight"), &mut self.weight, "").on_hover_text(
+                    number_line(ui, &named("Weight"), &mut self.weight, "").on_hover_text(
                         "How far each pass moves a vertex towards the mean of its neighbours: \
                          above 0, at most 1",
                     );
@@ -665,7 +666,7 @@ impl Framed for SurfaceLevelsDialog {
             }
             SurfaceLevelsKind::Thin => {
                 row(ui, "Tolerance:", |ui| {
-                    number_text_field(ui, &named("Value"), &mut self.value, "")
+                    number_line(ui, &named("Value"), &mut self.value, "")
                         .on_hover_text("The most the surface may move, vertically, anywhere");
                 });
             }
@@ -674,7 +675,7 @@ impl Framed for SurfaceLevelsDialog {
                     choice(ui, &named("Measure"), &self.measures, &mut self.measure);
                 });
                 row(ui, "Value:", |ui| {
-                    number_text_field(ui, &named("Value"), &mut self.value, "");
+                    number_line(ui, &named("Value"), &mut self.value, "");
                 });
             }
             SurfaceLevelsKind::DeleteTriangles => {
@@ -1038,11 +1039,23 @@ impl SurfaceCombineDialog {
         // of the dialog, and - the page measured while it is put away - held every page's label
         // column 160 wide for "Make" and "New surface".
         row(ui, "Top:", |ui| {
-            choice(ui, "surfaceCombineTop", &self.surfaces, &mut self.top)
-                .on_hover_text("The top wins inside its footprint");
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "surfaceCombineTop",
+                &self.surfaces,
+                &mut self.top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text("The top wins inside its footprint");
         });
         row(ui, "Base:", |ui| {
-            choice(ui, "surfaceCombineBase", &self.bases, &mut self.base);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "surfaceCombineBase",
+                &self.bases,
+                &mut self.base,
+                NO_SURFACE_HINT,
+            );
         });
     }
 
@@ -1050,11 +1063,17 @@ impl SurfaceCombineDialog {
     fn source_page(&mut self, ui: &mut Ui) {
         let mode = self.mode();
         row(ui, "Surface:", |ui| {
-            choice(ui, "surfaceCombineSource", &self.sources, &mut self.source);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "surfaceCombineSource",
+                &self.sources,
+                &mut self.source,
+                NO_SURFACE_HINT,
+            );
         });
         row(ui, "Raise by:", |ui| {
             ui.add_enabled_ui(mode == SurfaceCombineMode::Offset, |ui| {
-                number_text_field(ui, "surfaceCombineDz", &mut self.dz, "")
+                number_line(ui, "surfaceCombineDz", &mut self.dz, "")
                     .on_hover_text("How far to raise the copy; negative lowers it");
             });
         });

@@ -1778,29 +1778,19 @@ impl UtilityToolsDialog {
             },
             |ui| {
                 ui.add_enabled_ui(source == UtilityDesignSource::Alignment, |ui| {
-                    if self.alignments.is_empty() {
-                        // An empty choice says nothing; the choice is there for a driver still.
-                        ui.weak("the drawing has no alignment");
-                        super::survey_dialogs::hidden(ui, "utilityDesignAlignmentNone", |ui| {
-                            controls::choice(
-                                ui,
-                                "utilityDesignAlignmentName",
-                                &self.alignments,
-                                &mut self.alignment,
-                            );
-                        });
-                    } else {
-                        controls::choice(
-                            ui,
-                            "utilityDesignAlignmentName",
-                            &self.alignments,
-                            &mut self.alignment,
-                        )
-                        .on_hover_text(
-                            "One of the drawing's alignments: its horizontal geometry, at the \
-                             levels of its design profile where it has one",
-                        );
-                    }
+                    // An empty choice says what is missing in the control, muted, as every
+                    // empty choice does (it was a muted sentence over a hidden choice).
+                    controls::choice_with_hint(
+                        ui,
+                        "utilityDesignAlignmentName",
+                        &self.alignments,
+                        &mut self.alignment,
+                        "No alignment",
+                    )
+                    .on_hover_text(
+                        "One of the drawing's alignments: its horizontal geometry, at the levels \
+                         of its design profile where it has one",
+                    );
                 });
             },
         );

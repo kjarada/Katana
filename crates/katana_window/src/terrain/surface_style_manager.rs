@@ -1382,7 +1382,9 @@ impl SurfaceStyleManagerDialog {
         let mut edited =
             check(ui, "surfaceStyleContours", "Contours", &mut form.contours).changed();
         edited |= row(ui, "Interval", |ui| {
-            line(ui, "surfaceStyleInterval", &mut form.interval).changed()
+            // A number kept as text: a short well, as Major every's box beside it.
+            crate::drive::controls::number_line(ui, "surfaceStyleInterval", &mut form.interval, "")
+                .changed()
         });
         edited |= row(ui, "Major every", |ui| {
             whole(

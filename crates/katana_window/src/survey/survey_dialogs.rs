@@ -628,8 +628,14 @@ impl SurveyForwardDialog {
                         "An azimuth clockwise from grid north, or a quadrant bearing",
                     )
                 });
+                // A number kept as text (a blank is no distance): a short well, as a number box.
                 form_row(ui, "Horizontal distance:", |ui| {
-                    field(ui, "distance", &mut form.distance, "drawing units", "")
+                    drive::controls::number_line(
+                        ui,
+                        "distance",
+                        &mut form.distance,
+                        "drawing units",
+                    )
                 });
                 form_row(ui, "Height difference:", |ui| {
                     field(

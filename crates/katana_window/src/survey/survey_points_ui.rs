@@ -279,16 +279,14 @@ impl SurveyExportDialog {
             choice_of(ui, "delimiter", &names_of(&DELIMITERS), &mut form.delimiter)
                 .on_hover_text("What separates the fields")
         });
-        // At the fields' edge, as every check box of a form is (a row with no label).
-        form_row(ui, "", |ui| {
-            drive::check(
-                ui,
-                "header",
-                "A header line naming the columns",
-                &mut form.header,
-            )
-            .on_hover_text("With it, the import wizard reads the column order back without asking")
-        });
+        // At the fields' edge, as every check box of a form is.
+        crate::shell::dialog::check_row(
+            ui,
+            "header",
+            "A header line naming the columns",
+            &mut form.header,
+        )
+        .on_hover_text("With it, the import wizard reads the column order back without asking");
         form_row(ui, "Quotes:", |ui| {
             choice_of(ui, "quoting", &names_of(&QUOTINGS), &mut form.quoting)
                 .on_hover_text("Double quotes round a field that needs them (RFC 4180), or none")

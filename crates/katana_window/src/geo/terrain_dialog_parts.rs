@@ -27,6 +27,15 @@ use crate::shell::{DialogFrame, dialog};
 /// condition is the drawing's, not a field's.
 pub(crate) const NO_SURFACE: &str = "There is no surface: make one with Terrain > Surface From";
 
+/// What a choice of the drawing's surfaces says while the drawing has none
+/// (drive::controls::choice_with_hint), muted in the control: the Surface Edit toolbar's, the
+/// surface edit dialogs', Volumes', Combine Surfaces' and Export Surface as DEM's.
+pub(crate) const NO_SURFACE_HINT: &str = "No surface";
+
+/// What a choice of the drawing's surfaces and reference rasters says while it has neither
+/// (terrain_dialog_support::SourcePicker).
+pub(crate) const NO_SOURCE_HINT: &str = "No surface or raster";
+
 /// Why a dialog that reads a surface or a raster writes no line while the drawing has neither,
 /// in the same words in each (Contours, Drape and Sample, Slope, Shading, Viewshed, Statistics
 /// by Area), where each said it with its own verb.
@@ -95,33 +104,6 @@ pub(crate) fn field(ui: &mut Ui, name: &str, value: &mut String, placeholder: &s
         value,
         LineOptions {
             placeholder,
-            ..LineOptions::default()
-        },
-    )
-}
-
-/// A one-line field for a number written into the line as typed - an interval, a weight, a
-/// height that may be left blank - drawn as a number box is (drive::controls::NUMBER_FIELD_WIDTH,
-/// wider only for what it holds): a field filling its row beside a number box read as two kinds of
-/// control for one kind of value (Contours' Interval beside Major every, Smooth's Weight beside
-/// Passes). Text, not a DragValue: the line carries the number as typed ("interval=0.25"), a blank
-/// is the verb's own default, and a number box can be neither.
-pub(crate) fn number_text_field(
-    ui: &mut Ui,
-    name: &str,
-    value: &mut String,
-    placeholder: &str,
-) -> Response {
-    let widest = dialog::one_line_width(ui, value).max(dialog::one_line_width(ui, placeholder));
-    let width = (widest + 2.0 * crate::drive::controls::FIELD_INSET)
-        .max(crate::drive::controls::NUMBER_FIELD_WIDTH);
-    line_with(
-        ui,
-        name,
-        value,
-        LineOptions {
-            placeholder,
-            width: Some(width),
             ..LineOptions::default()
         },
     )

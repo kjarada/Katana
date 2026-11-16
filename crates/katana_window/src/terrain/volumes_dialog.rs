@@ -65,7 +65,7 @@ use crate::drive::{
 };
 use crate::geo::geo_dialog_support::line_word;
 use crate::geo::terrain_dialog_parts::{
-    Framed, NO_SURFACE, WordChoice, host_views, row, show_framed,
+    Framed, NO_SURFACE, NO_SURFACE_HINT, WordChoice, host_views, row, show_framed,
 };
 use crate::host::{Host, VerbOutcome};
 use crate::icons::{IconMode, show_icon};
@@ -1081,18 +1081,38 @@ impl VolumesDialog {
     fn surfaces_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Base:", |ui| {
-            choice(ui, "volumesBase", surfaces, &mut self.base).on_hover_text(BASE_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesBase",
+                surfaces,
+                &mut self.base,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(BASE_TIP);
         });
         row(ui, "Top:", |ui| {
-            choice(ui, "volumesTop", surfaces, &mut self.top).on_hover_text(TOP_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesTop",
+                surfaces,
+                &mut self.top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(TOP_TIP);
         });
     }
 
     fn level_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Surface:", |ui| {
-            choice(ui, "volumesLevelSurface", surfaces, &mut self.level_surface)
-                .on_hover_text("The surface measured against the level");
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesLevelSurface",
+                surfaces,
+                &mut self.level_surface,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text("The surface measured against the level");
         });
         row(ui, "Level:", |ui| {
             spin(ui, "volumesLevel", &mut self.level, LEVEL).on_hover_text(
@@ -1139,12 +1159,24 @@ impl VolumesDialog {
     fn sections_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Base:", |ui| {
-            choice(ui, "volumesSectionsBase", surfaces, &mut self.sections_base)
-                .on_hover_text(BASE_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesSectionsBase",
+                surfaces,
+                &mut self.sections_base,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(BASE_TIP);
         });
         row(ui, "Top:", |ui| {
-            choice(ui, "volumesSectionsTop", surfaces, &mut self.sections_top)
-                .on_hover_text(TOP_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesSectionsTop",
+                surfaces,
+                &mut self.sections_top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(TOP_TIP);
         });
         row(ui, "Alignment:", |ui| {
             choice(
@@ -1240,10 +1272,24 @@ impl VolumesDialog {
     fn grid_page(&mut self, ui: &mut Ui) {
         let surfaces = &self.surfaces;
         row(ui, "Base:", |ui| {
-            choice(ui, "volumesGridBase", surfaces, &mut self.grid_base).on_hover_text(BASE_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesGridBase",
+                surfaces,
+                &mut self.grid_base,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(BASE_TIP);
         });
         row(ui, "Top:", |ui| {
-            choice(ui, "volumesGridTop", surfaces, &mut self.grid_top).on_hover_text(TOP_TIP);
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "volumesGridTop",
+                surfaces,
+                &mut self.grid_top,
+                NO_SURFACE_HINT,
+            )
+            .on_hover_text(TOP_TIP);
         });
         row(ui, "Cell:", |ui| {
             spin(ui, "volumesCell", &mut self.cell, CELL)

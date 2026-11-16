@@ -178,8 +178,7 @@ impl ImportPlacementBox {
         let before = self.placement();
         // A headed section, as every group of a dialog is (shell::dialog::section): a bordered
         // box here, under the import dialogs' unbordered forms, read as a second convention.
-        crate::shell::dialog::section(ui, "Placement");
-        ui.vertical(|ui| {
+        crate::shell::dialog::section_with(ui, "Placement", |ui| {
             for (name, text, mode, tip) in [
                 (
                     "importPlacementKeep",

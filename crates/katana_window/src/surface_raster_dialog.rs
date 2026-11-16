@@ -44,11 +44,11 @@ use katana_interop::export::raster_export_formats;
 use katana_interop::terrain_io::suggested_cell_size;
 
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::{Choice, SpinRange, button, check, choice, label, spin};
+use crate::drive::{Choice, SpinRange, button, choice, label, spin};
 use crate::format::grouped;
 use crate::geo::terrain_dialog_parts::{
-    Framed, NO_SURFACE, WordChoice, command_field, field, host_views, invalid, row, run_buttons,
-    show_framed, why_no_line, without_blanks,
+    Framed, NO_SURFACE, NO_SURFACE_HINT, WordChoice, command_field, field, host_views, invalid,
+    row, run_buttons, show_framed, why_no_line, without_blanks,
 };
 use crate::geo::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -324,7 +324,13 @@ impl Framed for SurfaceFromDialog {
         let kind = self.kind();
         row(ui, "Source:", |ui| {
             ui.add_enabled_ui(kind != SurfaceFromKind::Drawing, |ui| {
-                self.source.ui(ui, "surfaceFromSource");
+                // What is missing in the source's own words: a raster, or a point cloud.
+                let hint = if kind == SurfaceFromKind::Cloud {
+                    "No point cloud"
+                } else {
+                    "No raster"
+                };
+                self.source.ui_with_hint(ui, "surfaceFromSource", hint);
             });
         });
         row(ui, "Classes:", |ui| {
@@ -660,7 +666,14 @@ impl Framed for SurfaceRasterDialog {
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let surface_changed = row(ui, "Surface:", |ui| {
-            choice(ui, "surfaceRasterSource", &self.surfaces, &mut self.surface).changed()
+            crate::drive::controls::choice_with_hint(
+                ui,
+                "surfaceRasterSource",
+                &self.surfaces,
+                &mut self.surface,
+                NO_SURFACE_HINT,
+            )
+            .changed()
         });
         if surface_changed {
             self.suggest_cell(&*host);
@@ -684,15 +697,13 @@ impl Framed for SurfaceRasterDialog {
         row(ui, "Stored as:", |ui| {
             choice(ui, "surfaceRasterType", &self.types, &mut self.data_type);
         });
-        // Check boxes at the fields' edge, as every check box of a form is (a row with no label).
-        row(ui, "", |ui| {
-            check(
-                ui,
-                "surfaceRasterCog",
-                "Cloud Optimised GeoTIFF",
-                &mut self.cog,
-            )
-        });
+        // Check boxes at the fields' edge, as every check box of a form is.
+        crate::shell::dialog::check_row(
+            ui,
+            "surfaceRasterCog",
+            "Cloud Optimised GeoTIFF",
+            &mut self.cog,
+        );
         let browse = row(ui, "File:", |ui| {
             ui.spacing_mut().text_edit_width =
                 crate::shell::dialog::beside_a_button(ui, "Browse...");
@@ -707,14 +718,12 @@ impl Framed for SurfaceRasterDialog {
         if browse {
             self.browse(&*host);
         }
-        row(ui, "", |ui| {
-            check(
-                ui,
-                "surfaceRasterOverwrite",
-                "Replace a file already there",
-                &mut self.overwrite,
-            )
-        });
+        crate::shell::dialog::check_row(
+            ui,
+            "surfaceRasterOverwrite",
+            "Replace a file already there",
+            &mut self.overwrite,
+        );
         command_field(ui, "surfaceRasterCommand", &self.command());
     }
 
