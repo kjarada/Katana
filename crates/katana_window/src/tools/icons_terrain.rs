@@ -1,11 +1,12 @@
 //! Icons of Terrain > Edit Surface's tools (see tool_icons; katana_cad's tools/terrain_edit,
-//! docs/surface_editing.md). Each draws the same small TIN in the neutral tone - a
-//! quadrilateral of four triangles round a centre vertex - and what the tool does to it in the
-//! accent, so the nine read as one family on the Surface Edit toolbar.
+//! docs/surface_editing.md). Each draws the same small TIN in the neutral tone and the fine weight -
+//! a quadrilateral of four triangles round a centre vertex - and what the tool does to it in the
+//! accent and the full stroke, so the nine read as one family on the Surface Edit toolbar and the
+//! stroke tells them apart.
 
 use crate::canvas::PointF;
 
-use super::tool_icons::{STROKE, TINT, ToolInk, polyline, pt, rectangle};
+use super::tool_icons::{FINE, STROKE, TINT, ToolInk, polyline, pt, rectangle};
 
 /// The corners of the TIN and its centre, on the 24-unit grid.
 const CORNERS: [PointF; 4] = [
@@ -16,25 +17,26 @@ const CORNERS: [PointF; 4] = [
 ];
 const CENTRE: PointF = PointF::new(12.0, 12.0);
 
+/// The TIN in the fine weight: the object every tool of the family works on, quiet, so that what
+/// each tool does - drawn in the full stroke - is what tells them apart. In the full stroke the
+/// TIN's outline and its four spokes made every icon a crossed square at 20 px.
 fn draw_tin(ink: &mut ToolInk<'_>, with_centre: bool) {
-    ink.stroke(&polyline(&CORNERS, true), false, STROKE);
+    ink.stroke(&polyline(&CORNERS, true), false, FINE);
     if with_centre {
         for corner in CORNERS {
-            ink.line(corner.x, corner.y, CENTRE.x, CENTRE.y, false, STROKE);
+            ink.line(corner.x, corner.y, CENTRE.x, CENTRE.y, false, FINE);
         }
     }
 }
 
 pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
     if tool_id == "terrain.edit.deletetriangle" {
-        // The lower triangle, filled and struck out.
+        // The lower triangle, outlined, filled and struck out.
         draw_tin(ink, true);
-        ink.fill(
-            &polyline(&[CORNERS[0], CORNERS[3], CENTRE], true),
-            true,
-            TINT,
-        );
-        ink.line(9.0, 18.0, 15.0, 14.0, true, STROKE);
+        let lower = polyline(&[CORNERS[0], CORNERS[3], CENTRE], true);
+        ink.fill(&lower, true, TINT);
+        ink.stroke(&lower, true, STROKE);
+        ink.line(8.0, 19.5, 16.5, 13.5, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.flip" {
@@ -45,7 +47,7 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
                 true,
             ),
             false,
-            STROKE,
+            FINE,
         );
         ink.dashed(&polyline(&[pt(3.0, 12.0), pt(21.0, 12.0)], false), false);
         ink.line(12.0, 3.0, 12.0, 21.0, true, STROKE);
@@ -62,10 +64,11 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         return true;
     }
     if tool_id == "terrain.edit.deletepoint" {
-        // The centre vertex, crossed out.
+        // The centre vertex, ringed and crossed out.
         draw_tin(ink, true);
-        ink.line(8.5, 8.5, 15.5, 15.5, true, STROKE);
-        ink.line(15.5, 8.5, 8.5, 15.5, true, STROKE);
+        ink.dot(12.0, 12.0, 1.6, true);
+        ink.line(7.5, 7.5, 16.5, 16.5, true, STROKE);
+        ink.line(16.5, 7.5, 7.5, 16.5, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.movepoint" {
@@ -103,9 +106,9 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
                 true,
             ),
             false,
-            STROKE,
+            FINE,
         );
-        ink.line(9.0, 7.0, 18.0, 16.0, false, STROKE);
+        ink.line(9.0, 7.0, 18.0, 16.0, false, FINE);
         ink.stroke(&rectangle(3.0, 4.0, 18.0, 16.0), true, STROKE);
         return true;
     }

@@ -40,7 +40,7 @@ use katana_app::console::Console;
 
 use super::actions::{BarPlace, Composed};
 use super::window::MainWindow;
-use crate::drive::action::{Action, Menu, MenuItem, ToolBarItem, shortcut_text};
+use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, shortcut_text};
 use crate::drive::program::MenuSigns;
 use crate::host::{SettingValue, UserSettings};
 use crate::keyboard_shortcuts_dialog::ShortcutRow;
@@ -158,6 +158,9 @@ pub struct BarSettings {
     /// The rows a restored layout put the top toolbars on, by name; None: as built. A toolbar the
     /// layout does not place stays where the window built it.
     pub rows: Option<BTreeMap<String, usize>>,
+    /// Each toolbar name's width as the window last drew it, by its title, in the text size of
+    /// that frame (`measure_names`): what its label takes on its row.
+    pub name_widths: BTreeMap<String, i32>,
 }
 
 impl Default for BarSettings {
@@ -167,6 +170,7 @@ impl Default for BarSettings {
             icon_size: 20,
             names_shown: true,
             rows: None,
+            name_widths: BTreeMap::new(),
         }
     }
 }
@@ -768,7 +772,7 @@ pub fn tool_bar_fit(window: &MainWindow, width: f32) -> (Vec<String>, usize, usi
     let icon_size = window.ui.bars.icon_size;
     let mut hiding = Vec::new();
     let mut counted = 0;
-    let mut rows: BTreeMap<usize, Vec<(String, i32)>> = BTreeMap::new();
+    let mut rows: BTreeMap<usize, Vec<(String, i32, Vec<StripItem>)>> = BTreeMap::new();
     for (bar, place) in &composed.bars {
         let BarPlace::Top(row) = place else {
             continue;
@@ -776,42 +780,38 @@ pub fn tool_bar_fit(window: &MainWindow, width: f32) -> (Vec<String>, usize, usi
         if !window.ui.bars.shown(&bar.name) {
             continue;
         }
-        let items = window.ui.tools.strip_items(bar, &|name| widget_size(name, icon_size));
-        let mut natural = natural_width(&items, icon_size);
-        if window.ui.bars.names_shown && bar.name != "PropertiesToolBar" {
-            natural += name_width(&bar.title);
-        }
-        rows.entry(*row).or_default().push((bar.name.clone(), natural));
+        // The strip as the row draws it, its name included (panels' tool_bars_ui), so that its
+        // natural width and what its room hides are worked out on the same items. The name was
+        // added to the natural width but not to the strip laid out in the room, and a bar short
+        // of its name's width was reported with "0 of 9 actions" behind its arrow.
+        let named = with_name(bar, window.ui.bars.names_shown);
+        let bars = &window.ui.bars;
+        let items = window
+            .ui
+            .tools
+            .strip_items(&named, &|name| top_widget_size(bars, name, icon_size));
+        let natural = natural_width(&items, icon_size);
+        rows.entry(*row)
+            .or_default()
+            .push((bar.name.clone(), natural, items));
         counted += 1;
     }
     let mut widths = Vec::new();
     for (index, (_, bars)) in rows.iter().enumerate() {
-        let naturals: Vec<i32> = bars.iter().map(|(_, natural)| *natural).collect();
+        let naturals: Vec<i32> = bars.iter().map(|(_, natural, _)| *natural).collect();
         let rooms = row_rooms(&naturals, width);
-        for ((name, natural), room) in bars.iter().zip(&rooms) {
+        for ((name, natural, items), room) in bars.iter().zip(&rooms) {
             if (*room as i32) < *natural {
-                let bar = composed
-                    .bars
-                    .iter()
-                    .find(|(bar, _)| bar.name == *name)
-                    .map(|(bar, _)| bar.clone());
-                if let Some(bar) = bar {
-                    let actions = bar
-                        .items
-                        .iter()
-                        .filter(|item| !matches!(item, ToolBarItem::Separator))
-                        .count();
-                    let shown = shown_within(&window.ui.tools.strip_items(&bar, &|name| widget_size(name, icon_size)), *room as i32, icon_size);
-                    hiding.push(format!(
-                        "{name}: {} of {actions} actions are behind its extension button",
-                        actions.saturating_sub(shown)
-                    ));
-                }
+                let (shown, actions) = shown_within(items, *room as i32, icon_size);
+                hiding.push(format!(
+                    "{name}: {} of {actions} actions are behind its extension button",
+                    actions - shown
+                ));
             }
         }
         let parts: Vec<String> = bars
             .iter()
-            .map(|(name, natural)| format!("{name} {natural}"))
+            .map(|(name, natural, _)| format!("{name} {natural}"))
             .collect();
         let needed: i32 = naturals.iter().sum();
         widths.push(format!(
@@ -824,19 +824,24 @@ pub fn tool_bar_fit(window: &MainWindow, width: f32) -> (Vec<String>, usize, usi
     (hiding, counted, rows.len(), widths)
 }
 
-/// How many of `items` - separators aside - show in `room`.
-fn shown_within(items: &[StripItem], room: i32, icon_size: i32) -> usize {
+/// How many of a strip's actions show in `room`, and how many it has: its buttons and the
+/// controls it draws itself, not its separators or its name.
+fn shown_within(items: &[StripItem], room: i32, icon_size: i32) -> (usize, usize) {
     let extents: Vec<i32> = items.iter().map(|item| item.size(icon_size).0).collect();
     let separators: Vec<bool> = items
         .iter()
         .map(|item| *item == StripItem::Separator)
         .collect();
     let layout = crate::tools::flyout_button::lay_out_strip(&extents, &separators, room);
-    items
+    let counted = |item: &StripItem| {
+        *item != StripItem::Separator && !item.name().starts_with("toolBarName:")
+    };
+    let shown = items
         .iter()
         .zip(&layout.shown)
-        .filter(|(item, shown)| **shown && **item != StripItem::Separator)
-        .count()
+        .filter(|(item, shown)| **shown && counted(item))
+        .count();
+    (shown, items.iter().filter(|item| counted(item)).count())
 }
 
 /// The size of a control a toolbar's owner draws itself: the name label, Undo's and Redo's split
@@ -853,9 +858,53 @@ pub fn widget_size(name: &str, icon_size: i32) -> Option<(i32, i32)> {
     }
 }
 
-/// A toolbar's name before its buttons: its text and the label's margins.
-pub fn name_width(title: &str) -> i32 {
-    7 * title.chars().count() as i32 + 12
+/// A toolbar's name before its buttons: its text as the window last drew it (`measure_names`), and
+/// the label's margins - 2 points before the word, NAME_GAP after it. Until a frame has measured
+/// it, the estimate the window began with, 7 points a character and 12 of margins: wider than the
+/// secondary text's words are, it cost the third row the 18 points it was short of 1280 by.
+pub fn name_width(bars: &BarSettings, title: &str) -> i32 {
+    bars.name_widths
+        .get(title)
+        .copied()
+        .unwrap_or_else(|| 7 * title.chars().count() as i32 + 12)
+}
+
+/// The space after a toolbar's name before its first button, beside the strip's own spacing.
+pub const NAME_GAP: i32 = 6;
+
+/// Measures each title in `titles` in the secondary text, as its label is drawn (panels'
+/// strip_ui), into `bars.name_widths`: the label's room on its row follows the text size.
+pub fn measure_names<'a>(bars: &mut BarSettings, ui: &egui::Ui, titles: impl Iterator<Item = &'a str>) {
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    for title in titles {
+        let text = ui
+            .painter()
+            .layout_no_wrap(String::from(title), font.clone(), egui::Color32::PLACEHOLDER)
+            .size()
+            .x;
+        let width = text.ceil() as i32 + 2 + NAME_GAP;
+        bars.name_widths.insert(String::from(title), width);
+    }
+}
+
+/// `bar` as a top row draws it: its name first, as a widget `toolBarName:<title>`, when names are
+/// shown (the Properties bar's " Style " label already says what it holds).
+pub fn with_name(bar: &ToolBar, names_shown: bool) -> ToolBar {
+    let mut bar = bar.clone();
+    if names_shown && bar.name != "PropertiesToolBar" {
+        bar.items
+            .insert(0, ToolBarItem::Widget(format!("toolBarName:{}", bar.title)));
+    }
+    bar
+}
+
+/// The size of a widget of a top row: a toolbar's name, else what `widget_size` says.
+pub fn top_widget_size(bars: &BarSettings, name: &str, icon_size: i32) -> Option<(i32, i32)> {
+    if let Some(title) = name.strip_prefix("toolBarName:") {
+        let (_, height) = ToolButtonLook::TOOL.button_size(icon_size);
+        return Some((name_width(bars, title), height));
+    }
+    widget_size(name, icon_size)
 }
 
 

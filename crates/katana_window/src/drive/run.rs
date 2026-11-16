@@ -766,6 +766,11 @@ fn screenshot(
     }
     if switches.select_everything {
         window.select_all();
+        // Drawn until idle, as after an action: with nothing after it a grab read the frame drawn
+        // before the selection, with nothing selected in it.
+        if !settled(&mut headless, window, console) {
+            return 1;
+        }
     }
     for action in &switches.actions {
         if let Err(error) = window.trigger_action(action) {
