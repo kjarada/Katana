@@ -264,14 +264,17 @@ impl ViewScaleDialog {
                 Err(error) => error.message,
             };
             captioned(ui, "viewScaleLineLabel", "Command:", |ui| {
-                controls::label_as(
-                    ui,
-                    "viewScaleLine",
-                    &line,
-                    egui::Label::new(RichText::new(line.as_str()).monospace())
-                        .wrap()
-                        .selectable(true),
-                );
+                // On its caption's line, as a field's text is (dialog::text_value).
+                dialog::text_value(ui, |ui| {
+                    controls::label_as(
+                        ui,
+                        "viewScaleLine",
+                        &line,
+                        egui::Label::new(RichText::new(line.as_str()).monospace())
+                            .wrap()
+                            .selectable(true),
+                    );
+                });
             });
         });
     }

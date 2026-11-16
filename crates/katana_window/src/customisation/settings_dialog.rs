@@ -1671,7 +1671,8 @@ impl SettingsDialog {
                     ("Kept", "settingsActiveKept", &self.kept),
                 ] {
                     form.row(caption, |ui| {
-                        value_label(ui, name, text);
+                        // On its label's line, as a field's text is.
+                        dialog::text_value(ui, |ui| value_label(ui, name, text));
                     });
                 }
             });

@@ -882,6 +882,28 @@ flat with the shortcuts in the tooltips, and its menus are the one menu
 drawer's. Rejected: filling every table by default (a table beside another
 column took that column's room).
 
+**Replies, values and labels.** A run dialog's reply - what its verb answered,
+records a line each - is `shell::dialog::reply`: a read-only, fixed-pitch box
+drawn only once there is a reply, as high as its lines up to `REPLY_ROWS`;
+until then it is recorded under its name and takes no room, where an empty
+box several lines high stood over every run dialog's buttons. A one-line
+status kept for drivers is `dialog_layout::reply_text` (muted, no room while
+empty): a box of records and a status line are two things, so two widgets,
+but one colour rule, `shell::dialog::status_colour` - red only for a refusal
+of something the person did, a hint before anything was done muted ("Name
+the .ifc file to write." read as an error in red). A run dialog's Preview is
+at its footer's left; a dialog of tabbed pages shows the front page's
+footer. A value that is text beside a label (Drawing Summary's figures, Zoom
+To's line, Settings' "What is active") is drawn in `text_value`, its first
+line on the label's line: drawn at the row's top, it stood 5 points above its
+label. A label never ends in a colon; `labelled` takes one off. The scope and
+filter widget fills its column under a dialog's fields, so its fields end
+where the dialog's do, and keeps `WIDGET_WIDTH` in a column of a row
+(`in_a_column`). A table with no rows keeps its header and says so under it,
+muted (`table_or_empty` over the one table look). A menu's column is the room
+below the menu, so a tall menu hung under the bar scrolls there rather than
+being moved up over it.
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the
@@ -5069,6 +5091,9 @@ they are easiest to break:
   was with the edits still in the grid (`ROADTEMPLATE SET <t> <c> key=value
   <c> key=value`). A verb that takes one thing at a time is given a form that
   takes several rather than being run in a loop by the dialog.
+- **A dialog's footer is `shell::dialog::button_row`**: Preview and a status
+  at the left, then Close, then the primary action last in the accent; a
+  reply over it only once there is one (`reply`).
 - **A form is `shell::dialog`'s form**, never a hand-built `egui::Grid` of
   labels and fields; a Grid is for a table (the Title Block's revision
   cells), and lines up only its own cells.

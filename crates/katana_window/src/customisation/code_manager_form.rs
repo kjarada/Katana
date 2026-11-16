@@ -313,7 +313,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             );
             // What is said of the layer, under its field: the secondary text, or the refusal's.
             let status = RichText::new(form.model_status.as_str())
-                .color(crate::dialog_layout::reply_colour(form.model_bad));
+                .color(crate::shell::dialog::status_colour(form.model_bad));
             dialog::labelled(ui, "", |ui| {
                 controls::label_as(
                     ui,

@@ -364,10 +364,15 @@ impl LabelLayoutReportDialog {
             ];
             for (title, meaning, name, value) in counts {
                 form.row(title, |ui| {
-                    controls::label(ui, name, value);
-                    if !meaning.is_empty() {
-                        dialog::form_label(ui, meaning);
-                    }
+                    // The figure and what it means, on the label's line (dialog::text_value).
+                    dialog::text_value(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            controls::label(ui, name, value);
+                            if !meaning.is_empty() {
+                                dialog::form_label(ui, meaning);
+                            }
+                        });
+                    });
                 });
             }
             form.row("Command", |ui| {

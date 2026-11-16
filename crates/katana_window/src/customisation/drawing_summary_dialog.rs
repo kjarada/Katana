@@ -319,7 +319,10 @@ impl DrawingSummaryDialog {
             ];
             for (title, name, text) in rows {
                 form.row(title, |ui| {
-                    controls::label_as(ui, name, text, egui::Label::new(text.as_str()).wrap());
+                    // On its label's line, as a field's text is (shell::dialog::text_value).
+                    crate::shell::dialog::text_value(ui, |ui| {
+                        controls::label_as(ui, name, text, egui::Label::new(text.as_str()).wrap());
+                    });
                 });
             }
         });

@@ -528,7 +528,10 @@ impl LabelEditDialog {
         // the fields they switch, every field from one edge to the body's.
         dialog::form(ui, |form| {
             form.row("Label", |ui| {
-                controls::label(ui, "labelEditTarget", &self.target);
+                // On its label's line, as a field's text is (dialog::text_value).
+                dialog::text_value(ui, |ui| {
+                    controls::label(ui, "labelEditTarget", &self.target);
+                });
             });
 
             form.row("Style", |ui| {

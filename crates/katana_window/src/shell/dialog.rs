@@ -754,13 +754,15 @@ pub fn reply(ui: &mut Ui, name: &str, text: &mut String, rows: usize) -> egui::R
     )
 }
 
-/// A dialog's table (the window's one table, annotation::dialog_support::table: a raised header
-/// row, faint stripes, the chosen row lit) named `name`, `headers` over `rows`, `current` the row
-/// chosen - or, while it has no rows, `empty` said in the muted text in its place. A header strip
-/// over nothing read as a table that failed to load (Check Geometry, Query with SQL), and a
-/// header of five columns sized to their words stood 270 wide in a column of 535. The empty table
-/// is still drawn, off the dialog, so a driver finds it by name and reads that it lists nothing.
-/// An `empty` of "" says nothing, for a dialog whose own status already says the list is empty.
+/// A dialog's table (the window's one table, annotation::dialog_support::table_look: a raised
+/// header row, faint stripes, the chosen row lit) named `name`, `headers` over `rows`, `current`
+/// the row chosen, spanning its column; while it has no rows, `empty` is said in the muted text
+/// under its header (dialog_layout::empty_table). A header strip over nothing read as a table that
+/// failed to load (Check Geometry, Query with SQL), and a header of five columns sized to their
+/// words stood 270 wide in a column of 535. An `empty` of "" says nothing, for a dialog whose own
+/// status already says the list is empty. One empty look for every table: the table's own, its
+/// header kept, rather than a note in its place with the table hidden (how the GIS and survey
+/// tables said it for a time, beside the managers' header-and-note).
 pub(crate) fn table_or_empty(
     ui: &mut Ui,
     name: &str,
@@ -769,17 +771,17 @@ pub(crate) fn table_or_empty(
     current: Option<usize>,
     empty: &str,
 ) -> crate::annotation::dialog_support::TableShown {
-    use crate::annotation::dialog_support::table;
-    if rows.is_empty() {
-        if !empty.is_empty() {
-            note(ui, empty);
-        }
-        let mut child = ui.new_child(UiBuilder::new().id_salt(("katanaEmptyTable", name)));
-        let corner = child.max_rect().min;
-        child.set_clip_rect(Rect::from_min_size(corner, Vec2::ZERO));
-        return table(&mut child, name, headers, rows, current, &[], None);
-    }
-    table(ui, name, headers, rows, current, &[], None)
+    use crate::annotation::dialog_support::{TableLook, table_look};
+    table_look(
+        ui,
+        name,
+        headers,
+        rows,
+        current,
+        &[],
+        None,
+        TableLook { fill: true, empty },
+    )
 }
 
 /// `table_or_empty` over a list a person picks a row of, `current` the row picked: answers true
