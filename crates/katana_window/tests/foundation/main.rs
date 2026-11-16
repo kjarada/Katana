@@ -20,6 +20,7 @@ pub mod fixture_customisation;
 #[path = "../support/window_support.rs"]
 pub mod window_support;
 
+mod control_look;
 mod dialog_layout;
 mod interfaces;
 mod named_controls;

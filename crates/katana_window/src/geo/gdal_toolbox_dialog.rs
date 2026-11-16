@@ -736,18 +736,15 @@ impl GdalToolboxDialog {
                     let item = &mut tree[at];
                     ui.horizontal(|ui| {
                         ui.add_space(14.0 * item.depth as f32);
-                        let text = if item.algorithm {
-                            item.name.clone()
-                        } else if item.open {
-                            format!("\u{25be} {}", item.name)
-                        } else {
-                            format!("\u{25b8} {}", item.name)
-                        };
-                        if ui
-                            .selectable_label(current == Some(at), text)
-                            .on_hover_text(item.tip.as_str())
-                            .clicked()
-                        {
+                        // A group's expander, an algorithm's empty cell: a level's names line up.
+                        let expander = crate::drive::controls::tree_expander(
+                            ui,
+                            (!item.algorithm).then_some(item.open),
+                        );
+                        let name = ui
+                            .selectable_label(current == Some(at), item.name.as_str())
+                            .on_hover_text(item.tip.as_str());
+                        if expander.clicked() || name.clicked() {
                             if item.algorithm {
                                 clicked = Some(at);
                             } else {

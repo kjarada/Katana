@@ -14,7 +14,8 @@
 //! SH_ComboBox_Popup = 0       Spacing::combo_height: a choice list shows MAX_VISIBLE_ITEMS rows
 //!                             and scrolls the rest (QComboBox::maxVisibleItems)
 //! SH_Menu_Scrollable          shell::menu_column (the foundation's): one scrolling column
-//! QMenu::icon:checked         menu_icon_cell: a checked item's icon framed in the accent
+//! QMenu::icon:checked         paint_menu_gutter: a checked item's tick in the accent beside its
+//!                             icon (drive::action::action_item draws every item with it)
 //! OverflowArrowEngine         paint_overflow_arrow and overflow_arrow, on the canvas
 //! ```
 //!
@@ -35,9 +36,8 @@ use std::collections::BTreeMap;
 use egui::style::{Selection, WidgetVisuals, Widgets};
 use egui::text::LayoutJob;
 use egui::{
-    Color32, Context, CornerRadius, FontFamily, FontId, Painter, Rect, Response, Sense, Shadow,
-    Spacing, Stroke, StrokeKind, Style, TextFormat, TextStyle, TextureId, Theme, Ui, Visuals, pos2,
-    vec2,
+    Color32, Context, CornerRadius, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense,
+    Shadow, Shape, Spacing, Stroke, Style, TextFormat, TextStyle, Theme, Ui, Visuals, pos2, vec2,
 };
 
 use super::palette::{
@@ -90,14 +90,20 @@ pub const INDENT: f32 = 12.0;
 pub const SECTION_SCALE: f64 = 12.0 / 13.0;
 pub const SECTION_LETTER_SPACING: f64 = 100.0;
 
-/// A menu item's icon, in points: Fusion's small icon (PM_SmallIconSize), with the stylesheet's
-/// QMenu::icon padding-left before it.
+/// A menu item's icon, in points: Fusion's small icon (PM_SmallIconSize), the design's 16 point
+/// grid.
 pub const MENU_ICON_SIZE: f32 = 16.0;
-pub const MENU_ICON_PADDING: f32 = 6.0;
 
-/// The corner radius of a checked icon's frame (QMenu::icon:checked), of buttons, inputs and
-/// list items (QPushButton, QLineEdit, QMenu::item), and of a dialog or a popup, in points.
-pub const CHECKED_ICON_RADIUS: u8 = 3;
+/// A menu item's check column, before its icon: room for the tick a checkable item shows while it
+/// is on (paint_menu_gutter), the tick's 8 px and 2 either side.
+pub const MENU_CHECK_WIDTH: f32 = 12.0;
+
+/// A menu item's gutter before its text, the check column and the icon: every item has it,
+/// with a tick or an icon or neither, so the texts of a menu start at one edge.
+pub const MENU_GUTTER_WIDTH: f32 = MENU_CHECK_WIDTH + MENU_ICON_SIZE;
+
+/// The corner radius of buttons, inputs and list items (QPushButton, QLineEdit, QMenu::item), and
+/// of a dialog or a popup, in points.
 pub const CORNER_RADIUS: u8 = 4;
 pub const WINDOW_RADIUS: u8 = 6;
 
@@ -428,56 +434,71 @@ pub fn menu_section(ui: &mut Ui, title: &str) -> Response {
             ..TextFormat::default()
         },
     ));
-    // The title starts where the items' text does - their button padding in from the menu's
-    // side - so a section and its items read as one column (theme.cpp's kIndent was the
-    // stylesheet's item padding; egui's menu pads an item by button_padding).
-    let indent = ui.spacing().button_padding.x;
-    let width = galley.size().x + 2.0 * indent + 2.0 * INDENT;
+    // The title starts where the items' text does - their button padding, their gutter of tick
+    // and icon and the gap after it in from the menu's side (menu_text_indent) - so a section and
+    // its items read as one column (theme.cpp's kIndent was the stylesheet's item padding).
+    let indent = menu_text_indent(ui);
+    let width = galley.size().x + indent + ui.spacing().button_padding.x + 2.0 * INDENT;
     let height = plain.size().y + SECTION_PADDING;
     let (rect, response) = ui.allocate_at_least(vec2(width, height), Sense::hover());
     let area = Rect::from_min_max(
         pos2(rect.left() + indent, rect.top() + SECTION_PADDING / 2.0),
-        pos2(rect.right() - indent, rect.bottom()),
+        pos2(rect.right().max(rect.left() + indent), rect.bottom()),
     );
     let at = pos2(area.left(), area.center().y - galley.size().y / 2.0);
     ui.painter().galley(at, galley, color);
     response
 }
 
-/// The frame a checked menu item's icon wears (QMenu::icon:checked): raised, a pixel of the
-/// accent round it, corners of CHECKED_ICON_RADIUS - as a checked toolbar button is framed, so a
-/// toggle (Grid, Object Snap, Link This View) looks on when it is on.
-pub fn paint_checked_icon_frame(painter: &Painter, cell: Rect) {
-    painter.rect(
-        cell,
-        CornerRadius::same(CHECKED_ICON_RADIUS),
-        raised().to_egui(),
-        Stroke::new(1.0, accent().to_egui()),
-        StrokeKind::Inside,
-    );
+/// Where a menu item's text starts from the item's left edge: its button padding, its gutter
+/// (MENU_GUTTER_WIDTH) and the gap egui leaves between the parts of a button (icon_spacing). A
+/// section's title starts there too (menu_section).
+pub fn menu_text_indent(ui: &Ui) -> f32 {
+    ui.spacing().button_padding.x + MENU_GUTTER_WIDTH + ui.spacing().icon_spacing
 }
 
-/// A menu item's icon cell: MENU_ICON_PADDING then the MENU_ICON_SIZE icon, with the frame's pixel
-/// on each side, framed when the item is checked (paint_checked_icon_frame); `icon` is the
-/// icon's texture, drawn as it is.
-pub fn menu_icon_cell(ui: &mut Ui, icon: Option<TextureId>, checked: bool) -> Response {
-    let size = vec2(
-        1.0 + MENU_ICON_PADDING + MENU_ICON_SIZE + 1.0,
-        1.0 + MENU_ICON_SIZE + 1.0,
-    );
-    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+/// A menu item's gutter, `gutter` MENU_GUTTER_WIDTH wide before its text: a tick in the accent in
+/// the check column while a checkable item is on (`checked`), and the item's icon - its name in
+/// the window's icon set (crate::icons), drawn through the icon painter - after it; an item with
+/// no icon leaves its place empty.
+///
+/// Until 2026-11-16 a checkable item was drawn as a pill filled with the selection's blue
+/// (egui's selectable button): fourteen of them in View > Toolbars read as a column of pressed
+/// buttons, and no item showed its icon. A tick beside the icon keeps both: what the item is,
+/// and whether it is on. Rejected: the icon framed in the accent (QMenu::icon:checked, the C++
+/// stylesheet's), which said "on" only for an item that had an icon, and in a frame the eye takes
+/// for hover.
+pub fn paint_menu_gutter(painter: &Painter, gutter: Rect, icon: &str, checked: bool) {
     if checked {
-        paint_checked_icon_frame(ui.painter(), rect);
+        let check = Rect::from_min_size(
+            gutter.left_top(),
+            vec2(MENU_CHECK_WIDTH, gutter.height()),
+        );
+        paint_menu_tick(painter, check.center());
     }
-    if let Some(texture) = icon {
+    if !icon.is_empty() {
         let place = Rect::from_min_size(
-            pos2(rect.left() + 1.0 + MENU_ICON_PADDING, rect.top() + 1.0),
+            pos2(
+                gutter.left() + MENU_CHECK_WIDTH,
+                gutter.center().y - MENU_ICON_SIZE / 2.0,
+            ),
             vec2(MENU_ICON_SIZE, MENU_ICON_SIZE),
         );
-        let whole = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-        ui.painter().image(texture, place, whole, Color32::WHITE);
+        crate::icons::show_icon(painter, place, icon, crate::icons::IconMode::Normal);
     }
-    response
+}
+
+/// The tick of a checked menu item, centred on `centre`: 8 px across and 6 high, in the accent, a
+/// stroke of 1.5 - the icons' weight at a menu's size.
+fn paint_menu_tick(painter: &Painter, centre: Pos2) {
+    painter.add(Shape::line(
+        vec![
+            pos2(centre.x - 4.0, centre.y),
+            pos2(centre.x - 1.5, centre.y + 2.5),
+            pos2(centre.x + 4.0, centre.y - 3.5),
+        ],
+        Stroke::new(1.5, accent().to_egui()),
+    ));
 }
 
 // ---- the toolbar's overflow arrow ----------------------------------------------------------------
