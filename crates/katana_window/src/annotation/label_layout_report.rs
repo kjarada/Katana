@@ -39,6 +39,7 @@ use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 /// The dialog's object name and title.
 const DIALOG: &str = "labelLayoutDialog";
@@ -335,33 +336,41 @@ impl LabelLayoutReportDialog {
         {
             self.command = label_layout_line(self.collisions);
         }
-        egui::Grid::new("labelLayoutCounts")
-            .num_columns(2)
-            .show(ui, |ui| {
-                let counts = [
-                    ("Placed", "labelLayoutPlaced", &self.placed),
-                    (
-                        "Displaced (moved to find room)",
-                        "labelLayoutDisplaced",
-                        &self.displaced,
-                    ),
-                    (
-                        "Suppressed (no room)",
-                        "labelLayoutSuppressed",
-                        &self.suppressed,
-                    ),
-                    (
-                        "Orphaned (label nothing)",
-                        "labelLayoutOrphaned",
-                        &self.orphaned,
-                    ),
-                ];
-                for (title, name, value) in counts {
-                    ui.label(title);
+        ui.add_space(dialog::GROUP_GAP);
+        dialog::form(ui, |form| {
+            // Each count's word in the label column and what it means after the figure, in the
+            // secondary text: "Displaced (moved to find room)" as a label was wider than the
+            // column and wrapped, and pushed every figure out to its edge.
+            let counts = [
+                ("Placed:", "", "labelLayoutPlaced", &self.placed),
+                (
+                    "Displaced:",
+                    "moved to find room",
+                    "labelLayoutDisplaced",
+                    &self.displaced,
+                ),
+                (
+                    "Suppressed:",
+                    "no room",
+                    "labelLayoutSuppressed",
+                    &self.suppressed,
+                ),
+                (
+                    "Orphaned:",
+                    "label nothing",
+                    "labelLayoutOrphaned",
+                    &self.orphaned,
+                ),
+            ];
+            for (title, meaning, name, value) in counts {
+                form.row(title, |ui| {
                     controls::label(ui, name, value);
-                    ui.end_row();
-                }
-                ui.label("Command");
+                    if !meaning.is_empty() {
+                        dialog::form_label(ui, meaning);
+                    }
+                });
+            }
+            form.row("Command:", |ui| {
                 controls::line_with(
                     ui,
                     "labelLayoutCommand",
@@ -371,8 +380,9 @@ impl LabelLayoutReportDialog {
                         ..LineOptions::default()
                     },
                 );
-                ui.end_row();
             });
+        });
+        ui.add_space(dialog::GROUP_GAP);
         controls::text_with(
             ui,
             "labelLayoutOutput",

@@ -40,6 +40,8 @@
 //! labelEditStatus     what happened last
 //! ```
 
+use std::cell::Cell;
+
 use egui::{Context, Ui};
 use katana_cad::{Document, DocumentChange};
 use katana_core::error::make_error;
@@ -54,6 +56,7 @@ use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 const DIALOG: &str = "labelEditDialog";
 const TITLE: &str = "Edit Label";
@@ -522,82 +525,106 @@ impl LabelEditDialog {
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let enabled = self.current.id != 0;
         let mut changed = false;
-        egui::Grid::new("labelEditFields")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("Label");
+        // One form: the labels in the dialog's label column, the two boxes in it as the labels of
+        // the fields they switch, every field from one edge to the body's.
+        dialog::form(ui, |form| {
+            form.row("Label:", |ui| {
                 controls::label(ui, "labelEditTarget", &self.target);
-                ui.end_row();
+            });
 
-                ui.label("Style");
+            form.row("Style:", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     changed |=
                         controls::choice(ui, "labelEditStyle", &self.styles, &mut self.style)
                             .on_hover_text(
                                 "What the label says and where it goes (Format > Label Styles and \
-                             Rules)",
+                                 Rules)",
                             )
                             .changed();
                 });
-                ui.end_row();
+            });
 
-                ui.add_enabled_ui(enabled, |ui| {
-                    changed |=
-                        controls::check(ui, "labelEditOverride", "Own text", &mut self.r#override)
+            // A box is its row's label and switches the field beside it: the two closures share
+            // it, and the field is drawn after the box, so it follows a tick in the same frame.
+            let r#override = Cell::new(self.r#override);
+            let mut ticked = false;
+            dialog::row_with(
+                form.ui(),
+                |ui| {
+                    ui.add_enabled_ui(enabled, |ui| {
+                        let mut on = r#override.get();
+                        ticked = controls::check(ui, "labelEditOverride", "Own text", &mut on)
                             .on_hover_text(
                                 "Say these words instead of the style's; unticked, the label says \
-                             what its style works out from its target",
+                                 what its style works out from its target",
                             )
                             .changed();
-                });
-                ui.add_enabled_ui(enabled && self.r#override, |ui| {
-                    changed |= controls::line(ui, "labelEditText", &mut self.text).changed();
-                });
-                ui.end_row();
-
-                ui.add_enabled_ui(enabled, |ui| {
-                    changed |= controls::check(
-                        ui,
-                        "labelEditPinned",
-                        "Pinned at",
-                        &mut self.pinned,
-                    )
-                    .on_hover_text(
-                        "Put the text at this point, with a leader back when its style draws \
-                             one; unticked, the placer finds it room at every scale",
-                    )
-                    .changed();
-                });
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(enabled && self.pinned, |ui| {
-                        for (name, value, placeholder) in [
-                            ("labelEditEasting", &mut self.easting, "Easting"),
-                            ("labelEditNorthing", &mut self.northing, "Northing"),
-                        ] {
-                            changed |= controls::line_with(
-                                ui,
-                                name,
-                                value,
-                                LineOptions {
-                                    placeholder,
-                                    ..LineOptions::default()
-                                },
-                            )
-                            .changed();
-                        }
+                        r#override.set(on);
                     });
-                });
-                ui.end_row();
+                },
+                |ui| {
+                    // The field is all the row draws after the box: its Ui is disabled in place.
+                    if !(enabled && r#override.get()) {
+                        ui.disable();
+                    }
+                    changed |= controls::line(ui, "labelEditText", &mut self.text).changed();
+                },
+            );
+            self.r#override = r#override.get();
+            changed |= ticked;
 
-                ui.label("Layer");
+            let pinned = Cell::new(self.pinned);
+            let mut ticked = false;
+            dialog::row_with(
+                form.ui(),
+                |ui| {
+                    ui.add_enabled_ui(enabled, |ui| {
+                        let mut on = pinned.get();
+                        ticked = controls::check(ui, "labelEditPinned", "Pinned at", &mut on)
+                            .on_hover_text(
+                                "Put the text at this point, with a leader back when its style \
+                                 draws one; unticked, the placer finds it room at every scale",
+                            )
+                            .changed();
+                        pinned.set(on);
+                    });
+                },
+                |ui| {
+                    if !(enabled && pinned.get()) {
+                        ui.disable();
+                    }
+                    // The easting and the northing share the field's room, half each.
+                    let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                    for (name, value, placeholder) in [
+                        ("labelEditEasting", &mut self.easting, "Easting"),
+                        ("labelEditNorthing", &mut self.northing, "Northing"),
+                    ] {
+                        changed |= controls::line_with(
+                            ui,
+                            name,
+                            value,
+                            LineOptions {
+                                placeholder,
+                                width: Some(half),
+                                ..LineOptions::default()
+                            },
+                        )
+                        .changed();
+                    }
+                },
+            );
+            self.pinned = pinned.get();
+            changed |= ticked;
+
+            form.row("Layer:", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     changed |=
                         controls::choice(ui, "labelEditLayer", &self.layers, &mut self.layer)
                             .changed();
                 });
-                ui.end_row();
+            });
 
-                ui.label("Command");
+            form.row("Command:", |ui| {
                 controls::line_with(
                     ui,
                     "labelEditCommand",
@@ -608,8 +635,8 @@ impl LabelEditDialog {
                     },
                 )
                 .on_hover_text("The line OK and Apply run, as it would be typed");
-                ui.end_row();
             });
+        });
         if changed {
             self.update_line();
         }

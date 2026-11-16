@@ -156,6 +156,63 @@ mod label_edit_dialog {
     use super::*;
 
     #[test]
+    fn its_fields_start_at_one_edge_and_end_at_the_bodys_whichever_box_labels_them() {
+        // The look of 2026-11-16: one form, its labels in one column - the two boxes as the
+        // labels of the fields they switch - and every field from one edge to the body's. In the
+        // window's theme (theme::style::apply); the harness's own style is egui's. Within half a
+        // point: egui rounds a widget's rectangle to the pixel grid (the offscreen screen's one
+        // pixel a point).
+        const HALF_A_POINT: f32 = 0.5;
+        let mut bench = edit_label();
+        katana_window::theme::style::apply(bench.harness.context());
+        bench.document_mut().selection_mut().set(vec![2]);
+        assert!(bench.dialog.load_selection(bench.host.document()));
+        bench.draw();
+        let dialog = bench
+            .harness
+            .target_record("labelEditDialog")
+            .expect("the dialog is drawn")
+            .rect;
+        // The body's right edge: the frame's pixel of border, its padding and BODY_WIDTH from the
+        // dialog's left - not from its right, which a control running past the body moves.
+        let body_right = dialog.left()
+            + 1.0
+            + katana_window::shell::dialog::PADDING
+            + katana_window::shell::dialog::BODY_WIDTH;
+        let rects: Vec<(&str, egui::Rect)> = [
+            "labelEditStyle",
+            "labelEditText",
+            "labelEditEasting",
+            "labelEditNorthing",
+            "labelEditLayer",
+            "labelEditCommand",
+        ]
+        .into_iter()
+        .map(|name| (name, bench.control(name).rect))
+        .collect();
+        let said = format!("the dialog is {dialog:?}, its body ends at {body_right}; {rects:?}");
+        let start = rects[0].1.left();
+        let mut wrong = Vec::new();
+        for (name, rect) in &rects {
+            if *name != "labelEditNorthing" && (rect.left() - start).abs() > HALF_A_POINT {
+                wrong.push(format!("{name} starts at {}", rect.left()));
+            }
+            // Not the layer's end, nor the command's under it: the layer is an editable choice,
+            // whose list arrow drive::controls::choice draws icon_spacing and icon_width_inner
+            // (14 points) wider than the room it leaves it, and that pushes the body out for the
+            // rows under it (docs/desktop.md, "Not done").
+            let ends_here = !matches!(
+                *name,
+                "labelEditEasting" | "labelEditLayer" | "labelEditCommand"
+            );
+            if ends_here && (rect.right() - body_right).abs() > HALF_A_POINT {
+                wrong.push(format!("{name} ends at {}", rect.right()));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:?}: {said}");
+    }
+
+    #[test]
     fn with_no_label_selected_it_says_so_and_offers_nothing_to_run() {
         let mut bench = edit_label();
         assert!(!bench.dialog.load_selection(bench.host.document()));
