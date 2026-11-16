@@ -915,10 +915,22 @@ nothing for an icon that changes once a year. Below 64 px the sword is drawn
 larger and heavier within its tile; at true proportions it is a few pixels
 wide on a taskbar and disappears. The window takes its icon at run time
 (eframe's viewport icon, `crates/katana_window/src/drive/desktop.rs`).
-Not done: `katana.exe` carries no Windows resource - no icon and no
-`VERSIONINFO` block, both of which the C++ build embedded - so Explorer shows
-a generic icon and no version for the file itself; the running window has
-its icon.
+On Windows the FILE carries the icon too, with a `VERSIONINFO` block, as
+the C++'s `katana.rc.in` gave it: the window crate's build script
+(`crates/katana_window/build.rs`) writes the resource script into cargo's
+output folder - the icon, the version from `project(Katana VERSION ...)`,
+the publisher from `cmake/KatanaPackaging.cmake` - compiles it with the
+toolchain's `windres` (`llvm-windres` where there is only LLVM's) and links
+it into `katana` alone. Explorer, the taskbar, the Start menu and Settings >
+Apps then show Katana's icon for the program before it runs, and its
+Properties name the product and the version. A Windows build with no
+resource compiler fails there, naming it. Rejected: a crate for it
+(embed-resource, winresource), a dependency for one command; a committed
+`.res`, whose version could drift from the CMakeLists.txt. Tested on
+Windows by `crates/katana_window/tests/program_resource/main.rs`: every
+image of `resources/katana.ico` is in the built program, and its version
+strings are. Not done: `katana_cli.exe`, `katana_mcp.exe` and
+`katana_updater.exe` carry neither, as in the C++.
 
 **Every menu item has an icon and says what it does.** Until 2026-09-26
 sixty menu items had no icon or no status tip, or neither: the snap modes,
