@@ -530,7 +530,7 @@ pub fn editable_choice_frame<R>(
 
 /// The down chevron of a list's arrow, centred in `rect`: 8 px across and 4 deep, a stroke of 1.5
 /// in `ink` - the icons' weight at a menu's size (icons.rs's STROKE at 16 px).
-fn paint_list_arrow(painter: &egui::Painter, rect: egui::Rect, ink: egui::Color32) {
+pub(crate) fn paint_list_arrow(painter: &egui::Painter, rect: egui::Rect, ink: egui::Color32) {
     let centre = rect.center();
     painter.add(egui::Shape::line(
         vec![

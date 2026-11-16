@@ -657,6 +657,15 @@ fn table_row(
         let mut changed = false;
         egui::ComboBox::from_id_salt(("surfaceStyle", at))
             .selected_text(row.style_text())
+            // The named choice's chevron (drive::controls::choice), so the rows read alike.
+            .icon(|ui, rect, _, open| {
+                let ink = if open {
+                    palette::text()
+                } else {
+                    palette::text_muted()
+                };
+                crate::drive::controls::paint_list_arrow(ui.painter(), rect, ink.to_egui());
+            })
             .show_ui(ui, |ui| {
                 for (index, text) in row.style_texts.iter().enumerate() {
                     if ui
