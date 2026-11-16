@@ -361,6 +361,30 @@ mod program {
     }
 
     #[test]
+    fn the_toolbar_fit_check_given_no_sizes_fails_at_once_and_takes_no_other_switch_for_them() {
+        // The second look audit (N16): `--check-toolbar-fit --screenshot X` took "--screenshot"
+        // for its sizes and X for a project, and with no screenshot asked for the window opened
+        // and ran until the 600 second timeout.
+        let scratch = Scratch::new("drive-program-fit-sizes");
+        let shot = scratch.path("fit.png");
+        let shot_text = path_text(&shot);
+        let shot_text = shot_text.as_str();
+        for arguments in [
+            ["katana", "--check-toolbar-fit", "--screenshot", shot_text],
+            ["katana", "--screenshot", shot_text, "--check-toolbar-fit"],
+        ] {
+            let (code, console, _) = run_headless(&arguments);
+            assert_eq!(code, 2, "{arguments:?}: {}", console.err);
+            assert_eq!(
+                console.err,
+                "--check-toolbar-fit needs sizes like 1366x768, a comma between\n",
+                "{arguments:?}"
+            );
+            assert!(!shot.exists(), "{arguments:?}: nothing was run");
+        }
+    }
+
+    #[test]
     fn the_managers_and_the_gis_dialogs_are_grabbed_and_a_file_with_none_fails_the_run() {
         let scratch = Scratch::new("drive-program-managers");
         let shot = path_text(&scratch.path("manager.png"));

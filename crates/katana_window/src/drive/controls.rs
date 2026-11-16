@@ -915,6 +915,65 @@ impl SpinRange {
     }
 }
 
+/// The least width of a number box (`spin`, `whole`): half a short field
+/// (shell::dialog::SHORT_FIELD_WIDTH), what holds a station, a percentage or a size with its unit
+/// ("2.50 mm"). egui's least is a control's 40, a box the size of a key.
+pub const NUMBER_FIELD_WIDTH: f32 = crate::shell::dialog::SHORT_FIELD_WIDTH / 2.0;
+
+/// A number box's look, set on the `Ui` it alone is drawn in: a field's well (the input token
+/// under the field's border, lit under the pointer and framed in the accent while dragged) and
+/// its text FIELD_INSET in, where a one-line field's is. egui draws a DragValue as a Button - the
+/// raised grey of a key, its text centred - so every number box of every form read as a button
+/// beside the fields round it (the second look audit's N4). Public for a number box drawn without
+/// `spin` or `whole` (the sheet editor's own).
+pub fn number_field_look(ui: &mut Ui) {
+    let well = ui.visuals().text_edit_bg_color();
+    let widgets = &mut ui.visuals_mut().widgets;
+    for state in [
+        &mut widgets.noninteractive,
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        state.bg_fill = well;
+        state.weak_bg_fill = well;
+        state.expansion = 0.0;
+    }
+    ui.spacing_mut().button_padding.x = FIELD_INSET;
+}
+
+/// Draws `drag`, which shows `shown`, as a field (`number_field_look`): a control high, its text
+/// centred in that height and FIELD_INSET in from its left, as wide as its text and its insets and
+/// NUMBER_FIELD_WIDTH at least. egui sizes a DragValue to the spacing's interact width and lays
+/// its text out by the layout it is drawn in, so the box is drawn in a cell of its own, left to
+/// right with its contents at the left and centred down - in a row whose items sit at its top (a
+/// form's) its text stood at the top of the box, and in egui's own row it stood in the middle.
+fn number_field(ui: &mut Ui, shown: &str, drag: egui::DragValue<'_>) -> Response {
+    let font = ui.style().drag_value_text_style.resolve(ui.style());
+    let text = ui
+        .painter()
+        .layout_no_wrap(String::from(shown), font, egui::Color32::PLACEHOLDER)
+        .size()
+        .x;
+    let width = (text + 2.0 * FIELD_INSET).max(NUMBER_FIELD_WIDTH);
+    let height = ui.spacing().interact_size.y;
+    ui.scope(|ui| {
+        number_field_look(ui);
+        // The width the DragValue takes as its least, both as a box and while typed into.
+        ui.spacing_mut().interact_size.x = width;
+        // Its text at the left: egui's left-to-right layout centres what it holds along the row
+        // ("to center text within a button"), and a button takes its text's place from it.
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, height),
+            egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Min),
+            |ui| ui.add(drag),
+        )
+        .inner
+    })
+    .inner
+}
+
 /// QDoubleSpinBox over `value`: a fill takes a number in the range, read as the box reads typed
 /// text (the C locale, whitespace round it ignored), rounded to its decimals as setValue rounds.
 pub fn spin(ui: &mut Ui, name: &str, value: &mut f64, range: SpinRange) -> Response {
@@ -943,6 +1002,16 @@ pub fn spin(ui: &mut Ui, name: &str, value: &mut f64, range: SpinRange) -> Respo
             Act::ScrollTo => {}
         }
     }
+    // What the box shows, read before the box borrows the value.
+    let shown = if !range.special.is_empty() && *value == range.minimum {
+        String::from(range.special)
+    } else {
+        format!(
+            "{}{}",
+            crate::format::qt_fixed(*value, range.decimals),
+            range.suffix
+        )
+    };
     let mut drag = egui::DragValue::new(value)
         .range(range.minimum..=range.maximum)
         .speed(range.step)
@@ -961,7 +1030,7 @@ pub fn spin(ui: &mut Ui, name: &str, value: &mut f64, range: SpinRange) -> Respo
             }
         });
     }
-    let mut response = ui.add(drag);
+    let mut response = number_field(ui, &shown, drag);
     if changed {
         response.mark_changed();
     }
@@ -998,7 +1067,8 @@ pub fn whole(ui: &mut Ui, name: &str, value: &mut i64, range: RangeInclusive<i64
             Act::ScrollTo => {}
         }
     }
-    let mut response = ui.add(egui::DragValue::new(value).range(range));
+    let shown = format!("{}", *value);
+    let mut response = number_field(ui, &shown, egui::DragValue::new(value).range(range));
     if changed {
         response.mark_changed();
     }
@@ -1075,13 +1145,13 @@ pub fn rows(
 /// One tab of a strip: its title, the text colour and an accent bar under it when it is in front,
 /// the secondary text colour when it is not, the raised colour under the pointer. A tab is a
 /// title, not a button: the strip reads as one row of places, with the one in front marked.
-fn tab(ui: &mut Ui, title: &str, in_front: bool) -> Response {
+fn tab(ui: &mut Ui, title: &str, in_front: bool, inset: f32) -> Response {
     use crate::theme::palette;
     let font = egui::TextStyle::Button.resolve(ui.style());
     let galley = ui
         .painter()
         .layout_no_wrap(String::from(title), font, egui::Color32::PLACEHOLDER);
-    let padding = egui::vec2(8.0, 4.0);
+    let padding = egui::vec2(inset, 4.0);
     let size = egui::vec2(
         galley.size().x + 2.0 * padding.x,
         ui.spacing().interact_size.y.max(galley.size().y + 2.0 * padding.y),
@@ -1126,6 +1196,24 @@ fn tab(ui: &mut Ui, title: &str, in_front: bool) -> Response {
 /// QTabWidget's tabs, `current` the one in front: a fill brings the tab whose title is the text
 /// given to the front, a title's '&' not counted (fillField).
 pub fn tabs(ui: &mut Ui, name: &str, titles: &[&str], current: &mut usize) -> Response {
+    tabs_with(ui, name, titles, current, true)
+}
+
+/// `tabs` drawn as a title bar's title (a group of docks' tabs, dock_chrome's `dock_ui_titled`):
+/// as high as the room it is given, with no rule of its own under it - the bar's own border is the
+/// rule the tab in front stands on - and set closer, each title the design's GAP in from its
+/// tab's sides and the tabs side by side, so two titles fit a panel's bar 240 wide.
+pub fn title_tabs(ui: &mut Ui, name: &str, titles: &[&str], current: &mut usize) -> Response {
+    tabs_with(ui, name, titles, current, false)
+}
+
+fn tabs_with(
+    ui: &mut Ui,
+    name: &str,
+    titles: &[&str],
+    current: &mut usize,
+    ruled: bool,
+) -> Response {
     let taken = take(ui, name);
     let mut changed = false;
     if let Some(taken) = &taken {
@@ -1152,23 +1240,39 @@ pub fn tabs(ui: &mut Ui, name: &str, titles: &[&str], current: &mut usize) -> Re
     let mut response = ui
         .push_id(name, |ui| {
             let strip = ui.horizontal(|ui| {
+                let inset = if ruled {
+                    crate::theme::style::GROUP_GAP
+                } else {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    crate::theme::style::GAP
+                };
                 for (at, title) in titles.iter().enumerate() {
-                    if tab(ui, &title.replace('&', ""), *current == at).clicked() && *current != at
-                    {
+                    let clicked = tab(ui, &title.replace('&', ""), *current == at, inset).clicked();
+                    if clicked && *current != at {
                         *current = at;
                         changed = true;
                     }
                 }
             });
-            // A rule under the strip, across what holds it, that the tab in front stands on.
-            let under = strip.response.rect.bottom();
-            let painter = ui.painter();
-            painter.hline(
-                ui.max_rect().x_range(),
-                painter.round_to_pixel_center(under),
-                egui::Stroke::new(1.0, crate::theme::palette::border().to_egui()),
-            );
-            ui.add_space(4.0);
+            if ruled {
+                // A rule under the strip, across what holds it, that the tab in front stands on;
+                // in a dialog body's own column, across the body as the last pass drew it: a page
+                // wider than the width the body is laid out at had the rule stop short of it.
+                let mut across = ui.max_rect().x_range();
+                if !crate::shell::dialog::in_a_column(ui)
+                    && let Some(body) = crate::shell::dialog::body_span(ui)
+                {
+                    across.max = across.max.max(body.max);
+                }
+                let under = strip.response.rect.bottom();
+                let painter = ui.painter();
+                painter.hline(
+                    across,
+                    painter.round_to_pixel_center(under),
+                    egui::Stroke::new(1.0, crate::theme::palette::border().to_egui()),
+                );
+                ui.add_space(4.0);
+            }
         })
         .response;
     if changed {

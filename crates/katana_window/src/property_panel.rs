@@ -1481,10 +1481,18 @@ impl PropertyTreePanel {
         // so a long label is cut short rather than pushing the values off it. Side by side, each
         // value after its own label, the values zigzagged down the panel and a column of numbers
         // could not be read down.
+        //
+        // ONE LEFT EDGE. A row's label starts where the panel's Style label and filter do: the
+        // expander's cell is kept only while some row of the tree has one (a tree of leaves - the
+        // selection's count - has no cell to keep), and a label is plain text on its row, the row
+        // lit when chosen, not a selectable button whose padding stood it another 8 in. Its rows
+        // stood 32 points in from the Style label (the second look audit's T8).
         let font = egui::TextStyle::Button.resolve(ui.style());
         let gap = ui.spacing().item_spacing.x;
-        let padding = 2.0 * ui.spacing().button_padding.x;
-        let lead = |depth: usize| TREE_STEP * depth as f32 + EXPANDER_WIDTH + gap;
+        let padding = gap;
+        let expanders = rows.iter().any(|(path, _)| self.has_children(path));
+        let expander_cell = if expanders { EXPANDER_WIDTH + gap } else { 0.0 };
+        let lead = |depth: usize| TREE_STEP * depth as f32 + expander_cell;
         let widest = rows
             .iter()
             .filter_map(|(path, depth)| self.node(path).map(|node| (node, *depth)))
@@ -1509,9 +1517,16 @@ impl PropertyTreePanel {
                 };
                 let expander = self.has_children(path);
                 let selected = self.selected.contains(path);
-                ui.horizontal(|ui| {
+                // The row's ground, painted under it once its place is known: the chosen row lit
+                // as a table's is (dialog_layout::selected_row_colour), a row under the pointer
+                // the hover token.
+                let ground = ui.painter().add(egui::Shape::Noop);
+                let mut hovered = false;
+                let row = ui.horizontal(|ui| {
                     ui.add_space(TREE_STEP * *depth as f32);
-                    if tree_expander(ui, expander.then_some(node.expanded)).clicked() {
+                    if expanders
+                        && tree_expander(ui, expander.then_some(node.expanded)).clicked()
+                    {
                         acts.push(Act::Toggle(path.clone()));
                     }
                     // The label muted, so the values read first; a heading in the text colour,
@@ -1527,16 +1542,31 @@ impl PropertyTreePanel {
                     }
                     let cell = (column - lead(*depth)).max(0.0);
                     let height = ui.spacing().interact_size.y;
-                    let mut name = ui
-                        .allocate_ui_with_layout(
-                            egui::vec2(cell, height),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.set_min_width(cell);
-                                ui.add(egui::Button::selectable(selected, label).truncate())
-                            },
+                    let (place, mut name) =
+                        ui.allocate_exact_size(egui::vec2(cell, height), egui::Sense::click());
+                    name.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            true,
+                            selected,
+                            node.data.label.as_str(),
                         )
-                        .inner;
+                    });
+                    hovered = name.hovered();
+                    if ui.is_rect_visible(place) {
+                        // Cut short at the label column's end, as the button was.
+                        let galley = egui::WidgetText::from(label).into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Truncate),
+                            cell,
+                            egui::TextStyle::Button,
+                        );
+                        ui.painter().galley(
+                            egui::pos2(place.left(), place.center().y - galley.size().y / 2.0),
+                            galley,
+                            ui.visuals().text_color(),
+                        );
+                    }
                     if !node.data.tip.is_empty() {
                         name = name.on_hover_text(node.data.tip.as_str());
                     }
@@ -1558,6 +1588,27 @@ impl PropertyTreePanel {
                     // Cut short at the panel's edge, the whole value in its tooltip.
                     ui.add(egui::Label::new(value).truncate());
                 });
+                let fill = if selected {
+                    Some(crate::dialog_layout::selected_row_colour())
+                } else if hovered {
+                    Some(ui.visuals().widgets.hovered.weak_bg_fill)
+                } else {
+                    None
+                };
+                if let Some(fill) = fill {
+                    let across = egui::Rect::from_x_y_ranges(
+                        ui.max_rect().x_range(),
+                        row.response.rect.y_range(),
+                    );
+                    ui.painter().set(
+                        ground,
+                        egui::epaint::RectShape::filled(
+                            across,
+                            egui::CornerRadius::same(crate::theme::style::CORNER_RADIUS),
+                            fill,
+                        ),
+                    );
+                }
             }
         });
         let table = ui.interact(
