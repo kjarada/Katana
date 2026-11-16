@@ -801,7 +801,17 @@ one must not fill, `fixed_fields` gives it a width of its own,
 that is a named control is drawn with `row_with_text`, measured by its text
 on one line: measured as drawn, a label shown after its column was measured
 narrower wrapped a word to a line and never widened it (the Leaders
-dialog's "Landing direction"). The scope and filter widget's rows are
+dialog's "Landing direction"). A row whose label is a check box or a radio
+button (Global Modify's ticks, Edit Label's "Own text") is `row_with_check`,
+measured as egui lays the box out - its icon, the icon's spacing, its text -
+where by the text alone the column was short and the text wrapped. A form
+outside a dialog's body (the sheet editor's properties panel) is wrapped in
+`form_panel`, so its rows share a measured column rather than a 150 one that
+ran a 260-wide panel's fields past its edge. A dialog that sets forms side by
+side or beside a preview gives its body the width they need (Dimension
+Styles 980, the Definition Editor `TWO_COLUMN_WIDTH`): at the 520 default the
+second form's fields were drawn 0 wide and its heading wrapped a letter to a
+line. The scope and filter widget's rows are
 labelled rows too, so in Buffer or Global Modify they line up with the
 dialog's own fields. A second form - an egui Grid of fixed-width fields
 behind a 110 column, in `crates/katana_window/src/dialog_layout.rs` - was
@@ -4969,6 +4979,9 @@ they are easiest to break:
   was with the edits still in the grid (`ROADTEMPLATE SET <t> <c> key=value
   <c> key=value`). A verb that takes one thing at a time is given a form that
   takes several rather than being run in a loop by the dialog.
+- **A form is `shell::dialog`'s form**, never a hand-built `egui::Grid` of
+  labels and fields; a Grid is for a table (the Title Block's revision
+  cells), and lines up only its own cells.
 - **A dialog gives its body a width.** The frame lends a body at most
   `BODY_WIDTH` (`crates/katana_window/src/shell/dialog.rs`); a dialog that
   needs more says how much, and nothing in a body fills "the available
