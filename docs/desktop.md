@@ -931,6 +931,91 @@ is a dialog in the window's own frame (`aboutDialog`, `aboutText`,
 `aboutClose`); rejected: the native warning box it was, which carried a
 warning sign and blocked the window.
 
+**The fourth round (the second audit's leftovers, shared parts and the main window).**
+A labelled row's label height is kept between passes by its Ui, its words, what the label is
+(words or a check box) and its column: egui gives sibling Uis one id (`Ui::id`), so the two
+columns of Global Modify kept one height for the filter's "Layer" (words) and the Modify side's
+"Layer" tick (a control high) - the words stood 5 points above their field, the tick 4 below its.
+The audit put it down to the `add_enabled_ui` round the filter's fields; a test shows that wrapper
+level either way. A number box (`drive::controls::spin`, `whole`) is a field's well - the input
+token, `FIELD_INSET`, a control high, its text where a field's is - `NUMBER_FIELD_WIDTH` (65, half
+`SHORT_FIELD_WIDTH`) at least, where egui drew a DragValue as a raised key; it keeps its own width
+rather than filling its row (a row of a box and a word after it would lose the word);
+`number_field_look` is public for a box drawn without them (the sheet editor's). A group of docks
+sharing a place (Reference Data and Surfaces) has its tabs as its bar's title
+(`DockChrome::dock_ui_titled`, `drive::controls::title_tabs`, no icon, the bar's border their
+rule); rejected: a strip of tabs over a bar that said the front tab again. The Vertices panel's
+table is in the table look, each column as wide as its widest text and the table scrolling across
+the 240-wide panel; the Reference Data panel lists in the table look and says when it has nothing;
+the Surfaces panel's style choice ends at the panel's edge, its text cut short. The Properties
+tree starts at its Style label's edge (no expander cell while no row has one; a row lit as a
+table's row, not a button's pill). The status bar shows an error's sentence, not its code
+(`command_log::without_error_code`); the log and what a line hands back keep it. The command log
+shows its last line, whole, whenever it is laid out again (a new line, a text size, a height):
+`stick_to_bottom` alone kept the old layout's offset at Extra Large. The Surface Edit choice says
+"No surface" while it is empty. A side column's bar after one that does not fit keeps the room of
+its overflow arrow (`layout::column_rooms`, `collapsed_bar`), so Annotate under Draw at 1360 x 860
+is an arrow rather than nothing; rejected: sharing the column by length (Draw kept 8 of its 17
+tools). A fit with no arrow needs Draw's tools regrouped into families (tools/). Also:
+`shell::dialog::status` (a named status line in `status_colour`) and `body_span` (the body as the
+last pass drew it), which a tab strip's rule spans in the body's own column.
+
+**The fourth round, the GIS, terrain, survey and utility dialogs.** A dialog's
+status has one home, the footer's left: why its fields write no line is that
+status, muted (`geo::terrain_dialog_parts::RunStatus`, `run_buttons`' status
+label `<stem>Status`), never the read-only Command field's placeholder, which
+read as the command and was cut with "..."; the Command field shows the line
+alone. A status said is put away when the fields stop writing the line it
+spoke of, unless it came with that change. A tabbed run dialog shows the front
+page's Preview, status and Run in its footer (GDAL Toolbox, as Drape). A tree
+is whole rows with `drive::controls::tree_expander` under a header in the
+table look (Command Reference, Project Coordinate System), not pills the size
+of their words. A box of text for a reply, a summary or a detail is drawn only
+once there is one (`shell::dialog::reply`; Import IFC's summary, Command
+Reference's detail, given to egui as paragraphs rather than the help's
+hand-wrapped lines). A check list is a whole number of rows high. Volumes'
+Measure is its footer's primary; Traverse's and Forward's second verb stands
+left of Close; Utilities keeps one width on every tab, and Clip and Overlay,
+Viewshed and Grid Points to DEM end their fields at one edge. Not done:
+Utilities' "What is drawn" note wraps beside its radio; Viewshed's observers
+list has no empty state; Surface Styles' Apply and Revert are in its body.
+
+**The fourth round: the Format, annotation, BIM and sheet dialogs.** A dialog of tabs shows the
+front tab's actions in the footer: Leaders' Freeze Note and Detach Tip at the left, Close, Apply
+last in the accent; For Selection's Close and Make for Selection; Label Styles' Delete and Add
+Standard Set at the left, Close, Apply - where they stood under the forms, the accent in the body.
+Layers' Revert and Save Changes are its footer's, and the rename prompt's OK is a plain button: one
+accent a dialog. Edit Label's Cancel reads Close (labelEditCancel, as it was). Leaders is one form
+of sections (Position, Note, Look, Attribute of the entity it is on) where it was three boxes with
+four right edges; the values a note may use are a table under the note, as wide as the fields,
+where it was a strip 100 points wide beside the Look box. A label kept for drivers takes no room
+while it is empty (`dialog_layout::quiet_label`, which records it without moving the cursor): an
+empty check's row left a band a control high in the form. A list a person picks one row of spans
+its column as a table's chosen row does (`dialog_layout::pick_list`), where a selectable sized to
+its words was a pill (Text Styles' "Standard", the Settings pages, the sheet list); beside a form
+it is a well as tall as the form, saying so when it is empty (`list_well`, the form's height kept
+from the last frame by `last_height` / `keep_height`). A preview with nothing to show says what to
+choose (`StylePreview::set_placeholder`, `dialog_layout::preview_placeholder`); the road dialogs'
+previews had never been painted - their `set_raster` had no caller - and paint through the
+window's raster canvas when none is lent. An empty road grid is as tall as its note. The Label
+Layout Report's counts were centred twice (a wrapped row centres its first line in a control's
+height, and `text_value` adds the same gap) and stood 5 points under their labels. The Survey Code
+Manager's body is at least as tall as its Code Table page (measured each frame, every page being
+laid out), so Issues no longer shrinks it to a strip; rejected: the tallest page's height - the
+scope pages are taller than a laptop's screen, and every tab then scrolled over a void. Its code
+table's column is 640, the filter bar's width, so the tab strip's rule spans the body. The
+Linetypes page's library details are a label column; Styles and Linetypes' least height is 720
+for it (the page's 719). The Hatch Patterns page is as tall as the Styles page, its buttons at
+its foot. The Definition Editor's hint is a muted line, a refusal a box as high as its lines. The
+sheet editor's toolbar is one row of icons and words (Add View, Tile, Arrange and Check Sheets were
+words beside icons, and a word without a gutter stood closer to its neighbours); the sheet list's
+rows span the list, one line cut short with an ellipsis and whole in its tooltip; New, Copy and
+Remove are squares, Copy the copy icon; the paper's construction guide wears the border token
+rather than the frame's orange (it never plots); the Checks dock is as tall as what it holds, up
+to the 170 it was; the panel's own number box is a field well (`drive::controls::number_field_look`).
+Rejected: number boxes spanning their form rows for one right edge (a `full_width` helper, tried
+and removed) - a number box is one short well in every dialog (drive::controls::number_field). Tested in `crates/katana_window/tests/annotation/leader_manager.rs`, `label_edit_dialog.rs` and `annotation_ui.rs`, `crates/katana_window/tests/codes/code_manager.rs` and `crates/katana_window/tests/sheets/sheet_painter.rs`.
+
 **The view's Layers popup** is drawn as the Layers panel is: a panel's
 padding, one width of 300 hung by its top right corner under the view's
 Layers button, rows 22 high (`main_window::panels::LIST_ROW`) with the

@@ -31,17 +31,18 @@
 
 use std::collections::BTreeMap;
 
-use egui::{RichText, Ui};
+use egui::{Rect, RichText, Sense, Ui, UiBuilder, Vec2};
 use katana_cad::CommandInterpreter;
 use katana_cad::interactive_tool::tool_catalog;
 
 use crate::command_log::contains_ignoring_case;
+use crate::dialog_layout::{cell_text, whole_row};
 use crate::drive::{
-    ControlKind, ControlRecord, LineOptions, TextOptions, button, custom, label, line_with,
-    simplified, text_with,
+    ControlKind, ControlRecord, LineOptions, button, custom, label, line_with, simplified,
 };
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::theme;
 
 /// One entry of the reference: a command, or a group of commands as the help text groups them
 /// ("Layers  LAYER LIST | NEW name ...").
@@ -120,6 +121,40 @@ pub fn summary_of(entry: &ReferenceEntry) -> String {
         return String::from(rest);
     }
     first
+}
+
+/// An entry's text as paragraphs for egui to wrap: the help's lines are wrapped by hand at about
+/// 95 characters, and wrapped again by egui at the dialog's width they broke ragged - a line, then
+/// a word or two alone ("in a", "form the"). A line goes on the one before it unless it starts an
+/// entry (no blank before it, after the first) or a command of its own (indented, its first word a
+/// command word of two letters or more: "CODE CENSUS ..." under "CODE ..."); a blank line parts
+/// two paragraphs. Each line's own spacing is kept, as the help sets its columns with it.
+pub fn unwrapped(text: &str) -> String {
+    let mut paragraphs = String::new();
+    // Whether the next line may go on the last one: false at the start and after a blank line.
+    let mut open = false;
+    for line in text.replace("\r\n", "\n").split('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !paragraphs.is_empty() {
+                paragraphs.push_str("\n\n");
+            }
+            open = false;
+            continue;
+        }
+        let indented = line.starts_with([' ', '\t']);
+        let first = trimmed.split(' ').next().unwrap_or("");
+        let starts_command = first.len() >= 2 && is_command_word(first);
+        let new_line = indented && starts_command;
+        if open && !new_line {
+            paragraphs.push(' ');
+        } else if open {
+            paragraphs.push('\n');
+        }
+        paragraphs.push_str(trimmed);
+        open = true;
+    }
+    paragraphs
 }
 
 /// A help text read into entries, in the layout every help here uses: an entry starts at a line
@@ -482,6 +517,8 @@ impl ReferenceState {
             &mut self.search,
             LineOptions {
                 placeholder: "Search: words that must all occur, such as layer colour",
+                // Across the table it searches, as its placeholder is long.
+                width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
         );
@@ -489,36 +526,65 @@ impl ReferenceState {
         let mut chosen = None;
         let mut activated = None;
         let mut toggled = None;
-        ui.horizontal(|ui| {
-            ui.strong("Command");
-            ui.strong("What it takes");
-        });
+        // The tree is a table in the window's one look (dialog_layout): a raised header naming its
+        // two columns over them, whole rows striped and the chosen one lit across the table. Its
+        // header was two words in a row over the rows, which did not line up under them, and a
+        // chosen row a pill the size of its text.
+        let row_height = ui.spacing().interact_size.y;
+        let indent = crate::drive::controls::EXPANDER_WIDTH + ui.spacing().item_spacing.x;
+        let titles = self.title_column(ui);
+        let width = ui.available_width();
+        let header = Rect::from_min_size(ui.cursor().min, Vec2::new(width, row_height));
+        ui.allocate_rect(header, Sense::hover());
+        ui.painter()
+            .rect_filled(header, 0.0, theme::raised().to_egui());
+        for (x, words) in [(indent, "Command"), (indent + titles, "What it takes")] {
+            cell_text(
+                ui,
+                header,
+                header.left() + x,
+                header.right(),
+                RichText::new(words)
+                    .strong()
+                    .color(theme::text_muted().to_egui()),
+            );
+        }
         let tree = egui::ScrollArea::vertical()
             .id_salt("commandReferenceTreeScroll")
             .max_height(360.0)
+            .auto_shrink([false, true])
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let mut striped = false;
                 for (at, section) in self.sections.iter().enumerate() {
                     if !self.section_shown(at) {
                         continue;
                     }
                     let visible = self.shown[at].iter().filter(|shown| **shown).count();
                     let open = self.expanded.get(at).copied().unwrap_or(false);
-                    let header = ui
-                        .horizontal(|ui| {
-                            let expander = crate::drive::controls::tree_expander(ui, Some(open));
-                            let name = ui.selectable_label(
-                                self.current == Some((at, None)),
-                                RichText::new(format!(
-                                    "{}   {visible} of {}",
-                                    section.name,
-                                    section.entries.len()
-                                ))
-                                .strong(),
-                            );
-                            expander.union(name)
-                        })
-                        .inner;
-                    if header.clicked() {
+                    let (rect, row) =
+                        whole_row(ui, row_height, self.current == Some((at, None)), striped);
+                    striped = !striped;
+                    // The expander over the row's left end, drawn after the row so a click on it
+                    // is its own; either opens or closes the section.
+                    let mut cell = ui.new_child(UiBuilder::new().max_rect(rect));
+                    let expander = crate::drive::controls::tree_expander(&mut cell, Some(open));
+                    cell_text(
+                        ui,
+                        rect,
+                        rect.left() + indent,
+                        rect.right(),
+                        RichText::new(section.name.as_str()).strong(),
+                    );
+                    cell_text(
+                        ui,
+                        rect,
+                        rect.left() + indent + titles,
+                        rect.right(),
+                        RichText::new(format!("{visible} of {}", section.entries.len()))
+                            .color(theme::text_muted().to_egui()),
+                    );
+                    if row.clicked() || expander.clicked() {
                         toggled = Some(at);
                         chosen = Some((at, None));
                     }
@@ -529,20 +595,29 @@ impl ReferenceState {
                         if !self.shown[at][number] {
                             continue;
                         }
-                        let row = ui
-                            .horizontal(|ui| {
-                                // Under its section's name, past the section's expander.
-                                ui.add_space(
-                                    crate::drive::controls::EXPANDER_WIDTH
-                                        + ui.spacing().item_spacing.x,
-                                );
-                                ui.selectable_label(
-                                    self.current == Some((at, Some(number))),
-                                    format!("{}   {}", entry.title, summary_of(entry)),
-                                )
-                                .on_hover_text(entry.text.as_str())
-                            })
-                            .inner;
+                        let (rect, row) = whole_row(
+                            ui,
+                            row_height,
+                            self.current == Some((at, Some(number))),
+                            striped,
+                        );
+                        striped = !striped;
+                        // Under its section's name, past the section's expander.
+                        cell_text(
+                            ui,
+                            rect,
+                            rect.left() + indent,
+                            rect.left() + indent + titles,
+                            RichText::new(entry.title.as_str()),
+                        );
+                        cell_text(
+                            ui,
+                            rect,
+                            rect.left() + indent + titles,
+                            rect.right(),
+                            RichText::new(summary_of(entry)),
+                        );
+                        let row = row.on_hover_text(entry.text.as_str());
                         if row.double_clicked() {
                             activated = Some((at, number));
                         }
@@ -569,17 +644,63 @@ impl ReferenceState {
         if let Some((section, entry)) = activated {
             self.inserted = self.activate(section, entry);
         }
-        let mut detail = self.detail.clone();
-        text_with(
-            ui,
-            "commandReferenceDetail",
-            &mut detail,
-            TextOptions {
-                read_only: true,
-                rows: 6,
-                monospace: true,
-            },
-        );
+        self.detail_ui(ui);
+    }
+
+    /// How wide the title column is: the widest title shown and a column's gap, at most
+    /// TITLE_COLUMN, so a long one is cut short rather than pushing every summary across.
+    fn title_column(&self, ui: &Ui) -> f32 {
+        let mut widest: f32 = 0.0;
+        for (at, section) in self.sections.iter().enumerate() {
+            if !self.expanded.get(at).copied().unwrap_or(false) {
+                widest = widest.max(crate::shell::dialog::one_line_width(ui, &section.name));
+                continue;
+            }
+            for (number, entry) in section.entries.iter().enumerate() {
+                if self.entry_shown(at, number) {
+                    widest = widest.max(crate::shell::dialog::one_line_width(ui, &entry.title));
+                }
+            }
+        }
+        (widest + crate::dialog_layout::TABLE_COLUMN_GAP).min(TITLE_COLUMN)
+    }
+
+    /// The chosen entry's whole text, as paragraphs egui wraps (`unwrapped`), under the tree in a
+    /// well of its own - drawn only once an entry is chosen. Before, an empty box six lines high
+    /// stood under the tree until then; now one muted line says what goes there. Recorded as
+    /// commandReferenceDetail, its value the entry's text as the help gives it.
+    fn detail_ui(&mut self, ui: &mut Ui) {
+        ui.add_space(crate::dialog_layout::GAP);
+        let mut record = ControlRecord::new("commandReferenceDetail", ControlKind::Text);
+        record.value = self.detail.clone();
+        if self.detail.is_empty() {
+            let hint = ui.label(
+                RichText::new("Choose a command to read all it takes.")
+                    .color(theme::text_muted().to_egui()),
+            );
+            custom(ui, &hint, record);
+            return;
+        }
+        let paragraphs = unwrapped(&self.detail);
+        let shown = egui::Frame::new()
+            .fill(theme::palette::input().to_egui())
+            .stroke(egui::Stroke::new(1.0, theme::border().to_egui()))
+            .corner_radius(crate::theme::style::CORNER_RADIUS)
+            .inner_margin(crate::drive::controls::FIELD_INSET)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                egui::ScrollArea::vertical()
+                    .id_salt("commandReferenceDetailScroll")
+                    .max_height(crate::dialog_layout::rows_height(ui, DETAIL_ROWS))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(paragraphs.as_str())
+                                .wrap()
+                                .selectable(true),
+                        );
+                    });
+            });
+        custom(ui, &shown.response, record);
     }
 
     fn footer(&mut self, ui: &mut Ui) {
@@ -607,6 +728,17 @@ impl ReferenceState {
     }
 }
 
+/// The widest the tree's title column grows: a command of two words ("SHEETS PAGESETUP") and its
+/// gap. A group's long label is cut short at it rather than pushing every summary across.
+const TITLE_COLUMN: f32 = 220.0;
+
+/// How many lines of the chosen entry show before its well scrolls.
+const DETAIL_ROWS: f32 = 6.0;
+
+/// The dialog's body: the title column and a summary of most help lines, which run to about 95
+/// characters.
+const BODY_WIDTH: f32 = 760.0;
+
 /// Help > Command Reference (see the module comment).
 pub struct CommandReferenceDialog {
     frame: DialogFrame,
@@ -623,7 +755,8 @@ impl CommandReferenceDialog {
         };
         state.filter();
         Self {
-            frame: DialogFrame::new("commandReferenceDialog", "Command Reference"),
+            frame: DialogFrame::new("commandReferenceDialog", "Command Reference")
+                .width(BODY_WIDTH),
             state,
             open: true,
         }

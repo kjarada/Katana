@@ -64,7 +64,7 @@ use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget, WIDGET_WIDTH};
 use crate::dialog_layout as layout;
-use crate::drive::controls::{TextOptions, custom, label_as, text_with};
+use crate::drive::controls::{custom, label_as};
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::format::qt_fixed;
 use crate::host::{Host, VerbOutcome};
@@ -508,16 +508,10 @@ impl Body {
                 if self.table.ui(ui).selection_changed {
                     self.show_info(host.document_mut());
                 }
-                text_with(
-                    ui,
-                    "roadObjectInfo",
-                    &mut self.info,
-                    TextOptions {
-                        read_only: true,
-                        rows: 6,
-                        monospace: true,
-                    },
-                );
+                // The chosen object's details, drawn only once there are some (shell::dialog::
+                // reply): an empty well 600 by 95 stood under the table's "Nothing to list" (the
+                // second look audit's N6).
+                crate::shell::dialog::reply(ui, "roadObjectInfo", &mut self.info, 6);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().text_edit_width = LIST_WIDTH - 80.0;
                     field(

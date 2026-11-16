@@ -286,10 +286,7 @@ mod surface_levels_dialog {
         heights.fill("surfaceHeightsValue", "12.5");
         heights.press("surfaceHeightsRun");
         assert_eq!(heights.host.lines().len(), 1);
-        assert_eq!(
-            heights.host.lines()[0],
-            "SURFACE EDIT ground SETLEVEL 12.5"
-        );
+        assert_eq!(heights.host.lines()[0], "SURFACE EDIT ground SETLEVEL 12.5");
         assert_eq!(
             heights.text("surfaceHeightsReply"),
             "ran SURFACE EDIT ground SETLEVEL 12.5"
@@ -394,15 +391,13 @@ mod surface_levels_dialog {
     }
 
     #[test]
-    fn with_no_surface_run_is_off_and_the_command_says_why() {
+    fn with_no_surface_run_is_off_and_the_status_says_why() {
         let bench = levels_bench(SurfaceLevelsKind::Thin, &[]);
         assert!(!bench.enabled("surfaceThinRun"));
-        assert!(
-            bench
-                .control("surfaceThinCommand")
-                .text
-                .contains("Surface")
-        );
+        // Why there is no line is the footer's status; the Command field holds the line only,
+        // and shows no sentence in its place.
+        assert!(bench.control("surfaceThinStatus").text.contains("Surface"));
+        assert!(bench.control("surfaceThinCommand").text.is_empty());
         assert!(bench.host.lines().is_empty());
     }
 
@@ -451,7 +446,12 @@ mod surface_combine_dialog {
     #[test]
     fn each_mode_writes_its_line_and_run_runs_it() {
         let mut bench = combine_bench(&["ground", "pad"]);
-        assert!(bench.harness.target_record("surfaceCombineDialog").is_some());
+        assert!(
+            bench
+                .harness
+                .target_record("surfaceCombineDialog")
+                .is_some()
+        );
         for name in [
             "surfaceCombineMode",
             "surfaceCombineMergeList",
@@ -618,9 +618,12 @@ mod surface_edit_ui {
             .expect("the levels item is there");
         assert_eq!(heights.dialog.as_deref(), Some("surfaceHeightsDialog"));
         assert!(ui.action("terrainCombineSurfaces").is_some());
-        assert!(terrain.items.iter().any(
-            |item| matches!(item, MenuItem::Menu(menu) if menu.name == "terrainEditMenu")
-        ));
+        assert!(
+            terrain
+                .items
+                .iter()
+                .any(|item| matches!(item, MenuItem::Menu(menu) if menu.name == "terrainEditMenu"))
+        );
 
         // The toolbar's list is the drawing's surfaces; choosing one points the tools at it.
         set_surface_edit_target(String::new());

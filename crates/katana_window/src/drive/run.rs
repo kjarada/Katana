@@ -359,7 +359,19 @@ pub fn read_switches(
             "--check-shortcuts" => switches.check_shortcuts = true,
             "--check-menus" => switches.check_menus = true,
             "--check-toolbars" => switches.check_tool_bars = true,
-            "--check-toolbar-fit" => switches.tool_bar_fit_sizes = next_value(arguments, &mut i),
+            "--check-toolbar-fit" => {
+                // Its sizes are not optional: with none given, the switch after it was taken for
+                // them (`--check-toolbar-fit --screenshot X` read "--screenshot" as the sizes and
+                // X as a project, and with no screenshot asked for the window opened and waited
+                // until a test's timeout, 600 seconds; the second look audit's N16). An empty
+                // value is still no check, as main.cpp's isEmpty() skips it.
+                let given = arguments.get(i + 1);
+                if given.is_none_or(|next| next.starts_with("--")) {
+                    console.err(TOOL_BAR_FIT_SIZES);
+                    return Err(2);
+                }
+                switches.tool_bar_fit_sizes = next_value(arguments, &mut i);
+            }
             "--check-session-restore" => switches.session_restore_check = true,
             "--update-health" => switches.update_health = Some(next_value(arguments, &mut i)),
             "--attributes" => {
@@ -465,6 +477,9 @@ pub fn customise(
     window.run_verb_line(&line).ok
 }
 
+/// What `--check-toolbar-fit` says of sizes it was not given, or given none of.
+pub(crate) const TOOL_BAR_FIT_SIZES: &str = "--check-toolbar-fit needs sizes like 1366x768, a comma between\n";
+
 /// main.cpp's checkToolBarFit, the sizes read (WIDTHxHEIGHT, a comma between, each at least 200
 /// both ways) and the check the window's (`DrivenWindow::check_tool_bar_fit`). Whether all held.
 pub fn check_tool_bar_fit(
@@ -498,7 +513,7 @@ pub fn check_tool_bar_fit(
         }
     }
     if list.is_empty() {
-        console.err("--check-toolbar-fit needs sizes like 1366x768, a comma between\n");
+        console.err(TOOL_BAR_FIT_SIZES);
         return false;
     }
     window.check_tool_bar_fit(&list, console)

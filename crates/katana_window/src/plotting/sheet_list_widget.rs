@@ -131,16 +131,27 @@ impl SheetListWidget {
                             if let Some(picture) = row.picture {
                                 ui.image(picture);
                             }
-                            // Wrapped at its words in what the picture leaves of the list's
-                            // width: on one line a name of three words ran past the list's edge
-                            // ("PLAN TILE 1" cut at the 220 column).
-                            ui.add(
-                                egui::Button::selectable(
-                                    self.current == Some(at),
-                                    row.text.as_str(),
-                                )
-                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            // The row spans what the picture leaves of the list's width, as a
+                            // table's chosen row does, its lines (the number and name, the
+                            // paper) each cut short with an ellipsis and whole in its tooltip:
+                            // sized to its text it was a pill, and wrapped at its words it ran to
+                            // three lines ("A3" over "landscape"; the look audits' T15 and N10).
+                            // On one line, unwrapped, a long name ran past the list's edge.
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center)
+                                    .with_main_justify(true),
+                                |ui| {
+                                    ui.add(
+                                        egui::Button::selectable(
+                                            self.current == Some(at),
+                                            row.text.as_str(),
+                                        )
+                                        .wrap_mode(egui::TextWrapMode::Truncate),
+                                    )
+                                    .on_hover_text(row.text.as_str())
+                                },
                             )
+                            .inner
                         })
                         .response;
                     let held = ui.interact(

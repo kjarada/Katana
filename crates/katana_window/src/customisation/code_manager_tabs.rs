@@ -42,7 +42,7 @@ use super::filter_bar::{FilterBar, FilterBarChanges};
 use super::linework_labels::linework_control_label;
 use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::scope_filter_widget::{ScopeChoice, ScopeFilterWidget, ViewsFn};
-use crate::annotation::dialog_support::table;
+use crate::annotation::dialog_support::{TableLook, table, table_look};
 use crate::command_word::{command_word, exact_number};
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange, TextOptions};
 use crate::drive::registry::{TargetKind, TargetSpec, begin_target, end_target};
@@ -1193,7 +1193,9 @@ impl SurveyCodeManagerDialog {
         if nested_filter(ui, "issuesFilter", &mut tabs.issues_filter).any() {
             self.events.push(Event::IssuesFilter);
         }
-        let shown = table(
+        // Alone across the page, the table spans it: its header stood 350 of the body's 1200
+        // (the look audits' T9).
+        let shown = table_look(
             ui,
             "issuesTable",
             &["Severity", "Rule", "Key", "Section", "Problem", "Message"],
@@ -1201,6 +1203,10 @@ impl SurveyCodeManagerDialog {
             None,
             &[],
             None,
+            TableLook {
+                fill: true,
+                empty: "No issues in the rules being edited",
+            },
         );
         if let Some(row) = shown.double_clicked {
             self.events.push(Event::IssueActivated(row));

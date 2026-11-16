@@ -1610,7 +1610,9 @@ impl SettingsDialog {
                     .iter()
                     .map(|(title, _)| vec![String::from(*title)])
                     .collect();
-                if controls::rows(ui, "settingsPages", &rows, &mut self.page).changed()
+                // Each page's row as wide as the column, as a table's chosen row is: the chosen
+                // one was a pill as wide as its word (the second look audit's N10).
+                if layout::pick_list(ui, "settingsPages", &rows, &mut self.page).changed()
                     && self.page == Some(UPDATES_PAGE)
                 {
                     // The Updates page shows per-user state that a typed line or the update

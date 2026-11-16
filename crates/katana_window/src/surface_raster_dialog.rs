@@ -48,7 +48,7 @@ use crate::drive::{Choice, SpinRange, button, check, choice, label, spin};
 use crate::format::grouped;
 use crate::geo::terrain_dialog_parts::{
     Framed, WordChoice, command_field, field, host_views, invalid, row, run_buttons, show_framed,
-    without_blanks,
+    why_no_line, without_blanks,
 };
 use crate::geo::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -364,11 +364,14 @@ impl Framed for SurfaceFromDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
-        let ready = self.command().is_ok();
+        let made = self.command();
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "surfaceFromReply", self.runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("surfaceFromPreview", ready)),
+            ("surfaceFromStatus", &why),
             ("surfaceFromRun", "Build Surface", ready),
             Some("surfaceFromClose"),
         );
@@ -714,12 +717,15 @@ impl Framed for SurfaceRasterDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
-        let ready = self.command().is_ok();
+        let made = self.command();
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         let (_, over_limit) = self.grid(&*host);
         terrain_reply_field(ui, "surfaceRasterReply", self.runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("surfaceRasterPreview", ready)),
+            ("surfaceRasterStatus", &why),
             ("surfaceRasterRun", "Export", ready && !over_limit),
             Some("surfaceRasterClose"),
         );

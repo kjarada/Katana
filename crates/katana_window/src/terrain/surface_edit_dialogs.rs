@@ -36,7 +36,7 @@ use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{Choice, button, check, choice, line, whole};
 use crate::geo::terrain_dialog_parts::{
     Framed, check_list_with_current, command_field, field, host_views, invalid, row, run_buttons,
-    show_framed,
+    show_framed, why_no_line,
 };
 use crate::geo::terrain_dialog_support::{line_word, terrain_reply_field};
 use crate::host::{Host, VerbOutcome};
@@ -199,9 +199,7 @@ pub fn surface_levels_line(kind: SurfaceLevelsKind, form: &SurfaceLevelsForm) ->
                 .ok()
                 .and_then(|at| WORDS.get(at))
             else {
-                return Err(invalid(
-                    "Change: choose Raise, Lower, Set Level or Scale",
-                ));
+                return Err(invalid("Change: choose Raise, Lower, Set Level or Scale"));
             };
             if value.is_none() {
                 return Err(invalid(match form.operation {
@@ -241,9 +239,8 @@ pub fn surface_levels_line(kind: SurfaceLevelsKind, form: &SurfaceLevelsForm) ->
             return Ok(format!("{line} THIN {typed}"));
         }
         SurfaceLevelsKind::DeleteLong => {
-            let reads = value.is_some_and(|value| {
-                value > 0.0 && (form.long_sides || value < 180.0)
-            });
+            let reads =
+                value.is_some_and(|value| value > 0.0 && (form.long_sides || value < 180.0));
             if !reads {
                 return Err(invalid(if form.long_sides {
                     "Longer than: a length above 0"
@@ -624,14 +621,18 @@ impl Framed for SurfaceLevelsDialog {
         let p = surface_levels_prefix(self.kind);
         let named = |part: &str| format!("{p}{part}");
         row(ui, "Surface:", |ui| {
-            choice(ui, &named("Surface"), &self.surfaces, &mut self.surface).on_hover_text(
-                "The surface of the drawing the edit changes, as one undo step",
-            );
+            choice(ui, &named("Surface"), &self.surfaces, &mut self.surface)
+                .on_hover_text("The surface of the drawing the edit changes, as one undo step");
         });
         match self.kind {
             SurfaceLevelsKind::Heights => {
                 row(ui, "Change:", |ui| {
-                    choice(ui, &named("Operation"), &self.operations, &mut self.operation);
+                    choice(
+                        ui,
+                        &named("Operation"),
+                        &self.operations,
+                        &mut self.operation,
+                    );
                 });
                 row(ui, "By / to:", |ui| {
                     line(ui, &named("Value"), &mut self.value).on_hover_text(
@@ -660,9 +661,8 @@ impl Framed for SurfaceLevelsDialog {
             }
             SurfaceLevelsKind::Thin => {
                 row(ui, "Tolerance:", |ui| {
-                    line(ui, &named("Value"), &mut self.value).on_hover_text(
-                        "The most the surface may move, vertically, anywhere",
-                    );
+                    line(ui, &named("Value"), &mut self.value)
+                        .on_hover_text("The most the surface may move, vertically, anywhere");
                 });
             }
             SurfaceLevelsKind::DeleteLong => {
@@ -719,14 +719,16 @@ impl Framed for SurfaceLevelsDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let p = surface_levels_prefix(self.kind);
-        // Nothing to run until the fields say a line; the placeholder says why.
-        let ready = self.command().is_ok();
+        // Nothing to run until the fields say a line; the status says why.
+        let made = self.command();
+        let ready = made.is_ok();
         terrain_reply_field(ui, &format!("{p}Reply"), &mut self.reply);
-        // Preview at the left, as it changes nothing; Close, then Run - the dialog's act, in the
-        // accent - at the right.
+        // Preview and the status at the left, as they change nothing; Close, then Run - the
+        // dialog's act, in the accent - at the right.
         let pressed = run_buttons(
             ui,
             Some((&format!("{p}Preview"), ready)),
+            (&format!("{p}Status"), &why_no_line(&made)),
             (&format!("{p}Run"), "Run", ready),
             Some(&format!("{p}Close")),
         );
@@ -973,6 +975,15 @@ impl SurfaceCombineDialog {
                 let width = dialog::beside_a_button(ui, "Down");
                 ui.vertical(|ui| {
                     ui.set_width(width);
+                    // With no surface the list says so, where Up and Down stood beside nothing.
+                    if self.merge.is_empty() {
+                        ui.label(
+                            egui::RichText::new(
+                                "No surfaces to merge: build them from the Terrain menu.",
+                            )
+                            .color(crate::theme::text_muted().to_egui()),
+                        );
+                    }
                     check_list_with_current(
                         ui,
                         "surfaceCombineMergeList",
@@ -986,10 +997,14 @@ impl SurfaceCombineDialog {
                 .on_hover_text(
                     "Tick the surfaces to merge; lower in the list wins where they overlap",
                 );
-                ui.vertical(|ui| {
-                    let up = button(ui, "surfaceCombineUp", "Up").clicked();
-                    let down = button(ui, "surfaceCombineDown", "Down").clicked();
-                    (up, down)
+                let movable = self.merge_current.is_some() && !self.merge.is_empty();
+                ui.add_enabled_ui(movable, |ui| {
+                    ui.vertical(|ui| {
+                        let up = button(ui, "surfaceCombineUp", "Up").clicked();
+                        let down = button(ui, "surfaceCombineDown", "Down").clicked();
+                        (up, down)
+                    })
+                    .inner
                 })
                 .inner
             })
@@ -1076,14 +1091,16 @@ impl Framed for SurfaceCombineDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        // Nothing to run until the fields say a line; the placeholder says why.
-        let ready = self.command().is_ok();
+        // Nothing to run until the fields say a line; the status says why.
+        let made = self.command();
+        let ready = made.is_ok();
         terrain_reply_field(ui, "surfaceCombineReply", &mut self.reply);
-        // Preview at the left, as it changes nothing; Close, then Run - the dialog's act, in the
-        // accent - at the right.
+        // Preview and the status at the left, as they change nothing; Close, then Run - the
+        // dialog's act, in the accent - at the right.
         let pressed = run_buttons(
             ui,
             Some(("surfaceCombinePreview", ready)),
+            ("surfaceCombineStatus", &why_no_line(&made)),
             ("surfaceCombineRun", "Run", ready),
             Some("surfaceCombineClose"),
         );

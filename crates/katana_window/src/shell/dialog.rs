@@ -395,7 +395,7 @@ pub fn row_with_text<R>(
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let natural = one_line_width(ui, text);
-    row_inner(ui, text, natural, label, add)
+    row_inner(ui, text, natural, LabelKind::Text, label, add)
 }
 
 /// A form's row whose label cell is a check box or a radio button reading `text`, which `label`
@@ -415,7 +415,16 @@ pub fn row_with_check<R>(
 ) -> R {
     let spacing = ui.spacing();
     let natural = spacing.icon_width + spacing.icon_spacing + one_line_width(ui, text);
-    row_inner(ui, text, natural, label, add)
+    row_inner(ui, text, natural, LabelKind::Check, label, add)
+}
+
+/// What a row's label cell holds, which its height kept between passes is kept under: a check
+/// box is a control high, a label of words a line of text, so two rows reading the same word, one
+/// of each, have labels of two heights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum LabelKind {
+    Text,
+    Check,
 }
 
 /// How wide `text` is in the body text style laid out on one line: what a label's cell needs, and
@@ -468,6 +477,44 @@ pub fn in_a_column(ui: &Ui) -> bool {
     true
 }
 
+/// Where a dialog body's drawn width is kept between passes, by the body's Ui (`body_span`).
+fn body_span_key(body: Id) -> Id {
+    body.with("katanaBodyDrawn")
+}
+
+/// Keeps the across of what the body `ui` (a dialog body, BODY_TAG) drew this pass, for
+/// `body_span` to read in the next.
+fn remember_body_span(ui: &Ui) {
+    let key = body_span_key(ui.stack().id);
+    let span = ui.min_rect().x_range();
+    ui.data_mut(|data| data.insert_temp(key, span));
+}
+
+/// The across of the dialog body `ui` is drawn in, as wide as the last pass drew it - wider than
+/// the width it is laid out at when a page holds something wider (a table, a row of fields) - or
+/// None outside a body, or before the body's first pass. What a part that runs across the body
+/// (a tab strip's rule, drive::controls::tabs) spans, so it is not short of what is under it.
+pub fn body_span(ui: &Ui) -> Option<egui::Rangef> {
+    let body = ui
+        .stack()
+        .iter()
+        .find(|frame| frame.tags().contains(BODY_TAG))?
+        .id;
+    ui.data(|data| data.get_temp(body_span_key(body)))
+}
+
+/// A dialog's status line - what its last action did, or why it was refused - named `name` so a
+/// driver reads it (drive::controls::label_as), in `status_colour` and wrapped at its room: one
+/// helper where dialogs each drew their own (a run dialog's status, a check's count).
+pub fn status(ui: &mut Ui, name: &str, text: &str, is_error: bool) -> egui::Response {
+    crate::drive::controls::label_as(
+        ui,
+        name,
+        text,
+        egui::Label::new(RichText::new(text).color(status_colour(is_error))).wrap(),
+    )
+}
+
 /// The label column a row drawn in `ui` starting `start` (its left edge) shares, and where the row
 /// starts from its body's left edge: the nearest dialog body it is in, and of that body the rows
 /// that start within COLUMN_REACH of each other. A row in a group starts a group's margin further
@@ -479,9 +526,17 @@ fn label_column_body(ui: &Ui, start: f32) -> Option<(Id, f32)> {
         .find(|frame| frame.tags().contains(BODY_TAG))
         .map(|frame| {
             let offset = start - frame.max_rect.left();
-            let band = (offset / COLUMN_REACH).round() as i64;
-            (frame.id.with(("katanaLabelColumn", band)), offset)
+            (
+                frame.id.with(("katanaLabelColumn", column_band(offset))),
+                offset,
+            )
         })
+}
+
+/// Which of a body's columns a row starting `offset` from the body's left edge is in: rows that
+/// start within COLUMN_REACH of each other are in one.
+fn column_band(offset: f32) -> i64 {
+    (offset / COLUMN_REACH).round() as i64
 }
 
 /// How far apart two rows of a body may start and share a label column: three group margins
@@ -538,6 +593,7 @@ fn row_inner<R>(
     ui: &mut Ui,
     text: &str,
     natural: f32,
+    kind: LabelKind,
     label: impl FnOnce(&mut Ui),
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
@@ -548,12 +604,22 @@ fn row_inner<R>(
     let offset = body.map_or(0.0, |(_, offset)| offset);
     let (key, edge) = label_column(ui, body.map(|(key, _)| key), offset);
     let width = (edge - offset).max(0.0);
-    // Where the label's height is kept between passes: by the Ui the row is drawn in and the
-    // label's words, not by the row's own Ui, whose id is counted from what is drawn before it
-    // and so moved whenever a list above the row grew; each such frame was measured again and
-    // laid out twice, and a press in it taken in the pass thrown away (the Corridor Quantities'
-    // Copy).
-    let label_key = ui.id().with(("katanaRowLabelHeight", text));
+    // Where the label's height is kept between passes: by the Ui the row is drawn in, the
+    // label's words, what the label is and the column the row starts in - not by the row's own
+    // Ui, whose id is counted from what is drawn before it and so moved whenever a list above the
+    // row grew; each such frame was measured again and laid out twice, and a press in it taken in
+    // the pass thrown away (the Corridor Quantities' Copy).
+    //
+    // The Ui's id alone is not enough: egui gives sibling Uis one id (Ui::id, "sibling Uis share
+    // the same id"), so the two columns of a body side by side were one place. Global Modify's
+    // filter row "Layer" (words, 15 high) and its tick "Layer" (a check box, a control high) kept
+    // one height between them: the words were drawn at the row's top, 5 points above their field,
+    // and the tick 4 points low (the second look audit's N3). The column - the row's start, in
+    // steps of COLUMN_REACH as the label column's own key is - and the kind part them.
+    let band = column_band(body.map_or(start, |(_, offset)| offset));
+    let label_key = ui
+        .id()
+        .with(("katanaRowLabelHeight", text, kind, band));
     ui.horizontal_top(|ui| {
         let spacing = ui.spacing().item_spacing.x;
         ui.spacing_mut().item_spacing.x = FORM_SPACING.x;
@@ -1067,7 +1133,11 @@ impl DialogFrame {
                                         UiBuilder::new().ui_stack_info(
                                             UiStackInfo::default().with_tag(BODY_TAG),
                                         ),
-                                        |ui| body(ui, &mut *state),
+                                        |ui| {
+                                            let answer = body(ui, &mut *state);
+                                            remember_body_span(ui);
+                                            answer
+                                        },
                                     )
                                     .inner;
                                 if footer_in_body && let Some(footer) = footer.take() {

@@ -1352,3 +1352,151 @@ mod leader_manager {
         assert!(!bench.dialog.apply(&mut bench.host));
     }
 }
+
+// ---- the look (the second look audit of 2026-11-16) ---------------------------------------------
+
+mod leader_manager_look {
+    use super::*;
+
+    /// egui rounds a widget's rectangle to the pixel grid (the offscreen screen's one pixel a
+    /// point): two edges laid out at one place are within half a point of each other.
+    const HALF_A_POINT: f32 = 0.5;
+
+    /// A leader, shown in the form, in the window's theme (theme::style::apply; the harness's
+    /// own style is egui's).
+    fn shown_leader() -> Bench<LeaderManagerDialog> {
+        let mut host = interpreter_host();
+        run(&mut host, "LEADER 0,0 5,5 text=NOTE");
+        let mut bench = manager(host);
+        katana_window::theme::style::apply(bench.harness.context());
+        bench.draw();
+        bench
+    }
+
+    #[test]
+    fn the_values_table_spans_the_notes_field_rather_than_a_strip_beside_the_look() {
+        // The look audits' T1: the Says table was some 100 points wide beside the Look group. It
+        // is under the note, in the field column, as wide as the fields.
+        let bench = shown_leader();
+        let (values, note) = (
+            bench.control("leaderValues").rect,
+            bench.control("leaderNote").rect,
+        );
+        assert!(
+            (values.left() - note.left()).abs() <= HALF_A_POINT,
+            "the table starts at {} and the note at {}",
+            values.left(),
+            note.left()
+        );
+        assert!(
+            (values.right() - note.right()).abs() <= HALF_A_POINT,
+            "the table ends at {} and the note at {}",
+            values.right(),
+            note.right()
+        );
+    }
+
+    #[test]
+    fn every_field_of_the_leader_tab_starts_at_one_edge_and_every_choice_ends_at_one() {
+        // N13: the Position box and the Look box beside a table had fields at four places. The
+        // fields start at the form's one edge, and its choices end at its one right edge; a number
+        // box is a short well of its own width (drive::controls::number_field, every dialog's).
+        let bench = shown_leader();
+        let note = bench.control("leaderNote").rect;
+        let mut wrong = Vec::new();
+        for name in [
+            "leaderPositionPoint",
+            "leaderNoteKind",
+            "leaderLabelStyle",
+            "leaderArrow",
+            "leaderTextStyle",
+            "leaderLandingAngle",
+        ] {
+            let rect = bench.control(name).rect;
+            if (rect.left() - note.left()).abs() > HALF_A_POINT
+                || (rect.right() - note.right()).abs() > HALF_A_POINT
+            {
+                wrong.push(format!("{name} is {rect:?}"));
+            }
+        }
+        for name in [
+            "leaderAlong",
+            "leaderPaperHeight",
+            "leaderArrowSize",
+            "leaderLanding",
+        ] {
+            let left = bench.control(name).rect.left();
+            if (left - note.left()).abs() > HALF_A_POINT {
+                wrong.push(format!("{name} starts at {left}"));
+            }
+        }
+        assert!(wrong.is_empty(), "the note is {note:?}: {wrong:?}");
+    }
+
+    #[test]
+    fn a_number_box_stays_in_its_row() {
+        // A number box made to span its row (a helper since removed) was centred in all the room
+        // left under it: Along stood 250 points below its label, the form a void between. Each
+        // row is a control high and FORM_SPACING above the next, so a box in its row ends that
+        // gap above the next row's field, and the Look's three boxes are one row's pitch apart.
+        let bench = shown_leader();
+        let spacing = katana_window::shell::dialog::FORM_SPACING.y;
+        let rect = |name: &str| bench.control(name).rect;
+        let mut wrong = Vec::new();
+        for (box_name, next) in [
+            ("leaderAlong", "leaderNoteKind"),
+            ("leaderPaperHeight", "leaderArrowSize"),
+            ("leaderArrowSize", "leaderLanding"),
+        ] {
+            let gap = rect(next).top() - rect(box_name).bottom();
+            if (gap - spacing).abs() > HALF_A_POINT {
+                wrong.push(format!("{box_name} ends {gap} above {next}"));
+            }
+        }
+        assert!(wrong.is_empty(), "rows {spacing} apart: {wrong:?}");
+    }
+
+    #[test]
+    fn an_empty_check_takes_no_row_of_the_form() {
+        // N13: with no leader shown the check says nothing, and its row stood blank, a control
+        // high, above "Says". (A leader's plain note is checked aloud: "Plain text: ...".)
+        let mut bench = manager(interpreter_host());
+        katana_window::theme::style::apply(bench.harness.context());
+        bench.draw();
+        let check = bench.control("leaderTemplateCheck");
+        assert_eq!(bench.report("leaderTemplateCheck"), "");
+        assert!(check.rect.height() <= HALF_A_POINT, "{:?}", check.rect);
+    }
+
+    #[test]
+    fn each_tabs_actions_are_in_the_footer_close_then_the_primary_last() {
+        // T5: Freeze Note, Detach Tip and Apply stood under the Leader tab's form and Make for
+        // Selection under the other's, the footer holding Close alone.
+        let mut bench = shown_leader();
+        let rect = |bench: &Bench<LeaderManagerDialog>, name: &str| bench.control(name).rect;
+        let close = rect(&bench, "leaderClose");
+        let apply = rect(&bench, "leaderApply");
+        assert!(apply.left() >= close.right(), "Apply is after Close");
+        for name in ["leaderFreeze", "leaderDetach"] {
+            let button = rect(&bench, name);
+            assert!(button.right() <= close.left(), "{name} is before Close");
+            assert!(
+                (button.center().y - close.center().y).abs() <= HALF_A_POINT,
+                "{name} is on the footer's row"
+            );
+        }
+        assert!(
+            (apply.center().y - close.center().y).abs() <= HALF_A_POINT,
+            "Apply is on the footer's row"
+        );
+        bench.dialog.show_tab(Tab::ForSelection);
+        bench.draw();
+        let close = rect(&bench, "leaderClose");
+        let make = rect(&bench, "leaderForMake");
+        assert!(
+            make.left() >= close.right(),
+            "Make for Selection is after Close"
+        );
+        assert!((make.center().y - close.center().y).abs() <= HALF_A_POINT);
+    }
+}

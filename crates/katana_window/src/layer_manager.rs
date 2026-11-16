@@ -61,10 +61,6 @@ const TITLE: &str = "Layers";
 const DEFAULT_DIMENSION_STYLE: &str = "(default)";
 /// The dialog's body width: the layer table's nine columns, its buttons, and the form under them.
 const BODY_WIDTH: f32 = 620.0;
-/// The colour a refusal is said in: the theme's error token.
-fn error_colour() -> egui::Color32 {
-    crate::theme::error().to_egui()
-}
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 2).with_suffix(" mm on paper");
 const HEADERS: [&str; 8] = [
     "Layer", "On", "Locked", "Colour", "Linetype", "Weight", "Hatch", "Entities",
@@ -792,22 +788,7 @@ impl LayerManagerDialog {
                 controls::check(ui, "layerLocked", "Locked", &mut self.locked);
             });
         });
-        // The form's own two buttons under it: Save, the one that writes, last and in the accent.
-        ui.add_space(layout::INNER);
-        ui.horizontal(|ui| {
-            if controls::button(ui, "layerRevert", "Revert")
-                .on_hover_text("Put the form back as the layer is")
-                .clicked()
-            {
-                self.revert(host.document());
-            }
-            if controls::primary(ui, "layerSave", "Save Changes")
-                .on_hover_text("Write the form to the layer")
-                .clicked()
-            {
-                self.save(host);
-            }
-        });
+        // Revert and Save Changes, the form's two buttons, are the footer's (`footer`).
     }
 
     fn prompt_row(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -823,7 +804,8 @@ impl LayerManagerDialog {
                 if controls::button(ui, "layerPromptCancel", "Cancel").clicked() {
                     self.cancel_prompt();
                 }
-                if controls::primary(ui, "layerPromptOk", "OK").clicked() || entered {
+                // A plain button: the dialog's one accent is its footer's Save Changes.
+                if controls::button(ui, "layerPromptOk", "OK").clicked() || entered {
                     self.accept_prompt(host);
                 }
             });
@@ -886,17 +868,42 @@ impl LayerManagerDialog {
         });
     }
 
-    fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        let mut said = egui::RichText::new(self.status.as_str());
-        if self.status_is_error {
-            said = said.color(error_colour());
-        }
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
-        let (_, close) = dialog::button_row(
+        let is_error = self.status_is_error;
+        // The one footer (shell::dialog::button_row): the status at the left; Revert, Close, then
+        // Save Changes, the primary, last at the right. Revert and Save stood under the form with
+        // Save in the accent in the body (the look audits' T5). Like the body, the form's two
+        // buttons take nothing while the dialog shows no drawing.
+        let orphan = self.orphan;
+        let (_, (reverted, close, saved)) = dialog::button_row(
             ui,
-            |ui| controls::label_as(ui, "layerStatus", &status, egui::Label::new(said).wrap()),
-            |ui| controls::button(ui, "closeButton", "Close").clicked(),
+            |ui| dialog::status(ui, "layerStatus", &status, is_error),
+            |ui| {
+                let reverted = ui
+                    .add_enabled_ui(!orphan, |ui| {
+                        controls::button(ui, "layerRevert", "Revert")
+                            .on_hover_text("Put the form back as the layer is")
+                            .clicked()
+                    })
+                    .inner;
+                let close = controls::button(ui, "closeButton", "Close").clicked();
+                let saved = ui
+                    .add_enabled_ui(!orphan, |ui| {
+                        controls::primary(ui, "layerSave", "Save Changes")
+                            .on_hover_text("Write the form to the layer")
+                            .clicked()
+                    })
+                    .inner;
+                (reverted, close, saved)
+            },
         );
+        if reverted {
+            self.revert(host.document());
+        }
+        if saved {
+            self.save(host);
+        }
         if close {
             self.closing = true;
         }

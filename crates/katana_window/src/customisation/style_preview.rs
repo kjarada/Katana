@@ -151,6 +151,9 @@ enum Showing {
     Linestyle,
 }
 
+/// What a preview says while it shows nothing, unless its dialog says something fitter.
+pub const NOTHING_TO_PREVIEW: &str = "Nothing to preview";
+
 /// See the module comment.
 pub struct StylePreview {
     // First, so it goes first: also how a paint knows the Document is still there.
@@ -174,6 +177,8 @@ pub struct StylePreview {
     origin_outside: bool,
     scale_bar_metres: f64,
     notice: String,
+    /// What the pane says, muted and centred, while it shows nothing (`set_placeholder`).
+    placeholder: String,
     texture: Option<egui::TextureHandle>,
 }
 
@@ -208,7 +213,25 @@ impl StylePreview {
             origin_outside: false,
             scale_bar_metres: 0.0,
             notice: String::new(),
+            placeholder: String::from(NOTHING_TO_PREVIEW),
             texture: None,
+        }
+    }
+
+    /// What the pane says while it shows nothing ("Choose a style to preview it"): an empty dark
+    /// box read as a preview that failed to draw (the look audits' T6). Said on the screen only,
+    /// over the painted pane; `grab` paints the pane alone.
+    pub fn set_placeholder(&mut self, text: &str) {
+        self.placeholder = String::from(text);
+    }
+
+    /// Whether the pane shows nothing: cleared, or a symbol or a linestyle of no name (a survey
+    /// code's rule that draws none).
+    pub fn shows_nothing(&self) -> bool {
+        match self.showing {
+            Showing::Nothing => true,
+            Showing::Symbol | Showing::Linestyle => self.name.is_empty(),
+            Showing::Style => false,
         }
     }
 
@@ -719,11 +742,9 @@ impl StylePreview {
         if ui.is_rect_visible(rect) {
             let ratio = f64::from(ui.ctx().pixels_per_point());
             let image = self.grab(document, size.x as u32, size.y as u32, ratio);
-            let handle = ui.ctx().load_texture(
-                name,
-                image.to_color_image(),
-                egui::TextureOptions::LINEAR,
-            );
+            let handle =
+                ui.ctx()
+                    .load_texture(name, image.to_color_image(), egui::TextureOptions::LINEAR);
             ui.painter().image(
                 handle.id(),
                 rect,
@@ -731,6 +752,9 @@ impl StylePreview {
                 egui::Color32::WHITE,
             );
             self.texture = Some(handle);
+            if self.shows_nothing() && !self.placeholder.is_empty() {
+                crate::dialog_layout::preview_placeholder(ui, rect, &self.placeholder);
+            }
         }
         let mut record = ControlRecord::new(name, ControlKind::Other);
         record.text.clone_from(&self.notice);

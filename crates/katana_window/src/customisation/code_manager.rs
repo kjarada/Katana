@@ -125,8 +125,11 @@ const BODY_WIDTH: f32 = TREE_WIDTH + crate::theme::style::GROUP_GAP + DETAIL_WID
 /// Set by, Decided against) at the Standard text size, and the rule form under them.
 const DETAIL_WIDTH: f32 = 560.0;
 
-/// The code table's width: it scrolls sideways within it when a rule's values are wider.
-const TREE_WIDTH: f32 = 600.0;
+/// The code table's width: it scrolls sideways within it when a rule's values are wider. As wide
+/// as the filter bar over it - the search field and its seven section chips, some 630 at the
+/// Standard text size: at 600 the bar ran past the column, the tab was 32 wider than BODY_WIDTH
+/// and the tab strip's rule stopped short of the body's edge (the look audits' T10).
+const TREE_WIDTH: f32 = 640.0;
 
 /// The colour of a refusal in the form and the tabs: the theme's error token (the C++'s stylesheets
 /// had a red of their own, #d9534f, before the theme had one).
@@ -691,6 +694,10 @@ impl SurveyCodeManagerDialog {
         // white panes of paper were the brightest things on the screen (the look of 2026-11-16).
         dialog.linestyle_preview.set_ground(PreviewGround::Screen);
         dialog.symbol_preview.set_ground(PreviewGround::Screen);
+        // A rule that draws no linestyle or no symbol says so in the pane rather than leaving an
+        // empty dark box (the look audits' T6).
+        dialog.linestyle_preview.set_placeholder("No linestyle");
+        dialog.symbol_preview.set_placeholder("No symbol");
         dialog
     }
 
@@ -1993,6 +2000,7 @@ impl SurveyCodeManagerDialog {
     fn code_table_tab(&mut self, ui: &mut Ui, document: &Document) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                ui.set_width(TREE_WIDTH);
                 if self.table_filter_ui(ui) {
                     self.events.push(Event::TableFilter);
                 }
@@ -2173,6 +2181,14 @@ impl SurveyCodeManagerDialog {
             Self::linework_tab,
         ];
         let front = self.tab.min(pages.len() - 1);
+        // The body is at least as tall as the Code Table page, the dialog's first and the one it
+        // is sized for, so the dialog keeps that size on the other tabs: on Issues it was a strip
+        // 256 high where the Code Table made it 750 (the look audits' T10). Every page is laid
+        // out each frame, the ones behind offstage, so the Code Table is measured whichever tab
+        // is in front. Rejected: the tallest page's height - the scope's pages are taller than a
+        // laptop's screen, and every tab then scrolled over a void.
+        let top = ui.cursor().min.y;
+        let mut least: f32 = 0.0;
         for (at, page) in pages.into_iter().enumerate() {
             let mut draw = |ui: &mut Ui| {
                 let drawn = ui.vertical(|ui| page(self, ui, document));
@@ -2181,13 +2197,24 @@ impl SurveyCodeManagerDialog {
                     &drawn.response,
                     ControlRecord::new(TAB_PAGES[at], ControlKind::Other),
                 );
+                drawn.response.rect.height()
             };
-            if at == front {
-                draw(ui);
+            let height = if at == front {
+                draw(ui)
             } else {
-                offstage(ui, TAB_PAGES[at], draw);
+                offstage(ui, TAB_PAGES[at], draw)
+            };
+            if at == 0 {
+                least = height;
             }
         }
+        // Down to where the Code Table page would end. Not Ui::set_min_height, which counts from
+        // the cursor - after the page in front - and made every tab a page taller than it was.
+        let left = ui.min_rect().left();
+        ui.expand_to_include_rect(egui::Rect::from_min_max(
+            egui::pos2(left, top),
+            egui::pos2(left, top + least),
+        ));
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {

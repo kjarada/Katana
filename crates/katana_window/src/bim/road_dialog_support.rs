@@ -483,7 +483,7 @@ impl Table {
         self
     }
 
-    /// Keeps `height` points of room, however few rows it holds.
+    /// Keeps `height` points of room, however few rows it holds - once it holds one.
     pub fn set_fixed_height(&mut self, height: f32) {
         self.fixed_height = Some(height);
     }
@@ -655,7 +655,11 @@ impl Table {
         // As wide as its columns, not as the dialog's room: a table that took the room made every
         // road dialog as wide as the screen (the look of 2026-11-16).
         let mut area = egui::ScrollArea::both().id_salt((name.as_str(), "scroll"));
-        area = match (self.fixed_height, self.max_height) {
+        // An empty table is as tall as its header and its note: the room kept for rows stood as a
+        // void of 120 points under "Choose a template to see its components" (the look audits'
+        // T9). It keeps that room once it has a row, so the grid does not jump as rows come.
+        let fixed = self.fixed_height.filter(|_| !self.rows.is_empty());
+        area = match (fixed, self.max_height) {
             (Some(height), _) => area
                 .min_scrolled_height(height)
                 .max_height(height)
@@ -779,8 +783,24 @@ pub fn rows_height(style: &egui::Style, rows: f32) -> f32 {
 /// The callback is given the canvas, its world transform scaled by the ratio, to paint in points.
 pub type PreviewRaster = Box<dyn Fn(u32, u32, f64, &mut dyn FnMut(&mut dyn Canvas)) -> Image>;
 
-/// A preview's place in a dialog, `size` points, named `name`: painted by `paint` through `raster`
-/// when the window has lent one, and kept as a texture for the frame; empty until then.
+/// The window's raster canvas (canvas::RasterCanvas), as a PreviewRaster: what a preview is
+/// painted through when its dialog was lent none.
+fn window_raster(
+    width: u32,
+    height: u32,
+    ratio: f64,
+    paint: &mut dyn FnMut(&mut dyn Canvas),
+) -> Image {
+    let mut image = Image::new(width, height);
+    image.set_device_pixel_ratio(ratio);
+    crate::canvas::RasterCanvas::paint_image(&mut image, paint);
+    image
+}
+
+/// A preview's place in a dialog, `size` points, named `name`: painted by `paint` through `raster`,
+/// or the window's raster canvas when none was lent, and kept as a texture for the frame. Nothing
+/// lent the dialogs one (their `set_raster` had no caller), so every road object's, template's
+/// and profile's preview was an empty dark box (the look audits' T6).
 pub fn preview(
     ui: &mut Ui,
     name: &str,
@@ -796,13 +816,14 @@ pub fn preview(
         ui.painter()
             .rect_filled(rect, 0.0, palette::viewport().to_egui());
     }
-    if let Some(raster) = raster
-        && ui.is_rect_visible(rect)
-    {
+    if ui.is_rect_visible(rect) {
         let ratio = ui.ctx().pixels_per_point();
         let width = (rect.width() * ratio).round().max(1.0) as u32;
         let height = (rect.height() * ratio).round().max(1.0) as u32;
-        let image = raster(width, height, f64::from(ratio), paint);
+        let image = match raster {
+            Some(raster) => raster(width, height, f64::from(ratio), paint),
+            None => window_raster(width, height, f64::from(ratio), paint),
+        };
         let handle =
             ui.ctx()
                 .load_texture(name, image.to_color_image(), egui::TextureOptions::LINEAR);

@@ -25,7 +25,7 @@ use katana_core::Result;
 use super::point_pick::PointPick;
 use super::terrain_dialog_parts::{
     Framed, WordChoice, command_field, field, host_views, invalid, one_column, remove_current, row,
-    run_buttons, show_framed, without_blanks,
+    run_buttons, show_framed, why_no_line, without_blanks,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, number_list, terrain_reply_field,
@@ -35,7 +35,7 @@ use crate::customisation::{ScopeChoice, ScopeFilterWidget};
 use crate::drive::{button, rows, tabs};
 use crate::format::qt_fixed;
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::offstage;
 
 /// What a pick's button says while its click is awaited, and its tip.
@@ -145,9 +145,7 @@ pub fn sample_line(form: &SampleForm) -> Result<String> {
         ));
     }
     if form.points.is_empty() {
-        return Err(invalid(
-            "Points: add a point to sample, typed or picked",
-        ));
+        return Err(invalid("Points: add a point to sample, typed or picked"));
     }
     let mut line = format!("RASTER SAMPLE {source}");
     for point in &form.points {
@@ -353,11 +351,14 @@ impl DrapeDialog {
     /// The Drape page's reply and buttons, in the dialog's footer: Close only while the page is in
     /// front (`close`). Whether Close was clicked.
     fn drape_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
-        let ready = drape_line(&self.drape_form()).is_ok();
+        let made = drape_line(&self.drape_form());
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "drapeReply", self.drape_runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("drapePreview", ready)),
+            ("drapeStatus", &why),
             ("drapeRun", "Drape", ready),
             close,
         );
@@ -383,8 +384,10 @@ impl DrapeDialog {
         });
         let can_pick = PointPick::offered(host);
         let (add, pick) = row(ui, "Point:", |ui| {
+            dialog::fixed_fields(ui, dialog::beside_buttons(ui, &["Add", "Pick"]));
             let typed = field(ui, "samplePoint", &mut self.sample_point, "x,y");
-            let entered = typed.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let entered =
+                typed.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
             let add = button(ui, "sampleAdd", "Add").clicked() || entered;
             let pick = ui
                 .add_enabled_ui(can_pick, |ui| {
@@ -432,9 +435,17 @@ impl DrapeDialog {
     /// The Sample page's reply and Sample, in the dialog's footer: Close only while the page is
     /// in front (`close`). Whether Close was clicked.
     fn sample_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
-        let ready = sample_line(&self.sample_form()).is_ok();
+        let made = sample_line(&self.sample_form());
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "sampleReply", self.sample_runner.reply_mut());
-        let pressed = run_buttons(ui, None, ("sampleRun", "Sample", ready), close);
+        let pressed = run_buttons(
+            ui,
+            None,
+            ("sampleStatus", &why),
+            ("sampleRun", "Sample", ready),
+            close,
+        );
         if pressed.run {
             self.run_sample(host);
         }
@@ -467,10 +478,14 @@ impl Framed for DrapeDialog {
         // The page not in front keeps its buttons and reply, off the dialog, as its fields are.
         let closed = if self.tab == 0 {
             let closed = self.drape_footer(ui, host, Some("drapeClose"));
-            offstage(ui, "drapeSampleFooter", |ui| self.sample_footer(ui, host, None));
+            offstage(ui, "drapeSampleFooter", |ui| {
+                self.sample_footer(ui, host, None)
+            });
             closed
         } else {
-            offstage(ui, "drapeDrapeFooter", |ui| self.drape_footer(ui, host, None));
+            offstage(ui, "drapeDrapeFooter", |ui| {
+                self.drape_footer(ui, host, None)
+            });
             self.sample_footer(ui, host, Some("drapeClose"))
         };
         if closed {

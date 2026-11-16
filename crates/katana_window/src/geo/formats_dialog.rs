@@ -344,7 +344,12 @@ impl FormatsDialog {
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         ui.set_max_width(BODY_WIDTH);
         ui.horizontal(|ui| {
-            crate::drive::choice(ui, "gisFormatsKind", &self.kind.items, &mut self.kind.chosen);
+            crate::drive::choice(
+                ui,
+                "gisFormatsKind",
+                &self.kind.items,
+                &mut self.kind.chosen,
+            );
             crate::drive::choice(
                 ui,
                 "gisFormatsCapability",
@@ -389,19 +394,26 @@ impl FormatsDialog {
         }
         let options = &self.options;
         let option = self.option;
-        let chosen = egui::ScrollArea::both()
+        // What an empty options table says: there is nothing until a format is chosen.
+        let empty = if self.current.is_none() {
+            "Choose a format above to list its options."
+        } else {
+            "The format lists no options."
+        };
+        // The table spans the body, its header with it (table_or_empty), as the formats' table
+        // over it does: sized to its words, the header stood 357 wide under a table of 950. It
+        // scrolls down in its own place; across, a long description scrolls here.
+        let chosen = egui::ScrollArea::horizontal()
             .id_salt("gisFormatsOptions")
-            .max_height(200.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                table(
+                crate::shell::dialog::table_or_empty(
                     ui,
                     "gisFormatsOptions",
                     &OPTION_HEADERS,
                     options,
                     option,
-                    &[],
-                    None,
+                    empty,
                 )
             })
             .inner

@@ -810,6 +810,21 @@ impl DockTitleBar {
         facts: BarFacts,
         icons: &mut ChromeIcons,
     ) -> Vec<ChromeRequest> {
+        self.ui_titled(ui, rect, dock, facts, icons, None)
+    }
+
+    /// The bar as `ui` draws it, its title's place drawn by `title` when one is given - the tabs
+    /// of a group of docks, which are the group's title (`DockChrome::dock_ui_titled`) - in a `Ui`
+    /// of that place, left to right with its contents centred down.
+    pub fn ui_titled(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        dock: &str,
+        facts: BarFacts,
+        icons: &mut ChromeIcons,
+        title_content: Option<&mut dyn FnMut(&mut Ui)>,
+    ) -> Vec<ChromeRequest> {
         let mut requests = Vec::new();
         // Panels are always readable; views are muted unless active, so the one the menus act on
         // stands out without the others fading away. A panel's bar is its body's grey, the title
@@ -875,6 +890,9 @@ impl DockTitleBar {
                     requests.push(ChromeRequest::Tool(String::from(dock), lead.name));
                 }
             }
+            // A bar whose title is a group's tabs has no icon: the tabs name the panel, and the
+            // front dock's icon before them read as the icon of the first tab alone.
+            None if title_content.is_some() => {}
             None => {
                 let pixels = (DOCK_ICON_SIZE * pixels_per_point).round() as u32;
                 if let Some(texture) = icons.texture(ui.ctx(), &self.icon, pixels) {
@@ -899,8 +917,27 @@ impl DockTitleBar {
             }
         }
 
-        // The title, elided to the room the bar leaves it, in the colour of the bar's state.
-        if layout.title.width() > 0.0 {
+        // The title, elided to the room the bar leaves it, in the colour of the bar's state; or
+        // what the owner draws in its place, clipped to it.
+        if let Some(title_content) = title_content {
+            // From where the icon would be: two tabs need the room ("Reference Data" and
+            // "Surfaces" are some 170 points; a panel's title has some 135 after its icon).
+            let room = Rect::from_min_max(
+                Pos2::new(layout.lead.min.x, layout.title.min.y),
+                layout.title.max,
+            );
+            if room.width() > 0.0 {
+                ui.scope_builder(
+                    UiBuilder::new()
+                        .max_rect(room)
+                        .layout(Layout::left_to_right(Align::Center)),
+                    |ui| {
+                        ui.set_clip_rect(room.intersect(ui.clip_rect()));
+                        title_content(ui);
+                    },
+                );
+            }
+        } else if layout.title.width() > 0.0 {
             let title = self.title.clone();
             ui.scope_builder(
                 UiBuilder::new()
@@ -1192,6 +1229,30 @@ impl<Tab: DockTab> DockChrome<Tab> {
     /// ask is kept for `take_requests` (or `apply`) once the dock area has been drawn. A dock not
     /// installed is drawn with no bar.
     pub fn dock_ui<R>(&mut self, ui: &mut Ui, name: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
+        self.dock_ui_parts(ui, name, None, content)
+    }
+
+    /// `dock_ui` with `title` drawn in the bar where its title would be: for a group of docks
+    /// sharing one place (the lower left's Reference Data and Surfaces), whose tabs are the bar's
+    /// title, as an IDE draws a tabbed panel. A strip of tabs over the bar, its title repeating
+    /// the tab in front, was two headings for one panel (the second look audit's N7).
+    pub fn dock_ui_titled<R>(
+        &mut self,
+        ui: &mut Ui,
+        name: &str,
+        mut title: impl FnMut(&mut Ui),
+        content: impl FnOnce(&mut Ui) -> R,
+    ) -> R {
+        self.dock_ui_parts(ui, name, Some(&mut title), content)
+    }
+
+    fn dock_ui_parts<R>(
+        &mut self,
+        ui: &mut Ui,
+        name: &str,
+        title_content: Option<&mut dyn FnMut(&mut Ui)>,
+        content: impl FnOnce(&mut Ui) -> R,
+    ) -> R {
         let rect = ui.available_rect_before_wrap();
         let title = self
             .title_bar(name)
@@ -1201,9 +1262,14 @@ impl<Tab: DockTab> DockChrome<Tab> {
         if let Some(at) = self.installed.iter().position(|entry| entry.name == name) {
             let bar_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), BAR_HEIGHT));
             ui.allocate_rect(bar_rect, Sense::hover());
-            let requests = self.installed[at]
-                .bar
-                .ui(ui, bar_rect, name, facts, &mut self.icons);
+            let requests = self.installed[at].bar.ui_titled(
+                ui,
+                bar_rect,
+                name,
+                facts,
+                &mut self.icons,
+                title_content,
+            );
             self.requests.extend(requests);
         }
         let panel = self.role(name) == Some(DockRole::Panel);
