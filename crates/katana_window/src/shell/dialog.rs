@@ -43,8 +43,10 @@
 //! dialog is never as wide as the screen for want of a width. What a dialog lays its controls out
 //! with is here too, so a dialog mostly says what it holds: `form` and `labelled` (a label column
 //! every row of a body shares, the fields filling the rest - or, where one must not fill,
-//! `fixed_fields`, `beside_a_button`), `button_row` (what reads the drawing at the left; Close and
-//! the dialog's primary action, drive::controls::primary, last at the right), `note` and `section`.
+//! `fixed_fields`, `beside_a_button`), `check_row` (a check box in the field column), `button_row`
+//! (what reads the drawing and the one-line `status` at the left; Close and the dialog's primary
+//! action, drive::controls::primary, last at the right), `note`, and `section` / `section_with` (a
+//! group is a heading over its rows, never a box).
 //! A button in a footer is FOOTER_BUTTON_WIDTH at least (drive::controls reads `in_footer`). This
 //! is the window's ONE form: dialog_layout's grid of fixed-width fields, written beside it, was
 //! folded into it.
@@ -157,6 +159,17 @@ pub fn in_footer(ui: &Ui) -> bool {
     ui.stack()
         .iter()
         .any(|frame| frame.tags().contains(FOOTER_TAG))
+}
+
+/// The tag of a `button_row`'s left part, which `beside_footer_buttons` reads.
+const ROW_LEADING_TAG: &str = "katanaButtonRowLeading";
+
+/// Whether `ui` is the left part of a `button_row` - where a dialog's status stands beside its
+/// buttons - so a label drawn in it is one line (drive::controls::label_as).
+pub fn beside_footer_buttons(ui: &Ui) -> bool {
+    ui.stack()
+        .iter()
+        .any(|frame| frame.tags().contains(ROW_LEADING_TAG))
 }
 
 /// The rectangle a window's frame may take on a screen whose available area (what a task bar and
@@ -285,6 +298,10 @@ pub(crate) fn footer_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui:
 /// they show: Close, then the dialog's primary action last (drive::controls::primary). Each button
 /// is FOOTER_BUTTON_WIDTH at least.
 ///
+/// A status at the left (`status`, or any named label) has the room the buttons leave - the row
+/// less `trailing`'s width - and is ONE line in it, cut short with the whole text in its tooltip
+/// (drive::controls::label_as): a row of buttons is a control high whatever its status says.
+///
 /// egui lays a row out left to right as it is drawn, so what pushes `trailing` to the right is its
 /// width as the last frame measured it (kept in the context's memory); a frame that finds it
 /// changed asks for the frame to be laid out again (`Context::request_discard`), as the dialog
@@ -300,13 +317,22 @@ pub fn button_row<L, R>(
             ui.horizontal(|ui| {
                 let id = ui.make_persistent_id("katanaButtonRowTrailing");
                 let wanted: f32 = ui.data(|data| data.get_temp(id)).unwrap_or(0.0);
-                // What is at the left - buttons, or a status that wraps - is held to the row less
-                // the right end, so it never runs under the buttons.
+                // What is at the left - buttons, and a status cut short to one line - is held to
+                // the row less the right end, so it never runs under the buttons.
                 let room = Vec2::new(
                     (ui.available_width() - wanted - ui.spacing().item_spacing.x).max(0.0),
                     ui.spacing().interact_size.y,
                 );
-                let left = ui.allocate_ui(room, leading).inner;
+                let left = ui
+                    .allocate_ui_with_layout(room, *ui.layout(), |ui| {
+                        ui.scope_builder(
+                            UiBuilder::new()
+                                .ui_stack_info(UiStackInfo::default().with_tag(ROW_LEADING_TAG)),
+                            leading,
+                        )
+                        .inner
+                    })
+                    .inner;
                 // The spacing after what is at the left is already behind the cursor.
                 let gap = ui.available_width() - wanted;
                 if gap > 0.0 {
@@ -504,15 +530,22 @@ pub fn body_span(ui: &Ui) -> Option<egui::Rangef> {
 }
 
 /// A dialog's status line - what its last action did, or why it was refused - named `name` so a
-/// driver reads it (drive::controls::label_as), in `status_colour` and wrapped at its room: one
-/// helper where dialogs each drew their own (a run dialog's status, a check's count).
+/// driver reads it (drive::controls::label_as) whole, in `status_colour`: muted, red only for a
+/// refusal. One helper where dialogs each drew their own (a run dialog's status, a check's count).
+///
+/// In a footer - its place, at the left of `button_row` beside the buttons - it is ONE line in the
+/// room the buttons leave, cut short with an ellipsis and the whole text in its tooltip: wrapped,
+/// a sentence made its footer a line taller than every other (the third look audit's A). In a
+/// body (a manager's refusal under its form) it wraps at the body's width, where a refusal is read
+/// whole.
 pub fn status(ui: &mut Ui, name: &str, text: &str, is_error: bool) -> egui::Response {
-    crate::drive::controls::label_as(
-        ui,
-        name,
-        text,
-        egui::Label::new(RichText::new(text).color(status_colour(is_error))).wrap(),
-    )
+    let label = egui::Label::new(RichText::new(text).color(status_colour(is_error)));
+    let label = if in_footer(ui) {
+        label.truncate()
+    } else {
+        label.wrap()
+    };
+    crate::drive::controls::label_as(ui, name, text, label)
 }
 
 /// The label column a row drawn in `ui` starting `start` (its left edge) shares, and where the row
@@ -689,15 +722,31 @@ impl Form<'_> {
         labelled(self.ui, label, add)
     }
 
-    /// A row with no label: a check box or a note under the fields, lined up with them.
+    /// A row with no label: a check box or a note under the fields, lined up with them. A check
+    /// box alone is `check_row`, which draws it so.
     pub fn under<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R {
         labelled(self.ui, "", add)
+    }
+
+    /// A check box in the field column under the fields (`check_row`).
+    pub fn check(&mut self, name: &str, text: &str, on: &mut bool) -> egui::Response {
+        check_row(self.ui, name, text, on)
     }
 
     /// The form's `Ui`, for what is drawn across the whole row.
     pub fn ui(&mut self) -> &mut Ui {
         self.ui
     }
+}
+
+/// A dialog's check box (drive::controls::check, named `name`, reading `text`, over `on`) in the
+/// FIELD column, under the fields it qualifies - the one place a check box of a form stands, in a
+/// `form` or out of one. Drawn alone in a body a check box stands at the LABEL column, under the
+/// labels, and dialogs mixed the two on one page (Settings' "Show Notice" at the label column,
+/// "Replace instead of merging" at the field column; the third look audit's C). A check box that
+/// is a row's label - a tick that lets the field beside it be used - is `row_with_check`.
+pub fn check_row(ui: &mut Ui, name: &str, text: &str, on: &mut bool) -> egui::Response {
+    labelled(ui, "", |ui| crate::drive::controls::check(ui, name, text, on))
 }
 
 /// A form's label: the secondary text colour, so the values read first.
@@ -761,14 +810,29 @@ pub const SHORT_FIELD_WIDTH: f32 = 130.0;
 /// scale after GROUP_GAP, so that groups read as blocks without boxes round them.
 pub const SECTION_GAP: f32 = PADDING;
 
-/// A group's heading inside a dialog's body ("Customisation", "Results"): strong text, SECTION_GAP
-/// above it unless it is the first thing in its `ui` (the body's padding is room enough there).
-/// The group's rows follow it (`form`, `labelled`).
+/// A group's heading inside a dialog's body ("Customisation", "Results"): the Heading text style
+/// (a pixel larger than the body's, theme::style::HEADING_PIXELS_MORE) in the strong text colour,
+/// SECTION_GAP above it unless it is the first thing in its `ui` (the body's padding is room
+/// enough there). The group's rows follow it (`form`, `labelled`), or are drawn in it
+/// (`section_with`).
+///
+/// A group is a heading over its rows, never a box round them: bordered boxes beside headed
+/// groups were two looks of one thing (the third look audit's B). The heading has weight - a size
+/// and a colour of its own - and the gap above it, so it reads as a group's start: at the body's
+/// size it read as one more line of the form, 4 points under the field above it.
 pub fn section(ui: &mut Ui, title: &str) -> egui::Response {
     if ui.cursor().min.y > ui.max_rect().min.y + 0.5 {
         ui.add_space((SECTION_GAP - ui.spacing().item_spacing.y).max(0.0));
     }
-    ui.label(RichText::new(title).strong())
+    ui.label(RichText::new(title).text_style(TextStyle::Heading).strong())
+}
+
+/// A group of a dialog's body: its heading (`section`) and under it the rows `add` draws, top
+/// down. What a bordered group (`Ui::group`) is replaced with: the rows keep the body's label
+/// column, as a group's did.
+pub fn section_with<R>(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    section(ui, title);
+    ui.vertical(add).inner
 }
 
 /// A note in the secondary text colour, wrapped at the body's width: what a dialog says of what it

@@ -157,6 +157,12 @@ pub fn button(ui: &mut Ui, name: &str, text: &str) -> Response {
 
 /// A dialog's primary action (Run, Import, Compute): `button` drawn in the accent with the text
 /// on the accent - one to a dialog, last in its row of buttons (shell::dialog::button_row).
+///
+/// A primary with nothing to act on is GREYED, never lit: a dialog draws it in
+/// `ui.add_enabled_ui(can_run, |ui| primary(..))`, and in a disabled `Ui` it takes the look of any
+/// disabled button (`primary_look` with `enabled` false) - an accent fill on a button that does
+/// nothing invites the click (Volumes' Measure and Utilities' Run beside a status saying there was
+/// nothing to run, the third look audit's A). A press of it is refused as disabled.
 pub fn primary(ui: &mut Ui, name: &str, text: &str) -> Response {
     let look = primary_look(text, ui.is_enabled());
     button_as(ui, name, text, look)
@@ -627,6 +633,9 @@ pub fn line_with(
         edit = edit.desired_width(width);
     }
     let mut response = ui.add(edit);
+    if !options.password {
+        field_swatch(ui, &response, value);
+    }
     if changed {
         response.mark_changed();
     }
@@ -636,6 +645,139 @@ pub fn line_with(
     record.value = value.clone();
     super::registry::record(ui, &response, record);
     response
+}
+
+/// A number typed as text (QLineEdit) over `value`: a field `line_with` draws, as wide as a number
+/// box (`spin`, `whole`) showing it would be - its text, or `placeholder` while it is empty, and
+/// FIELD_INSET either side, NUMBER_FIELD_WIDTH at least - rather than filling its row. For a
+/// number a box cannot hold: one that may be absent (absent is not zero), or that a dialog reads
+/// and refuses with its own sentence. Drawn filling the row, a typed number stood beside the short
+/// wells of the boxes in one form (Contours' Interval beside its Major every, Smooth's Weight
+/// beside its Passes; the third look audit's C), so a number is one short well whichever it is.
+pub fn number_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> Response {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let shown = if value.is_empty() {
+        placeholder
+    } else {
+        value.as_str()
+    };
+    let text = ui
+        .painter()
+        .layout_no_wrap(String::from(shown), font, egui::Color32::PLACEHOLDER)
+        .size()
+        .x;
+    // A caret's room past the text, as a field being typed into needs it.
+    let width = (text + 2.0 * FIELD_INSET + CARET_ROOM)
+        .max(NUMBER_FIELD_WIDTH)
+        .min(ui.available_width().max(NUMBER_FIELD_WIDTH));
+    line_with(
+        ui,
+        name,
+        value,
+        LineOptions {
+            placeholder,
+            width: Some(width),
+            ..LineOptions::default()
+        },
+    )
+}
+
+/// The room `number_line` keeps after its text for the caret: egui's text cursor is two points
+/// wide (Visuals::text_cursor's stroke).
+const CARET_ROOM: f32 = 2.0;
+
+// ---- colours ----------------------------------------------------------------------------------
+
+/// The side of a colour's swatch (`colour_swatch`): a menu icon's 16 less two either side, so a
+/// swatch sits inside a line of text at the Standard size.
+pub const SWATCH_SIZE: f32 = 12.0;
+
+/// The colour `text` names when it is a colour as the window writes one - #RRGGBB, or #RRGGBBAA
+/// when it is not opaque (EntityColor::to_hex) - and nothing else: a name ("ByLayer", "red") is a
+/// word, not a colour to paint.
+pub fn colour_of_text(text: &str) -> Option<egui::Color32> {
+    let digits = text.trim().strip_prefix('#')?;
+    if !(digits.len() == 6 || digits.len() == 8) || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(&digits[at..at + 2], 16).ok();
+    let alpha = if digits.len() == 8 { byte(6)? } else { u8::MAX };
+    Some(egui::Color32::from_rgba_unmultiplied(
+        byte(0)?,
+        byte(2)?,
+        byte(4)?,
+        alpha,
+    ))
+}
+
+/// Paints a colour's swatch over `rect`: the colour, under a pixel of the border token, so a
+/// colour as dark as the panel (#000000, the window's own grey) is still seen as a swatch.
+pub fn paint_swatch(painter: &egui::Painter, rect: egui::Rect, colour: egui::Color32) {
+    painter.rect(
+        rect,
+        egui::CornerRadius::same(2),
+        colour,
+        egui::Stroke::new(1.0, crate::theme::palette::border().to_egui()),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// A colour's swatch, SWATCH_SIZE square, in a cell a line of text high: what is drawn beside a
+/// colour written as text, so the colour is seen, not read as six digits (Layers, Surface Styles,
+/// Text Styles showed "#3CA03C" alone; the third look audit's H).
+pub fn colour_swatch(ui: &mut Ui, colour: egui::Color32) -> Response {
+    let height = ui.text_style_height(&egui::TextStyle::Body).max(SWATCH_SIZE);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(SWATCH_SIZE, height), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let square = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(SWATCH_SIZE));
+        paint_swatch(ui.painter(), square, colour);
+    }
+    response
+}
+
+/// A colour shown as its text (`hex`, as the window writes one) with its swatch before it, the
+/// text a label named `name` (`label`, which a driver reads): what a form or a summary shows a
+/// colour with. A text that is not a colour (ByLayer) is shown alone.
+pub fn colour_value(ui: &mut Ui, name: &str, hex: &str) -> Response {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = crate::theme::style::GAP;
+        if let Some(colour) = colour_of_text(hex) {
+            colour_swatch(ui, colour);
+        }
+        label(ui, name, hex)
+    })
+    .inner
+}
+
+/// A one-line field holding a colour (`colour_of_text`) shows its swatch inside its right end, so
+/// every colour field - Layers' Colour, Surface Styles' seven, the scope's Colour filter once a
+/// colour is typed - shows the colour it holds without a helper of its own. At the right end, not
+/// before the text: the text would move as the field became a colour while being typed. Not drawn
+/// where the field is too narrow for its text and the swatch both.
+fn field_swatch(ui: &Ui, field: &Response, value: &str) {
+    let Some(colour) = colour_of_text(value) else {
+        return;
+    };
+    let text = ui
+        .painter()
+        .layout_no_wrap(
+            String::from(value),
+            egui::TextStyle::Body.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x;
+    let rect = field.rect;
+    let needed = FIELD_INSET + text + crate::theme::style::GROUP_GAP + SWATCH_SIZE + FIELD_INSET;
+    if rect.width() < needed || !ui.is_rect_visible(rect) {
+        return;
+    }
+    let square = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - FIELD_INSET - SWATCH_SIZE / 2.0, rect.center().y),
+        egui::Vec2::splat(SWATCH_SIZE),
+    );
+    paint_swatch(ui.painter(), square, colour);
 }
 
 /// How a text box is drawn.
@@ -710,8 +852,19 @@ pub fn label(ui: &mut Ui, name: &str, text: &str) -> Response {
 }
 
 /// A label drawn as `label` - coloured, wrapped - whose text is `text`.
+///
+/// Beside a footer's buttons (the left part of shell::dialog::button_row) a label is a status, and
+/// a status is ONE line however its caller asked for it: cut short with an ellipsis, the whole
+/// text in its tooltip (egui's Label shows an elided text whole on hover). Wrapped there, a
+/// sentence stood two lines high and made its footer 55 points where every other is 49 (21
+/// terrain dialogs; the third look audit's A).
 pub fn label_as(ui: &mut Ui, name: &str, text: &str, label: egui::Label) -> Response {
     let taken = take(ui, name);
+    let label = if crate::shell::dialog::beside_footer_buttons(ui) {
+        label.truncate()
+    } else {
+        label
+    };
     let response = ui.add(label);
     if let Some(taken) = &taken {
         match &taken.posted.act {
@@ -780,9 +933,32 @@ impl Choice {
     }
 }
 
+/// What an empty choice says (`choice`): nothing is chosen.
+pub const NO_CHOICE: &str = "None";
+
 /// QComboBox over `items`: a fill chooses the item whose text is the text given; an editable one
-/// takes a text it does not list, as typing does; any other is refused (fillField).
+/// takes a text it does not list, as typing does; any other is refused (fillField). While nothing
+/// is chosen and it shows no text it says NO_CHOICE, muted (`choice_with_hint`).
 pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) -> Response {
+    choice_with_hint(ui, name, items, chosen, NO_CHOICE)
+}
+
+/// `choice`, saying `hint` - muted, in the control - while nothing is chosen and it shows no text:
+/// what is missing, in the caller's words ("No surface", "No style"). An empty choice was an empty
+/// well, read as a control that failed to fill (Thin's and Smooth's Surface, Global Modify's Layer
+/// and Style; the third look audit's I). The hint is the control's look only: its recorded value
+/// is still "", as a driver and the tests read it, and a fill of the hint's words is refused as any
+/// text the list does not hold. An empty `hint` says nothing.
+///
+/// A hint, not a field of `Choice`: a dialog's Choice is plain data, written out whole in several
+/// dialogs, and what an empty one says is how it is drawn.
+pub fn choice_with_hint(
+    ui: &mut Ui,
+    name: &str,
+    items: &[String],
+    chosen: &mut Choice,
+    hint: &str,
+) -> Response {
     let taken = take(ui, name);
     let mut changed = false;
     if let Some(taken) = &taken {
@@ -811,7 +987,8 @@ pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) ->
     let mut response = if chosen.editable {
         // One control, as wide as a field alone: the field and the list's arrow inside its end.
         let index = chosen.index;
-        editable_choice_frame(ui, name, &mut chosen.text, "", None, |ui| {
+        // The field's own hint is drawn while it is empty: the editable choice's empty state.
+        editable_choice_frame(ui, name, &mut chosen.text, hint, None, |ui| {
             for (at, item) in items.iter().enumerate() {
                 if ui.selectable_label(index == Some(at), item).clicked() {
                     picked = Some(at);
@@ -822,8 +999,18 @@ pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) ->
     } else {
         let current = chosen.current_text(items);
         let index = chosen.index;
+        // Nothing chosen - no index, or one past the list's end - and nothing to show: the hint.
+        // An item chosen whose text is "" is a choice, and shows as it is.
+        let nothing = chosen.index.is_none_or(|at| at >= items.len());
+        let shown: egui::WidgetText = if nothing && current.is_empty() && !hint.is_empty() {
+            egui::RichText::new(hint)
+                .color(crate::theme::palette::text_muted().to_egui())
+                .into()
+        } else {
+            current.into()
+        };
         egui::ComboBox::from_id_salt(name)
-            .selected_text(current)
+            .selected_text(shown)
             // The editable choice's chevron (paint_list_arrow), so a choice reads the same
             // whether it can be typed into or not; egui's own is a filled triangle.
             .icon(|ui, rect, _, open| {
