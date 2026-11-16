@@ -979,6 +979,28 @@ typical section, the hatch swatch). Words: "Select Matches" (Road Objects, as
 Global Modify), "Save CSV..." everywhere, "Replace" (its verb in the tooltip),
 buttons in Title Case like menu items, singular and plural counted right.
 
+**The fifth round, the GIS, terrain, survey and utility dialogs.** A status
+never carries a field's name before a condition that is the drawing's: one
+sentence says there is no surface (`terrain_dialog_parts::NO_SURFACE`,
+`NO_SURFACE_OR_RASTER`), and a GIS or utility dialog's status is the error's
+words begun with a capital (`why_status`) - Clip said "Nothing to run yet: the
+boundary: the scope: tick ...". Volumes' Measure and Utilities' Run are greyed
+while there is no line. The option dialogs that change nothing until their
+act (Project Coordinate System, the three import dialogs, the placement step)
+leave by Close; the far-apart question keeps Cancel. Every bordered group is
+a headed section. A number kept as text is a `number_line`. Utilities measures
+every tab's captions so its fields keep one edge. Online Data is one column
+wide again (977, where the Box row's choice ran past the column and widened
+every row under it to 1,283). Paper Style Scale and Zoom To show their line in
+a read-only Command field. Command Reference indents a command under its group
+and measures its title column over the whole reference. Viewshed's observers
+are a list well with an empty state. GDAL Toolbox says what to choose before
+an algorithm is chosen, and its catalogue is a tree in the table look. Parcel
+Report's Copy and Save CSV... are its footer's, as Point Report's are; Surface
+Styles' Apply and Revert are its footer's. Counts are written right ("12
+points", "1 problem on 1 entity", `katana_cad::tools::everyday_support::counted`),
+where "point(s)" was; the process tests that read them follow.
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the

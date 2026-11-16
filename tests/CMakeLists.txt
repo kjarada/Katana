@@ -1338,7 +1338,7 @@ if(KATANA_TEST_WINDOW)
             "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|#surveyPointManager|filter=CP"
-            "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
+            "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 points from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The note under the wizard's Options step (finishNote) says what the
@@ -1399,7 +1399,7 @@ if(KATANA_TEST_WINDOW)
             "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/fld/gnss.fld|!next|!next|!next|!next|!next|?applyCodes|?drawLinework|layer=fieldwork|!next|!import|>LIST|>UNDO|>STATUS"
-            "-DEXPECT=Customisation: test_field_codes, 1 definition [^\r\n]*and 3 survey code rules, built in\\..*applyCodes: Apply survey codes to the imported points, checked[\r\n]+drawLinework: Draw linework through the imported points, checked[\r\n].*Imported survey job job-1 from gnss\\.fld [^\r\n]*point\\(s\\) on fieldwork[^\r\n]*[\r\n]+Survey codes were applied to the 5 point\\(s\\) drawn: 4 carry a code and 4 of those have a rule; 1 layer\\(s\\) and 1 style\\(s\\) were created\\.[\r\n]+Linework: 1 line\\(s\\) drawn\\.[\r\n].*6 entities[\r\n]+[^\r\n]*Point +layer=fieldwork +at 500000,6200000[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040[\r\n]+[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50[\r\n].*Entities: 0 "
+            "-DEXPECT=Customisation: test_field_codes, 1 definition [^\r\n]*and 3 survey code rules, built in\\..*applyCodes: Apply survey codes to the imported points, checked[\r\n]+drawLinework: Draw linework through the imported points, checked[\r\n].*Imported survey job job-1 from gnss\\.fld [^\r\n]*points? on fieldwork[^\r\n]*[\r\n]+Survey codes were applied to the 5 point\\(s\\) drawn: 4 carry a code and 4 of those have a rule; 1 layer\\(s\\) and 1 style\\(s\\) were created\\.[\r\n]+Linework: 1 line\\(s\\) drawn\\.[\r\n].*6 entities[\r\n]+[^\r\n]*Point +layer=fieldwork +at 500000,6200000[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500010,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200020[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500020,6200030[\r\n]+[^\r\n]*Point +layer=FIELD KERB +at 500040,6200040[\r\n]+[^\r\n]*Polyline +layer=FIELD KERB +vertices=3 +closed +length=34[.]1421[0-9]* +area=50[\r\n].*Entities: 0 "
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_codes_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(
@@ -1415,7 +1415,7 @@ if(KATANA_TEST_WINDOW)
             "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless.txt|!next|${_survey_format}|!next|columns=P,N,E,Z|delimiter=whitespace|headerLines=0|!next|confirmOrder=on|!next|unit=metres|!next|!next|!import"
-            "-DEXPECT=could not tell the order of the columns.*Imported 3 point\\(s\\) from survey_points_headerless\\.txt"
+            "-DEXPECT=could not tell the order of the columns.*Imported 3 points from survey_points_headerless\\.txt"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_uncertain_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The order corrected through the role boxes, one box at a time, as a
@@ -1434,7 +1434,7 @@ if(KATANA_TEST_WINDOW)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless_penz.txt|!next|${_survey_format}|!next|role2=ignored|role2=easting|role3=northing|confirmOrder=on|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt|columns=P,N,E,Z|delimiter=whitespace|header=off|decimals=3|!export"
             "-DCOMPARE=${_survey_data}/survey_points_headerless.txt|${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt"
-            "-DEXPECT=Layout: P,E,N,Z.delimiter=whitespace.header=0.*Imported 3 point\\(s\\) from survey_points_headerless_penz\\.txt.*Exported 3 point\\(s\\) to survey_role_swap\\.txt"
+            "-DEXPECT=Layout: P,E,N,Z.delimiter=whitespace.header=0.*Imported 3 points from survey_points_headerless_penz\\.txt.*Exported 3 points to survey_role_swap\\.txt"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_role_boxes_swap_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Round trip through files: export(import(fixture)) with the fixture's own
@@ -1447,7 +1447,7 @@ if(KATANA_TEST_WINDOW)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|columns=P,N,E,Z,C,D|decimals=3|!export|@surveyImport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|existing=replace the drawing's point|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv|!export"
             "-DCOMPARE=${_survey_data}/survey_points_pnezd.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv"
-            "-DEXPECT=Exported 12 point\\(s\\) to survey_round_trip_1\\.csv.*12 point\\(s\\) in the drawing are replaced.*Exported 12 point\\(s\\) to survey_round_trip_2\\.csv"
+            "-DEXPECT=Exported 12 points to survey_round_trip_1\\.csv.*12 point\\(s\\) in the drawing are replaced.*Exported 12 points to survey_round_trip_2\\.csv"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_export_round_trip_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The stated transformation: UTM zone 30N (EPSG:32630) to 30S
@@ -1472,7 +1472,7 @@ if(KATANA_TEST_WINDOW)
             "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest survey layout|!saveTemplate|template=ctest survey layout|!deleteTemplate|!next|unit=metres|!next|!next|!import|@surveyPointReport"
-            "-DEXPECT=Saved the survey layout template \"ctest survey layout\": P,N,E,Z,C,D.delimiter=comma.header=1.quote=double.*Deleted the survey layout template.*Point Report: 12 point\\(s\\)"
+            "-DEXPECT=Saved the survey layout template \"ctest survey layout\": P,N,E,Z,C,D.delimiter=comma.header=1.quote=double.*Deleted the survey layout template.*Point Report: 12 points"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_point_report_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A template saved or deleted in the import wizard reaches an Export
@@ -2541,7 +2541,7 @@ if(KATANA_TEST_WINDOW)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DCUSTOMISE_DIR=${_twins}"
             "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|>SELECT ALL|@formatSymbols|symbolGrid=TEST Survey Mark|?detailName|!assignToPoints|>STYLE USAGE TEST Survey Mark"
-            "-DEXPECT=Imported 12 point\\(s\\).*detailName: TEST Survey Mark[\r\n]+12 points now in style \"TEST Survey Mark\" \\(new\\), drawing \"TEST Survey Mark\"\\..*style TEST Survey Mark: used by 12 entities"
+            "-DEXPECT=Imported 12 points.*detailName: TEST Survey Mark[\r\n]+12 points now in style \"TEST Survey Mark\" \\(new\\), drawing \"TEST Survey Mark\"\\..*style TEST Survey Mark: used by 12 entities"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/symbol_assign_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Format > Purge Unused (* is --trigger, the menu item in its turn). By
