@@ -761,11 +761,12 @@ impl HatchPatternsTab {
                     for (row, cells) in self.families.iter().enumerate() {
                         for (column, cell) in cells.iter().enumerate() {
                             let mut text = cell.clone();
-                            let field = ui.add(
+                            let field = ui.add(crate::dialog_layout::field_look(
+                                ui,
                                 egui::TextEdit::singleline(&mut text)
                                     .id_salt(("hatchPatternFamilies", row, column))
                                     .desired_width(90.0),
-                            );
+                            ));
                             if field.gained_focus() || field.clicked() {
                                 self.family_current = Some(row);
                             }

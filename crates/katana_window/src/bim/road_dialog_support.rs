@@ -23,7 +23,8 @@ use katana_core::text::parse_finite_double;
 use crate::canvas::{Canvas, Image};
 use crate::command_word::command_word;
 use crate::dialog_layout::{
-    EMPTY_TABLE, TABLE_COLUMN_GAP, TABLE_ROW_GAP, empty_table, table_header, table_row_colour,
+    EMPTY_TABLE, TABLE_COLUMN_GAP, TABLE_ROW_GAP, empty_table, field_look, table_header,
+    table_row_colour,
 };
 use crate::drive::controls::{
     Choice, LineOptions, accept_fill, accept_press, button_as, choice, custom, label_as, line_with,
@@ -81,7 +82,7 @@ pub fn button(ui: &mut Ui, name: &str, text: &str, tip: &str) -> Response {
 /// the one chosen. (F0's `radio` records the text as drawn, which would show the '&'.)
 pub fn radio(ui: &mut Ui, name: &str, text: &str, chosen: bool) -> Response {
     let taken = take(ui, name);
-    let mut response = ui.add(egui::RadioButton::new(chosen, shown_text(text)));
+    let mut response = crate::drive::controls::radio_button(ui, chosen, shown_text(text));
     if let Some(taken) = &taken {
         match &taken.posted.act {
             Act::Press => {
@@ -683,11 +684,12 @@ impl Table {
                     for (row, cells) in rows.iter_mut().enumerate() {
                         for (column, cell) in cells.iter_mut().enumerate() {
                             if editing && cell.editable {
-                                let response = ui.add(
+                                let response = ui.add(field_look(
+                                    ui,
                                     egui::TextEdit::singleline(&mut cell.text)
                                         .id_salt((name.as_str(), row, column))
                                         .desired_width(90.0),
-                                );
+                                ));
                                 if response.changed() && !events.edited.contains(&(row, column)) {
                                     events.edited.push((row, column));
                                 }

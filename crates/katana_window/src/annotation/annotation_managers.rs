@@ -63,7 +63,7 @@ use super::dialog_support::{
 use super::form_widgets::{button, check, combo, describe, edit, problem_line};
 use crate::command_word::{annotation_text_word, command_word, exact_number};
 use crate::dialog_layout as layout;
-use crate::drive::action::{Action, Menu, MenuItem, action_item};
+use crate::drive::action::{Action, Menu, menu_items_ui};
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -1649,27 +1649,14 @@ impl LabelStyleManagerDialog {
                     self.check_template();
                 }
                 let menu = &self.insert_menu;
+                // The window's one menu drawer (drive::action::menu_items_ui): its values in
+                // sections, each kind's steps a submenu beside it, in a column that scrolls.
                 let shown = ui.menu_button("Insert Value", |ui| {
-                    for item in &menu.items {
-                        match item {
-                            MenuItem::Menu(sub) => {
-                                ui.menu_button(sub.title.as_str(), |ui| {
-                                    for action in sub.actions() {
-                                        if action_item(ui, action).clicked() {
-                                            inserted = Some(action.name.clone());
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                            }
-                            MenuItem::Action(action) => {
-                                if action_item(ui, action).clicked() {
-                                    inserted = Some(action.name.clone());
-                                    ui.close();
-                                }
-                            }
-                            MenuItem::Section(_) | MenuItem::Separator => {}
-                        }
+                    crate::shell::dialog::menu_column(ui, |ui| {
+                        menu_items_ui(ui, menu, &mut inserted);
+                    });
+                    if inserted.is_some() {
+                        ui.close();
                     }
                 });
                 let mut record = ControlRecord::new("labelTemplateInsert", ControlKind::Button);

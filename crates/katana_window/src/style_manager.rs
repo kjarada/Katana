@@ -3414,7 +3414,7 @@ impl StyleManagerDialog {
                 ui.label(self.purge_label.as_str());
                 let list = ui.vertical(|ui| {
                     for item in &mut self.purge_items {
-                        ui.checkbox(&mut item.checked, item.label.as_str());
+                        controls::check_box(ui, &mut item.checked, item.label.as_str());
                     }
                 });
                 let mut record = ControlRecord::new("purgeList", ControlKind::Rows);

@@ -253,3 +253,13 @@ pub fn reply_text(
     controls::custom(ui, &response, record);
     response
 }
+
+/// `edit` - a one-line field a table or a grid draws in a cell of its own, which drive::controls'
+/// named fields cannot be - given their look: a control's height, its text centred in it and
+/// drive::controls::FIELD_INSET in from its left as a choice's is, where egui's own field stands
+/// its text 4 in and at the top. The margin is line_with's (FIELD_INSET across, egui's 2 down).
+pub fn field_look<'t>(ui: &Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
+    edit.margin(egui::Margin::symmetric(controls::FIELD_INSET as i8, 2))
+        .vertical_align(egui::Align::Center)
+        .min_size(egui::vec2(0.0, ui.spacing().interact_size.y))
+}

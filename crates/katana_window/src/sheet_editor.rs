@@ -106,7 +106,7 @@ use crate::canvas::{
     RasterCanvas, RectF, RenderHint, SizeF, TextFlags,
 };
 use crate::drive::action::{
-    Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item, shortcut_text,
+    Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item, menu_items_ui, shortcut_text,
 };
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::drive::mailbox::{Act, no_button, no_field, whole_out_of_range};
@@ -2395,7 +2395,7 @@ impl HiddenLayersDialog {
                 let response = ui
                     .vertical(|ui| {
                         for (layer, _, shown) in &mut dialog.layers {
-                            ui.checkbox(shown, layer.as_str());
+                            controls::check_box(ui, shown, layer.as_str());
                         }
                     })
                     .response;
@@ -5183,10 +5183,12 @@ impl SheetEditor {
         // The context menu, and the dialogs, each a target of its own.
         if let Some((at, id)) = self.context_menu.clone() {
             let items = self.context_menu_items(&*host, &id);
+            let menu = Menu {
+                items,
+                ..Menu::new("sheetContextMenu", "")
+            };
             let shown = crate::shell::popup_menu(&ctx, "sheetContextMenu", at, |ui| {
-                for item in &items {
-                    menu_item_ui(ui, item, &mut chosen);
-                }
+                menu_items_ui(ui, &menu, &mut chosen);
             });
             // Closed by an item chosen, Escape, or a click away from it.
             let away = ctx.input(|input| {
@@ -5586,29 +5588,15 @@ impl SheetEditor {
 }
 
 /// A menu drawn as a menu button with its items: a click on an action is the action chosen.
+/// A menu of the editor's menu bar, drawn as the main window draws its own: its items by
+/// drive::action::menu_items_ui (a tick or icon gutter, titled sections, inset separators,
+/// submenus beside it) in one column that scrolls when it is taller than the screen.
 fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
     ui.menu_button(menu.title.replace('&', ""), |ui| {
-        for item in &menu.items {
-            menu_item_ui(ui, item, chosen);
-        }
+        crate::shell::dialog::menu_column(ui, |ui| {
+            menu_items_ui(ui, menu, chosen);
+        });
     });
-}
-
-fn menu_item_ui(ui: &mut Ui, item: &MenuItem, chosen: &mut Option<String>) {
-    match item {
-        MenuItem::Action(action) => {
-            if action_item(ui, action).clicked() {
-                *chosen = Some(action.name.clone());
-            }
-        }
-        MenuItem::Section(title) => {
-            ui.weak(title.as_str());
-        }
-        MenuItem::Separator => {
-            ui.separator();
-        }
-        MenuItem::Menu(menu) => menu_ui(ui, menu, chosen),
-    }
 }
 
 /// A title block cell's key ("approver_date") as a form's label says it: words, in sentence case
@@ -5653,9 +5641,9 @@ fn tool_button_menu(ui: &mut Ui, name: &str, menu: &Menu, chosen: &mut Option<St
     let taken = take(ui, name);
     let response = ui
         .menu_button(menu.title.replace('&', ""), |ui| {
-            for item in &menu.items {
-                menu_item_ui(ui, item, chosen);
-            }
+            crate::shell::dialog::menu_column(ui, |ui| {
+                menu_items_ui(ui, menu, chosen);
+            });
         })
         .response;
     if let Some(taken) = &taken {

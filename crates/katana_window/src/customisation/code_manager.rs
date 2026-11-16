@@ -1924,11 +1924,12 @@ impl SurveyCodeManagerDialog {
                 }
             }
             let placeholder = "Search keys, descriptions, layers, linestyles, symbols";
-            let response = ui.add(
+            let response = ui.add(layout::field_look(
+                ui,
                 egui::TextEdit::singleline(&mut text)
                     .id_salt("codeTableFilterText")
                     .hint_text(placeholder),
-            );
+            ));
             if let Some(taken) = &taken
                 && taken.posted.act == Act::ScrollTo
             {

@@ -204,6 +204,29 @@ mod manager {
     use super::*;
 
     #[test]
+    fn a_library_linestyles_details_wrap_across_the_detail_pane_not_a_letter_a_line() {
+        // The look audit of 2026-11-16 (T1): beside the Linetypes table, 908 points wide, the
+        // detail pane had what was left of a 940-point body, some 40 points, and the library
+        // linestyle's details were drawn a letter or two a line. The pane has a width of its own
+        // now (style_manager::DETAIL_WIDTH, 374): its text wraps across it.
+        let mut bench = Fixture::new().manager();
+        bench.fill("managerTabs", "Linetypes");
+        select_linetype(&mut bench, "TEST Dashed Kerb", LinetypeOrigin::Library);
+        let details = bench.control("libraryDetails");
+        assert!(!bench.text("libraryDetails").is_empty());
+        // A letter a line is under 20 points across; the details' first line alone, "Library
+        // linestyle" and the name, is some 200 at any text size the window offers.
+        assert!(
+            details.rect.width() > 150.0,
+            "the details are {} points wide",
+            details.rect.width()
+        );
+        // And the pane is beside the table, not under it or past the dialog's edge.
+        let table = bench.control("linetypeTable");
+        assert!(details.rect.left() >= table.rect.right());
+    }
+
+    #[test]
     fn saving_a_style_naming_undefined_names_unedited_changes_nothing_and_pushes_no_undo_step() {
         // Audit QT-02: the old form showed a name it could not list as the previous row's, and
         // Save wrote that back - every imported style whose library was not loaded lost its
