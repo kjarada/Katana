@@ -370,10 +370,17 @@ in.
   them under `.claude/`, which got wiped. When one is finished and merged,
   remove it with `git worktree remove ../Katana-wt/<name>` and then
   `git branch -d <branch>`; `git worktree prune` clears the record of one whose
-  folder is already gone.
+  folder is already gone; `bash tools/build_visible.sh prune` then deletes the
+  WSL build folders (about 3 GB each) of worktrees that are gone.
   - The harness's `isolation: "worktree"` branches from `origin/main`, not
     local HEAD, so it misses unpushed commits.
-  - Each worktree builds in its own `~/katana-build/<worktree>/` in WSL.
+  - Each worktree builds in its own `~/katana-build/<worktree>/` in WSL. Its
+    first build starts from a copy of the main checkout's cargo folder, so
+    only Katana's own crates are compiled, not every third-party crate again
+    (`seed_from_main_checkout` in `tools/build_visible.sh`); build the main
+    checkout once before starting agents, and do not start one while a run
+    is going there (the copy is skipped then, and the worktree compiles
+    everything).
 - **Give each agent a disjoint, named file set.** Any shared hotspot needs an
   exact, small edit: a crate's `lib.rs` (each agent adds its modules in a
   commented block of its own, merged with `git merge-file --union`), the main

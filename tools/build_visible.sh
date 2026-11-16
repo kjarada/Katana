@@ -23,6 +23,12 @@
 #                                                    test -R PlanContextMenu
 #   tools/build_visible.sh close                     close this checkout's windows whose run
 #                                                    has ended
+#   tools/build_visible.sh prune                     delete the WSL build folders of
+#                                                    worktrees that are gone (no window)
+#
+# A worktree's first WSL build starts from a copy of the main checkout's cargo
+# folder, so the third-party crates are compiled once on this machine, not once
+# a worktree (seed_from_main_checkout).
 #
 # With `wsl` a phase runs in the WSL distribution; without it the same phases
 # run natively on Windows, in MSYS2 UCRT64 (docs/rust.md, "Windows, once the
@@ -84,8 +90,25 @@ main() {
         inside_wsl "$root" "$@"
         return
     fi
+    if [ "${1:-}" = --prune-inside-wsl ]; then
+        shift
+        prune_build_folders "$@"
+        return
+    fi
     if [ "${1:-}" = close ]; then
         close_finished "$script"
+        return
+    fi
+    # `prune`: the WSL build folders of checkouts and worktrees that are gone.
+    # The names to keep are this repository's checkout and worktrees, by their
+    # folders' names, as inside_wsl names their build folders.
+    if [ "${1:-}" = prune ]; then
+        local keep=()
+        mapfile -t keep < <(git -C "$root" worktree list --porcelain | sed -n 's/^worktree //p' |
+            while IFS= read -r path; do basename "$path"; done)
+        [ "${#keep[@]}" -gt 0 ] || { echo "no worktree list from git: nothing pruned" >&2; return 1; }
+        MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wsl.exe -d "${KATANA_WSL_DISTRO:-Ubuntu-24.04}" \
+            --cd "$(cygpath -w "$root")" --exec bash tools/build_visible.sh --prune-inside-wsl "${keep[@]}"
         return
     fi
     # `wsl` on Claude's command line; KATANA_BUILD_HOST in the window it opens,
@@ -114,7 +137,7 @@ main() {
     case "$phase" in
         all | cargo | test) ;;
         *)
-            echo "usage: tools/build_visible.sh [wsl] [all | cargo [cargo test arguments...] | test [ctest arguments...]] | close" >&2
+            echo "usage: tools/build_visible.sh [wsl] [all | cargo [cargo test arguments...] | test [ctest arguments...]] | close | prune" >&2
             return 2
             ;;
     esac
@@ -171,8 +194,10 @@ main() {
         # that a Linux path or a ctest pattern arrives as it was written. --exec,
         # not --, because -- hands the line to a shell, which takes a pattern's
         # ( | $ as its own syntax. KATANA_ONLINE_TESTS=1 lets the cases that
-        # reach real hosts run (docs/testing.md).
-        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_TOOLCHAIN/u:KATANA_SHEET_PNG/p:KATANA_ONLINE_TESTS/u${WSLENV:+:$WSLENV}"
+        # reach real hosts run (docs/testing.md). CARGO_LOG, when set, is
+        # cargo's own log: CARGO_LOG=cargo::core::compiler::fingerprint=info
+        # says why each unit it compiles was not fresh.
+        export WSLENV="KATANA_BUILD_JOBS/u:KATANA_TOOLCHAIN/u:KATANA_SHEET_PNG/p:KATANA_ONLINE_TESTS/u:CARGO_LOG/u${WSLENV:+:$WSLENV}"
         MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wsl.exe -d "$distro" --cd "$(cygpath -w "$root")" \
             --exec bash tools/build_visible.sh --inside-wsl "$phase" "$@" 2>&1 | tee -a "$log"
         code=${PIPESTATUS[0]}
@@ -356,7 +381,68 @@ inside_wsl() {
     mkdir -p "$home"
     cd "$root" || return 1
     echo "== WSL: $(. /etc/os-release && echo "$PRETTY_NAME"), toolchain $prefix, builds in $home"
+    seed_from_main_checkout "$root" "$CARGO_TARGET_DIR"
     steps "$home/tests" "$CARGO_TARGET_DIR/release" "$phase" "$@"
+}
+
+# A worktree's first WSL build starts from a copy of its main checkout's cargo
+# folder. Each checkout builds in a folder of its own, so a new worktree once
+# compiled every third-party crate again - the same crates, the same versions
+# and features, several minutes of every core - before it compiled a line of
+# Katana. Copied with its timestamps, the folder's third-party crates are fresh
+# to cargo (their fingerprints name the registry's sources and the target's
+# relative paths, not the worktree), and only the workspace's own crates, whose
+# sources are elsewhere, are compiled. Skipped, building from nothing as
+# before, when the worktree has a folder already, when the main checkout has
+# none, and while a run is going there (a cargo writing it would be copied half
+# written; the main checkout's build/wsl/visible_build.running says one is).
+# The copy goes to a side name first, so an interrupted one is never taken for
+# a build. REJECTED: one cargo folder shared by every checkout, whose lock
+# would queue the agents' builds one behind another; sccache, a cache of every
+# compile, a tool more to install and keep in step with the compiler for what
+# one copy does.
+seed_from_main_checkout() {
+    local root="$1" target="$2" gitdir main seed
+    [ -d "$target" ] && return 0
+    # A worktree's .git is a file naming the repository: gitdir: D:/.../<main>/.git/worktrees/<name>.
+    [ -f "$root/.git" ] || return 0
+    gitdir="$(sed -n 's/^gitdir: //p' "$root/.git" | tr -d '\r')"
+    main="${gitdir%%/.git/worktrees/*}"
+    [ -n "$main" ] && [ "$main" != "$gitdir" ] || return 0
+    seed="$HOME/katana-build/$(basename "$main")/cargo"
+    [ -d "$seed" ] || return 0
+    if [ -e "$(wslpath -u "$main")/build/wsl/visible_build.running" ]; then
+        echo "== not seeded from $seed: a run is going in $(basename "$main"); every crate is compiled"
+        return 0
+    fi
+    echo "== seeding $target from $seed: the third-party crates, compiled once, are not compiled again"
+    rm -rf "$target.seeding"
+    cp -a --reflink=auto "$seed" "$target.seeding" && mv "$target.seeding" "$target"
+}
+
+# Deletes the WSL build folders (~/katana-build/<name>) of checkouts and
+# worktrees that no longer exist: each is a full cargo folder of about 3 GB, and
+# removing a worktree (CLAUDE.md, section 8) left its folder behind. `names`
+# are the folders to keep, this checkout's and its worktrees', given from the
+# Windows side, where git is.
+prune_build_folders() {
+    local folder name keep wanted kept=0 removed=0
+    for folder in "$HOME"/katana-build/*/; do
+        [ -d "$folder" ] || continue
+        name="$(basename "$folder")"
+        keep=0
+        for wanted in "$@"; do
+            [ "$name" = "$wanted" ] && keep=1
+        done
+        if [ "$keep" = 1 ]; then
+            kept=$((kept + 1))
+            continue
+        fi
+        echo "removing $folder ($(du -sh "$folder" 2> /dev/null | cut -f1)): no checkout or worktree of that name"
+        rm -rf "$folder"
+        removed=$((removed + 1))
+    done
+    echo "pruned $removed build folder(s); kept $kept"
 }
 
 # Closes the windows of this script - this checkout's, by its full path - whose
