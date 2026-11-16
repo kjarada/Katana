@@ -742,11 +742,9 @@ impl StylePreview {
         if ui.is_rect_visible(rect) {
             let ratio = f64::from(ui.ctx().pixels_per_point());
             let image = self.grab(document, size.x as u32, size.y as u32, ratio);
-            let handle = ui.ctx().load_texture(
-                name,
-                image.to_color_image(),
-                egui::TextureOptions::LINEAR,
-            );
+            let handle =
+                ui.ctx()
+                    .load_texture(name, image.to_color_image(), egui::TextureOptions::LINEAR);
             ui.painter().image(
                 handle.id(),
                 rect,

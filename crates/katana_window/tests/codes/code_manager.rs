@@ -2177,3 +2177,80 @@ mod survey_code_manager {
         assert_eq!(bench.value("ruleSymbolSize"), "1.5");
     }
 }
+
+// ---- the look (the second look audit of 2026-11-16) ---------------------------------------------
+
+mod survey_code_manager_look {
+    use super::*;
+
+    /// The Issues tab's title as the strip shows it, its count in it: the third of five.
+    fn issues_tab(bench: &Manager) -> String {
+        bench.items("codeManagerTabs")[2].clone()
+    }
+
+    #[test]
+    fn the_dialog_is_one_size_on_every_tab() {
+        // T10: 1226 by 750 on the Code Table, 1194 by 256 on Issues - the dialog jumped as its
+        // tabs were turned, and on the Code Table its filter bar ran the body 32 past the width
+        // the tab strip's rule was drawn across. The Issues tab holds a table and a line, far
+        // less than the body's width and height, so its size is the body's own; the Code Table's
+        // must be the same.
+        let mut bench = manager(fixture_host());
+        katana_window::theme::style::apply(bench.harness.context());
+        let size = |bench: &mut Manager, tab: &str| {
+            bench.fill("codeManagerTabs", tab);
+            bench
+                .harness
+                .target_record("surveyCodeManagerDialog")
+                .expect("the dialog is drawn")
+                .rect
+                .size()
+        };
+        // The Issues tab's title counts them ("Issues (2)").
+        let issues_title = issues_tab(&bench);
+        let issues = size(&mut bench, &issues_title);
+        for tab in ["Code Table", "Codes in Drawing", "Apply Codes", "Linework"] {
+            let shown = size(&mut bench, tab);
+            assert!(
+                (shown - issues).length() <= 0.5,
+                "{tab} is {shown:?} where Issues is {issues:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_issues_table_spans_its_page() {
+        // T9: its header stood 350 points of a page some 1200 wide.
+        let mut bench = manager(fixture_host());
+        katana_window::theme::style::apply(bench.harness.context());
+        let issues_title = issues_tab(&bench);
+        bench.fill("codeManagerTabs", &issues_title);
+        let table = bench.control("issuesTable").rect;
+        let filter = bench
+            .harness
+            .target_record("issuesFilter")
+            .expect("the filter bar is a target of its own")
+            .rect;
+        let dialog = bench
+            .harness
+            .target_record("surveyCodeManagerDialog")
+            .expect("the dialog is drawn")
+            .rect;
+        // The body's right edge: the frame's pixel of border and its padding in from the dialog's.
+        // The table scrolls in its own place, and the room its scroll bar is given (the theme's
+        // thin bar, always shown) is at its right: its rows end that much short of the edge.
+        let body_right = dialog.right() - 1.0 - katana_window::shell::dialog::PADDING;
+        let bar = bench
+            .harness
+            .context()
+            .global_style()
+            .spacing
+            .scroll
+            .allocated_width();
+        assert!(
+            (table.left() - filter.left()).abs() <= 0.5
+                && (table.right() + bar - body_right).abs() <= 0.5,
+            "the table is {table:?} in a body ending at {body_right}, its bar {bar} wide"
+        );
+    }
+}

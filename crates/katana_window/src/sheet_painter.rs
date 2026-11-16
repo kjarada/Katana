@@ -692,15 +692,18 @@ fn paint_frame(
             continue;
         }
         let polygon: Vec<PointF> = line.points.iter().map(|point| paper.at(*point)).collect();
-        canvas.set_pen(if line.dash_mm > 0.0 && line.gap_mm > 0.0 {
-            dashed_pen(
-                paper,
-                canvas_colour(line.colour),
-                line.weight_mm,
-                &[line.dash_mm, line.gap_mm],
-            )
+        // The construction guide is the editor's furniture, never plotted, so it wears the
+        // chrome's border token rather than the frame's orange: an orange outline round the paper
+        // was a second accent in a window of one (the look audits' T15).
+        let colour = if line.role == FrameRole::Construction {
+            crate::theme::palette::border()
         } else {
-            paper_pen(paper, canvas_colour(line.colour), line.weight_mm)
+            canvas_colour(line.colour)
+        };
+        canvas.set_pen(if line.dash_mm > 0.0 && line.gap_mm > 0.0 {
+            dashed_pen(paper, colour, line.weight_mm, &[line.dash_mm, line.gap_mm])
+        } else {
+            paper_pen(paper, colour, line.weight_mm)
         });
         canvas.set_brush(Brush::none());
         if line.closed {

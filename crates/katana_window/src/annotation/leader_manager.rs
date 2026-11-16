@@ -3043,8 +3043,7 @@ impl LeaderManagerDialog {
                             self.for_note.values_current = Some(at);
                         }
                         if let Some(at) = shown.double_clicked {
-                            double_clicked =
-                                self.for_note.values.get(at).map(|row| row[0].clone());
+                            double_clicked = self.for_note.values.get(at).map(|row| row[0].clone());
                         }
                     });
                 });

@@ -1626,8 +1626,7 @@ impl LabelStyleManagerDialog {
                 ui.set_width(LIST_COLUMN_WIDTH);
                 let rows = name_rows(&self.names);
                 let well = form_height - new_height - ui.spacing().item_spacing.y;
-                if layout::list_well(ui, "labelStyleList", &rows, &mut self.current, well)
-                    .changed()
+                if layout::list_well(ui, "labelStyleList", &rows, &mut self.current, well).changed()
                 {
                     let name = self.current_name();
                     if let Some(style) = host.document().model().label_styles.find(&name) {

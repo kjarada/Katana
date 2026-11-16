@@ -125,8 +125,11 @@ const BODY_WIDTH: f32 = TREE_WIDTH + crate::theme::style::GROUP_GAP + DETAIL_WID
 /// Set by, Decided against) at the Standard text size, and the rule form under them.
 const DETAIL_WIDTH: f32 = 560.0;
 
-/// The code table's width: it scrolls sideways within it when a rule's values are wider.
-const TREE_WIDTH: f32 = 600.0;
+/// The code table's width: it scrolls sideways within it when a rule's values are wider. As wide
+/// as the filter bar over it - the search field and its seven section chips, some 630 at the
+/// Standard text size: at 600 the bar ran past the column, the tab was 32 wider than BODY_WIDTH
+/// and the tab strip's rule stopped short of the body's edge (the look audits' T10).
+const TREE_WIDTH: f32 = 640.0;
 
 /// The colour of a refusal in the form and the tabs: the theme's error token (the C++'s stylesheets
 /// had a red of their own, #d9534f, before the theme had one).
@@ -1997,6 +2000,7 @@ impl SurveyCodeManagerDialog {
     fn code_table_tab(&mut self, ui: &mut Ui, document: &Document) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                ui.set_width(TREE_WIDTH);
                 if self.table_filter_ui(ui) {
                     self.events.push(Event::TableFilter);
                 }
@@ -2177,6 +2181,11 @@ impl SurveyCodeManagerDialog {
             Self::linework_tab,
         ];
         let front = self.tab.min(pages.len() - 1);
+        // The body is as tall as the tallest page, so the dialog is one size on every tab: on
+        // Issues it was a strip 256 high where the Code Table made it 750 (the look audits' T10).
+        // Every page is laid out each frame, the ones behind offstage, so each is measured.
+        let top = ui.cursor().min.y;
+        let mut tallest: f32 = 0.0;
         for (at, page) in pages.into_iter().enumerate() {
             let mut draw = |ui: &mut Ui| {
                 let drawn = ui.vertical(|ui| page(self, ui, document));
@@ -2185,13 +2194,16 @@ impl SurveyCodeManagerDialog {
                     &drawn.response,
                     ControlRecord::new(TAB_PAGES[at], ControlKind::Other),
                 );
+                drawn.response.rect.height()
             };
-            if at == front {
-                draw(ui);
+            let height = if at == front {
+                draw(ui)
             } else {
-                offstage(ui, TAB_PAGES[at], draw);
-            }
+                offstage(ui, TAB_PAGES[at], draw)
+            };
+            tallest = tallest.max(height);
         }
+        ui.set_min_height(top + tallest - ui.min_rect().top());
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {

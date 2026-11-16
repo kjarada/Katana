@@ -105,8 +105,8 @@ use katana_entity::{LineStyle, StyleUnits};
 use katana_geometry::Point2;
 
 use super::customisation_context::{CustomisationContext, DefinitionEdit};
-use super::style_preview::{DefinitionAs, PreviewGround, StylePreview};
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
+use super::style_preview::{DefinitionAs, PreviewGround, StylePreview};
 use crate::annotation::dialog_support::show_dialog;
 use crate::command_word::exact_number;
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
@@ -964,8 +964,7 @@ impl DefinitionEditorDialog {
         // Asked here, so the refusal over unsaved edits says what was asked for.
         let on_it = self.existing.as_deref() == Some(name);
         let document = self.live_document(host.document());
-        let shown = (on_it
-            || self.may_replace(document, &format!("Delete {}", in_quotes(name))))
+        let shown = (on_it || self.may_replace(document, &format!("Delete {}", in_quotes(name))))
             && self.edit_definition_in(document, name);
         let removed = shown && self.remove_in(host, false);
         self.flush(host);
@@ -1564,8 +1563,7 @@ impl DefinitionEditorDialog {
         let anchors = self.live && self.two_point;
         ui.horizontal_top(|ui| {
             // Left: the form, and the strokes under it, in what the previews leave of the row.
-            let previews =
-                PREVIEW_WIDTH + dialog::group_margins(ui) + ui.spacing().item_spacing.x;
+            let previews = PREVIEW_WIDTH + dialog::group_margins(ui) + ui.spacing().item_spacing.x;
             let form_width = (ui.available_width() - previews).max(dialog::LEAST_BODY_WIDTH);
             ui.vertical(|ui| {
                 ui.set_width(form_width);
@@ -1612,8 +1610,7 @@ impl DefinitionEditorDialog {
                                 .iter()
                                 .map(|(_, word, _)| String::from(*word))
                                 .collect();
-                            if index_choice(ui, "definitionUnits", &words, &mut self.form.units)
-                            {
+                            if index_choice(ui, "definitionUnits", &words, &mut self.form.units) {
                                 self.edited_now = true;
                             }
                         });
@@ -1792,8 +1789,12 @@ impl DefinitionEditorDialog {
             ui.vertical(|ui| {
                 ui.group(|ui| {
                     ui.label("As a symbol, on its insertion point");
-                    self.preview
-                        .ui(ui, "definitionPreview", document, egui::vec2(PREVIEW_WIDTH, 170.0));
+                    self.preview.ui(
+                        ui,
+                        "definitionPreview",
+                        document,
+                        egui::vec2(PREVIEW_WIDTH, 170.0),
+                    );
                 });
                 let line_box = |ui: &mut Ui, preview: &mut StylePreview| {
                     ui.group(|ui| {
@@ -1820,8 +1821,7 @@ impl DefinitionEditorDialog {
                     "definitionPreviewNote",
                     &self.preview_note,
                     egui::Label::new(
-                        RichText::new(self.preview_note.as_str())
-                            .color(palette::error().to_egui()),
+                        RichText::new(self.preview_note.as_str()).color(palette::error().to_egui()),
                     ),
                 );
                 ui.horizontal(|ui| {
@@ -1845,31 +1845,36 @@ impl DefinitionEditorDialog {
         // What is wrong, or what names it; then the buttons.
         let mut issues = self.issues.clone();
         let issues_error = self.issues_error;
-        // A hint or a note in the secondary text colour; a refusal in the text colour, framed in
-        // the error's.
-        let shown = ui
-            .scope(|ui| {
-                if !issues_error {
-                    ui.visuals_mut().override_text_color = Some(palette::text_muted().to_egui());
-                }
-                controls::text_with(
-                    ui,
-                    "definitionIssues",
-                    &mut issues,
-                    TextOptions {
-                        read_only: true,
-                        rows: 5,
-                        monospace: false,
-                    },
-                )
-            })
-            .inner;
-        if self.issues_error {
+        // A hint or a note is a muted line, as every dialog's status is
+        // (dialog_layout::reply_text): in a read-only box 800 by 80 a one-line hint was the
+        // largest thing in the footer (the second look audit's N6). A refusal - a verb's answer of
+        // several lines - stays a box as high as its lines, five at most, in the text colour
+        // framed in the error's.
+        if issues_error {
+            let rows = issues.lines().count().clamp(1, 5);
+            let shown = controls::text_with(
+                ui,
+                "definitionIssues",
+                &mut issues,
+                TextOptions {
+                    read_only: true,
+                    rows,
+                    monospace: false,
+                },
+            );
             ui.painter().rect_stroke(
                 shown.rect,
                 0.0,
                 egui::Stroke::new(1.0, palette::error().to_egui()),
                 egui::StrokeKind::Inside,
+            );
+        } else {
+            crate::dialog_layout::reply_text(
+                ui,
+                "definitionIssues",
+                &mut issues,
+                ControlKind::Text,
+                false,
             );
         }
 

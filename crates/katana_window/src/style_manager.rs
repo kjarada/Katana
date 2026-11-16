@@ -425,6 +425,11 @@ pub struct StyleManagerDialog {
     pattern_status_is_error: bool,
     linetype_description: String,
     library_details: String,
+    /// The details `library_details` says, laid out: the name, its rows of a label and a value,
+    /// and the notes under them.
+    library_name: String,
+    library_rows: Vec<(&'static str, String)>,
+    library_notes: Vec<String>,
     linetype_preview: StylePreview,
     linetype_preview_scale: usize,
     linetype_preview_screen: bool,
@@ -542,6 +547,9 @@ impl StyleManagerDialog {
             pattern_status_is_error: false,
             linetype_description: String::new(),
             library_details: String::new(),
+            library_name: String::new(),
+            library_rows: Vec::new(),
+            library_notes: Vec::new(),
             linetype_preview: {
                 let mut preview = StylePreview::new(document);
                 preview.set_placeholder("Choose a linetype to preview it");
@@ -1370,54 +1378,78 @@ impl StyleManagerDialog {
     }
 
     fn show_library_details(&mut self, document: &Document, row: &LinetypeRow) {
-        let mut lines = vec![row.name.clone()];
-        lines.push(format!(
-            "Group: {}",
-            if row.group.is_empty() {
-                "(none)"
-            } else {
-                row.group.as_str()
-            }
-        ));
-        // A library definition's source is the name of its customisation.
-        lines.push(format!(
-            "Customisation: {}",
-            if row.source_file.is_empty() {
-                "(made in this session)"
-            } else {
-                row.source_file.as_str()
-            }
-        ));
-        lines.push(format!("Kind: {}", kind_explained(row.kind)));
-        lines.push(format!("One repeat: {}", period_text(row)));
+        let mut rows: Vec<(&'static str, String)> = vec![
+            (
+                "Group",
+                if row.group.is_empty() {
+                    String::from("(none)")
+                } else {
+                    row.group.clone()
+                },
+            ),
+            // A library definition's source is the name of its customisation.
+            (
+                "Customisation",
+                if row.source_file.is_empty() {
+                    String::from("(made in this session)")
+                } else {
+                    row.source_file.clone()
+                },
+            ),
+            ("Kind", String::from(kind_explained(row.kind))),
+            ("One repeat", period_text(row)),
+        ];
         if let Some(definition) = document.style_library().find(&row.name) {
-            lines.push(format!(
-                "{} stroke(s), {} text(s)",
-                definition.strokes.len(),
-                definition.texts.len()
+            rows.push((
+                "Strokes",
+                format!(
+                    "{} stroke(s), {} text(s)",
+                    definition.strokes.len(),
+                    definition.texts.len()
+                ),
             ));
         }
-        lines.push(format!(
-            "Used by: {}",
+        rows.push((
+            "Used by",
             if row.users.used() {
                 row.users.describe()
             } else {
                 String::from("nothing")
-            }
+            },
         ));
+        let mut notes = Vec::new();
         if row.collision {
-            lines.push(String::new());
-            lines.push(String::from(
+            notes.push(String::from(
                 "The drawing also has a linetype of this name. This linestyle is what is drawn; \
                  rename or merge the drawing's to end the clash.",
             ));
         }
-        lines.push(String::new());
-        lines.push(String::from(
+        notes.push(String::from(
             "Library linestyles belong to the session's customisation and are read-only here. \
              Edit Definition opens this one in the definition editor.",
         ));
-        self.library_details = lines.join("\n");
+        // What the details control says, as it said it when it was drawn as this prose: a line
+        // each, "Label: value", the stroke count's line without its label, a blank line before
+        // each note.
+        let mut lines = vec![row.name.clone()];
+        for (label, value) in &rows {
+            if *label == "Strokes" {
+                lines.push(value.clone());
+            } else {
+                lines.push(format!("{label}: {value}"));
+            }
+        }
+        for note in &notes {
+            lines.push(String::new());
+            lines.push(note.clone());
+        }
+        self.library_details = lines.join(
+            "
+",
+        );
+        self.library_name.clone_from(&row.name);
+        self.library_rows = rows;
+        self.library_notes = notes;
     }
 
     fn refresh_linetype_preview(&mut self) {
@@ -2322,10 +2354,18 @@ impl StyleManagerDialog {
                 ("diagnosticsPage", Self::diagnostics_page),
             ];
             for (at, (name, page)) in pages.into_iter().enumerate() {
-                if at == self.tab {
-                    page(self, ui, host, true);
+                let drawn = if at == self.tab {
+                    ui.vertical(|ui| page(self, ui, host, true)).response
                 } else {
-                    offstage(ui, name, |ui| page(self, ui, host, false));
+                    offstage(ui, name, |ui| {
+                        ui.vertical(|ui| page(self, ui, host, false)).response
+                    })
+                };
+                // The Hatch Patterns page is made as tall as the Styles page, drawn before it, so
+                // its buttons stand where the other pages' do rather than over a void of 220
+                // points the dialog's least height left under them (the second look audit's N11).
+                if at == 0 {
+                    self.hatch_patterns.set_page_height(drawn.rect.height());
                 }
             }
             self.prompt_row(ui, host);
@@ -3164,12 +3204,27 @@ impl StyleManagerDialog {
     fn library_face(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         ui.group(|ui| {
             ui.strong("Library linestyle");
-            controls::label_as(
-                ui,
-                "libraryDetails",
-                &self.library_details,
-                egui::Label::new(self.library_details.as_str()).wrap(),
-            );
+            // The details as a form, a label column and its values, with the notes under it:
+            // drawn as "Group: ..." prose they read as a paragraph (the look audits' T12). The
+            // control keeps the text it had, for its drivers.
+            let details = ui.vertical(|ui| {
+                ui.label(self.library_name.as_str());
+                dialog::form(ui, |form| {
+                    for (label, value) in &self.library_rows {
+                        form.row(label, |ui| {
+                            dialog::text_value(ui, |ui| {
+                                ui.add(egui::Label::new(value.as_str()).wrap());
+                            });
+                        });
+                    }
+                });
+                for note in &self.library_notes {
+                    dialog::note(ui, note);
+                }
+            });
+            let mut record = ControlRecord::new("libraryDetails", ControlKind::Label);
+            record.text.clone_from(&self.library_details);
+            controls::custom(ui, &details.response, record);
             if Self::page_button(
                 ui,
                 true,

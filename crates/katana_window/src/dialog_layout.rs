@@ -176,7 +176,8 @@ pub fn reply_text(
             .1
     } else {
         ui.add(
-            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error))).wrap(),
+            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error)))
+                .wrap(),
         )
     };
     if let Some(taken) = &taken
@@ -207,9 +208,14 @@ pub fn quiet_label(ui: &mut Ui, name: &str, text: &str, colour: egui::Color32) -
         );
     }
     let taken = take(ui, name);
-    let response = ui
-        .allocate_exact_size(egui::vec2(ui.available_width(), 0.0), egui::Sense::hover())
-        .1;
+    // Where it will be, its row's width and no height, without moving the cursor: a place of no
+    // height still took the spacing after it, and a form's rows round it stood two gaps apart.
+    let at = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 0.0));
+    let response = ui.interact(
+        at,
+        ui.id().with(("katanaQuietLabel", name)),
+        egui::Sense::hover(),
+    );
     if let Some(taken) = &taken {
         match &taken.posted.act {
             // As controls::label_as refuses one.
@@ -238,10 +244,9 @@ pub fn pick_list(
     rows: &[Vec<String>],
     current: &mut Option<usize>,
 ) -> Response {
-    ui.with_layout(
-        egui::Layout::top_down_justified(egui::Align::LEFT),
-        |ui| controls::rows(ui, name, rows, current),
-    )
+    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+        controls::rows(ui, name, rows, current)
+    })
     .inner
 }
 

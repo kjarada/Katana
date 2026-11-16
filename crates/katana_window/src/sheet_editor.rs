@@ -142,11 +142,15 @@ use crate::viewport_widget::{KeyModifiers, MouseButton};
 
 // ---- constants ---------------------------------------------------------------------------------
 
-/// Logical pixels a millimetre, at the least and the most.
 /// The properties dock's width (the look of 2026-11-16; it was 300): the side panels' width.
 const PROPERTIES_WIDTH: f32 = 260.0;
 /// The sheet list's width: a sheet's thumbnail and its number, name and paper beside it.
 const SHEET_LIST_WIDTH: f32 = 220.0;
+/// The Checks dock's most height (the 170 it always was), its findings scrolling past it, and
+/// its least: the title, the one line and a table's header and empty state.
+const CHECKS_HEIGHT: f32 = 170.0;
+const CHECKS_LEAST_HEIGHT: f32 = 60.0;
+/// Logical pixels a millimetre, at the least and the most.
 const MINIMUM_ZOOM: f64 = 0.3;
 const MAXIMUM_ZOOM: f64 = 60.0;
 const HANDLE_PIXELS: f64 = 7.0;
@@ -4624,7 +4628,9 @@ fn shortcut(modifiers: Modifiers, key: Key) -> KeyboardShortcut {
 impl SheetEditor {
     /// The toolbar's Add View menu: a view of each kind (sheetAddView_<kind>).
     fn add_view_menu(&self) -> Menu {
-        let mut menu = Menu::new("sheetAddViewMenu", "Add View");
+        // Its own icon on the toolbar, a plan view's: the toolbar's words-only buttons among
+        // its icons read as two looks (the look audits' T15).
+        let mut menu = Menu::new("sheetAddViewMenu", "Add View").icon("ViewPlan");
         for kind in KINDS {
             menu = menu.action(Action::new(
                 &format!("sheetAddView_{}", kind.name()),
@@ -4636,7 +4642,7 @@ impl SheetEditor {
 
     /// The toolbar's Tile menu: a preset each (sheetTile_<n>).
     fn tile_menu(&self) -> Menu {
-        let mut menu = Menu::new("sheetTileMenu", "Tile");
+        let mut menu = Menu::new("sheetTileMenu", "Tile").icon("LayoutQuad");
         for (i, preset) in PRESETS.iter().enumerate() {
             menu = menu.action(Action::new(&format!("sheetTile_{i}"), preset_name(*preset)));
         }
@@ -4691,7 +4697,7 @@ impl SheetEditor {
         ));
         add(ToolBarItem::Separator);
         add(ToolBarItem::Action(
-            Action::new("sheetCheck", "Check Sheets").tip(
+            Action::new("sheetCheck", "Check Sheets").icon("DrawingSummary").tip(
                 "Find what a plot would get wrong: views off the paper or over nothing, sections \
                  off their alignment, blanks in the title block",
             ),
@@ -5131,28 +5137,44 @@ impl SheetEditor {
         });
         // The dock's room is kept while it is closed, so the canvas keeps its size: in the C++ the
         // canvas grew into it and fitted its page again, which moved every paper point under the
-        // pointer. Recorded as a difference.
+        // pointer. Recorded as a difference. It is as tall as what it holds, up to CHECKS_HEIGHT,
+        // its findings scrolling past that: a fixed 170 left some 70 points of void under a dock
+        // that said "Not checked yet" (the look audits' T15). The height is the last frame's
+        // measure, kept while the dock is closed.
+        let checks_id = egui::Id::new("sheetChecksDockHeight");
+        let checks_height = crate::dialog_layout::last_height(ui, checks_id)
+            .unwrap_or(CHECKS_HEIGHT)
+            .clamp(CHECKS_LEAST_HEIGHT, CHECKS_HEIGHT);
         egui::Panel::bottom("sheetChecksDock")
             .resizable(false)
-            .exact_size(170.0)
+            .exact_size(checks_height)
             .show(ui, |ui| {
                 if !self.checks.is_visible() {
                     return;
                 }
-                // The dock's compact header: its title, and its close button at the right.
-                let title = String::from(self.checks.window_title());
-                egui::Sides::new().show(
-                    ui,
-                    |ui| {
-                        ui.strong(title.as_str());
-                    },
-                    |ui| {
-                        if ui.small_button("\u{d7}").clicked() {
-                            self.checks.close();
-                        }
-                    },
-                );
-                self.checks.ui(ui);
+                // What the panel's frame takes beyond its content, for the next frame's size.
+                let margins = checks_height - ui.max_rect().height();
+                // Measured in a column of its own: the panel holds its content's least height to
+                // the panel's.
+                let content = ui.vertical(|ui| {
+                    // The dock's compact header: its title, and its close button at the right.
+                    let title = String::from(self.checks.window_title());
+                    egui::Sides::new().show(
+                        ui,
+                        |ui| {
+                            ui.strong(title.as_str());
+                        },
+                        |ui| {
+                            if ui.small_button("\u{d7}").clicked() {
+                                self.checks.close();
+                            }
+                        },
+                    );
+                    self.checks.ui(ui);
+                });
+                let wanted = (content.response.rect.height() + margins)
+                    .clamp(CHECKS_LEAST_HEIGHT, CHECKS_HEIGHT);
+                crate::dialog_layout::keep_height(ui, checks_id, wanted);
             });
         if let Some(finding) = self.checks.take_activated() {
             self.activate_finding(host, finding);
@@ -5306,13 +5328,35 @@ impl SheetEditor {
             }
         }
         ui.horizontal(|ui| {
+            // Five squares a control high, each a glyph or an icon, the words in their tooltips:
+            // "Copy" was a word among glyphs, and the glyphs' buttons were each as wide as their
+            // text (the look audits' T15). Copy is the window's copy icon; the button keeps its
+            // word as its text for its drivers.
+            let side = ui.spacing().interact_size.y;
             let buttons = [
-                ("sheetListNew", "+", "A new blank sheet"),
-                ("sheetListCopy", "Copy", "Duplicate this sheet"),
-                ("sheetListRemove", "\u{2212}", "Remove this sheet"),
+                ("sheetListNew", "+", "", "A new blank sheet"),
+                ("sheetListCopy", "Copy", "Copy", "Duplicate this sheet"),
+                ("sheetListRemove", "\u{2212}", "", "Remove this sheet"),
             ];
-            for (name, text, tip) in buttons {
-                if controls::button(ui, name, text).on_hover_text(tip).clicked() {
+            for (name, text, icon, tip) in buttons {
+                let face = if icon.is_empty() { text } else { "" };
+                let response = controls::button_as(
+                    ui,
+                    name,
+                    text,
+                    egui::Button::new(face).min_size(egui::vec2(side, side)),
+                )
+                .on_hover_text(tip);
+                if !icon.is_empty() && ui.is_rect_visible(response.rect) {
+                    let size = crate::theme::style::MENU_ICON_SIZE;
+                    crate::icons::show_icon(
+                        ui.painter(),
+                        egui::Rect::from_center_size(response.rect.center(), egui::vec2(size, size)),
+                        icon,
+                        crate::icons::IconMode::Normal,
+                    );
+                }
+                if response.clicked() {
                     self.queued.push(Queued::Trigger(String::from(name)));
                 }
             }
@@ -5636,16 +5680,39 @@ fn tool_bar_look(ui: &mut Ui) {
     widgets.inactive.bg_stroke = egui::Stroke::NONE;
 }
 
-/// A toolbar button that opens its menu (QToolButton::InstantPopup), named `name`.
+/// A toolbar button that opens its menu (QToolButton::InstantPopup), named `name`: drawn as the
+/// bar's actions are (drive::action::action_item), its menu's icon in the gutter they have and
+/// then its title, so the bar is one row of icons and words evenly spaced. A plain menu button,
+/// a word with no gutter, stood among them closer to its neighbours than they to theirs.
 fn tool_button_menu(ui: &mut Ui, name: &str, menu: &Menu, chosen: &mut Option<String>) {
+    use crate::theme::style::{MENU_GUTTER_WIDTH, MENU_ICON_SIZE, paint_menu_gutter};
     let taken = take(ui, name);
-    let response = ui
-        .menu_button(menu.title.replace('&', ""), |ui| {
+    let button = egui::Button::new((
+        egui::Atom::custom(
+            egui::Id::new("sheetToolGutter"),
+            egui::vec2(MENU_GUTTER_WIDTH, MENU_ICON_SIZE),
+        ),
+        menu.title.replace('&', ""),
+    ))
+    .frame_when_inactive(false);
+    let response = egui::containers::menu::MenuButton::from_button(button)
+        .ui(ui, |ui| {
             crate::shell::dialog::menu_column(ui, |ui| {
                 menu_items_ui(ui, menu, chosen);
             });
         })
-        .response;
+        .0;
+    // Where the button lays its gutter out: its padding in from the left, centred down.
+    let gutter = egui::Rect::from_min_size(
+        egui::pos2(
+            response.rect.left() + ui.spacing().button_padding.x,
+            response.rect.center().y - MENU_ICON_SIZE / 2.0,
+        ),
+        egui::vec2(MENU_GUTTER_WIDTH, MENU_ICON_SIZE),
+    );
+    if ui.is_rect_visible(gutter) {
+        paint_menu_gutter(ui.painter(), gutter, menu.icon, false);
+    }
     if let Some(taken) = &taken {
         match &taken.posted.act {
             Act::Press | Act::ScrollTo => settle(ui, taken, Ok(())),
