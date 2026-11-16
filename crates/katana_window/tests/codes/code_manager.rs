@@ -2209,6 +2209,18 @@ mod survey_code_manager_look {
         // The Issues tab's title counts them ("Issues (2)").
         let issues_title = issues_tab(&bench);
         let code_table = size(&mut bench, "Code Table");
+        // On the Code Table the body ends where the page does, the footer's padding and rule
+        // under it: the body's least height once counted from the page's foot and left a void a
+        // page high under it, which the sizes alone, equal on both tabs, did not show.
+        let page = bench.control("codeTableTab").rect;
+        let close = bench.control("closeManager").rect;
+        let room = katana_window::shell::dialog::PADDING;
+        assert!(
+            close.top() - page.bottom() <= 3.0 * room,
+            "the page ends at {} and the footer's Close starts at {}",
+            page.bottom(),
+            close.top()
+        );
         let issues = size(&mut bench, &issues_title);
         assert!(
             (issues - code_table).length() <= 0.5,
@@ -2242,20 +2254,13 @@ mod survey_code_manager_look {
             .expect("the dialog is drawn")
             .rect;
         // The body's right edge: the frame's pixel of border and its padding in from the dialog's.
-        // The table scrolls in its own place, and the room its scroll bar is given (the theme's
-        // thin bar, always shown) is at its right: its rows end that much short of the edge.
+        // (A body that scrolled, as it did while its least height was counted from the wrong
+        // place, gave its scroll bar 6 points of the table's width.)
         let body_right = dialog.right() - 1.0 - katana_window::shell::dialog::PADDING;
-        let bar = bench
-            .harness
-            .context()
-            .global_style()
-            .spacing
-            .scroll
-            .allocated_width();
         assert!(
             (table.left() - filter.left()).abs() <= 0.5
-                && (table.right() + bar - body_right).abs() <= 0.5,
-            "the table is {table:?} in a body ending at {body_right}, its bar {bar} wide"
+                && (table.right() - body_right).abs() <= 0.5,
+            "the table is {table:?} in a body ending at {body_right}"
         );
     }
 }

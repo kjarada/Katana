@@ -2208,7 +2208,13 @@ impl SurveyCodeManagerDialog {
                 least = height;
             }
         }
-        ui.set_min_height(top + least - ui.min_rect().top());
+        // Down to where the Code Table page would end. Not Ui::set_min_height, which counts from
+        // the cursor - after the page in front - and made every tab a page taller than it was.
+        let left = ui.min_rect().left();
+        ui.expand_to_include_rect(egui::Rect::from_min_max(
+            egui::pos2(left, top),
+            egui::pos2(left, top + least),
+        ));
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
