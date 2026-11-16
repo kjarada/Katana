@@ -49,7 +49,6 @@ use katana_core::text::format_general;
 
 use super::document_watcher::DocumentWatcher;
 use crate::annotation::dialog_support::show_dialog;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, TextOptions, custom};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -326,16 +325,19 @@ impl DrawingSummaryDialog {
                 });
             }
         });
-        // Says where the customisation is changed: the summary only shows it.
-        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+        // A heading of a word, and under it, as a note, where the customisation is changed: the
+        // summary only shows it. A heading of a sentence and its parenthesis, ending in a colon,
+        // read as a label of a form (the third look audit's J).
+        dialog::section(ui, "Customisation");
+        let changed_in = "File > Settings loads, writes or resets it.";
         controls::label_as(
             ui,
             "drawingSummaryCustomisationLabel",
-            "Customisation (File > Settings loads, writes or resets it):",
+            changed_in,
             egui::Label::new(
-                egui::RichText::new("Customisation (File > Settings loads, writes or resets it):")
-                    .strong(),
-            ),
+                egui::RichText::new(changed_in).color(crate::theme::text_muted().to_egui()),
+            )
+            .wrap(),
         );
         // Wrapped at the pane's edge: the reply's records are longer than the pane is wide (the
         // linework record is 143 characters), and left unwrapped the end of each lay out of sight
@@ -354,16 +356,11 @@ impl DrawingSummaryDialog {
                 monospace: true,
             },
         );
-        ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(
-                    "Names the drawing's styles give that no loaded library defines - click one \
-                     to see its styles among the Missing in Styles and Linetypes:",
-                )
-                .color(crate::theme::text_muted().to_egui()),
-            )
-            .wrap(),
+        dialog::section(ui, "Names no library defines");
+        dialog::note(
+            ui,
+            "Names the drawing's styles give that no loaded library defines. Click one to see its \
+             styles among the missing ones in Styles and Linetypes.",
         );
         let shown = name_list(
             ui,

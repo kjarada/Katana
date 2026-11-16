@@ -1,5 +1,5 @@
 //! The sheet editor's Arrange commands (docs/plotting.md, "Arranging a sheet"): the Arrange menu on
-//! the toolbar and in the canvas's context menu, and the "Choose paper for this scale" button of
+//! the toolbar and in the canvas's context menu, and the "Choose Paper for This Scale" button of
 //! the sheet's properties. The port of plotting/sheet_arrange.
 //!
 //! Each command is a thin front end over cad's arrange_commands: it gathers the ids it acts on and
@@ -391,7 +391,7 @@ impl SuggestPaperDialog {
     }
 }
 
-/// The sheet properties' "Choose paper for this scale" button (sheetChoosePaper), disabled on a
+/// The sheet properties' "Choose Paper for This Scale" button (sheetChoosePaper), disabled on a
 /// sheet with no plan: true when it is clicked.
 pub fn choose_paper_button(ui: &mut egui::Ui, set: &SheetSet, index: usize) -> bool {
     let id = main_plan_of(set, index);
@@ -404,7 +404,8 @@ pub fn choose_paper_button(ui: &mut egui::Ui, set: &SheetSet, index: usize) -> b
         )
     };
     ui.add_enabled_ui(!id.is_empty(), |ui| {
-        controls::button(ui, "sheetChoosePaper", "Choose paper for this scale")
+        // Title Case, as a button reads (the third look audit's K).
+        controls::button(ui, "sheetChoosePaper", "Choose Paper for This Scale")
     })
     .inner
     .on_hover_text(tip)

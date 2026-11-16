@@ -91,11 +91,11 @@
 //! settingsUpdateTokenState   whether a token is stored, and where
 //! settingsUpdateSkipped      the version UPDATE SKIP set aside, or that none is; nothing when
 //!                            nobody can say (the state file does not read)
-//! settingsUpdateUnskip       "Offer the skipped version again": runs UPDATE SKIP NONE
+//! settingsUpdateUnskip       "Offer the Skipped Version Again": runs UPDATE SKIP NONE
 //! settingsUpdateBlocked      whether a version is set aside because it was installed here, did
 //!                            not start and was put back, or that none is; nothing when nobody can
 //!                            say
-//! settingsUpdateUnblock      "Offer the version that was put back again": runs UPDATE BLOCKED
+//! settingsUpdateUnblock      "Offer the Version That Was Put Back Again": runs UPDATE BLOCKED
 //!                            CLEAR, as Unskip runs its line
 //! ```
 //!
@@ -1621,8 +1621,16 @@ impl SettingsDialog {
                 }
             });
             ui.add_space(layout::SECTION_GAP);
+            // The stack as tall as its tallest page, whichever is in front, so the dialog keeps
+            // one size as its pages are turned: it was 808 high on Customisation and 462 on
+            // Updates (the third look audit's D). Every page is drawn each frame, the pages not
+            // in front off the stage, so the tallest is measured whichever is in front.
+            let tallest_id = ui.id().with("settingsTallestPage");
+            let tallest = layout::last_height(ui, tallest_id).unwrap_or(0.0);
+            let mut measured: f32 = 0.0;
             let stack = ui.vertical(|ui| {
                 ui.set_width(PAGE_WIDTH);
+                ui.set_min_height(tallest);
                 let front = self.page.unwrap_or(0);
                 for (at, (_, name)) in PAGES.iter().enumerate() {
                     let mut draw = |ui: &mut Ui| {
@@ -1633,6 +1641,7 @@ impl SettingsDialog {
                                 self.customisation_page(ui, &mut *host);
                             }
                         });
+                        measured = measured.max(page.response.rect.height());
                         controls::custom(
                             ui,
                             &page.response,
@@ -1648,6 +1657,7 @@ impl SettingsDialog {
                     }
                 }
             });
+            layout::keep_height(ui, tallest_id, measured);
             let mut record = ControlRecord::new("settingsStack", ControlKind::Other);
             record.items = PAGES.iter().map(|(_, name)| String::from(*name)).collect();
             record.value = String::from(PAGES[self.page.unwrap_or(0).min(PAGES.len() - 1)].1);
@@ -1698,7 +1708,7 @@ impl SettingsDialog {
                 draw_problems(ui);
             }
             let mut toggled = false;
-            let mut draw_toggle = |ui: &mut Ui| {
+            let draw_toggle = |ui: &mut Ui| {
                 toggled = controls::check(
                     ui,
                     "settingsShowNotice",
@@ -1709,7 +1719,9 @@ impl SettingsDialog {
                 .changed();
             };
             if self.show_notice_shown {
-                draw_toggle(ui);
+                // In the field column, under the values it shows the notice of, as every tick of a
+                // form stands (the third look audit's C).
+                dialog::labelled(ui, "", draw_toggle);
             } else {
                 hidden(ui, "settingsShowNotice", draw_toggle);
             }
@@ -1896,34 +1908,40 @@ impl SettingsDialog {
         {
             // Automation. A box toggled, not clicked: one set by the headless driver's --fill has
             // been toggled as much as one a person clicked.
+            // The ticks in the field column, as "Replace instead of merging" above them is (the
+            // third look audit's C).
             group(ui, "When survey data comes in", |ui| {
-                ui.add_enabled_ui(self.enabled.auto_codes, |ui| {
-                    if controls::check(
-                        ui,
-                        "settingsAutoCodes",
-                        "Apply survey codes",
-                        &mut self.auto_codes,
-                    )
-                    .on_hover_text(AUTO_CODES_TIP)
-                    .changed()
-                    {
-                        let on = self.auto_codes;
-                        self.automation_toggled(&mut *host, "auto.codes", on);
-                    }
+                dialog::labelled(ui, "", |ui| {
+                    ui.add_enabled_ui(self.enabled.auto_codes, |ui| {
+                        if controls::check(
+                            ui,
+                            "settingsAutoCodes",
+                            "Apply survey codes",
+                            &mut self.auto_codes,
+                        )
+                        .on_hover_text(AUTO_CODES_TIP)
+                        .changed()
+                        {
+                            let on = self.auto_codes;
+                            self.automation_toggled(&mut *host, "auto.codes", on);
+                        }
+                    });
                 });
-                ui.add_enabled_ui(self.enabled.auto_linework, |ui| {
-                    if controls::check(
-                        ui,
-                        "settingsAutoLinework",
-                        "Join coded points into lines",
-                        &mut self.auto_linework,
-                    )
-                    .on_hover_text(AUTO_LINEWORK_TIP)
-                    .changed()
-                    {
-                        let on = self.auto_linework;
-                        self.automation_toggled(&mut *host, "auto.linework", on);
-                    }
+                dialog::labelled(ui, "", |ui| {
+                    ui.add_enabled_ui(self.enabled.auto_linework, |ui| {
+                        if controls::check(
+                            ui,
+                            "settingsAutoLinework",
+                            "Join coded points into lines",
+                            &mut self.auto_linework,
+                        )
+                        .on_hover_text(AUTO_LINEWORK_TIP)
+                        .changed()
+                        {
+                            let on = self.auto_linework;
+                            self.automation_toggled(&mut *host, "auto.linework", on);
+                        }
+                    });
                 });
             });
 
@@ -2047,7 +2065,8 @@ impl SettingsDialog {
                     if controls::button(
                         ui,
                         "settingsUpdateUnskip",
-                        "Offer the skipped version again",
+                        // Title Case, as a button reads (the third look audit's K).
+                        "Offer the Skipped Version Again",
                     )
                     .on_hover_text(UNSKIP_TIP)
                     .clicked()
@@ -2067,7 +2086,8 @@ impl SettingsDialog {
                     if controls::button(
                         ui,
                         "settingsUpdateUnblock",
-                        "Offer the version that was put back again",
+                        // Title Case, as a button reads (the third look audit's K).
+                        "Offer the Version That Was Put Back Again",
                     )
                     .on_hover_text(UNBLOCK_TIP)
                     .clicked()

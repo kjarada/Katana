@@ -53,7 +53,8 @@ mod settings_updates {
         );
         assert_eq!(
             bench.control("settingsUpdateUnskip").text,
-            "Offer the skipped version again"
+            // A button's text in Title Case, as a menu item's (the third look audit's K).
+            "Offer the Skipped Version Again"
         );
         assert_eq!(bench.control("settingsUpdateTokenSave").text, "Save");
         assert_eq!(bench.control("settingsUpdateTokenClear").text, "Clear");
@@ -308,7 +309,8 @@ mod settings_updates {
         let mut bench = SettingsBench::of(&f);
         assert!(bench.record("settingsUpdates").is_some());
         let unblock = bench.control("settingsUpdateUnblock");
-        assert_eq!(unblock.text, "Offer the version that was put back again");
+        // A button's text in Title Case, as a menu item's (the third look audit's K).
+        assert_eq!(unblock.text, "Offer the Version That Was Put Back Again");
         // It says what it does, and by which line.
         let tip = bench.dialog.tip("settingsUpdateUnblock");
         assert!(tip.contains("UPDATE BLOCKED CLEAR"), "{tip}");

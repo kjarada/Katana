@@ -936,6 +936,10 @@ pub struct LeaderManagerDialog {
     arrange_report: String,
 
     pressed: Option<Pressed>,
+    /// The dialog's least height: the tallest tab's as drawn (the Leader tab's), so it keeps one
+    /// size as its tabs are turned - it was 830 high on Leader and 693 on the others (the third
+    /// look audit's D).
+    least_height: f32,
     /// Set by the document when the drawing is replaced (File > New, Open): the next refresh
     /// starts the form afresh rather than applying edits meant for the old drawing to a leader of
     /// the new one.
@@ -1050,6 +1054,7 @@ impl LeaderManagerDialog {
             renumber_scoped: false,
             arrange_report: String::new(),
             pressed: None,
+            least_height: 0.0,
             replaced,
             _replaced_registration,
             watcher: DocumentWatcher::new(document),
@@ -2487,7 +2492,13 @@ impl LeaderManagerDialog {
         }
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, TITLE));
         frame.set_body_width(BODY_WIDTH);
+        if self.least_height > 0.0 {
+            frame.set_minimum_height(self.least_height);
+        }
         let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
+        if let Some(drawn) = frame.rect() {
+            self.least_height = self.least_height.max(drawn.height());
+        }
         self.frame = frame;
         match self.pressed.take() {
             Some(Pressed::Apply) => {
@@ -2569,20 +2580,19 @@ impl LeaderManagerDialog {
                 // A column of its own width, which the list's rows span as a table's do; the form
                 // has the rest of the body.
                 ui.set_width(LIST_WIDTH);
-                if controls::toggle(
-                    ui,
-                    "leaderListScopeToggle",
-                    "Which leaders...",
-                    self.list_scope_toggle,
-                )
-                .on_hover_text(
-                    "List only the leaders a scope and a filter take: the selection, what a view \
-                     shows, layers, an area or the whole drawing, and only those that match (as \
-                     Global Modify chooses what to change)",
-                )
-                .clicked()
+                // A tick over the list, as every on-off choice of a dialog is: a toggle button of
+                // a word or two read as a button floating over the list (the third look audit's
+                // J).
+                let mut scoped = self.list_scope_toggle;
+                if controls::check(ui, "leaderListScopeToggle", "Only what a scope takes", &mut scoped)
+                    .on_hover_text(
+                        "List only the leaders a scope and a filter take: the selection, what a \
+                         view shows, layers, an area or the whole drawing, and only those that \
+                         match (as Global Modify chooses what to change)",
+                    )
+                    .changed()
                 {
-                    self.list_scope_toggle = !self.list_scope_toggle;
+                    self.list_scope_toggle = scoped;
                     self.fill_list(document);
                 }
                 if self.list_scope_toggle && self.list_scope.ui(ui) {
@@ -2655,10 +2665,15 @@ impl LeaderManagerDialog {
                     }
                 });
             });
-            ui.add_enabled_ui(self.position_enabled, |ui| {
+            let position_enabled = self.position_enabled;
+            {
                 // Easting and northing on one row, as a point is read: the two fields share what
-                // the northing's label leaves of it.
+                // the northing's label leaves of it. The fields grey, never their labels, as on
+                // every row of the tab (the third look audit's J).
                 named_row(ui, "leaderPositionXLabel", "Easting", |ui| {
+                    if !position_enabled {
+                        ui.disable();
+                    }
                     let northing = ui
                         .painter()
                         .layout_no_wrap(
@@ -2678,7 +2693,7 @@ impl LeaderManagerDialog {
                         preview |= edit(ui, "leaderPositionY", &mut self.position_y, "").changed();
                     });
                 });
-            });
+            }
             // What the position rows do, under their fields in the secondary text.
             dialog::labelled(ui, "", |ui| {
                 controls::label_as(
@@ -2717,13 +2732,17 @@ impl LeaderManagerDialog {
                     egui::Label::new(self.target.as_str()).wrap(),
                 );
             });
-            ui.add_enabled_ui(self.attach_enabled, |ui| {
-                if button(ui, "leaderAttachSelected", "Attach to Selected")
-                    .on_hover_text(self.attach_tip.as_str())
-                    .clicked()
-                {
-                    self.pressed = Some(Pressed::Attach);
-                }
+            // At the row's right end, where the fields end: after the words, wherever they
+            // stopped, it ended 11 points short of them (the third look audit's D).
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                ui.add_enabled_ui(self.attach_enabled, |ui| {
+                    if button(ui, "leaderAttachSelected", "Attach to Selected")
+                        .on_hover_text(self.attach_tip.as_str())
+                        .clicked()
+                    {
+                        self.pressed = Some(Pressed::Attach);
+                    }
+                });
             });
         });
         let mut kind_chosen = false;
@@ -2792,15 +2811,13 @@ impl LeaderManagerDialog {
                 &self.leader.check,
                 self.leader.check_error,
             );
-            form.row("Says", |ui| {
-                dialog::text_value(ui, |ui| {
-                    controls::label(ui, "leaderPreview", &self.leader.preview);
-                });
-            });
+            // What the note says, while it says something: an empty "Says" stood alone over the
+            // values' header, a row's height above it (the third look audit's J).
+            says_row(form, "leaderPreview", &self.leader.preview);
             // The values the note may use, under the note in the field column and as wide as
             // the fields: beside the Look box it was a strip 100 points wide (the look audits'
-            // T1).
-            form.under(|ui| {
+            // T1). Its row is labelled, so the label column beside its header is not a void.
+            form.row("Values", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     let shown = table_look(
                         ui,
@@ -2825,15 +2842,26 @@ impl LeaderManagerDialog {
             });
         });
         dialog::section(ui, "Look");
-        ui.add_enabled_ui(enabled, |ui| {
+        // The fields grey with no leader shown, never their labels, as the Note's rows above
+        // them: the whole form greyed, labels and all, beside a Note whose labels stayed (the
+        // third look audit's J).
+        let fields = |ui: &mut Ui| {
+            if !enabled {
+                ui.disable();
+            }
+        };
+        {
             dialog::form(ui, |form| {
                 form.row("Arrow", |ui| {
+                    fields(ui);
                     preview |= combo(ui, "leaderArrow", &ARROWS, &mut self.arrow).changed();
                 });
                 form.row("Note frame", |ui| {
+                    fields(ui);
                     preview |= combo(ui, "leaderCallout", &CALLOUTS, &mut self.callout).changed();
                 });
                 form.row("Text style", |ui| {
+                    fields(ui);
                     preview |= self.leader.text_style.ui(ui, "leaderTextStyle");
                 });
                 let boxes = [
@@ -2847,6 +2875,7 @@ impl LeaderManagerDialog {
                 ];
                 for (title, name, value) in boxes {
                     form.row(title, |ui| {
+                        fields(ui);
                         preview |= controls::spin(ui, name, value, SIZE).changed();
                     });
                 }
@@ -2855,6 +2884,7 @@ impl LeaderManagerDialog {
                     "leaderLandingAngleLabel",
                     "Landing direction",
                     |ui| {
+                        fields(ui);
                         preview |= controls::choice(
                             ui,
                             "leaderLandingAngle",
@@ -2869,7 +2899,7 @@ impl LeaderManagerDialog {
                     },
                 );
             });
-        });
+        }
         dialog::section(ui, "Attribute of the entity it is on");
         dialog::labelled(ui, "Name, value, type", |ui| {
             // The name, the value and the type share what Set and Remove leave of the row.
@@ -2897,16 +2927,22 @@ impl LeaderManagerDialog {
                     &mut self.attribute_type,
                 );
             });
-            ui.add_enabled_ui(self.attribute_enabled, |ui| {
-                if button(ui, "leaderAttributeSet", "Set")
-                    .on_hover_text("Set this attribute on the entity the tip is on (LEADER PROP)")
-                    .clicked()
-                {
-                    self.pressed = Some(Pressed::AttributeSet);
-                }
-                if button(ui, "leaderAttributeRemove", "Remove").clicked() {
-                    self.pressed = Some(Pressed::AttributeRemove);
-                }
+            // Set and Remove at the row's right end, where the fields above end: placed after
+            // the fields, Remove ended 5 points short of them (the third look audit's D).
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                ui.add_enabled_ui(self.attribute_enabled, |ui| {
+                    if button(ui, "leaderAttributeRemove", "Remove").clicked() {
+                        self.pressed = Some(Pressed::AttributeRemove);
+                    }
+                    if button(ui, "leaderAttributeSet", "Set")
+                        .on_hover_text(
+                            "Set this attribute on the entity the tip is on (LEADER PROP)",
+                        )
+                        .clicked()
+                    {
+                        self.pressed = Some(Pressed::AttributeSet);
+                    }
+                });
             });
         });
         // Freeze Note, Detach Tip and Apply, the tab's actions, are in the footer (`footer`).
@@ -3015,13 +3051,9 @@ impl LeaderManagerDialog {
                         &self.for_note.check,
                         self.for_note.check_error,
                     );
-                    form.row("Says", |ui| {
-                        dialog::text_value(ui, |ui| {
-                            controls::label(ui, "leaderForPreview", &self.for_note.preview);
-                        });
-                    });
+                    says_row(form, "leaderForPreview", &self.for_note.preview);
                     // The values under the note, as wide as its fields (the Leader tab's).
-                    form.under(|ui| {
+                    form.row("Values", |ui| {
                         let shown = table_look(
                             ui,
                             "leaderForValues",
@@ -3174,10 +3206,11 @@ impl LeaderManagerDialog {
                 // What the scope and filter beside it leave of the body (as on For Selection).
                 let gap = ui.spacing().item_spacing.x;
                 ui.set_width(BODY_WIDTH - WIDGET_WIDTH - gap);
-                // Sections under headings, as the other tabs' are; each keeps its own action, the
-                // tab having two that do not go together.
+                // Sections under headings, as the other tabs' are; their two actions, which do
+                // not go together, are the footer's (`footer`), as every tab's actions are.
                 ui.vertical(|ui| {
-                    dialog::section(ui, "Line the notes up (the topmost sets x)");
+                    dialog::section(ui, "Line the notes up");
+                    dialog::note(ui, "The topmost note sets x.");
                     ui.horizontal(|ui| {
                         check(ui, "leaderAlignUseX", "At x", &mut self.align_use_x);
                         ui.add_enabled_ui(self.align_use_x, |ui| {
@@ -3200,9 +3233,6 @@ impl LeaderManagerDialog {
                             );
                         });
                     });
-                    if button(ui, "leaderAlign", "Align Selected Leaders").clicked() {
-                        self.pressed = Some(Pressed::Align);
-                    }
                 });
                 ui.vertical(|ui| {
                     dialog::section(ui, "Number the balloons again");
@@ -3230,20 +3260,20 @@ impl LeaderManagerDialog {
                             self.renumber_order = chosen;
                         }
                     });
-                    check(
-                        ui,
-                        "balloonRenumberScoped",
-                        "Only the balloons Apply to takes",
-                        &mut self.renumber_scoped,
-                    )
-                    .on_hover_text(
-                        "Unticked, every numbered balloon in the drawing is numbered again, as it \
-                         always was; ticked, only those the Apply to / Only those that match \
-                         controls take - and the others keep their numbers",
-                    );
-                    if button(ui, "balloonRenumber", "Renumber Balloons").clicked() {
-                        self.pressed = Some(Pressed::Renumber);
-                    }
+                    // In the field column, under the fields, as a form's ticks are.
+                    dialog::labelled(ui, "", |ui| {
+                        check(
+                            ui,
+                            "balloonRenumberScoped",
+                            "Only the balloons Apply to takes",
+                            &mut self.renumber_scoped,
+                        )
+                        .on_hover_text(
+                            "Unticked, every numbered balloon in the drawing is numbered again, \
+                             as it always was; ticked, only those the Apply to / Only those that \
+                             match controls take - and the others keep their numbers",
+                        );
+                    });
                 });
                 layout::quiet_label(
                     ui,
@@ -3263,9 +3293,10 @@ impl LeaderManagerDialog {
         // The one footer (shell::dialog::button_row), the front tab's: on Leader, Freeze Note and
         // Detach Tip at the left beside the last refusal, away from Apply (as Text Styles keeps
         // Delete), then Close and Apply, the primary; on For Selection, Close and Make for
-        // Selection; on Arrange, whose two actions each belong to a section, Close alone. The
-        // tabs' actions stood in their bodies, under the forms, with the footer empty but for
-        // Close (the look audits' T5).
+        // Selection; on Arrange, whose two actions each belong to a section and neither is the
+        // other's lesser, both at the left and Close alone at the right. The tabs' actions stood
+        // in their bodies, under the forms, with the footer empty but for Close (the look audits'
+        // T5; Arrange's, the third look audit's A).
         let tab = self.tab;
         let (freeze, detach) = (self.freeze_enabled, self.detach_enabled);
         let apply = self.apply_enabled;
@@ -3291,6 +3322,22 @@ impl LeaderManagerDialog {
                             pressed = Some(Pressed::Detach);
                         }
                     });
+                }
+                if tab == 2 {
+                    if button(ui, "leaderAlign", "Align Selected Leaders")
+                        .on_hover_text(
+                            "Line up the notes of the leaders Apply to takes (LEADER ALIGN)",
+                        )
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Align);
+                    }
+                    if button(ui, "balloonRenumber", "Renumber Balloons")
+                        .on_hover_text("Number the balloons again (BALLOON RENUMBER)")
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Renumber);
+                    }
                 }
                 problem_line(ui, "leaderProblem", &problem);
                 pressed
@@ -3333,6 +3380,21 @@ impl LeaderManagerDialog {
         // row, no room until there is one (dialog_layout::reply_text).
         layout::reply_text(ui, "leaderLine", &mut self.line, ControlKind::Line, false)
             .on_hover_text("The command the last action ran, as you could type it");
+    }
+}
+
+/// The "Says" row of a note's form: what the note says, `text`, on its label's line, named `name`;
+/// while it says nothing the row takes no room and the label is recorded where it would be
+/// (dialog_layout::quiet_label).
+fn says_row(form: &mut dialog::Form<'_>, name: &str, text: &str) {
+    if text.is_empty() {
+        layout::quiet_label(form.ui(), name, text, palette::text().to_egui());
+    } else {
+        form.row("Says", |ui| {
+            dialog::text_value(ui, |ui| {
+                controls::label(ui, name, text);
+            });
+        });
     }
 }
 

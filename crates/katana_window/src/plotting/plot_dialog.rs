@@ -446,9 +446,13 @@ impl PlotDialog {
             &mut (&mut *self, &mut answer),
             |ui, (dialog, _)| dialog.body(ui, headless),
             |ui, (dialog, answer)| {
-                let ok = dialog.check().is_ok();
-                // The one footer (shell::dialog::button_row): Cancel, then Plot (or Save), the
-                // primary, last at the right.
+                let problem = dialog.problem();
+                let ok = problem.is_empty();
+                // The one footer (shell::dialog::button_row): what stops the plot at the left,
+                // then Close, then Plot (or Save), the primary, last at the right. Close, not
+                // Cancel: nothing is plotted or kept until the primary, so leaving discards
+                // nothing - the word every dialog of the window leaves by (the third look audit's
+                // A). Its name stays plotCancel, which the tests press.
                 let (name, text) = if dialog.mode == PlotDialogMode::PageSetup {
                     ("pageSetupSave", "Save")
                 } else {
@@ -456,9 +460,12 @@ impl PlotDialog {
                 };
                 let ((), (cancelled, accepted)) = dialog::button_row(
                     ui,
-                    |_| {},
                     |ui| {
-                        let cancelled = controls::button(ui, "plotCancel", "Cancel").clicked();
+                        // A refusal: what the person chose cannot be plotted.
+                        dialog::status(ui, "plotProblem", &problem, true);
+                    },
+                    |ui| {
+                        let cancelled = controls::button(ui, "plotCancel", "Close").clicked();
                         let accepted = ui
                             .add_enabled_ui(ok, |ui| controls::primary(ui, name, text))
                             .inner
@@ -485,15 +492,6 @@ impl PlotDialog {
         ui.set_width(BODY_WIDTH);
         let page_setup = self.mode == PlotDialogMode::PageSetup;
         let before = (self.sheets, self.format.clone(), self.list_text.clone());
-        // A row shown or not; drawn either way, so a driver can fill it, as a hidden Qt row.
-        let row = |ui: &mut Ui, shown: bool, add: &mut dyn FnMut(&mut Ui)| {
-            ui.scope(|ui| {
-                if !shown {
-                    ui.set_invisible();
-                }
-                add(ui);
-            });
-        };
         // A row of the form shown or not: drawn either way, as `row`, but a hidden one takes no
         // room - its label is not drawn and its controls are drawn apart - so the page setup is
         // not a column of empty rows (the look of 2026-11-16).
@@ -521,7 +519,7 @@ impl PlotDialog {
                     if controls::radio(
                         ui,
                         "plotSheetsAll",
-                        &format!("All {count} sheets"),
+                        &all_sheets_text(count),
                         self.sheets == PlotSheets::All,
                     )
                     .clicked()
@@ -703,33 +701,28 @@ impl PlotDialog {
                     controls::choice(ui, "plotPrinter", &self.printers, &mut self.printer);
                 },
             );
-        });
-        row(ui, !page_setup, &mut |ui| {
-            ui.add_enabled_ui(!printer, |ui| {
-                controls::check(
-                    ui,
-                    "plotOpenAfter",
-                    "Open the result afterwards",
-                    &mut self.open_after,
-                );
+            // The two ticks in the field column, under the fields they qualify, as every check
+            // box of a form stands; hidden in the page setup without taking room (drawn
+            // set_invisible() in a scope, they kept their two rows' room: a void over the footer).
+            form_row(ui, !page_setup, "", "plotRowAfterwards", &mut |ui| {
+                ui.vertical(|ui| {
+                    ui.add_enabled_ui(!printer, |ui| {
+                        controls::check(
+                            ui,
+                            "plotOpenAfter",
+                            "Open the result afterwards",
+                            &mut self.open_after,
+                        );
+                    });
+                    controls::check(
+                        ui,
+                        "plotKeepSetup",
+                        "Keep these settings as the project's page setup",
+                        &mut self.keep_setup,
+                    );
+                });
             });
-            controls::check(
-                ui,
-                "plotKeepSetup",
-                "Keep these settings as the project's page setup",
-                &mut self.keep_setup,
-            );
         });
-        let problem = self.problem();
-        controls::label_as(
-            ui,
-            "plotProblem",
-            &problem,
-            egui::Label::new(
-                egui::RichText::new(problem.as_str()).color(crate::theme::error().to_egui()),
-            )
-            .wrap(),
-        );
         if (self.sheets, self.format.clone(), self.list_text.clone()) != before {
             // The rows a choice shows are drawn at the next frame.
             ui.ctx().request_repaint();
@@ -738,6 +731,16 @@ impl PlotDialog {
 }
 
 // ---- running a plot ----------------------------------------------------------------------------
+
+/// The "All" choice's words for a set of `count` sheets, in the right number: "All 1 sheets"
+/// read as a slip.
+fn all_sheets_text(count: usize) -> String {
+    match count {
+        0 => String::from("All sheets"),
+        1 => String::from("The one sheet"),
+        _ => format!("All {count} sheets"),
+    }
+}
 
 /// The progress a plot reports, a sheet at a time, and its Cancel (the C++'s QProgressDialog,
 /// object name plotProgress): shared, so whoever shows it - the window, or a test standing in for

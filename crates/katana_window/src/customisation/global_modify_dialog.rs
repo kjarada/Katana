@@ -74,12 +74,6 @@ const DIALOG: &str = "globalModifyDialog";
 const MODIFY_WIDTH: f32 = 440.0;
 const TITLE: &str = "Global Modify";
 const BY_LAYER: &str = "ByLayer";
-/// The colour an error is said in: the theme's error token (the summary's stylesheet had a red of
-/// its own, #c0392b, before the theme had one).
-fn error_colour() -> egui::Color32 {
-    crate::theme::error().to_egui()
-}
-
 /// One open view, as the View scope offers it: the shared widget's.
 pub type GlobalModifyView = ScopeFilterView;
 
@@ -140,7 +134,13 @@ impl NameBox {
     }
 
     fn ui(&mut self, ui: &mut Ui, name: &str) -> bool {
-        controls::choice(ui, name, &self.items, &mut self.choice).changed()
+        self.ui_with_hint(ui, name, controls::NO_CHOICE)
+    }
+
+    /// The box saying `hint`, muted, while it names nothing: an empty well read as a box that
+    /// failed to fill (the third look audit's I).
+    fn ui_with_hint(&mut self, ui: &mut Ui, name: &str, hint: &str) -> bool {
+        controls::choice_with_hint(ui, name, &self.items, &mut self.choice, hint).changed()
     }
 }
 
@@ -773,7 +773,7 @@ impl GlobalModifyDialog {
             ui.vertical(|ui| {
                 ui.set_width(MODIFY_WIDTH);
                 ui.vertical(|ui| {
-                    ui.strong("Modify");
+                    dialog::section(ui, "Modify");
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(
@@ -810,18 +810,13 @@ impl GlobalModifyDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        let mut said = egui::RichText::new(self.summary.as_str());
-        if self.summary_is_error {
-            said = said.color(error_colour());
-        }
-        controls::label_as(
-            ui,
-            "globalModifySummary",
-            &self.summary,
-            egui::Label::new(said).wrap(),
-        );
+        let summary = self.summary.clone();
+        let summary_is_error = self.summary_is_error;
         // The one footer (shell::dialog::button_row): Preview and Select Matches read the drawing,
-        // at the left; Close, then Apply, which changes it - the primary - last at the right.
+        // at the left, and what the preview found beside them, muted unless it is a refusal (on a
+        // line of its own over the buttons it made a footer 68 high against the others' 49, the
+        // third look audit's A); Close, then Apply, which changes it - the primary - last at the
+        // right.
         let ((previewed, selected), (closed, applied)) = dialog::button_row(
             ui,
             |ui| {
@@ -831,6 +826,7 @@ impl GlobalModifyDialog {
                 let selected = controls::button(ui, "globalModifySelect", "Select Matches")
                     .on_hover_text("Select what the scope and the filter take, and show it")
                     .clicked();
+                dialog::status(ui, "globalModifySummary", &summary, summary_is_error);
                 (previewed, selected)
             },
             |ui| {
@@ -967,7 +963,7 @@ impl GlobalModifyDialog {
                 ("globalModifySetLayer", "Layer", ""),
                 &mut self.set_layer,
                 &mut due,
-                |ui| self.layer.ui(ui, "globalModifyLayer"),
+                |ui| self.layer.ui_with_hint(ui, "globalModifyLayer", "No layer"),
             );
             Self::ticked_row(
                 ui,
@@ -990,7 +986,7 @@ impl GlobalModifyDialog {
                 ("globalModifySetStyle", "Style", ""),
                 &mut self.set_style,
                 &mut due,
-                |ui| self.style.ui(ui, "globalModifyStyle"),
+                |ui| self.style.ui_with_hint(ui, "globalModifyStyle", "No style"),
             );
             Self::ticked_row(
                 ui,
@@ -1161,7 +1157,10 @@ impl GlobalModifyDialog {
                 ("globalModifySetLayerDimStyle", "Dimension style", ""),
                 &mut self.set_layer_dim_style,
                 &mut due,
-                |ui| self.layer_dim_style.ui(ui, "globalModifyLayerDimStyle"),
+                |ui| {
+                    self.layer_dim_style
+                        .ui_with_hint(ui, "globalModifyLayerDimStyle", "No dimension style")
+                },
             );
             Self::ticked_row(
                 ui,

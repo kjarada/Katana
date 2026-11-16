@@ -636,6 +636,13 @@ impl ScopeFilterWidget {
     /// setter since the last frame.
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = std::mem::take(&mut self.pending);
+        // Under what a dialog drew above it, a group's gap before its "Apply to" heading, as
+        // before any section (shell::dialog::section): drawn in a column of its own, the heading
+        // was that column's first thing, and it stood a row's spacing under the field above it
+        // (the third look audit's B).
+        if ui.cursor().min.y > ui.max_rect().min.y + 0.5 {
+            ui.add_space((dialog::SECTION_GAP - ui.spacing().item_spacing.y).max(0.0));
+        }
         let outer = ui.vertical(|ui| {
             // Under a dialog's fields it fills the body's column, so its fields end at the edge
             // theirs do: at WIDGET_WIDTH there they stopped 120 short of the dialog's (Drape,
@@ -652,7 +659,7 @@ impl ScopeFilterWidget {
             // ---- Apply to ----
             let scope_group = ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
-                ui.strong("Apply to");
+                dialog::section(ui, "Apply to");
                 let choices = [
                     (
                         "ScopeSelection",
@@ -730,7 +737,7 @@ impl ScopeFilterWidget {
             ui.add_space(dialog::SECTION_GAP - ui.spacing().item_spacing.y);
             let filter_group = ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
-                ui.strong("Only those that match (optional)");
+                dialog::section(ui, "Only those that match (optional)");
                 dialog::form_label(ui, "Types (none: all)");
                 let prefix = self.prefix.clone();
                 let greyed = &self.greyed;

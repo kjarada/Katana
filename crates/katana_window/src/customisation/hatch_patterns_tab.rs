@@ -21,6 +21,8 @@
 //!
 //! ```text
 //! hatchPatternsPage          the tab
+//! filterText                 the search over the patterns' names and descriptions (drawn on
+//!                            the page in front only, as the other pages' filter bars are)
 //! hatchPatternTable          name, kind (solid, N families), used by, description
 //! hatchPatternEditor         the editor of the chosen pattern:
 //!   hatchPatternSolid        a solid fill rather than line families
@@ -52,7 +54,7 @@ use katana_cad::hatch_pattern_rows::{
 };
 use katana_cad::hatching::hatch_segments;
 use katana_cad::style_manager_rows::{UsageTable, entities_using};
-use katana_core::text::{format_exact_real, parse_finite_double};
+use katana_core::text::{format_exact_real, lowered, parse_finite_double};
 use katana_core::{Error, ErrorCode, Result};
 use katana_entity::tables::HatchPatternPolicy;
 use katana_entity::{HatchLineFamily, HatchPattern, NamedTablePolicy, validate};
@@ -61,6 +63,7 @@ use katana_math::numerics::DEG_TO_RAD;
 
 use super::customisation_context::CustomisationContext;
 use super::document_watcher::DocumentWatcher;
+use super::filter_bar::FilterBar;
 use crate::annotation::dialog_support::{TableLook, table_look};
 use crate::command_word::command_word;
 use crate::drive::controls::{self, LineOptions, custom};
@@ -98,10 +101,14 @@ pub struct HatchPatternsTab {
     /// What the swatch draws, or the note it shows in place of a pattern.
     swatch: Option<HatchPattern>,
     swatch_note: String,
-    /// How tall the page is to be (`set_page_height`), and how tall its rows of buttons were the
-    /// last frame: the table's column takes the rest.
-    page_height: f32,
-    buttons_height: f32,
+    /// The search over the table, as the Styles and Linetypes pages have one: without it this
+    /// page's table stood a row higher than theirs (the third look audit's D).
+    filter: FilterBar,
+    /// How tall the table and the editor beside it are to be (`set_middle_height`): the manager's
+    /// pages' tallest, so the row of buttons stands where theirs does. And how tall they were drawn
+    /// the last frame, before room was added (`middle_height`).
+    middle_target: f32,
+    middle_natural: f32,
     name: String,
     status: String,
     status_is_error: bool,
@@ -126,8 +133,13 @@ impl HatchPatternsTab {
             family_current: None,
             swatch: None,
             swatch_note: String::new(),
-            page_height: 0.0,
-            buttons_height: 0.0,
+            filter: {
+                let mut filter = FilterBar::new(&[]);
+                filter.set_placeholder_text("Search names and descriptions");
+                filter
+            },
+            middle_target: 0.0,
+            middle_natural: 0.0,
             name: String::new(),
             status: String::new(),
             status_is_error: false,
@@ -604,11 +616,40 @@ impl HatchPatternsTab {
 
     // ---- the frame -----------------------------------------------------------------------------
 
-    /// The page made `height` points tall, the room going to the table's column, so its rows of
-    /// buttons stand at its foot as the other pages' do: the manager is one least height on every
-    /// page, and this page's content is the shortest.
-    pub fn set_page_height(&mut self, height: f32) {
-        self.page_height = height;
+    /// The table and the editor made `height` points tall at least, the room going under them, so
+    /// the page's row of buttons stands where the other pages' rows do (style_manager's pages).
+    pub fn set_middle_height(&mut self, height: f32) {
+        self.middle_target = height;
+    }
+
+    /// How tall the table and the editor were drawn the last frame, before room was added.
+    pub fn middle_height(&self) -> f32 {
+        self.middle_natural
+    }
+
+    /// The search over the table: drawn by the manager on the page in front only, as its other
+    /// pages' filter bars are (their fields share the name filterText).
+    pub fn filter_ui(&mut self, ui: &mut Ui) {
+        self.filter.ui(ui);
+    }
+
+    /// The rows the search lets through, by their place in `rows`: those whose name or
+    /// description holds the search, its case ignored; all of them while it is empty.
+    fn view(&self) -> Vec<usize> {
+        let search = lowered(self.filter.text());
+        let holds = |text: &str| {
+            search.is_empty()
+                || lowered(text)
+                    .windows(search.len())
+                    .any(|window| window == search.as_slice())
+        };
+        (0..self.rows.len())
+            .filter(|&row| {
+                let cells = &self.rows[row];
+                cells.first().is_some_and(|name| holds(name))
+                    || cells.get(3).is_some_and(|description| holds(description))
+            })
+            .collect()
     }
 
     /// Draws the tab - the drawing's changes since the last frame first.
@@ -631,133 +672,146 @@ impl HatchPatternsTab {
         // row it was given, left to right - Pattern, Solid fill, the grid, its buttons, the swatch,
         // Revert and Save - a strip that ran past the dialog's edge ("Save" cut).
         let detail = crate::style_manager::DETAIL_WIDTH;
-        let spacing = ui.spacing().item_spacing.y;
-        let top = (self.page_height - self.buttons_height - 2.0 * spacing).max(0.0);
-        ui.horizontal_top(|ui| {
+        let view = self.view();
+        let middle = ui.horizontal_top(|ui| {
             let column = (ui.available_width() - detail - dialog::GROUP_GAP).max(0.0);
             ui.vertical(|ui| {
                 ui.set_width(column);
-                ui.set_min_height(top);
+                let rows: Vec<Vec<String>> =
+                    view.iter().map(|&row| self.rows[row].clone()).collect();
+                let current = self
+                    .current
+                    .and_then(|current| view.iter().position(|&row| row == current));
                 let shown = table_look(
                     ui,
                     "hatchPatternTable",
                     &["Name", "Kind", "Used by", "Description"],
-                    &self.rows,
-                    self.current,
+                    &rows,
+                    current,
                     &[],
                     None,
                     TableLook {
                         fill: true,
-                        empty: "No hatch patterns: New or New Solid makes one",
+                        empty: if self.rows.is_empty() {
+                            "No hatch patterns: New or New Solid makes one"
+                        } else {
+                            "No hatch pattern matches the search"
+                        },
                     },
                 );
-                if let Some(row) = shown.chosen {
+                if let Some(&row) = shown.chosen.and_then(|at| view.get(at)) {
                     self.choose_row(host.document(), row);
                 }
             });
             ui.add_space(dialog::GROUP_GAP - ui.spacing().item_spacing.x);
             ui.vertical(|ui| {
                 ui.set_width(detail);
+                // The editor in the column as the Styles' form is, not in a bordered box (the
+                // third look audit's B).
                 ui.add_enabled_ui(enabled.editable, |ui| {
-                    ui.group(|ui| {
-                        ui.set_width(detail - dialog::group_margins(ui));
-                        self.editor(ui, host, enabled);
-                    });
+                    self.editor(ui, host, enabled);
                 });
             });
         });
+        // The table and the editor as tall as the manager's other pages', the room under them,
+        // so the row of buttons stands where theirs does (the third look audit's D: this page's
+        // stood 85 points higher, over a void of 75).
+        let natural = middle.response.rect.height();
+        if (natural - self.middle_natural).abs() > 0.5 {
+            self.middle_natural = natural;
+            ui.ctx()
+                .request_discard("the hatch page measured its table and editor");
+        }
+        let room = self.middle_target - natural;
+        if room > 0.0 {
+            ui.add_space(room);
+        }
 
-        let buttons = ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.label("Name");
-                controls::line_with(
-                    ui,
-                    "hatchPatternName",
-                    &mut self.name,
-                    LineOptions {
-                        placeholder: "name for New, New Solid, Duplicate or New Style",
-                        ..LineOptions::default()
-                    },
-                );
-                if controls::button(ui, "hatchPatternNew", "New")
-                    .on_hover_text("HATCH NEW name angle spacing ...: the families in the grid")
+        // One row of buttons, as the other pages' are: in two rows its second stood a row lower
+        // than any of theirs.
+        ui.horizontal(|ui| {
+            ui.label("Name");
+            controls::line_with(
+                ui,
+                "hatchPatternName",
+                &mut self.name,
+                LineOptions {
+                    placeholder: "name for New, New Solid, Duplicate or New Style",
+                    width: Some(dialog::SHORT_FIELD_WIDTH * 1.5),
+                    ..LineOptions::default()
+                },
+            )
+            .on_hover_text("The name New, New Solid, Duplicate and New Style Using This give");
+            if controls::button(ui, "hatchPatternNew", "New")
+                .on_hover_text("HATCH NEW name angle spacing ...: the families in the grid")
+                .clicked()
+            {
+                self.create(host);
+            }
+            if controls::button(ui, "hatchPatternNewSolid", "New Solid")
+                .on_hover_text("HATCH SOLID name: a solid fill")
+                .clicked()
+            {
+                self.create_solid(host);
+            }
+            ui.add_enabled_ui(enabled.editable, |ui| {
+                if controls::button(ui, "hatchPatternDuplicate", "Duplicate")
+                    .on_hover_text("The chosen pattern again, under the name")
                     .clicked()
                 {
-                    self.create(host);
+                    self.duplicate(host);
                 }
-                if controls::button(ui, "hatchPatternNewSolid", "New Solid")
-                    .on_hover_text("HATCH SOLID name: a solid fill")
-                    .clicked()
-                {
-                    self.create_solid(host);
-                }
-                ui.add_enabled_ui(enabled.editable, |ui| {
-                    if controls::button(ui, "hatchPatternDuplicate", "Duplicate")
-                        .on_hover_text("The chosen pattern again, under the name")
-                        .clicked()
-                    {
-                        self.duplicate(host);
-                    }
-                });
-                ui.add_enabled_ui(enabled.chosen, |ui| {
-                    if controls::button(ui, "hatchPatternNewStyle", "New Style Using This")
-                        .on_hover_text(
-                            "STYLE NEW name HATCH pattern: a style that hatches with the chosen \
-                         pattern",
-                        )
-                        .clicked()
-                    {
-                        self.new_style(host);
-                    }
-                });
             });
-
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(enabled.editable, |ui| {
-                    if controls::button(ui, "hatchPatternDelete", "Delete")
-                        .on_hover_text("HATCH DELETE name: refused while a layer or style names it")
-                        .clicked()
-                    {
-                        self.delete(host);
-                    }
-                });
-                if controls::button(ui, "hatchPatternPurge", "Purge")
+            ui.add_enabled_ui(enabled.chosen, |ui| {
+                if controls::button(ui, "hatchPatternNewStyle", "New Style Using This")
                     .on_hover_text(
-                        "PURGE HATCHES: delete every pattern nothing uses, one undo step",
+                        "STYLE NEW name HATCH pattern: a style that hatches with the chosen \
+                     pattern",
                     )
                     .clicked()
                 {
-                    self.run(host, "PURGE HATCHES");
+                    self.new_style(host);
                 }
-                crate::shell::dialog::status(
-                    ui,
-                    "hatchPatternStatus",
-                    &self.status,
-                    self.status_is_error,
-                );
-                ui.add_enabled_ui(enabled.chosen, |ui| {
-                    if controls::button(ui, "hatchPatternSelectUsers", "Select Users")
-                        .on_hover_text("Select the entities hatched with the chosen pattern")
-                        .clicked()
-                    {
-                        self.select_users(host);
-                    }
-                });
             });
+            ui.add_enabled_ui(enabled.editable, |ui| {
+                if controls::button(ui, "hatchPatternDelete", "Delete")
+                    .on_hover_text("HATCH DELETE name: refused while a layer or style names it")
+                    .clicked()
+                {
+                    self.delete(host);
+                }
+            });
+            if controls::button(ui, "hatchPatternPurge", "Purge")
+                .on_hover_text(
+                    "PURGE HATCHES: delete every pattern nothing uses, one undo step",
+                )
+                .clicked()
+            {
+                self.run(host, "PURGE HATCHES");
+            }
+            ui.add_enabled_ui(enabled.chosen, |ui| {
+                if controls::button(ui, "hatchPatternSelectUsers", "Select Users")
+                    .on_hover_text("Select the entities hatched with the chosen pattern")
+                    .clicked()
+                {
+                    self.select_users(host);
+                }
+            });
+            // What the last line replied, after the buttons it answers.
+            crate::shell::dialog::status(
+                ui,
+                "hatchPatternStatus",
+                &self.status,
+                self.status_is_error,
+            );
         });
-        let measured = buttons.response.rect.height();
-        if (measured - self.buttons_height).abs() > 0.5 {
-            self.buttons_height = measured;
-            ui.ctx()
-                .request_discard("the hatch page measured its rows of buttons");
-        }
     }
 
     /// The editor of the chosen pattern, drawn in its group.
     fn editor(&mut self, ui: &mut Ui, host: &mut dyn Host, enabled: Enabled) {
         // The group is a control of its own to a driver: whether the chosen pattern is the tab's
         // to change is read off it.
-        let heading = ui.strong("Pattern");
+        let heading = dialog::section(ui, "Pattern");
         custom(
             ui,
             &heading,
@@ -870,7 +924,8 @@ impl HatchPatternsTab {
             return;
         }
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, palette::panel().to_egui());
+        // The drawing's own ground, as every preview of the window is (the third look audit's H).
+        painter.rect_filled(rect, 0.0, palette::viewport().to_egui());
         let side = rect.width().min(rect.height()) - 16.0;
         let frame = egui::Rect::from_center_size(rect.center(), egui::vec2(side, side));
         let border = egui::Stroke::new(1.0, palette::border().to_egui());

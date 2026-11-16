@@ -286,6 +286,25 @@ fn field(ui: &mut Ui, label: &str, name: &str, value: &mut String, tip: &str, hi
     })
 }
 
+/// A labelled number kept as typed (a weight, a size): a number-box-wide well
+/// (controls::number_line), not a field filling the row (the third look audit's C).
+fn number_field(
+    ui: &mut Ui,
+    label: &str,
+    name: &str,
+    value: &mut String,
+    tip: &str,
+    hint: &str,
+) -> bool {
+    dialog::labelled(ui, label, |ui| {
+        let mut response = controls::number_line(ui, name, value, hint);
+        if !tip.is_empty() {
+            response = response.on_hover_text(tip);
+        }
+        response.changed()
+    })
+}
+
 /// A labelled box of fixed choices, by its row.
 fn pick(ui: &mut Ui, label: &str, name: &str, items: &[&str], index: &mut usize) -> bool {
     dialog::labelled(ui, label, |ui| index_choice(ui, name, &items_of(items), index))
@@ -337,7 +356,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                     edited |= picker_edited(&mut form.linestyle, ui, "ruleLinestyle");
                 });
             });
-            edited |= field(ui, "Weight", "ruleWeight", &mut form.weight, "", "");
+            edited |= number_field(ui, "Weight", "ruleWeight", &mut form.weight, "", "");
             edited |= field(ui, "Group", "ruleGroup", &mut form.group, "", "");
         }
         SYMBOL_PAGE => {
@@ -349,7 +368,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.symbol_colour.ui(ui, "ruleSymbolColour").changed();
             });
-            edited |= field(
+            edited |= number_field(
                 ui,
                 "Size",
                 "ruleSymbolSize",
@@ -408,7 +427,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 &TEXT_TYPES,
                 &mut form.text_type,
             );
-            edited |= field(ui, "Size", "ruleTextSize", &mut form.text_size, "", "");
+            edited |= number_field(ui, "Size", "ruleTextSize", &mut form.text_size, "", "");
             edited |= field(
                 ui,
                 "Justify across",
@@ -441,7 +460,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 &PIPE_SHAPES,
                 &mut form.pipe_shape,
             );
-            edited |= field(
+            edited |= number_field(
                 ui,
                 "Size 1",
                 "rulePipeSize1",
@@ -449,11 +468,10 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 "A number, or another attribute's name: $PipeDiameter",
                 "",
             );
-            edited |= field(ui, "Size 2", "rulePipeSize2", &mut form.pipe_size2, "", "");
+            edited |= number_field(ui, "Size 2", "rulePipeSize2", &mut form.pipe_size2, "", "");
             // Under the fields, lined up with them.
-            edited |= dialog::labelled(ui, "", |ui| {
-                controls::check(ui, "rulePipeActive", "Active", &mut form.pipe_active).changed()
-            });
+            edited |= dialog::check_row(ui, "rulePipeActive", "Active", &mut form.pipe_active)
+                .changed();
         }
         ATTRIBUTES_PAGE => {
             ui.label("One attribute a line: <type> <name> = <value>, the type text or integer");

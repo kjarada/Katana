@@ -462,7 +462,8 @@ mod definition_editor {
             issues(&bench),
             "Named by:\n  rule #0 WM* (feature) names it as its linestyle"
         );
-        assert_eq!(bench.value("definitionIssues"), issues(&bench));
+        // A note is the footer's status, a label beside the buttons (the third look audit's A).
+        assert_eq!(bench.text("definitionIssues"), issues(&bench));
 
         // Opened and not touched: nothing to save or to go back to.
         assert!(!bench.dialog.dirty());

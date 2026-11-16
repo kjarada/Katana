@@ -10,8 +10,9 @@
 //! list, and a drop must not have its list cleared under it). Here the request is kept and the
 //! editor takes it after the frame's drawing, which is the same order of things.
 
-use egui::{Rect, Response, Sense, Ui};
+use egui::{Rect, Response, RichText, Sense, Ui};
 
+use crate::dialog_layout;
 use crate::drive::controls;
 use crate::drive::mailbox::{Act, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -19,7 +20,7 @@ use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 /// One row of the list: what it says, and its sheet's picture when there is one.
 #[derive(Clone, Debug)]
 pub struct SheetListRow {
-    /// The sheet's number and name.
+    /// The sheet's number and name, then, after a line break, its paper.
     pub text: String,
     /// The thumbnail, as a texture the editor keeps, and its size in points.
     pub picture: Option<egui::load::SizedTexture>,
@@ -125,40 +126,12 @@ impl SheetListWidget {
         let mut dropped_at = None;
         let mut response = ui
             .push_id(self.name.as_str(), |ui| {
+                ui.spacing_mut().item_spacing.y = ROW_GAP;
                 for (at, row) in rows.iter().enumerate() {
-                    let shown = ui
-                        .horizontal(|ui| {
-                            if let Some(picture) = row.picture {
-                                ui.image(picture);
-                            }
-                            // The row spans what the picture leaves of the list's width, as a
-                            // table's chosen row does, its lines (the number and name, the
-                            // paper) each cut short with an ellipsis and whole in its tooltip:
-                            // sized to its text it was a pill, and wrapped at its words it ran to
-                            // three lines ("A3" over "landscape"; the look audits' T15 and N10).
-                            // On one line, unwrapped, a long name ran past the list's edge.
-                            ui.with_layout(
-                                egui::Layout::left_to_right(egui::Align::Center)
-                                    .with_main_justify(true),
-                                |ui| {
-                                    ui.add(
-                                        egui::Button::selectable(
-                                            self.current == Some(at),
-                                            row.text.as_str(),
-                                        )
-                                        .wrap_mode(egui::TextWrapMode::Truncate),
-                                    )
-                                    .on_hover_text(row.text.as_str())
-                                },
-                            )
-                            .inner
-                        })
-                        .response;
-                    let held = ui.interact(
-                        shown.rect,
-                        ui.id().with(("sheet", at)),
-                        Sense::click_and_drag(),
-                    );
+                    let shown = row_ui(ui, self.current == Some(at), row);
+                    let held = ui
+                        .interact(shown, ui.id().with(("sheet", at)), Sense::click_and_drag())
+                        .on_hover_text(row.text.as_str());
                     if held.clicked() || held.drag_started() {
                         changed |= self.current != Some(at);
                         self.current = Some(at);
@@ -166,7 +139,7 @@ impl SheetListWidget {
                     if held.drag_stopped() {
                         dropped_at = held.interact_pointer_pos().map(|pointer| pointer.y);
                     }
-                    drawn.push(shown.rect);
+                    drawn.push(shown);
                 }
             })
             .response;
@@ -194,3 +167,63 @@ impl SheetListWidget {
         response
     }
 }
+
+/// Draws `row` (`current`, the current sheet's), answering where it is. The row is the list's
+/// width: lit whole when it is the current sheet, as a table's chosen row is - its words alone
+/// were a pill (the third look audit's E) - and under the pointer otherwise. The picture at its
+/// left; beside it the number and name in the text colour on one line, cut short only where they
+/// do not fit, and the paper under them, muted. The two lines were one button's text of which one
+/// line showed, cut short with an ellipsis whatever its length ("PLAN ...").
+fn row_ui(ui: &mut Ui, current: bool, row: &SheetListRow) -> Rect {
+    let line = ui.text_style_height(&egui::TextStyle::Body);
+    let words = 2.0 * line + LINE_GAP;
+    let picture = row.picture.map_or(egui::Vec2::ZERO, |picture| picture.size);
+    let height = picture.y.max(words) + 2.0 * ROW_PADDING;
+    let (rect, hover) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return rect;
+    }
+    let fill = if current {
+        Some(dialog_layout::selected_row_colour())
+    } else if hover.contains_pointer() {
+        Some(crate::theme::hover().to_egui())
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, 0.0, fill);
+    }
+    let mut left = rect.left() + ROW_PADDING;
+    if let Some(texture) = row.picture {
+        let at = Rect::from_min_size(
+            egui::pos2(left, rect.center().y - picture.y / 2.0),
+            picture,
+        );
+        egui::Image::from_texture(texture).paint_at(ui, at);
+        left = at.right() + ui.spacing().item_spacing.x;
+    }
+    let (name, paper) = row.text.split_once('\n').unwrap_or((row.text.as_str(), ""));
+    let top = rect.center().y - words / 2.0;
+    let first = Rect::from_min_max(egui::pos2(left, top), egui::pos2(rect.right(), top + line));
+    let second = first.translate(egui::vec2(0.0, line + LINE_GAP));
+    let right = rect.right() - ROW_PADDING + dialog_layout::TABLE_COLUMN_GAP / 2.0;
+    dialog_layout::cell_text(ui, first, left, right, RichText::new(name));
+    dialog_layout::cell_text(
+        ui,
+        second,
+        left,
+        right,
+        RichText::new(paper).color(crate::theme::text_muted().to_egui()),
+    );
+    rect
+}
+
+/// Between two rows: a drop there goes between them (`insertion_row_at`).
+const ROW_GAP: f32 = 2.0;
+
+/// Round a row's picture and words, inside its lit ground.
+const ROW_PADDING: f32 = 4.0;
+
+/// Between a row's two lines of words.
+const LINE_GAP: f32 = 2.0;
