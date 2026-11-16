@@ -570,7 +570,7 @@ A selected entity the document draws and the frame's layers hide
 as a GHOST when `PlanPaintOptions::selection_ghosts`
 is on - the plan view sets it from its view's switch, `ViewState::selection_ghosts`;
 every other caller leaves it off and draws what it always drew, and a plot
-never draws one. A ghost is DOTS of the selection's orange at 60 % (alpha
+never draws one. A ghost is DOTS of the selection's accent at 60 % (alpha
 153), 2 px square, one every 6 px from the line's start, each on whole device
 pixels (below; `crates/katana_cad/src/selection_style.rs`), with no fill, hatch, linestyle or
 symbol, so it

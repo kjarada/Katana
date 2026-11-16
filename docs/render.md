@@ -586,7 +586,8 @@ passes **write no depth**:
   surface's weaker ones).
 * **The selection's casing is tested but not written**, so the core drawn
   next covers it wherever the two overlap and the casing shows a pixel
-  either side: a 3 px core of #FF9F1C over a 5 px casing of (16, 18, 22),
+  either side: a 3 px core of the accent #4c8dff (the orange #FF9F1C until
+  2026-11-16) over a 5 px casing of (16, 18, 22),
   and a selected point 9 px over 11 (`crates/katana_cad/src/selection_style.rs`;
   `scene_frame::a_selected_line_is_drawn_in_the_selection_colour_between_two_edges_of_its_casing`).
   In the core's own list, the software view drew it right by the bias alone
@@ -601,7 +602,7 @@ selected entities the view draws, as the core, then - when the view's
 `SceneOptions::selection_ghosts` is on - its GHOSTS: selected entities the
 document draws and the view (`SceneOptions::layers`) hides (`katana_cad::selection::is_ghost`,
 the rule the plan painter and a section ask too), each
-one 1 px line of (130, 88, 32), the selection colour at 45 % mixed over the
+one 1 px line of (51, 83, 137), the selection colour at 45 % mixed over the
 view's ground beforehand, with no casing (`docs/desktop.md`, "The selection
 in every view"). The one-list build (`SceneBuilder::build`), which no view
 draws - the benchmarks and tests do, and a sheet's 3D snapshot is built by
