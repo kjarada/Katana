@@ -791,19 +791,39 @@ are a strip with the accent's 2 px bar under the one in front. Tables have
 a raised header row, faint stripes and the chosen row lit in the accent at
 35 %, and scroll after 12 rows.
 
-**Two ways of laying out a form, for now.** `shell::dialog::form` and
-`labelled` give every labelled row of a body one label column, measured
-from its widest label (150 at most, a longer label wraps), so the fields of
-a whole dialog, inside a group or not, start at one edge; the survey, terrain,
-GIS and geo dialogs use them. The managers, the plot and sheet dialogs, the
-start screen, annotation, BIM, IFC and update dialogs use
-`crates/katana_window/src/dialog_layout.rs`'s grid form, a column of 110
-and fields of one fixed width (260 by default). They were written side by
-side by two agents. The integration kept one home for every part they share
-- the spacing scale is `theme::style`'s, the padding, footer width, label
-colour and footer tag `shell::dialog`'s, the primary button's look
-`drive::controls::primary_look` - and left the two form layouts (Not done,
-below).
+**One way of laying out a form.** `shell::dialog::form` and `labelled` give
+every labelled row of a body one label column, measured from its widest
+label (150 at most; a longer label wraps), so the fields of a whole dialog,
+inside a group or not, start at one edge, and a field fills its row. Where
+one must not fill, `fixed_fields` gives it a width of its own,
+`beside_a_button` / `beside_buttons` leave a button its room, and
+`SHORT_FIELD_WIDTH` (130) sizes the fields of a table's add-row. A label
+that is a named control is drawn with `row_with_text`, measured by its text
+on one line: measured as drawn, a label shown after its column was measured
+narrower wrapped a word to a line and never widened it (the Leaders
+dialog's "Landing direction"). The scope and filter widget's rows are
+labelled rows too, so in Buffer or Global Modify they line up with the
+dialog's own fields. A second form - an egui Grid of fixed-width fields
+behind a 110 column, in `crates/katana_window/src/dialog_layout.rs` - was
+written beside this one in the first round of the look and folded into it
+and deleted in the second (2026-11-16); `dialog_layout.rs` keeps the tables'
+look. *Rejected:* egui's Grid with a measured first column - a Grid lines
+up only its own cells, so rows drawn by a dialog's shared helpers, or
+inside a group, would not share the edge.
+
+**Fields and buttons are one height.** A one-line field is a control's
+height (`CONTROL_HEIGHT`, 24) like the buttons beside it
+(`drive::controls::line_with`): egui sizes one to its text, 19 points, and
+a Browse or Measure stood taller than its field. An editable choice's list
+arrow is given the width egui draws an empty ComboBox in
+(`drive::controls::list_arrow_width`: its icon, the icon's spacing and the
+button's padding, 38), not a control's height: reserved 24, it ran 14 past
+its row and egui lent that room to every row under it, widening the dialog.
+
+**The view's Layers popup** is drawn as the Layers panel is: a panel's
+padding, one width of 300 hung by its top right corner under the view's
+Layers button, rows 22 high (`main_window::panels::LIST_ROW`) with the
+panel's own eye switch (`row_switch`), lit for what this view shows.
 
 **The icons** are drawn in one line style ("`icons.rs`", below): two weights, a
 single tint, the accent only for an active tool.
@@ -817,7 +837,13 @@ to 32 x 20 (`crates/katana_window/tests/drive/flyout_button.rs`, and the toolbar
 and a title-bar tool's width in the workspace tests. The dialog frame's own
 rules are tested in `crates/katana_window/tests/foundation/dialog_layout.rs`
 (footer buttons at the right edge, the primary last; one edge for every
-field; a long label wrapping; the body's width).
+field; a long label wrapping; the body's width; a named label shown after
+its column was measured widening it to one line; a field given a width of
+its own keeping it; a field leaving the button beside it its room; a
+section's gap above it unless it starts its body). A field and its button
+standing level (Volumes' Measure) and every field of Edit Label ending at
+the body's edge, the editable Layer choice's included, are tested with
+those dialogs.
 
 **`palette.rs` - every chrome colour is a named token**
 (`crates/katana_window/src/theme/palette.rs`). `window`, `panel`,
@@ -1262,18 +1288,9 @@ person ("The Command Reference and the keyboard shortcuts", below).
 reviewed, and the same run can drive the menus and dialogs step by step:
 `docs/headless.md`.
 
-**Not done.** There is no light theme. Two form layouts (above, "Two ways
-of laying out a form"): folding them is moving `dialog_layout.rs`'s grid
-forms (about ten `form` / `form_with` calls and twelve `fixed_label` rows,
-in the managers, plot, start, annotation, BIM and IFC dialogs) onto
-`shell::dialog::form` and `labelled`, then deleting the grid form; the
-scope and filter widget
-(`crates/katana_window/src/customisation/scope_filter_widget.rs`) keeps a
-label layout of its own as well. No semibold face: a heading is the body
-face drawn strong (the face is the owner's decision). The side columns and
-toolbar rows do not grow with Large toolbar icons. The view layers popup
-was not restyled; the Alignment Manager's Name and PIs fields are narrow.
-The views inside the workspace are not kept between
+**Not done.** There is no light theme. No semibold face: a heading is the
+body face drawn strong (the face is the owner's decision). The side columns
+and toolbar rows do not grow with Large toolbar icons. The views inside the workspace are not kept between
 sessions (above, "How the window starts"); the dock chrome's hooks
 (`minimised_names`, `minimise_named`) are ready for it. The Text Size is the
 window's; a dialog that set a font of its own other than the fixed-pitch one
