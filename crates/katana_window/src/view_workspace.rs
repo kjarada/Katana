@@ -284,6 +284,8 @@ struct Inner {
     /// frame.
     kind_menu: Option<ViewId>,
     kind_choice: Option<(ViewId, ViewKind)>,
+    /// The view whose kind menu a click outside it closed this frame (draw_kind_menu).
+    kind_menu_dismissed: Option<ViewId>,
     events: Vec<WorkspaceEvent>,
     /// Lines a bar or a transparent zoom asked for, run through the window's executor once
     /// nothing of the workspace is borrowed.
@@ -2031,6 +2033,7 @@ impl ViewWorkspace {
             scale_dialog: None,
             kind_menu: None,
             kind_choice: None,
+            kind_menu_dismissed: None,
             events: Vec::new(),
             lines: Rc::new(RefCell::new(Vec::new())),
             unbuilt: Vec::new(),
@@ -3216,7 +3219,7 @@ impl ViewWorkspace {
             // view's own settings, the active view), never at each frame: a tool a caller took
             // off a bar stays off, as the C++'s setToolWanted holds.
             draw_docks(&mut inner, views, ui, area, &mut cx, scenery);
-            draw_kind_menu(&mut inner, ui, area);
+            draw_kind_menu(&mut inner, views, ui, area);
         }
         self.after_frame(host, scenery);
         self.dialogs_ui(ui, host);
@@ -3236,6 +3239,7 @@ impl ViewWorkspace {
             self.chrome_request(host, scenery, request);
         }
         let chosen = self.inner().kind_choice.take();
+        self.inner().kind_menu_dismissed = None;
         if let Some((id, kind)) = chosen {
             let mut cx = HostDrawing {
                 host: &mut *host,
@@ -3309,7 +3313,9 @@ impl ViewWorkspace {
                 match tool.as_str() {
                     "ViewKindButton" => {
                         let mut inner = self.inner();
-                        inner.kind_menu = if inner.kind_menu == Some(id) {
+                        inner.kind_menu = if inner.kind_menu == Some(id)
+                            || inner.kind_menu_dismissed == Some(id)
+                        {
                             None
                         } else {
                             Some(id)
@@ -3406,24 +3412,35 @@ fn draw_docks(
         if tabs.len() > 1 {
             let strip = Rect::from_min_size(rect.min, Vec2::new(rect.width(), TAB_STRIP));
             dock.min.y = strip.max.y;
-            let mut chosen = None;
-            ui.scope_builder(
-                UiBuilder::new()
-                    .max_rect(strip)
-                    .layout(Layout::left_to_right(Align::Center)),
-                |ui| {
-                    for (at, name) in tabs.iter().enumerate() {
-                        let title = inner
-                            .chrome
-                            .as_ref()
-                            .and_then(|chrome| chrome.title_bar(name))
-                            .map_or_else(|| name.clone(), |bar| String::from(bar.title()));
-                        if ui.selectable_label(at == active, title).clicked() {
-                            chosen = Some(at);
-                        }
-                    }
-                },
-            );
+            // The views' tabs drawn as every tab strip of the window is (drive::controls::tabs):
+            // the one in front over the accent's bar, the others muted - not egui's selectable
+            // labels, blue pills. Named by the group's first view, so two groups' strips differ.
+            let titles: Vec<String> = tabs
+                .iter()
+                .map(|name| {
+                    inner
+                        .chrome
+                        .as_ref()
+                        .and_then(|chrome| chrome.title_bar(name))
+                        .map_or_else(|| name.clone(), |bar| String::from(bar.title()))
+                })
+                .collect();
+            let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+            let strip_name = format!("viewTabs{}", tabs.first().map_or("", String::as_str));
+            let mut current = active;
+            let chosen = ui
+                .scope_builder(
+                    UiBuilder::new()
+                        .max_rect(strip)
+                        .layout(Layout::left_to_right(Align::Center)),
+                    |ui| {
+                        ui.set_clip_rect(strip.intersect(ui.clip_rect()));
+                        crate::drive::controls::tabs(ui, &strip_name, &titles, &mut current)
+                            .changed()
+                            .then_some(current)
+                    },
+                )
+                .inner;
             if let Some(at) = chosen
                 && let Some(id) = tabs.get(at).and_then(|name| dock_id(name))
             {
@@ -3571,8 +3588,25 @@ fn draw_widget(
     }
 }
 
-/// The kind switcher's menu of the view it was opened on: a click on a kind changes the view.
-fn draw_kind_menu(inner: &mut Inner, ui: &mut Ui, area: Rect) {
+/// The kind switcher's menu as a drive target: a step presses one of its kinds in it.
+pub const KIND_MENU: &str = "ViewKindMenu";
+
+/// The tip of each kind in the kind switcher's menu, as View > Active Viewport Shows words it for
+/// the active view.
+fn kind_tip(kind: ViewKind) -> &'static str {
+    match kind {
+        ViewKind::Plan => "Show the plan in this view",
+        ViewKind::Model3D => "Show the model in 3D in this view",
+        ViewKind::Section => "Show the section cut last in this view",
+        ViewKind::Elevation => "Show an elevation of the model in this view",
+    }
+}
+
+/// The kind switcher's menu of the view it was opened on: a click on a kind changes the view. It
+/// is drawn as every menu of the window is - egui's menu frame, each kind an action item
+/// ("viewKindPlan" ...) with its icon and the view's own kind ticked - where it was four framed
+/// buttons with neither. A click outside it closes it, as a menu's does.
+fn draw_kind_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui, area: Rect) {
     let Some(id) = inner.kind_menu else {
         return;
     };
@@ -3580,23 +3614,37 @@ fn draw_kind_menu(inner: &mut Inner, ui: &mut Ui, area: Rect) {
         inner.kind_menu = None;
         return;
     };
+    let shows = views.borrow().find(id).map(|state| state.kind);
     let origin = area.min + at.min.to_vec2() + Vec2::new(6.0, BAR_HEIGHT);
     let mut chosen = None;
-    egui::Area::new(egui::Id::new(("katanaViewKindMenu", id)))
-        .order(egui::Order::Foreground)
-        .fixed_pos(origin)
-        .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                for kind in KINDS {
-                    if ui.button(kind.name()).clicked() {
-                        chosen = Some(kind);
-                    }
-                }
-            });
-        });
+    let shown = crate::shell::popup_menu(ui.ctx(), KIND_MENU, origin, |ui| {
+        // The look egui gives a menu it opens itself: items framed only under the pointer.
+        egui::containers::menu::menu_style(ui.style_mut());
+        for kind in KINDS {
+            let item = crate::drive::Action::new(&format!("viewKind{}", kind.name()), kind.name())
+                .icon(kind_icon(kind))
+                .tip(kind_tip(kind))
+                .checkable(shows == Some(kind));
+            if crate::drive::action_item(ui, &item).clicked() {
+                chosen = Some(kind);
+            }
+        }
+    });
+    let clicked_outside = ui.input(|input| {
+        input.pointer.any_click()
+            && input
+                .pointer
+                .interact_pos()
+                .is_some_and(|at| !shown.rect.contains(at))
+    });
     if let Some(kind) = chosen {
         inner.kind_menu = None;
         inner.kind_choice = Some((id, kind));
+    } else if clicked_outside {
+        // The press on the switcher itself toggles the menu after the frame: kept from opening
+        // it again in the frame that closed it.
+        inner.kind_menu = None;
+        inner.kind_menu_dismissed = Some(id);
     }
 }
 

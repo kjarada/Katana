@@ -29,6 +29,28 @@ fn plus(ink: &mut ToolInk<'_>, x: f64, y: f64) {
     ink.line(x, y - 2.5, x, y + 2.5, true, STROKE);
 }
 
+/// An open arrowhead in the accent at `tip`, on a line coming from `from`: the end of a line that
+/// runs on without end (Construction Line, Ray). Its wings 3 units back and 2.6 across, as the
+/// view and arrow icons draw theirs (icons::draw_head).
+fn open_head(ink: &mut ToolInk<'_>, from: crate::canvas::PointF, tip: crate::canvas::PointF) {
+    let (dx, dy) = (tip.x - from.x, tip.y - from.y);
+    let length = dx.hypot(dy);
+    let (ux, uy) = (dx / length, dy / length);
+    let (back, side) = (3.0, 2.6);
+    ink.stroke(
+        &polyline(
+            &[
+                pt(tip.x - back * ux - side * uy, tip.y - back * uy + side * ux),
+                tip,
+                pt(tip.x - back * ux + side * uy, tip.y - back * uy - side * ux),
+            ],
+            false,
+        ),
+        true,
+        STROKE,
+    );
+}
+
 fn cross(ink: &mut ToolInk<'_>, x: f64, y: f64) {
     ink.line(x - 2.2, y - 2.2, x + 2.2, y + 2.2, true, STROKE);
     ink.line(x - 2.2, y + 2.2, x + 2.2, y - 2.2, true, STROKE);
@@ -277,13 +299,21 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         return true;
     }
     if tool_id == "draw.spline" {
+        // The smooth curve and the control polygon that shapes it, its control points off the
+        // curve: what tells a spline from Freehand's jagged line, beside it on the Draw toolbar
+        // (the two were one "~" at 20 px).
         let mut path = Path::new();
-        path.move_to(pt(3.0, 17.0));
-        path.cubic_to(pt(8.0, 2.0), pt(14.0, 24.0), pt(21.0, 7.0));
+        path.move_to(pt(3.0, 18.0));
+        path.cubic_to(pt(7.0, 3.0), pt(16.0, 21.0), pt(21.0, 6.0));
+        ink.stroke(
+            &polyline(&[pt(3.0, 18.0), pt(7.0, 3.0), pt(16.0, 21.0), pt(21.0, 6.0)], false),
+            false,
+            FINE,
+        );
         ink.stroke(&path, true, STROKE);
-        ink.node(3.0, 17.0, false);
-        ink.node(12.0, 13.0, false);
-        ink.node(21.0, 7.0, false);
+        for (x, y) in [(3.0, 18.0), (7.0, 3.0), (16.0, 21.0), (21.0, 6.0)] {
+            ink.node(x, y, false);
+        }
         return true;
     }
     if tool_id == "draw.ellipse"
@@ -310,13 +340,19 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         return true;
     }
     if tool_id == "draw.xline" {
-        ink.line(1.0, 20.0, 23.0, 4.0, true, STROKE);
-        ink.node(9.5, 13.8, false);
+        // A line without end: an arrowhead at both ends, and the point it was put through. Plain,
+        // it was Line's diagonal again, a pixel longer.
+        ink.line(3.5, 18.5, 20.5, 5.5, true, STROKE);
+        open_head(ink, pt(3.5, 18.5), pt(20.5, 5.5));
+        open_head(ink, pt(20.5, 5.5), pt(3.5, 18.5));
+        ink.node(12.0, 12.0, false);
         return true;
     }
     if tool_id == "draw.ray" {
-        ink.line(5.0, 18.0, 23.0, 5.0, true, STROKE);
-        ink.node(5.0, 18.0, false);
+        // From the point it starts at, without end the other way: one arrowhead.
+        ink.line(4.5, 19.0, 20.5, 5.5, true, STROKE);
+        open_head(ink, pt(4.5, 19.0), pt(20.5, 5.5));
+        ink.node(4.5, 19.0, false);
         return true;
     }
     if tool_id == "draw.dline" {
@@ -337,11 +373,27 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         return true;
     }
     if tool_id == "draw.sketch" {
-        let mut path = Path::new();
-        path.move_to(pt(3.0, 15.0));
-        path.cubic_to(pt(6.0, 6.0), pt(8.0, 20.0), pt(11.0, 12.0));
-        path.cubic_to(pt(13.0, 6.0), pt(16.0, 18.0), pt(21.0, 9.0));
-        ink.stroke(&path, true, STROKE);
+        // A hand's line: short straight strokes that wander, as Freehand records the pointer -
+        // no control points, no curve. It was a smooth "~", Spline's at 20 px.
+        ink.stroke(
+            &polyline(
+                &[
+                    pt(3.0, 16.0),
+                    pt(5.0, 11.5),
+                    pt(7.0, 14.5),
+                    pt(9.0, 9.0),
+                    pt(11.5, 13.5),
+                    pt(13.0, 10.0),
+                    pt(15.5, 15.5),
+                    pt(17.5, 9.5),
+                    pt(19.0, 12.0),
+                    pt(21.0, 7.0),
+                ],
+                false,
+            ),
+            true,
+            STROKE,
+        );
         return true;
     }
     if tool_id == "draw.revcloud" {

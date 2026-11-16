@@ -56,8 +56,10 @@ use katana_entity::{Entity, EntityId, Geometry, LeaderContext, Model, PropertyMa
 use katana_geometry::Point2;
 use katana_math::numerics::{RAD_TO_DEG, normalize_angle};
 
+use crate::drive::controls::EXPANDER_WIDTH;
 use crate::drive::{
     Action, ControlKind, ControlRecord, LineOptions, action_item, custom, line_with,
+    tree_expander,
 };
 use crate::format::{grouped, plan_number, plan_point};
 use crate::host::Clipboard;
@@ -89,6 +91,14 @@ const PATH_SEPARATOR_TEXT: &str = "\u{1f}";
 /// Typing in the filter waits for a pause: every keystroke would otherwise search the whole
 /// selection again.
 const FILTER_DELAY: Duration = Duration::from_millis(200);
+
+/// How far a level of the tree steps in from the one above it (as it always has).
+const TREE_STEP: f32 = 14.0;
+
+/// The most of the panel's width the labels' column takes, so a value always has the rest: a
+/// little over half, at the panel's 240 points some 130 for a label - "Vertical exaggeration"
+/// two levels down - and the rest for its value.
+const VALUE_COLUMN_SHARE: f32 = 0.55;
 
 /// A level's rows, read when the level is opened, lent the drawing.
 pub type LevelReader = Rc<dyn Fn(&Document) -> PropertyLevel>;
@@ -1466,6 +1476,32 @@ impl PropertyTreePanel {
         if std::mem::take(&mut self.scroll_to_top) {
             scroll = scroll.vertical_scroll_offset(0.0);
         }
+        // THE VALUE COLUMN: every value starts at one edge, where the widest label shown ends -
+        // its depth's indent, its expander and its text - held to VALUE_COLUMN_SHARE of the panel
+        // so a long label is cut short rather than pushing the values off it. Side by side, each
+        // value after its own label, the values zigzagged down the panel and a column of numbers
+        // could not be read down.
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let gap = ui.spacing().item_spacing.x;
+        let padding = 2.0 * ui.spacing().button_padding.x;
+        let lead = |depth: usize| TREE_STEP * depth as f32 + EXPANDER_WIDTH + gap;
+        let widest = rows
+            .iter()
+            .filter_map(|(path, depth)| self.node(path).map(|node| (node, *depth)))
+            .map(|(node, depth)| {
+                let text = ui
+                    .painter()
+                    .layout_no_wrap(
+                        node.data.label.clone(),
+                        font.clone(),
+                        egui::Color32::PLACEHOLDER,
+                    )
+                    .size()
+                    .x;
+                lead(depth) + text + padding
+            })
+            .fold(0.0_f32, f32::max);
+        let column = widest.min(ui.available_width() * VALUE_COLUMN_SHARE);
         let shown = scroll.show(ui, |ui| {
             for (path, depth) in &rows {
                 let Some(node) = self.node(path) else {
@@ -1474,27 +1510,33 @@ impl PropertyTreePanel {
                 let expander = self.has_children(path);
                 let selected = self.selected.contains(path);
                 ui.horizontal(|ui| {
-                    ui.add_space(14.0 * *depth as f32);
-                    if expander {
-                        let arrow = if node.expanded {
-                            "\u{25be}"
-                        } else {
-                            "\u{25b8}"
-                        };
-                        if ui.small_button(arrow).clicked() {
-                            acts.push(Act::Toggle(path.clone()));
-                        }
-                    } else {
-                        ui.add_space(18.0);
+                    ui.add_space(TREE_STEP * *depth as f32);
+                    if tree_expander(ui, expander.then_some(node.expanded)).clicked() {
+                        acts.push(Act::Toggle(path.clone()));
                     }
+                    // The label muted, so the values read first; a heading in the text colour,
+                    // the row that lists more in the accent.
                     let mut label = RichText::new(node.data.label.as_str());
                     if node.data.heading {
                         label = label.strong();
+                    } else if !node.is_more {
+                        label = label.color(muted);
                     }
                     if node.is_more {
                         label = label.italics().color(accent);
                     }
-                    let mut name = ui.selectable_label(selected, label);
+                    let cell = (column - lead(*depth)).max(0.0);
+                    let height = ui.spacing().interact_size.y;
+                    let mut name = ui
+                        .allocate_ui_with_layout(
+                            egui::vec2(cell, height),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.set_min_width(cell);
+                                ui.add(egui::Button::selectable(selected, label).truncate())
+                            },
+                        )
+                        .inner;
                     if !node.data.tip.is_empty() {
                         name = name.on_hover_text(node.data.tip.as_str());
                     }
@@ -1513,7 +1555,8 @@ impl PropertyTreePanel {
                     if node.data.muted || node.is_more {
                         value = value.color(if node.is_more { accent } else { muted });
                     }
-                    ui.label(value);
+                    // Cut short at the panel's edge, the whole value in its tooltip.
+                    ui.add(egui::Label::new(value).truncate());
                 });
             }
         });

@@ -493,6 +493,8 @@ fn tree_ui(
                 ui.horizontal(|ui| {
                     ui.add_space(14.0 * row.depth as f32);
                     if row.leaf {
+                        // An attribute's empty expander cell: its name under its group's.
+                        crate::drive::controls::tree_expander(ui, None);
                         let picked = state.selected_key == row.path;
                         if ui.selectable_label(picked, row.name.as_str()).clicked() {
                             *chosen = Some(Some(row.path.clone()));
@@ -501,11 +503,9 @@ fn tree_ui(
                         ui.label(RichText::new(row.kind.as_str()).weak());
                     } else {
                         let open = state.expanded.contains(&row.path);
-                        let arrow = if open { "\u{25be}" } else { "\u{25b8}" };
-                        if ui
-                            .selectable_label(false, format!("{arrow} {}", row.name))
-                            .clicked()
-                        {
+                        let expander = crate::drive::controls::tree_expander(ui, Some(open));
+                        let name = ui.selectable_label(false, row.name.as_str());
+                        if expander.clicked() || name.clicked() {
                             if open {
                                 state.expanded.remove(&row.path);
                             } else {

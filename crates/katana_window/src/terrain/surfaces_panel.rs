@@ -28,13 +28,16 @@ use katana_cad::Document;
 use katana_core::text::equals_ignoring_case;
 
 use crate::command_word::command_word;
-use crate::drive::action::{Action, action_item};
-use crate::drive::controls::custom;
+use crate::dialog_layout::{TABLE_ROW_GAP, table_row_colour};
+use crate::drive::action::Action;
+use crate::drive::controls::{custom, label_as};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
-use crate::drive::{Choice, choice, label};
+use crate::drive::{Choice, choice};
 use crate::host::Host;
+use crate::main_window::panels::{group_rule, panel_tool, row_switch};
 use crate::shell::workbench::DockSpec;
+use crate::theme::palette;
 
 /// What the panel may ask of the window, beside running lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,7 +191,8 @@ impl SurfacesPanel {
         self.status = if self.rows.is_empty() {
             String::from("No surfaces. Terrain > Surface From makes one; an import may bring some.")
         } else {
-            format!("{} surfaces", self.rows.len())
+            let count = self.rows.len();
+            format!("{count} surface{}", if count == 1 { "" } else { "s" })
         };
     }
 
@@ -362,66 +366,68 @@ impl SurfacesPanel {
         }
     }
 
-    /// The row tools above the table. Zoom To is on only where there are views to frame it in.
+    /// The row tools above the table, the panel's icon tools as the Layers and Reference Data
+    /// panels have them (main_window::panels::panel_tool): worded, the five ran past the panel's
+    /// 240 points and Zoom To was cut. Zoom To is on only where there are views to frame it in.
     fn tools(&mut self, ui: &mut Ui, can_zoom: bool, asked: &mut Vec<Asked>) {
         let picked = self.current.is_some();
         let runs = self.services.runs;
         let tools = [
             (
-                Action::new("surfacesRename", "Rename")
-                    .icon("Rename")
-                    .tip("Rename the picked surface (SURFACE RENAME): type the new name in its row.")
-                    .enabled(picked && runs),
-                0,
+                "surfacesRename",
+                "Rename",
+                "Rename",
+                "Rename the picked surface (SURFACE RENAME): type the new name in its row.",
+                picked && runs,
+                Asked::Rename,
             ),
             (
-                Action::new("surfacesCopy", "Copy")
-                    .icon("Copy")
-                    .tip(
-                        "Copy the picked surface under a new name (SURFACE COPY), to edit one and \
-                         keep the other.",
-                    )
-                    .enabled(picked && runs),
-                1,
+                "surfacesCopy",
+                "Copy",
+                "Copy",
+                "Copy the picked surface under a new name (SURFACE COPY), to edit one and keep \
+                 the other.",
+                picked && runs,
+                Asked::Copy,
             ),
             (
-                Action::new("surfacesRemove", "Remove")
-                    .icon("Erase")
-                    .tip(
-                        "Remove the picked surface from the drawing (SURFACE REMOVE). Undo puts \
-                         it back.",
-                    )
-                    .enabled(picked && runs),
-                2,
+                "surfacesRemove",
+                "Erase",
+                "Remove",
+                "Remove the picked surface from the drawing (SURFACE REMOVE). Undo puts it back.",
+                picked && runs,
+                Asked::Remove,
             ),
             (
-                Action::new("surfacesZoomTo", "Zoom To")
-                    .icon("ZoomTo")
-                    .tip("Frame the picked surface in the plan views.")
-                    .enabled(picked && can_zoom),
-                3,
+                "surfacesZoomTo",
+                "ZoomTo",
+                "Zoom To",
+                "Frame the picked surface in the plan views.",
+                picked && can_zoom,
+                Asked::ZoomTo,
             ),
             (
-                Action::new("surfacesEditStyles", "Edit Styles")
-                    .icon("FormatStyles")
-                    .tip(
-                        "Make and change the styles a surface is drawn in (Terrain > Surface \
-                         Styles).",
-                    )
-                    .enabled(self.services.edit_styles),
-                4,
+                "surfacesEditStyles",
+                "SurfaceStyles",
+                "Edit Styles",
+                "Make and change the styles a surface is drawn in (Terrain > Surface Styles).",
+                self.services.edit_styles,
+                Asked::EditStyles,
             ),
         ];
         ui.horizontal(|ui| {
-            for (action, which) in &tools {
-                if action_item(ui, action).clicked() {
-                    asked.push(match which {
-                        0 => Asked::Rename,
-                        1 => Asked::Copy,
-                        2 => Asked::Remove,
-                        3 => Asked::ZoomTo,
-                        _ => Asked::EditStyles,
-                    });
+            ui.spacing_mut().item_spacing.x = crate::theme::style::GAP / 2.0;
+            for (at, (name, icon, label, tip, enabled, what)) in tools.into_iter().enumerate() {
+                // What acts on the picked surface, then what acts on the styles.
+                if at == 4 {
+                    group_rule(ui);
+                }
+                let clicked = ui
+                    .add_enabled_ui(enabled, |ui| panel_tool(ui, name, icon, label, tip))
+                    .inner
+                    .clicked();
+                if clicked {
+                    asked.push(what);
                 }
             }
         });
@@ -451,78 +457,40 @@ impl SurfacesPanel {
         let current = self.current;
         let mut picked = None;
         let mut renaming = self.renaming.take();
-        let rows = &mut self.rows;
+        let rows = &self.rows;
+        // The design's table (crate::dialog_layout): a raised header row of muted titles, faint
+        // stripes, the picked row lit in the accent, scrolled across inside the panel rather than
+        // widening it. Its header was one line of text, "Name | Style | Source | Triangles".
+        let chosen: Vec<bool> = (0..rows.len()).map(|at| current == Some(at)).collect();
         let drawn = ui.vertical(|ui| {
-            ui.weak("Name | Style | Source | Triangles");
-            for (at, row) in rows.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    let mut shown = row.shown;
-                    if ui
-                        .checkbox(&mut shown, "")
-                        .on_hover_text(if row.shown {
-                            "Shown: untick to hide it (SURFACE HIDE)"
-                        } else {
-                            "Hidden: tick to show it (SURFACE SHOW)"
-                        })
-                        .changed()
-                    {
-                        asked.push(Asked::Shown(at, shown));
-                    }
-                    // Only the name is typed into, and only when asked (Rename, or a double
-                    // click): a click picks a row.
-                    let mut typed_here = None;
-                    if let Some((which, text)) = &mut renaming
-                        && *which == at
-                    {
-                        let edit = ui.text_edit_singleline(text);
-                        if edit.lost_focus() {
-                            typed_here = Some(text.clone());
-                        } else {
-                            edit.request_focus();
-                        }
-                    } else {
-                        let name = ui.selectable_label(current == Some(at), row.name.as_str());
-                        if name.double_clicked() {
-                            picked = Some(at);
-                            asked.push(Asked::Rename);
-                        } else if name.clicked() {
-                            picked = Some(at);
-                        }
-                    }
-                    if let Some(typed) = typed_here {
-                        renaming = None;
-                        asked.push(Asked::Renamed(at, typed));
-                    }
-                    let mut style = Choice::at(row.style);
-                    let changed = if current == Some(at) {
-                        choice(ui, "surfaceStyle", &row.style_texts, &mut style)
-                            .on_hover_text("The style the surface is drawn in (SURFACE STYLE)")
-                            .changed()
-                    } else {
-                        let mut changed = false;
-                        egui::ComboBox::from_id_salt(("surfaceStyle", at))
-                            .selected_text(row.style_text())
-                            .show_ui(ui, |ui| {
-                                for (index, text) in row.style_texts.iter().enumerate() {
-                                    if ui
-                                        .selectable_label(style.index == Some(index), text)
-                                        .clicked()
-                                    {
-                                        style.index = Some(index);
-                                        changed = true;
-                                    }
-                                }
-                            });
-                        changed
-                    };
-                    if changed && let Some(index) = style.index {
-                        asked.push(Asked::Style(at, index));
-                    }
-                    ui.label(row.source.as_str())
-                        .on_hover_text(row.source.as_str());
-                    ui.label(format!("{}", row.triangles));
-                });
+            if rows.is_empty() {
+                // No header over no rows: the status under it says why it is empty.
+                return;
             }
+            egui::ScrollArea::horizontal()
+                .id_salt("surfacesTableScroll")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    egui::Grid::new("surfacesTableGrid")
+                        .num_columns(5)
+                        .spacing([crate::theme::style::GROUP_GAP, TABLE_ROW_GAP])
+                        .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+                        .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
+                        .show(ui, |ui| {
+                            for title in ["", "Name", "Style", "Source", "Triangles"] {
+                                ui.label(
+                                    egui::RichText::new(title)
+                                        .strong()
+                                        .color(palette::text_muted().to_egui()),
+                                );
+                            }
+                            ui.end_row();
+                            for (at, row) in rows.iter().enumerate() {
+                                table_row(ui, at, row, current, &mut renaming, &mut picked, asked);
+                                ui.end_row();
+                            }
+                        });
+                });
         });
         self.renaming = renaming;
         if picked.is_some() {
@@ -563,8 +531,18 @@ impl SurfacesPanel {
         let outer = ui.vertical(|ui| {
             self.tools(ui, can_zoom, &mut asked);
             self.table(ui, &mut asked);
+            // In the secondary text, wrapped at the panel's width: "No surfaces. ..." is the
+            // panel's empty state, and was cut mid-word at the panel's edge.
             let status = self.status.clone();
-            label(ui, "surfacesStatus", &status);
+            let _ = label_as(
+                ui,
+                "surfacesStatus",
+                &status,
+                egui::Label::new(
+                    egui::RichText::new(status.as_str()).color(palette::text_muted().to_egui()),
+                )
+                .wrap(),
+            );
         });
         custom(
             ui,
@@ -601,6 +579,83 @@ impl SurfacesPanel {
             ui.ctx().request_repaint();
         }
     }
+}
+
+/// One row of the table, its five cells: shown (the Layers panel's eye), the name - typed into
+/// only while it is being renamed, a click picks the row and a double click renames it - the
+/// style, where it came from, and its triangles.
+fn table_row(
+    ui: &mut Ui,
+    at: usize,
+    row: &SurfaceRow,
+    current: Option<usize>,
+    renaming: &mut Option<(usize, String)>,
+    picked: &mut Option<usize>,
+    asked: &mut Vec<Asked>,
+) {
+    let tip = if row.shown {
+        "Shown: click to hide it (SURFACE HIDE)"
+    } else {
+        "Hidden: click to show it (SURFACE SHOW)"
+    };
+    if row_switch(ui, "LayerVisible", row.shown, tip).clicked() {
+        asked.push(Asked::Shown(at, !row.shown));
+    }
+    let mut typed_here = None;
+    if let Some((which, text)) = renaming
+        && *which == at
+    {
+        let edit = ui.text_edit_singleline(text);
+        if edit.lost_focus() {
+            typed_here = Some(text.clone());
+        } else {
+            edit.request_focus();
+        }
+    } else {
+        let name = ui.add(
+            egui::Label::new(row.name.as_str())
+                .sense(egui::Sense::click())
+                .selectable(false),
+        );
+        if name.double_clicked() {
+            *picked = Some(at);
+            asked.push(Asked::Rename);
+        } else if name.clicked() {
+            *picked = Some(at);
+        }
+    }
+    if let Some(typed) = typed_here {
+        *renaming = None;
+        asked.push(Asked::Renamed(at, typed));
+    }
+    let mut style = Choice::at(row.style);
+    let changed = if current == Some(at) {
+        choice(ui, "surfaceStyle", &row.style_texts, &mut style)
+            .on_hover_text("The style the surface is drawn in (SURFACE STYLE)")
+            .changed()
+    } else {
+        let mut changed = false;
+        egui::ComboBox::from_id_salt(("surfaceStyle", at))
+            .selected_text(row.style_text())
+            .show_ui(ui, |ui| {
+                for (index, text) in row.style_texts.iter().enumerate() {
+                    if ui
+                        .selectable_label(style.index == Some(index), text)
+                        .clicked()
+                    {
+                        style.index = Some(index);
+                        changed = true;
+                    }
+                }
+            });
+        changed
+    };
+    if changed && let Some(index) = style.index {
+        asked.push(Asked::Style(at, index));
+    }
+    ui.label(row.source.as_str())
+        .on_hover_text(row.source.as_str());
+    ui.label(format!("{}", row.triangles));
 }
 
 /// The panel's dock and its two ways in, for the window to install (installSurfacesPanel): the

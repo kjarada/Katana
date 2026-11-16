@@ -186,6 +186,8 @@ pub struct Menu {
     pub title: String,
     pub items: Vec<MenuItem>,
     pub tip: String,
+    /// The icon of the item that opens it as a submenu (menuAction()->setIcon), empty for none.
+    pub icon: &'static str,
 }
 
 impl Menu {
@@ -195,7 +197,14 @@ impl Menu {
             title: String::from(title),
             items: Vec::new(),
             tip: String::new(),
+            icon: "",
         }
+    }
+
+    /// The icon of the item that opens the menu, as a submenu shows it beside its title.
+    pub fn icon(mut self, icon: &'static str) -> Self {
+        self.icon = icon;
+        self
     }
 
     /// The status tip of the item that opens the menu: what a parent menu's report shows of it in
@@ -309,22 +318,53 @@ impl ToolBar {
     }
 }
 
-/// An action drawn as a menu item, named by its object name: its text, its shortcut beside it,
-/// checked when it is, and greyed when it is disabled. A click - a person's or a press - is
-/// `clicked()`; the caller triggers the action. A disabled item refuses a press as a disabled
-/// button does.
+/// The id of a menu item's gutter atom (theme::style::paint_menu_gutter).
+fn gutter_id() -> egui::Id {
+    egui::Id::new("katanaMenuGutter")
+}
+
+/// A menu item's button: its gutter (theme::style::MENU_GUTTER_WIDTH, a menu icon high) then
+/// `text`, unframed until the pointer is on it wherever it is drawn - a menu bar's popup gives its
+/// items egui's menu style, a popup of the window's own (shell::popup_menu) does not.
+fn item_button<'a>(text: impl Into<egui::WidgetText>) -> egui::Button<'a> {
+    use crate::theme::style::{MENU_GUTTER_WIDTH, MENU_ICON_SIZE};
+    egui::Button::new((
+        egui::Atom::custom(gutter_id(), egui::vec2(MENU_GUTTER_WIDTH, MENU_ICON_SIZE)),
+        text.into(),
+    ))
+    .frame_when_inactive(false)
+}
+
+/// An action drawn as a menu item, named by its object name: its icon and its text, its shortcut
+/// beside it, a tick before the icon while it is checked (theme::style::paint_menu_gutter), and
+/// greyed when it is disabled. A click - a person's or a press - is `clicked()`; the caller
+/// triggers the action. A disabled item refuses a press as a disabled button does.
 pub fn action_item(ui: &mut Ui, action: &Action) -> Response {
     let taken = take(ui, &action.name);
     ui.add_enabled_ui(action.enabled, |ui| {
         let text = action.display_text();
-        let mut button = match action.checked {
-            Some(checked) => egui::Button::selectable(checked, text),
-            None => egui::Button::new(text),
-        };
+        let mut button = item_button(text.clone());
         if let Some(shortcut) = &action.shortcut {
             button = button.shortcut_text(shortcut_text(shortcut));
         }
-        let mut response = ui.add(button);
+        let shown = button.atom_ui(ui);
+        if let Some(gutter) = shown.rect(gutter_id()) {
+            crate::theme::style::paint_menu_gutter(
+                ui.painter(),
+                gutter,
+                action.icon,
+                action.checked == Some(true),
+            );
+        }
+        let mut response = shown.response;
+        if let Some(checked) = action.checked {
+            // A screen reader hears a checkable item as checked or not, as egui's selectable
+            // button said it; the look is the gutter's tick.
+            let enabled = ui.is_enabled();
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, &text)
+            });
+        }
         if let Some(taken) = &taken {
             match &taken.posted.act {
                 Act::Press => {
@@ -360,6 +400,76 @@ pub fn action_item(ui: &mut Ui, action: &Action) -> Response {
         response
     })
     .inner
+}
+
+/// The items of `menu` drawn into a menu's `ui`, the one way every menu of the window is drawn
+/// (the menu bar's, a step's `--panel` of one, the plan view's shortcut menu, the sheet editor's):
+/// each action an `action_item`, a titled section its title (theme::menu_section), a separator a
+/// rule inset as the items are (theme::menu_separator), and a submenu an item with its icon, its
+/// title and an arrow, whose own items open beside it in one column that scrolls when it is
+/// taller than the screen (shell::dialog::menu_column). The action clicked, if any, is put in
+/// `chosen`; an action with no name (a list's "(none)") is never chosen.
+///
+/// The caller puts the menu's own items in a `menu_column` too, where its popup does not already
+/// (shell::popup_menu does).
+pub fn menu_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
+    // egui's menu look - items unframed, the pointer's item shaded - also where the popup is the
+    // window's own rather than egui's (shell::popup_menu, a step's menu), which gave every item a
+    // button's border.
+    egui::containers::menu::menu_style(ui.style_mut());
+    for item in &menu.items {
+        match item {
+            MenuItem::Action(action) => {
+                if action_item(ui, action).clicked() && !action.name.is_empty() {
+                    *chosen = Some(action.name.clone());
+                }
+            }
+            MenuItem::Section(title) => {
+                crate::theme::menu_section(ui, title);
+            }
+            MenuItem::Separator => {
+                crate::theme::menu_separator(ui);
+            }
+            MenuItem::Menu(submenu) => {
+                submenu_item(ui, submenu, |ui| {
+                    crate::shell::dialog::menu_column(ui, |ui| {
+                        menu_items_ui(ui, submenu, chosen);
+                    });
+                });
+            }
+        }
+    }
+}
+
+/// The item that opens `submenu` (egui's SubMenuButton in a menu, a MenuButton elsewhere, as
+/// `Ui::menu_button` chooses): its icon in the gutter its siblings have, its title, and the arrow
+/// egui draws a submenu with; `add` draws what it opens.
+fn submenu_item(ui: &mut Ui, submenu: &Menu, add: impl FnOnce(&mut Ui)) {
+    let button = item_button(submenu.title.replace('&', ""))
+        .right_text(egui::containers::menu::SubMenuButton::RIGHT_ARROW);
+    let response = if egui::containers::menu::is_in_menu(ui) {
+        egui::containers::menu::SubMenuButton::from_button(button)
+            .ui(ui, add)
+            .0
+    } else {
+        egui::containers::menu::MenuButton::from_button(button)
+            .ui(ui, add)
+            .0
+    };
+    // Where item_button lays its gutter out: its button padding in from the left, centred down.
+    let gutter = egui::Rect::from_min_size(
+        egui::pos2(
+            response.rect.left() + ui.spacing().button_padding.x,
+            response.rect.center().y - crate::theme::style::MENU_ICON_SIZE / 2.0,
+        ),
+        egui::vec2(
+            crate::theme::style::MENU_GUTTER_WIDTH,
+            crate::theme::style::MENU_ICON_SIZE,
+        ),
+    );
+    if ui.is_rect_visible(gutter) {
+        crate::theme::style::paint_menu_gutter(ui.painter(), gutter, submenu.icon, false);
+    }
 }
 
 #[cfg(test)]

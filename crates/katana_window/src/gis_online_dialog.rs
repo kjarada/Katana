@@ -1092,7 +1092,9 @@ impl OnlineDataDialog {
             rows: &mut Vec<String>,
         ) {
             for item in items.iter_mut().filter(|item| !item.hidden) {
-                let indent = "    ".repeat(depth);
+                // A level in by a step of a tree's indent, each row its expander's cell - a
+                // layer's empty - then its text.
+                let indent = ui.spacing().indent * depth as f32;
                 if item.is_layer() {
                     rows.push(format!("{} | {}", item.text, item.kind));
                     let chosen = current
@@ -1100,22 +1102,32 @@ impl OnlineDataDialog {
                         .is_some_and(|(provider, layer)| {
                             *provider == item.provider && *layer == item.layer
                         });
-                    let shown = format!("{indent}{}   {}", item.text, item.kind);
-                    if ui
-                        .selectable_label(chosen, shown)
-                        .on_hover_text(format!("{} {}", item.provider, item.layer))
-                        .clicked()
-                    {
+                    let shown = format!("{}   {}", item.text, item.kind);
+                    let picked = ui
+                        .horizontal(|ui| {
+                            ui.add_space(indent);
+                            crate::drive::controls::tree_expander(ui, None);
+                            ui.selectable_label(chosen, shown)
+                                .on_hover_text(format!("{} {}", item.provider, item.layer))
+                                .clicked()
+                        })
+                        .inner;
+                    if picked {
                         *current = Some((item.provider.clone(), item.layer.clone()));
                     }
                     continue;
                 }
                 rows.push(item.text.clone());
-                let mark = if item.expanded { "\u{25be}" } else { "\u{25b8}" };
-                if ui
-                    .selectable_label(false, format!("{indent}{mark} {}", item.text))
-                    .clicked()
-                {
+                let toggled = ui
+                    .horizontal(|ui| {
+                        ui.add_space(indent);
+                        let expander =
+                            crate::drive::controls::tree_expander(ui, Some(item.expanded));
+                        let name = ui.selectable_label(false, item.text.as_str());
+                        expander.clicked() || name.clicked()
+                    })
+                    .inner;
+                if toggled {
                     item.expanded = !item.expanded;
                 }
                 if item.expanded {
