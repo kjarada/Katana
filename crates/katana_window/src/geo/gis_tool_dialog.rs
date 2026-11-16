@@ -54,14 +54,13 @@ use katana_core::text::parse_finite_double;
 use katana_core::{Error, ErrorCode, Result};
 
 use super::geo_workbench::{GeoMenus, started_job};
+use super::terrain_dialog_parts::RunStatus;
 
 use crate::customisation::scope_filter_widget::ViewsFn;
 use crate::customisation::{
     DocumentWatcher, ScopeFilterView, ScopeFilterWidget, scope_filter_views,
 };
-use crate::drive::{
-    Action, LineOptions, button, label_as, line_with, primary,
-};
+use crate::drive::{Action, LineOptions, button, label_as, line_with, primary};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 use crate::shell::{DialogFrame, dialog};
 
@@ -179,9 +178,7 @@ pub fn gis_number_option(key: &str, text: &str, field: &str) -> Result<String> {
         return Ok(String::new());
     }
     if parse_finite_double(number).is_none() {
-        return Err(invalid(format!(
-            "{field} must be a number, not '{number}'"
-        )));
+        return Err(invalid(format!("{field} must be a number, not '{number}'")));
     }
     Ok(format!(" {key}={number}"))
 }
@@ -250,10 +247,9 @@ pub struct GisToolFrame {
     scope: Option<ScopeFilterWidget>,
     width: f32,
     command: String,
-    placeholder: String,
     ready: bool,
-    status: String,
-    status_error: bool,
+    /// What happened last, or why there is no line yet.
+    status: RunStatus,
     reply: String,
     /// The <d>Problems rows; None for a dialog that shows none.
     problems: Option<Vec<Vec<String>>>,
@@ -293,10 +289,8 @@ impl GisToolFrame {
             scope,
             width: if scoped { 950.0 } else { 690.0 },
             command: String::new(),
-            placeholder: String::new(),
             ready: false,
-            status: String::new(),
-            status_error: false,
+            status: RunStatus::default(),
             reply: String::new(),
             problems: None,
             problem: None,
@@ -386,12 +380,13 @@ impl GisToolFrame {
         &self.reply
     }
 
+    /// The last thing <d>Status said; "" when it says only why there is no line.
     pub fn status_text(&self) -> &str {
-        &self.status
+        self.status.said()
     }
 
     pub fn status_is_error(&self) -> bool {
-        self.status_error
+        self.status.is_error()
     }
 
     /// The line <d>Command shows; empty when the fields make none.
@@ -401,8 +396,7 @@ impl GisToolFrame {
 
     /// What <d>Status says; an error is shown as one.
     pub fn set_status(&mut self, text: &str, is_error: bool) {
-        self.status = String::from(text);
-        self.status_error = is_error;
+        self.status.set(text, is_error);
     }
 
     pub fn is_visible(&self) -> bool {
@@ -414,20 +408,21 @@ impl GisToolFrame {
         self.frame.is_modal()
     }
 
-    /// Shows the line the fields make now, or why there is none.
+    /// Shows the line the fields make now, or - in the status - why there is none (RunStatus).
     fn refresh_command(&mut self, made: &Result<String>) {
-        match made {
+        let why = match made {
             Ok(line) => {
                 self.command.clone_from(line);
-                self.placeholder.clear();
                 self.ready = true;
+                String::new()
             }
             Err(error) => {
                 self.command.clear();
-                self.placeholder = format!("nothing to run yet: {}", error.message);
                 self.ready = false;
+                format!("Nothing to run yet: {}", error.message)
             }
-        }
+        };
+        self.status.read_line(why);
     }
 }
 
@@ -508,7 +503,7 @@ pub trait GisTool {
     }
 
     fn status_text(&self) -> String {
-        self.frame().status.clone()
+        String::from(self.frame().status.said())
     }
 
     /// One frame of the dialog, when it is shown.
@@ -658,10 +653,14 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
                 scope.ui(ui);
             });
         }
+        // The fields' column is a form of its own (dialog::form_panel): its rows share a label
+        // column measured in it, and a second scope in it (Clip's boundary, Overlay's other
+        // layer) fills the column as its fields do. Taken for a column of a row, it kept the
+        // scope's own 400 and ended 350 short of the fields under it (Clip and Overlay).
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.x = dialog::GROUP_GAP;
             ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
-            tool.fields_ui(ui, host);
+            dialog::form_panel(ui, |ui| tool.fields_ui(ui, host));
             let frame = tool.frame_mut();
             if let Some(problems) = frame.problems.as_ref() {
                 let name = format!("{}Problems", frame.name);
@@ -684,14 +683,12 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
     ui.add_space(dialog::GROUP_GAP);
     let frame = tool.frame_mut();
     let prefix = frame.name.clone();
-    let placeholder = frame.placeholder.clone();
     dialog::labelled(ui, "Command", |ui| {
         line_with(
             ui,
             &format!("{prefix}Command"),
             &mut frame.command,
             LineOptions {
-                placeholder: &placeholder,
                 read_only: true,
                 width: Some(f32::INFINITY),
                 ..LineOptions::default()
@@ -717,10 +714,10 @@ fn footer<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui) -> (bool, bool) {
         &mut frame.reply,
         dialog::REPLY_ROWS,
     );
-    let status = frame.status.clone();
+    let (status, is_error) = frame.status.shown();
     let ready = frame.ready;
     // A refusal's words, never markup; red only for a refusal.
-    let text = RichText::new(status.as_str()).color(dialog::status_colour(frame.status_error));
+    let text = RichText::new(status.as_str()).color(dialog::status_colour(is_error));
     let (preview, (close, run)) = dialog::button_row(
         ui,
         |ui| {

@@ -10,7 +10,7 @@
 use katana_cad::CommandInterpreter;
 use katana_window::command_reference_dialog::{
     CommandReferenceDialog, ReferenceEntry, ReferenceSection, command_reference_sections,
-    reference_entries, summary_of, window_help_text,
+    reference_entries, summary_of, unwrapped, window_help_text,
 };
 use katana_window::drive::Harness;
 use katana_window::host::{Clipboard, Host, RecordingHost};
@@ -112,6 +112,45 @@ mod command_reference {
         assert_eq!(entries[1].title, "SHEETS");
         assert_eq!(entries[2].title, "SHEET NEW");
         assert!(entries[2].text.ends_with("  options  rect=x0,y0,x1,y1"));
+    }
+
+    #[test]
+    fn a_detail_is_given_to_egui_as_paragraphs_not_the_helps_hand_wrapped_lines() {
+        // The help wraps its lines by hand; egui wrapped them again at the dialog's width, and
+        // each hand-wrapped line ended in a word or two alone. A continuation of prose goes on
+        // the line before it; an indented line that starts a command ("FORWARD ...") stays a
+        // line of its own; a blank line parts paragraphs; a one-letter capital ("A") is prose.
+        let entry = [
+            "Survey    INVERSE p p   distance, bearing; height difference,",
+            "          slope distance and grade",
+            "          FORWARD p direction distance   a new point, one",
+            "          undo step",
+            "          A point's id may stand for p",
+        ]
+        .join("\n");
+        assert_eq!(
+            unwrapped(&entry),
+            [
+                "Survey    INVERSE p p   distance, bearing; height difference, slope distance \
+                 and grade",
+                "FORWARD p direction distance   a new point, one undo step A point's id may \
+                 stand for p",
+            ]
+            .join("\n")
+        );
+        let introduction = [
+            "Sheets on the command line. A sheet is its number or its",
+            "id; a view is its id.",
+            "",
+            "SHEETS [LIST] every sheet",
+        ]
+        .join("\n");
+        assert_eq!(
+            unwrapped(&introduction),
+            "Sheets on the command line. A sheet is its number or its id; a view is its id.\n\n\
+             SHEETS [LIST] every sheet"
+        );
+        assert_eq!(unwrapped(""), "");
     }
 
     #[test]

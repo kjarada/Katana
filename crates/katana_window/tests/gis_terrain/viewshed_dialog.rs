@@ -203,6 +203,9 @@ mod viewshed_dialog {
         for name in ["viewshedPick", "losPickObserver", "losPickTarget"] {
             assert!(!bench.enabled(name), "{name}");
         }
-        assert!(bench.placeholder("viewshedCommand").contains("Source"));
+        // Why there is no line is the footer's status; the Command field holds the line only,
+        // and shows no sentence in its place.
+        assert!(bench.text("viewshedStatus").contains("Source"));
+        assert!(bench.placeholder("viewshedCommand").is_empty());
     }
 }

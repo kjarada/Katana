@@ -179,9 +179,13 @@ mod terrain_shading_dialog {
     }
 
     #[test]
-    fn with_nothing_to_shade_run_is_off_and_the_command_says_why() {
+    fn with_nothing_to_shade_run_is_off_and_the_status_says_why() {
         let bench = bench(ran_host());
         assert!(!bench.enabled("shadingRun"));
-        assert!(bench.placeholder("shadingCommand").contains("Source"));
+        // Why there is no line is the footer's status; the Command field holds the line only,
+        // and shows no sentence in its place.
+        assert!(bench.text("shadingStatus").contains("Source"));
+        assert!(bench.text("shadingCommand").is_empty());
+        assert!(bench.placeholder("shadingCommand").is_empty());
     }
 }

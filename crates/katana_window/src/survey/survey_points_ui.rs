@@ -138,6 +138,8 @@ struct ExportForm {
     comment: String,
     decimals: String,
     unit: Choice,
+    /// Browse, beside the file, was pressed this frame.
+    browse: bool,
 }
 
 /// Survey > Export Survey Points... (surveyExportDialog).
@@ -178,6 +180,7 @@ impl SurveyExportDialog {
                 comment: String::new(),
                 decimals: String::from("3"),
                 unit: Choice::at(0),
+                browse: false,
             },
         }
     }
@@ -199,7 +202,8 @@ impl SurveyExportDialog {
             ui,
             &mut self.form,
             Self::draw_form,
-            &[ToolButton::new("browse", "Browse...")],
+            // Browse is beside the file it fills (draw_form), not a footer button.
+            &[],
             &[ToolButton::new("export", "Export")],
         );
         if let Some(text) = self.form.template_chosen.take() {
@@ -215,29 +219,31 @@ impl SurveyExportDialog {
         {
             self.form.columns = column_letters(&preset_columns(preset));
         }
-        match pressed {
-            Some("browse") => {
-                self.tool.pane.message.clear();
-                let status = self.browse(host);
-                self.tool.filler_done(host, status);
-            }
-            Some("export") => {
-                let report = self.export_points(host);
-                self.tool.verb_done(host, report);
-            }
-            _ => {}
+        if std::mem::take(&mut self.form.browse) {
+            self.tool.pane.message.clear();
+            let status = self.browse(host);
+            self.tool.filler_done(host, status);
+        }
+        if pressed == Some("export") {
+            let report = self.export_points(host);
+            self.tool.verb_done(host, report);
         }
     }
 
     fn draw_form(ui: &mut Ui, form: &mut ExportForm) {
         form_row(ui, "File:", |ui| {
+            let width = crate::shell::dialog::beside_a_button(ui, "Browse...");
+            crate::shell::dialog::fixed_fields(ui, width);
             field(
                 ui,
                 "file",
                 &mut form.file,
                 "the file to write",
                 "The file to write; it is replaced whole",
-            )
+            );
+            if drive::button(ui, "browse", "Browse...").clicked() {
+                form.browse = true;
+            }
         });
         form_row(ui, "Points:", |ui| {
             choice_of(
@@ -689,7 +695,9 @@ impl SurveyPointsDock {
                         .show(ui, |ui| {
                             for (column, title) in POINT_COLUMNS.iter().enumerate() {
                                 let sorted = match self.sort {
-                                    Some((sorted, ascending)) if sorted == column => Some(ascending),
+                                    Some((sorted, ascending)) if sorted == column => {
+                                        Some(ascending)
+                                    }
                                     _ => None,
                                 };
                                 if sort_header(ui, title, sorted).clicked() {
@@ -811,9 +819,29 @@ fn sort_header(ui: &mut Ui, title: &str, sorted: Option<bool>) -> Response {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct ReportForm {
     scope: String,
+    /// The report as text (katana_cad's format_point_report): what Copy copies.
     report: String,
+    /// The same points as the table shows them, a row each (REPORT_HEADERS).
+    rows: Vec<Vec<String>>,
     pressed: Option<&'static str>,
 }
+
+/// The Point Report table's columns: the text report's, in its order.
+const REPORT_HEADERS: [&str; 7] = [
+    "Point",
+    "Easting",
+    "Northing",
+    "Elevation",
+    "Code",
+    "Description",
+    "Source file",
+];
+
+/// The Point Report's decimals: the C++ default, which the text report and the CSV use too.
+const REPORT_DECIMALS: i32 = 3;
+
+/// The Point Report's body width: seven columns, a description and a file name among them.
+const REPORT_WIDTH: f32 = 760.0;
 
 /// Survey > Point Report...: the points - the selected survey points when any are selected, all
 /// of them otherwise - as a table of text, with Copy and Save As CSV. Non-modal, rebuilt each
@@ -836,7 +864,7 @@ impl Default for SurveyPointReportDialog {
 impl SurveyPointReportDialog {
     pub fn new() -> Self {
         Self {
-            frame: DialogFrame::new("surveyPointReportDialog", "Point Report"),
+            frame: DialogFrame::new("surveyPointReportDialog", "Point Report").width(REPORT_WIDTH),
             open: false,
             refresh_pending: false,
             form: ReportForm::default(),
@@ -874,16 +902,29 @@ impl SurveyPointReportDialog {
                      Coordinates to 3 decimals; a blank elevation is a point with none.",
                 );
                 coloured_label(ui, "scope", &form.scope, palette::text().to_egui());
-                drive::text_with(
+                // The points in the window's one table look: a fixed-pitch text table in a box
+                // wrapped its header over two lines at the dialog's width. The text is still what
+                // Copy copies, and still there for a driver ("report"), off the dialog.
+                crate::shell::dialog::table_or_empty(
                     ui,
-                    "report",
-                    &mut form.report,
-                    TextOptions {
-                        read_only: true,
-                        rows: 16,
-                        monospace: true,
-                    },
+                    "reportTable",
+                    &REPORT_HEADERS,
+                    &form.rows,
+                    None,
+                    "No survey points to list.",
                 );
+                super::survey_dialogs::offstage(ui, "reportText", |ui| {
+                    drive::text_with(
+                        ui,
+                        "report",
+                        &mut form.report,
+                        TextOptions {
+                            read_only: true,
+                            rows: 16,
+                            monospace: true,
+                        },
+                    );
+                });
             },
             |ui, form| {
                 // Refresh, Copy and Save at the left, what they do to the report; Close at the right.
@@ -947,7 +988,23 @@ impl SurveyPointReportDialog {
         } else {
             format!("All {} survey point(s) in the drawing.", self.points.len())
         };
-        self.form.report = format_point_report(&self.points, 3);
+        self.form.report = format_point_report(&self.points, REPORT_DECIMALS);
+        let fixed = |value: f64| katana_core::text::format_fixed(value, REPORT_DECIMALS);
+        self.form.rows = self
+            .points
+            .iter()
+            .map(|point| {
+                vec![
+                    point.id.clone(),
+                    fixed(point.easting),
+                    fixed(point.northing),
+                    point.elevation.map(fixed).unwrap_or_default(),
+                    point.code.clone(),
+                    point.description.clone(),
+                    point.source_file.clone(),
+                ]
+            })
+            .collect();
         host.log(
             &format!("Point Report: {} point(s)", self.points.len()),
             false,
@@ -966,7 +1023,10 @@ impl SurveyPointReportDialog {
             return;
         };
         let path = String::from_utf8_lossy(&path_to_utf8(&path)).into_owned();
-        if let Err(error) = write_file(&path, point_report_csv(&self.points, 3).as_bytes()) {
+        if let Err(error) = write_file(
+            &path,
+            point_report_csv(&self.points, REPORT_DECIMALS).as_bytes(),
+        ) {
             host.log(&format!("Point Report: {}", error.describe()), true);
             return;
         }

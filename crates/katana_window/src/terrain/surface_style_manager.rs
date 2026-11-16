@@ -223,8 +223,13 @@ fn read_colour(field: &str, what: &str, document: Option<&Document>) -> Result<E
 }
 
 fn read_real(field: &str, what: &str) -> Result<f64> {
-    parse_finite_double(field.trim())
-        .ok_or_else(|| make_error(ErrorCode::ParseFailure, format!("{what} is a number"), field))
+    parse_finite_double(field.trim()).ok_or_else(|| {
+        make_error(
+            ErrorCode::ParseFailure,
+            format!("{what} is a number"),
+            field,
+        )
+    })
 }
 
 fn read_optional_real(field: &str, what: &str) -> Result<Option<f64>> {
@@ -771,15 +776,15 @@ impl SurfaceStyleManagerDialog {
             .iter()
             .map(|named| named.name.clone())
             .collect();
-        self.surface.index = self
-            .surfaces
-            .iter()
-            .position(|name| *name == was)
-            .or(if self.surfaces.is_empty() {
-                None
-            } else {
-                Some(0)
-            });
+        self.surface.index =
+            self.surfaces
+                .iter()
+                .position(|name| *name == was)
+                .or(if self.surfaces.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
         // Keep unapplied edits while the style they were made to is as it was; else the form
         // shows the drawing's style.
         match self.chosen(document).cloned() {
@@ -1116,19 +1121,23 @@ impl SurfaceStyleManagerDialog {
             .max_height(LIST_HEIGHT)
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                for (at, row) in styles.iter().enumerate() {
-                    let mut text = RichText::new(row.name.as_str());
-                    if row.is_default {
-                        text = text.strong();
+                // Top down and justified, so a row spans the list as a table's does: a chosen
+                // style was a pill the size of its name.
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                    for (at, row) in styles.iter().enumerate() {
+                        let mut text = RichText::new(row.name.as_str());
+                        if row.is_default {
+                            text = text.strong();
+                        }
+                        let mut item = ui.selectable_label(current == Some(at), text);
+                        if !row.description.is_empty() {
+                            item = item.on_hover_text(row.description.as_str());
+                        }
+                        if item.clicked() {
+                            picked = Some(at);
+                        }
                     }
-                    let mut item = ui.selectable_label(current == Some(at), text);
-                    if !row.description.is_empty() {
-                        item = item.on_hover_text(row.description.as_str());
-                    }
-                    if item.clicked() {
-                        picked = Some(at);
-                    }
-                }
+                });
             })
             .inner_rect;
         if let Some(at) = picked
@@ -1372,7 +1381,8 @@ impl SurfaceStyleManagerDialog {
 
     fn contours_page(&mut self, ui: &mut Ui) -> bool {
         let form = &mut self.form;
-        let mut edited = check(ui, "surfaceStyleContours", "Contours", &mut form.contours).changed();
+        let mut edited =
+            check(ui, "surfaceStyleContours", "Contours", &mut form.contours).changed();
         edited |= row(ui, "Interval", |ui| {
             line(ui, "surfaceStyleInterval", &mut form.interval).changed()
         });
@@ -1541,13 +1551,8 @@ impl SurfaceStyleManagerDialog {
     fn assign_row(&mut self, ui: &mut Ui, host: &mut dyn Host, asked: &mut Option<Asked>) {
         let style_chosen = self.chosen(host.document()).is_some();
         crate::shell::dialog::labelled(ui, "Draw surface", |ui| {
-            choice(
-                ui,
-                "surfaceStyleSurface",
-                &self.surfaces,
-                &mut self.surface,
-            )
-            .on_hover_text("The drawing's surfaces");
+            choice(ui, "surfaceStyleSurface", &self.surfaces, &mut self.surface)
+                .on_hover_text("The drawing's surfaces");
             let ready = style_chosen && self.surface.index.is_some();
             let assign = ui
                 .add_enabled_ui(ready, |ui| {

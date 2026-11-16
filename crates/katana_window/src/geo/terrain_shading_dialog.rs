@@ -41,6 +41,7 @@ use katana_terrain::colour_ramp_names;
 
 use super::terrain_dialog_parts::{
     Framed, WordChoice, command_field, field, invalid, number_of, row, run_buttons, show_framed,
+    why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -156,18 +157,14 @@ pub fn shading_line(form: &ShadingForm) -> Result<String> {
         let low = form.range_min.trim();
         let high = form.range_max.trim();
         if low.is_empty() != high.is_empty() {
-            return Err(invalid(
-                "Range: both ends, or neither for the data's own",
-            ));
+            return Err(invalid("Range: both ends, or neither for the data's own"));
         }
         if !low.is_empty() {
             if !number_list(low, 1, false)
                 || !number_list(high, 1, false)
                 || !(number_of(high) > number_of(low))
             {
-                return Err(invalid(
-                    "Range: two numbers, the low end before the high",
-                ));
+                return Err(invalid("Range: two numbers, the low end before the high"));
             }
             line.push_str(&format!(" range={low},{high}"));
         }
@@ -341,11 +338,8 @@ impl TerrainShadingDialog {
             );
             return;
         }
-        let chosen = get_save_file_name(
-            "Save the Shading",
-            "shading.tif",
-            "GeoTIFF (*.tif *.tiff)",
-        );
+        let chosen =
+            get_save_file_name("Save the Shading", "shading.tif", "GeoTIFF (*.tif *.tiff)");
         if chosen.is_empty() {
             return;
         }
@@ -498,11 +492,14 @@ impl Framed for TerrainShadingDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
-        let ready = self.command().is_ok();
+        let made = self.command();
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "shadingReply", self.runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("shadingPreview", ready)),
+            ("shadingStatus", &why),
             ("shadingRun", "Shade", ready),
             Some("shadingClose"),
         );

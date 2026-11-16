@@ -37,7 +37,7 @@ use katana_core::Result;
 
 use super::terrain_dialog_parts::{
     Framed, WordChoice, command_field, field, host_views, invalid, number_of, row, run_buttons,
-    show_framed, without_blanks,
+    show_framed, why_no_line, without_blanks,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -349,11 +349,14 @@ impl Framed for SlopeAnalysisDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
-        let ready = self.command().is_ok();
+        let made = self.command();
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "slopeReply", self.runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("slopePreview", ready)),
+            ("slopeStatus", &why),
             ("slopeRun", "Analyse", ready),
             Some("slopeClose"),
         );

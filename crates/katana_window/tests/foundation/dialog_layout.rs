@@ -17,8 +17,8 @@ use katana_window::drive::{self, ControlKind, LineOptions};
 use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
     BODY_WIDTH, FOOTER_BUTTON_WIDTH, FORM_SPACING, LABEL_WIDTH, PADDING, REPLY_ROWS, SECTION_GAP,
-    beside_a_button, button_row, fixed_fields, form_panel, labelled, note, reply, row_with_check,
-    row_with_text, section, text_value,
+    beside_a_button, body_span, button_row, fixed_fields, form_panel, labelled, note, reply,
+    row_with_check, row_with_text, section, status, text_value,
 };
 
 use crate::window_support::offscreen_harness;
@@ -519,6 +519,162 @@ mod dialog_layout {
             caption.center().y,
             field.center().y
         );
+    }
+
+    #[test]
+    fn a_field_disabled_inside_a_labelled_row_is_level_with_its_label() {
+        // The scope and filter widget's Layer, Style, Colour and Text fields are each drawn in
+        // `add_enabled_ui` inside their row, to grey one a tool cannot filter by: the child Ui
+        // must not move the field off its label's line.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("enabledDialog", "Enabled");
+        let mut values = [String::new(), String::new()];
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut values, |ui, values| {
+                    let [greyed, plain] = values;
+                    row_with_text(
+                        ui,
+                        "Layer",
+                        |ui| {
+                            drive::label(ui, "greyedCaption", "Layer");
+                        },
+                        |ui| ui.add_enabled_ui(false, |ui| drive::line(ui, "greyed", greyed)),
+                    );
+                    row_with_text(
+                        ui,
+                        "Property",
+                        |ui| {
+                            drive::label(ui, "plainCaption", "Property");
+                        },
+                        |ui| drive::line(ui, "plain", plain),
+                    );
+                });
+            })
+            .expect("the dialog is drawn");
+        let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
+        for (caption, field) in [("greyedCaption", "greyed"), ("plainCaption", "plain")] {
+            let (caption, field) = (control(caption), control(field));
+            assert!(
+                (caption.center().y - field.center().y).abs() <= HALF_A_POINT,
+                "the label's middle is at {} and its field's at {}",
+                caption.center().y,
+                field.center().y
+            );
+        }
+    }
+
+    #[test]
+    fn rows_reading_the_same_word_in_two_columns_are_each_level_with_their_fields() {
+        // Global Modify: the scope and filter widget's "Layer" row (a label of words) in the
+        // left column and the Modify side's "Layer" tick (a check box) in the right. egui gives
+        // sibling Uis one id, so both rows kept their label's height in one place: the words
+        // stood 5 points above their field and the tick 4 points below its (the second look
+        // audit's N3).
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("twoColumnDialog", "Two Columns").width(800.0);
+        let mut values = [String::new(), String::new()];
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut values, |ui, values| {
+                    let [filter, modify] = values;
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(380.0);
+                            row_with_text(
+                                ui,
+                                "Layer",
+                                |ui| {
+                                    drive::label(ui, "filterCaption", "Layer");
+                                },
+                                |ui| {
+                                    ui.add_enabled_ui(true, |ui| {
+                                        drive::line(ui, "filterLayer", filter)
+                                    })
+                                },
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            let mut on = false;
+                            row_with_check(
+                                ui,
+                                "Layer",
+                                |ui| {
+                                    drive::check(ui, "setLayer", "Layer", &mut on);
+                                },
+                                |ui| drive::line(ui, "modifyLayer", modify),
+                            );
+                        });
+                    });
+                });
+            })
+            .expect("the dialog is drawn");
+        let control = |name: &str| harness.control(name).expect("each control is drawn").rect;
+        for (label, field) in [("filterCaption", "filterLayer"), ("setLayer", "modifyLayer")] {
+            let (label, field) = (control(label), control(field));
+            assert!(
+                (label.center().y - field.center().y).abs() <= HALF_A_POINT,
+                "the label's middle is at {} and its field's at {}",
+                label.center().y,
+                field.center().y
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_says_how_wide_it_was_drawn_when_a_page_is_wider_than_its_width() {
+        // A tab strip's rule spans the body (drive::controls::tabs): it ran across the width the
+        // body is laid out at, and stopped short of a page wider than that.
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("spanDialog", "Span").width(320.0);
+        let seen = std::cell::Cell::new(None);
+        let wide = 600.0;
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            frame.show_body(&ctx, &mut (), |ui, _| {
+                seen.set(body_span(ui).map(|span| (span, ui.max_rect().x_range())));
+                ui.allocate_exact_size(egui::vec2(wide, 24.0), egui::Sense::hover());
+            });
+        };
+        harness.show(&mut draw).expect("the dialog is drawn");
+        harness.show(&mut draw).expect("the dialog is drawn again");
+        let (span, laid_out) = seen.get().expect("a body's span is known after its first pass");
+        assert!(
+            (span.span() - wide).abs() <= HALF_A_POINT,
+            "the body drew {} across",
+            span.span()
+        );
+        assert!((span.min - laid_out.min).abs() <= HALF_A_POINT);
+        assert!(laid_out.span() < wide, "the premise: laid out narrower than drawn");
+    }
+
+    #[test]
+    fn a_status_is_a_named_label_reading_its_text() {
+        let mut harness = offscreen_harness();
+        let mut frame = DialogFrame::new("statusDialog", "Status");
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut (), |ui, _| {
+                    status(ui, "runStatus", "nothing to run yet", false);
+                    status(ui, "runRefusal", "no surface to read", true);
+                });
+            })
+            .expect("the dialog is drawn");
+        assert_eq!(
+            harness.control("runStatus").expect("drawn").kind,
+            ControlKind::Label
+        );
+        assert_eq!(harness.report("runStatus").expect("read"), "nothing to run yet");
+        assert_eq!(harness.report("runRefusal").expect("read"), "no surface to read");
+        // Outside a dialog's body there is no body to span.
+        let mut outside = None;
+        harness
+            .show(|ui| outside = Some(body_span(ui)))
+            .expect("drawn");
+        assert_eq!(outside, Some(None));
     }
 
     #[test]

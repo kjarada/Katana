@@ -10,7 +10,7 @@ use std::cell::Cell;
 
 use egui::epaint::{ClippedShape, ColorMode};
 use egui::{Modifiers, Order, PointerButton, Pos2, Rect, Shape, Ui};
-use katana_window::drive::{self, Choice, Harness, LineOptions};
+use katana_window::drive::{self, Choice, Harness, LineOptions, SpinRange};
 use katana_window::theme::palette;
 use katana_window::theme::style::apply;
 
@@ -98,6 +98,82 @@ mod control_look {
             field_text.left() - field.left(),
             list_text.left() - list.left()
         );
+    }
+
+    #[test]
+    fn a_number_box_is_a_fields_well_with_its_text_where_a_fields_is() {
+        // The second look audit (N4): egui draws a DragValue as a button, the raised grey of a
+        // key with its text centred across it, so every number box of every form (Layers' Line
+        // weight, Contours' Major every, Text Styles') read as a button beside the fields round
+        // it. A number box is a field's well, a control high, its text centred in that height
+        // and set in as a field's is - a decimal box and a whole one alike.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let mut value = String::from("2.50 mm");
+        let mut size = 2.5;
+        let mut count: i64 = 5;
+        let mut draw = |ui: &mut Ui| {
+            ui.spacing_mut().text_edit_width = 200.0;
+            drive::line_with(ui, "field", &mut value, LineOptions::default());
+            drive::spin(
+                ui,
+                "decimal",
+                &mut size,
+                SpinRange::new(0.0, 100.0, 0.1, 2).with_suffix(" mm"),
+            );
+            drive::whole(ui, "count", &mut count, 0..=99);
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let field = harness.control("field").expect("the field").rect;
+        let field_text = text_row(&shapes, field);
+        let input = palette::input().to_egui();
+        let raised = palette::raised().to_egui();
+        for name in ["decimal", "count"] {
+            let control = harness.control(name).expect("the number box").rect;
+            assert!(
+                (control.height() - field.height()).abs() <= HALF_A_POINT,
+                "{name} is {} high beside a field {} high",
+                control.height(),
+                field.height()
+            );
+            let drawn = inside(&shapes, control);
+            let wells: Vec<Rect> = drawn
+                .iter()
+                .filter_map(|shape| match shape {
+                    Shape::Rect(rect) if rect.fill == input => Some(rect.rect),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(wells.len(), 1, "{name}: one well: {wells:?}");
+            assert!(
+                (wells[0].width() - control.width()).abs() <= HALF_A_POINT,
+                "{name}: the well {:?} spans the box {control:?}",
+                wells[0]
+            );
+            assert!(
+                !drawn
+                    .iter()
+                    .any(|shape| matches!(shape, Shape::Rect(rect) if rect.fill == raised)),
+                "{name}: not a button's raised grey"
+            );
+            let text = text_row(&shapes, control);
+            assert!(
+                (text.center().y - control.center().y).abs() <= 1.0,
+                "{name}: the text {text:?} is not centred in {control:?}"
+            );
+            assert!(
+                ((text.left() - control.left()) - (field_text.left() - field.left())).abs() <= 1.0,
+                "{name}: the text starts {} in, a field's {}",
+                text.left() - control.left(),
+                field_text.left() - field.left()
+            );
+        }
+        // What it holds and reports is as it was.
+        assert_eq!(harness.control("decimal").expect("drawn").value, "2.50");
+        assert_eq!(harness.control("count").expect("drawn").value, "5");
     }
 
     #[test]

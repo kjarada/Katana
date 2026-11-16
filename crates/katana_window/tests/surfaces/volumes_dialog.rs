@@ -190,26 +190,28 @@ mod volumes_dialog {
     }
 
     #[test]
-    fn measure_stands_level_with_the_line_it_runs_and_as_tall_as_it() {
-        // The look of 2026-11-16: a button beside its field in a form's row is one band with it,
-        // its top and bottom the field's. Measure stood shorter than the command beside it.
-        // In the window's theme (theme::style::apply), whose controls are CONTROL_HEIGHT high:
-        // the harness's own style is egui's. Within half a point: egui rounds a widget's
-        // rectangle to the pixel grid (the offscreen screen's one pixel a point).
-        const HALF_A_POINT: f32 = 0.5;
+    fn measure_is_the_footers_last_button_after_close() {
+        // The design's one footer (shell::dialog::button_row): Close, then the dialog's act last.
+        // Measure stood beside the line in the body, below the fold, with only Close in the
+        // footer; the test that held it level with that line went with it.
         let mut bench = bench(wedge_host());
         katana_window::theme::style::apply(bench.harness.context());
         bench.draw();
-        let field = bench.control("volumesCommand").rect;
-        let run = bench.control("volumesRun").rect;
+        let run = bench.control("volumesRun");
+        let close = bench.control("volumesClose");
+        assert_eq!(run.part, Part::Footer);
         assert!(
-            (field.top() - run.top()).abs() <= HALF_A_POINT
-                && (field.bottom() - run.bottom()).abs() <= HALF_A_POINT,
-            "the command spans {:?} and Measure {:?}",
-            field.y_range(),
-            run.y_range()
+            run.rect.left() > close.rect.right(),
+            "Measure {:?} is after Close {:?}",
+            run.rect,
+            close.rect
         );
-        assert!(run.left() > field.right(), "Measure is after the line it runs");
+        assert!(
+            (run.rect.top() - close.rect.top()).abs() <= 0.5,
+            "one row: Measure {:?}, Close {:?}",
+            run.rect,
+            close.rect
+        );
     }
 
     #[test]
@@ -382,10 +384,7 @@ mod volumes_dialog {
         bench.fill("volumesEnvelopeName", "");
         bench.press("volumesEnvelope");
         assert_eq!(bench.host.lines().len(), 2);
-        assert_eq!(
-            bench.host.lines()[1],
-            "SURFACE ENVELOPE ground design MAX"
-        );
+        assert_eq!(bench.host.lines()[1], "SURFACE ENVELOPE ground design MAX");
         assert!(
             bench
                 .host
@@ -432,7 +431,10 @@ mod volumes_dialog {
         assert_eq!(bench.items("volumesAlignment").len(), 1);
 
         // A surface made by a typed line is offered after a turn of the event loop.
-        run(&mut bench.host, "SURFACE DIFFERENCE ground design NAME raised");
+        run(
+            &mut bench.host,
+            "SURFACE DIFFERENCE ground design NAME raised",
+        );
         bench.draw();
         assert!(offers(&bench, "volumesTop", "raised"));
         assert!(offers(&bench, "volumesBase", "raised"));
@@ -494,7 +496,10 @@ mod volumes_dialog {
         let mut bench = bench(wedge_host());
         set_method(&mut bench, VolumeMethod::Surfaces);
         let scratch = Scratch::new("volumes_dialog_csv");
-        let file = scratch.file("katana_volumes_dialog.csv", "OLD TABLE FROM AN EARLIER RUN\r\n");
+        let file = scratch.file(
+            "katana_volumes_dialog.csv",
+            "OLD TABLE FROM AN EARLIER RUN\r\n",
+        );
         // The C++'s generic_string: forward slashes on every system.
         let path = file.to_string_lossy().replace('\\', "/");
         bench.fill("volumesCsvPath", &path);
@@ -584,7 +589,11 @@ mod volumes_dialog {
                     .run(|ui| dialog.draw(ui, &mut *host))
                     .unwrap_or_else(|problem| panic!("{problem}"));
             }
-            assert_eq!(bench.control("volumesClose").rect, resting, "scrolled to {name}");
+            assert_eq!(
+                bench.control("volumesClose").rect,
+                resting,
+                "scrolled to {name}"
+            );
         }
     }
 }

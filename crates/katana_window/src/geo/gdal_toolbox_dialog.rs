@@ -239,7 +239,10 @@ impl GdalToolboxDialog {
     pub fn new(host: &mut dyn Host) -> Self {
         Self {
             watcher: DocumentWatcher::new(host.document()),
-            frame: DialogFrame::new("gdalToolboxDialog", "GDAL Toolbox"),
+            // The catalogue and the algorithm's groups side by side: at the frame's 520 they ran past
+            // the tabs' rule, which stopped at 530 of 645.
+            frame: DialogFrame::new("gdalToolboxDialog", "GDAL Toolbox")
+                .width(crate::shell::dialog::TWO_COLUMN_WIDTH),
             visible: false,
             tab: 0,
             search: String::new(),
@@ -561,7 +564,10 @@ impl GdalToolboxDialog {
                 offered.push(("SURFACE", "Surface"));
             }
             self.output_words = offered.iter().map(|(word, _)| *word).collect();
-            self.output_texts = offered.iter().map(|(_, text)| String::from(*text)).collect();
+            self.output_texts = offered
+                .iter()
+                .map(|(_, text)| String::from(*text))
+                .collect();
             self.output_kind = Choice::at(0);
         }
         let has_output = output.is_some();
@@ -810,9 +816,8 @@ impl GdalToolboxDialog {
             kind_changed = false;
         }
         row(ui, "Name:", |ui| {
-            line(ui, "gdalOutput.name", &mut self.output_name).on_hover_text(
-                "The layer's path, the reference raster's name, or the file's path",
-            );
+            line(ui, "gdalOutput.name", &mut self.output_name)
+                .on_hover_text("The layer's path, the reference raster's name, or the file's path");
         });
         let to_file = self.output_word() == "FILE";
         row(ui, "Format:", |ui| {
@@ -823,9 +828,7 @@ impl GdalToolboxDialog {
                     &self.output_formats,
                     &mut self.output_format,
                 )
-                .on_hover_text(
-                    "FORMAT: the file's driver; blank to choose it from the extension",
-                );
+                .on_hover_text("FORMAT: the file's driver; blank to choose it from the extension");
             });
         });
         ui.add_enabled_ui(to_file, |ui| {
@@ -986,9 +989,18 @@ impl GdalToolboxDialog {
             self.last_kind = kind;
         }
         let made = gdal_toolbox_line(&self.form());
-        if self.panel.ui(ui, host, &made).is_some() {
+        self.panel.command_ui(ui, &made);
+    }
+
+    /// The Algorithm page's reply, once there is one, and its row of buttons, in the dialog's
+    /// footer: Close only while the page is in front (`close`). Whether Close was clicked.
+    fn algorithm_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
+        let made = gdal_toolbox_line(&self.form());
+        let (finished, closed) = self.panel.footer_ui(ui, host, &made, close);
+        if finished.is_some() {
             self.reload_wanted = true;
         }
+        closed
     }
 }
 
@@ -1027,8 +1039,9 @@ impl Framed for GdalToolboxDialog {
         &mut self.frame
     }
 
-    // Each tab holds its own Run and Reply, as the C++ pages do, so the dialog has no footer of
-    // its own and everything scrolls together.
+    // Each tab holds its own Run and Reply, as the C++ pages do; the page in front shows them in
+    // the dialog's footer (Preview and the status at the left, Close, then Run in the accent),
+    // where they were in the body over an empty footer band.
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         tabs(
             ui,
@@ -1041,15 +1054,32 @@ impl Framed for GdalToolboxDialog {
         if self.tab == 0 {
             self.algorithm_page(ui, host);
             offstage(ui, "gdalToolboxPipelinePage", |ui| {
-                self.pipeline.ui(ui, host);
+                self.pipeline.page_ui(ui, host);
             });
         } else {
             offstage(ui, "gdalToolboxAlgorithmPage", |ui| {
                 self.algorithm_page(ui, host);
             });
-            self.pipeline.ui(ui, host);
+            self.pipeline.page_ui(ui, host);
         }
     }
 
-    fn footer(&mut self, _ui: &mut Ui, _host: &mut dyn Host) {}
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The page not in front keeps its buttons and reply, off the dialog, as its fields are.
+        let closed = if self.tab == 0 {
+            let closed = self.algorithm_footer(ui, host, Some("gdalToolboxClose"));
+            offstage(ui, "gdalToolboxPipelineFooter", |ui| {
+                self.pipeline.footer_ui(ui, host, None)
+            });
+            closed
+        } else {
+            offstage(ui, "gdalToolboxAlgorithmFooter", |ui| {
+                self.algorithm_footer(ui, host, None)
+            });
+            self.pipeline.footer_ui(ui, host, Some("gdalToolboxClose"))
+        };
+        if closed {
+            self.hide();
+        }
+    }
 }

@@ -68,6 +68,9 @@ pub struct Panels {
     pub coordinates: String,
     pub snap: String,
     pub frame_stats: String,
+    /// What the command log was last laid out for - its blocks, its line's height and its own
+    /// height - so a change of any scrolls it to its last line (command_line_ui).
+    pub log_laid_out: (usize, f32, f32),
 }
 
 impl Default for Panels {
@@ -99,6 +102,7 @@ impl Default for Panels {
             coordinates: String::from("0.0000, 0.0000"),
             snap: String::new(),
             frame_stats: String::new(),
+            log_laid_out: (0, 0.0, 0.0),
         }
     }
 }
@@ -499,10 +503,16 @@ impl MainWindow {
         }
         for (column, rect) in [(left, geometry.left_bars), (right, geometry.right_bars)] {
             let mut y = rect.min.y;
-            for bar in column {
-                let strip = self.strip_of(bar, true, icon_size);
-                let natural = natural_width(&strip.items, icon_size) as f32;
-                let room = natural.min(rect.max.y - y).max(0.0);
+            let strips: Vec<Strip> = column
+                .iter()
+                .map(|bar| self.strip_of(bar, true, icon_size))
+                .collect();
+            let naturals: Vec<i32> = strips
+                .iter()
+                .map(|strip| natural_width(&strip.items, icon_size))
+                .collect();
+            let rooms = layout::column_rooms(&naturals, rect.height(), layout::collapsed_bar());
+            for (strip, room) in strips.iter().zip(rooms) {
                 if room <= 0.0 {
                     continue;
                 }
@@ -510,7 +520,7 @@ impl MainWindow {
                     Pos2::new(rect.min.x, y),
                     Vec2::new(bar_breadth(icon_size), room),
                 );
-                self.strip_ui(ui, &strip, at, room, &[]);
+                self.strip_ui(ui, strip, at, room, &[]);
                 y += room;
             }
         }
@@ -657,6 +667,19 @@ impl MainWindow {
                 }
                 "surfaceEditActive" => {
                     ui_state.surface_edit.active_ui(&mut child, exec);
+                    // An empty choice says what it is waiting for, as a field's placeholder
+                    // does: a blank box on the toolbar read as a control that failed to fill
+                    // (the second look audit's T18). Painted, so the choice keeps its value "".
+                    if ui_state.surface_edit.active_text().is_empty() {
+                        let place = child.min_rect();
+                        child.painter().text(
+                            egui::pos2(place.left() + controls::FIELD_INSET, place.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            "No surface",
+                            egui::TextStyle::Body.resolve(child.style()),
+                            palette::text_muted().to_egui(),
+                        );
+                    }
                     false
                 }
                 _ => false,
@@ -690,13 +713,12 @@ impl MainWindow {
         if let Some(rect) = geometry.lower_left {
             let tabs = self.ui.docks.lower_left_tabs();
             let front = self.ui.docks.lower_left().unwrap_or("ReferenceDataDock");
-            let mut body = rect;
-            if tabs.len() > 1 {
-                // A tab strip over the group, its tabs the docks' titles, drawn as every tab
-                // strip of the window is: the one in front over the accent's bar, the others
-                // muted (drive::controls::tabs). They were egui's selectable labels, blue pills.
-                let strip = Rect::from_min_size(rect.min, Vec2::new(rect.width(), crate::view_workspace::TAB_STRIP));
-                body.min.y = strip.max.y;
+            // Two docks in the one place: their tabs are the title of its bar, the one in front
+            // over the accent's bar and the others muted (drive::controls::title_tabs), as an IDE
+            // draws a tabbed panel. A strip of tabs over the bar, whose title then said the tab in
+            // front again, was two headings for one panel (the second look audit's N7).
+            let mut chosen: Option<bool> = None;
+            let tab_titles = |ui: &mut Ui| {
                 let titles: Vec<&str> = tabs
                     .iter()
                     .map(|tab| {
@@ -708,29 +730,26 @@ impl MainWindow {
                     })
                     .collect();
                 let mut current = tabs.iter().position(|tab| *tab == front).unwrap_or(0);
-                let changed = ui
-                    .scope_builder(
-                        UiBuilder::new()
-                            .max_rect(strip)
-                            .layout(Layout::left_to_right(Align::Center)),
-                        |ui| {
-                            ui.set_clip_rect(strip.intersect(ui.clip_rect()));
-                            controls::tabs(ui, "lowerLeftDockTabs", &titles, &mut current).changed()
-                        },
-                    )
-                    .inner;
+                // The tabs stand on the bar's border, its last pixel row.
+                ui.spacing_mut().interact_size.y = crate::dock_chrome::BAR_HEIGHT - 1.0;
+                let changed =
+                    controls::title_tabs(ui, "lowerLeftDockTabs", &titles, &mut current).changed();
                 if changed && let Some(tab) = tabs.get(current) {
-                    self.ui.docks.surfaces_in_front = *tab == "SurfacesDock";
+                    chosen = Some(*tab == "SurfacesDock");
                 }
-            }
+            };
+            let grouped = tabs.len() > 1;
             if front == "SurfacesDock" {
-                self.dock_at(ui, body, "SurfacesDock", |window, ui| {
+                self.dock_titled_at(ui, rect, "SurfacesDock", grouped.then_some(tab_titles), |window, ui| {
                     window.ui.surfaces.ui(ui, &mut window.exec);
                 });
             } else {
-                self.dock_at(ui, body, "ReferenceDataDock", |window, ui| {
+                self.dock_titled_at(ui, rect, "ReferenceDataDock", grouped.then_some(tab_titles), |window, ui| {
                     reference_ui(window, ui);
                 });
+            }
+            if let Some(surfaces) = chosen {
+                self.ui.docks.surfaces_in_front = surfaces;
             }
         }
         if let Some(rect) = geometry.properties {
@@ -776,6 +795,18 @@ impl MainWindow {
         name: &str,
         content: impl FnOnce(&mut MainWindow, &mut Ui),
     ) {
+        self.dock_titled_at(ui, rect, name, None::<fn(&mut Ui)>, content);
+    }
+
+    /// `dock_at`, the bar's title drawn by `title` when one is given (a group's tabs).
+    fn dock_titled_at(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        name: &str,
+        title: Option<impl FnMut(&mut Ui)>,
+        content: impl FnOnce(&mut MainWindow, &mut Ui),
+    ) {
         let mut chrome = std::mem::replace(
             &mut self.ui.panels.chrome,
             DockChrome::new(ChromeIcons::none()),
@@ -787,7 +818,14 @@ impl MainWindow {
                 .id_salt(("katanaPanel", name)),
             |ui| {
                 ui.set_clip_rect(rect);
-                chrome.dock_ui(ui, name, |ui| content(self, ui));
+                match title {
+                    Some(title) => {
+                        chrome.dock_ui_titled(ui, name, title, |ui| content(self, ui));
+                    }
+                    None => {
+                        chrome.dock_ui(ui, name, |ui| content(self, ui));
+                    }
+                }
             },
         );
         // A request the content's own chrome made meanwhile is kept with the real chrome's.
@@ -1969,12 +2007,41 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
         .panels
         .reference_selected
         .and_then(|id| ids.iter().position(|each| *each == id));
-    let response = controls::rows(ui, "referenceList", &rows, &mut current);
-    if response.changed() {
-        window.ui.panels.reference_selected = current.and_then(|at| ids.get(at).copied());
-    }
-    if response.double_clicked() {
-        asked = Some("ReferenceZoomButton");
+    // The window's one table look (a raised header, stripes, the chosen row lit), scrolled across
+    // inside the panel rather than cut at its edge; with nothing imported, the panel says so, as
+    // the Surfaces panel does, rather than showing nothing at all under its tools. The list was
+    // a bare row of words, "terrain Raster 120 x 90 px 100%" (the second look audit's T8).
+    if rows.is_empty() {
+        // Still the list a driver names: a fill of it is refused as naming no row.
+        let _ = controls::rows(ui, "referenceList", &rows, &mut current);
+        let _ = crate::dialog_layout::empty_table(
+            ui,
+            "No reference data. Import brings in an image, a raster or a point cloud to show \
+             under the drawing.",
+        );
+    } else {
+        let shown = egui::ScrollArea::horizontal()
+            .id_salt("referenceListScroll")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                crate::shell::dialog::table_or_empty(
+                    ui,
+                    "referenceList",
+                    &["Name", "Kind", "Size", "Shown"],
+                    &rows,
+                    current,
+                    "",
+                )
+            })
+            .inner;
+        if let Some(at) = shown.chosen
+            && current != Some(at)
+        {
+            window.ui.panels.reference_selected = ids.get(at).copied();
+        }
+        if shown.double_clicked.is_some() {
+            asked = Some("ReferenceZoomButton");
+        }
     }
     reference_display_ui(window, ui);
     match asked {
@@ -2210,6 +2277,14 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
     let lines = ((room - LOG_MARGIN) / line).floor().max(1.0);
     let height = (lines * line + LOG_MARGIN).min(room);
     ui.add_space(room - height);
+    // A new line, or the log laid out again at another text size or height, shows its last line,
+    // whole. stick_to_bottom alone kept the offset of the old layout when View > Text Size changed
+    // it, and the log stood part way down its text with a half line cut at its top and its foot
+    // (Extra Large, the second look audit's T8). Only then: every frame, it would stop a person
+    // scrolling back through it.
+    let laid_out = (window.exec.log.blocks().len(), line, height);
+    let to_the_end = window.ui.panels.log_laid_out != laid_out;
+    window.ui.panels.log_laid_out = laid_out;
     ui.allocate_ui(Vec2::new(ui.available_width(), height), |ui| {
         // The log is read, not typed in: drawn on the panel itself, with no well or frame of a
         // field, so the one field of the panel is the line below it.
@@ -2224,7 +2299,7 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
         ] {
             widget.bg_stroke = egui::Stroke::NONE;
         }
-        egui::ScrollArea::vertical()
+        let shown = egui::ScrollArea::vertical()
             .id_salt("katanaCommandLog")
             .stick_to_bottom(true)
             .auto_shrink([false, false])
@@ -2246,6 +2321,16 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
                     },
                 );
             });
+        if to_the_end {
+            // The offset of its end as this pass laid it out, kept for the pass that is shown:
+            // this one is laid out again (an offset given before the content is measured - "past
+            // the end" - drew the content off the view in the pass that was shown).
+            let mut state = shown.state;
+            state.offset.y = (shown.content_size.y - shown.inner_rect.height()).max(0.0);
+            state.store(ui.ctx(), shown.id);
+            ui.ctx()
+                .request_discard("the command log scrolled to its last line");
+        }
     });
     let placeholder = window.ui.panels.placeholder.clone();
     let response = controls::line_with(

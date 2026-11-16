@@ -33,6 +33,7 @@
 use std::time::{Duration, Instant};
 
 use katana_app::console::Console;
+use katana_core::ErrorCode;
 
 use crate::drive::simplified;
 use crate::host::VerbOutcome;
@@ -220,11 +221,49 @@ impl CommandLog {
         self.blocks.clear();
     }
 
-    /// The error the status bar shows at `now`: the last one logged, for six seconds.
+    /// The error the status bar shows at `now`: the last one logged, for six seconds, as a person
+    /// reads it (`without_error_code`). The log keeps the line whole.
     pub fn status_message(&self, now: Instant) -> Option<&str> {
         let (text, since) = self.status.as_ref()?;
-        (now.saturating_duration_since(*since) < STATUS_MESSAGE).then_some(text.as_str())
+        (now.saturating_duration_since(*since) < STATUS_MESSAGE)
+            .then(|| without_error_code(text.as_str()))
     }
+}
+
+/// Every code an error's description can start with (katana_core::Error::describe).
+const ERROR_CODES: [ErrorCode; 17] = [
+    ErrorCode::InvalidArgument,
+    ErrorCode::InvalidState,
+    ErrorCode::NotFound,
+    ErrorCode::AlreadyExists,
+    ErrorCode::ParseFailure,
+    ErrorCode::Unsupported,
+    ErrorCode::InvalidGeometry,
+    ErrorCode::InvalidCrs,
+    ErrorCode::InvalidSurveyObservation,
+    ErrorCode::AdjustmentFailure,
+    ErrorCode::TriangulationFailure,
+    ErrorCode::FileImportFailure,
+    ErrorCode::FileExportFailure,
+    ErrorCode::DatabaseFailure,
+    ErrorCode::RenderingFailure,
+    ErrorCode::CommandRejected,
+    ErrorCode::Internal,
+];
+
+/// `text` without the code an error's description starts with ("InvalidState: nothing is
+/// selected; use SELECT first" is "nothing is selected; use SELECT first"): what the status bar
+/// shows a person, who reads the sentence, not the code - the second look audit's N12. The code
+/// stays in the log and in what a line hands back, which drivers and tests read. A text that does
+/// not start with a code comes back as it is.
+pub fn without_error_code(text: &str) -> &str {
+    ERROR_CODES
+        .iter()
+        .find_map(|code| {
+            text.strip_prefix(katana_core::error::to_string(*code))
+                .and_then(|rest| rest.strip_prefix(": "))
+        })
+        .unwrap_or(text)
 }
 
 impl Console for CommandLog {
@@ -342,5 +381,52 @@ pub fn update_logged_line(line: &str) -> String {
         shown.join(" ")
     } else {
         String::from(line)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use katana_core::{Error, ErrorCode};
+
+    use super::{CommandLog, without_error_code};
+
+    #[test]
+    fn the_status_bar_shows_an_errors_sentence_and_the_log_keeps_its_code() {
+        // The second look audit (N12): the status bar read "InvalidState: nothing is selected;
+        // use SELECT first", the code a driver reads, where a person reads the sentence.
+        let described = Error::new(
+            ErrorCode::InvalidState,
+            "nothing is selected; use SELECT first",
+        )
+        .describe();
+        let mut log = CommandLog::new();
+        log.log(&described, true);
+        let now = Instant::now();
+        assert_eq!(
+            log.status_message(now),
+            Some("nothing is selected; use SELECT first")
+        );
+        assert_eq!(log.blocks(), [format!("! {described}")]);
+        // Gone after its six seconds, as before.
+        assert_eq!(
+            log.status_message(now + super::STATUS_MESSAGE + Duration::from_millis(1)),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_code_at_the_front_is_taken_off_and_every_code_is_known() {
+        assert_eq!(without_error_code("a plain note"), "a plain note");
+        assert_eq!(
+            without_error_code("Style: InvalidState: no style"),
+            "Style: InvalidState: no style"
+        );
+        assert_eq!(without_error_code("NotFound:no gap"), "NotFound:no gap");
+        for code in super::ERROR_CODES {
+            let described = Error::new(code, "said").with_context("where").describe();
+            assert_eq!(without_error_code(&described), "said [where]", "{code}");
+        }
     }
 }

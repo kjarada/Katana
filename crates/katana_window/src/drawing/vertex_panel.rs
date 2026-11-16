@@ -30,6 +30,7 @@ use katana_entity::entity::to_string;
 use katana_geometry::polyline_vertices::{delete_vertex, insert_vertex, minimum_vertices};
 use katana_geometry::{CurvePolyline2, Point2};
 
+use crate::dialog_layout;
 use crate::drive::controls;
 use crate::drive::mailbox::{Act, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -335,35 +336,61 @@ impl VertexPanel {
         let mut current = self.current;
         let cells = &self.cells;
         let typed = &mut self.typed;
+        let headers: Vec<&str> = COLUMNS.iter().map(|&column| to_string(column)).collect();
+        let widths = column_widths(ui, &headers, cells);
+        let chosen: Vec<bool> = (0..typed.len()).map(|row| current == Some(row)).collect();
+        let height = ui.spacing().interact_size.y;
+        // The window's one table look (dialog_layout): the header raised with its titles muted,
+        // faint stripes, the current row lit in the accent. Each column is as wide as its widest
+        // text and a field's insets, so no number is cut ("60.00(" in a 46-point cell, the second
+        // look audit's N8): seven columns do not fit a panel 240 wide, and the table scrolls
+        // across under them rather than squeezing every cell.
         let shown = egui::ScrollArea::both()
             .id_salt("vertexTableScroll")
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 egui::Grid::new("vertexTableGrid")
-                    .striped(true)
+                    .spacing(egui::vec2(dialog_layout::INNER, dialog_layout::TABLE_ROW_GAP))
+                    .with_row_color(move |row, style| {
+                        dialog_layout::table_row_colour(row, &chosen, style)
+                    })
                     .show(ui, |ui| {
-                        for column in COLUMNS {
-                            ui.strong(to_string(column));
-                        }
+                        dialog_layout::table_header(ui, &headers, false);
                         ui.end_row();
                         for (row, texts) in typed.iter_mut().enumerate() {
                             for (column, text) in texts.iter_mut().enumerate() {
+                                let width = widths.get(column).copied().unwrap_or_default();
                                 if column == 0 {
-                                    // The index is the row's handle: not edited, it selects.
-                                    if ui
-                                        .selectable_label(current == Some(row), text.as_str())
-                                        .clicked()
-                                    {
+                                    // The index is the row's handle: not edited, it selects. The
+                                    // row is lit by the table, not a pill round the number.
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        egui::vec2(width, height),
+                                        egui::Sense::click(),
+                                    );
+                                    ui.painter().text(
+                                        egui::pos2(rect.left() + controls::FIELD_INSET, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        text.as_str(),
+                                        egui::TextStyle::Body.resolve(ui.style()),
+                                        ui.visuals().text_color(),
+                                    );
+                                    if response.clicked() {
                                         current = Some(row);
                                     }
                                     continue;
                                 }
-                                let field = ui.add(
+                                let edit = dialog_layout::field_look(
+                                    ui,
                                     egui::TextEdit::singleline(text)
                                         .id_salt(("vertexCell", row, column))
-                                        .horizontal_align(egui::Align::RIGHT)
-                                        .desired_width(84.0),
-                                );
+                                        .horizontal_align(egui::Align::RIGHT),
+                                )
+                                // A width of its own, not held to the room left: egui holds a
+                                // field's desired width to what is available, which a scroll
+                                // area offers as its viewport's.
+                                .min_size(egui::vec2(width, height))
+                                .desired_width(width);
+                                let field = ui.add(edit);
                                 if field.gained_focus() {
                                     current = Some(row);
                                 }
@@ -399,4 +426,29 @@ impl VertexPanel {
         controls::custom(ui, &response, record);
         entered
     }
+}
+
+/// Each column's width: its widest text - its header's or a cell's - in the body text style, and a
+/// field's inset at either side (controls::FIELD_INSET, which a cell's field stands its text in by).
+fn column_widths(ui: &Ui, headers: &[&str], cells: &[Vec<String>]) -> Vec<f32> {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(String::from(text), font.clone(), egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    headers
+        .iter()
+        .enumerate()
+        .map(|(column, header)| {
+            let widest = cells
+                .iter()
+                .filter_map(|row| row.get(column))
+                .map(|text| width(text))
+                .fold(width(header), f32::max);
+            // The pixel each side the field's border takes is in the inset (field_margin).
+            (widest + 2.0 * controls::FIELD_INSET).ceil()
+        })
+        .collect()
 }
