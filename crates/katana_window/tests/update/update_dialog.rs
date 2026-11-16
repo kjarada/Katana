@@ -55,7 +55,33 @@ mod update_dialog {
             let tip = UpdateButton::of_name(name).expect("a button of the dialog").tip();
             assert!(!tip.is_empty(), "{name} says what it does");
         }
-        assert_eq!(bench.buttons().len(), 9, "and no other button");
+        // And Close: the look of 2026-11-16 gives every dialog's footer one (docs/desktop.md,
+        // "The look of 2026-11-16"), here where Later - which closes it as well - is not shown.
+        let close = bench.control("updateClose");
+        assert_eq!(close.text, "Close");
+        assert!(close.visible);
+        assert_eq!(bench.buttons().len(), 10, "and no other button");
+    }
+
+    #[test]
+    fn close_hides_the_dialog_and_tells_the_owner_nothing() {
+        // As the title bar's cross: a check or a download goes on, and no line is run.
+        let f = DialogFixture::new();
+        let mut bench = UpdateBench::new(f.context());
+        bench.set_view(view_of(UpdateDialogState::Idle));
+        bench.dialog.show();
+        bench.press("updateClose");
+        assert!(!bench.dialog.is_visible());
+        assert!(f.called().is_empty(), "{}", f.called());
+    }
+
+    #[test]
+    fn where_later_is_offered_it_is_the_close_and_there_is_no_second() {
+        let f = DialogFixture::new();
+        let mut bench = UpdateBench::new(f.context());
+        bench.set_view(view_of(UpdateDialogState::Ready));
+        assert!(bench.record("updateClose").is_none());
+        assert_eq!(bench.buttons().len(), 9);
     }
 
     // egui has no default button: Enter in the dialog presses nothing, whatever is shown.

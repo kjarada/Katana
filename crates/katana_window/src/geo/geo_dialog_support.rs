@@ -25,10 +25,9 @@ use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 
 use super::geo_workbench::started_job;
-use crate::drive::{LineOptions, TextOptions, button, label_as, line_with, primary, text_with};
+use crate::drive::{LineOptions, button, label_as, line_with, primary};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 use crate::shell::dialog;
-use crate::theme::palette;
 
 /// `text` as one word of a line, as the command line reads it: double-quoted when it holds a blank
 /// (geo::replies::line_word, the one quoting rule - a keyword as a name is quoted too).
@@ -274,19 +273,26 @@ impl GeoRunPanel {
         self.status_is_error = is_error;
     }
 
-    /// Draws the panel with the line `made`, running it when Run or Preview is pressed; answers
-    /// the outcome of a run that ended this frame (the dialog's onFinished).
+    /// Draws the panel with the line `made` where it is - its Command row, its reply and its row
+    /// of buttons - running the line when Run or Preview is pressed; answers the outcome of a run
+    /// that ended this frame (the dialog's onFinished). A dialog that has a footer draws the
+    /// Command row in its body (`command_ui`) and the rest in its footer (`footer_ui`).
     pub fn ui(
         &mut self,
         ui: &mut Ui,
         host: &mut dyn Host,
         made: &Result<String>,
     ) -> Option<VerbOutcome> {
+        self.command_ui(ui, made);
+        self.footer_ui(ui, host, made, None).0
+    }
+
+    /// The Command row: the exact line Run runs, read-only, or why there is none.
+    pub fn command_ui(&mut self, ui: &mut Ui, made: &Result<String>) {
         self.refresh(made);
-        let mut finished = self.poll();
         let command_name = self.name("Command");
         let placeholder = self.placeholder.clone();
-        dialog::labelled(ui, "Command:", |ui| {
+        dialog::labelled(ui, "Command", |ui| {
             line_with(
                 ui,
                 &command_name,
@@ -302,51 +308,55 @@ impl GeoRunPanel {
                  or send it to katana_mcp, and it does the same",
             );
         });
+    }
+
+    /// The reply, once there is one, and under it the design's one footer row
+    /// (shell::dialog::button_row): Preview and the status at the left, Close - when the row has
+    /// one, `close` its name - and Run, in the accent, last at the right. Runs the line `made` when
+    /// Run or Preview is pressed; answers the outcome of a run that ended this frame and whether
+    /// Close was clicked.
+    pub fn footer_ui(
+        &mut self,
+        ui: &mut Ui,
+        host: &mut dyn Host,
+        made: &Result<String>,
+        close: Option<&str>,
+    ) -> (Option<VerbOutcome>, bool) {
+        self.refresh(made);
+        let mut finished = self.poll();
+        let reply_name = self.name("Reply");
+        dialog::reply(ui, &reply_name, &mut self.reply, dialog::REPLY_ROWS);
         let status_name = self.name("Status");
         let preview_name = self.name("Preview");
         let run_name = self.name("Run");
         let status = self.status.clone();
-        let colour = if self.status_is_error {
-            Some(palette::error().to_egui())
-        } else {
-            None
-        };
+        let colour = dialog::status_colour(self.status_is_error);
         let ready = self.ready;
         let offers_preview = self.preview;
-        // The status at the left, Preview and Run - the panel's act, in the accent - at the right.
-        let ((), (preview_clicked, run_clicked)) = dialog::button_row(
+        let (preview_clicked, (closed, run_clicked)) = dialog::button_row(
             ui,
             |ui| {
-                let mut text = RichText::new(status.as_str());
-                if let Some(colour) = colour {
-                    text = text.color(colour);
-                }
+                let preview = offers_preview
+                    && ui
+                        .add_enabled_ui(ready, |ui| {
+                            button(ui, &preview_name, "Preview")
+                                .on_hover_text(
+                                    "Run the line with PREVIEW: what it would take, checked by \
+                                     GDAL, and nothing changed",
+                                )
+                                .clicked()
+                        })
+                        .inner;
+                let text = RichText::new(status.as_str()).color(colour);
                 label_as(ui, &status_name, &status, egui::Label::new(text).wrap());
+                preview
             },
             |ui| {
-                ui.add_enabled_ui(ready, |ui| {
-                    let preview = offers_preview
-                        && button(ui, &preview_name, "Preview")
-                            .on_hover_text(
-                                "Run the line with PREVIEW: what it would take, checked by \
-                                 GDAL, and nothing changed",
-                            )
-                            .clicked();
-                    let run = primary(ui, &run_name, "Run").clicked();
-                    (preview, run)
-                })
-                .inner
-            },
-        );
-        let reply_name = self.name("Reply");
-        text_with(
-            ui,
-            &reply_name,
-            &mut self.reply,
-            TextOptions {
-                read_only: true,
-                rows: 6,
-                monospace: true,
+                let closed = close.is_some_and(|name| button(ui, name, "Close").clicked());
+                let run = ui
+                    .add_enabled_ui(ready, |ui| primary(ui, &run_name, "Run").clicked())
+                    .inner;
+                (closed, run)
             },
         );
         for (clicked, preview) in [(preview_clicked, true), (run_clicked, false)] {
@@ -357,6 +367,6 @@ impl GeoRunPanel {
                 }
             }
         }
-        finished
+        (finished, closed)
     }
 }

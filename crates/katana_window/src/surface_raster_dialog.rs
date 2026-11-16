@@ -365,17 +365,21 @@ impl Framed for SurfaceFromDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
-        let (preview, run) = run_buttons(
+        terrain_reply_field(ui, "surfaceFromReply", self.runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("surfaceFromPreview", ready)),
             ("surfaceFromRun", "Build Surface", ready),
+            Some("surfaceFromClose"),
         );
-        terrain_reply_field(ui, "surfaceFromReply", self.runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }
@@ -711,17 +715,21 @@ impl Framed for SurfaceRasterDialog {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
         let (_, over_limit) = self.grid(&*host);
-        let (preview, run) = run_buttons(
+        terrain_reply_field(ui, "surfaceRasterReply", self.runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("surfaceRasterPreview", ready)),
             ("surfaceRasterRun", "Export", ready && !over_limit),
+            Some("surfaceRasterClose"),
         );
-        terrain_reply_field(ui, "surfaceRasterReply", self.runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }

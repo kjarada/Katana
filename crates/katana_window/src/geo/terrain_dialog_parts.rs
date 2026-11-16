@@ -94,7 +94,7 @@ pub(crate) fn command_field(ui: &mut Ui, name: &str, made: &Result<String>) -> R
         Ok(line) => (line.clone(), String::new()),
         Err(error) => (String::new(), error.message.clone()),
     };
-    row(ui, "Command:", |ui| {
+    row(ui, "Command", |ui| {
         line_with(
             ui,
             name,
@@ -108,31 +108,47 @@ pub(crate) fn command_field(ui: &mut Ui, name: &str, made: &Result<String>) -> R
     })
 }
 
-/// The row of buttons under a dialog's fields: Preview, when it is offered - its name and whether
-/// it is enabled - and the button that runs the line - its name, its text and whether it is
-/// enabled. Which were clicked: Preview, then Run.
+/// Which of a run dialog's footer buttons (`run_buttons`) were clicked this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RunPressed {
+    pub preview: bool,
+    pub run: bool,
+    pub close: bool,
+}
+
+/// A run dialog's row of buttons, the design's one footer (shell::dialog::button_row): at the
+/// left Preview, when it is offered - its name and whether it is enabled - as it reads the drawing
+/// and changes nothing; at the right Close, when the row has one (a tab's row drawn off the page
+/// has none: the dialog's Close is the page in front's), then the button that runs the line - its
+/// name, its text and whether it is enabled - in the accent, last.
 pub(crate) fn run_buttons(
     ui: &mut Ui,
     preview: Option<(&str, bool)>,
     run: (&str, &str, bool),
-) -> (bool, bool) {
-    // At the right of the row, Run - the dialog's act, in the accent - last.
-    dialog::button_row(
+    close: Option<&str>,
+) -> RunPressed {
+    let (previewed, (closed, ran)) = dialog::button_row(
         ui,
-        |_| {},
         |ui| {
-            let previewed = preview.is_some_and(|(name, ready)| {
+            preview.is_some_and(|(name, ready)| {
                 ui.add_enabled_ui(ready, |ui| button(ui, name, "Preview").clicked())
                     .inner
-            });
+            })
+        },
+        |ui| {
+            let closed = close.is_some_and(|name| button(ui, name, "Close").clicked());
             let (name, text, ready) = run;
             let ran = ui
                 .add_enabled_ui(ready, |ui| primary(ui, name, text).clicked())
                 .inner;
-            (previewed, ran)
+            (closed, ran)
         },
-    )
-    .1
+    );
+    RunPressed {
+        preview: previewed,
+        run: ran,
+        close: closed,
+    }
 }
 
 /// A choice whose items carry the word a line writes (a QComboBox's item data): what it shows and

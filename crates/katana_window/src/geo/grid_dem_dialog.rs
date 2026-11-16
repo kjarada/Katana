@@ -399,7 +399,7 @@ impl GridDemDialog {
                      so every cell is this size and grids of one cell size line up",
                 );
             });
-            ui.label("or size:");
+            ui.label("or size");
             ui.add_enabled_ui(!cell_given, |ui| {
                 field(ui, "gridSize", &mut self.size, "or columns x rows: 400x300").on_hover_text(
                     "size=: the grid's columns and rows over the extent as it is, instead of a \
@@ -465,6 +465,7 @@ impl Framed for GridDemDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+        let made = self.command();
         // The scope and the options side by side, each half the body.
         ui.columns(2, |columns| {
             self.scope.ui(&mut columns[0]);
@@ -477,10 +478,14 @@ impl Framed for GridDemDialog {
                 ControlRecord::new("gridOptions", ControlKind::Other),
             );
         });
+        self.panel.command_ui(ui, &made);
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let made = self.command();
-        let _ = self.panel.ui(ui, host, &made);
+        let (_, closed) = self.panel.footer_ui(ui, host, &made, Some("gridClose"));
+        if closed {
+            self.hide();
+        }
     }
 }

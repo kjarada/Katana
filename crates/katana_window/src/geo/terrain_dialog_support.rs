@@ -24,7 +24,7 @@ use katana_interop::ReferenceData;
 use katana_terrain::SurfaceStore;
 
 use super::geo_workbench::started_job;
-use crate::drive::{Choice, LineOptions, TextOptions, choice, line_with, text_with};
+use crate::drive::{Choice, LineOptions, choice, line_with};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 
 /// What a source picker offers: a surface, a reference raster or a point cloud, and the words a
@@ -175,18 +175,10 @@ pub fn terrain_command_field(ui: &mut Ui, name: &str, text: &mut String) -> Resp
     )
 }
 
-/// The field every terrain dialog has for what the line said, in a fixed-width font.
+/// What the line said, in a fixed-width font, over the dialog's buttons: drawn once there is a
+/// reply, as many lines as it holds (shell::dialog::reply).
 pub fn terrain_reply_field(ui: &mut Ui, name: &str, text: &mut String) -> Response {
-    text_with(
-        ui,
-        name,
-        text,
-        TextOptions {
-            read_only: true,
-            rows: 6,
-            monospace: true,
-        },
-    )
+    crate::shell::dialog::reply(ui, name, text, crate::shell::dialog::REPLY_ROWS)
 }
 
 /// Runs a dialog's line and shows what it said in its reply: at once when it answered (a refusal, a

@@ -407,15 +407,10 @@ impl DatasetInfoDialog {
             },
         )
         .on_hover_text("The line last run, as it would be typed");
-        // GDAL's words, never markup.
         let reply = self.reply.clone();
-        label_as(
-            ui,
-            "datasetInfoReply",
-            &reply,
-            egui::Label::new(reply.as_str()).wrap(),
-        );
-        // Statistics and Check at the left, what they read; Close at the right.
+        // Statistics and Check at the left, what they read, and what the last said beside them
+        // in the muted status text (a line of its own over the buttons stood empty until one
+        // ran); Close at the right.
         let ((stats, check), close) = crate::shell::dialog::button_row(
             ui,
             |ui| {
@@ -431,6 +426,17 @@ impl DatasetInfoDialog {
                          read",
                     )
                     .clicked();
+                // GDAL's words, never markup.
+                label_as(
+                    ui,
+                    "datasetInfoReply",
+                    &reply,
+                    egui::Label::new(
+                        egui::RichText::new(reply.as_str())
+                            .color(crate::theme::palette::text_muted().to_egui()),
+                    )
+                    .wrap(),
+                );
                 (stats, check)
             },
             |ui| button(ui, "datasetInfoClose", "Close").clicked(),

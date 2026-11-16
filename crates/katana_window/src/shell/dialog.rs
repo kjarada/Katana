@@ -268,7 +268,7 @@ fn rule(ui: &Ui, x: egui::Rangef, y: f32) {
 }
 
 /// Draws `add` in a child of `ui`, top down, tagged as a dialog's footer: a button drawn in it is
-/// FOOTER_BUTTON_WIDTH at least (dialog_layout::footer draws its row in one).
+/// FOOTER_BUTTON_WIDTH at least.
 pub(crate) fn footer_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     ui.scope_builder(
         UiBuilder::new()
@@ -358,7 +358,12 @@ pub fn form<R>(ui: &mut Ui, add: impl FnOnce(&mut Form<'_>) -> R) -> R {
 /// the next pass, as egui's Grid measures its columns; a dialog's first pass is laid out again at
 /// once (`Context::request_discard`), so the column a person sees is the measured one. A row
 /// drawn outside a dialog's body, and outside a `form_panel`, has a column LABEL_WIDTH wide.
+///
+/// A label is shown without a trailing colon, whatever its caller wrote: the design's labels are
+/// sentence-case words in a muted column, and the column already parts them from their fields.
+/// Half the dialogs wrote "Name:" and half "Name", so two dialogs side by side read differently.
 pub fn labelled<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let label = label.strip_suffix(':').unwrap_or(label);
     row_with_text(
         ui,
         label,
@@ -444,6 +449,25 @@ pub fn form_panel<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
+/// Whether `ui` is a column of a row of its dialog's body - a scope beside a dialog's fields, the
+/// second of two forms side by side - rather than the body's own column: some layout between it
+/// and the body runs left to right. Outside a dialog's body (a panel, a test's bare `Ui`) it is
+/// taken as a column, whose width is its own to say. What a part that fills its column (the scope
+/// and filter widget) reads: filling the body's column, it ends where the dialog's fields do; in a
+/// column of a row, "the rest of the row" is every column after it too, and it keeps a width of
+/// its own.
+pub fn in_a_column(ui: &Ui) -> bool {
+    for frame in ui.stack().iter() {
+        if frame.tags().contains(BODY_TAG) {
+            return false;
+        }
+        if frame.layout_direction.is_horizontal() {
+            return true;
+        }
+    }
+    true
+}
+
 /// The label column a row drawn in `ui` starting `start` (its left edge) shares, and where the row
 /// starts from its body's left edge: the nearest dialog body it is in, and of that body the rows
 /// that start within COLUMN_REACH of each other. A row in a group starts a group's margin further
@@ -526,12 +550,29 @@ fn row_inner<R>(
     ui.horizontal_top(|ui| {
         let spacing = ui.spacing().item_spacing.x;
         ui.spacing_mut().item_spacing.x = FORM_SPACING.x;
-        // The label's cell: as high as a control, so a one-line label sits level with the field
-        // beside it, and at the top of a taller one (a text box) rather than at its middle.
-        let height = ui.spacing().interact_size.y;
+        // The label's cell: as high as the first line of what is beside it, so a one-line label
+        // sits level with a field (a control's height) and on the line of a plain value (a line
+        // of text's), and at the top of a taller one (a text box) rather than at its middle. A
+        // cell a control high beside a value of one line of text centred the label 5 points below
+        // the value's words (Drawing Summary, Zoom To's "Line"). What is beside it is drawn after
+        // the label, so its height is the last pass's, as the label column's width is.
+        let beside_key = ui.id().with("katanaRowFieldHeight");
+        let control = ui.spacing().interact_size.y;
+        let height = ui
+            .data(|data| data.get_temp::<f32>(beside_key))
+            .filter(|beside| *beside >= 1.0)
+            .map_or(control, |beside| beside.min(control));
+        // Beside a control, centred in its height; beside a line of text, at its top as the text
+        // is, so the two lines' words share a baseline (a wrapping layout centres in the room it
+        // was given, not in the line it lays out, and stood the label 1.5 points low).
+        let align = if height < control - 0.5 {
+            Align::Min
+        } else {
+            Align::Center
+        };
         ui.allocate_ui_with_layout(
             Vec2::new(width, height),
-            Layout::left_to_right(Align::Center).with_main_wrap(true),
+            Layout::left_to_right(align).with_main_wrap(true),
             |ui| {
                 // The cell's size first: set after the label, egui would add it beyond the label
                 // as the room for the next widget.
@@ -544,8 +585,22 @@ fn row_inner<R>(
             widen_label_column(ui, key, reach, edge);
         }
         ui.spacing_mut().item_spacing.x = spacing;
-        fill_fields(ui);
-        add(ui)
+        // What is beside the label, measured for the next pass's cell; a change is laid out again
+        // at once, so the row a person sees is the measured one.
+        let beside = ui.scope(|ui| {
+            fill_fields(ui);
+            add(ui)
+        });
+        let measured = beside.response.rect.height();
+        let before: Option<f32> = ui.data(|data| data.get_temp(beside_key));
+        if before.is_none_or(|before| (before - measured).abs() > 0.5) {
+            ui.data_mut(|data| data.insert_temp(beside_key, measured));
+            if before.is_some() || measured < control - 0.5 {
+                ui.ctx()
+                    .request_discard("a dialog's row measured what is beside its label");
+            }
+        }
+        beside.inner
     })
     .inner
 }
@@ -649,6 +704,111 @@ pub fn section(ui: &mut Ui, title: &str) -> egui::Response {
 /// does, at its top.
 pub fn note(ui: &mut Ui, text: &str) -> egui::Response {
     ui.add(egui::Label::new(RichText::new(text).color(palette::text_muted().to_egui())).wrap())
+}
+
+/// The most lines a dialog's reply (`reply`) shows before it scrolls: a reply of a record or two
+/// is read whole, and a long one does not push the dialog's buttons off a laptop's screen.
+pub const REPLY_ROWS: usize = 6;
+
+/// What a dialog's last line answered (its Reply, named `name`): records one to a line, read-only
+/// and fixed pitch, as many lines high as it holds up to `rows`. Drawn only once there is a reply:
+/// before, an empty box several lines high stood over every run dialog's buttons, the largest
+/// thing on a fresh dialog. Until then the box is recorded under its name where it will be, taking
+/// no room, and answers as the empty read-only box did: it reads "", a fill is taken and drawn
+/// over, a press is refused.
+pub fn reply(ui: &mut Ui, name: &str, text: &mut String, rows: usize) -> egui::Response {
+    use crate::drive::mailbox::{Act, no_button};
+    use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
+    if text.is_empty() {
+        let taken = take(ui, name);
+        let at = Rect::from_min_size(ui.cursor().min, Vec2::ZERO);
+        let response = ui.interact(at, ui.id().with(("katanaEmptyReply", name)), Sense::hover());
+        if let Some(taken) = &taken {
+            match &taken.posted.act {
+                Act::Fill(_) => settle(ui, taken, Ok(())),
+                Act::Press => settle(ui, taken, Err(no_button(&taken.posted))),
+                Act::ScrollTo => {
+                    response.scroll_to_me(None);
+                    settle(ui, taken, Ok(()));
+                }
+            }
+        }
+        crate::drive::custom(ui, &response, ControlRecord::new(name, ControlKind::Text));
+        return response;
+    }
+    let lines = text.lines().count().clamp(1, rows.max(1));
+    crate::drive::text_with(
+        ui,
+        name,
+        text,
+        crate::drive::TextOptions {
+            read_only: true,
+            rows: lines,
+            monospace: true,
+        },
+    )
+}
+
+/// A dialog's table (the window's one table, annotation::dialog_support::table: a raised header
+/// row, faint stripes, the chosen row lit) named `name`, `headers` over `rows`, `current` the row
+/// chosen - or, while it has no rows, `empty` said in the muted text in its place. A header strip
+/// over nothing read as a table that failed to load (Check Geometry, Query with SQL), and a
+/// header of five columns sized to their words stood 270 wide in a column of 535. The empty table
+/// is still drawn, off the dialog, so a driver finds it by name and reads that it lists nothing.
+/// An `empty` of "" says nothing, for a dialog whose own status already says the list is empty.
+pub(crate) fn table_or_empty(
+    ui: &mut Ui,
+    name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    current: Option<usize>,
+    empty: &str,
+) -> crate::annotation::dialog_support::TableShown {
+    use crate::annotation::dialog_support::table;
+    if rows.is_empty() {
+        if !empty.is_empty() {
+            note(ui, empty);
+        }
+        let mut child = ui.new_child(UiBuilder::new().id_salt(("katanaEmptyTable", name)));
+        let corner = child.max_rect().min;
+        child.set_clip_rect(Rect::from_min_size(corner, Vec2::ZERO));
+        return table(&mut child, name, headers, rows, current, &[], None);
+    }
+    table(ui, name, headers, rows, current, &[], None)
+}
+
+/// `table_or_empty` over a list a person picks a row of, `current` the row picked: answers true
+/// when a click or a fill picked another. What a list of whole rows under a line of "A | B | C"
+/// (a pseudo-header the rows did not line up under: Survey Jobs, the Parcel Report) is drawn with.
+pub(crate) fn pick_table(
+    ui: &mut Ui,
+    name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    current: &mut Option<usize>,
+    empty: &str,
+) -> egui::InnerResponse<bool> {
+    ui.scope(|ui| {
+        let shown = table_or_empty(ui, name, headers, rows, *current, empty);
+        match shown.chosen {
+            Some(at) if *current != Some(at) => {
+                *current = Some(at);
+                true
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The colour of a dialog's status line or hint: the error token for a refusal of
+/// something the person did, the secondary text otherwise - a hint shown before anything was done
+/// ("Name the .ifc file to write.") is not an error, and in red it read as one.
+pub fn status_colour(is_error: bool) -> egui::Color32 {
+    if is_error {
+        palette::error().to_egui()
+    } else {
+        palette::text_muted().to_egui()
+    }
 }
 
 /// What a dialog's frame drew this frame.

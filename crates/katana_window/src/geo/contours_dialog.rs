@@ -313,16 +313,20 @@ impl Framed for ContoursDialog {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
         terrain_reply_field(ui, "contourReply", self.runner.reply_mut());
-        let (preview, run) = run_buttons(
+        let pressed = run_buttons(
             ui,
             Some(("contourPreview", ready)),
             ("contourRun", "Draw Contours", ready),
+            Some("contourClose"),
         );
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }

@@ -33,9 +33,10 @@ use katana_core::text::{equals_ignoring_case, parse_finite_double};
 use crate::customisation::{DocumentWatcher, ScopeFilterWidget};
 use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord};
-use crate::drive::{Choice, button, check, choice, line, primary, whole};
+use crate::drive::{Choice, button, check, choice, line, whole};
 use crate::geo::terrain_dialog_parts::{
-    Framed, check_list_with_current, command_field, field, host_views, invalid, row, show_framed,
+    Framed, check_list_with_current, command_field, field, host_views, invalid, row, run_buttons,
+    show_framed,
 };
 use crate::geo::terrain_dialog_support::{line_word, terrain_reply_field};
 use crate::host::{Host, VerbOutcome};
@@ -721,33 +722,21 @@ impl Framed for SurfaceLevelsDialog {
         // Nothing to run until the fields say a line; the placeholder says why.
         let ready = self.command().is_ok();
         terrain_reply_field(ui, &format!("{p}Reply"), &mut self.reply);
-        // Close, Preview, then Run - the dialog's act, in the accent - at the right.
-        let ((), (close, (preview, run))) = dialog::button_row(
+        // Preview at the left, as it changes nothing; Close, then Run - the dialog's act, in the
+        // accent - at the right.
+        let pressed = run_buttons(
             ui,
-            |_| {},
-            |ui| {
-                let close = button(ui, &format!("{p}Close"), "Close").clicked();
-                let pressed = ui
-                    .add_enabled_ui(ready, |ui| {
-                        let preview = button(ui, &format!("{p}Preview"), "Preview")
-                            .on_hover_text(
-                                "Run the line with PREVIEW: what it would change, nothing changed",
-                            )
-                            .clicked();
-                        let run = primary(ui, &format!("{p}Run"), "Run").clicked();
-                        (preview, run)
-                    })
-                    .inner;
-                (close, pressed)
-            },
+            Some((&format!("{p}Preview"), ready)),
+            (&format!("{p}Run"), "Run", ready),
+            Some(&format!("{p}Close")),
         );
-        if preview {
+        if pressed.preview {
             self.run_line(host, true);
         }
-        if run {
+        if pressed.run {
             self.run_line(host, false);
         }
-        if close {
+        if pressed.close {
             self.hide();
         }
     }
@@ -1090,33 +1079,21 @@ impl Framed for SurfaceCombineDialog {
         // Nothing to run until the fields say a line; the placeholder says why.
         let ready = self.command().is_ok();
         terrain_reply_field(ui, "surfaceCombineReply", &mut self.reply);
-        // Close, Preview, then Run - the dialog's act, in the accent - at the right.
-        let ((), (close, (preview, run))) = dialog::button_row(
+        // Preview at the left, as it changes nothing; Close, then Run - the dialog's act, in the
+        // accent - at the right.
+        let pressed = run_buttons(
             ui,
-            |_| {},
-            |ui| {
-                let close = button(ui, "surfaceCombineClose", "Close").clicked();
-                let pressed = ui
-                    .add_enabled_ui(ready, |ui| {
-                        let preview = button(ui, "surfaceCombinePreview", "Preview")
-                            .on_hover_text(
-                                "Run the line with PREVIEW: what it would make, nothing changed",
-                            )
-                            .clicked();
-                        let run = primary(ui, "surfaceCombineRun", "Run").clicked();
-                        (preview, run)
-                    })
-                    .inner;
-                (close, pressed)
-            },
+            Some(("surfaceCombinePreview", ready)),
+            ("surfaceCombineRun", "Run", ready),
+            Some("surfaceCombineClose"),
         );
-        if preview {
+        if pressed.preview {
             self.run_line(host, true);
         }
-        if run {
+        if pressed.run {
             self.run_line(host, false);
         }
-        if close {
+        if pressed.close {
             self.hide();
         }
     }

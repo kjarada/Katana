@@ -25,18 +25,25 @@ pub fn ok_cancel_names(dialog: &str) -> (String, String) {
 /// OK, named for what it does ("Import", "Export") and enabled as `ok_enabled` says, and Cancel,
 /// for the dialog whose object name is `dialog`.
 pub fn ok_cancel(ui: &mut Ui, dialog: &str, ok_text: &str, ok_enabled: bool) -> OkCancel {
+    ok_cancel_beside(ui, dialog, ok_text, ok_enabled, |_| {}).1
+}
+
+/// `ok_cancel` with `leading` at the left of the row - what reads the file and changes nothing (a
+/// Preview) and what it said - as the design's one footer has it (shell::dialog::button_row).
+pub fn ok_cancel_beside<L>(
+    ui: &mut Ui,
+    dialog: &str,
+    ok_text: &str,
+    ok_enabled: bool,
+    leading: impl FnOnce(&mut Ui) -> L,
+) -> (L, OkCancel) {
     let (run, cancel) = ok_cancel_names(dialog);
     // At the right: Cancel, then OK - the dialog's act - last, in the accent.
-    crate::shell::dialog::button_row(
-        ui,
-        |_| {},
-        |ui| {
-            let rejected = button(ui, &cancel, "Cancel").clicked();
-            let accepted = ui
-                .add_enabled_ui(ok_enabled, |ui| primary(ui, &run, ok_text).clicked())
-                .inner;
-            OkCancel { accepted, rejected }
-        },
-    )
-    .1
+    crate::shell::dialog::button_row(ui, leading, |ui| {
+        let rejected = button(ui, &cancel, "Cancel").clicked();
+        let accepted = ui
+            .add_enabled_ui(ok_enabled, |ui| primary(ui, &run, ok_text).clicked())
+            .inner;
+        OkCancel { accepted, rejected }
+    })
 }

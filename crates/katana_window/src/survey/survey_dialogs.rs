@@ -109,6 +109,10 @@ pub(crate) fn offstage<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> 
     add(&mut child)
 }
 
+/// The most lines a survey tool's answer shows before it scrolls: a traverse's adjusted stations,
+/// a parcel's courses (the C++ box's height).
+const SURVEY_RESULT_ROWS: usize = 10;
+
 /// A form row: the label, then what `add` draws beside it (QFormLayout::addRow) - the label in
 /// the column every dialog's form shares, the field filling the rest (shell::dialog::labelled).
 pub(crate) fn form_row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -392,16 +396,9 @@ impl SurveyToolFrame {
                     &pane.message,
                     message_colour(pane.message_is_error),
                 );
-                drive::text_with(
-                    ui,
-                    "result",
-                    &mut pane.result,
-                    TextOptions {
-                        read_only: true,
-                        rows: 10,
-                        monospace: true,
-                    },
-                );
+                // The answer, once there is one: an empty box ten lines high stood under the form
+                // of every survey tool before anything was computed.
+                dialog::reply(ui, "result", &mut pane.result, SURVEY_RESULT_ROWS);
             },
             |ui, parts| {
                 let (_, _, pressed) = parts;

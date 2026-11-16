@@ -1357,7 +1357,7 @@ impl VolumesDialog {
             spin(ui, "volumesBulk", &mut self.bulk, FACTOR).on_hover_text(
                 "Multiplies the cut in the reply (bank to loose, say); never the surfaces",
             );
-            ui.label("Shrink (fill x):");
+            ui.label("Shrink (fill x)");
             spin(ui, "volumesShrink", &mut self.shrink, FACTOR).on_hover_text(
                 "Multiplies the fill in the reply (compacted to bank, say); never the surfaces",
             );

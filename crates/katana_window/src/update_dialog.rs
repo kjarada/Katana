@@ -117,11 +117,10 @@ use katana_update::{
 use crate::command_log::{
     folded, is_update_token_verb_word, same_ignoring_case, update_token_line_words,
 };
-use crate::dialog_layout as layout;
 use crate::drive::controls;
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::host::{Host, VerbOutcome};
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::hidden;
 use crate::theme;
 
@@ -1977,38 +1976,52 @@ impl UpdateDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let mut clicked = None;
-        // At the right, drawn from the right edge in: the button that acts (check, retry, update,
-        // restart) first, in the accent, so it sits last; then the rest from Later back, so the
-        // row reads as the states list them with what acts moved to the end.
+        // At the right, the design's one footer (shell::dialog::button_row): Close where Later is
+        // not shown - a state of no choice to make (checked, checking, failed) had no button that
+        // closed the dialog, only the title bar's cross - then the rest in the row's order with
+        // the button that acts (check, retry, update, restart), in the accent, last.
+        let later_shown = self.shows(UpdateButton::Later);
         let order = UPDATE_BUTTONS
             .into_iter()
-            .filter(|button| button.acts())
-            .chain(UPDATE_BUTTONS.into_iter().rev().filter(|button| !button.acts()));
-        layout::footer_buttons(ui, |ui| {
-            for button in order {
-                let enabled = self.enables(button);
-                let mut draw = |ui: &mut Ui| {
-                    ui.add_enabled_ui(enabled, |ui| {
-                        let shown = if button.acts() {
-                            layout::primary(ui, button.name(), button.text())
-                        } else {
-                            layout::button(ui, button.name(), button.text())
-                        };
-                        if shown.on_hover_text(button.tip()).clicked() {
-                            clicked = Some(button);
-                        }
-                    });
-                };
-                if self.shows(button) {
-                    draw(ui);
-                } else {
-                    hidden(ui, button.name(), draw);
+            .filter(|button| !button.acts())
+            .chain(UPDATE_BUTTONS.into_iter().filter(|button| button.acts()));
+        let ((), closed) = dialog::button_row(
+            ui,
+            |_| {},
+            |ui| {
+                let closed = !later_shown
+                    && controls::button(ui, "updateClose", "Close")
+                        .on_hover_text("Close this dialog; a check or a download goes on")
+                        .clicked();
+                for button in order {
+                    let enabled = self.enables(button);
+                    let mut draw = |ui: &mut Ui| {
+                        ui.add_enabled_ui(enabled, |ui| {
+                            let shown = if button.acts() {
+                                controls::primary(ui, button.name(), button.text())
+                            } else {
+                                controls::button(ui, button.name(), button.text())
+                            };
+                            if shown.on_hover_text(button.tip()).clicked() {
+                                clicked = Some(button);
+                            }
+                        });
+                    };
+                    if self.shows(button) {
+                        draw(ui);
+                    } else {
+                        hidden(ui, button.name(), draw);
+                    }
                 }
-            }
-        });
+                closed
+            },
+        );
         if let Some(button) = clicked {
             self.click(host, button);
             ui.ctx().request_repaint();
+        }
+        if closed {
+            self.close();
         }
     }
 }
