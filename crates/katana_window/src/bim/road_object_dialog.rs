@@ -74,7 +74,9 @@ use katana_geometry::{
 };
 use katana_math::cpp;
 
-use super::road_dialog_support::{Combo, PreviewRaster, button, field, preview, radio, shown_text};
+use super::road_dialog_support::{
+    Combo, PreviewRaster, button, field, muted, preview, radio, shown_text,
+};
 use crate::canvas::{
     Brush, Canvas, Color, FillRule, Pen, PenCap, PenJoin, PenStyle, PointF, RectF, RenderHint,
     TextFlags,
@@ -83,11 +85,11 @@ use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
 use crate::dialog_layout as layout;
 use crate::drive::controls::{
-    LineOptions, TextOptions, button_as, custom, label, label_as, line_with, tabs, text_with,
+    LineOptions, TextOptions, button_as, custom, label, line_with, tabs, text_with,
 };
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
-use crate::shell::dialog::DialogFrame;
+use crate::shell::dialog::{self, DialogFrame};
 use crate::theme::palette;
 
 /// Where the object goes.
@@ -505,6 +507,17 @@ pub fn paint_object_preview(
     canvas.draw_text(bar + PointF::new(scale + 4.0, 4.0), "1 m");
 }
 
+/// The width of a kind's page: its tab strip of eight kinds, some 595 points at the Standard
+/// text size, whose fields and source note it holds.
+const PAGE_WIDTH: f32 = 600.0;
+
+/// The preview's size, in points: an elevation of the kind, beside its page.
+const PREVIEW_SIZE: (f32, f32) = (220.0, 160.0);
+
+/// The width the body is laid out at: the page and the preview beside it, parted by twice
+/// GROUP_GAP (the row's own gap and one more), the columns of the rest of the body as wide.
+const BODY_WIDTH: f32 = PAGE_WIDTH + 2.0 * dialog::GROUP_GAP + PREVIEW_SIZE.0;
+
 /// One page's parameter field: a text field, or a choice whose first item is the default (no
 /// data) and the rest the kind's words.
 struct ParameterField {
@@ -781,32 +794,33 @@ impl Body {
         let Some(page) = self.pages.get_mut(index) else {
             return false;
         };
-        egui::Grid::new(("roadObjectPage", index)).show(ui, |ui| {
+        dialog::form(ui, |form| {
             for parameter in page.iter_mut() {
-                ui.label(parameter.label.as_str());
-                let response = match &mut parameter.choice {
-                    Some(choice) => {
-                        let edited = choice.ui(ui, &parameter.object_name);
-                        changed |= edited;
-                        None
+                let label = format!("{}:", parameter.label);
+                form.row(&label, |ui| {
+                    let response = match &mut parameter.choice {
+                        Some(choice) => {
+                            let edited = choice.ui(ui, &parameter.object_name);
+                            changed |= edited;
+                            None
+                        }
+                        None => Some(line_with(
+                            ui,
+                            &parameter.object_name,
+                            &mut parameter.text,
+                            LineOptions {
+                                placeholder: &parameter.placeholder,
+                                ..LineOptions::default()
+                            },
+                        )),
+                    };
+                    if let Some(response) = response {
+                        if response.changed() {
+                            changed = true;
+                        }
+                        response.on_hover_text(parameter.tip);
                     }
-                    None => Some(line_with(
-                        ui,
-                        &parameter.object_name,
-                        &mut parameter.text,
-                        LineOptions {
-                            placeholder: &parameter.placeholder,
-                            ..LineOptions::default()
-                        },
-                    )),
-                };
-                if let Some(response) = response {
-                    if response.changed() {
-                        changed = true;
-                    }
-                    response.on_hover_text(parameter.tip);
-                }
-                ui.end_row();
+                });
             }
         });
         changed
@@ -817,6 +831,9 @@ impl Body {
         // ---- the pages and the preview ----
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                // The page's own width, so its fields run to one edge on every kind's page and
+                // the kind's source wraps there, the preview beside it.
+                ui.set_width(PAGE_WIDTH);
                 let titles: Vec<&str> = road_object_kinds()
                     .iter()
                     .map(|&kind| kind_title(kind))
@@ -827,25 +844,28 @@ impl Body {
                 if self.page_ui(ui) {
                     changed = true;
                 }
-                label_as(
-                    ui,
-                    "roadObjectKindSource",
-                    &self.source,
-                    egui::Label::new(self.source.as_str()).wrap(),
-                );
+                ui.add_space(dialog::GROUP_GAP);
+                muted(ui, "roadObjectKindSource", &self.source);
             });
+            // The columns are parted by a gap, never a rule: the row's own GROUP_GAP and this.
+            ui.add_space(dialog::GROUP_GAP);
             let model = &self.preview_model;
             let across_x = self.preview_across_x;
             preview(
                 ui,
                 "roadObjectPreview",
-                egui::vec2(220.0, 160.0),
+                egui::vec2(PREVIEW_SIZE.0, PREVIEW_SIZE.1),
                 self.raster.as_ref(),
                 &mut self.texture,
                 &mut |canvas: &mut dyn Canvas| {
                     paint_object_preview(
                         canvas,
-                        RectF::new(0.0, 0.0, 220.0, 160.0),
+                        RectF::new(
+                            0.0,
+                            0.0,
+                            f64::from(PREVIEW_SIZE.0),
+                            f64::from(PREVIEW_SIZE.1),
+                        ),
                         model,
                         across_x,
                     );
@@ -854,82 +874,102 @@ impl Body {
         });
 
         // ---- where it goes ----
-        let placement = ui.group(|ui| {
-            ui.strong("Placement");
-            egui::Grid::new("roadObjectPlaceGrid").show(ui, |ui| {
-                if radio(
-                    ui,
-                    "roadObjectPlaceAlignment",
-                    "Along an &alignment",
-                    self.place == Place::Alignment,
-                )
-                .clicked()
-                    && self.place != Place::Alignment
-                {
-                    self.place = Place::Alignment;
-                    changed = true;
-                }
-                ui.add_enabled_ui(self.enabled.alignment, |ui| {
-                    if self.alignment.ui(ui, "roadObjectAlignment") {
-                        changed = true;
+        // A section under a heading, as the dialog's other parts are, rather than a box: each
+        // way of placing is its radio button in the label column with its fields beside it.
+        let placement = ui.vertical(|ui| {
+            dialog::section(ui, "Placement");
+            // A radio button is its row's label, and the row's two closures are drawn together:
+            // what it chose is said as `picked`, the change counted once both are drawn.
+            let mut picked = false;
+            dialog::row_with(
+                ui,
+                |ui| {
+                    if radio(
+                        ui,
+                        "roadObjectPlaceAlignment",
+                        "Along an &alignment",
+                        self.place == Place::Alignment,
+                    )
+                    .clicked()
+                        && self.place != Place::Alignment
+                    {
+                        self.place = Place::Alignment;
+                        picked = true;
                     }
-                });
-                ui.label("station");
-                changed |= enabled_field(
-                    ui,
-                    self.enabled.station,
-                    "roadObjectStation",
-                    &mut self.station,
-                    "chainage",
-                );
-                ui.label("to");
-                changed |= enabled_field(
-                    ui,
-                    self.enabled.to,
-                    "roadObjectTo",
-                    &mut self.to,
-                    "end chainage",
-                );
-                ui.end_row();
-                ui.label("");
-                ui.label("");
-                ui.label("offset");
-                changed |= enabled_field(
-                    ui,
-                    self.enabled.offset,
-                    "roadObjectOffset",
-                    &mut self.offset,
-                    "0 (left of the centreline +)",
-                );
-                ui.label("spacing");
-                changed |= enabled_field(
-                    ui,
-                    self.enabled.spacing,
-                    "roadObjectSpacing",
-                    &mut self.spacing,
-                    "one every ... m",
-                );
-                ui.end_row();
-                if radio(
-                    ui,
-                    "roadObjectPlacePoints",
-                    "At points &typed",
-                    self.place == Place::Points,
-                )
-                .clicked()
-                    && self.place != Place::Points
-                {
-                    self.place = Place::Points;
-                    changed = true;
+                },
+                |ui| {
+                    ui.add_enabled_ui(self.enabled.alignment, |ui| {
+                        if self.alignment.ui(ui, "roadObjectAlignment") {
+                            changed = true;
+                        }
+                    });
+                },
+            );
+            // The stations and offsets are the alignment's, so they sit in under it; a row each,
+            // so every field starts at the form's edge.
+            ui.indent("roadObjectAlongAlignment", |ui| {
+                for (label_text, enabled, name, value, placeholder) in [
+                    (
+                        "Station:",
+                        self.enabled.station,
+                        "roadObjectStation",
+                        &mut self.station,
+                        "chainage",
+                    ),
+                    (
+                        "To:",
+                        self.enabled.to,
+                        "roadObjectTo",
+                        &mut self.to,
+                        "end chainage",
+                    ),
+                    (
+                        "Offset:",
+                        self.enabled.offset,
+                        "roadObjectOffset",
+                        &mut self.offset,
+                        "0 (left of the centreline +)",
+                    ),
+                    (
+                        "Spacing:",
+                        self.enabled.spacing,
+                        "roadObjectSpacing",
+                        &mut self.spacing,
+                        "one every ... m",
+                    ),
+                ] {
+                    dialog::labelled(ui, label_text, |ui| {
+                        changed |= enabled_field(ui, enabled, name, value, placeholder);
+                    });
                 }
-                changed |= enabled_field(
-                    ui,
-                    self.enabled.points,
-                    "roadObjectPoints",
-                    &mut self.points,
-                    "x,y[,z] x,y[,z] ...",
-                );
-                ui.end_row();
+            });
+            dialog::row_with(
+                ui,
+                |ui| {
+                    if radio(
+                        ui,
+                        "roadObjectPlacePoints",
+                        "At points &typed",
+                        self.place == Place::Points,
+                    )
+                    .clicked()
+                        && self.place != Place::Points
+                    {
+                        self.place = Place::Points;
+                        picked = true;
+                    }
+                },
+                |ui| {
+                    changed |= enabled_field(
+                        ui,
+                        self.enabled.points,
+                        "roadObjectPoints",
+                        &mut self.points,
+                        "x,y[,z] x,y[,z] ...",
+                    );
+                },
+            );
+            ui.horizontal(|ui| {
                 if radio(
                     ui,
                     "roadObjectPlaceLines",
@@ -956,8 +996,8 @@ impl Body {
                     self.place = Place::DrawnPoints;
                     changed = true;
                 }
-                ui.end_row();
             });
+            changed |= picked;
             ui.add_enabled_ui(self.enabled.scope, |ui| {
                 if self.scope.ui(ui) {
                     changed = true;
@@ -971,21 +1011,23 @@ impl Body {
         );
 
         // ---- what it stands on, and what it is called ----
+        // Two columns of the body's width, parted by a gap: the row's own GROUP_GAP and one more.
         ui.horizontal_top(|ui| {
-            let heights = ui.group(|ui| {
-                ui.strong("Heights");
-                egui::Grid::new("roadObjectHeightsForm").show(ui, |ui| {
-                    ui.label("Heights from");
+            let column = ((ui.available_width() - 2.0 * dialog::GROUP_GAP) / 2.0).max(0.0);
+            let heights = ui.vertical(|ui| {
+                ui.set_width(column);
+                dialog::section(ui, "Heights");
+                dialog::labelled(ui, "Heights from:", |ui| {
                     if self.heights.ui(ui, "roadObjectHeights") {
                         changed = true;
                     }
-                    ui.end_row();
-                    ui.label("Surface");
+                });
+                dialog::labelled(ui, "Surface:", |ui| {
                     if self.surface.ui(ui, "roadObjectSurface") {
                         changed = true;
                     }
-                    ui.end_row();
-                    ui.label("Crossfall (%)");
+                });
+                dialog::labelled(ui, "Crossfall (%):", |ui| {
                     changed |= enabled_field(
                         ui,
                         self.enabled.crossfall,
@@ -993,10 +1035,9 @@ impl Body {
                         &mut self.crossfall,
                         "0 %",
                     );
-                    ui.end_row();
-                    ui.label("Raised by (m)");
+                });
+                dialog::labelled(ui, "Raised by (m):", |ui| {
                     changed |= enabled_field(ui, true, "roadObjectDz", &mut self.dz, "0 m");
-                    ui.end_row();
                 });
             });
             custom(
@@ -1004,46 +1045,46 @@ impl Body {
                 &heights.response,
                 ControlRecord::new("roadObjectHeightsGroup", ControlKind::Other),
             );
-            let common = ui.group(|ui| {
-                ui.strong("Object");
-                egui::Grid::new("roadObjectCommonForm").show(ui, |ui| {
-                    for (label_text, name, value, placeholder) in [
-                        (
-                            "Name",
-                            "roadObjectName",
-                            &mut self.name,
-                            "the kind and its id",
-                        ),
-                        (
-                            "Layer",
-                            "roadObjectLayer",
-                            &mut self.layer,
-                            "road/objects/<kind>",
-                        ),
-                        (
-                            "Colour",
-                            "roadObjectColour",
-                            &mut self.colour,
-                            "#RRGGBB or a colour name",
-                        ),
-                        (
-                            "Material",
-                            "roadObjectMaterial",
-                            &mut self.material,
-                            "the kind's",
-                        ),
-                        (
-                            "Road",
-                            "roadObjectFacility",
-                            &mut self.facility,
-                            "the road it is part of",
-                        ),
-                    ] {
-                        ui.label(label_text);
+            ui.add_space(dialog::GROUP_GAP);
+            let common = ui.vertical(|ui| {
+                ui.set_width(column);
+                dialog::section(ui, "Object");
+                for (label_text, name, value, placeholder) in [
+                    (
+                        "Name:",
+                        "roadObjectName",
+                        &mut self.name,
+                        "the kind and its id",
+                    ),
+                    (
+                        "Layer:",
+                        "roadObjectLayer",
+                        &mut self.layer,
+                        "road/objects/<kind>",
+                    ),
+                    (
+                        "Colour:",
+                        "roadObjectColour",
+                        &mut self.colour,
+                        "#RRGGBB or a colour name",
+                    ),
+                    (
+                        "Material:",
+                        "roadObjectMaterial",
+                        &mut self.material,
+                        "the kind's",
+                    ),
+                    (
+                        "Road:",
+                        "roadObjectFacility",
+                        &mut self.facility,
+                        "the road it is part of",
+                    ),
+                ] {
+                    dialog::labelled(ui, label_text, |ui| {
                         changed |= enabled_field(ui, true, name, value, placeholder);
-                        ui.end_row();
-                    }
-                });
+                    });
+                }
             });
             custom(
                 ui,
@@ -1061,7 +1102,8 @@ impl Body {
             &mut self.line,
             LineOptions {
                 read_only: true,
-                width: Some(560.0),
+                // Across the footer, as wide as the body above it.
+                width: Some(ui.available_width()),
                 ..LineOptions::default()
             },
         );
@@ -1215,7 +1257,7 @@ impl RoadObjectDialog {
         body.reload(document);
         body.refresh();
         Self {
-            frame: DialogFrame::new("roadObjectDialog", "Road Objects"),
+            frame: DialogFrame::new("roadObjectDialog", "Road Objects").width(BODY_WIDTH),
             open: true,
             body,
         }

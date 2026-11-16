@@ -93,7 +93,7 @@ use crate::drive::controls::tabs;
 use crate::drive::registry::simplified;
 use crate::format::qt_fixed;
 use crate::host::Host;
-use crate::shell::dialog::DialogFrame;
+use crate::shell::dialog::{self, DialogFrame};
 use crate::survey::survey_dialogs::offstage;
 use crate::theme::palette;
 
@@ -916,25 +916,29 @@ impl Body {
         if self.list.ui(ui).selection_changed && !self.loading {
             self.load_alignment(host.document());
         }
-        egui::Grid::new("alignmentNewForm").show(ui, |ui| {
-            ui.label("Name:");
-            field(
-                ui,
-                "alignmentName",
-                &mut self.name,
-                "name",
-                "The new alignment's name",
-            );
-            ui.end_row();
-            ui.label("PIs:");
-            field(
-                ui,
-                "alignmentPoints",
-                &mut self.points,
-                "x,y x,y ...",
-                "The new alignment's PIs, easting first, at least two",
-            );
-            ui.end_row();
+        // The column is as wide as the list its columns make, and the fields for New run to the
+        // list's right edge: a Grid left each field at its own small width, and a field filling
+        // the body's room would have pushed the tabs beside the column away.
+        ui.set_max_width(ui.min_rect().width());
+        dialog::form(ui, |form| {
+            form.row("Name:", |ui| {
+                field(
+                    ui,
+                    "alignmentName",
+                    &mut self.name,
+                    "name",
+                    "The new alignment's name",
+                );
+            });
+            form.row("PIs:", |ui| {
+                field(
+                    ui,
+                    "alignmentPoints",
+                    &mut self.points,
+                    "x,y x,y ...",
+                    "The new alignment's PIs, easting first, at least two",
+                );
+            });
         });
         ui.horizontal(|ui| {
             if button(
@@ -1041,7 +1045,9 @@ impl Body {
                 }
             });
         });
-        crate::shell::dialog::labelled(ui, "Start chainage:", |ui| {
+        dialog::labelled(ui, "Start chainage:", |ui| {
+            // The field leaves its button the room beside it, inside the column.
+            ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Set Start Chainage");
             field(
                 ui,
                 "alignmentStartStation",
@@ -1173,7 +1179,7 @@ impl Body {
              with no curve - as ALIGN STATIONS prints them. Azimuths are clockwise from grid \
              north.",
         );
-        crate::shell::dialog::labelled(ui, "Interval:", |ui| {
+        dialog::labelled(ui, "Interval:", |ui| {
             // As it is typed: the table is cheap to make (setting_out_stations caps it), and a
             // headless --fill sets the text without finishing an edit.
             if field(
@@ -1187,8 +1193,11 @@ impl Body {
             {
                 self.load_setting_out(host.document());
             }
-            // What the table holds, or why it holds nothing: its own line, so a half-typed
-            // interval never overwrites what the last line replied.
+        });
+        // What the table holds, or why it holds nothing: its own line, so a half-typed interval
+        // never overwrites what the last line replied. Under the field, where it wraps in the
+        // column, rather than beside a field that fills the row.
+        dialog::labelled(ui, "", |ui| {
             self.stations_note.ui(ui, "alignmentStationsNote");
         });
         self.stations.ui(ui);
@@ -1217,9 +1226,13 @@ impl Body {
                 }
             });
         });
-        crate::shell::dialog::labelled(ui, "Label style:", |ui| {
+        // The style, and the layer beside Label Chainages, a row each: three controls and a
+        // label in one row ran past the column's edge.
+        dialog::labelled(ui, "Label style:", |ui| {
             self.label_style.ui(ui, "alignmentLabelStyle");
-            ui.label("Layer:");
+        });
+        dialog::labelled(ui, "Layer:", |ui| {
+            ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Label Chainages");
             field(
                 ui,
                 "alignmentLabelLayer",
@@ -1253,6 +1266,9 @@ impl Body {
         );
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| self.list_ui(ui, host));
+            // The columns are parted by a gap, never a rule (docs/desktop.md, "The rules a dialog
+            // or panel follows"): the row's own GROUP_GAP and this one.
+            ui.add_space(dialog::GROUP_GAP);
             ui.vertical(|ui| {
                 tabs(ui, "alignmentTabs", &TABS, &mut self.tab);
                 // The pages not in front are still there, as a QTabWidget's are: what they hold
@@ -1359,8 +1375,11 @@ impl AlignmentManagerDialog {
         };
         body.reload(document);
         Self {
-            // Non-modal: kept open beside the drawing while PIs are picked off it.
-            frame: DialogFrame::new("alignmentManagerDialog", "Alignment Manager"),
+            // Non-modal: kept open beside the drawing while PIs are picked off it. Two columns,
+            // the alignments and the chosen one's tabs, so the body is laid out two columns wide:
+            // at BODY_WIDTH the tabs' grids ran past the edge the notes wrapped at.
+            frame: DialogFrame::new("alignmentManagerDialog", "Alignment Manager")
+                .width(dialog::TWO_COLUMN_WIDTH),
             open: true,
             body,
         }
