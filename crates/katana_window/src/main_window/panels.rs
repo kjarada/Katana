@@ -27,7 +27,7 @@ use super::actions::{BarPlace, Composed};
 use super::layout::{self, Geometry, bar_breadth, natural_width, row_rooms};
 use super::window::{ImportOptions, MainWindow};
 use crate::dock_chrome::{ChromeIcons, ChromeRequest, DockChrome, DockRole, DockTab};
-use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item};
+use crate::drive::action::{Action, Menu, ToolBar, ToolBarItem};
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
 use crate::drive::registry::{TargetKind, TargetSpec, WINDOW, begin_target, end_target};
 use crate::host::Host;
@@ -649,11 +649,9 @@ impl MainWindow {
                     false
                 }
                 "annotationScaleCombo" => {
-                    // An editable choice: its field, then the list's arrow beside it.
-                    let arrow = child.spacing().icon_width + 2.0 * child.spacing().button_padding.x;
-                    child.spacing_mut().combo_width = arrow;
-                    child.spacing_mut().text_edit_width =
-                        (rect.width() - arrow - 2.0 - 8.0).max(24.0);
+                    // An editable choice, one framed control with its list's arrow inside: as wide
+                    // as its slot on the strip, less the strip's 2 points between widgets.
+                    child.spacing_mut().text_edit_width = (rect.width() - 2.0).max(24.0);
                     let _ = ui_state.annotation.scale_box_ui(&mut child, exec);
                     false
                 }
@@ -960,7 +958,9 @@ impl MainWindow {
                     egui::containers::menu::menu_style(ui.style_mut());
                     begin_target(ui, TargetSpec::new(&menu.name, TargetKind::Menu, &menu.title.replace('&', "")));
                     let shown = ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
-                        menu_items_ui(ui, &menu, &mut chosen);
+                        crate::shell::dialog::menu_column(ui, |ui| {
+                            crate::drive::action::menu_items_ui(ui, &menu, &mut chosen);
+                        });
                     });
                     end_target(ui, shown.response.rect);
                 });
@@ -1304,40 +1304,21 @@ fn is_timing(readout: &str) -> bool {
     readout.ends_with(" ms") || readout.ends_with(" ms)")
 }
 
-/// A menu drawn as a menu button with its items; a click on an action is the action chosen.
+/// A menu drawn as a menu button with its items, by the one drawer every menu of the window uses
+/// (drive::action::menu_items_ui: a tick and icon gutter, sections, inset separators, submenus) in
+/// a column that scrolls when the menu is taller than the room under the bar (the Annotate menu);
+/// a click on an action is the action chosen.
 fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Vec<String>) {
     ui.menu_button(menu.title.replace('&', ""), |ui| {
         let mut one = None;
-        menu_items_ui(ui, menu, &mut one);
+        crate::shell::dialog::menu_column(ui, |ui| {
+            crate::drive::action::menu_items_ui(ui, menu, &mut one);
+        });
         if let Some(name) = one {
             chosen.push(name);
             ui.close();
         }
     });
-}
-
-/// A menu's items: actions, titled sections, separators and submenus.
-fn menu_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
-    for item in &menu.items {
-        match item {
-            MenuItem::Action(action) => {
-                if action_item(ui, action).clicked() && !action.name.is_empty() {
-                    *chosen = Some(action.name.clone());
-                }
-            }
-            MenuItem::Section(title) => {
-                let _ = crate::theme::menu_section(ui, title);
-            }
-            MenuItem::Separator => {
-                ui.separator();
-            }
-            MenuItem::Menu(submenu) => {
-                ui.menu_button(submenu.title.replace('&', ""), |ui| {
-                    menu_items_ui(ui, submenu, chosen);
-                });
-            }
-        }
-    }
 }
 
 // ---- a panel's own tools -------------------------------------------------------------------------
@@ -1613,7 +1594,8 @@ fn properties_ui(window: &mut MainWindow, ui: &mut Ui) {
     let any = !styles.is_empty();
     let mut apply = false;
     ui.horizontal(|ui| {
-        ui.label("Style");
+        // Muted, as every label beside a field is, the property tree's under it included.
+        crate::shell::dialog::form_label(ui, "Style");
         ui.add_enabled_ui(any, |ui| {
             if !ui.memory(|memory| memory.has_focus(ui.id())) && styles.len() == 1 {
                 let style = styles.iter().next().cloned().unwrap_or_default();
@@ -1625,17 +1607,12 @@ fn properties_ui(window: &mut MainWindow, ui: &mut Ui) {
                     };
                 }
             }
-            // The field takes the row's width less the list's arrow and Apply, so Apply is on the
-            // panel at its 240 points (egui's default field ran it off the edge).
-            let arrow = ui.spacing().icon_width + 2.0 * ui.spacing().button_padding.x;
+            // The choice - one framed control, its list's arrow inside its right end
+            // (drive::controls::editable_choice_frame) - takes the row's width less Apply, so
+            // Apply is on the panel at its 240 points and the two end at its edge.
             let apply_width = 56.0;
-            ui.spacing_mut().combo_width = arrow;
-            ui.spacing_mut().text_edit_width = (ui.available_width()
-                - arrow
-                - apply_width
-                - 2.0 * ui.spacing().item_spacing.x
-                - 8.0)
-                .max(40.0);
+            ui.spacing_mut().text_edit_width =
+                (ui.available_width() - apply_width - ui.spacing().item_spacing.x).max(40.0);
             let response = controls::choice(ui, "PropertyStyle", &items, &mut panels.property_style);
             if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                 apply = true;

@@ -59,6 +59,8 @@ add_test(NAME qt_a_copy_that_cannot_update_is_offered_no_check_in_the_update_dia
 # tip, a letter of its own in the Help menu (U), and it opens the same dialog.
 # --check-shortcuts and --check-menus fail the run when it does not; the Help
 # menu is then listed with the tip each item shows.
+# Every Help item that opens a dialog ends in "..." (the menu convention; since
+# 2026-11-16 Command Reference, Sheets and Plotting Commands and About too).
 add_test(NAME qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_its_own_headless
     COMMAND ${CMAKE_COMMAND}
         "-DAPP=${KATANA_PROGRAM_katana}"
@@ -66,7 +68,7 @@ add_test(NAME qt_help_has_check_for_updates_with_an_icon_a_tip_and_a_letter_of_i
         "-DCHECK_SHORTCUTS=ON"
         "-DCHECK_MENUS=ON"
         "-DDRIVE=@helpCheckForUpdates|?helpMenu|?helpCheckForUpdates|@helpKeyboardShortcuts"
-        "-DEXPECT=shortcuts: [0-9]+ key sequences, each reaching one thing.*menus: [0-9]+ items, each with an icon and a status tip.*--dialog helpCheckForUpdates opened updateDialog \"Check for Updates\".*helpMenu: Help: Command Reference \\[[^]]+\\] . Sheets and Plotting Commands \\[[^]]+\\] . Keyboard Shortcuts\\.\\.\\. \\[[^]]+\\] . Check for Updates\\.\\.\\. \\[Ask whether a newer Katana has been released[^]]+\\] . About Katana \\[[^]]+\\][\r\n]+helpCheckForUpdates: Check for Updates\\.\\.\\."
+        "-DEXPECT=shortcuts: [0-9]+ key sequences, each reaching one thing.*menus: [0-9]+ items, each with an icon and a status tip.*--dialog helpCheckForUpdates opened updateDialog \"Check for Updates\".*helpMenu: Help: Command Reference\\.\\.\\. \\[[^]]+\\] . Sheets and Plotting Commands\\.\\.\\. \\[[^]]+\\] . Keyboard Shortcuts\\.\\.\\. \\[[^]]+\\] . Check for Updates\\.\\.\\. \\[Ask whether a newer Katana has been released[^]]+\\] . About Katana\\.\\.\\. \\[[^]]+\\][\r\n]+helpCheckForUpdates: Check for Updates\\.\\.\\."
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_help_item_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
