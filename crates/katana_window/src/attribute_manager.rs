@@ -422,9 +422,10 @@ impl AttributeManagerDialog {
                 });
             },
             |ui, parts| {
-                if layout::footer_buttons(ui, |ui| layout::button(ui, "attributeClose", "Close"))
-                    .clicked()
-                {
+                // The one footer: nothing reads the drawing here, so Close alone at the right.
+                let (_, closed) =
+                    dialog::button_row(ui, |_| {}, |ui| button(ui, "attributeClose", "Close").clicked());
+                if closed {
                     *parts.2 = true;
                 }
             },

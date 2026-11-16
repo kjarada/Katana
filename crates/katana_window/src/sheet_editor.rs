@@ -4663,7 +4663,7 @@ impl SheetEditor {
         let mut add = |item: ToolBarItem| bar.items.push(item);
         add(ToolBarItem::Action(
             Action::new("sheetGenerate", "Generate Sheets...")
-                .icon("Properties")
+                .icon("Sheets")
                 .tip("Lay sheets out for the drawing, an alignment or its sections")
                 .opens("sheetGenerateDialog"),
         ));
@@ -4703,7 +4703,7 @@ impl SheetEditor {
         ));
         add(ToolBarItem::Action(
             Action::new("sheetPlotAll", "Plot All...")
-                .icon("Plot")
+                .icon("PlotSheets")
                 .shortcut(shortcut(Modifiers::COMMAND, Key::P))
                 .opens("plotDialog"),
         ));

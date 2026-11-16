@@ -369,8 +369,9 @@ pub const FIELD_INSET: f32 = crate::theme::style::GROUP_GAP;
 
 /// A one-line field's margin round its text: FIELD_INSET across, less the pixel of border egui
 /// draws inside it (TextEdit takes the stroke's width off its margin); 2 down, egui's own, the
-/// text being centred in the control's height anyway.
-fn field_margin() -> egui::Margin {
+/// text being centred in the control's height anyway. Public for the fields a table draws in a
+/// cell of its own (dialog_layout::field_look), which wear the same look.
+pub fn field_margin() -> egui::Margin {
     egui::Margin::symmetric(FIELD_INSET as i8, 2)
 }
 

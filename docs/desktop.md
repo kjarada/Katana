@@ -861,6 +861,27 @@ U+25B8, U+25BE, U+2191, U+2193, U+25B2 or U+25BC, and those drew as boxes.
 The Properties panel's labels are muted and its values in one column, a long
 value cut short with the whole of it in its tooltip.
 
+**One footer, one table, a reply that takes no room.** Every dialog's footer
+is `shell::dialog::button_row`: what reads the drawing and a status at the
+left, then Close, then the primary action last in the accent. Text Styles,
+Dimension Styles, Edit Text, Label Styles and Rules and Leaders had no Close;
+Generate Sheets and Title Block had their buttons at the left and no primary.
+A reply kept for drivers (a verb's last line, its answer) is
+`dialog_layout::reply_text`: muted text that takes no room while it is empty,
+recorded as the field it replaced, where an empty read-only box 220 points
+wide (Leaders) or a footer 160 high (Road Objects) waited for one. Every
+table's header and its empty state come from `dialog_layout::table_header` and
+`empty_table`, so an empty table says so rather than showing a header over a
+void; a table alone in its column fills it. A manager with tabs keeps one body
+width and one least height on every tab (Styles and Linetypes 1296 by 690,
+Leaders 950), where it jumped between four sizes and clipped its hatch editor.
+Previews (styles, linetypes, symbols, survey codes, definitions, road
+objects) start on the dark ground; how a style prints on paper is one choice
+away. The sheet editor's rulers wear the panel's colours, its toolbar is
+flat with the shortcuts in the tooltips, and its menus are the one menu
+drawer's. Rejected: filling every table by default (a table beside another
+column took that column's room).
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the
