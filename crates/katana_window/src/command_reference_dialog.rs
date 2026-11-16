@@ -516,6 +516,8 @@ impl ReferenceState {
             &mut self.search,
             LineOptions {
                 placeholder: "Search: words that must all occur, such as layer colour",
+                // Across the table it searches, as its placeholder is long.
+                width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
         );

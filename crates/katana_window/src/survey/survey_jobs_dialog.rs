@@ -242,10 +242,22 @@ impl Default for SurveyJobsDialog {
     }
 }
 
+/// What the jobs table says while there are none.
+const NO_JOBS: &str =
+    "No survey jobs yet: Survey > Import Survey Points reads a field file as one.";
+
+/// The body's width: the jobs table's eight columns and the export row beside its label.
+const BODY_WIDTH: f32 = 720.0;
+
+/// The export format choice's width: its longest item ("Plain text (.txt)") and its chevron.
+const EXPORT_FORMAT_WIDTH: f32 = 150.0;
+
 impl SurveyJobsDialog {
     pub fn new() -> Self {
         Self {
-            frame: DialogFrame::new("surveyJobsDialog", "Survey Jobs"),
+            // The jobs' eight columns, and the export row's choice, field and two buttons: at
+            // the frame's 520 the row took what it needed and its file field was left 40 wide.
+            frame: DialogFrame::new("surveyJobsDialog", "Survey Jobs").width(BODY_WIDTH),
             open: false,
             form: JobsForm {
                 jobs: Vec::new(),
@@ -314,9 +326,17 @@ impl SurveyJobsDialog {
         let shown = self
             .frame
             .show(&ctx, &mut self.form, Self::draw_body, |ui, form| {
+                // What happened last at the footer's left, the design's one home for a status.
                 let ((), close) = crate::shell::dialog::button_row(
                     ui,
-                    |_| {},
+                    |ui| {
+                        coloured_label(
+                            ui,
+                            "message",
+                            &form.message,
+                            message_colour(form.message_is_error),
+                        );
+                    },
                     |ui| {
                         drive::button(ui, "close", "Close")
                             .on_hover_text("Close; the jobs stay with the drawing")
@@ -366,39 +386,44 @@ impl SurveyJobsDialog {
              can be reduced and adjusted again with other settings: Edit Adjustment, Preview, \
              Apply - one undo step.",
         );
-        egui::ScrollArea::vertical()
-            .id_salt("surveyJobsList")
-            .max_height(120.0)
-            .show(ui, |ui| {
-                if crate::shell::dialog::pick_table(
-                    ui,
-                    "jobs",
-                    &[
-                        "Job",
-                        "File",
-                        "Format",
-                        "Imported",
-                        "Method",
-                        "Points",
-                        "Variance factor",
-                        "Global test",
-                    ],
-                    &form.jobs,
-                    &mut form.current,
-                    // The job summary under it says so already.
-                    "",
-                )
-                .inner
-                {
-                    form.job_changed = true;
-                }
-            });
-        coloured_label(
+        // The table scrolls in its own place (table_or_empty); in a scroll area of its own, which
+        // shrank to its header's words, the header stood 527 wide in a body of 665.
+        if crate::shell::dialog::pick_table(
             ui,
-            "jobSummary",
-            &form.job_summary,
-            palette::text_muted().to_egui(),
-        );
+            "jobs",
+            &[
+                "Job",
+                "File",
+                "Format",
+                "Imported",
+                "Method",
+                "Points",
+                "Variance factor",
+                "Global test",
+            ],
+            &form.jobs,
+            &mut form.current,
+            NO_JOBS,
+        )
+        .inner
+        {
+            form.job_changed = true;
+        }
+        // The summary under the table, once there is something to say beyond the table's own
+        // empty state: an empty label took a line of its own.
+        let summary = |ui: &mut Ui| {
+            coloured_label(
+                ui,
+                "jobSummary",
+                &form.job_summary,
+                palette::text_muted().to_egui(),
+            );
+        };
+        if form.job_summary.is_empty() {
+            super::survey_dialogs::offstage(ui, "jobSummaryEmpty", summary);
+        } else {
+            summary(ui);
+        }
         let busy = form.task.busy();
         ui.horizontal(|ui| {
             let buttons = [
@@ -423,10 +448,16 @@ impl SurveyJobsDialog {
                     form.pressed.push(name);
                 }
             }
-            ui.add_space(16.0);
+        });
+        // The export on a row of its own: its format, then the file filling what its two buttons
+        // leave. Squeezed beside the job's buttons, the file field was 40 wide ("fil...").
+        crate::shell::dialog::labelled(ui, "Export report", |ui| {
+            crate::shell::dialog::fixed_fields(ui, EXPORT_FORMAT_WIDTH);
             let formats: Vec<&str> = EXPORT_FORMATS.iter().map(|(label, _, _)| *label).collect();
             choice_of(ui, "exportFormat", &formats, &mut form.export_format)
                 .on_hover_text("The format, when the file name has no extension saying it");
+            let width = crate::shell::dialog::beside_buttons(ui, &["...", "Export Report"]);
+            crate::shell::dialog::fixed_fields(ui, width);
             field(
                 ui,
                 "exportFile",
@@ -493,12 +524,6 @@ impl SurveyJobsDialog {
         if form.task.ui(ui) {
             form.task_cancelled = true;
         }
-        coloured_label(
-            ui,
-            "message",
-            &form.message,
-            message_colour(form.message_is_error),
-        );
     }
 
     fn edit_page(ui: &mut Ui, form: &mut JobsForm, busy: bool) {
@@ -671,8 +696,9 @@ impl SurveyJobsDialog {
     fn job_chosen(&mut self, host: &mut dyn Host) {
         let document = host.document();
         let Some(job) = self.current_job(document) else {
+            // With no jobs the table's empty state says so (NO_JOBS).
             self.form.job_summary = String::from(if document.survey_jobs().is_empty() {
-                "No survey jobs yet: Survey > Import Survey Points reads a field file as one."
+                ""
             } else {
                 "Choose a job."
             });

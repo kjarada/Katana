@@ -400,7 +400,8 @@ impl GridDemDialog {
                      so every cell is this size and grids of one cell size line up",
                 );
             });
-            ui.label("or size");
+            // On its fields' line, as a form's label is (dialog::text_value).
+            crate::shell::dialog::text_value(ui, |ui| ui.label("or size"));
             crate::shell::dialog::fill_fields(ui);
             ui.add_enabled_ui(!cell_given, |ui| {
                 field(ui, "gridSize", &mut self.size, "or columns x rows: 400x300").on_hover_text(
