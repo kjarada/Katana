@@ -28,7 +28,7 @@ use super::layout::{self, Geometry, bar_breadth, natural_width, row_rooms};
 use super::window::{ImportOptions, MainWindow};
 use crate::dock_chrome::{ChromeIcons, ChromeRequest, DockChrome, DockRole, DockTab};
 use crate::drive::action::{Action, Menu, ToolBar, ToolBarItem};
-use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
+use crate::drive::controls::{self, Choice, LineOptions};
 use crate::drive::registry::{TargetKind, TargetSpec, WINDOW, begin_target, end_target};
 use crate::host::Host;
 use crate::import_placement::DialogResult;
@@ -511,7 +511,8 @@ impl MainWindow {
                 .iter()
                 .map(|strip| natural_width(&strip.items, icon_size))
                 .collect();
-            let rooms = layout::column_rooms(&naturals, rect.height(), layout::collapsed_bar());
+            let rooms =
+                layout::column_rooms(&naturals, rect.height(), layout::collapsed_bar(icon_size));
             for (strip, room) in strips.iter().zip(rooms) {
                 if room <= 0.0 {
                     continue;
@@ -857,12 +858,18 @@ impl MainWindow {
     /// the current layer, the snap and the coordinates.
     fn status_bar_ui(&mut self, ui: &mut Ui, geometry: &Geometry) {
         let now = std::time::Instant::now();
-        let message = self
-            .exec
-            .log
-            .status_message(now)
-            .map(String::from)
-            .unwrap_or_else(|| self.ui.panels.status.clone());
+        // A sentence starts with a capital where a person reads it: an error's sentence is written
+        // to follow a code ("InvalidState: nothing is selected; use SELECT first"), and the bar,
+        // which shows it without the code, read "nothing is selected; ..." (the third look
+        // audit's J). The log and what a line hands back keep it as it was.
+        let message = sentence_start(
+            &self
+                .exec
+                .log
+                .status_message(now)
+                .map(String::from)
+                .unwrap_or_else(|| self.ui.panels.status.clone()),
+        );
         let document = &self.exec.document;
         let crs = format!("CRS: {}", crate::project_crs_dialog::project_crs_label(document));
         let selection = format!(
@@ -1242,10 +1249,15 @@ impl MainWindow {
                 WorkspaceEvent::Status(text) => self.ui.panels.status = text,
                 WorkspaceEvent::FrameStats(text) => self.ui.panels.frame_stats = text,
                 WorkspaceEvent::Prompt(prompt) => {
-                    self.ui.panels.status.clone_from(&prompt);
-                    // A running tool's prompt shows where its answer is typed.
+                    // A running tool's prompt shows where its answer is typed, the command line's
+                    // field, and in the view's band over the drawing; the status bar said it a
+                    // third time at once (the third look audit's H), so it says it only when no
+                    // tool runs.
                     if !prompt.is_empty() && !self.exec.workspace.active_tool_id().is_empty() {
+                        self.ui.panels.status.clear();
                         self.ui.panels.placeholder = prompt;
+                    } else {
+                        self.ui.panels.status = prompt;
                     }
                 }
                 WorkspaceEvent::Error(error) => self.exec.log_message(&error, true),
@@ -1956,7 +1968,7 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
             ("referenceShow", "LayerVisible", "Show", "Show the selected reference layer (REFS SHOW)."),
             ("referenceHide", "LayerHidden", "Hide", "Hide the selected reference layer (REFS HIDE)."),
             ("referenceInfo", "DatasetInfo", "Information", "The selected layer's source and display (REFS INFO), and what its file holds."),
-            ("referenceOverviews", "Processing", "Build Overviews", "Build overviews for the selected raster, written beside its file as .ovr (REFS OVERVIEWS ... CONFIRM)."),
+            ("referenceOverviews", "BuildOverviews", "Build Overviews", "Build overviews for the selected raster, written beside its file as .ovr (REFS OVERVIEWS ... CONFIRM)."),
             ("referenceRemove", "Erase", "Remove", "Remove the selected reference layer (REFS REMOVE). The file is not touched."),
         ]
         .into_iter()
@@ -1971,6 +1983,9 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
         }
     });
     let reference = &window.exec.reference;
+    // Three columns, which fit the panel's 240: a fourth, Kind ("Raster", "Point cloud"), ran the
+    // last column's header off the panel's edge ("Show", the third look audit's J), and the size
+    // already says the kind - pixels for a raster, points for a cloud.
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut ids: Vec<u64> = Vec::new();
     for raster in reference.rasters() {
@@ -1980,7 +1995,6 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
         }
         rows.push(vec![
             raster.name.clone(),
-            String::from("Raster"),
             detail,
             format!("{}%", (raster.opacity * 100.0).round() as i64),
         ]);
@@ -1996,7 +2010,6 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
         }
         rows.push(vec![
             cloud.name.clone(),
-            String::from("Point cloud"),
             detail,
             String::from(cloud.color_mode.name()),
         ]);
@@ -2020,18 +2033,23 @@ fn reference_ui(window: &mut MainWindow, ui: &mut Ui) {
              under the drawing.",
         );
     } else {
-        let shown = egui::ScrollArea::horizontal()
-            .id_salt("referenceListScroll")
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                crate::shell::dialog::table_or_empty(
-                    ui,
-                    "referenceList",
-                    &["Name", "Kind", "Size", "Shown"],
-                    &rows,
-                    current,
-                    "",
-                )
+        let shown = ui
+            .scope(|ui| {
+                scroll_bar_seen(ui);
+                egui::ScrollArea::horizontal()
+                    .id_salt("referenceListScroll")
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        crate::shell::dialog::table_or_empty(
+                            ui,
+                            "referenceList",
+                            &["Name", "Size", "Shown"],
+                            &rows,
+                            current,
+                            "",
+                        )
+                    })
+                    .inner
             })
             .inner;
         if let Some(at) = shown.chosen
@@ -2310,17 +2328,28 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
                 // egui's text box takes its width from text_edit_width, 280 points by default, and
                 // the log wrapped there with the rest of the panel empty.
                 ui.spacing_mut().text_edit_width = ui.available_width();
-                let _ = controls::text_with(
-                    ui,
-                    "commandLog",
-                    &mut log,
-                    TextOptions {
-                        read_only: true,
-                        rows: 3,
-                        monospace: true,
-                    },
-                );
+                command_log_box(ui, &mut log)
             });
+        // At its end, the log starts at a whole logical line: a line wrapped over the log's top
+        // showed its last words alone ("in."), and at Extra Large a pixel or two of the row above
+        // the first whole one - its descenders - showed over it (the third look audit's J). What
+        // is above the first row that starts a line is covered with the log's own ground. Only at
+        // the end: scrolled back, a person reads a long line part by part.
+        let (galley, galley_pos) = &shown.inner;
+        let at_end = shown.state.offset.y + 1.0
+            >= shown.content_size.y - shown.inner_rect.height();
+        if at_end
+            && let Some(top) =
+                first_whole_line_top(galley, *galley_pos, shown.inner_rect.top())
+            && top > shown.inner_rect.top() + 0.5
+        {
+            let cover = Rect::from_min_max(
+                shown.inner_rect.min,
+                Pos2::new(shown.inner_rect.max.x, top),
+            );
+            ui.painter_at(shown.inner_rect)
+                .rect_filled(cover, 0.0, palette::panel().to_egui());
+        }
         if to_the_end {
             // The offset of its end as this pass laid it out, kept for the pass that is shown:
             // this one is laid out again (an offset given before the content is measured - "past
@@ -2381,6 +2410,105 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
         let text = std::mem::take(&mut window.ui.panels.command_text);
         window.exec.run_command_line(&text);
     }
+}
+
+/// A panel's table that scrolls across shows that it does: its scroll bar's handle in the
+/// secondary text colour (egui's `foreground_color`) rather than the raised grey on the input's
+/// well, which in a 240-wide panel read as no bar at all - the Vertices table's Height cut at the
+/// panel's edge and its Bulge out of view with nothing to say so (the third look audit's J). For
+/// the scroll areas inside `ui` only: the window's thin bars elsewhere are the theme's.
+pub fn scroll_bar_seen(ui: &mut Ui) {
+    ui.spacing_mut().scroll.foreground_color = true;
+}
+
+/// `text` with its first letter a capital, the rest as it is.
+pub fn sentence_start(text: &str) -> String {
+    let mut letters = text.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+/// The command log's box: what `controls::text_with` draws for a read-only, fixed-pitch text box
+/// named commandLog - the same record, the same answers to a driver's acts - with each line that
+/// reports an error ("! ...", command_log) in the error token. Every line was the text colour, and
+/// a refusal read as one more reply (the third look audit's H). Answers the galley as laid out
+/// and where it was drawn, for the log's top line (`first_whole_line_top`).
+fn command_log_box(ui: &mut Ui, log: &mut String) -> (std::sync::Arc<egui::Galley>, Pos2) {
+    use crate::drive::mailbox::{Act, no_button};
+    use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
+    const NAME: &str = "commandLog";
+    let taken = take(ui, NAME);
+    let mut changed = false;
+    if let Some(taken) = &taken {
+        match &taken.posted.act {
+            Act::Fill(text) => {
+                if controls::accept_fill(ui, taken) {
+                    let written = text.replace("\\n", "\n");
+                    changed = *log != written;
+                    *log = written;
+                    settle(ui, taken, Ok(()));
+                }
+            }
+            Act::Press => settle(ui, taken, Err(no_button(&taken.posted))),
+            Act::ScrollTo => {}
+        }
+    }
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+        let mut job = egui::text::LayoutJob::default();
+        for line in text.as_str().split_inclusive('\n') {
+            let colour = if line.starts_with("! ") {
+                palette::error()
+            } else {
+                palette::text()
+            };
+            job.append(
+                line,
+                0.0,
+                egui::TextFormat::simple(font.clone(), colour.to_egui()),
+            );
+        }
+        job.wrap.max_width = wrap_width;
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+    let output = egui::TextEdit::multiline(log)
+        .id_salt(NAME)
+        .desired_rows(3)
+        .desired_width(f32::INFINITY)
+        .interactive(false)
+        .code_editor()
+        .layouter(&mut layouter)
+        .show(ui);
+    let mut response = output.response.response;
+    if changed {
+        response.mark_changed();
+    }
+    if let Some(taken) = &taken
+        && matches!(taken.posted.act, Act::ScrollTo)
+    {
+        response.scroll_to_me(None);
+        settle(ui, taken, Ok(()));
+    }
+    let mut kept = ControlRecord::new(NAME, ControlKind::Text);
+    kept.enabled = ui.is_enabled();
+    kept.visible = ui.is_visible();
+    kept.value = log.clone();
+    record(ui, &response, kept);
+    (output.galley, output.galley_pos)
+}
+
+/// The top on the screen of the first row of `galley`, drawn at `at`, that starts a logical line
+/// and lies wholly below `view_top`; None when no row does (one line longer than the view).
+pub fn first_whole_line_top(galley: &egui::Galley, at: Pos2, view_top: f32) -> Option<f32> {
+    galley
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index == 0 || galley.rows[index - 1].ends_with_newline)
+        .map(|(_, row)| at.y + row.pos.y)
+        .find(|top| *top >= view_top - 0.5)
 }
 
 // ---- a view's report -------------------------------------------------------------------------
@@ -2480,7 +2608,51 @@ pub fn reserve(ui: &mut Ui, rect: Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_timing;
+    use egui::Pos2;
+
+    use super::{is_timing, sentence_start};
+
+    #[test]
+    fn the_log_starts_at_the_first_row_below_its_top_that_begins_a_line() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+        // A middle line long enough to wrap at 60 points, between two short ones.
+        let galley = ctx.fonts_mut(|fonts| {
+            fonts.layout(
+                String::from("one
+wrapped words wrapped words wrapped words
+three"),
+                egui::FontId::monospace(10.0),
+                egui::Color32::WHITE,
+                60.0,
+            )
+        });
+        let rows = &galley.rows;
+        assert!(rows.len() >= 4, "the premise: the middle line wraps ({})", rows.len());
+        let at = Pos2::new(0.0, 100.0);
+        let top = |index: usize| at.y + rows[index].pos.y;
+        let last = rows.len() - 1;
+        // The view's top on the first row: that row.
+        assert_eq!(super::first_whole_line_top(&galley, at, top(0)), Some(top(0)));
+        // Below the first row's top: not the wrapped line's second row, its first.
+        assert_eq!(super::first_whole_line_top(&galley, at, top(0) + 1.0), Some(top(1)));
+        // Inside the wrapped line: past all of it, to the last line.
+        assert_eq!(super::first_whole_line_top(&galley, at, top(1) + 1.0), Some(top(last)));
+        // Below every line's start: none.
+        assert_eq!(super::first_whole_line_top(&galley, at, top(last) + 1.0), None);
+    }
+
+    #[test]
+    fn the_status_bars_sentence_starts_with_a_capital_and_keeps_the_rest() {
+        assert_eq!(
+            sentence_start("nothing is selected; use SELECT first"),
+            "Nothing is selected; use SELECT first"
+        );
+        assert_eq!(sentence_start("Line: Specify next point"), "Line: Specify next point");
+        assert_eq!(sentence_start("élan"), "Élan");
+        assert_eq!(sentence_start("3 selected"), "3 selected");
+        assert_eq!(sentence_start(""), "");
+    }
 
     // The readouts as the views write them (viewport_widget's paint, render_view_widget's frame,
     // section_view_widget's cut and pointer readouts).

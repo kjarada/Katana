@@ -21,7 +21,7 @@ mod icons {
         // the list does.
         let icons = all_icons();
         // The last enumerator, which moves whenever an icon is added at the end.
-        assert_eq!(icons.len(), Icon::SurveyParcelReport as usize + 1);
+        assert_eq!(icons.len(), Icon::OnlineData as usize + 1);
         for (index, icon) in icons.iter().enumerate() {
             assert_eq!(*icon as usize, index);
         }
@@ -48,6 +48,45 @@ mod icons {
             // size; an icon that paints nothing is 0.
             assert!(ink >= 12, "icon {} has {ink}", which as usize);
         }
+    }
+
+    #[test]
+    fn no_two_icons_of_the_set_paint_the_same_picture() {
+        // The third look audit's G: GIS's processing items, Terrain's Analysis and DEM items and
+        // View's sizes each shared one icon. Two names painting one picture is that again, so
+        // every pair is told apart at a toolbar's 20 px, both tones distinct.
+        let painted: Vec<(Icon, Vec<u8>)> = all_icons()
+            .iter()
+            .map(|&which| {
+                let mut canvas = RasterCanvas::new(20, 20);
+                paint_icon(
+                    &mut canvas,
+                    which,
+                    RectF::new(0.0, 0.0, 20.0, 20.0),
+                    Color::WHITE,
+                    Color::rgb(0, 0, 255),
+                );
+                let image = canvas.into_image();
+                let mut bytes = Vec::with_capacity(20 * 20 * 4);
+                for y in 0..20 {
+                    for x in 0..20 {
+                        let pixel = image.pixel(x, y);
+                        bytes.extend([pixel.r, pixel.g, pixel.b, pixel.a]);
+                    }
+                }
+                (which, bytes)
+            })
+            .collect();
+        let mut same = Vec::new();
+        for (at, (one, picture)) in painted.iter().enumerate() {
+            for (other, theirs) in &painted[at + 1..] {
+                if picture == theirs {
+                    same.push(format!("{} = {}", one.name(), other.name()));
+                }
+            }
+        }
+        assert!(painted.len() > 190, "the premise: the whole set ({})", painted.len());
+        assert!(same.is_empty(), "icons that paint one picture: {same:?}");
     }
 
     /// Whether `colour` is the accent's blue rather than one of the text greys: the accent

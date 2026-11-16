@@ -336,7 +336,16 @@ impl VertexPanel {
         let mut current = self.current;
         let cells = &self.cells;
         let typed = &mut self.typed;
-        let headers: Vec<&str> = COLUMNS.iter().map(|&column| to_string(column)).collect();
+        // The index's header is "#": "Index", wider than any index under it, held the column 50
+        // wide, and the Height after Northing was cut at the panel's edge (the third look
+        // audit's J). The other columns keep the drawing's names.
+        let headers: Vec<&str> = COLUMNS
+            .iter()
+            .map(|&column| match column {
+                VertexColumn::Index => "#",
+                _ => to_string(column),
+            })
+            .collect();
         let widths = column_widths(ui, &headers, cells);
         let chosen: Vec<bool> = (0..typed.len()).map(|row| current == Some(row)).collect();
         let height = ui.spacing().interact_size.y;
@@ -345,6 +354,8 @@ impl VertexPanel {
         // text and a field's insets, so no number is cut ("60.00(" in a 46-point cell, the second
         // look audit's N8): seven columns do not fit a panel 240 wide, and the table scrolls
         // across under them rather than squeezing every cell.
+        // The bar it scrolls across by is seen (main_window::panels::scroll_bar_seen).
+        crate::main_window::panels::scroll_bar_seen(ui);
         let shown = egui::ScrollArea::both()
             .id_salt("vertexTableScroll")
             .auto_shrink([false, true])

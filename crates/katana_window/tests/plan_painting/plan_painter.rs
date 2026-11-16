@@ -366,15 +366,16 @@ impl GhostPlan {
     }
 }
 
-/// Pixels of the line's rows, 48 to 52, in the selection's orange: red well above green, green
-/// well above blue - never the layer's white, the black ground or grey.
-fn orange_ink(image: &Image) -> usize {
+/// Pixels of the line's rows, 48 to 52, in the selection's blue (the accent, #4c8dff, since the
+/// look of 2026-11-16; it was an orange): blue well above green, green well above red - never
+/// the layer's white, the black ground or grey.
+fn selection_ink(image: &Image) -> usize {
     let mut count = 0;
     for y in 48..=52 {
         for x in 0..image.width() {
             let c = image.pixel(x, y);
             let (r, g, b) = (i32::from(c.r), i32::from(c.g), i32::from(c.b));
-            count += usize::from(r > g + 30 && g > b + 30);
+            count += usize::from(b > g + 30 && g > r + 30);
         }
     }
     count
@@ -1861,13 +1862,13 @@ mod plan_painter {
 
     #[test]
     fn a_selected_entity_on_a_layer_this_view_hides_is_drawn_as_a_ghost() {
-        // The ghost: #FF9F1C at alpha 153, in 2 px square dots every 6 px from the line's start,
+        // The ghost: #4C8DFF at alpha 153, in 2 px square dots every 6 px from the line's start,
         // not antialiased (selection_style; the painter's dot_path). The 80 px run from column 10
         // has a dot at t = 0, 6 ... 78 along it, fourteen, and a dot about x covers columns x - 1
         // and x of rows 49 and 50, so row 50 has 28 pixels of ink - columns 9 and 10, then every
         // 6 - and nothing between. Ink is measured against a baseline, the same frame painted
         // with nothing selected, never as pixels lit in the ghosted image alone. Over black a
-        // covered pixel is 153/255 of the orange: (153, 95.4, 16.8), within 2 of that after the
+        // covered pixel is 153/255 of the blue: (45.6, 84.6, 153), within 2 of that after the
         // 8-bit premultiplied blend's rounding.
         let plan = GhostPlan::new();
         let (bare, unselected) = plan.paint(false);
@@ -1883,8 +1884,8 @@ mod plan_painter {
             selected.entities_drawn, 0,
             "the layer is hidden in this view"
         );
-        assert_eq!(orange_ink(&bare), 0);
-        assert!(orange_ink(&ghosted) > orange_ink(&bare));
+        assert_eq!(selection_ink(&bare), 0);
+        assert!(selection_ink(&ghosted) > selection_ink(&bare));
 
         let inked = |x: u32, y: u32| ghosted.pixel(x, y) != bare.pixel(x, y);
         let mut ink = 0;
@@ -1894,9 +1895,9 @@ mod plan_painter {
             ink += i32::from(inked(x, 50));
             exact += i32::from(
                 inked(x, 50)
-                    && (i32::from(c.r) - 153).abs() <= 2
-                    && (i32::from(c.g) - 95).abs() <= 2
-                    && (i32::from(c.b) - 17).abs() <= 2,
+                    && (i32::from(c.r) - 46).abs() <= 2
+                    && (i32::from(c.g) - 85).abs() <= 2
+                    && (i32::from(c.b) - 153).abs() <= 2,
             );
         }
         assert_eq!(ink, 28, "fourteen dots, 2 px each");
@@ -1926,7 +1927,7 @@ mod plan_painter {
             .expect("the layer is updated");
         let (image, stats) = plan.paint(true);
         assert_eq!(stats.ghosts_drawn, 0);
-        assert_eq!(orange_ink(&image), 0);
+        assert_eq!(selection_ink(&image), 0);
     }
 
     #[test]
@@ -1948,7 +1949,7 @@ mod plan_painter {
             .expect("the entity is replaced");
         let (image, stats) = plan.paint(true);
         assert_eq!(stats.ghosts_drawn, 0);
-        assert_eq!(orange_ink(&image), 0);
+        assert_eq!(selection_ink(&image), 0);
     }
 
     #[test]
@@ -1976,18 +1977,18 @@ mod plan_painter {
         assert!(!plan.options.selection_ghosts);
         let (image, stats) = plan.paint(true);
         assert_eq!(stats.ghosts_drawn, 0);
-        assert_eq!(orange_ink(&image), 0);
+        assert_eq!(selection_ink(&image), 0);
     }
 
     #[test]
     fn a_selected_entity_the_view_shows_is_drawn_selected_and_not_as_a_ghost() {
-        // The view hiding nothing: the line is drawn, in the selection's 2 px orange dashes, once.
+        // The view hiding nothing: the line is drawn, in the selection's 2 px dashes, once.
         let mut plan = GhostPlan::new();
         plan.hidden_in_view = false;
         let (image, stats) = plan.paint(true);
         assert_eq!(stats.ghosts_drawn, 0);
         assert_eq!(stats.entities_drawn, 1);
-        assert!(orange_ink(&image) > 0);
+        assert!(selection_ink(&image) > 0);
     }
 
     #[test]

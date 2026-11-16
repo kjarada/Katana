@@ -38,7 +38,7 @@ pub const BIM_MENU_TITLE: &str = "&BIM";
 pub const BIM_TOOL_BAR: &str = "BIMToolBar";
 pub const BIM_TOOL_BAR_TITLE: &str = "BIM";
 /// The section's title in the menu.
-pub const SECTION: &str = "Road Objects";
+pub const SECTION: &str = "Road objects";
 
 /// One kind's action. The section, in the order of the dialog's pages. The letters are ones the
 /// BIM menu's road model section leaves (--check-shortcuts): B, G, N, L, U, W, F, M and, for the

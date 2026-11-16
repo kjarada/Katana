@@ -311,7 +311,7 @@ impl Workbench for UtilityWorkbench {
     /// after what is already there. A section, as the Survey menu's others are: a style that draws
     /// its title says what the group is for.
     fn menus(&self) -> Vec<Menu> {
-        let mut menu = Menu::new("surveyMenu", "&Survey").section("Subsurface Utilities (AS 5488)");
+        let mut menu = Menu::new("surveyMenu", "&Survey").section("Subsurface utilities (AS 5488)");
         for entry in &ACTIONS {
             menu = menu.action(tool_action(entry));
         }

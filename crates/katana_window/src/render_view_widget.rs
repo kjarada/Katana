@@ -85,9 +85,11 @@ use crate::viewport_widget::{KeyModifiers, MouseButton};
 /// and matches what every other CAD package feels like.
 pub const ORBIT_PER_PIXEL: f64 = 0.008;
 
-/// The ground behind the model, and behind the empty view's message.
-pub const BACKGROUND: Color = Color::rgb(28, 30, 36);
-const BACKGROUND_RGBA: Rgba = rgba(28, 30, 36);
+/// The ground behind the model, and behind the empty view's message: the plan's (the viewport
+/// token), so every view of the workspace stands on one ground. It was (28, 30, 36), and in Quad
+/// the plan, the 3D and the section were three darks side by side (the third look audit's H).
+pub const BACKGROUND: Color = palette::viewport();
+const BACKGROUND_RGBA: Rgba = rgba(BACKGROUND.r, BACKGROUND.g, BACKGROUND.b);
 
 /// The smallest the view may be made (QWidget::setMinimumSize(40, 40)).
 pub const MINIMUM_SIZE: i32 = 40;

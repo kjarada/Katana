@@ -97,7 +97,9 @@ pub struct FrameSettings {
 impl Default for FrameSettings {
     fn default() -> Self {
         Self {
-            background: rgba(28, 30, 36),
+            // The views' one ground, the plan's #1e2329, as the software path's (katana_window's
+            // render view); it was (28, 30, 36), a second dark beside the plan in Quad.
+            background: rgba(30, 35, 41),
             lighting: LightingMode::Baked,
             light_direction: Vec3::new(0.35, -0.5, 0.79),
             ambient: 0.35,

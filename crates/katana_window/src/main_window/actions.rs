@@ -649,15 +649,48 @@ pub const ICON_SIZES: [(i32, &str, &str); 3] = [
     (28, "&Large Icons", "viewToolBarIconsLarge"),
 ];
 
-/// A toolbar's toggle in View > Toolbars: viewToolBar<title without blanks>.
-pub fn tool_bar_toggle(bar: &ToolBar, shown: bool) -> Action {
+/// Each icon size's own icon in View > Toolbars, in ICON_SIZES' order: the three shared Toolbars'
+/// window, and read only by their words (the third look audit's G).
+const ICON_SIZE_ICONS: [&str; 3] = ["ToolbarIconsSmall", "ToolbarIconsStandard", "ToolbarIconsLarge"];
+
+/// Each text size's own icon in View > Text Size, in TEXT_SIZES' order: an A at each size.
+const TEXT_SIZE_ICONS: [&str; 4] = [
+    "TextSizeSmall",
+    "TextSizeStandard",
+    "TextSizeLarge",
+    "TextSizeExtraLarge",
+];
+
+/// A toolbar's toggle in View > Toolbars: viewToolBar<title without blanks>, with the icon of the
+/// bar's first button (`tool_bar_icon`).
+pub fn tool_bar_toggle(bar: &ToolBar, shown: bool, icon: &'static str) -> Action {
     act(
         &format!("viewToolBar{}", bar.title.replace(' ', "")),
-        "Toolbars",
+        icon,
         &bar.title,
         &format!("Show or hide the {} toolbar", bar.title),
     )
     .checkable(shown)
+}
+
+/// The icon of a toolbar's first button, which its toggle in View > Toolbars shows: all thirteen
+/// toggles showed one window icon, so the list was read word by word (the third look audit's G).
+/// A control the bar draws itself is asked of `widget_icon` (a tool family's button: its first
+/// tool's icon) or is the icon of what it does (Edit's Undo button, the Properties bar's style
+/// choice); one with neither is passed over. Toolbars' window when the bar shows no icon at all.
+pub fn tool_bar_icon(bar: &ToolBar, widget_icon: &dyn Fn(&str) -> Option<&'static str>) -> &'static str {
+    bar.items
+        .iter()
+        .find_map(|item| match item {
+            ToolBarItem::Action(action) if !action.icon.is_empty() => Some(action.icon),
+            ToolBarItem::Widget(name) => match name.as_str() {
+                "editUndoButton" => Some("Undo"),
+                "CurrentStyleCombo" => Some("Properties"),
+                _ => widget_icon(name),
+            },
+            _ => None,
+        })
+        .unwrap_or("Toolbars")
 }
 
 /// The window's menus and toolbars, composed from its own rows and every workbench's, in the
@@ -691,7 +724,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(open_action())
         .action(save_action())
         .action(save_as_action())
-        .section("Import and Export");
+        .section("Import and export");
     let mut import_menu = Menu::new("fileImportMenu", "&Import");
     let mut export_menu = Menu::new("fileExportMenu", "&Export");
     signs.insert(
@@ -1008,7 +1041,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .checkable(active.as_ref().is_some_and(|state| state.selection_ghosts))
         .enabled(active.is_some()),
     ));
-    view.items.push(MenuItem::Section(String::from("3D Views")));
+    view.items.push(MenuItem::Section(String::from("3D views")));
     let mut standard = Menu::new("viewStandardMenu", "Standard &3D Views");
     signs.insert(
         String::from("viewStandardMenu"),
@@ -1196,21 +1229,21 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
 
     // ---- GIS --------------------------------------------------------------------------------
     let mut gis = Menu::new("gisMenu", "&GIS")
-        .section("Vector - GDAL")
+        .section("Vector")
         .action(import_vector_action())
         .action(export_action())
-        .section("Raster - GDAL")
+        .section("Raster")
         .action(import_raster_action())
         .action(export_dem_action())
-        .section("Point Cloud - PDAL")
+        .section("Point cloud")
         .action(import_cloud_action())
         .action(export_cloud_action())
         .action(copc_action())
         // Dataset Information reads a vector file, a raster or a point cloud, so it is under none
         // of the three: a section of its own, where a bare rule left it under Point Cloud's.
-        .section("Any Dataset")
+        .section("Any dataset")
         .action(dataset_info_action())
-        .section("Online - Web Services")
+        .section("Online")
         .action(online.clone());
     append(&mut gis, ui.geo_menus.gis());
 
@@ -1465,11 +1498,21 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         "BIMToolBar",
         "GISToolBar",
     ];
+    // A tool family's button on a bar shows its first tool's icon, as its submenu does.
+    let family_icon = |name: &str| -> Option<&'static str> {
+        let family = ui
+            .tools
+            .families()
+            .iter()
+            .find(|family| family.button.as_deref() == Some(name))?;
+        ui.tools.action(&family.first).map(|action| action.icon)
+    };
     for name in MADE {
         if let Some((bar, _)) = bars.iter().find(|(bar, _)| bar.name == name) {
             toolbars.items.push(MenuItem::Action(tool_bar_toggle(
                 bar,
                 ui.bars.shown(&bar.name),
+                tool_bar_icon(bar, &family_icon),
             )));
         }
     }
@@ -1484,11 +1527,11 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         )
         .checkable(ui.bars.names_shown),
     ));
-    for (pixels, text, name) in ICON_SIZES {
+    for ((pixels, text, name), icon) in ICON_SIZES.into_iter().zip(ICON_SIZE_ICONS) {
         toolbars.items.push(MenuItem::Action(
             act(
                 name,
-                "Toolbars",
+                icon,
                 text,
                 &format!("Toolbar icons {pixels} pixels square"),
             )
@@ -1505,7 +1548,11 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             ),
         ),
     );
-    for (size, label) in TEXT_SIZES.into_iter().zip(["&Small", "S&tandard", "&Large", "&Extra Large"]) {
+    for ((size, label), icon) in TEXT_SIZES
+        .into_iter()
+        .zip(["&Small", "S&tandard", "&Large", "&Extra Large"])
+        .zip(TEXT_SIZE_ICONS)
+    {
         let steps = text_size_steps(size);
         let tip = if steps == 0 {
             String::from("The platform's own text size")
@@ -1518,7 +1565,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             )
         };
         text_size.items.push(MenuItem::Action(
-            act(text_size_action_name(size), "TextSize", label, &tip)
+            act(text_size_action_name(size), icon, label, &tip)
                 .checkable(size == crate::theme::text_size()),
         ));
     }

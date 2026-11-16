@@ -1271,7 +1271,8 @@ mod scene_layers_build {
 
     #[test]
     fn the_selection_overlay_is_the_selection_colour_over_a_dark_casing() {
-        // selection_style.rs: a 3 px core in #FF9F1C over a 5 px casing of
+        // selection_style.rs: a 3 px core in #4C8DFF (the window's accent since
+        // the look of 2026-11-16; it was #FF9F1C) over a 5 px casing of
         // (16, 18, 22), in a list of its own. The casing's bias is between the
         // core's and the drawing's, so it is not lost behind the line it
         // frames.
@@ -1286,11 +1287,11 @@ mod scene_layers_build {
         let casing = layers.selection_casing.lines[0];
         assert_eq!(
             layers.selection.colors[core.a as usize],
-            rgba(0xFF, 0x9F, 0x1C)
+            rgba(0x4C, 0x8D, 0xFF)
         );
         assert_eq!(
             layers.selection.colors[core.b as usize],
-            rgba(0xFF, 0x9F, 0x1C)
+            rgba(0x4C, 0x8D, 0xFF)
         );
         assert_eq!(
             layers.selection_casing.colors[casing.a as usize],
@@ -1333,7 +1334,7 @@ mod scene_layers_build {
         assert_eq!(layers.selection.points[0].size, 9.0);
         assert_eq!(
             layers.selection.colors[layers.selection.points[0].a as usize],
-            rgba(0xFF, 0x9F, 0x1C)
+            rgba(0x4C, 0x8D, 0xFF)
         );
         assert_eq!(layers.selection_casing.points.len(), 1);
         assert_eq!(layers.selection_casing.points[0].size, 11.0);
@@ -1345,8 +1346,9 @@ mod scene_layers_build {
 
     #[test]
     fn a_selected_entity_on_a_layer_the_view_hides_is_one_faint_line_in_the_overlay() {
-        // selection_style.rs: one 1 px line of (130, 88, 32) - the selection
-        // colour at 45 % over the 3D view's ground - with no casing.
+        // selection_style.rs: one 1 px line of (51, 83, 137) - the selection
+        // colour at 45 % over the 3D view's ground, worked there - with no
+        // casing.
         let scene = GhostScene::new();
         let layers = layers_of(&scene.document, &[], &scene.options());
         assert_eq!(
@@ -1364,7 +1366,7 @@ mod scene_layers_build {
             "a ghost has no casing"
         );
         let ghost = layers.selection.lines[0];
-        assert_eq!(layers.selection.colors[ghost.a as usize], rgba(130, 88, 32));
+        assert_eq!(layers.selection.colors[ghost.a as usize], rgba(51, 83, 137));
         assert_eq!(ghost.width, 1.0);
         assert_eq!(
             layers.selection.positions[ghost.a as usize].y, 0.0,
@@ -1852,7 +1854,7 @@ mod scene_frame {
     fn a_selected_line_is_drawn_in_the_selection_colour_between_two_edges_of_its_casing() {
         // A line along x through the middle of the default iso view, selected:
         // down the middle column the first and last pixels drawn are the
-        // casing's (16, 18, 22), with the core's #FF9F1C between them and none
+        // casing's (16, 18, 22), with the core's #4C8DFF between them and none
         // of the line's own white - the casing drawn first writes no depth, so
         // the core covers it, and the core's pull beats the line's (scene.rs,
         // render_layers). Not the top view: a flat drawing seen face-on has a
@@ -1874,7 +1876,7 @@ mod scene_frame {
         camera.set_standard_view(StandardView::IsoSouthWest);
         assert!(camera.frame(layers.bounds));
         let seen = frame_of(&mut layers, &camera);
-        const CORE: Rgba = rgba(0xFF, 0x9F, 0x1C);
+        const CORE: Rgba = rgba(0x4C, 0x8D, 0xFF);
         const CASING: Rgba = rgba(16, 18, 22);
         let column: Vec<Rgba> = (0..100)
             .map(|row| seen.color_at(100, row))

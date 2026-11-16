@@ -351,11 +351,14 @@ pub fn column_rooms(naturals: &[i32], room: f32, collapsed: f32) -> Vec<f32> {
     rooms
 }
 
-/// The room a side column's toolbar takes with all its tools behind its overflow arrow: the arrow
-/// and the strip's padding at either end (tools::flyout_button's strip layout).
-pub fn collapsed_bar() -> f32 {
-    use crate::tools::flyout_button::{EXTENSION_EXTENT, TOOL_BAR_PADDING_ALONG};
-    (2 * TOOL_BAR_PADDING_ALONG + EXTENSION_EXTENT) as f32
+/// The room a side column's toolbar takes with all its tools behind one button: a tool button at
+/// `icon_size` and the strip's padding at either end (tools::flyout_button's strip layout). The
+/// bar is drawn as its first tool's icon with a family's corner mark (`tool_bar_strip`), which
+/// opens the bar's tools as its overflow arrow did. It was the arrow alone, 24 points: under
+/// Draw's own arrow at 1360 x 860 the two read as one sign drawn twice (the third look audit's G).
+pub fn collapsed_bar(icon_size: i32) -> f32 {
+    use crate::tools::flyout_button::TOOL_BAR_PADDING_ALONG;
+    (2 * TOOL_BAR_PADDING_ALONG + ToolButtonLook::TOOL.button_size(icon_size).1) as f32
 }
 
 /// The height of a toolbar across it at `icon_size`.

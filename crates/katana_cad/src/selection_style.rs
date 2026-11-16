@@ -16,11 +16,17 @@
 
 use katana_render::framebuffer::{Rgba, rgba};
 
-/// #FF9F1C, the orange the plan view has always drawn a selection in. Not
-/// blue: the grips, the active view's stroke and a checked tool are blue.
-pub const SELECTION_RED: u8 = 0xFF;
-pub const SELECTION_GREEN: u8 = 0x9F;
-pub const SELECTION_BLUE: u8 = 0x1C;
+/// #4C8DFF, the window's accent (katana_window's theme palette, which this
+/// layer cannot see; a window test holds the two equal): the design's one
+/// colour for what is chosen, as the grips, the active view's stroke and a
+/// checked tool are. It was #FF9F1C, the orange the plan view had always
+/// drawn a selection in, which was the hue of an alignment's own amber - a
+/// selected entity and the "access" alignment were not told apart (the third
+/// look audit, 2026-11-16). 4.9:1 against the views' ground #1e2329, over
+/// WCAG's 3:1 for a mark that carries meaning.
+pub const SELECTION_RED: u8 = 0x4C;
+pub const SELECTION_GREEN: u8 = 0x8D;
+pub const SELECTION_BLUE: u8 = 0xFF;
 pub const SELECTION_COLOR: Rgba = rgba(SELECTION_RED, SELECTION_GREEN, SELECTION_BLUE);
 
 /// Plan and section: a ghost is the selection colour at 60 % (alpha 153) and
@@ -52,8 +58,9 @@ pub const SELECTION_CASING_BIAS: f32 = 2.0;
 pub const SELECTED_POINT_SIZE: f32 = 9.0;
 pub const SELECTED_POINT_CASING: f32 = 11.0;
 /// A ghost in 3D: one 1 px line with no casing, the selection colour at 45 %
-/// over the view's ground (28, 30, 36) mixed beforehand, since the software
-/// rasteriser draws no alpha: 0.45 x (255, 159, 28) + 0.55 x (28, 30, 36) =
-/// (130.2, 88.1, 32.4), rounded.
-pub const GHOST_COLOR3D: Rgba = rgba(130, 88, 32);
+/// over the view's ground (30, 35, 41) - the plan's, every view's since the
+/// look of 2026-11-16 - mixed beforehand, since the software rasteriser draws
+/// no alpha: 0.45 x (76, 141, 255) + 0.55 x (30, 35, 41) = (50.7, 82.7,
+/// 137.3), rounded.
+pub const GHOST_COLOR3D: Rgba = rgba(51, 83, 137);
 pub const GHOST_WIDTH3D: f32 = 1.0;

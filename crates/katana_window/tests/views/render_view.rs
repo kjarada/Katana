@@ -327,8 +327,9 @@ mod render_view {
     /// notches).
     const NOTCH: i32 = 120;
     const PER_NOTCH: f64 = 1.15;
-    /// The view's background (render_view_widget.rs, BACKGROUND).
-    const VIEW_BACKGROUND: Rgba = rgba(28, 30, 36);
+    /// The view's background (render_view_widget.rs, BACKGROUND): the plan's #1e2329, every
+    /// view's ground since the look of 2026-11-16 (it was (28, 30, 36)).
+    const VIEW_BACKGROUND: Rgba = rgba(30, 35, 41);
 
     /// Flat ground 200 m square at z = 10, from an 11 x 11 grid of points 20 m apart, and nothing
     /// else: the datum is its floor, so the navigation grid stands in the same plane. Framed from
