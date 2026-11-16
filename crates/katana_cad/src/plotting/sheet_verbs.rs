@@ -2715,7 +2715,7 @@ pub fn run_sheet_verb(
 /// Every sheet verb and option, for HELP SHEETS.
 pub fn sheet_verb_help() -> String {
     String::from(
-        r#"Sheets on the command line (docs/plotting.md). A sheet is its number (1, 2 ...) or its
+        r#"Sheets on the command line. A sheet is its number (1, 2 ...) or its
 id (s1 ...); a view is its id (vp1 ...). Options are key=value, a switch on|off, and "\n" in a
 text is a line break. Every edit is one UNDO step. A reply is one fact per line, in the form the
 options take.

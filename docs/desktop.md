@@ -954,6 +954,31 @@ capital. The Vertices table's index is "#", and a table that scrolls across
 shows its bar (`panels::scroll_bar_seen`); Reference Data lists Name, Size and
 Shown, which fit its panel.
 
+**The fifth round, the Format, annotation, BIM, plotting and sheet
+dialogs.** Close is the word for leaving a dialog that changes nothing until
+its primary is pressed (Generate Sheets, Plot Sheets, Page Setup, which said
+Cancel; the control names kept); Cancel then OK is kept only for a
+confirmation (Title Block, Hidden Layers). Edit Label has one primary: Close,
+then Apply (its OK, which applied and closed, is gone), and an empty target
+reads "No label". A refusal is a red status at the footer's left and the
+Command field is then empty (Generate Sheets, Plot Sheets); a hint before
+anything is done is muted. Hidden rows take no room (Plot to PDF's warnings,
+Page Setup's ticks). Leaders and Label Styles keep their tallest tab's height
+once drawn, and move their tabs' actions to the footer (Arrange's Align
+Selected Leaders and Renumber Balloons; Rules' Preview and Run Rules);
+Leaders' "Which leaders..." is a tick, "Only what a scope takes". Settings
+keeps its tallest page's height. Styles and Linetypes' three pages share one
+table top (113) and one action-row y (627): Hatch Patterns has a search field
+too and one row of buttons. The sheet editor stands on the main window's
+tokens (its panes the panel's grey, its desk the viewport's, so with no sheet
+nothing is bright), its list tools are panel tools, its Checks pane has a
+title bar, its sheet actions grey with no sheet, and a sheet row shows
+"{number} {name}" whole with its paper muted under it, lit across the row.
+Previews stand on the viewport's ground (the road objects', the template's
+typical section, the hatch swatch). Words: "Select Matches" (Road Objects, as
+Global Modify), "Save CSV..." everywhere, "Replace" (its verb in the tooltip),
+buttons in Title Case like menu items, singular and plural counted right.
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the

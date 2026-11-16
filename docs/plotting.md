@@ -778,7 +778,7 @@ and still make their one `edit_viewport` step themselves.
 | Cross sections: At chainages with the list, or Every with the interval | `sheetSectionsAtChainages`, `sheetSectionStations`, `sheetSectionsEvery`, `sheetSectionInterval` | `interval=0 stations=a,b,c`, or `stations="" interval=m`, and with no range yet `from=` and `to=` the alignment's whole length: the painter cuts a list when there is one and an interval only over a range (`viewport_stations`) |
 | Hidden layers... on plans, key plans, long sections and cross sections | `sheetViewportHiddenLayers`; its dialog `sheetHiddenLayersDialog`, `sheetHiddenLayersList`, `sheetHiddenLayersOk` | `VIEW SET id hide="a" show="b"`, only what the ticks changed, so an entry that is no layer of its own (a parent path) is kept |
 | An image view's Browse... | `sheetImageName`, `sheetImageBrowse` | `VIEW SET id file="path"`: copied into the project's assets (`import_image_asset`, up to 32 MB) and named in one step; a headless session opens no file dialog and names the verb |
-| Choose paper for this scale | `sheetChoosePaper`; its dialog below | `SHEET SUGGESTPAPER n scale=... apply=on` |
+| Choose Paper for This Scale | `sheetChoosePaper`; its dialog below | `SHEET SUGGESTPAPER n scale=... apply=on` |
 | Generate Sheets... | `sheetGenerate`; its dialog below | `GENERATE kind ...` |
 
 **Choose Paper** (`sheetSuggestPaperDialog`) takes the scale the sheet's

@@ -343,7 +343,9 @@ pub fn list_well(
                 .show(ui, |ui| {
                     let list = pick_list(ui, name, rows, current);
                     if rows.is_empty() {
-                        empty_table(ui, empty);
+                        // In the middle of the well, as a preview with nothing to show says what
+                        // to choose: at the well's top left it read as the first row of a list.
+                        ui.centered_and_justified(|ui| empty_table(ui, empty));
                     }
                     list
                 })

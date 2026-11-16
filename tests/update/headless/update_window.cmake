@@ -159,7 +159,8 @@ add_test(NAME qt_a_headless_run_saves_no_access_token_headless
 
 # Settings > Updates has the button that offers again a release that was put
 # back (the hardening pass's ruling H5, 2026-10-14: object name
-# settingsUpdateUnblock, text "Offer the version that was put back again", the
+# settingsUpdateUnblock, text "Offer the Version That Was Put Back Again" (a
+# button reads in Title Case as a menu item does, since 2026-11-16), the
 # line UPDATE BLOCKED CLEAR through the path the skipped version's button
 # uses). In the real window: the button is there by its name with those words;
 # pressed, the window's one executor is handed exactly that line - the command
@@ -175,7 +176,7 @@ add_test(NAME qt_settings_offers_again_a_version_that_was_put_back_by_its_line_h
         "-DAPP=${KATANA_PROGRAM_katana}"
         "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
         "-DDRIVE=@fileSettings|settingsPages=Updates|?settingsUpdateUnblock|!settingsUpdateUnblock|?settingsStatus|?commandLog"
-        "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+settingsUpdateUnblock: Offer the version that was put back again[\r\n].*settingsStatus: > UPDATE BLOCKED CLEAR Refused: [^\r\n]*reason=headless[^\r\n]*[\r\n]+commandLog: [^\r\n]*> UPDATE BLOCKED CLEAR"
+        "-DEXPECT=--dialog fileSettings opened settingsDialog \"Settings\"[\r\n]+settingsUpdateUnblock: Offer the Version That Was Put Back Again[\r\n].*settingsStatus: > UPDATE BLOCKED CLEAR Refused: [^\r\n]*reason=headless[^\r\n]*[\r\n]+commandLog: [^\r\n]*> UPDATE BLOCKED CLEAR"
         "-DFORBID=> UPDATE (CHECK|STATUS|DOWNLOAD|APPLY|SKIP|SET|TOKEN)"
         "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/update_settings_unblock_headless.png"
         -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
