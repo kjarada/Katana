@@ -234,47 +234,38 @@ impl ViewScaleDialog {
                 .iter()
                 .map(|(_, shown)| shown.clone())
                 .collect();
-            let changed = dialog::row_with(
-                ui,
-                |ui| caption(ui, "viewScaleViewLabel", "&Plan view:"),
-                |ui| controls::choice(ui, "viewScaleView", &items, &mut self.view).changed(),
-            );
+            let changed = captioned(ui, "viewScaleViewLabel", "&Plan view:", |ui| {
+                controls::choice(ui, "viewScaleView", &items, &mut self.view).changed()
+            });
             if changed {
                 self.read_view();
             }
             let modes: Vec<String> = MODES.iter().map(|mode| String::from(*mode)).collect();
-            dialog::row_with(
-                ui,
-                |ui| caption(ui, "viewScaleModeLabel", "&Sizing:"),
-                |ui| controls::choice(ui, "viewScaleMode", &modes, &mut self.mode),
-            );
+            captioned(ui, "viewScaleModeLabel", "&Sizing:", |ui| {
+                controls::choice(ui, "viewScaleMode", &modes, &mut self.mode)
+            });
             let fixed = self.mode.index == Some(1);
-            dialog::row_with(
-                ui,
-                |ui| caption(ui, "viewScaleDenominatorLabel", "&Denominator N:"),
-                |ui| {
-                    ui.add_enabled_ui(fixed, |ui| {
-                        controls::line_with(
-                            ui,
-                            "viewScaleDenominator",
-                            &mut self.denominator,
-                            LineOptions {
-                                placeholder: "For example, 500 or 1:500",
-                                ..LineOptions::default()
-                            },
-                        )
-                        .on_hover_text("Positive finite N in 1:N; this is not the camera zoom");
-                    });
-                },
-            );
+            captioned(ui, "viewScaleDenominatorLabel", "&Denominator N:", |ui| {
+                ui.add_enabled_ui(fixed, |ui| {
+                    controls::line_with(
+                        ui,
+                        "viewScaleDenominator",
+                        &mut self.denominator,
+                        LineOptions {
+                            placeholder: "For example, 500 or 1:500",
+                            ..LineOptions::default()
+                        },
+                    )
+                    .on_hover_text("Positive finite N in 1:N; this is not the camera zoom");
+                });
+            });
             let line = match self.line() {
                 Ok(line) => line,
                 Err(error) => error.message,
             };
-            dialog::row_with(
-                ui,
-                |ui| caption(ui, "viewScaleLineLabel", "Command:"),
-                |ui| {
+            captioned(ui, "viewScaleLineLabel", "Command:", |ui| {
+                // On its caption's line, as a field's text is (dialog::text_value).
+                dialog::text_value(ui, |ui| {
                     controls::label_as(
                         ui,
                         "viewScaleLine",
@@ -283,8 +274,8 @@ impl ViewScaleDialog {
                             .wrap()
                             .selectable(true),
                     );
-                },
-            );
+                });
+            });
         });
     }
 
@@ -336,6 +327,13 @@ impl ViewScaleDialog {
             ControlRecord::new("viewScaleButtons", ControlKind::Other),
         );
     }
+}
+
+/// A form's row whose label is the caption `name` reading `text`, and what `add` draws beside it:
+/// the column is measured by the caption as it is shown.
+fn captioned<R>(ui: &mut Ui, name: &str, text: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let shown = text.replace('&', "");
+    dialog::row_with_text(ui, &shown, |ui| caption(ui, name, text), add)
 }
 
 /// A form's caption, named, its text as Qt holds it ('&' before the letter Alt reaches its field

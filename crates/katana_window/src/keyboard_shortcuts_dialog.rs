@@ -24,6 +24,7 @@ use std::collections::BTreeSet;
 use egui::{RichText, Ui};
 
 use crate::command_log::contains_ignoring_case;
+use crate::dialog_layout::{TABLE_COLUMN_GAP, TABLE_ROW_GAP, table_row_colour};
 use crate::drive::{
     ControlKind, ControlRecord, LineOptions, button, custom, label, label_as, line_with,
 };
@@ -176,11 +177,30 @@ impl ShortcutsState {
         self.filter();
         let order = self.order();
         let error = palette::error().to_egui();
+        // The window's one table look (dialog_layout's): a raised header row, faint stripes. The
+        // headers sort, as a QTableView's do, and are its header row's words, not raised buttons;
+        // the column sorted by is in the text colour, the rest muted.
         let table = egui::Grid::new("keyboardShortcutsGrid")
-            .striped(true)
+            .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
+            .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+            .with_row_color(|row, style| table_row_colour(row, &[], style))
             .show(ui, |ui| {
                 for (column, title) in COLUMNS.iter().enumerate() {
-                    if ui.button(RichText::new(*title).strong()).clicked() {
+                    let sorted = self.sort.is_some_and(|(sorted, _)| sorted == column);
+                    let ink = if sorted {
+                        palette::text()
+                    } else {
+                        palette::text_muted()
+                    };
+                    let header = ui
+                        .add(
+                            egui::Label::new(RichText::new(*title).strong().color(ink.to_egui()))
+                                .sense(egui::Sense::click())
+                                .selectable(false),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("Sort by this column; again to reverse it");
+                    if header.clicked() {
                         self.sort = match self.sort {
                             Some((sorted, descending)) if sorted == column => {
                                 Some((column, !descending))

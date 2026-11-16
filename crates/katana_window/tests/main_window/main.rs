@@ -32,5 +32,6 @@ pub mod window_support;
 
 mod command_line;
 mod geo_menus;
+mod menu_texts;
 mod screen_fit_dialogs;
 mod surfaces_panel;

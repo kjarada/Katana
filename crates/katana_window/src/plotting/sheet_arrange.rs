@@ -337,36 +337,46 @@ impl SuggestPaperDialog {
             &mut (&mut *self, &mut answer),
             |ui, (dialog, _)| {
                 ui.label(egui::RichText::new(dialog.note.as_str()));
-                egui::Grid::new("sheetSuggestPaperForm").num_columns(2).show(ui, |ui| {
-                    ui.label("Scale");
-                    let items = SuggestPaperDialog::items();
-                    controls::choice(ui, "sheetSuggestPaperScale", &items, &mut dialog.scale);
-                    ui.end_row();
-                    ui.label("Paper");
-                    controls::label_as(
-                        ui,
-                        "sheetSuggestPaperAdvice",
-                        &dialog.advice,
-                        egui::Label::new(dialog.advice.as_str()).wrap(),
-                    );
-                    ui.end_row();
+                crate::shell::dialog::form(ui, |form| {
+                    form.row("Scale", |ui| {
+                        let items = SuggestPaperDialog::items();
+                        controls::choice(ui, "sheetSuggestPaperScale", &items, &mut dialog.scale);
+                    });
+                    form.row("Paper", |ui| {
+                        controls::label_as(
+                            ui,
+                            "sheetSuggestPaperAdvice",
+                            &dialog.advice,
+                            egui::Label::new(dialog.advice.as_str()).wrap(),
+                        );
+                    });
                 });
             },
             |ui, (dialog, answer)| {
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled_ui(dialog.apply_enabled, |ui| {
-                            controls::button(ui, "sheetSuggestPaperApply", "Apply")
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        **answer = Some(true);
-                    }
-                    if controls::button(ui, "sheetSuggestPaperCancel", "Cancel").clicked() {
-                        **answer = Some(false);
-                    }
-                });
+                // The one footer (shell::dialog::button_row): Cancel, then Apply, the primary,
+                // last at the right.
+                let apply_enabled = dialog.apply_enabled;
+                let ((), (cancelled, applied)) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        let cancelled =
+                            controls::button(ui, "sheetSuggestPaperCancel", "Cancel").clicked();
+                        let applied = ui
+                            .add_enabled_ui(apply_enabled, |ui| {
+                                controls::primary(ui, "sheetSuggestPaperApply", "Apply")
+                            })
+                            .inner
+                            .clicked();
+                        (cancelled, applied)
+                    },
+                );
+                if applied {
+                    **answer = Some(true);
+                }
+                if cancelled {
+                    **answer = Some(false);
+                }
             },
         );
         self.frame = frame;

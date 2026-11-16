@@ -168,6 +168,8 @@ pub struct Dialogs {
     pub plot_sheets: Option<(PlotDialog, katana_cad::plotting::SheetSet)>,
     /// A question the window asks in a small dialog of its own (QInputDialog).
     pub input: Option<super::panels::InputDialog>,
+    /// Help > About Katana, in the window's own dialog frame.
+    pub about: Option<super::panels::AboutDialog>,
     /// The name the drawing summary's "Show in Styles and Linetypes" asked for, shown by the
     /// window after the dialogs' frame (show_missing_in_styles).
     pub missing_asked: Rc<RefCell<Option<String>>>,
@@ -781,17 +783,14 @@ impl MainWindow {
             "helpCommandReference" => self.show_command_reference(""),
             "helpSheetCommands" => self.show_command_reference("Sheets"),
             "helpKeyboardShortcuts" => self.show_keyboard_shortcuts(),
+            // A dialog of the window's own frame, not the platform's message box: that box wore
+            // a warning sign for what is no warning, and blocked the window while it was up. It
+            // asks nothing, so a headless run may show it too.
             "helpAbout" => {
-                if !exec.headless {
-                    show_warning(
-                        "About Katana",
-                        &format!(
-                            "Katana {}\n\nHigh-performance survey and CAD platform.\n\n\
-                             Deterministic engineering core, egui desktop shell.",
-                            katana_update::version::program_version_text()
-                        ),
-                    );
-                }
+                ui.dialogs
+                    .about
+                    .get_or_insert_with(super::panels::AboutDialog::new)
+                    .show();
             }
             _ => self.run_other_action(action),
         }

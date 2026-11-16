@@ -350,17 +350,21 @@ impl Framed for SlopeAnalysisDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
-        let (preview, run) = run_buttons(
+        terrain_reply_field(ui, "slopeReply", self.runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("slopePreview", ready)),
             ("slopeRun", "Analyse", ready),
+            Some("slopeClose"),
         );
-        terrain_reply_field(ui, "slopeReply", self.runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }

@@ -131,13 +131,14 @@ use super::document_watcher::DocumentWatcher;
 use super::linework_labels::linework_control_label;
 use crate::command_log::folded;
 use crate::command_word::command_word;
-use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
 use crate::dialog_layout as layout;
+use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::{Host, VerbOutcome};
 use crate::ifc_dialogs::{get_open_file_name, get_save_file_name};
 use crate::script_runner::from_native_separators;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::{hidden, offstage};
 use crate::theme;
 
@@ -251,14 +252,6 @@ pub const TOKEN_FIELD: LineOptions<'static> = LineOptions {
 pub const NOTICE_BOX: TextOptions = TextOptions {
     read_only: true,
     rows: 6,
-    monospace: false,
-};
-
-/// How the status is drawn. A box, not a label: a load answers with several records and a refusal
-/// may list every reason, and a label that grew with them would push the page about.
-pub const STATUS_BOX: TextOptions = TextOptions {
-    read_only: true,
-    rows: 4,
     monospace: false,
 };
 
@@ -830,14 +823,12 @@ fn value_label(ui: &mut Ui, name: &str, text: &str) -> egui::Response {
 /// A QGroupBox: its title over what it holds - drawn as a section (a heading, no box), so the page
 /// reads as one column rather than a stack of frames of different widths.
 fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
-    layout::section(ui, title, add);
+    dialog::section(ui, title);
+    add(ui);
 }
 
 /// The width of the page beside the list of pages.
 const PAGE_WIDTH: f32 = 560.0;
-
-/// The width of a path field: with its Browse button and one more button, the page's width.
-const PATH_WIDTH: f32 = 380.0;
 
 impl SettingsDialog {
     /// The dialog over `context`, filled from `host`'s drawing when the context reads one.
@@ -983,17 +974,18 @@ impl SettingsDialog {
         let mut words: Vec<String> = [
             self.frame.title(),
             "What is active",
-            "Name:",
-            "Origin:",
-            "Built-in:",
-            "Definitions:",
-            "Symbols among them:",
-            "Survey code rules:",
-            "Kept:",
+            "Name",
+            "Origin",
+            "Built-in",
+            "Definitions",
+            "Symbols among them",
+            "Survey code rules",
+            "Kept",
             "Import",
             "Export",
+            "File",
             "Built-in and kept",
-            "Built-in library:",
+            "Built-in library",
             "When survey data comes in",
             "Editors",
             "Linework control codes",
@@ -1242,7 +1234,11 @@ impl SettingsDialog {
             return;
         }
         match command_word(&name, "Use Built-in") {
-            Ok(word) => self.run(host, &format!("CUSTOMISE BUILTIN {word}"), Then::KeepWhatWasKept),
+            Ok(word) => self.run(
+                host,
+                &format!("CUSTOMISE BUILTIN {word}"),
+                Then::KeepWhatWasKept,
+            ),
             Err(error) => self.refuse(host, &error.message),
         }
     }
@@ -1481,7 +1477,10 @@ impl SettingsDialog {
         // The box shows what the STATE has, as the automation boxes show the Document: a line
         // that was refused left it as it was, and the box goes back. With nobody to ask it is off
         // and disabled, never a guess.
-        page.auto = updates.automatic.as_ref().is_some_and(|automatic| automatic());
+        page.auto = updates
+            .automatic
+            .as_ref()
+            .is_some_and(|automatic| automatic());
         page.auto_enabled = lines && updates.automatic.is_some();
 
         let store = updates.credentials.as_deref();
@@ -1657,19 +1656,24 @@ impl SettingsDialog {
     fn customisation_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // What is active.
         group(ui, "What is active", |ui| {
-            layout::form(ui, "settingsActiveForm", |ui| {
+            dialog::form(ui, |form| {
                 for (caption, name, text) in [
                     ("Name", "settingsActiveName", &self.name),
                     ("Origin", "settingsActiveOrigin", &self.origin),
                     ("Built-in", "settingsActiveBuiltIn", &self.active_built_in),
-                    ("Definitions", "settingsActiveDefinitions", &self.definitions),
+                    (
+                        "Definitions",
+                        "settingsActiveDefinitions",
+                        &self.definitions,
+                    ),
                     ("Symbols among them", "settingsActiveSymbols", &self.symbols),
                     ("Survey code rules", "settingsActiveRules", &self.rules),
                     ("Kept", "settingsActiveKept", &self.kept),
                 ] {
-                    layout::form_label(ui, caption);
-                    value_label(ui, name, text);
-                    ui.end_row();
+                    form.row(caption, |ui| {
+                        // On its label's line, as a field's text is.
+                        dialog::text_value(ui, |ui| value_label(ui, name, text));
+                    });
                 }
             });
             // The next three are hidden until refresh finds something for them to show: a page
@@ -1723,8 +1727,12 @@ impl SettingsDialog {
         });
 
         // Import.
+        // The file rows are labelled rows of the page's one label column, their fields filling
+        // to the page's edge less their buttons: a path field 380 wide from the page's left edge
+        // gave the page two field edges (173 and 310) and three right edges.
         group(ui, "Import", |ui| {
-            ui.horizontal(|ui| {
+            dialog::labelled(ui, "File", |ui| {
+                let width = dialog::beside_a_button(ui, "Browse...");
                 ui.add_enabled_ui(self.enabled.import_path, |ui| {
                     controls::line_with(
                         ui,
@@ -1732,7 +1740,7 @@ impl SettingsDialog {
                         &mut self.import_path,
                         LineOptions {
                             placeholder: IMPORT_PLACEHOLDER,
-                            width: Some(PATH_WIDTH),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
@@ -1743,7 +1751,7 @@ impl SettingsDialog {
                     }
                 });
             });
-            ui.horizontal(|ui| {
+            dialog::labelled(ui, "", |ui| {
                 ui.add_enabled_ui(self.enabled.import_replace, |ui| {
                     controls::check(
                         ui,
@@ -1766,7 +1774,8 @@ impl SettingsDialog {
 
         // Export.
         group(ui, "Export", |ui| {
-            ui.horizontal(|ui| {
+            dialog::labelled(ui, "File", |ui| {
+                let width = dialog::beside_buttons(ui, &["Browse...", "Export"]);
                 ui.add_enabled_ui(self.enabled.export_path, |ui| {
                     controls::line_with(
                         ui,
@@ -1774,7 +1783,7 @@ impl SettingsDialog {
                         &mut self.export_path,
                         LineOptions {
                             placeholder: EXPORT_PLACEHOLDER,
-                            width: Some(PATH_WIDTH),
+                            width: Some(width),
                             ..LineOptions::default()
                         },
                     );
@@ -1802,28 +1811,33 @@ impl SettingsDialog {
             let mut chosen = false;
             let mut used = false;
             let mut draw_row = |ui: &mut Ui| {
-                let row = ui.horizontal(|ui| {
-                    layout::form_label(ui, "Built-in library");
-                    ui.add_enabled_ui(self.enabled.built_in_choice, |ui| {
-                        let tip = self
-                            .built_in
-                            .index
-                            .and_then(|at| self.built_in_tips.get(at))
-                            .cloned()
-                            .unwrap_or_default();
-                        chosen = controls::choice(
-                            ui,
-                            "settingsBuiltIn",
-                            &self.built_in_items,
-                            &mut self.built_in,
-                        )
-                        .on_hover_text(tip)
-                        .changed();
-                    });
-                    ui.add_enabled_ui(self.enabled.built_in_use, |ui| {
-                        used = controls::button(ui, "settingsBuiltInUse", "Use")
-                            .on_hover_text(self.built_in_use_tip.as_str())
-                            .clicked();
+                // A scope round the row, whose rectangle is the row's record.
+                let row = ui.scope(|ui| {
+                    dialog::labelled(ui, "Built-in library", |ui| {
+                        // The choice leaves its row room for Use after it.
+                        let width = dialog::beside_a_button(ui, "Use");
+                        dialog::fixed_fields(ui, width);
+                        ui.add_enabled_ui(self.enabled.built_in_choice, |ui| {
+                            let tip = self
+                                .built_in
+                                .index
+                                .and_then(|at| self.built_in_tips.get(at))
+                                .cloned()
+                                .unwrap_or_default();
+                            chosen = controls::choice(
+                                ui,
+                                "settingsBuiltIn",
+                                &self.built_in_items,
+                                &mut self.built_in,
+                            )
+                            .on_hover_text(tip)
+                            .changed();
+                        });
+                        ui.add_enabled_ui(self.enabled.built_in_use, |ui| {
+                            used = controls::button(ui, "settingsBuiltInUse", "Use")
+                                .on_hover_text(self.built_in_use_tip.as_str())
+                                .clicked();
+                        });
                     });
                 });
                 controls::custom(
@@ -1845,7 +1859,8 @@ impl SettingsDialog {
             if used {
                 self.use_built_in(&mut *host);
             }
-            ui.horizontal(|ui| {
+            // Under the fields, at their edge, as the Import row's box and button are.
+            dialog::labelled(ui, "", |ui| {
                 ui.add_enabled_ui(self.enabled.reset, |ui| {
                     if controls::button(ui, "settingsReset", "Reset to Built-in")
                         .on_hover_text(self.reset_tip.as_str())
@@ -1913,24 +1928,24 @@ impl SettingsDialog {
             // The editors.
             group(ui, "Editors", |ui| {
                 ui.horizontal(|ui| {
-                ui.add_enabled_ui(self.enabled.open_codes, |ui| {
-                    if controls::button(ui, "settingsOpenCodes", "Survey Codes...")
-                        .on_hover_text(OPEN_CODES_TIP)
-                        .clicked()
-                        && let Some(open) = self.context.open_code_manager.as_mut()
-                    {
-                        open(&mut *host);
-                    }
-                });
-                ui.add_enabled_ui(self.enabled.open_symbols, |ui| {
-                    if controls::button(ui, "settingsOpenSymbols", "Symbol Library...")
-                        .on_hover_text(OPEN_SYMBOLS_TIP)
-                        .clicked()
-                        && let Some(open) = self.context.open_symbol_library.as_mut()
-                    {
-                        open(&mut *host);
-                    }
-                });
+                    ui.add_enabled_ui(self.enabled.open_codes, |ui| {
+                        if controls::button(ui, "settingsOpenCodes", "Survey Codes...")
+                            .on_hover_text(OPEN_CODES_TIP)
+                            .clicked()
+                            && let Some(open) = self.context.open_code_manager.as_mut()
+                        {
+                            open(&mut *host);
+                        }
+                    });
+                    ui.add_enabled_ui(self.enabled.open_symbols, |ui| {
+                        if controls::button(ui, "settingsOpenSymbols", "Symbol Library...")
+                            .on_hover_text(OPEN_SYMBOLS_TIP)
+                            .clicked()
+                            && let Some(open) = self.context.open_symbol_library.as_mut()
+                        {
+                            open(&mut *host);
+                        }
+                    });
                 });
             });
         }
@@ -2063,31 +2078,31 @@ impl SettingsDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui) {
-        // Read, never typed into: what is drawn is a copy the frame throws away. A refusal is in
-        // the error colour. As wide as the dialog, so the reply of a load is read without
-        // scrolling sideways.
-        let mut status = self.status.clone();
-        ui.add_space(layout::INNER);
-        ui.scope(|ui| {
-            if self.status_error {
-                ui.visuals_mut().override_text_color = Some(theme::error().to_egui());
-            }
-            if !ui.is_sizing_pass() {
-                ui.spacing_mut().text_edit_width = ui.available_width();
-            }
-            controls::text_with(ui, "settingsStatus", &mut status, STATUS_BOX);
-        });
         let placeholder = if self.status.is_empty() {
             STATUS_PLACEHOLDER
         } else {
             ""
         };
-        let close = layout::footer(
+        // The one footer (shell::dialog::button_row): what the reply box is for, muted, at the
+        // left until there is a reply; Close at the right.
+        let close = dialog::button_row(
             ui,
             |ui| ui.weak(placeholder),
-            |ui| layout::button(ui, "settingsClose", "Close").clicked(),
+            |ui| controls::button(ui, "settingsClose", "Close").clicked(),
         )
         .1;
+        // The reply under the row, read and never typed into: what is drawn is a copy the frame
+        // throws away. Muted text, a refusal in the error colour, as wide as the dialog so the
+        // reply of a load is read whole - and no room at all until there is one, where an empty
+        // four-row box was a third of the footer.
+        let mut status = self.status.clone();
+        layout::reply_text(
+            ui,
+            "settingsStatus",
+            &mut status,
+            ControlKind::Text,
+            self.status_error,
+        );
         if close {
             self.close();
         }

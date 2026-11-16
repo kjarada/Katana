@@ -63,31 +63,17 @@ use katana_entity::entity::{ENTITY_TYPES, to_string};
 use katana_entity::{EntityType, Model};
 use katana_geometry::Box2;
 
-use crate::dialog_layout as layout;
 use crate::drive::controls::{Choice, LineOptions, check, choice, line_with, radio};
 use crate::drive::mailbox::{Act, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
+use crate::shell::dialog;
 
-/// The widget's width, the same in every dialog that holds it (the look of 2026-11-16): the four
-/// type boxes a row and a filter's label and field.
+/// The widget's width in a column of a row - beside a dialog's fields, or a second form - the same
+/// in every dialog that holds it so (the look of 2026-11-16): the four type boxes a row and a
+/// filter's label and field. Held to its column where the column is narrower. In the body's own
+/// column it fills the column instead (`ScopeFilterWidget::ui`), so its fields end where the
+/// dialog's do.
 pub const WIDGET_WIDTH: f32 = 400.0;
-
-/// The width of a filter field's label (Layer, Style, Colour, Property, Text), so the fields line
-/// up.
-const FILTER_LABEL_WIDTH: f32 = 60.0;
-
-/// A filter field's label, FILTER_LABEL_WIDTH wide, in the secondary text colour.
-fn filter_label(ui: &mut Ui, text: &str) {
-    let height = ui.spacing().interact_size.y;
-    ui.allocate_ui_with_layout(
-        egui::vec2(FILTER_LABEL_WIDTH, height),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.set_min_width(FILTER_LABEL_WIDTH);
-            layout::form_label(ui, text);
-        },
-    );
-}
 
 /// One open view, as the View scope offers it: its id, its title, its own hidden layers and, for a
 /// plan view, its area on screen. Read at once by whoever asks for the list and never kept: the
@@ -651,14 +637,21 @@ impl ScopeFilterWidget {
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = std::mem::take(&mut self.pending);
         let outer = ui.vertical(|ui| {
-            // One width wherever it is shown: its layer list fills it, and a list that filled the
-            // dialog's room made every dialog holding it as wide as the screen.
-            ui.set_width(WIDGET_WIDTH);
-            ui.spacing_mut().text_edit_width =
-                WIDGET_WIDTH - FILTER_LABEL_WIDTH - ui.spacing().item_spacing.x;
+            // Under a dialog's fields it fills the body's column, so its fields end at the edge
+            // theirs do: at WIDGET_WIDTH there they stopped 120 short of the dialog's (Drape,
+            // Statistics by Area). Beside them, in a column of a row, it keeps WIDGET_WIDTH held to
+            // the column: "what is left" there is the rest of the row, and a list that filled it
+            // left the columns after it no room. The body itself is held to its width
+            // (shell::dialog::BODY_WIDTH), so filling it never widens a dialog to the screen.
+            let width = if dialog::in_a_column(ui) {
+                WIDGET_WIDTH.min(ui.available_width())
+            } else {
+                ui.available_width()
+            };
+            ui.set_width(width.max(0.0));
             // ---- Apply to ----
             let scope_group = ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = layout::INNER;
+                ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
                 ui.strong("Apply to");
                 let choices = [
                     (
@@ -734,11 +727,11 @@ impl ScopeFilterWidget {
             );
 
             // ---- Only those that match ----
-            ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+            ui.add_space(dialog::SECTION_GAP - ui.spacing().item_spacing.y);
             let filter_group = ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = layout::INNER;
+                ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
                 ui.strong("Only those that match (optional)");
-                layout::form_label(ui, "Types (none: all)");
+                dialog::form_label(ui, "Types (none: all)");
                 let prefix = self.prefix.clone();
                 let greyed = &self.greyed;
                 let types = &mut self.types;
@@ -781,6 +774,8 @@ impl ScopeFilterWidget {
                         String::new(),
                     ),
                 ];
+                // The filter's fields on labelled rows, so that they start where the fields of the
+                // dialog holding the widget do (shell::dialog's THE LABEL COLUMN).
                 for (label, part, placeholder, tip) in fields {
                     let name = self.named(part);
                     let grey = self.greyed.get(&name).cloned();
@@ -789,8 +784,7 @@ impl ScopeFilterWidget {
                         "FilterStyle" => &mut self.filter_style,
                         _ => &mut self.filter_colour,
                     };
-                    ui.horizontal(|ui| {
-                        filter_label(ui, label);
+                    dialog::labelled(ui, label, |ui| {
                         ui.add_enabled_ui(grey.is_none(), |ui| {
                             let mut response = line_with(
                                 ui,
@@ -812,11 +806,10 @@ impl ScopeFilterWidget {
                         });
                     });
                 }
-                ui.horizontal(|ui| {
-                    filter_label(ui, "Property");
+                dialog::labelled(ui, "Property", |ui| {
                     let key = self.named("FilterProperty");
-                    // The key and the value share the field column.
-                    let half = (ui.spacing().text_edit_width - ui.spacing().item_spacing.x) / 2.0;
+                    // The key and the value share the row.
+                    let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
                     if line_with(
                         ui,
                         &key,
@@ -848,8 +841,7 @@ impl ScopeFilterWidget {
                         changed = true;
                     }
                 });
-                ui.horizontal(|ui| {
-                    filter_label(ui, "Text");
+                dialog::labelled(ui, "Text", |ui| {
                     let name = self.named("FilterText");
                     let grey = self.greyed.get(&name).cloned();
                     ui.add_enabled_ui(grey.is_none(), |ui| {
@@ -931,7 +923,7 @@ impl ScopeFilterWidget {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for (layer, on) in &mut self.layers {
-                    if ui.checkbox(on, layer.as_str()).changed() {
+                    if crate::drive::controls::check_box(ui, on, layer.as_str()).changed() {
                         changed = true;
                     }
                 }

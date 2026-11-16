@@ -547,13 +547,6 @@ impl ViewshedDialog {
         });
         let made = viewshed_line(&self.viewshed_form());
         command_field(ui, "viewshedCommand", &made);
-        let ready = made.is_ok();
-        let (preview, run) = run_buttons(
-            ui,
-            Some(("viewshedPreview", ready)),
-            ("viewshedRun", "Compute", ready),
-        );
-        terrain_reply_field(ui, "viewshedReply", self.viewshed_runner.reply_mut());
         if add {
             let text = self.observer.clone();
             if self.add_observer(&text) {
@@ -568,12 +561,26 @@ impl ViewshedDialog {
         if remove {
             remove_current(&mut self.observers, &mut self.observers_current);
         }
-        if preview {
+    }
+
+    /// The Viewshed page's reply and buttons, in the dialog's footer: Close only while the page is
+    /// in front (`close`). Whether Close was clicked.
+    fn viewshed_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
+        let ready = viewshed_line(&self.viewshed_form()).is_ok();
+        terrain_reply_field(ui, "viewshedReply", self.viewshed_runner.reply_mut());
+        let pressed = run_buttons(
+            ui,
+            Some(("viewshedPreview", ready)),
+            ("viewshedRun", "Compute", ready),
+            close,
+        );
+        if pressed.preview {
             self.run_viewshed(host, true);
         }
-        if run {
+        if pressed.run {
             self.run_viewshed(host, false);
         }
+        pressed.close
     }
 
     fn los_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -616,17 +623,24 @@ impl ViewshedDialog {
         });
         let made = los_line(&self.los_form());
         command_field(ui, "losCommand", &made);
-        let (_, run) = run_buttons(ui, None, ("losRun", "Check", made.is_ok()));
-        terrain_reply_field(ui, "losReply", self.los_runner.reply_mut());
         if pick_observer {
             self.pick_into(host, PickInto::LosObserver);
         }
         if pick_target {
             self.pick_into(host, PickInto::LosTarget);
         }
-        if run {
+    }
+
+    /// The Line of Sight page's reply and Check, in the dialog's footer: Close only while the page
+    /// is in front (`close`). Whether Close was clicked.
+    fn los_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
+        let ready = los_line(&self.los_form()).is_ok();
+        terrain_reply_field(ui, "losReply", self.los_runner.reply_mut());
+        let pressed = run_buttons(ui, None, ("losRun", "Check", ready), close);
+        if pressed.run {
             self.run_los(host);
         }
+        pressed.close
     }
 }
 
@@ -635,8 +649,9 @@ impl Framed for ViewshedDialog {
         &mut self.frame
     }
 
-    // Each tab holds its own buttons and reply, as the C++ pages do, so the dialog has no footer
-    // of its own and everything scrolls together.
+    // Each tab has its own fields, line, reply and run button, as the C++ pages do; the page in
+    // front's reply and buttons are the dialog's footer, so they stay in sight below its fields
+    // as every dialog's do.
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         tabs(
             ui,
@@ -657,5 +672,20 @@ impl Framed for ViewshedDialog {
         }
     }
 
-    fn footer(&mut self, _ui: &mut Ui, _host: &mut dyn Host) {}
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The page not in front keeps its buttons and reply, off the dialog, as its fields are.
+        let closed = if self.tab == 0 {
+            let closed = self.viewshed_footer(ui, host, Some("viewshedClose"));
+            offstage(ui, "viewshedLosFooter", |ui| self.los_footer(ui, host, None));
+            closed
+        } else {
+            offstage(ui, "viewshedViewshedFooter", |ui| {
+                self.viewshed_footer(ui, host, None)
+            });
+            self.los_footer(ui, host, Some("viewshedClose"))
+        };
+        if closed {
+            self.hide();
+        }
+    }
 }

@@ -19,14 +19,14 @@ use katana_cad::{Document, DocumentChange, ListenerHandle};
 use katana_math::cpp;
 
 use crate::dialog_layout::{
-    TABLE_COLUMN_GAP, TABLE_ROW_GAP, TABLE_ROWS, rows_height, table_row_colour,
+    EMPTY_TABLE, TABLE_COLUMN_GAP, TABLE_ROW_GAP, TABLE_ROWS, empty_table, rows_height,
+    table_header, table_row_colour,
 };
-use crate::drive::controls::{SpinRange, custom};
+use crate::drive::controls::{self, SpinRange, custom};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::host::Host;
 use crate::shell::DialogFrame;
-use crate::theme;
 
 /// The parts of the Document notifications heard since the dialog last looked (see the module
 /// comment).
@@ -102,7 +102,7 @@ pub(crate) struct TableShown {
 /// `highlighted` shown chosen, and the column `checks` names, if any, a check box a row with its
 /// cell's text beside it. A fill makes the row whose first cell is the text current, as fillField
 /// matches column 0 and a click on the row does; it is reported as main.cpp reports a list, the
-/// cells joined by " | ".
+/// cells joined by " | ". As wide as its columns; an empty one says EMPTY_TABLE under its header.
 pub(crate) fn table(
     ui: &mut Ui,
     name: &str,
@@ -111,6 +111,54 @@ pub(crate) fn table(
     current: Option<usize>,
     highlighted: &[bool],
     checks: Option<(usize, &[bool])>,
+) -> TableShown {
+    table_look(
+        ui,
+        name,
+        headers,
+        rows,
+        current,
+        highlighted,
+        checks,
+        TableLook::default(),
+    )
+}
+
+/// How a `table` is drawn beyond its rows: the window's one table look (dialog_layout's header,
+/// stripes and chosen row) either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TableLook<'a> {
+    /// The table spans the width of what holds it (dialog_layout::table_header), so the tables of
+    /// one column of a dialog are one width. Only for a table whose holder has a width of its
+    /// own: in a column beside another, the table would take the other's room.
+    pub(crate) fill: bool,
+    /// What it says, muted, under its header while it has no rows.
+    pub(crate) empty: &'a str,
+}
+
+impl Default for TableLook<'_> {
+    fn default() -> Self {
+        Self {
+            fill: false,
+            empty: EMPTY_TABLE,
+        }
+    }
+}
+
+/// A `table` drawn as `look` says.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "table's seven, and how it is drawn"
+)]
+pub(crate) fn table_look(
+    ui: &mut Ui,
+    name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    current: Option<usize>,
+    highlighted: &[bool],
+    checks: Option<(usize, &[bool])>,
+    look: TableLook<'_>,
 ) -> TableShown {
     let mut shown = TableShown::default();
     let taken = take(ui, name);
@@ -146,50 +194,54 @@ pub(crate) fn table(
         .max_height(rows_height(ui, TABLE_ROWS + 1.0))
         .auto_shrink([true, true])
         .show(ui, |ui| {
-            egui::Grid::new(name)
-                .num_columns(headers.len())
-                .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
-                .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
-                .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
-                .show(ui, |ui| {
-                    for header in headers {
-                        ui.label(
-                            egui::RichText::new(*header)
-                                .strong()
-                                .color(theme::text_muted().to_egui()),
-                        );
-                    }
-                    ui.end_row();
-                    for (at, row) in rows.iter().enumerate() {
-                        for (column, cell) in row.iter().enumerate() {
-                            if let Some((check_column, states)) = checks
-                                && column == check_column
-                            {
-                                let mut on = states.get(at).copied().unwrap_or(false);
-                                if ui.checkbox(&mut on, cell.as_str()).changed() {
-                                    shown.checked = Some((at, on));
-                                }
-                                continue;
-                            }
-                            let response = ui.add(
-                                egui::Label::new(cell.as_str())
-                                    .sense(egui::Sense::click())
-                                    .selectable(false)
-                                    .extend(),
-                            );
-                            if response.double_clicked() {
-                                shown.double_clicked = Some(at);
-                            }
-                            if response.clicked() {
-                                shown.chosen = Some(at);
-                                shown.adding = adding;
-                            }
-                        }
+            // Top down whatever holds the table, so an empty table's note is under its header,
+            // not beside it in a row (the Leaders' Says table, in a row with its Look group).
+            ui.vertical(|ui| {
+                let grid = egui::Grid::new(name)
+                    .num_columns(headers.len())
+                    .spacing([TABLE_COLUMN_GAP, TABLE_ROW_GAP])
+                    .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+                    .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
+                    .show(ui, |ui| {
+                        table_header(ui, headers, look.fill);
                         ui.end_row();
-                    }
-                })
+                        for (at, row) in rows.iter().enumerate() {
+                            for (column, cell) in row.iter().enumerate() {
+                                if let Some((check_column, states)) = checks
+                                    && column == check_column
+                                {
+                                    let mut on = states.get(at).copied().unwrap_or(false);
+                                    if controls::check_box(ui, &mut on, cell.as_str()).changed() {
+                                        shown.checked = Some((at, on));
+                                    }
+                                    continue;
+                                }
+                                let response = ui.add(
+                                    egui::Label::new(cell.as_str())
+                                        .sense(egui::Sense::click())
+                                        .selectable(false)
+                                        .extend(),
+                                );
+                                if response.double_clicked() {
+                                    shown.double_clicked = Some(at);
+                                }
+                                if response.clicked() {
+                                    shown.chosen = Some(at);
+                                    shown.adding = adding;
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    })
+                    .response;
+                if rows.is_empty() {
+                    empty_table(ui, look.empty);
+                }
+                grid
+            })
+            .inner
         });
-    let response = scrolled.inner.response;
+    let response = scrolled.inner;
     if let Some(taken) = &taken
         && taken.posted.act == Act::ScrollTo
     {

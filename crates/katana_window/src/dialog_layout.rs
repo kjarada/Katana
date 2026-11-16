@@ -1,36 +1,34 @@
-//! How a dialog lays out what it holds inside the dialog frame (shell::dialog): sections under a
-//! small heading, two-column forms whose labels line up and whose fields are one width, a footer
-//! whose buttons sit at the right with the primary one last, and the reply line above them. The
-//! design system's numbers (the owner's "tidy, not rethink" of 2026-11-16) are here, once, so the
-//! managers, the plot and sheet dialogs, the start screen and the update dialogs are spaced alike;
-//! the colours are the theme's tokens (theme::palette), never a literal.
+//! How a dialog lays out what is not its form or its footer: the tables' look and a reply kept in a
+//! footer as muted text. The design system's numbers
+//! (the owner's "tidy, not rethink" of 2026-11-16) are here, once, so the managers, the plot and
+//! sheet dialogs, the start screen and the update dialogs are spaced alike; the colours are the
+//! theme's tokens (theme::palette), never a literal.
 //!
 //! ONE HOME FOR EACH PART. The spacing scale is theme::style's; the dialog frame's padding, footer
-//! button width, label colour and footer tag are shell::dialog's; a primary button's look is
-//! drive::controls::primary_look. This module adds what those do not have - the grid form of
-//! fixed-width fields the managers use, sections that hold their rows, the footer row drawn with
-//! egui::Sides, and the tables' look - and names the shared parts again only so its callers read
-//! one module. NOT DONE: the grid form here beside shell::dialog's measured label column (`form`,
-//! `labelled`) is two ways of laying out a form; docs/desktop.md, "Not done", says what folding
-//! them would take.
+//! button width, label colour, footer tag, section heading and FORM - the label column every
+//! labelled row of a body shares, its fields filling the rest (`form`, `labelled`, `fill_fields`,
+//! `fixed_fields`, `beside_a_button`) - are shell::dialog's; a primary button's look is
+//! drive::controls::primary_look. This module adds what those do not have - the tables' look and
+//! the reply line - and names the shared parts again only so its callers read one module. It held a second form once, a grid of fixed-width fields with a label column
+//! of its own width (110), written beside shell::dialog's by another hand; it was folded into
+//! shell::dialog's, so that every field of every dialog starts at its body's one label edge
+//! (docs/desktop.md, "The look of 2026-11-16").
 //!
-//! WHY FIXED WIDTHS. An egui dialog is sized by what it holds (its Area is as large as its content
-//! was last frame), so a field told to fill "the available width" fills the screen on the first
-//! frame and then holds the dialog that wide. A form therefore gives its fields one width of its
-//! own (FIELD_WIDTH, or what the dialog asks for) through the style's `text_edit_width` and
-//! `combo_width`, which every named line and choice (drive::controls) reads; the footer's buttons
-//! are put at the right with `egui::Sides`, which measures them small in a sizing pass and only
-//! then pushes them across the width the body already took. *Rejected:* a right-to-left layout
-//! for the footer, which in the first (sizing) pass takes egui's default area width (600 points)
-//! and keeps every dialog at least that wide from then on.
+//! ONE FOOTER. A dialog's footer is shell::dialog::button_row with drive::controls::{button,
+//! primary}: what reads the drawing and a status at the left, Close, then the primary action last
+//! at the right. This module held a second footer once (`footer`, `footer_buttons`, `button`,
+//! `primary`, drawn with egui::Sides), written in the look's first round beside button_row; every
+//! dialog moved onto button_row in its third round (2026-11-16) and the second was deleted.
 
-use egui::{Align, Layout, Response, RichText, Sides, Ui};
+use egui::{Response, RichText, Ui};
 
 use crate::drive::controls;
+use crate::drive::mailbox::{Act, fill_disabled, no_button};
+use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::shell::dialog;
 use crate::theme;
 
-pub use crate::shell::dialog::form_label;
+pub use crate::shell::dialog::{SECTION_GAP, form_label};
 
 /// The gap between groups (a section and the next, a table and its buttons).
 pub const GAP: f32 = theme::style::GROUP_GAP;
@@ -38,198 +36,9 @@ pub const GAP: f32 = theme::style::GROUP_GAP;
 /// The gap inside a group (a label and its field, the rows of a form).
 pub const INNER: f32 = theme::style::GAP;
 
-/// The gap above a section's heading, so that sections read as blocks without boxes round them:
-/// the dialog's padding, the next step of the spacing scale.
-pub const SECTION_GAP: f32 = dialog::PADDING;
-
-/// The width of a form's label column: a label of about sixteen characters at 13 px fits, and a
-/// longer one widens the column (egui's Grid takes the widest cell).
-pub const LABEL_WIDTH: f32 = 110.0;
-
-/// The width of a form's fields: one line field, choice or path, with room for a Browse button
-/// beside it inside a 480-point dialog.
-pub const FIELD_WIDTH: f32 = 260.0;
-
-/// The least a footer button is wide, so that "OK", "Close" and "Apply" are one size.
-pub const BUTTON_MIN_WIDTH: f32 = dialog::FOOTER_BUTTON_WIDTH;
-
 /// The rows a table shows before it scrolls: enough to read a list down without the table
 /// pushing the dialog off the screen.
 pub const TABLE_ROWS: f32 = 12.0;
-
-/// A section: `title` as a small strong heading over what `add` draws, a SECTION_GAP above it
-/// unless it is the first thing in its `ui`.
-pub fn section<R>(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    if ui.cursor().min.y > ui.max_rect().min.y + 0.5 {
-        ui.add_space(SECTION_GAP - ui.spacing().item_spacing.y);
-    }
-    ui.label(RichText::new(title).strong());
-    ui.add_space(INNER - ui.spacing().item_spacing.y);
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = INNER;
-        add(ui)
-    })
-    .inner
-}
-
-/// A two-column form named `salt`: labels on the left, left-aligned and vertically centred on
-/// their row; fields on the right, each `field_width` wide (lines and choices). `add` draws the
-/// rows with `row` (or by hand, ending each with `ui.end_row()`).
-pub fn form_with<R>(
-    ui: &mut Ui,
-    salt: &str,
-    field_width: f32,
-    add: impl FnOnce(&mut Ui) -> R,
-) -> R {
-    ui.scope(|ui| {
-        ui.spacing_mut().text_edit_width = field_width;
-        ui.spacing_mut().combo_width = field_width;
-        egui::Grid::new(salt)
-            .num_columns(2)
-            .spacing([GAP, INNER])
-            .min_col_width(LABEL_WIDTH)
-            .show(ui, add)
-            .inner
-    })
-    .inner
-}
-
-/// Sets `ui` up for an EDITABLE choice `width` wide in all: drive::controls draws one as a field
-/// `text_edit_width` wide and its list's arrow beside it, a control's height square, so in a form
-/// of fields `width` wide the field is given less the arrow and the gap, and the two end where
-/// the form's other fields do.
-pub fn editable_choice_width(ui: &mut Ui, width: f32) {
-    ui.spacing_mut().text_edit_width =
-        (width - EDITABLE_CHOICE_BUTTON - ui.spacing().item_spacing.x).max(0.0);
-}
-
-/// The width of an editable choice's list arrow (drive::controls draws it a control's height
-/// square).
-pub const EDITABLE_CHOICE_BUTTON: f32 = theme::style::CONTROL_HEIGHT;
-
-/// A form of FIELD_WIDTH fields (`form_with`).
-pub fn form<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    form_with(ui, salt, FIELD_WIDTH, add)
-}
-
-/// A label `width` wide, in the secondary text colour, for a row of a form drawn as rows of its own
-/// (a label, a field and its buttons) rather than as a grid: the fields after it line up.
-pub fn fixed_label(ui: &mut Ui, text: &str, width: f32) {
-    let height = ui.spacing().interact_size.y;
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, height),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            ui.set_min_width(width);
-            form_label(ui, text);
-        },
-    );
-}
-
-/// What `add` draws, moved right by `width` and the row's gap: a check box under the fields of a
-/// form drawn with `fixed_label`, lined up with them.
-pub fn indented<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        ui.add_space(width);
-        add(ui)
-    })
-    .inner
-}
-
-/// One row of a form: `label`, then what `add` draws in the field column, then the row's end.
-pub fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    form_label(ui, label);
-    let answer = ui
-        .with_layout(Layout::left_to_right(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = INNER;
-            add(ui)
-        })
-        .inner;
-    ui.end_row();
-    answer
-}
-
-/// Fields side by side in one row of a form or a section (a field and its Browse button): the
-/// gap between them INNER.
-pub fn inline<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = INNER;
-        add(ui)
-    })
-    .inner
-}
-
-/// The dialog's footer row: `left` at the left (a check box, a reply), and `right` at the right,
-/// drawn from the right edge inwards - so the PRIMARY button is drawn first and so sits last, at
-/// the far right. In the dialog frame's footer, the frame's rule is above it already; drawn in a
-/// body, a separator of its own parts it from what is above. Either way the row is a footer's
-/// (shell::dialog::footer_ui), so its buttons share the footer's least width.
-pub fn footer<L, R>(
-    ui: &mut Ui,
-    left: impl FnOnce(&mut Ui) -> L,
-    right: impl FnOnce(&mut Ui) -> R,
-) -> (L, R) {
-    if !dialog::in_footer(ui) {
-        ui.add_space(INNER);
-        ui.separator();
-        ui.add_space(INNER);
-    }
-    dialog::footer_ui(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = GAP;
-        Sides::new().shrink_left().show(ui, left, |ui| {
-            ui.spacing_mut().item_spacing.x = GAP;
-            right(ui)
-        })
-    })
-    .inner
-}
-
-/// The footer's buttons alone, at the right (`footer` with nothing at the left).
-pub fn footer_buttons<R>(ui: &mut Ui, right: impl FnOnce(&mut Ui) -> R) -> R {
-    footer(ui, |_| {}, right).1
-}
-
-/// A footer button named `name`: at least BUTTON_MIN_WIDTH wide.
-pub fn button(ui: &mut Ui, name: &str, text: &str) -> Response {
-    controls::button_as(
-        ui,
-        name,
-        text,
-        egui::Button::new(text).min_size(egui::vec2(BUTTON_MIN_WIDTH, 0.0)),
-    )
-}
-
-/// The dialog's primary button named `name` (OK, Start, Plot, Apply): filled in the accent, its
-/// text in the accent's text colour - the one accent the design system allows a dialog.
-pub fn primary(ui: &mut Ui, name: &str, text: &str) -> Response {
-    let drawn = primary_button(text, ui.is_enabled());
-    controls::button_as(ui, name, text, drawn)
-}
-
-/// The primary button's look (drive::controls::primary_look), showing `shown`, BUTTON_MIN_WIDTH
-/// wide at least wherever it is drawn.
-pub fn primary_button(shown: &str, enabled: bool) -> egui::Button<'static> {
-    controls::primary_look(shown, enabled).min_size(egui::vec2(BUTTON_MIN_WIDTH, 0.0))
-}
-
-/// A heading over a part of a dialog that is not drawn as a `section` (its controls are drawn
-/// round it by the dialog itself): a SECTION_GAP above unless it is the first thing, then the
-/// title in strong text.
-pub fn heading(ui: &mut Ui, title: &str) {
-    if ui.cursor().min.y > ui.max_rect().min.y + 0.5 {
-        ui.add_space(SECTION_GAP - ui.spacing().item_spacing.y);
-    }
-    ui.label(RichText::new(title).strong());
-}
-
-/// The colour of a reply line: the error token for a refusal, the secondary text otherwise.
-pub fn reply_colour(is_error: bool) -> egui::Color32 {
-    if is_error {
-        theme::error().to_egui()
-    } else {
-        theme::text_muted().to_egui()
-    }
-}
 
 /// The height of `rows` rows of a compact table or list at the style's text size.
 pub fn rows_height(ui: &Ui, rows: f32) -> f32 {
@@ -261,7 +70,8 @@ pub fn table_row_colour(row: usize, chosen: &[bool], style: &egui::Style) -> Opt
     if chosen.get(row - 1).copied().unwrap_or(false) {
         return Some(selected_row_colour());
     }
-    row.is_multiple_of(2).then_some(style.visuals.faint_bg_color)
+    row.is_multiple_of(2)
+        .then_some(style.visuals.faint_bg_color)
 }
 
 /// A chosen row's background: the accent at SELECTED_ROW_OPACITY.
@@ -274,3 +84,107 @@ pub fn selected_row_colour() -> egui::Color32 {
 /// How much of the accent a chosen row is lit with: enough to be seen at a glance across a wide
 /// table, little enough that the row's text keeps its contrast.
 pub const SELECTED_ROW_OPACITY: f32 = 0.35;
+
+/// What an empty table says under its header when its owner says nothing more fitting: a header
+/// strip over nothing read as a table that failed to draw (the look audit's T9).
+pub const EMPTY_TABLE: &str = "Nothing to list";
+
+/// A table's header row, drawn into an egui Grid as its row 0 (table_row_colour paints it in the
+/// raised token): each title strong and in the secondary text colour. With `fill`, the last title's
+/// cell reaches the right edge of the room the grid was lent, so the header - and every row's
+/// stripe, which egui paints as wide as the grid's columns - spans the table's place rather than
+/// ending where its titles do: three tables of one column of a dialog were three strips of three
+/// widths (the Road Template Manager's 325, 513 and 275).
+pub fn table_header<S: AsRef<str>>(ui: &mut Ui, headers: &[S], fill: bool) {
+    let last = headers.len().saturating_sub(1);
+    for (at, header) in headers.iter().enumerate() {
+        let title = RichText::new(header.as_ref())
+            .strong()
+            .color(theme::text_muted().to_egui());
+        if fill && at == last {
+            // egui's Grid lends its last column the room to the right edge of what holds it (from
+            // its second frame), so a cell that takes it all makes the column that wide.
+            let room = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+            ui.allocate_ui_with_layout(
+                room,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_width(room.x);
+                    ui.label(title);
+                },
+            );
+        } else {
+            ui.label(title);
+        }
+    }
+}
+
+/// An empty table's line under its header: `text` in the secondary text colour, at its own width
+/// from the table's left edge, so the table says it has nothing rather than showing a header over
+/// a void. Not sized to the row: a table in a column of no width of its own would take the
+/// column's room for its note, and push what is beside it away (the Leaders' Look group).
+pub fn empty_table(ui: &mut Ui, text: &str) -> Response {
+    ui.add(egui::Label::new(RichText::new(text).color(theme::text_muted().to_egui())).wrap())
+}
+
+/// A reply a dialog keeps where its drivers and tests read it - the line its last action ran, a
+/// verb's answer - drawn as muted text in a footer rather than in a field's well, and taking no
+/// room while it is empty: a blank read-only well read as a field to type in, and a reply box of
+/// four empty rows was most of a fresh dialog's footer (the Leaders footer's 220 px field, Road
+/// Objects' command field and reply well; the look audit's T5). It is recorded as the read-only
+/// field or text box it replaced (`kind`, ControlKind::Line or Text), its `value` the text, and a
+/// fill writes it as QLineEdit::setText wrote the read-only field. A refusal (`is_error`) is in the
+/// error token's colour (shell::dialog::status_colour).
+pub fn reply_text(
+    ui: &mut Ui,
+    name: &str,
+    value: &mut String,
+    kind: ControlKind,
+    is_error: bool,
+) -> Response {
+    let taken = take(ui, name);
+    if let Some(taken) = &taken {
+        match &taken.posted.act {
+            Act::Fill(text) => {
+                if ui.is_visible() && !ui.is_enabled() {
+                    settle(ui, taken, Err(fill_disabled(&taken.posted)));
+                } else {
+                    value.clone_from(text);
+                    settle(ui, taken, Ok(()));
+                }
+            }
+            Act::Press => settle(ui, taken, Err(no_button(&taken.posted))),
+            Act::ScrollTo => {}
+        }
+    }
+    let response = if value.is_empty() {
+        // Nothing to say: a place in the footer, the row's width and no height.
+        let width = ui.available_width();
+        ui.allocate_exact_size(egui::vec2(width, 0.0), egui::Sense::hover())
+            .1
+    } else {
+        ui.add(
+            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error))).wrap(),
+        )
+    };
+    if let Some(taken) = &taken
+        && taken.posted.act == Act::ScrollTo
+    {
+        response.scroll_to_me(None);
+        settle(ui, taken, Ok(()));
+    }
+    let mut record = ControlRecord::new(name, kind);
+    record.value = value.clone();
+    controls::custom(ui, &response, record);
+    response
+}
+
+/// `edit` - a one-line field a table or a grid draws in a cell of its own, which drive::controls'
+/// named fields cannot be - given their look: a control's height, its text centred in it and
+/// drive::controls::FIELD_INSET in from its left as a choice's is, where egui's own field stands
+/// its text 4 in and at the top. The margin is line_with's (controls::field_margin).
+pub fn field_look<'t>(ui: &Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
+    edit.margin(controls::field_margin())
+        .vertical_align(egui::Align::Center)
+        .min_size(egui::vec2(0.0, ui.spacing().interact_size.y))
+}

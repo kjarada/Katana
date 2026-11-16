@@ -1229,7 +1229,10 @@ impl SurfaceStyleManagerDialog {
         });
     }
 
-    /// A tick box and the colour of what it shows, in one row. True when either was edited.
+    /// A tick box and the colour of what it shows, in one row of the form: the box in the label
+    /// column (shell::dialog::row_with_check), so every colour starts at the form's one edge.
+    /// Laid out as a plain row, each colour started where its box's word ended, 347 to 371.
+    /// True when either was edited.
     fn shown_row(
         ui: &mut Ui,
         names: (&str, &str),
@@ -1238,12 +1241,14 @@ impl SurfaceStyleManagerDialog {
         on: &mut bool,
         colour: &mut String,
     ) -> bool {
-        ui.horizontal(|ui| {
-            let ticked = check(ui, names.0, text, on).changed();
-            let typed = colour_field(ui, names.1, colour, tip);
-            ticked || typed
-        })
-        .inner
+        let mut ticked = false;
+        let typed = crate::shell::dialog::row_with_check(
+            ui,
+            text,
+            |ui| ticked = check(ui, names.0, text, on).changed(),
+            |ui| colour_field(ui, names.1, colour, tip),
+        );
+        ticked || typed
     }
 
     fn plan_page(&mut self, ui: &mut Ui) -> bool {
@@ -1309,20 +1314,25 @@ impl SurfaceStyleManagerDialog {
         let mut edited = row(ui, "Ramp", |ui| {
             choice(ui, "surfaceStyleRamp", &self.ramp_items, &mut form.ramp).changed()
         });
-        edited |= ui
-            .horizontal(|ui| {
-                let ticked = check(ui, "surfaceStyleBanded", "Banded", &mut form.banded).changed();
-                let counted = whole(
+        // The tick in the label column, as the plan page's are, so the count lines up with the
+        // fields above and below it.
+        let mut ticked = false;
+        let counted = crate::shell::dialog::row_with_check(
+            ui,
+            "Banded",
+            |ui| ticked = check(ui, "surfaceStyleBanded", "Banded", &mut form.banded).changed(),
+            |ui| {
+                whole(
                     ui,
                     "surfaceStyleBands",
                     &mut form.bands,
                     surface_style_bands_range(),
                 )
                 .on_hover_text("How many bands of equal width the range is cut into")
-                .changed();
-                ticked || counted
-            })
-            .inner;
+                .changed()
+            },
+        );
+        edited |= ticked || counted;
         edited |= row(ui, "Stops", |ui| {
             line_with(
                 ui,

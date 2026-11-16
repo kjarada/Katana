@@ -62,7 +62,6 @@ use super::style_painter::{
     CanvasRasterBackend, RasterBackend, StylePaintTarget, paint_style_drawing, painted_extent,
 };
 use crate::canvas::{Canvas, Color, Image, Pen, PenCap, PenJoin, PenStyle, RenderHint};
-use crate::dialog_layout as layout;
 use crate::drive::controls::custom;
 use crate::drive::mailbox::{Act, fill_disabled, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -627,9 +626,7 @@ impl NamePicker {
             // entity's resolved linetype: a Style's ByLayer inherits; a Layer's has no layer above
             // it, and draws what a missing layer does.
             return if self.offer_by_layer {
-                format!(
-                    "ByLayer, spelt \"{name}\": the entity is drawn in its layer's linetype"
-                )
+                format!("ByLayer, spelt \"{name}\": the entity is drawn in its layer's linetype")
             } else {
                 format!(
                     "ByLayer, spelt \"{name}\": a layer has no layer above it to inherit from, so \
@@ -779,67 +776,62 @@ impl NamePicker {
         let placeholder = self.placeholder.clone();
         let before = self.text.clone();
         let shown = ui.vertical(|ui| {
-            let row = ui.horizontal(|ui| {
-                // The field and its list button together as wide as a form's field (the list
-                // button its arrow's width, as dialog_layout's editable choice is).
-                let field_width = (ui.spacing().text_edit_width
-                    - layout::EDITABLE_CHOICE_BUTTON
-                    - ui.spacing().item_spacing.x)
-                    .max(layout::EDITABLE_CHOICE_BUTTON);
-                let mut edit = egui::TextEdit::singleline(&mut self.text)
-                    .id_salt(name)
-                    .desired_width(field_width)
-                    .hint_text(placeholder);
-                if marked {
-                    edit = edit.text_color(UNDEFINED_NAME_COLOUR.to_egui());
-                }
-                let field = ui.add(edit);
-                let list = egui::ComboBox::from_id_salt((name, "items"))
-                    .selected_text("")
-                    .width(layout::EDITABLE_CHOICE_BUTTON)
-                    .show_ui(ui, |ui| {
-                        self.ensure_textures(ui, name);
-                        for (at, item) in self.items.iter().enumerate() {
-                            if item.is_header() {
-                                ui.strong(item.label.as_str());
-                                continue;
-                            }
-                            let clicked = ui
-                                .horizontal(|ui| {
-                                    if let Some(Some(texture)) = self.textures.get(at) {
-                                        let size = texture.size_vec2();
-                                        let (rect, _) =
-                                            ui.allocate_exact_size(size, egui::Sense::hover());
-                                        ui.painter().image(
-                                            texture.id(),
-                                            rect,
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(0.0, 0.0),
-                                                egui::pos2(1.0, 1.0),
-                                            ),
-                                            egui::Color32::WHITE,
-                                        );
-                                    }
-                                    let mut label = egui::RichText::new(item.label.as_str());
-                                    if let Some(colour) = item.foreground {
-                                        label = label.color(colour.to_egui());
-                                    }
-                                    let mut response =
-                                        ui.selectable_label(self.current == Some(at), label);
-                                    if !item.tool_tip.is_empty() {
-                                        response = response.on_hover_text(item.tool_tip.as_str());
-                                    }
-                                    response.clicked()
-                                })
-                                .inner;
-                            if clicked {
-                                picked = Some(at);
-                            }
+            // One control as wide as a form's field: the field and the list's arrow inside its
+            // right end, as drive::controls::choice draws an editable choice
+            // (drive::controls::editable_choice_frame, the one painter of both).
+            let colour = marked.then(|| UNDEFINED_NAME_COLOUR.to_egui());
+            if crate::drive::controls::editable_choice_is_open(ui, name) {
+                // The rows' pictures, made once a list is first shown.
+                Self::ensure_textures(&mut self.textures, &self.items, ui, name);
+            }
+            let (items, textures, current) = (&self.items, &self.textures, self.current);
+            let row = crate::drive::controls::editable_choice_frame(
+                ui,
+                name,
+                &mut self.text,
+                &placeholder,
+                colour,
+                |ui| {
+                    for (at, item) in items.iter().enumerate() {
+                        if item.is_header() {
+                            ui.strong(item.label.as_str());
+                            continue;
                         }
-                    });
-                (field, list.response)
-            });
-            let (field, list) = row.inner;
+                        let clicked = ui
+                            .horizontal(|ui| {
+                                if let Some(Some(texture)) = textures.get(at) {
+                                    let size = texture.size_vec2();
+                                    let (rect, _) =
+                                        ui.allocate_exact_size(size, egui::Sense::hover());
+                                    ui.painter().image(
+                                        texture.id(),
+                                        rect,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        egui::Color32::WHITE,
+                                    );
+                                }
+                                let mut label = egui::RichText::new(item.label.as_str());
+                                if let Some(colour) = item.foreground {
+                                    label = label.color(colour.to_egui());
+                                }
+                                let mut response =
+                                    ui.selectable_label(current == Some(at), label);
+                                if !item.tool_tip.is_empty() {
+                                    response = response.on_hover_text(item.tool_tip.as_str());
+                                }
+                                response.clicked()
+                            })
+                            .inner;
+                        if clicked {
+                            picked = Some(at);
+                        }
+                    }
+                },
+            );
+            let (field, list) = (row.field, row.arrow);
             if self.completing {
                 for (at, offered) in self
                     .completions()
@@ -893,13 +885,17 @@ impl NamePicker {
         chosen
     }
 
-    /// The rows' pictures as textures, made once for a list.
-    fn ensure_textures(&mut self, ui: &Ui, name: &str) {
-        if self.textures.len() == self.items.len() {
+    /// The rows' pictures (`items`) as textures (`textures`), made once for a list.
+    fn ensure_textures(
+        textures: &mut Vec<Option<egui::TextureHandle>>,
+        items: &[PickerItem],
+        ui: &Ui,
+        name: &str,
+    ) {
+        if textures.len() == items.len() {
             return;
         }
-        self.textures = self
-            .items
+        *textures = items
             .iter()
             .enumerate()
             .map(|(at, item)| {

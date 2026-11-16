@@ -31,6 +31,7 @@ use super::name_picker::{NamePicker, UNDEFINED_NAME_COLOUR};
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::offstage;
 
 /// The sections the form offers, in the Section list's order.
@@ -261,10 +262,14 @@ impl RuleForm {
     }
 }
 
+// The form's rows are the dialog's labelled rows (shell::dialog::labelled): every label of the
+// form and of every page in one column, so the fields of the rule start at one edge and run to
+// the form's, whichever section's page is in front. Each row was a label and its field side by
+// side at their own widths, so no two fields started or ended together.
+
 /// A labelled field of a page: true when it was edited.
 fn field(ui: &mut Ui, label: &str, name: &str, value: &mut String, tip: &str, hint: &str) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(label);
+    dialog::labelled(ui, label, |ui| {
         let mut response = controls::line_with(
             ui,
             name,
@@ -279,25 +284,18 @@ fn field(ui: &mut Ui, label: &str, name: &str, value: &mut String, tip: &str, hi
         }
         response.changed()
     })
-    .inner
 }
 
 /// A labelled box of fixed choices, by its row.
 fn pick(ui: &mut Ui, label: &str, name: &str, items: &[&str], index: &mut usize) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        index_choice(ui, name, &items_of(items), index)
-    })
-    .inner
+    dialog::labelled(ui, label, |ui| index_choice(ui, name, &items_of(items), index))
 }
 
 /// A labelled box whose text may be typed.
 fn typed(ui: &mut Ui, label: &str, name: &str, items: &[&str], chosen: &mut Choice) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(label);
+    dialog::labelled(ui, label, |ui| {
         controls::choice(ui, name, &items_of(items), chosen).changed()
     })
-    .inner
 }
 
 /// One page of the form; true when a field of it was edited.
@@ -313,18 +311,18 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 "The layer the code's entities go on",
                 "",
             );
-            let mut status = RichText::new(form.model_status.as_str());
-            if form.model_bad {
-                status = status.color(refusal_colour());
-            }
-            controls::label_as(
-                ui,
-                "ruleModelStatus",
-                &form.model_status,
-                egui::Label::new(status).wrap(),
-            );
-            ui.horizontal(|ui| {
-                ui.label("Colour");
+            // What is said of the layer, under its field: the secondary text, or the refusal's.
+            let status = RichText::new(form.model_status.as_str())
+                .color(crate::shell::dialog::status_colour(form.model_bad));
+            dialog::labelled(ui, "", |ui| {
+                controls::label_as(
+                    ui,
+                    "ruleModelStatus",
+                    &form.model_status,
+                    egui::Label::new(status).wrap(),
+                );
+            });
+            dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.colour.ui(ui, "ruleColour").changed();
             });
             edited |= pick(
@@ -334,8 +332,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 &["(not set)", "Line", "Point"],
                 &mut form.breakline,
             );
-            ui.horizontal(|ui| {
-                ui.label("Linestyle");
+            dialog::labelled(ui, "Linestyle", |ui| {
                 ui.add_enabled_ui(form.pickers_loaded, |ui| {
                     edited |= picker_edited(&mut form.linestyle, ui, "ruleLinestyle");
                 });
@@ -344,14 +341,12 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
             edited |= field(ui, "Group", "ruleGroup", &mut form.group, "", "");
         }
         SYMBOL_PAGE => {
-            ui.horizontal(|ui| {
-                ui.label("Symbol");
+            dialog::labelled(ui, "Symbol", |ui| {
                 ui.add_enabled_ui(form.pickers_loaded, |ui| {
                     edited |= picker_edited(&mut form.symbol, ui, "ruleSymbol");
                 });
             });
-            ui.horizontal(|ui| {
-                ui.label("Colour");
+            dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.symbol_colour.ui(ui, "ruleSymbolColour").changed();
             });
             edited |= field(
@@ -403,8 +398,7 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 "",
                 "",
             );
-            ui.horizontal(|ui| {
-                ui.label("Colour");
+            dialog::labelled(ui, "Colour", |ui| {
                 edited |= form.text_colour.ui(ui, "ruleTextColour").changed();
             });
             edited |= typed(
@@ -456,8 +450,10 @@ fn page_ui(form: &mut RuleForm, page: usize, ui: &mut Ui) -> bool {
                 "",
             );
             edited |= field(ui, "Size 2", "rulePipeSize2", &mut form.pipe_size2, "", "");
-            edited |=
-                controls::check(ui, "rulePipeActive", "Active", &mut form.pipe_active).changed();
+            // Under the fields, lined up with them.
+            edited |= dialog::labelled(ui, "", |ui| {
+                controls::check(ui, "rulePipeActive", "Active", &mut form.pipe_active).changed()
+            });
         }
         ATTRIBUTES_PAGE => {
             ui.label("One attribute a line: <type> <name> = <value>, the type text or integer");

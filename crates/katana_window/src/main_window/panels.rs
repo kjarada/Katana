@@ -24,10 +24,10 @@ use katana_core::{ErrorCode, Status};
 use katana_entity::{EnumName, Layer};
 
 use super::actions::{BarPlace, Composed};
-use super::layout::{self, Geometry, bar_breadth, natural_width, row_rooms, widget_size};
+use super::layout::{self, Geometry, bar_breadth, natural_width, row_rooms};
 use super::window::{ImportOptions, MainWindow};
 use crate::dock_chrome::{ChromeIcons, ChromeRequest, DockChrome, DockRole, DockTab};
-use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item};
+use crate::drive::action::{Action, Menu, ToolBar, ToolBarItem};
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions};
 use crate::drive::registry::{TargetKind, TargetSpec, WINDOW, begin_target, end_target};
 use crate::host::Host;
@@ -80,7 +80,8 @@ impl Default for Panels {
             ("ReferenceDataDock", "ReferenceData", "Reference Data"),
             ("SurfacesDock", "SurfacesPanel", "Surfaces"),
             ("VerticesDock", "draw.vertex.edit", "Vertices"),
-            ("SurveyPointsDock", "SurveyPoints", "Survey Points"),
+            // The Point Manager's own icon: "SurveyPoints" named none, and the bar drew no icon.
+            ("SurveyPointsDock", "SurveyPointManager", "Survey Points"),
         ] {
             chrome.install(name, icon, DockRole::Panel).set_title(title);
         }
@@ -214,6 +215,115 @@ impl InputDialog {
     }
 }
 
+/// Help > About Katana ("aboutDialog"): the logo, the version and what the program is, and Close
+/// ("aboutClose"). Non-modal, as the start screen beside it is; it asks nothing.
+pub struct AboutDialog {
+    frame: DialogFrame,
+    state: AboutState,
+}
+
+/// What the About dialog's frame lends its body and footer.
+struct AboutState {
+    open: bool,
+    logo: Option<egui::TextureHandle>,
+}
+
+/// The side of the About dialog's logo: the start screen's, so the two show the program alike.
+const ABOUT_LOGO: f32 = 64.0;
+
+impl Default for AboutDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AboutDialog {
+    pub fn new() -> Self {
+        Self {
+            // As narrow as the logo and two lines of words need: the body's 520 left the words
+            // one long line with the dialog mostly empty.
+            frame: DialogFrame::new("aboutDialog", "About Katana").width(400.0),
+            state: AboutState {
+                open: false,
+                logo: None,
+            },
+        }
+    }
+
+    pub fn show(&mut self) {
+        self.state.open = true;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.state.open
+    }
+
+    /// The words the dialog shows under its title: the version first.
+    pub fn text() -> String {
+        format!(
+            "Version {}\nSurvey and CAD, for a person at the window and an agent at the \
+             command line alike.",
+            katana_update::version::program_version_text()
+        )
+    }
+
+    pub fn ui(&mut self, ctx: &Context) {
+        if !self.state.open {
+            return;
+        }
+        let shown = self.frame.show(
+            ctx,
+            &mut self.state,
+            |ui, state| {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = crate::shell::dialog::SECTION_GAP;
+                    let logo = state
+                        .logo
+                        .get_or_insert_with(|| {
+                            let image = crate::icons::application_icon_image(
+                                &crate::icons::CanvasRasteriser,
+                                ABOUT_LOGO as u32,
+                            );
+                            ui.ctx().load_texture(
+                                "katanaAboutLogo",
+                                image.to_color_image(),
+                                egui::TextureOptions::LINEAR,
+                            )
+                        })
+                        .id();
+                    let _ = ui.image((logo, Vec2::splat(ABOUT_LOGO)));
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("Katana").heading().strong());
+                        let text = Self::text();
+                        let _ = controls::label_as(
+                            ui,
+                            "aboutText",
+                            &text,
+                            egui::Label::new(
+                                RichText::new(text.as_str()).color(palette::text_muted().to_egui()),
+                            )
+                            .wrap(),
+                        );
+                    });
+                });
+            },
+            |ui, state| {
+                let ((), close) = crate::shell::dialog::button_row(
+                    ui,
+                    |_| {},
+                    |ui| controls::button(ui, "aboutClose", "Close").clicked(),
+                );
+                if close {
+                    state.open = false;
+                }
+            },
+        );
+        if shown.closed {
+            self.state.open = false;
+        }
+    }
+}
+
 // ---- the frame ------------------------------------------------------------------------------
 
 impl MainWindow {
@@ -333,18 +443,20 @@ impl MainWindow {
                 BarPlace::Nowhere => {}
             }
         }
+        // The names' widths in this frame's text, before any strip is laid out with them.
+        if names_shown {
+            let titles: Vec<String> = rows
+                .iter()
+                .flatten()
+                .map(|bar| bar.title.clone())
+                .collect();
+            layout::measure_names(&mut self.ui.bars, ui, titles.iter().map(String::as_str));
+        }
         for (at, row) in rows.iter().enumerate() {
             let rect = geometry.rows[at];
             let strips: Vec<Strip> = row
                 .iter()
-                .map(|bar| {
-                    let mut bar = (*bar).clone();
-                    if names_shown && bar.name != "PropertiesToolBar" {
-                        bar.items
-                            .insert(0, ToolBarItem::Widget(format!("toolBarName:{}", bar.title)));
-                    }
-                    self.strip_of(&bar, false, icon_size)
-                })
+                .map(|bar| self.strip_of(&layout::with_name(bar, names_shown), false, icon_size))
                 .collect();
             let naturals: Vec<i32> = strips
                 .iter()
@@ -354,11 +466,6 @@ impl MainWindow {
             // The row is one band: the frame's colour to its end and the rule under it the whole
             // width, so a short row has no stretch where the toolbars' own ground stops.
             ui.painter().rect_filled(rect, 0.0, palette::window().to_egui());
-            ui.painter().hline(
-                rect.x_range(),
-                ui.painter().round_to_pixel_center(rect.max.y - 0.5),
-                egui::Stroke::new(1.0, palette::border().to_egui()),
-            );
             let mut x = rect.min.x;
             let mut seams = Vec::new();
             for (at_bar, (strip, room)) in strips.iter().zip(rooms).enumerate() {
@@ -372,9 +479,15 @@ impl MainWindow {
                 self.strip_ui(ui, strip, at, room, &[]);
                 x += room;
             }
-            // Between two toolbars of a row, a rule a little shorter than the buttons: where one
-            // task's group ends and the next begins. Drawn after the bars, whose ground covers
-            // the row.
+            // The rule under the row, and between two toolbars of a row a rule a little shorter
+            // than the buttons: where one task's group ends and the next begins. Both drawn after
+            // the bars, whose ground covers the row: painted first, the rule under the row was
+            // hidden by every toolbar and showed only as a stub after the last.
+            ui.painter().hline(
+                rect.x_range(),
+                ui.painter().round_to_pixel_center(rect.max.y - 0.5),
+                egui::Stroke::new(1.0, palette::border().to_egui()),
+            );
             let inset = 9.0;
             for seam in seams {
                 ui.painter().vline(
@@ -424,12 +537,8 @@ impl MainWindow {
 
     /// A toolbar's strip as it is drawn this frame.
     fn strip_of(&self, bar: &ToolBar, vertical: bool, icon_size: i32) -> Strip {
+        let bars = &self.ui.bars;
         let items = self.ui.tools.strip_items(bar, &|name| {
-            if let Some(title) = name.strip_prefix("toolBarName:") {
-                let (_, height) = crate::tools::flyout_button::ToolButtonLook::TOOL
-                    .button_size(icon_size);
-                return Some((layout::name_width(title), height));
-            }
             if let Some(width) = name
                 .strip_prefix(WORD_PREFIX)
                 .and_then(|rest| rest.split_once(':'))
@@ -437,7 +546,7 @@ impl MainWindow {
             {
                 return Some((width, crate::theme::style::CONTROL_HEIGHT as i32));
             }
-            widget_size(name, icon_size)
+            layout::top_widget_size(bars, name, icon_size)
         });
         Strip {
             name: bar.name.clone(),
@@ -481,10 +590,9 @@ impl MainWindow {
                 word_of(name).and_then(|named| texts.iter().find(|action| action.name == named))
             {
                 let text = action.text.replace('&', "");
-                child.spacing_mut().button_padding.x = 6.0;
                 let response = child
                     .add_enabled_ui(action.enabled, |ui| {
-                        controls::toggle(ui, &action.name, &text, action.checked == Some(true))
+                        word_toggle(ui, &action.name, &text, action.checked == Some(true))
                     })
                     .inner;
                 if response.hovered() {
@@ -541,11 +649,9 @@ impl MainWindow {
                     false
                 }
                 "annotationScaleCombo" => {
-                    // An editable choice: its field, then the list's arrow beside it.
-                    let arrow = child.spacing().icon_width + 2.0 * child.spacing().button_padding.x;
-                    child.spacing_mut().combo_width = arrow;
-                    child.spacing_mut().text_edit_width =
-                        (rect.width() - arrow - 2.0 - 8.0).max(24.0);
+                    // An editable choice, one framed control with its list's arrow inside: as wide
+                    // as its slot on the strip, less the strip's 2 points between widgets.
+                    child.spacing_mut().text_edit_width = (rect.width() - 2.0).max(24.0);
                     let _ = ui_state.annotation.scale_box_ui(&mut child, exec);
                     false
                 }
@@ -586,29 +692,35 @@ impl MainWindow {
             let front = self.ui.docks.lower_left().unwrap_or("ReferenceDataDock");
             let mut body = rect;
             if tabs.len() > 1 {
-                // A tab strip over the group, its tabs the docks' titles.
+                // A tab strip over the group, its tabs the docks' titles, drawn as every tab
+                // strip of the window is: the one in front over the accent's bar, the others
+                // muted (drive::controls::tabs). They were egui's selectable labels, blue pills.
                 let strip = Rect::from_min_size(rect.min, Vec2::new(rect.width(), crate::view_workspace::TAB_STRIP));
                 body.min.y = strip.max.y;
-                let mut chosen = None;
-                ui.scope_builder(
-                    UiBuilder::new()
-                        .max_rect(strip)
-                        .layout(Layout::left_to_right(Align::Center)),
-                    |ui| {
-                        for tab in &tabs {
-                            let title = if *tab == "SurfacesDock" {
-                                "Surfaces"
-                            } else {
-                                "Reference Data"
-                            };
-                            if ui.selectable_label(*tab == front, title).clicked() {
-                                chosen = Some(*tab);
-                            }
+                let titles: Vec<&str> = tabs
+                    .iter()
+                    .map(|tab| {
+                        if *tab == "SurfacesDock" {
+                            "Surfaces"
+                        } else {
+                            "Reference Data"
                         }
-                    },
-                );
-                if let Some(tab) = chosen {
-                    self.ui.docks.surfaces_in_front = tab == "SurfacesDock";
+                    })
+                    .collect();
+                let mut current = tabs.iter().position(|tab| *tab == front).unwrap_or(0);
+                let changed = ui
+                    .scope_builder(
+                        UiBuilder::new()
+                            .max_rect(strip)
+                            .layout(Layout::left_to_right(Align::Center)),
+                        |ui| {
+                            ui.set_clip_rect(strip.intersect(ui.clip_rect()));
+                            controls::tabs(ui, "lowerLeftDockTabs", &titles, &mut current).changed()
+                        },
+                    )
+                    .inner;
+                if changed && let Some(tab) = tabs.get(current) {
+                    self.ui.docks.surfaces_in_front = *tab == "SurfacesDock";
                 }
             }
             if front == "SurfacesDock" {
@@ -741,16 +853,18 @@ impl MainWindow {
             )
             .selectable(false)
         };
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(bar.shrink2(Vec2::new(crate::theme::style::GROUP_GAP, 0.0)))
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                ui.spacing_mut().item_spacing.x = crate::theme::style::GROUP_GAP;
-                ui.spacing_mut().interact_size.y = bar.height() - 4.0;
-                ui.add(egui::Label::new(RichText::new(message.as_str()).small()).truncate());
-                self.exec.jobs.status_ui(ui);
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let inside = bar.shrink2(Vec2::new(crate::theme::style::GROUP_GAP, 0.0));
+        // The readouts first, from the right edge in, and the message after in what they leave:
+        // laid out after the message, a long prompt at a large text size took the whole bar and
+        // the readouts were drawn over it ("CRS:" through the prompt's words).
+        let readouts = ui
+            .scope_builder(
+                UiBuilder::new()
+                    .max_rect(inside)
+                    .layout(Layout::right_to_left(Align::Center)),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = crate::theme::style::GROUP_GAP;
+                    ui.spacing_mut().interact_size.y = bar.height() - 4.0;
                     let divider = |ui: &mut Ui| {
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 12.0), Sense::hover());
                         ui.painter().vline(
@@ -772,10 +886,19 @@ impl MainWindow {
                     let _ = controls::label_as(ui, "statusSnap", snap, quiet(snap));
                     let _ = controls::label_as(ui, "statusLayer", &layer, quiet(&layer));
                     divider(ui);
-                    let _ = controls::label_as(ui, "statusSelectionCount", &selection, quiet(&selection))
-                        .on_hover_text("Entities selected, of all the drawing holds");
                     let stats = &self.ui.panels.frame_stats;
-                    let _ = controls::label_as(ui, "FrameStatsLabel", stats, quiet(stats));
+                    let mut count_tip = String::from("Entities selected, of all the drawing holds");
+                    if is_timing(stats) {
+                        count_tip.push_str(&format!("\n\nLast frame: {stats}"));
+                    }
+                    let _ = controls::label_as(ui, "statusSelectionCount", &selection, quiet(&selection))
+                        .on_hover_text(count_tip);
+                    // A view's readout a person reads - a section's station and elevation, its
+                    // crossings - is shown; a frame's timings are a developer's, kept in the
+                    // label's report (--report FrameStatsLabel, the tests' "Plan N drawn") and the
+                    // count's tooltip, not printed in a person's status bar.
+                    let shown = if is_timing(stats) { "" } else { stats.as_str() };
+                    let _ = controls::label_as(ui, "FrameStatsLabel", stats, quiet(shown));
                     divider(ui);
                     crs_clicked = controls::button_as(
                         ui,
@@ -791,7 +914,21 @@ impl MainWindow {
                     .on_hover_text("The project's coordinate system: click to change it")
                     .clicked();
                     self.ui.update.status_button_ui(ui, &mut self.exec);
-                });
+                    self.exec.jobs.status_ui(ui);
+                },
+            )
+            .response
+            .rect;
+        let mut left = inside;
+        left.max.x = (readouts.min.x - crate::theme::style::GROUP_GAP).max(left.min.x);
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(left)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                ui.set_clip_rect(left.intersect(ui.clip_rect()));
+                ui.spacing_mut().interact_size.y = bar.height() - 4.0;
+                ui.add(egui::Label::new(RichText::new(message.as_str()).small()).truncate());
             },
         );
         if crs_clicked {
@@ -821,7 +958,9 @@ impl MainWindow {
                     egui::containers::menu::menu_style(ui.style_mut());
                     begin_target(ui, TargetSpec::new(&menu.name, TargetKind::Menu, &menu.title.replace('&', "")));
                     let shown = ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
-                        menu_items_ui(ui, &menu, &mut chosen);
+                        crate::shell::dialog::menu_column(ui, |ui| {
+                            crate::drive::action::menu_items_ui(ui, &menu, &mut chosen);
+                        });
                     });
                     end_target(ui, shown.response.rect);
                 });
@@ -868,6 +1007,9 @@ impl MainWindow {
         }
         if let Some(dialog) = dialogs.shortcuts.as_mut() {
             dialog.ui(ui);
+        }
+        if let Some(dialog) = dialogs.about.as_mut() {
+            dialog.ui(&ctx);
         }
         if dialogs.summary_shown
             && let Some(dialog) = dialogs.summary.as_mut()
@@ -1154,11 +1296,24 @@ pub fn window_title(document: &katana_cad::Document) -> String {
     )
 }
 
-/// A menu drawn as a menu button with its items; a click on an action is the action chosen.
+/// Whether a view's readout is a frame's timing - the plan's "Plan  20 drawn  5.4 ms (kept, 0.2
+/// ms)", a 3D view's "3D  1036 tri  4.2 ms (scene 2.0 ms)" - a developer's measure, which every
+/// one of them ends with; a section's readouts (its crossings, the station and elevation under
+/// the pointer) never do.
+fn is_timing(readout: &str) -> bool {
+    readout.ends_with(" ms") || readout.ends_with(" ms)")
+}
+
+/// A menu drawn as a menu button with its items, by the one drawer every menu of the window uses
+/// (drive::action::menu_items_ui: a tick and icon gutter, sections, inset separators, submenus) in
+/// a column that scrolls when the menu is taller than the room under the bar (the Annotate menu);
+/// a click on an action is the action chosen.
 fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Vec<String>) {
     ui.menu_button(menu.title.replace('&', ""), |ui| {
         let mut one = None;
-        menu_items_ui(ui, menu, &mut one);
+        crate::shell::dialog::menu_column(ui, |ui| {
+            crate::drive::action::menu_items_ui(ui, menu, &mut one);
+        });
         if let Some(name) = one {
             chosen.push(name);
             ui.close();
@@ -1166,42 +1321,35 @@ fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Vec<String>) {
     });
 }
 
-/// A menu's items: actions, titled sections, separators and submenus.
-fn menu_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
-    for item in &menu.items {
-        match item {
-            MenuItem::Action(action) => {
-                if action_item(ui, action).clicked() && !action.name.is_empty() {
-                    *chosen = Some(action.name.clone());
-                }
-            }
-            MenuItem::Section(title) => {
-                let _ = crate::theme::menu_section(ui, title);
-            }
-            MenuItem::Separator => {
-                ui.separator();
-            }
-            MenuItem::Menu(submenu) => {
-                ui.menu_button(submenu.title.replace('&', ""), |ui| {
-                    menu_items_ui(ui, submenu, chosen);
-                });
-            }
-        }
-    }
-}
-
 // ---- a panel's own tools -------------------------------------------------------------------------
 
-/// A row of a list or tree in a panel (the Layers tree): denser than a form's control.
-const LIST_ROW: f32 = 22.0;
+/// A row of a list or tree in a panel (the Layers tree, a view's layers popup): denser than a
+/// form's control.
+pub(crate) const LIST_ROW: f32 = 22.0;
 
 /// The side of a panel tool's icon: the design's 16 point grid, in a control-high square.
 const PANEL_ICON: f32 = 16.0;
 
+/// The slot before a layer's name that holds the current layer's mark, and the mark's radius: a
+/// dot the size of a snap marker's, small beside the 14 point eye and padlock before it.
+const CURRENT_MARK_SLOT: f32 = 8.0;
+const CURRENT_MARK_RADIUS: f32 = 3.0;
+
 /// A panel's tool: an icon in a square a control high, framed only under the pointer, its name
 /// and what it does in the tooltip. It reports and is pressed as `name`, its accessible text
 /// `label`, as the worded button it replaced was; with no icon of that name it shows `label`.
-fn panel_tool(ui: &mut Ui, name: &str, icon: &str, label: &str, tip: &str) -> egui::Response {
+pub(crate) fn panel_tool(ui: &mut Ui, name: &str, icon: &str, label: &str, tip: &str) -> egui::Response {
+    ui.scope(|ui| {
+        // The icon's square padded to the control's height and no more: with the style's button
+        // padding each tool was 32 points, and the Reference Data panel's seven ran off its edge.
+        let side = crate::theme::style::CONTROL_HEIGHT;
+        ui.spacing_mut().button_padding = Vec2::splat((side - PANEL_ICON) / 2.0);
+        panel_tool_button(ui, name, icon, label, tip)
+    })
+    .inner
+}
+
+fn panel_tool_button(ui: &mut Ui, name: &str, icon: &str, label: &str, tip: &str) -> egui::Response {
     let side = crate::theme::style::CONTROL_HEIGHT;
     // The set has no closed eye yet: Hide is the open eye faded, beside Show's.
     let (icon, mode) = if icon == "LayerHidden" && !crate::icons::is_named_icon(icon) {
@@ -1226,7 +1374,7 @@ fn panel_tool(ui: &mut Ui, name: &str, icon: &str, label: &str, tip: &str) -> eg
 }
 
 /// A short rule between two groups of a panel's tools.
-fn group_rule(ui: &mut Ui) {
+pub(crate) fn group_rule(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(crate::theme::style::GROUP_GAP, crate::theme::style::CONTROL_HEIGHT),
         Sense::hover(),
@@ -1238,9 +1386,10 @@ fn group_rule(ui: &mut Ui) {
     );
 }
 
-/// A two-state switch of a list row (a layer's eye or padlock): the icon full while `on`, faint
-/// while off, a click a press of it.
-fn row_switch(ui: &mut Ui, icon: &str, on: bool, tip: &str) -> egui::Response {
+/// A two-state switch of a list row (a layer's eye or padlock, the eye of a view's layers popup):
+/// the icon full while `on`, faint while off, framed only under the pointer, a click a press of
+/// it. With no icon painter (a test's context) a word stands in the icon's place.
+pub(crate) fn row_switch(ui: &mut Ui, icon: &str, on: bool, tip: &str) -> egui::Response {
     let side = 14.0;
     let response = match crate::icons::texture(ui.ctx(), icon, side, crate::icons::IconMode::Normal) {
         Some(texture) => ui.add(
@@ -1270,6 +1419,85 @@ fn word_of(name: &str) -> Option<&str> {
     name.strip_prefix(WORD_PREFIX)
         .and_then(|rest| rest.split_once(':'))
         .map(|(_, action)| action)
+}
+
+/// A worded toggle of the Drafting bar, named `name`: its word in the text colour over a 2 point
+/// accent bar while it is on, in the secondary text with no bar while it is off, raised under the
+/// pointer. A filled pill for "on" read as a pressed button, and egui's selectable button drew
+/// nothing at all for "off" - so at rest nothing said which modes were on. It reports and takes a
+/// press as `controls::toggle` does: a Toggle with its checked state, a fill refused.
+fn word_toggle(ui: &mut Ui, name: &str, text: &str, checked: bool) -> egui::Response {
+    use crate::drive::mailbox::{Act, no_field};
+    use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
+    let taken = take(ui, name);
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(String::from(text), font, egui::Color32::PLACEHOLDER);
+    let padding = 6.0;
+    let size = Vec2::new(
+        galley.size().x + 2.0 * padding,
+        crate::theme::style::CONTROL_HEIGHT,
+    );
+    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), checked, text)
+    });
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if response.hovered() && ui.is_enabled() {
+            painter.rect_filled(rect, egui::CornerRadius::same(4), palette::raised().to_egui());
+        }
+        let ink = if !ui.is_enabled() {
+            palette::text_disabled()
+        } else if checked {
+            palette::text()
+        } else {
+            palette::text_muted()
+        };
+        let at = Pos2::new(rect.left() + padding, rect.center().y - galley.size().y / 2.0);
+        let under = at.y + galley.size().y + 1.0;
+        painter.galley_with_override_text_color(at, galley.clone(), ink.to_egui());
+        if checked {
+            // Under the word, not the whole slot: the bar marks the word that is on.
+            painter.rect_filled(
+                Rect::from_min_max(
+                    Pos2::new(at.x, under),
+                    Pos2::new(at.x + galley.size().x, (under + 2.0).min(rect.bottom())),
+                ),
+                egui::CornerRadius::ZERO,
+                palette::accent().to_egui(),
+            );
+        }
+    }
+    if let Some(taken) = &taken {
+        match &taken.posted.act {
+            Act::Press => {
+                if controls::accept_press(ui, taken) {
+                    response
+                        .flags
+                        .insert(egui::response::Flags::FAKE_PRIMARY_CLICKED);
+                    settle(ui, taken, Ok(()));
+                }
+            }
+            Act::Fill(fill) => {
+                if controls::accept_fill(ui, taken) {
+                    settle(ui, taken, Err(no_field(name, fill)));
+                }
+            }
+            Act::ScrollTo => {
+                response.scroll_to_me(None);
+                settle(ui, taken, Ok(()));
+            }
+        }
+    }
+    let mut control = ControlRecord::new(name, ControlKind::Toggle);
+    control.text = String::from(text);
+    control.checked = Some(checked);
+    control.enabled = ui.is_enabled();
+    control.visible = ui.is_visible();
+    record(ui, &response, control);
+    response
 }
 
 /// `bar` with every action that has no icon put as a word (a Widget slot `word_of` reads), and
@@ -1366,7 +1594,8 @@ fn properties_ui(window: &mut MainWindow, ui: &mut Ui) {
     let any = !styles.is_empty();
     let mut apply = false;
     ui.horizontal(|ui| {
-        ui.label("Style");
+        // Muted, as every label beside a field is, the property tree's under it included.
+        crate::shell::dialog::form_label(ui, "Style");
         ui.add_enabled_ui(any, |ui| {
             if !ui.memory(|memory| memory.has_focus(ui.id())) && styles.len() == 1 {
                 let style = styles.iter().next().cloned().unwrap_or_default();
@@ -1378,17 +1607,12 @@ fn properties_ui(window: &mut MainWindow, ui: &mut Ui) {
                     };
                 }
             }
-            // The field takes the row's width less the list's arrow and Apply, so Apply is on the
-            // panel at its 240 points (egui's default field ran it off the edge).
-            let arrow = ui.spacing().icon_width + 2.0 * ui.spacing().button_padding.x;
+            // The choice - one framed control, its list's arrow inside its right end
+            // (drive::controls::editable_choice_frame) - takes the row's width less Apply, so
+            // Apply is on the panel at its 240 points and the two end at its edge.
             let apply_width = 56.0;
-            ui.spacing_mut().combo_width = arrow;
-            ui.spacing_mut().text_edit_width = (ui.available_width()
-                - arrow
-                - apply_width
-                - 2.0 * ui.spacing().item_spacing.x
-                - 8.0)
-                .max(40.0);
+            ui.spacing_mut().text_edit_width =
+                (ui.available_width() - apply_width - ui.spacing().item_spacing.x).max(40.0);
             let response = controls::choice(ui, "PropertyStyle", &items, &mut panels.property_style);
             if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                 apply = true;
@@ -1508,12 +1732,25 @@ fn layers_ui(window: &mut MainWindow, ui: &mut Ui) {
                     {
                         toggled = Some((path.clone(), false, !layer.locked));
                     }
+                    // The current layer: an accent dot in a slot every row keeps before its name,
+                    // and its name strong. It was a typed "  <" after the name, which read as part
+                    // of it.
                     let current = path == document.current_layer();
-                    let shown = if current { format!("{leaf}  <") } else { leaf };
-                    let text = if layers.effectively_visible(&path) {
-                        RichText::new(shown)
+                    let (slot, _) =
+                        ui.allocate_exact_size(Vec2::new(CURRENT_MARK_SLOT, LIST_ROW), Sense::hover());
+                    if current {
+                        ui.painter().circle_filled(
+                            slot.center(),
+                            CURRENT_MARK_RADIUS,
+                            palette::accent().to_egui(),
+                        );
+                    }
+                    let text = if !layers.effectively_visible(&path) {
+                        RichText::new(leaf).color(palette::text_disabled().to_egui())
+                    } else if current {
+                        RichText::new(leaf).strong()
                     } else {
-                        RichText::new(shown).color(palette::text_disabled().to_egui())
+                        RichText::new(leaf)
                     };
                     let picked = window.ui.panels.layer_selected.as_deref() == Some(path.as_str());
                     let count = format!("{}", document.model().entities.count_on_layer(&path));
@@ -1532,7 +1769,11 @@ fn layers_ui(window: &mut MainWindow, ui: &mut Ui) {
                                 .truncate()
                                 .min_size(Vec2::new(ui.available_width(), LIST_ROW)),
                         )
-                        .on_hover_text(path.as_str());
+                        .on_hover_text(if current {
+                            format!("{path} (the current layer: new work is drawn on it)")
+                        } else {
+                            path.clone()
+                        });
                     if response.clicked() {
                         window.ui.panels.layer_selected = Some(path.clone());
                     }
@@ -1838,13 +2079,36 @@ fn reference_display_ui(window: &mut MainWindow, ui: &mut Ui) {
         .collect();
     let mut opacity_changed = false;
     let mut colour_changed = false;
-    // A two-column form: the labels in the secondary text, the choices the panel's width.
-    egui::Grid::new("katanaReferenceDisplay")
-        .num_columns(2)
-        .spacing(Vec2::new(crate::theme::style::GROUP_GAP, crate::theme::style::GAP))
-        .show(ui, |ui| {
-        ui.label(RichText::new("Opacity").color(palette::text_muted().to_egui()));
-        ui.spacing_mut().combo_width = (ui.available_width()).max(80.0);
+    // A two-column form: the labels in the secondary text in a column as wide as the wider, the
+    // choices the rest of the panel's width. Each choice is sized to its row, a point inside the
+    // panel's padding for its frame's stroke: an egui Grid gave its second column the grid's
+    // whole width, and the choices ran past the panel's right edge.
+    let muted = |text: &str| RichText::new(text).color(palette::text_muted().to_egui());
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let label_width = ["Opacity", "Colour"]
+        .iter()
+        .map(|text| {
+            ui.painter()
+                .layout_no_wrap(String::from(*text), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+        .fold(0.0_f32, f32::max)
+        .ceil();
+    let row = |ui: &mut Ui, label: &str, add: &mut dyn FnMut(&mut Ui)| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = crate::theme::style::GROUP_GAP;
+            let drawn = ui.add(egui::Label::new(muted(label)).selectable(false));
+            // The label column's width, whatever this row's label is.
+            let short = label_width - drawn.rect.width();
+            if short > 0.0 {
+                ui.add_space(short);
+            }
+            ui.spacing_mut().combo_width = (ui.available_width() - 1.0).max(60.0);
+            add(ui);
+        });
+    };
+    row(ui, "Opacity", &mut |ui| {
         ui.add_enabled_ui(raster_opacity.is_some(), |ui| {
             opacity_changed = controls::choice(
                 ui,
@@ -1855,8 +2119,8 @@ fn reference_display_ui(window: &mut MainWindow, ui: &mut Ui) {
             .on_hover_text("How much of the selected raster shows (REFS OPACITY)")
             .changed();
         });
-        ui.end_row();
-        ui.label(RichText::new("Colour").color(palette::text_muted().to_egui()));
+    });
+    row(ui, "Colour", &mut |ui| {
         ui.add_enabled_ui(cloud_colour.is_some(), |ui| {
             colour_changed = controls::choice(
                 ui,
@@ -1867,7 +2131,6 @@ fn reference_display_ui(window: &mut MainWindow, ui: &mut Ui) {
             .on_hover_text("How the selected point cloud is coloured (REFS COLOR)")
             .changed();
         });
-        ui.end_row();
     });
     if opacity_changed
         && let Some(&(_, value)) = window
@@ -1929,13 +2192,24 @@ fn zoom_to_selected_reference(window: &mut MainWindow) {
 
 // ---- the command line ---------------------------------------------------------------------------
 
+/// The space above a text box's first line: egui's TextEdit margin, `Margin::symmetric(4, 2)`.
+const LOG_MARGIN: f32 = 2.0;
+
 /// The command line: its log, and the field a line is typed in - Enter runs it, Up and Down browse
 /// the history, Esc cancels the running tool, and several lines pasted run at once.
 fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
     let mut log = window.exec.log.text();
     // The log over the field a line is typed in: the field a control high, the log the rest.
     let field = crate::theme::style::CONTROL_HEIGHT + ui.spacing().item_spacing.y;
-    let height = (ui.available_height() - field).max(20.0);
+    let room = (ui.available_height() - field).max(20.0);
+    // The log a whole number of lines high, and what is left over above it: kept at its bottom,
+    // a log of any other height showed part of a line, cut through, at its top. The log's text
+    // starts LOG_MARGIN below its top (egui's text box margin), so a whole line shows at the top
+    // when the view is that margin more than whole lines.
+    let line = ui.text_style_height(&egui::TextStyle::Monospace);
+    let lines = ((room - LOG_MARGIN) / line).floor().max(1.0);
+    let height = (lines * line + LOG_MARGIN).min(room);
+    ui.add_space(room - height);
     ui.allocate_ui(Vec2::new(ui.available_width(), height), |ui| {
         // The log is read, not typed in: drawn on the panel itself, with no well or frame of a
         // field, so the one field of the panel is the line below it.
@@ -2117,4 +2391,23 @@ pub fn host_of(window: &mut MainWindow) -> &mut dyn Host {
 /// Draws nothing; keeps a rect's area allocated so the layout below it holds.
 pub fn reserve(ui: &mut Ui, rect: Rect) {
     let _ = ui.allocate_rect(rect, Sense::hover());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_timing;
+
+    // The readouts as the views write them (viewport_widget's paint, render_view_widget's frame,
+    // section_view_widget's cut and pointer readouts).
+    #[test]
+    fn a_frames_timing_is_told_from_a_readout_a_person_reads() {
+        assert!(is_timing("Plan  20 drawn  5.4 ms"));
+        assert!(is_timing("Plan  20 drawn  5.4 ms (kept, 0.2 ms)"));
+        assert!(is_timing("3D  1036 tri  4.2 ms"));
+        assert!(is_timing("3D  1036 tri  4.2 ms (scene 12.0 ms)"));
+        assert!(!is_timing("Section  length 120.00  3 crossings"));
+        assert!(!is_timing("Section  length 120.00  3 crossings, surfaces changed since the cut"));
+        assert!(!is_timing("Station 12.000   Elevation 3.250   (V x2)"));
+        assert!(!is_timing(""));
+    }
 }

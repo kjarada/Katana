@@ -55,6 +55,7 @@ use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 const DIALOG: &str = "drawingSummaryDialog";
 const TITLE: &str = "Drawing Summary";
@@ -226,7 +227,10 @@ impl DrawingSummaryDialog {
         self.selection = if status.selected == 0 {
             String::from("nothing selected")
         } else {
-            format!("{} selected", counted(status.selected, "entity", "entities"))
+            format!(
+                "{} selected",
+                counted(status.selected, "entity", "entities")
+            )
         };
         let next = |name: &str| {
             if name.is_empty() {
@@ -305,20 +309,23 @@ impl DrawingSummaryDialog {
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         ui.set_width(BODY_WIDTH);
-        layout::form(ui, "drawingSummaryForm", |ui| {
-                let rows = [
-                    ("Project", "drawingSummaryProject", &self.project),
-                    ("Drawing", "drawingSummaryDrawing", &self.drawing),
-                    ("Current", "drawingSummaryCurrent", &self.current),
-                    ("Selection", "drawingSummarySelection", &self.selection),
-                    ("History", "drawingSummaryHistory", &self.history),
-                ];
-                for (title, name, text) in rows {
-                    layout::form_label(ui, title);
-                    controls::label_as(ui, name, text, egui::Label::new(text.as_str()).wrap());
-                    ui.end_row();
-                }
-            });
+        dialog::form(ui, |form| {
+            let rows = [
+                ("Project", "drawingSummaryProject", &self.project),
+                ("Drawing", "drawingSummaryDrawing", &self.drawing),
+                ("Current", "drawingSummaryCurrent", &self.current),
+                ("Selection", "drawingSummarySelection", &self.selection),
+                ("History", "drawingSummaryHistory", &self.history),
+            ];
+            for (title, name, text) in rows {
+                form.row(title, |ui| {
+                    // On its label's line, as a field's text is (shell::dialog::text_value).
+                    crate::shell::dialog::text_value(ui, |ui| {
+                        controls::label_as(ui, name, text, egui::Label::new(text.as_str()).wrap());
+                    });
+                });
+            }
+        });
         // Says where the customisation is changed: the summary only shows it.
         ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
         controls::label_as(
@@ -389,14 +396,10 @@ impl DrawingSummaryDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        controls::label_as(
-            ui,
-            "drawingSummaryStatus",
-            &self.status,
-            egui::Label::new(self.status.as_str()).wrap(),
-        );
-        // Copy and Refresh at the left; Close, the only way out, at the right.
-        let ((copied, refreshed), closed) = layout::footer(
+        let status = self.status.clone();
+        // The one footer (shell::dialog::button_row): Copy, Refresh and the status at the left;
+        // Close, the only way out, at the right.
+        let ((copied, refreshed), closed) = dialog::button_row(
             ui,
             |ui| {
                 let copied = controls::button(ui, "drawingSummaryCopyJson", "Copy as JSON")
@@ -405,10 +408,16 @@ impl DrawingSummaryDialog {
                 let refreshed = controls::button(ui, "drawingSummaryRefresh", "Refresh")
                     .on_hover_text("Read the drawing's state again")
                     .clicked();
+                controls::label_as(
+                    ui,
+                    "drawingSummaryStatus",
+                    &status,
+                    egui::Label::new(status.as_str()).wrap(),
+                );
                 (copied, refreshed)
             },
             |ui| {
-                layout::button(ui, "drawingSummaryClose", "Close")
+                controls::button(ui, "drawingSummaryClose", "Close")
                     .on_hover_text("Close the summary")
                     .clicked()
             },

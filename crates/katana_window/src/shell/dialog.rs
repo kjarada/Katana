@@ -42,10 +42,12 @@
 //! a rule. The body is laid out BODY_WIDTH wide at most unless the dialog says otherwise, so a
 //! dialog is never as wide as the screen for want of a width. What a dialog lays its controls out
 //! with is here too, so a dialog mostly says what it holds: `form` and `labelled` (a label column
-//! every row of a body shares, the fields filling the rest), `button_row` (what reads the drawing
-//! at the left; Close and the dialog's primary action, drive::controls::primary, last at the
-//! right), `note` and `section`. A button in a footer is FOOTER_BUTTON_WIDTH at least
-//! (drive::controls reads `in_footer`).
+//! every row of a body shares, the fields filling the rest - or, where one must not fill,
+//! `fixed_fields`, `beside_a_button`), `button_row` (what reads the drawing at the left; Close and
+//! the dialog's primary action, drive::controls::primary, last at the right), `note` and `section`.
+//! A button in a footer is FOOTER_BUTTON_WIDTH at least (drive::controls reads `in_footer`). This
+//! is the window's ONE form: dialog_layout's grid of fixed-width fields, written beside it, was
+//! folded into it.
 
 use egui::{
     Align, Align2, Area, Context, CursorIcon, Frame, Id, Layout, Order, Pos2, Rect, RichText,
@@ -138,6 +140,13 @@ pub const FORM_SPACING: Vec2 = Vec2::new(PADDING, crate::theme::style::GAP);
 
 /// The space between two groups of a dialog's body (the design system's gap between groups).
 pub const GROUP_GAP: f32 = crate::theme::style::GROUP_GAP;
+
+/// What a group (`Ui::group`) adds round what it holds, across: egui 0.36's Frame::group, an
+/// inner margin of 6 and the border of a non-interactive widget on each side. What a column holding
+/// a group of a known width (a preview's) must leave beside it.
+pub fn group_margins(ui: &Ui) -> f32 {
+    2.0 * (6.0 + ui.visuals().widgets.noninteractive.bg_stroke.width)
+}
 
 /// The tag of a dialog's footer `Ui` and of a `button_row`'s, which `in_footer` reads: a button
 /// drawn in one is given FOOTER_BUTTON_WIDTH at least (drive::controls).
@@ -259,7 +268,7 @@ fn rule(ui: &Ui, x: egui::Rangef, y: f32) {
 }
 
 /// Draws `add` in a child of `ui`, top down, tagged as a dialog's footer: a button drawn in it is
-/// FOOTER_BUTTON_WIDTH at least (dialog_layout::footer draws its row in one).
+/// FOOTER_BUTTON_WIDTH at least.
 pub(crate) fn footer_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     ui.scope_builder(
         UiBuilder::new()
@@ -319,15 +328,16 @@ pub fn button_row<L, R>(
 }
 
 /// A dialog's form (QFormLayout): its rows (`Form::row`) one under another, FORM_SPACING apart.
-/// Each row is a label in a column LABEL_WIDTH wide and its field beside it, running to the
-/// body's right edge, so every field of every dialog starts where the others do.
+/// Each row is a label in the body's label column (`labelled`) and its field beside it, running
+/// to the body's right edge, so every field of a dialog starts where the others do.
 ///
-/// A column of one width for every dialog, rather than egui's Grid measuring each form's widest
-/// label: the window's dialogs then line up with each other as well as within, a row is the same
+/// Rows that find their column through the body, rather than egui's Grid: a row is the same
 /// whatever is drawn between two rows (a Grid takes every widget drawn into it as a cell, so a
-/// check box between two rows shifted every row after it by a column), and a form is laid out at
-/// its first frame (a Grid hides its first frame while it measures). A label longer than the
-/// column wraps in it.
+/// check box between two rows shifted every row after it by a column), the rows of a dialog line
+/// up whichever helper or group drew them (a Grid lines up only its own cells), and a field fills
+/// its row rather than being one fixed width (a Grid's field column is as wide as its widest
+/// field, so its fields were each given a width of their own). A label longer than the column
+/// wraps in it.
 pub fn form<R>(ui: &mut Ui, add: impl FnOnce(&mut Form<'_>) -> R) -> R {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = FORM_SPACING.y;
@@ -347,23 +357,16 @@ pub fn form<R>(ui: &mut Ui, add: impl FnOnce(&mut Form<'_>) -> R) -> R {
 /// has no wide gap before its fields. The widest is measured as the rows are drawn and used from
 /// the next pass, as egui's Grid measures its columns; a dialog's first pass is laid out again at
 /// once (`Context::request_discard`), so the column a person sees is the measured one. A row
-/// drawn outside a dialog's body has a column LABEL_WIDTH wide.
+/// drawn outside a dialog's body, and outside a `form_panel`, has a column LABEL_WIDTH wide.
+///
+/// A label is shown without a trailing colon, whatever its caller wrote: the design's labels are
+/// sentence-case words in a muted column, and the column already parts them from their fields.
+/// Half the dialogs wrote "Name:" and half "Name", so two dialogs side by side read differently.
 pub fn labelled<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let natural = if label.is_empty() {
-        0.0
-    } else {
-        ui.painter()
-            .layout_no_wrap(
-                String::from(label),
-                TextStyle::Body.resolve(ui.style()),
-                egui::Color32::PLACEHOLDER,
-            )
-            .size()
-            .x
-    };
-    row_inner(
+    let label = label.strip_suffix(':').unwrap_or(label);
+    row_with_text(
         ui,
-        Some(natural),
+        label,
         |ui| {
             if !label.is_empty() {
                 ui.add(
@@ -376,10 +379,93 @@ pub fn labelled<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> 
     )
 }
 
-/// A form's row whose label cell `label` draws itself (a named caption a driver reads), and its
-/// field `add` beside it, as `labelled` lays them out; the label is measured as drawn.
-pub fn row_with<R>(ui: &mut Ui, label: impl FnOnce(&mut Ui), add: impl FnOnce(&mut Ui) -> R) -> R {
-    row_inner(ui, None, label, add)
+/// A form's row whose label cell `label` draws itself (a named caption a driver reads) showing
+/// `text`, and its field `add` beside it, as `labelled` lays them out; the column is measured by
+/// `text` laid out on one line, as `labelled`'s is.
+///
+/// The label is measured by its text, never as drawn: a label measured as drawn is measured in
+/// the cell the column already gives it, wrapped to that width, so one shown after the column was
+/// measured narrower (a row that appears later, a page turned) never widened it and stayed
+/// wrapped, a word to a line (the Leaders dialog's "Landing direction"; `row_with`, which measured
+/// so, was removed for it).
+pub fn row_with_text<R>(
+    ui: &mut Ui,
+    text: &str,
+    label: impl FnOnce(&mut Ui),
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let natural = one_line_width(ui, text);
+    row_inner(ui, text, natural, label, add)
+}
+
+/// A form's row whose label cell is a check box or a radio button reading `text`, which `label`
+/// draws - a tick that lets the field beside it be used (Global Modify's "Layer", the label
+/// editor's "Own text"), or a way of placing whose fields follow it (Road Object's "Along an
+/// alignment") - and its field `add` beside it, as `labelled` lays them out.
+///
+/// The column is measured by the box and its text on one line, as egui lays either out (egui
+/// 0.36's checkbox.rs and radio_button.rs: the icon, `icon_width` square, then `icon_spacing`,
+/// then the text). Measured by its text alone (`row_with_text`) the column was short by the box,
+/// and the text wrapped in it.
+pub fn row_with_check<R>(
+    ui: &mut Ui,
+    text: &str,
+    label: impl FnOnce(&mut Ui),
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let spacing = ui.spacing();
+    let natural = spacing.icon_width + spacing.icon_spacing + one_line_width(ui, text);
+    row_inner(ui, text, natural, label, add)
+}
+
+/// How wide `text` is in the body text style laid out on one line: what a label's cell needs, and
+/// what a word between two fields of a row (a range's "to") leaves them.
+pub fn one_line_width(ui: &Ui, text: &str) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    ui.painter()
+        .layout_no_wrap(
+            String::from(text),
+            TextStyle::Body.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
+}
+
+/// Draws `add` as a part of the window that is not a dialog's body - a dock's form, the Sheets
+/// editor's properties - whose labelled rows share one label column as a body's do (THE LABEL
+/// COLUMN, `labelled`): as wide as its widest label, not LABEL_WIDTH. Outside a body every row's
+/// column was LABEL_WIDTH from its own start, which in a panel 260 wide left a field 80 wide
+/// beside a label of a word.
+pub fn form_panel<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(
+        UiBuilder::new()
+            .id_salt("katanaFormPanel")
+            .ui_stack_info(UiStackInfo::default().with_tag(BODY_TAG)),
+        add,
+    )
+    .inner
+}
+
+/// Whether `ui` is a column of a row of its dialog's body - a scope beside a dialog's fields, the
+/// second of two forms side by side - rather than the body's own column: some layout between it
+/// and the body runs left to right. Outside a dialog's body (a panel, a test's bare `Ui`) it is
+/// taken as a column, whose width is its own to say. What a part that fills its column (the scope
+/// and filter widget) reads: filling the body's column, it ends where the dialog's fields do; in a
+/// column of a row, "the rest of the row" is every column after it too, and it keeps a width of
+/// its own.
+pub fn in_a_column(ui: &Ui) -> bool {
+    for frame in ui.stack().iter() {
+        if frame.tags().contains(BODY_TAG) {
+            return false;
+        }
+        if frame.layout_direction.is_horizontal() {
+            return true;
+        }
+    }
+    true
 }
 
 /// The label column a row drawn in `ui` starting `start` (its left edge) shares, and where the row
@@ -447,9 +533,11 @@ fn widen_label_column(ui: &Ui, key: Id, reach: f32, edge: f32) {
     }
 }
 
+/// A labelled row whose label `label` draws, reading `text`, `natural` wide on one line.
 fn row_inner<R>(
     ui: &mut Ui,
-    natural: Option<f32>,
+    text: &str,
+    natural: f32,
     label: impl FnOnce(&mut Ui),
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
@@ -460,30 +548,63 @@ fn row_inner<R>(
     let offset = body.map_or(0.0, |(_, offset)| offset);
     let (key, edge) = label_column(ui, body.map(|(key, _)| key), offset);
     let width = (edge - offset).max(0.0);
+    // Where the label's height is kept between passes: by the Ui the row is drawn in and the
+    // label's words, not by the row's own Ui, whose id is counted from what is drawn before it
+    // and so moved whenever a list above the row grew; each such frame was measured again and
+    // laid out twice, and a press in it taken in the pass thrown away (the Corridor Quantities'
+    // Copy).
+    let label_key = ui.id().with(("katanaRowLabelHeight", text));
     ui.horizontal_top(|ui| {
         let spacing = ui.spacing().item_spacing.x;
         ui.spacing_mut().item_spacing.x = FORM_SPACING.x;
-        // The label's cell: as high as a control, so a one-line label sits level with the field
-        // beside it, and at the top of a taller one (a text box) rather than at its middle.
-        let height = ui.spacing().interact_size.y;
-        let drawn = ui
-            .allocate_ui_with_layout(
-                Vec2::new(width, height),
-                Layout::left_to_right(Align::Center).with_main_wrap(true),
-                |ui| {
-                    // The cell's size first: set after the label, egui would add it beyond the
-                    // label as the room for the next widget.
-                    ui.set_min_size(Vec2::new(width, height));
-                    ui.scope(label).response.rect.width()
-                },
-            )
-            .inner;
+        // The label's cell: a control high, the label centred in it, so a one-line label sits
+        // level with the field beside it, and at the top of a taller one (a text box) rather than
+        // at its middle. Centred by a gap above it worked out from the label's own height (the
+        // last pass's, as the column's width is): egui centres a wrapping row in the room it was
+        // given, not in the line it lays out, which stood a label up to 2 points off its field's
+        // middle. A value that is text is drawn by `text_value`, the same gap above it.
+        let control = ui.spacing().interact_size.y;
+
+        let above = ui
+            .data(|data| data.get_temp::<f32>(label_key))
+            .map_or(0.0, |drawn| ((control - drawn) / 2.0).max(0.0));
+        ui.allocate_ui_with_layout(
+            Vec2::new(width, control),
+            Layout::top_down(Align::Min),
+            |ui| {
+                // The cell's size first: set after the label, egui would add it beyond the label
+                // as the room for the next widget.
+                ui.set_min_size(Vec2::new(width, control));
+                ui.add_space(above);
+                let drawn = ui.scope(label).response.rect.height();
+                let before: Option<f32> = ui.data(|data| data.get_temp(label_key));
+                if before.is_none_or(|before| (before - drawn).abs() > 0.5) {
+                    ui.data_mut(|data| data.insert_temp(label_key, drawn));
+                    ui.ctx().request_discard("a dialog's row measured its label");
+                }
+            },
+        );
         if let Some(key) = key {
-            let reach = offset + natural.unwrap_or(drawn).min(LABEL_WIDTH);
+            let reach = offset + natural.min(LABEL_WIDTH);
             widen_label_column(ui, key, reach, edge);
         }
         ui.spacing_mut().item_spacing.x = spacing;
         fill_fields(ui);
+        add(ui)
+    })
+    .inner
+}
+
+/// A form's value that is text - a summary's figure, the line a dialog will zoom to - drawn by
+/// `add` (a `drive::label`, so it keeps its name) on its label's line: in a row a control high, its
+/// first line the gap from the row's top that a one-line label has (`labelled`), and a long value
+/// wrapping down from there. Drawn at the row's top as egui draws it, a value stood 5 points
+/// above its label's words (Drawing Summary, Zoom To's "Line", Export Surface as DEM's "Grid").
+pub fn text_value<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let line = ui.text_style_height(&TextStyle::Body);
+    let above = ((ui.spacing().interact_size.y - line) / 2.0).max(0.0);
+    ui.vertical(|ui| {
+        ui.add_space(above);
         add(ui)
     })
     .inner
@@ -555,10 +676,32 @@ pub fn beside_buttons(ui: &Ui, texts: &[&str]) -> f32 {
 /// The least width `beside_a_button` leaves a field.
 const LEAST_FIELD_WIDTH: f32 = 80.0;
 
-/// A group's heading inside a dialog's body ("Inside", "Results"): the text colour, a group's gap
-/// above it.
+/// Makes a one-line field and a choice list drawn in `ui` with no width of their own `width` wide,
+/// held to what is left of the row: what a row of a form draws in place of `fill_fields` when its
+/// field must not fill - one of several fields side by side, or a short one beside a wide one.
+pub fn fixed_fields(ui: &mut Ui, width: f32) {
+    let width = width.min(ui.available_width()).max(0.0);
+    ui.spacing_mut().text_edit_width = width;
+    ui.spacing_mut().combo_width = width;
+}
+
+/// The width of a field of a short word or a number in a row of fields that is not a form's - the
+/// row under a table that adds an entry to it ("from", "to", a name) - where filling the row would
+/// leave the row's buttons no room: a name of a dozen characters, or a number of eight digits with
+/// its unit, at the Standard text size. Half of it holds a station or a percentage.
+pub const SHORT_FIELD_WIDTH: f32 = 130.0;
+
+/// The gap above a group's heading (`section`): the dialog's padding, the next step of the spacing
+/// scale after GROUP_GAP, so that groups read as blocks without boxes round them.
+pub const SECTION_GAP: f32 = PADDING;
+
+/// A group's heading inside a dialog's body ("Customisation", "Results"): strong text, SECTION_GAP
+/// above it unless it is the first thing in its `ui` (the body's padding is room enough there).
+/// The group's rows follow it (`form`, `labelled`).
 pub fn section(ui: &mut Ui, title: &str) -> egui::Response {
-    ui.add_space(GROUP_GAP);
+    if ui.cursor().min.y > ui.max_rect().min.y + 0.5 {
+        ui.add_space((SECTION_GAP - ui.spacing().item_spacing.y).max(0.0));
+    }
     ui.label(RichText::new(title).strong())
 }
 
@@ -566,6 +709,113 @@ pub fn section(ui: &mut Ui, title: &str) -> egui::Response {
 /// does, at its top.
 pub fn note(ui: &mut Ui, text: &str) -> egui::Response {
     ui.add(egui::Label::new(RichText::new(text).color(palette::text_muted().to_egui())).wrap())
+}
+
+/// The most lines a dialog's reply (`reply`) shows before it scrolls: a reply of a record or two
+/// is read whole, and a long one does not push the dialog's buttons off a laptop's screen.
+pub const REPLY_ROWS: usize = 6;
+
+/// What a dialog's last line answered (its Reply, named `name`): records one to a line, read-only
+/// and fixed pitch, as many lines high as it holds up to `rows`. Drawn only once there is a reply:
+/// before, an empty box several lines high stood over every run dialog's buttons, the largest
+/// thing on a fresh dialog. Until then the box is recorded under its name where it will be, taking
+/// no room, and answers as the empty read-only box did: it reads "", a fill is taken and drawn
+/// over, a press is refused.
+pub fn reply(ui: &mut Ui, name: &str, text: &mut String, rows: usize) -> egui::Response {
+    use crate::drive::mailbox::{Act, no_button};
+    use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
+    if text.is_empty() {
+        let taken = take(ui, name);
+        let at = Rect::from_min_size(ui.cursor().min, Vec2::ZERO);
+        let response = ui.interact(at, ui.id().with(("katanaEmptyReply", name)), Sense::hover());
+        if let Some(taken) = &taken {
+            match &taken.posted.act {
+                Act::Fill(_) => settle(ui, taken, Ok(())),
+                Act::Press => settle(ui, taken, Err(no_button(&taken.posted))),
+                Act::ScrollTo => {
+                    response.scroll_to_me(None);
+                    settle(ui, taken, Ok(()));
+                }
+            }
+        }
+        crate::drive::custom(ui, &response, ControlRecord::new(name, ControlKind::Text));
+        return response;
+    }
+    let lines = text.lines().count().clamp(1, rows.max(1));
+    crate::drive::text_with(
+        ui,
+        name,
+        text,
+        crate::drive::TextOptions {
+            read_only: true,
+            rows: lines,
+            monospace: true,
+        },
+    )
+}
+
+/// A dialog's table (the window's one table, annotation::dialog_support::table_look: a raised
+/// header row, faint stripes, the chosen row lit) named `name`, `headers` over `rows`, `current`
+/// the row chosen, spanning its column; while it has no rows, `empty` is said in the muted text
+/// under its header (dialog_layout::empty_table). A header strip over nothing read as a table that
+/// failed to load (Check Geometry, Query with SQL), and a header of five columns sized to their
+/// words stood 270 wide in a column of 535. An `empty` of "" says nothing, for a dialog whose own
+/// status already says the list is empty. One empty look for every table: the table's own, its
+/// header kept, rather than a note in its place with the table hidden (how the GIS and survey
+/// tables said it for a time, beside the managers' header-and-note).
+pub(crate) fn table_or_empty(
+    ui: &mut Ui,
+    name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    current: Option<usize>,
+    empty: &str,
+) -> crate::annotation::dialog_support::TableShown {
+    use crate::annotation::dialog_support::{TableLook, table_look};
+    table_look(
+        ui,
+        name,
+        headers,
+        rows,
+        current,
+        &[],
+        None,
+        TableLook { fill: true, empty },
+    )
+}
+
+/// `table_or_empty` over a list a person picks a row of, `current` the row picked: answers true
+/// when a click or a fill picked another. What a list of whole rows under a line of "A | B | C"
+/// (a pseudo-header the rows did not line up under: Survey Jobs, the Parcel Report) is drawn with.
+pub(crate) fn pick_table(
+    ui: &mut Ui,
+    name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    current: &mut Option<usize>,
+    empty: &str,
+) -> egui::InnerResponse<bool> {
+    ui.scope(|ui| {
+        let shown = table_or_empty(ui, name, headers, rows, *current, empty);
+        match shown.chosen {
+            Some(at) if *current != Some(at) => {
+                *current = Some(at);
+                true
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The colour of a dialog's status line or hint: the error token for a refusal of
+/// something the person did, the secondary text otherwise - a hint shown before anything was done
+/// ("Name the .ifc file to write.") is not an error, and in red it read as one.
+pub fn status_colour(is_error: bool) -> egui::Color32 {
+    if is_error {
+        palette::error().to_egui()
+    } else {
+        palette::text_muted().to_egui()
+    }
 }
 
 /// What a dialog's frame drew this frame.
@@ -945,10 +1195,15 @@ pub struct MenuShown {
 /// more (theme.cpp's SH_Menu_Scrollable): Fusion laid a menu taller than its screen out in several
 /// columns side by side, which a menu of sections and submenus turns into a wall nobody can read
 /// down. For a menu's contents wherever a menu is drawn; the wheel and the keys scroll it.
+///
+/// The column is as tall as the screen leaves it BELOW where it starts, less the menu frame's
+/// bottom: a menu bar's popup starts under the bar, and a column the screen's whole height (the
+/// Annotate menu, some 855 points in a window of 860) was taller than the room under the bar, so
+/// egui shifted the popup up over the bar it hangs from and its last item was still cut.
 pub fn menu_column(ui: &mut Ui, add: impl FnOnce(&mut Ui)) -> ScrollRecord {
     let screen = ui.ctx().content_rect();
-    let frame = Frame::menu(ui.style()).total_margin().sum();
-    let height = (screen.height() - frame.y).max(0.0);
+    let below = Frame::menu(ui.style()).total_margin().bottom;
+    let height = (screen.bottom() - ui.max_rect().top() - below).max(0.0);
     let output = ScrollArea::vertical()
         .id_salt("katanaMenuColumn")
         .max_height(height)

@@ -190,6 +190,29 @@ mod volumes_dialog {
     }
 
     #[test]
+    fn measure_stands_level_with_the_line_it_runs_and_as_tall_as_it() {
+        // The look of 2026-11-16: a button beside its field in a form's row is one band with it,
+        // its top and bottom the field's. Measure stood shorter than the command beside it.
+        // In the window's theme (theme::style::apply), whose controls are CONTROL_HEIGHT high:
+        // the harness's own style is egui's. Within half a point: egui rounds a widget's
+        // rectangle to the pixel grid (the offscreen screen's one pixel a point).
+        const HALF_A_POINT: f32 = 0.5;
+        let mut bench = bench(wedge_host());
+        katana_window::theme::style::apply(bench.harness.context());
+        bench.draw();
+        let field = bench.control("volumesCommand").rect;
+        let run = bench.control("volumesRun").rect;
+        assert!(
+            (field.top() - run.top()).abs() <= HALF_A_POINT
+                && (field.bottom() - run.bottom()).abs() <= HALF_A_POINT,
+            "the command spans {:?} and Measure {:?}",
+            field.y_range(),
+            run.y_range()
+        );
+        assert!(run.left() > field.right(), "Measure is after the line it runs");
+    }
+
+    #[test]
     fn the_curvature_box_is_on_by_default_says_nothing_then_and_curvature_off_when_unchecked() {
         // The correction is the verb's default, so the line only names the plain figure; the box
         // is on the Along Alignment page alone, and the line it makes is the one handed to the

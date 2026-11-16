@@ -57,21 +57,16 @@ use katana_core::text::{format_general, parse_finite_double, parse_integer};
 use katana_core::{Error, ErrorCode, Result, Status};
 
 use crate::canvas::{Image, encode_png};
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions};
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name, to_native_separators};
 use crate::plotting::tiff_writer::write_tiff;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
-/// The dialog's body width: a form whose fields are FIELD_WIDTH wide beside its longest label.
+/// The dialog's body width: its form's fields fill what the labels leave of it, long enough to
+/// read a path and the command it runs.
 const BODY_WIDTH: f32 = 520.0;
-
-/// The width of the form's fields: long enough to read a path and the command it runs.
-const FIELD_WIDTH: f32 = 360.0;
-
-/// The path field's width: the field column less its Browse button.
-const PATH_WIDTH: f32 = FIELD_WIDTH - 76.0;
 
 /// What a plan view is pictured on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -294,15 +289,9 @@ pub fn snapshot_size(request: &SnapshotRequest, view_size: (i32, i32)) -> (i32, 
     let (width, height) = if request.width > 0 && request.height > 0 {
         (f64::from(request.width), f64::from(request.height))
     } else if request.width > 0 {
-        (
-            f64::from(request.width),
-            f64::from(request.width) * h / w,
-        )
+        (f64::from(request.width), f64::from(request.width) * h / w)
     } else if request.height > 0 {
-        (
-            f64::from(request.height) * w / h,
-            f64::from(request.height),
-        )
+        (f64::from(request.height) * w / h, f64::from(request.height))
     } else {
         (w * request.scale, h * request.scale)
     };
@@ -617,55 +606,54 @@ impl ViewImageDialog {
     fn body(&mut self, ui: &mut Ui, host: &dyn Host) {
         // Wide enough for a path and the line it runs to be read whole.
         ui.set_width(BODY_WIDTH);
-        layout::form_with(ui, "viewImageForm", FIELD_WIDTH, |ui| {
-                layout::form_label(ui, "Image");
-                ui.horizontal(|ui| {
-                    controls::line_with(
-                        ui,
-                        "viewImagePath",
-                        &mut self.path,
-                        LineOptions {
-                            placeholder: "the image to write: .png, .jpg or .tif",
-                            width: Some(PATH_WIDTH),
-                            ..LineOptions::default()
-                        },
-                    );
-                    if controls::button(ui, "viewImageBrowse", "Browse...").clicked() {
-                        self.browse(host);
-                    }
-                });
-                ui.end_row();
+        dialog::form(ui, |form| {
+            form.row("Image", |ui| {
+                let width = dialog::beside_a_button(ui, "Browse...");
+                controls::line_with(
+                    ui,
+                    "viewImagePath",
+                    &mut self.path,
+                    LineOptions {
+                        placeholder: "the image to write: .png, .jpg or .tif",
+                        width: Some(width),
+                        ..LineOptions::default()
+                    },
+                );
+                if controls::button(ui, "viewImageBrowse", "Browse...").clicked() {
+                    self.browse(host);
+                }
+            });
 
-                layout::form_label(ui, "Format");
+            form.row("Format", |ui| {
                 if controls::choice(ui, "viewImageFormat", &items(&FORMATS), &mut self.format)
                     .changed()
                 {
                     self.follow_format();
                 }
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "View");
+            form.row("View", |ui| {
                 controls::choice(ui, "viewImageView", &items(&VIEWS), &mut self.view);
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Size");
+            form.row("Size", |ui| {
                 controls::choice(ui, "viewImageSize", &items(&SIZES), &mut self.size);
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Custom size");
-                let custom = self.custom_size();
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(custom, |ui| {
+            let custom = self.custom_size();
+            form.row("Custom size", |ui| {
+                ui.add_enabled_ui(custom, |ui| {
+                    ui.horizontal(|ui| {
                         let sides = 1..=i64::from(MAXIMUM_SNAPSHOT_SIDE);
                         controls::whole(ui, "viewImageWidth", &mut self.width, sides.clone());
                         ui.label("by");
                         controls::whole(ui, "viewImageHeight", &mut self.height, sides);
                     });
                 });
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Background");
-                let plan = self.view.index == Some(0);
+            let plan = self.view.index == Some(0);
+            form.row("Background", |ui| {
                 ui.add_enabled_ui(plan, |ui| {
                     controls::choice(
                         ui,
@@ -677,14 +665,11 @@ impl ViewImageDialog {
                         "The plan view's ground: as on screen, white, or none (a PNG only)",
                     );
                 });
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Command");
-                let made = self.request();
-                let mut command = made
-                    .as_ref()
-                    .map(snapshot_command_line)
-                    .unwrap_or_default();
+            let made = self.request();
+            form.row("Command", |ui| {
+                let mut command = made.as_ref().map(snapshot_command_line).unwrap_or_default();
                 let waiting = match &made {
                     Ok(_) => String::new(),
                     Err(error) => format!("nothing to run yet: {}", error.message),
@@ -703,14 +688,16 @@ impl ViewImageDialog {
                     "The line Export hands to the command line - type it there and it does the \
                      same",
                 );
-                ui.end_row();
             });
+        });
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
         let ready = self.request().is_ok();
-        let (_, (pressed, closed)) = layout::footer(
+        // The one footer (shell::dialog::button_row): the status at the left; Close, then Export, the
+        // primary, last at the right.
+        let (_, (closed, pressed)) = dialog::button_row(
             ui,
             |ui| {
                 controls::label_as(
@@ -720,15 +707,14 @@ impl ViewImageDialog {
                     egui::Label::new(status.as_str()).wrap().selectable(true),
                 );
             },
-            // Drawn from the right: Export, the primary, last.
             |ui| {
+                let closed = controls::button(ui, "viewImageClose", "Close").clicked();
                 let pressed = ui
                     .add_enabled_ui(ready, |ui| {
-                        layout::primary(ui, "viewImageExport", "Export").clicked()
+                        controls::primary(ui, "viewImageExport", "Export").clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "viewImageClose", "Close").clicked();
-                (pressed, closed)
+                (closed, pressed)
             },
         );
         if pressed {

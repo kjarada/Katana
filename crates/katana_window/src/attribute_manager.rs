@@ -41,6 +41,7 @@ use crate::drive::{
 };
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 /// Values that differ across the selection are shown as this rather than as one of them: a manager
 /// that showed the first entity's value and wrote it to all of them would quietly overwrite the
@@ -369,8 +370,8 @@ impl AttributeManagerDialog {
                 tree_ui(ui, state, &rows, chosen);
                 ui.add_space(layout::GAP);
                 let types: Vec<String> = TYPES.iter().map(|t| String::from(*t)).collect();
-                layout::form(ui, "attributeForm", |ui| {
-                    layout::row(ui, "Value", |ui| {
+                dialog::form(ui, |form| {
+                    form.row("Value", |ui| {
                         line_with(
                             ui,
                             "attributeValue",
@@ -378,10 +379,10 @@ impl AttributeManagerDialog {
                             LineOptions::default(),
                         );
                     });
-                    layout::row(ui, "Type", |ui| {
+                    form.row("Type", |ui| {
                         choice(ui, "attributeType", &types, &mut state.kind);
                     });
-                    layout::row(ui, "Name", |ui| {
+                    form.row("Name", |ui| {
                         line_with(
                             ui,
                             "attributeName",
@@ -421,9 +422,10 @@ impl AttributeManagerDialog {
                 });
             },
             |ui, parts| {
-                if layout::footer_buttons(ui, |ui| layout::button(ui, "attributeClose", "Close"))
-                    .clicked()
-                {
+                // The one footer: nothing reads the drawing here, so Close alone at the right.
+                let (_, closed) =
+                    dialog::button_row(ui, |_| {}, |ui| button(ui, "attributeClose", "Close").clicked());
+                if closed {
                     *parts.2 = true;
                 }
             },
@@ -492,6 +494,8 @@ fn tree_ui(
                 ui.horizontal(|ui| {
                     ui.add_space(14.0 * row.depth as f32);
                     if row.leaf {
+                        // An attribute's empty expander cell: its name under its group's.
+                        crate::drive::controls::tree_expander(ui, None);
                         let picked = state.selected_key == row.path;
                         if ui.selectable_label(picked, row.name.as_str()).clicked() {
                             *chosen = Some(Some(row.path.clone()));
@@ -500,11 +504,9 @@ fn tree_ui(
                         ui.label(RichText::new(row.kind.as_str()).weak());
                     } else {
                         let open = state.expanded.contains(&row.path);
-                        let arrow = if open { "\u{25be}" } else { "\u{25b8}" };
-                        if ui
-                            .selectable_label(false, format!("{arrow} {}", row.name))
-                            .clicked()
-                        {
+                        let expander = crate::drive::controls::tree_expander(ui, Some(open));
+                        let name = ui.selectable_label(false, row.name.as_str());
+                        if expander.clicked() || name.clicked() {
                             if open {
                                 state.expanded.remove(&row.path);
                             } else {

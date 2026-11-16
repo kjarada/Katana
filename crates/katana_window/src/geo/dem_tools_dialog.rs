@@ -579,7 +579,7 @@ impl DemToolsDialog {
                 );
                 let by_area = self.clip_by_area;
                 ui.horizontal(|ui| {
-                    if radio(ui, "demClipByArea", "To a box:", by_area).clicked() {
+                    if radio(ui, "demClipByArea", "To a box", by_area).clicked() {
                         self.clip_by_area = true;
                     }
                     ui.add_enabled_ui(by_area, |ui| {
@@ -786,9 +786,7 @@ impl DemToolsDialog {
                 self.panels[tool.index()].set_status(&text, true);
             }
             let made = dem_tool_command_line(&self.form(tool));
-            if self.panels[tool.index()].ui(ui, host, &made).is_some() {
-                self.reload_wanted = true;
-            }
+            self.panels[tool.index()].command_ui(ui, &made);
         });
         custom(
             ui,
@@ -806,8 +804,9 @@ impl Framed for DemToolsDialog {
         &mut self.frame
     }
 
-    // Each tab holds its own Run and Reply, as the C++ pages do, so the dialog has no footer of
-    // its own and everything scrolls together.
+    // Each tab has its own line, Run and Reply, as the C++ pages do; the page in front's reply and
+    // buttons are the dialog's footer, so they stay in sight below its fields as every dialog's
+    // do.
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         tabs(ui, "demToolsTabs", &TAB_TITLES, &mut self.tab);
         // The pages not in front are still there, as a QTabWidget's are: what they hold can be
@@ -823,5 +822,28 @@ impl Framed for DemToolsDialog {
         }
     }
 
-    fn footer(&mut self, _ui: &mut Ui, _host: &mut dyn Host) {}
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // The pages not in front keep their buttons and replies, off the dialog, as their fields
+        // are.
+        let current = self.tool();
+        let mut closed = false;
+        for tool in TOOLS {
+            let made = dem_tool_command_line(&self.form(tool));
+            let panel = &mut self.panels[tool.index()];
+            let finished = if tool == current {
+                let (finished, close) = panel.footer_ui(ui, host, &made, Some("demToolsClose"));
+                closed = close;
+                finished
+            } else {
+                let salt = format!("demToolsFooter{}", tool.index());
+                offstage(ui, &salt, |ui| panel.footer_ui(ui, host, &made, None).0)
+            };
+            if finished.is_some() {
+                self.reload_wanted = true;
+            }
+        }
+        if closed {
+            self.hide();
+        }
+    }
 }

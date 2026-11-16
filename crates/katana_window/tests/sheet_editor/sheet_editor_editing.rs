@@ -28,6 +28,7 @@ mod sheet_editor_editing {
     };
     use katana_window::sheet_editor::{SheetKey, ShortcutScope};
     use katana_window::sheet_painter::{SheetSource, resolve_plan_viewport};
+    use katana_window::theme::palette;
     use katana_window::viewport_widget::MouseButton;
 
     use crate::support::{
@@ -557,20 +558,25 @@ mod sheet_editor_editing {
 
         let with = shown.grab();
         let corner = with.pixel((r / 2.0) as u32, 2);
-        // The rulers' light ground, not the dark desk.
-        assert!(corner.r > 200);
-        // The paper's span is white on the top ruler, above its ticks and numbers.
+        // The rulers' ground is the panel token, the chrome's grey: the rulers took the theme's
+        // dark tokens in the look of 2026-11-16, where the C++'s were a light grey strip (this
+        // asserted a red above 200 then). What is held is the same: the rulers are drawn, and
+        // the paper's span on them stands apart from the desk's.
+        assert_eq!(corner, palette::panel());
+        // The paper's span on the top ruler, above its ticks and numbers, a step lighter.
         let paper_on_ruler = with.pixel(shown.at(235.0, 0.0).x as u32, 1);
-        assert_eq!(paper_on_ruler, Color::WHITE);
-        // The desk's is not.
+        assert_eq!(paper_on_ruler, palette::hover());
+        // The desk's is the ruler's own ground.
         let width = shown.canvas().width() as u32;
-        assert_ne!(with.pixel(width - 2, 1), Color::WHITE);
+        assert_eq!(with.pixel(width - 2, 1), palette::panel());
+        assert!(grey(paper_on_ruler) > grey(palette::panel()));
 
         shown.trigger("sheetShowRulers");
         assert!(!shown.canvas().rulers_shown());
         let without = shown.grab();
-        // The desk.
+        // The desk, where the ruler's corner was.
         assert!(without.pixel((r / 2.0) as u32, 2).r < 120);
+        assert_ne!(without.pixel((r / 2.0) as u32, 2), corner);
 
         // The rulers are not paper: a press on one leaves the selection alone.
         shown.canvas_mut().set_rulers_shown(true);

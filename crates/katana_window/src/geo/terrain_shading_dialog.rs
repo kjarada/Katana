@@ -443,6 +443,10 @@ impl Framed for TerrainShadingDialog {
             });
         });
         row(ui, "Range:", |ui| {
+            // The least and the greatest share the row: each filling it, the second ran past the
+            // dialog's edge, and every field under it was laid out to that wider edge.
+            let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+            crate::shell::dialog::fixed_fields(ui, half);
             ui.add_enabled_ui(coloured, |ui| {
                 field(
                     ui,
@@ -495,17 +499,21 @@ impl Framed for TerrainShadingDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
         let ready = self.command().is_ok();
-        let (preview, run) = run_buttons(
+        terrain_reply_field(ui, "shadingReply", self.runner.reply_mut());
+        let pressed = run_buttons(
             ui,
             Some(("shadingPreview", ready)),
             ("shadingRun", "Shade", ready),
+            Some("shadingClose"),
         );
-        terrain_reply_field(ui, "shadingReply", self.runner.reply_mut());
-        if preview {
+        if pressed.preview {
             self.run(host, true);
         }
-        if run {
+        if pressed.run {
             self.run(host, false);
+        }
+        if pressed.close {
+            self.hide();
         }
     }
 }

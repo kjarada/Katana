@@ -43,13 +43,17 @@ use super::road_dialog_support::{
     word,
 };
 use crate::customisation::document_watcher::DocumentWatcher;
-use crate::dialog_layout as layout;
 use crate::drive::controls::check;
 use crate::host::Host;
-use crate::shell::dialog::DialogFrame;
+use crate::shell::dialog::{self, DialogFrame};
 
 /// The first item of the corridor choice: every corridor.
 pub const ALL: &str = "All corridors";
+
+/// The width the body is laid out at: the table's eight headers and the gaps between them
+/// measure some 565 points at the Standard text size, which BODY_WIDTH cut off at the volume
+/// behind a sideways scroll; a little more leaves a figure wider than its header its room.
+const BODY_WIDTH: f32 = 600.0;
 
 /// The quantities a row shows, by the names the records carry them under.
 const QUANTITIES: [&str; 6] = [
@@ -260,7 +264,9 @@ impl Body {
     }
 
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.horizontal(|ui| {
+        dialog::labelled(ui, "Corridor", |ui| {
+            // The choice leaves List Quantities its room beside it.
+            ui.spacing_mut().combo_width = dialog::beside_a_button(ui, "List Quantities");
             self.corridor.ui(ui, "corridorQuantitiesCorridor");
             if button(
                 ui,
@@ -273,9 +279,14 @@ impl Body {
                 self.press_run(host);
             }
         });
+        ui.add_space(dialog::GROUP_GAP);
         self.table.ui(ui);
         muted(ui, "corridorQuantitiesTotals", &self.totals);
-        ui.horizontal(|ui| {
+        ui.add_space(dialog::GROUP_GAP);
+        dialog::labelled(ui, "CSV file", |ui| {
+            // The path leaves its three buttons their room beside it.
+            ui.spacing_mut().text_edit_width =
+                dialog::beside_buttons(ui, &["Browse...", "Save CSV", "Copy"]);
             field(
                 ui,
                 "corridorQuantitiesCsvPath",
@@ -314,22 +325,34 @@ impl Body {
                 self.press_copy(host);
             }
         });
-        check(
-            ui,
-            "corridorQuantitiesOverwrite",
-            "Replace the file if it is there (OVERWRITE)",
-            &mut self.overwrite,
-        )
-        .on_hover_text(
-            "A file already there is only replaced with OVERWRITE, as every report verb writes it",
-        );
-        self.status.ui(ui, "corridorQuantitiesStatus");
+        // Under the path it is about, lined up with the fields.
+        let overwrite = &mut self.overwrite;
+        dialog::labelled(ui, "", |ui| {
+            check(
+                ui,
+                "corridorQuantitiesOverwrite",
+                "Replace the file if it is there (OVERWRITE)",
+                overwrite,
+            )
+            .on_hover_text(
+                "A file already there is only replaced with OVERWRITE, as every report verb \
+                 writes it",
+            );
+        });
     }
 
     fn footer_ui(&mut self, ui: &mut Ui) {
-        if layout::footer_buttons(ui, |ui| {
-            button(ui, "corridorQuantitiesClose", "Close", "Close the dialog").clicked()
-        }) {
+        // What the last line replied at the left, as the Alignment Manager's footer has it;
+        // Close at the right.
+        let status = &self.status;
+        let ((), close) = dialog::button_row(
+            ui,
+            |ui| {
+                status.ui(ui, "corridorQuantitiesStatus");
+            },
+            |ui| button(ui, "corridorQuantitiesClose", "Close", "Close the dialog").clicked(),
+        );
+        if close {
             self.close = true;
         }
     }
@@ -362,7 +385,9 @@ impl CorridorQuantitiesDialog {
                     "Volume (m3)",
                 ],
             )
-            .max_height(320.0),
+            .max_height(320.0)
+            .filling()
+            .empty_text("Nothing listed yet: choose a corridor, then List Quantities"),
             totals: String::new(),
             csv_path: String::new(),
             overwrite: false,
@@ -372,7 +397,8 @@ impl CorridorQuantitiesDialog {
         };
         body.reload(document);
         Self {
-            frame: DialogFrame::new("corridorQuantitiesDialog", "Corridor Quantities"),
+            frame: DialogFrame::new("corridorQuantitiesDialog", "Corridor Quantities")
+                .width(BODY_WIDTH),
             open: true,
             body,
         }

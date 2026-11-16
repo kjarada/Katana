@@ -1101,18 +1101,20 @@ impl ReductionOptionsWidget {
                 });
                 ui.label("mm");
             });
-            ui.horizontal(|ui| {
-                ui.weak("Point | From | Northing, easting | Elevation");
-            });
             let mut current = self.control_current;
-            let table = drive::rows(ui, "control", &self.control_rows, &mut current);
-            let table = if self.control_tip.is_empty() {
-                table
-            } else {
-                table.on_hover_text(self.control_tip.as_str())
-            };
+            let table = crate::shell::dialog::pick_table(
+                ui,
+                "control",
+                &["Point", "From", "Northing, easting", "Elevation"],
+                &self.control_rows,
+                &mut current,
+                "No control points: the job's fixed points are listed here.",
+            );
+            if !self.control_tip.is_empty() {
+                table.response.on_hover_text(self.control_tip.as_str());
+            }
             self.control_current = current;
-            if table.changed()
+            if table.inner
                 && let Some(row) = current
             {
                 self.control_chosen(row);

@@ -694,9 +694,16 @@ and each button's size hint); every row still fits, and the test passes
   applied once with nothing kept, so the order cannot bite it, and the check
   stays as the guard.
 
-Not done: a window narrower
-than about 1,290 px (a 1280-px laptop) still overflows the second row, and
-larger icons or text widen every toolbar (a button is 41 px at Large Icons
+Since the look's third round (2026-11-16) a toolbar's name is measured in
+the secondary text as it is drawn (`measure_names`, kept in
+`BarSettings::name_widths`) rather than estimated at 7 points a character,
+and `tool_bar_fit` lays out the same named strip it measures: the three rows
+need 1,247, 1,249 and 1,274 px at 100 %, so a 1280-px laptop shows every
+action. The check had added a name's width to a bar but laid the bar out
+without it, and so reported "0 of 9 actions are behind" for a bar that did
+not fit. Rejected: moving toolbars between rows (the three need 3,847 px
+together against 3 x 1,280) and narrower buttons. Not done: larger icons or
+text widen every toolbar (a button is 41 px at Large Icons
 against 33); no setting chooses a density from the screen; a floating dock is
 not fitted; the native window opens at 1360 x 860 points whatever the screen,
 since its place and size are not kept ("How the window starts").
@@ -791,22 +798,148 @@ are a strip with the accent's 2 px bar under the one in front. Tables have
 a raised header row, faint stripes and the chosen row lit in the accent at
 35 %, and scroll after 12 rows.
 
-**Two ways of laying out a form, for now.** `shell::dialog::form` and
-`labelled` give every labelled row of a body one label column, measured
-from its widest label (150 at most, a longer label wraps), so the fields of
-a whole dialog, inside a group or not, start at one edge; the survey, terrain,
-GIS and geo dialogs use them. The managers, the plot and sheet dialogs, the
-start screen, annotation, BIM, IFC and update dialogs use
-`crates/katana_window/src/dialog_layout.rs`'s grid form, a column of 110
-and fields of one fixed width (260 by default). They were written side by
-side by two agents. The integration kept one home for every part they share
-- the spacing scale is `theme::style`'s, the padding, footer width, label
-colour and footer tag `shell::dialog`'s, the primary button's look
-`drive::controls::primary_look` - and left the two form layouts (Not done,
-below).
+**One way of laying out a form.** `shell::dialog::form` and `labelled` give
+every labelled row of a body one label column, measured from its widest
+label (150 at most; a longer label wraps), so the fields of a whole dialog,
+inside a group or not, start at one edge, and a field fills its row. Where
+one must not fill, `fixed_fields` gives it a width of its own,
+`beside_a_button` / `beside_buttons` leave a button its room, and
+`SHORT_FIELD_WIDTH` (130) sizes the fields of a table's add-row. A label
+that is a named control is drawn with `row_with_text`, measured by its text
+on one line: measured as drawn, a label shown after its column was measured
+narrower wrapped a word to a line and never widened it (the Leaders
+dialog's "Landing direction"). A row whose label is a check box or a radio
+button (Global Modify's ticks, Edit Label's "Own text") is `row_with_check`,
+measured as egui lays the box out - its icon, the icon's spacing, its text -
+where by the text alone the column was short and the text wrapped. A form
+outside a dialog's body (the sheet editor's properties panel) is wrapped in
+`form_panel`, so its rows share a measured column rather than a 150 one that
+ran a 260-wide panel's fields past its edge. A dialog that sets forms side by
+side or beside a preview gives its body the width they need (Dimension
+Styles 980, the Definition Editor `TWO_COLUMN_WIDTH`): at the 520 default the
+second form's fields were drawn 0 wide and its heading wrapped a letter to a
+line. The scope and filter widget's rows are
+labelled rows too, so in Buffer or Global Modify they line up with the
+dialog's own fields. A second form - an egui Grid of fixed-width fields
+behind a 110 column, in `crates/katana_window/src/dialog_layout.rs` - was
+written beside this one in the first round of the look and folded into it
+and deleted in the second (2026-11-16); `dialog_layout.rs` keeps the tables'
+look. *Rejected:* egui's Grid with a measured first column - a Grid lines
+up only its own cells, so rows drawn by a dialog's shared helpers, or
+inside a group, would not share the edge.
+
+**Fields and buttons are one height.** A one-line field is a control's
+height (`CONTROL_HEIGHT`, 24) like the buttons beside it
+(`drive::controls::line_with`): egui sizes one to its text, 19 points, and
+a Browse or Measure stood taller than its field. An editable choice's list
+arrow is given the width egui draws an empty ComboBox in
+(`drive::controls::list_arrow_width`: its icon, the icon's spacing and the
+button's padding, 38), not a control's height: reserved 24, it ran 14 past
+its row and egui lent that room to every row under it, widening the dialog.
+Then (the third round) a field's text was centred in that height and set
+`drive::controls::FIELD_INSET` (8) in, where a choice's is - egui sat it 4-5
+px high and 4 in - and an editable choice became ONE framed control, its
+list's chevron inside its right end in a square a control high
+(`drive::controls::editable_choice_frame`, shared by `choice` and the name
+picker), the list opening under the whole control at its width: the field
+and a ComboBox beside it read as two controls. A plain choice draws the same
+chevron. `list_arrow_width` is the chevron's square again (24).
+
+**Checks, menus, trees.** A check box that is on is the accent with a dark
+2 px tick, and a chosen radio an accent disc with a dark dot; off is a
+field's well (`drive::controls::check_look`, drawn by `check_box` and
+`radio_button`): egui paints both from the pointer's state alone, so its
+visuals cannot tell checked from unchecked. Every menu item has a gutter -
+a tick while a checkable item is on, then its 16 px icon, an empty slot when
+it has none, so texts line up - and one drawer, `drive::action::menu_items_ui`,
+draws every menu's items (the menu bar's, a step's, the plan view's shortcut
+menu, the view kind menu), sections indented to the items' text, separators
+inset, each menu in `shell::dialog::menu_column` so a menu taller than the
+room scrolls (the Annotate menu). Tree expanders are egui's collapsing
+triangle (`drive::controls::tree_expander`): the window's fonts have no
+U+25B8, U+25BE, U+2191, U+2193, U+25B2 or U+25BC, and those drew as boxes.
+The Properties panel's labels are muted and its values in one column, a long
+value cut short with the whole of it in its tooltip.
+
+**One footer, one table, a reply that takes no room.** Every dialog's footer
+is `shell::dialog::button_row`: what reads the drawing and a status at the
+left, then Close, then the primary action last in the accent. Text Styles,
+Dimension Styles, Edit Text, Label Styles and Rules and Leaders had no Close;
+Generate Sheets and Title Block had their buttons at the left and no primary.
+A reply kept for drivers (a verb's last line, its answer) is
+`dialog_layout::reply_text`: muted text that takes no room while it is empty,
+recorded as the field it replaced, where an empty read-only box 220 points
+wide (Leaders) or a footer 160 high (Road Objects) waited for one. Every
+table's header and its empty state come from `dialog_layout::table_header` and
+`empty_table`, so an empty table says so rather than showing a header over a
+void; a table alone in its column fills it. A manager with tabs keeps one body
+width and one least height on every tab (Styles and Linetypes 1296 by 690,
+Leaders 950), where it jumped between four sizes and clipped its hatch editor.
+Previews (styles, linetypes, symbols, survey codes, definitions, road
+objects) start on the dark ground; how a style prints on paper is one choice
+away. The sheet editor's rulers wear the panel's colours, its toolbar is
+flat with the shortcuts in the tooltips, and its menus are the one menu
+drawer's. Rejected: filling every table by default (a table beside another
+column took that column's room).
+
+**Replies, values and labels.** A run dialog's reply - what its verb answered,
+records a line each - is `shell::dialog::reply`: a read-only, fixed-pitch box
+drawn only once there is a reply, as high as its lines up to `REPLY_ROWS`;
+until then it is recorded under its name and takes no room, where an empty
+box several lines high stood over every run dialog's buttons. A one-line
+status kept for drivers is `dialog_layout::reply_text` (muted, no room while
+empty): a box of records and a status line are two things, so two widgets,
+but one colour rule, `shell::dialog::status_colour` - red only for a refusal
+of something the person did, a hint before anything was done muted ("Name
+the .ifc file to write." read as an error in red). A run dialog's Preview is
+at its footer's left; a dialog of tabbed pages shows the front page's
+footer. A value that is text beside a label (Drawing Summary's figures, Zoom
+To's line, Settings' "What is active") is drawn in `text_value`, its first
+line on the label's line: drawn at the row's top, it stood 5 points above its
+label. A label never ends in a colon; `labelled` takes one off. The scope and
+filter widget fills its column under a dialog's fields, so its fields end
+where the dialog's do, and keeps `WIDGET_WIDTH` in a column of a row
+(`in_a_column`). A table with no rows keeps its header and says so under it,
+muted (`table_or_empty` over the one table look). A menu's column is the room
+below the menu, so a tall menu hung under the bar scrolls there rather than
+being moved up over it.
+
+**The main window, third round.** A panel's tools are 24 point squares (the
+style's button padding had made them 32, and Reference Data's ran off its
+panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the
+accent-underline strip of `drive::controls::tabs`
+(`lowerLeftDockTabs`, `viewTabs<dock>`), not pills. The Surfaces and Survey
+Points panels are tables in the table look, with an empty state rather than
+a header over nothing. The current layer is an accent dot in a slot every row
+keeps (it was a typed "<"). The command log is a whole number of lines high,
+so no half line shows at its top. The status bar lays its readouts out first
+and elides the message in the room left; a frame's timings are not shown -
+`FrameStatsLabel`'s report keeps them for the tests and the count's tooltip
+for a developer - while a section's readouts, which a person reads, are. The
+rule under a toolbar row is painted after its toolbars. A Drafting bar toggle
+that is on is the text colour over a 2 point accent bar, one that is off
+muted; rejected: a filled pill, which reads as a pressed button. The view's
+kind switcher is a menu like the others (`ViewKindMenu`, items
+`viewKind<Kind>`, each with its icon and the current one ticked). Help > About
+is a dialog in the window's own frame (`aboutDialog`, `aboutText`,
+`aboutClose`); rejected: the native warning box it was, which carried a
+warning sign and blocked the window.
+
+**The view's Layers popup** is drawn as the Layers panel is: a panel's
+padding, one width of 300 hung by its top right corner under the view's
+Layers button, rows 22 high (`main_window::panels::LIST_ROW`) with the
+panel's own eye switch (`row_switch`), lit for what this view shows.
 
 **The icons** are drawn in one line style ("`icons.rs`", below): two weights, a
-single tint, the accent only for an active tool.
+single tint, the accent only for an active tool. No two toolbar buttons share
+one: Sheets, Plot Sheets, Drawing Summary, Project Coordinate System, Start
+Screen, Command Reference, Keyboard Shortcuts, Import IFC, Export IFC, Export
+View as Image, Apply Survey Codes and Parcel Report have icons of their own
+(they shared the printer, Properties, Help, Import or Export, or Area of
+Selection's pentagon); the construction line has an arrowhead at both ends
+and the ray one, freehand is a jagged hand line where the spline shows its
+control polygon, and the Surface Edit tools draw their triangles in the fine
+weight so each tool's own mark stands out.
 
 **How the tests moved.** No test was weakened; the numbers that pinned the
 old geometry were changed to the new design with the reason beside each:
@@ -815,9 +948,21 @@ the dock chrome's bar widths and button places
 to 32 x 20 (`crates/katana_window/tests/drive/flyout_button.rs`, and the toolbar sign test in
 `tests/CMakeLists.txt`, its 125 % numbers the 100 % ones scaled by 1.25),
 and a title-bar tool's width in the workspace tests. The dialog frame's own
-rules are tested in `crates/katana_window/tests/foundation/dialog_layout.rs`
+rules are tested in `crates/katana_window/tests/foundation/dialog_layout.rs`,
+the controls' look in `crates/katana_window/tests/foundation/control_look.rs`
+(a field's text centred and inset as a choice's; an editable choice one well
+whose arrow opens its list; checks in the accent; the expander), the menus'
+texts in `crates/katana_window/tests/main_window/menu_texts.rs`, and the
+About dialog in `crates/katana_window/tests/host/about_dialog.rs`; the frame's
+own
 (footer buttons at the right edge, the primary last; one edge for every
-field; a long label wrapping; the body's width).
+field; a long label wrapping; the body's width; a named label shown after
+its column was measured widening it to one line; a field given a width of
+its own keeping it; a field leaving the button beside it its room; a
+section's gap above it unless it starts its body). A field and its button
+standing level (Volumes' Measure) and every field of Edit Label ending at
+the body's edge, the editable Layer choice's included, are tested with
+those dialogs.
 
 **`palette.rs` - every chrome colour is a named token**
 (`crates/katana_window/src/theme/palette.rs`). `window`, `panel`,
@@ -1274,18 +1419,9 @@ person ("The Command Reference and the keyboard shortcuts", below).
 reviewed, and the same run can drive the menus and dialogs step by step:
 `docs/headless.md`.
 
-**Not done.** There is no light theme. Two form layouts (above, "Two ways
-of laying out a form"): folding them is moving `dialog_layout.rs`'s grid
-forms (about ten `form` / `form_with` calls and twelve `fixed_label` rows,
-in the managers, plot, start, annotation, BIM and IFC dialogs) onto
-`shell::dialog::form` and `labelled`, then deleting the grid form; the
-scope and filter widget
-(`crates/katana_window/src/customisation/scope_filter_widget.rs`) keeps a
-label layout of its own as well. No semibold face: a heading is the body
-face drawn strong (the face is the owner's decision). The side columns and
-toolbar rows do not grow with Large toolbar icons. The view layers popup
-was not restyled; the Alignment Manager's Name and PIs fields are narrow.
-The views inside the workspace are not kept between
+**Not done.** There is no light theme. No semibold face: a heading is the
+body face drawn strong (the face is the owner's decision). The side columns
+and toolbar rows do not grow with Large toolbar icons. The views inside the workspace are not kept between
 sessions (above, "How the window starts"); the dock chrome's hooks
 (`minimised_names`, `minimise_named`) are ready for it. The Text Size is the
 window's; a dialog that set a font of its own other than the fixed-pitch one
@@ -1528,10 +1664,13 @@ their check was once never seen: the C++'s theme drew a menu item that had
 an icon with no check mark at all, so
 they - and Grid, Object Snap and every other toggle with an icon - looked
 the same on as off, pixel for pixel, and Link This View on a linked view
-unlinked it with nothing on screen to say it was on. A checked item's icon
-now wears the accent frame a checked toolbar button wears
-(`menu_icon_cell` in `crates/katana_window/src/theme/style.rs`,
-`theme::a_checked_menu_item_with_an_icon_is_framed_and_an_unchecked_one_is_not`). Rejected:
+unlinked it with nothing on screen to say it was on. A checked item now
+shows a tick in the accent in a check column before its icon
+(`paint_menu_gutter` in `crates/katana_window/src/theme/style.rs`,
+`theme::a_checked_menu_item_shows_a_tick_before_its_icon_and_an_unchecked_one_does_not`);
+until 2026-11-16 it was a pill filled with the selection's blue, and no
+menu item showed its icon. Rejected: the icon framed in the accent, which
+marked only items that have an icon, in a frame that reads as hover; and
 a label that changes with the state ("Unlink This View") - a checkable item
 keeps one label and shows its state by its check, as Grid does, and a label
 that turns into its opposite reads as a second item.
@@ -4952,6 +5091,12 @@ they are easiest to break:
   was with the edits still in the grid (`ROADTEMPLATE SET <t> <c> key=value
   <c> key=value`). A verb that takes one thing at a time is given a form that
   takes several rather than being run in a loop by the dialog.
+- **A dialog's footer is `shell::dialog::button_row`**: Preview and a status
+  at the left, then Close, then the primary action last in the accent; a
+  reply over it only once there is one (`reply`).
+- **A form is `shell::dialog`'s form**, never a hand-built `egui::Grid` of
+  labels and fields; a Grid is for a table (the Title Block's revision
+  cells), and lines up only its own cells.
 - **A dialog gives its body a width.** The frame lends a body at most
   `BODY_WIDTH` (`crates/katana_window/src/shell/dialog.rs`); a dialog that
   needs more says how much, and nothing in a body fills "the available

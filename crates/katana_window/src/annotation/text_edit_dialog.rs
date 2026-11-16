@@ -22,7 +22,7 @@
 //! textEditJustify     TL TC TR ML MC MR BL BC BR
 //! textEditRotation    degrees counter-clockwise from east
 //! textEditPosition    the justification point, E,N
-//! textEditApply, textEditRevert
+//! textEditApply, textEditRevert, textEditClose
 //! textEditProblem     the last refusal
 //! ```
 
@@ -37,10 +37,10 @@ use katana_math::numerics::RAD_TO_DEG;
 
 use super::dialog_support::{Followed, show_dialog};
 use super::form_widgets::describe;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::theme::palette;
 
 const DIALOG: &str = "textEditDialog";
@@ -118,6 +118,7 @@ pub struct TextEditDialog {
     shown: Shown,
     apply_pressed: bool,
     revert_pressed: bool,
+    close_pressed: bool,
 }
 
 impl TextEditDialog {
@@ -148,6 +149,7 @@ impl TextEditDialog {
             shown: Shown::default(),
             apply_pressed: false,
             revert_pressed: false,
+            close_pressed: false,
         };
         dialog.fill_styles(document);
         dialog.follow(document);
@@ -403,16 +405,14 @@ impl TextEditDialog {
         if std::mem::take(&mut self.apply_pressed) {
             self.apply(host);
         }
-        !closed
+        !closed && !std::mem::take(&mut self.close_pressed)
     }
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         controls::label(ui, "textEditStatus", &self.status);
         ui.add_enabled_ui(self.editable, |ui| {
-            egui::Grid::new("textEditFields")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("Text");
+            dialog::form(ui, |form| {
+                form.row("Text", |ui| {
                     controls::text_with(
                         ui,
                         "textEditText",
@@ -423,33 +423,31 @@ impl TextEditDialog {
                         },
                     )
                     .on_hover_text("The words, a line a line: one text of several lines");
-                    ui.end_row();
-                    ui.label("Style");
+                });
+                form.row("Style", |ui| {
                     controls::choice(ui, "textEditStyle", &self.styles, &mut self.style)
                         .on_hover_text("The text style it is set in; (none) for the plain face");
-                    ui.end_row();
-                    let lines = [
-                        (
-                            "Height on paper (mm)",
-                            "textEditPaper",
-                            &mut self.paper,
-                            "Height on paper in mm, drawn at the annotation scale; 0 for the \
-                             style's, or a model height with no style",
-                        ),
-                        (
-                            "Model height",
-                            "textEditHeight",
-                            &mut self.height,
-                            "Height in model units; a paper-sized text's is worked out for the \
-                             annotation scale",
-                        ),
-                    ];
-                    for (title, name, value, tip) in lines {
-                        ui.label(title);
+                });
+                let lines = [
+                    (
+                        "Height on paper (mm)",
+                        "textEditPaper",
+                        &mut self.paper,
+                        "Height on paper in mm, drawn at the annotation scale; 0 for the                          style's, or a model height with no style",
+                    ),
+                    (
+                        "Model height",
+                        "textEditHeight",
+                        &mut self.height,
+                        "Height in model units; a paper-sized text's is worked out for the                          annotation scale",
+                    ),
+                ];
+                for (title, name, value, tip) in lines {
+                    form.row(title, |ui| {
                         controls::line(ui, name, value).on_hover_text(tip);
-                        ui.end_row();
-                    }
-                    ui.label("Justification");
+                    });
+                }
+                form.row("Justification", |ui| {
                     controls::choice(
                         ui,
                         "textEditJustify",
@@ -457,57 +455,77 @@ impl TextEditDialog {
                         &mut self.justify,
                     )
                     .on_hover_text(
-                        "The point the position is: T, M or B for top, middle or bottom (the \
-                         baseline), then L, C or R for left, centre or right",
+                        "The point the position is: T, M or B for top, middle or bottom (the                          baseline), then L, C or R for left, centre or right",
                     );
-                    ui.end_row();
-                    let lines = [
-                        (
-                            "Rotation (degrees)",
-                            "textEditRotation",
-                            &mut self.rotation,
-                            "Degrees counter-clockwise from east",
-                        ),
-                        (
-                            "Position (E,N)",
-                            "textEditPosition",
-                            &mut self.position,
-                            "The justification point, as E,N",
-                        ),
-                    ];
-                    for (title, name, value, tip) in lines {
-                        ui.label(title);
-                        controls::line(ui, name, value).on_hover_text(tip);
-                        ui.end_row();
-                    }
                 });
+                let lines = [
+                    (
+                        "Rotation (degrees)",
+                        "textEditRotation",
+                        &mut self.rotation,
+                        "Degrees counter-clockwise from east",
+                    ),
+                    (
+                        "Position (E,N)",
+                        "textEditPosition",
+                        &mut self.position,
+                        "The justification point, as E,N",
+                    ),
+                ];
+                for (title, name, value, tip) in lines {
+                    form.row(title, |ui| {
+                        controls::line(ui, name, value).on_hover_text(tip);
+                    });
+                }
+            });
         });
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        controls::label_as(
-            ui,
-            "textEditProblem",
-            &self.problem,
-            egui::Label::new(
-                RichText::new(self.problem.as_str()).color(palette::error().to_egui()),
-            )
-            .wrap(),
-        );
-        // Drawn from the right: Apply, the primary, last.
+        // The one footer (shell::dialog::button_row): the last refusal at the left; Revert, Close,
+        // then Apply, the primary, last at the right. Close is the footer's own: the dialog had
+        // only its title bar's cross to dismiss it.
         let editable = self.editable;
-        let (applied, reverted) = layout::footer_buttons(ui, |ui| {
-            ui.add_enabled_ui(editable, |ui| {
-                let applied = layout::primary(ui, "textEditApply", "Apply")
-                    .on_hover_text("Store what the form changed, as one undo step (TEXTEDIT)")
+        let problem = self.problem.clone();
+        let (_, (closed, reverted, applied)) = dialog::button_row(
+            ui,
+            |ui| {
+                controls::label_as(
+                    ui,
+                    "textEditProblem",
+                    &problem,
+                    egui::Label::new(
+                        RichText::new(problem.as_str()).color(palette::error().to_egui()),
+                    )
+                    .wrap(),
+                );
+            },
+            |ui| {
+                let reverted = ui
+                    .add_enabled_ui(editable, |ui| {
+                        controls::button(ui, "textEditRevert", "Revert")
+                            .on_hover_text("Throw the form's edits away")
+                            .clicked()
+                    })
+                    .inner;
+                let closed = controls::button(ui, "textEditClose", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
                     .clicked();
-                let reverted = layout::button(ui, "textEditRevert", "Revert")
-                    .on_hover_text("Throw the form's edits away")
-                    .clicked();
-                (applied, reverted)
-            })
-            .inner
-        });
+                let applied = ui
+                    .add_enabled_ui(editable, |ui| {
+                        controls::primary(ui, "textEditApply", "Apply")
+                            .on_hover_text(
+                                "Store what the form changed, as one undo step (TEXTEDIT)",
+                            )
+                            .clicked()
+                    })
+                    .inner;
+                (closed, reverted, applied)
+            },
+        );
+        if closed {
+            self.close_pressed = true;
+        }
         if reverted {
             self.revert_pressed = true;
         }

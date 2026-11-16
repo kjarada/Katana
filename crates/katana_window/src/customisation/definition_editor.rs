@@ -105,20 +105,35 @@ use katana_entity::{LineStyle, StyleUnits};
 use katana_geometry::Point2;
 
 use super::customisation_context::{CustomisationContext, DefinitionEdit};
-use super::style_preview::{DefinitionAs, StylePreview};
+use super::style_preview::{DefinitionAs, PreviewGround, StylePreview};
 use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use crate::annotation::dialog_support::show_dialog;
 use crate::command_word::exact_number;
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::hidden;
 use crate::theme::palette;
 
 const DIALOG: &str = "definitionEditorDialog";
 const TITLE: &str = "Definition Editor";
+
+/// The width of the two previews, the symbol's and the line's, at the dialog's right.
+const PREVIEW_WIDTH: f32 = 260.0;
+
+/// One field of the form being edited, by the place it is kept.
+type PairField = fn(&mut Form) -> &mut String;
+
+/// A row of the form holding a point: its x and its y side by side.
+struct PairRow<'a> {
+    label: &'a str,
+    enabled: bool,
+    names: [&'a str; 2],
+    values: [PairField; 2],
+    tip: &'a str,
+}
 
 /// The units box's rows. The words are the format's own for "units" (docs/customisation.md, "The
 /// members"), so the box reads as a file does.
@@ -456,7 +471,8 @@ impl DefinitionEditorDialog {
             .position(|&denominator| denominator == preview.scale_denominator())
             .unwrap_or(0);
         let mut dialog = Self {
-            frame: DialogFrame::new(DIALOG, TITLE),
+            // The form beside its previews: a body of two columns.
+            frame: DialogFrame::new(DIALOG, TITLE).width(dialog::TWO_COLUMN_WIDTH),
             open: true,
             context,
             existing: None,
@@ -492,6 +508,10 @@ impl DefinitionEditorDialog {
             logs: Vec::new(),
             watcher: DocumentWatcher::new(document),
         };
+        // On the viewport's dark ground, as the plan view draws it: a white pane of paper was the
+        // brightest thing on the screen (the look of 2026-11-16).
+        dialog.preview.set_ground(PreviewGround::Screen);
+        dialog.line_preview.set_ground(PreviewGround::Screen);
         dialog.load(
             Some(document),
             fields_of(&LineStyle::default()),
@@ -1343,7 +1363,11 @@ impl DefinitionEditorDialog {
                 match &reading.definition {
                     None => {
                         parts.push(reading.problem.clone());
-                        is_error = true;
+                        // A new form nobody has touched yet is told what it needs ("Type a name"),
+                        // muted, as a hint; it is a refusal, in the error's colour, once there is
+                        // something typed or a definition loaded to refuse. The editor opened in
+                        // red, as if it had already refused something.
+                        is_error |= changed || self.existing.is_some();
                     }
                     Some(definition) => {
                         let name = &definition.name;
@@ -1539,12 +1563,14 @@ impl DefinitionEditorDialog {
         let live = self.live;
         let anchors = self.live && self.two_point;
         ui.horizontal_top(|ui| {
-            // Left: the form, and the strokes under it.
+            // Left: the form, and the strokes under it, in what the previews leave of the row.
+            let previews =
+                PREVIEW_WIDTH + dialog::group_margins(ui) + ui.spacing().item_spacing.x;
+            let form_width = (ui.available_width() - previews).max(dialog::LEAST_BODY_WIDTH);
             ui.vertical(|ui| {
-                egui::Grid::new("definitionForm")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("Name");
+                ui.set_width(form_width);
+                dialog::form(ui, |form| {
+                    form.row("Name", |ui| {
                         ui.add_enabled_ui(live && self.existing.is_none(), |ui| {
                             self.line_field(
                                 ui,
@@ -1557,8 +1583,8 @@ impl DefinitionEditorDialog {
                                 |form| &mut form.name,
                             );
                         });
-                        ui.end_row();
-                        ui.label("Group");
+                    });
+                    form.row("Group", |ui| {
                         ui.add_enabled_ui(live, |ui| {
                             self.line_field(
                                 ui,
@@ -1569,8 +1595,8 @@ impl DefinitionEditorDialog {
                                 |form| &mut form.group,
                             );
                         });
-                        ui.end_row();
-                        ui.label("Kind");
+                    });
+                    form.row("Kind", |ui| {
                         ui.add_enabled_ui(live, |ui| {
                             let kinds = [String::from("Linestyle"), String::from("Symbol")];
                             let mut kind = usize::from(self.form.symbol);
@@ -1579,27 +1605,34 @@ impl DefinitionEditorDialog {
                                 self.edited_now = true;
                             }
                         });
-                        ui.end_row();
-                        ui.label("Units");
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(live, |ui| {
-                                let words: Vec<String> = UNITS_ROWS
-                                    .iter()
-                                    .map(|(_, word, _)| String::from(*word))
-                                    .collect();
-                                if index_choice(
-                                    ui,
-                                    "definitionUnits",
-                                    &words,
-                                    &mut self.form.units,
-                                ) {
-                                    self.edited_now = true;
-                                }
-                            });
-                            controls::label(ui, "definitionUnitsNote", &self.units_note);
+                    });
+                    form.row("Units", |ui| {
+                        ui.add_enabled_ui(live, |ui| {
+                            let words: Vec<String> = UNITS_ROWS
+                                .iter()
+                                .map(|(_, word, _)| String::from(*word))
+                                .collect();
+                            if index_choice(ui, "definitionUnits", &words, &mut self.form.units)
+                            {
+                                self.edited_now = true;
+                            }
                         });
-                        ui.end_row();
-                        ui.label("");
+                    });
+                    // What the units mean, under their choice: a sentence beside it left the
+                    // choice a sliver of the row.
+                    form.under(|ui| {
+                        controls::label_as(
+                            ui,
+                            "definitionUnitsNote",
+                            &self.units_note,
+                            egui::Label::new(
+                                RichText::new(self.units_note.as_str())
+                                    .color(palette::text_muted().to_egui()),
+                            )
+                            .wrap(),
+                        );
+                    });
+                    form.under(|ui| {
                         ui.add_enabled_ui(live, |ui| {
                             if controls::check(
                                 ui,
@@ -1616,8 +1649,8 @@ impl DefinitionEditorDialog {
                                 self.edited_now = true;
                             }
                         });
-                        ui.end_row();
-                        ui.label("Length");
+                    });
+                    form.row("Length", |ui| {
                         ui.add_enabled_ui(live, |ui| {
                             self.line_field(
                                 ui,
@@ -1628,8 +1661,8 @@ impl DefinitionEditorDialog {
                                 |form| &mut form.length,
                             );
                         });
-                        ui.end_row();
-                        ui.label("Factor");
+                    });
+                    form.row("Factor", |ui| {
                         ui.add_enabled_ui(live, |ui| {
                             self.line_field(
                                 ui,
@@ -1639,48 +1672,50 @@ impl DefinitionEditorDialog {
                                 |form| &mut form.factor,
                             );
                         });
-                        ui.end_row();
-                        let origin_tip = "The point of the strokes' coordinates that is put on \
-                                          the point drawn";
-                        ui.label("Origin x, y");
-                        ui.add_enabled_ui(live, |ui| {
-                            ui.horizontal(|ui| {
-                                self.line_field(ui, "definitionOriginX", origin_tip, "0", |form| {
-                                    &mut form.origin_x
-                                });
-                                self.line_field(ui, "definitionOriginY", origin_tip, "0", |form| {
-                                    &mut form.origin_y
+                    });
+                    let origin_tip = "The point of the strokes' coordinates that is put on the \
+                                      point drawn";
+                    let anchor_tip = "For the units twoPoint only: where the two points it is \
+                                      drawn across sit in the strokes' coordinates";
+                    let pairs: [PairRow<'_>; 3] = [
+                        PairRow {
+                            label: "Origin x, y",
+                            enabled: live,
+                            names: ["definitionOriginX", "definitionOriginY"],
+                            values: [|form| &mut form.origin_x, |form| &mut form.origin_y],
+                            tip: origin_tip,
+                        },
+                        PairRow {
+                            label: "Anchor 1 x, y",
+                            enabled: anchors,
+                            names: ["definitionAnchor1X", "definitionAnchor1Y"],
+                            values: [|form| &mut form.anchor1_x, |form| &mut form.anchor1_y],
+                            tip: anchor_tip,
+                        },
+                        PairRow {
+                            label: "Anchor 2 x, y",
+                            enabled: anchors,
+                            names: ["definitionAnchor2X", "definitionAnchor2Y"],
+                            values: [|form| &mut form.anchor2_x, |form| &mut form.anchor2_y],
+                            tip: anchor_tip,
+                        },
+                    ];
+                    for pair in pairs {
+                        form.row(pair.label, |ui| {
+                            ui.add_enabled_ui(pair.enabled, |ui| {
+                                ui.horizontal(|ui| {
+                                    // The x and the y share the field's room, half each.
+                                    let half =
+                                        (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                                    dialog::fixed_fields(ui, half);
+                                    for (name, value) in pair.names.into_iter().zip(pair.values) {
+                                        self.line_field(ui, name, pair.tip, "0", value);
+                                    }
                                 });
                             });
                         });
-                        ui.end_row();
-                        let anchor_tip = "For the units twoPoint only: where the two points it \
-                                          is drawn across sit in the strokes' coordinates";
-                        ui.label("Anchor 1 x, y");
-                        ui.add_enabled_ui(anchors, |ui| {
-                            ui.horizontal(|ui| {
-                                self.line_field(ui, "definitionAnchor1X", anchor_tip, "0", |form| {
-                                    &mut form.anchor1_x
-                                });
-                                self.line_field(ui, "definitionAnchor1Y", anchor_tip, "0", |form| {
-                                    &mut form.anchor1_y
-                                });
-                            });
-                        });
-                        ui.end_row();
-                        ui.label("Anchor 2 x, y");
-                        ui.add_enabled_ui(anchors, |ui| {
-                            ui.horizontal(|ui| {
-                                self.line_field(ui, "definitionAnchor2X", anchor_tip, "0", |form| {
-                                    &mut form.anchor2_x
-                                });
-                                self.line_field(ui, "definitionAnchor2Y", anchor_tip, "0", |form| {
-                                    &mut form.anchor2_y
-                                });
-                            });
-                        });
-                        ui.end_row();
-                        ui.label("Stretch, cycle mode");
+                    }
+                    form.row("Stretch, cycle mode", |ui| {
                         ui.add_enabled_ui(anchors, |ui| {
                             ui.horizontal(|ui| {
                                 let mode_tip = "For the units twoPoint only: a whole number kept \
@@ -1709,11 +1744,11 @@ impl DefinitionEditorDialog {
                                 }
                             });
                         });
-                        ui.end_row();
-                        ui.label("From");
-                        controls::label(ui, "definitionSource", &self.source_label);
-                        ui.end_row();
                     });
+                    form.row("From", |ui| {
+                        controls::label(ui, "definitionSource", &self.source_label);
+                    });
+                });
                 controls::label_as(
                     ui,
                     "definitionStrokesHelp",
@@ -1758,7 +1793,7 @@ impl DefinitionEditorDialog {
                 ui.group(|ui| {
                     ui.label("As a symbol, on its insertion point");
                     self.preview
-                        .ui(ui, "definitionPreview", document, egui::vec2(260.0, 170.0));
+                        .ui(ui, "definitionPreview", document, egui::vec2(PREVIEW_WIDTH, 170.0));
                 });
                 let line_box = |ui: &mut Ui, preview: &mut StylePreview| {
                     ui.group(|ui| {
@@ -1767,7 +1802,7 @@ impl DefinitionEditorDialog {
                             ui,
                             "definitionLinePreview",
                             document,
-                            egui::vec2(260.0, 130.0),
+                            egui::vec2(PREVIEW_WIDTH, 130.0),
                         );
                     });
                 };
@@ -1809,16 +1844,26 @@ impl DefinitionEditorDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         // What is wrong, or what names it; then the buttons.
         let mut issues = self.issues.clone();
-        let shown = controls::text_with(
-            ui,
-            "definitionIssues",
-            &mut issues,
-            TextOptions {
-                read_only: true,
-                rows: 5,
-                monospace: false,
-            },
-        );
+        let issues_error = self.issues_error;
+        // A hint or a note in the secondary text colour; a refusal in the text colour, framed in
+        // the error's.
+        let shown = ui
+            .scope(|ui| {
+                if !issues_error {
+                    ui.visuals_mut().override_text_color = Some(palette::text_muted().to_egui());
+                }
+                controls::text_with(
+                    ui,
+                    "definitionIssues",
+                    &mut issues,
+                    TextOptions {
+                        read_only: true,
+                        rows: 5,
+                        monospace: false,
+                    },
+                )
+            })
+            .inner;
         if self.issues_error {
             ui.painter().rect_stroke(
                 shown.rect,
@@ -1864,9 +1909,9 @@ impl DefinitionEditorDialog {
         let in_library = self.in_library;
         let save_enabled = self.save_enabled;
         let revert_enabled = self.revert_enabled;
-        // New, Duplicate and Delete at the left; at the right, drawn from the right edge in, Save,
-        // the primary, last, then Close and Revert.
-        let (left, right) = layout::footer(
+        // The one footer (shell::dialog::button_row): New, Duplicate and Delete at the left;
+        // Revert, Close, then Save, the primary, last at the right.
+        let (left, right) = dialog::button_row(
             ui,
             |ui| {
                 let mut pressed = None;
@@ -1899,8 +1944,19 @@ impl DefinitionEditorDialog {
             },
             |ui| {
                 let mut pressed = None;
+                ui.add_enabled_ui(revert_enabled, |ui| {
+                    if controls::button(ui, "definitionRevert", "Revert")
+                        .on_hover_text("Forget what was changed here")
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Revert);
+                    }
+                });
+                if controls::button(ui, "definitionClose", "Close").clicked() {
+                    pressed = Some(Pressed::Close);
+                }
                 ui.add_enabled_ui(save_enabled, |ui| {
-                    if layout::primary(ui, "definitionSave", "Save")
+                    if controls::primary(ui, "definitionSave", "Save")
                         .on_hover_text(
                             "Put the definition into the session's library, in place of the one \
                              of its name",
@@ -1908,17 +1964,6 @@ impl DefinitionEditorDialog {
                         .clicked()
                     {
                         pressed = Some(Pressed::Save);
-                    }
-                });
-                if layout::button(ui, "definitionClose", "Close").clicked() {
-                    pressed = Some(Pressed::Close);
-                }
-                ui.add_enabled_ui(revert_enabled, |ui| {
-                    if layout::button(ui, "definitionRevert", "Revert")
-                        .on_hover_text("Forget what was changed here")
-                        .clicked()
-                    {
-                        pressed = Some(Pressed::Revert);
                     }
                 });
                 pressed

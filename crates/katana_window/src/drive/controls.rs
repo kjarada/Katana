@@ -246,7 +246,7 @@ pub fn check(ui: &mut Ui, name: &str, text: &str, on: &mut bool) -> Response {
             Act::ScrollTo => {}
         }
     }
-    let mut response = ui.add(egui::Checkbox::new(on, text));
+    let mut response = check_box(ui, on, text);
     if clicked {
         click(&mut response);
     }
@@ -266,7 +266,7 @@ pub fn check(ui: &mut Ui, name: &str, text: &str, on: &mut bool) -> Response {
 /// caller makes it the one chosen.
 pub fn radio(ui: &mut Ui, name: &str, text: &str, chosen: bool) -> Response {
     let taken = take(ui, name);
-    let mut response = ui.add(egui::RadioButton::new(chosen, text));
+    let mut response = radio_button(ui, chosen, text);
     press_button(ui, taken.as_ref(), name, &mut response);
     scroll_if_asked(ui, taken.as_ref(), &response);
     let mut record = base_record(ui, name, ControlKind::Radio);
@@ -274,6 +274,72 @@ pub fn radio(ui: &mut Ui, name: &str, text: &str, chosen: bool) -> Response {
     record.checked = Some(chosen);
     super::registry::record(ui, &response, record);
     response
+}
+
+/// egui's check box over `on`, in the window's look (`check_look`), with no name of its own: for
+/// a box a list draws in its rows (a layer's, a type's), where `check` is for a form's control.
+/// A click toggles it, as egui's does.
+pub fn check_box(ui: &mut Ui, on: &mut bool, text: impl Into<egui::WidgetText>) -> Response {
+    let text = text.into();
+    ui.scope(|ui| {
+        check_look(ui, *on, false);
+        ui.add(egui::Checkbox::new(on, text))
+    })
+    .inner
+}
+
+/// egui's radio button, `chosen` or not, in the window's look (`check_look`), with no name of its
+/// own (`radio` is the named one).
+pub fn radio_button(ui: &mut Ui, chosen: bool, text: impl Into<egui::WidgetText>) -> Response {
+    let text = text.into();
+    ui.scope(|ui| {
+        check_look(ui, chosen, true);
+        ui.add(egui::RadioButton::new(chosen, text))
+    })
+    .inner
+}
+
+/// The look of a check box or a radio button (`radio`) that is `on`, set on the `Ui` it alone is
+/// drawn in: egui draws both from the widget's interaction state alone - the same raised grey
+/// whether checked or not, a thin tick in the text colour and a radio's dot 5 px across - so on
+/// read as off at a glance. On, the box or disc is the accent with a mark on it in the text drawn
+/// on the accent (palette::accent_text, 5.8:1 against it); off, it is a field's well with its
+/// border. The label keeps the text colour either way: egui takes a label's colour from the same
+/// visuals the box is painted with.
+fn check_look(ui: &mut Ui, on: bool, radio: bool) {
+    use crate::theme::palette;
+    let text = palette::text().to_egui();
+    let visuals = ui.visuals_mut();
+    visuals.override_text_color = Some(text);
+    let widgets = &mut visuals.widgets;
+    // A disabled control is drawn with egui's noninteractive look, faded as a whole by its Ui.
+    for (state, lit) in [
+        (&mut widgets.noninteractive, false),
+        (&mut widgets.inactive, false),
+        (&mut widgets.hovered, true),
+        (&mut widgets.active, true),
+    ] {
+        if on {
+            let ground = if lit {
+                palette::accent_hover()
+            } else {
+                palette::accent()
+            }
+            .to_egui();
+            state.bg_fill = ground;
+            state.weak_bg_fill = ground;
+            state.bg_stroke = egui::Stroke::new(1.0, ground);
+            // The tick is two pixels wide: at egui's one it was a hairline on a 16 px box.
+            state.fg_stroke = egui::Stroke::new(2.0, palette::accent_text().to_egui());
+        } else {
+            state.bg_fill = palette::input().to_egui();
+            state.weak_bg_fill = state.bg_fill;
+        }
+    }
+    // The mark's square inside the 16 px box: a tick across 10 px of it, where egui's 8 drew a
+    // short one; a radio's dot is a third of it across each way of its centre, 4 + 4 = 8 px in
+    // the 16 px disc, where egui's was 5.
+    ui.spacing_mut().icon_width_inner = if radio { 12.0 } else { 10.0 };
 }
 
 // ---- text ------------------------------------------------------------------------------------
@@ -295,6 +361,233 @@ pub struct LineOptions<'a> {
 pub fn line(ui: &mut Ui, name: &str, value: &mut String) -> Response {
     line_with(ui, name, value, LineOptions::default())
 }
+
+/// How far a field's text stands in from its left edge: a choice's (egui's ComboBox puts its text
+/// a button's padding, theme::style::GROUP_GAP, in from its edge), so a column of fields and
+/// choices reads down one edge. egui's TextEdit stands its text 4 in.
+pub const FIELD_INSET: f32 = crate::theme::style::GROUP_GAP;
+
+/// A one-line field's margin round its text: FIELD_INSET across, less the pixel of border egui
+/// draws inside it (TextEdit takes the stroke's width off its margin); 2 down, egui's own, the
+/// text being centred in the control's height anyway. Public for the fields a table draws in a
+/// cell of its own (dialog_layout::field_look), which wear the same look.
+pub fn field_margin() -> egui::Margin {
+    egui::Margin::symmetric(FIELD_INSET as i8, 2)
+}
+
+/// The room an editable choice's list arrow takes at its right end, inside its frame: a square a
+/// control high (theme::style::CONTROL_HEIGHT). The arrow was once a ComboBox of its own beside
+/// the field, 38 wide (an empty ComboBox's icon, its spacing and its padding), and the two read
+/// as two controls; one frame round both is one control, as a person reads it.
+pub fn list_arrow_width(ui: &Ui) -> f32 {
+    ui.spacing().interact_size.y
+}
+
+/// What `editable_choice_frame` drew.
+pub struct EditableChoiceShown<R> {
+    /// The field typed into.
+    pub field: Response,
+    /// The list's arrow at the control's right end.
+    pub arrow: Response,
+    /// What the list's contents gave, while it is open.
+    pub list: Option<R>,
+}
+
+impl<R> EditableChoiceShown<R> {
+    /// The whole control: the field and its arrow, under the field's id (what a driver and the
+    /// registry take for the control).
+    pub fn whole(&self) -> Response {
+        self.field.union(self.arrow.clone())
+    }
+}
+
+/// An editable choice's look and behaviour without its record (QComboBox::setEditable): ONE framed
+/// control as wide as a field (`Spacing::text_edit_width`, held to the row), the field typed into
+/// at its left and the list's arrow inside its right end (`list_arrow_width`); a click on the
+/// arrow opens the list under the whole control, its rows drawn by `list`, scrolling past
+/// `Spacing::combo_height` as a choice's list does. `salt` names the field and the list, so the
+/// state of each is kept from one frame to the next. `placeholder` is the field's hint, and
+/// `text_color` its text's colour when it has one of its own (a name nothing defines).
+///
+/// Used by `choice` for an editable choice and by the shared name picker
+/// (customisation::name_picker), which draw the same control: one painter for both.
+pub fn editable_choice_frame<R>(
+    ui: &mut Ui,
+    salt: &str,
+    text: &mut String,
+    placeholder: &str,
+    text_color: Option<egui::Color32>,
+    list: impl FnOnce(&mut Ui) -> R,
+) -> EditableChoiceShown<R> {
+    let height = ui.spacing().interact_size.y;
+    let arrow_width = list_arrow_width(ui);
+    let width = ui
+        .spacing()
+        .text_edit_width
+        .min(ui.available_width())
+        .max(2.0 * arrow_width);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    // The frame is painted under the field, once the field has said whether it has the keys.
+    let background = ui.painter().add(egui::Shape::Noop);
+    let field_rect =
+        egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - arrow_width, rect.bottom()));
+    let arrow_rect =
+        egui::Rect::from_min_max(egui::pos2(rect.right() - arrow_width, rect.top()), rect.max);
+    // The field draws no frame of its own; its text stands FIELD_INSET in, as a field's does, and
+    // the pixel of border the frame below draws round it is counted in that.
+    let inset = FIELD_INSET as i8 - 1;
+    let mut edit = egui::TextEdit::singleline(text)
+        .id_salt(salt)
+        .hint_text(String::from(placeholder))
+        .frame(egui::Frame::new().inner_margin(egui::Margin {
+            left: inset,
+            right: 2,
+            top: 0,
+            bottom: 0,
+        }))
+        .vertical_align(egui::Align::Center)
+        .desired_width(field_rect.width())
+        .min_size(field_rect.size());
+    if let Some(color) = text_color {
+        edit = edit.text_color(color);
+    }
+    let field = ui.place(field_rect, edit);
+    let arrow_id = ui.make_persistent_id((salt, "items"));
+    let arrow = ui.interact(arrow_rect, arrow_id, egui::Sense::click());
+    let popup_id = arrow_id.with("popup");
+    // Opened under the whole control, as wide as it, not under the arrow alone.
+    let mut anchor = arrow.clone().with_new_rect(rect);
+    anchor.interact_rect = rect;
+    let shown = egui::Popup::menu(&arrow)
+        .id(popup_id)
+        .anchor(&anchor)
+        .width(rect.width())
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        // A choice's list's look (egui's ComboBox keeps the style it is drawn in), not a menu's.
+        .style(egui::style::StyleModifier::default())
+        .show(|ui| {
+            ui.set_min_width(ui.available_width());
+            egui::ScrollArea::vertical()
+                .max_height(ui.spacing().combo_height)
+                .show(ui, |ui| {
+                    // Rows are not wrapped to a narrow control: the list widens to its longest.
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    list(ui)
+                })
+                .inner
+        })
+        .map(|shown| shown.inner);
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.visuals();
+        let hovered = field.hovered() || arrow.hovered();
+        // A field's frame: the border lit under the pointer, the field's focus colour while it
+        // has the keys or its list is open (egui's TextEdit frames a focused field so).
+        let stroke = if field.has_focus() || open {
+            visuals.selection.stroke
+        } else if hovered {
+            visuals.widgets.hovered.bg_stroke
+        } else {
+            visuals.widgets.inactive.bg_stroke
+        };
+        let radius = visuals.widgets.inactive.corner_radius;
+        let fill = visuals.text_edit_bg_color();
+        let arrow_ground = visuals.widgets.hovered.weak_bg_fill;
+        let ink = if arrow.hovered() || open {
+            crate::theme::palette::text()
+        } else {
+            crate::theme::palette::text_muted()
+        }
+        .to_egui();
+        let painter = ui.painter();
+        painter.set(
+            background,
+            egui::epaint::RectShape::new(rect, radius, fill, stroke, egui::StrokeKind::Inside),
+        );
+        if arrow.hovered() || open {
+            // The arrow's own square shaded under the pointer, inside the border, so the part a
+            // click opens the list from is seen.
+            let corner = radius.ne.saturating_sub(1);
+            painter.rect_filled(
+                arrow_rect.shrink(1.0),
+                egui::CornerRadius {
+                    nw: 0,
+                    sw: 0,
+                    ne: corner,
+                    se: corner,
+                },
+                arrow_ground,
+            );
+        }
+        paint_list_arrow(painter, arrow_rect, ink);
+    }
+    EditableChoiceShown {
+        field,
+        arrow,
+        list: shown,
+    }
+}
+
+/// The down chevron of a list's arrow, centred in `rect`: 8 px across and 4 deep, a stroke of 1.5
+/// in `ink` - the icons' weight at a menu's size (icons.rs's STROKE at 16 px).
+fn paint_list_arrow(painter: &egui::Painter, rect: egui::Rect, ink: egui::Color32) {
+    let centre = rect.center();
+    painter.add(egui::Shape::line(
+        vec![
+            egui::pos2(centre.x - 4.0, centre.y - 2.0),
+            egui::pos2(centre.x, centre.y + 2.0),
+            egui::pos2(centre.x + 4.0, centre.y - 2.0),
+        ],
+        egui::Stroke::new(1.5, ink),
+    ));
+}
+
+/// Whether the list of the editable choice `salt` drawn in `ui` is open (`editable_choice_frame`):
+/// for a list whose rows cost something to make, made only while it shows.
+pub fn editable_choice_is_open(ui: &Ui, salt: &str) -> bool {
+    egui::Popup::is_id_open(
+        ui.ctx(),
+        ui.make_persistent_id((salt, "items")).with("popup"),
+    )
+}
+
+/// A tree row's expander (a QTreeView branch's arrow): egui's collapsing triangle, pointing right
+/// while the row is closed and down while it is open, in an EXPANDER_WIDTH cell a control high;
+/// `None` for a row that has nothing under it, an empty cell, so the texts of a level line up.
+/// The fonts the window carries have no ▸ or ▾ (U+25B8, U+25BE): drawn as text, every tree's
+/// expanders were boxes. A click on it is `clicked()`; the tree opens or closes the row.
+pub fn tree_expander(ui: &mut Ui, open: Option<bool>) -> Response {
+    let size = egui::vec2(EXPANDER_WIDTH, ui.spacing().interact_size.y);
+    let Some(open) = open else {
+        return ui.allocate_exact_size(size, egui::Sense::hover()).1;
+    };
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        // The triangle in a square of EXPANDER_MARK, muted at rest and the text colour under the
+        // pointer: an expander is a quiet thing beside the name it opens.
+        let mark = response
+            .clone()
+            .with_new_rect(egui::Rect::from_center_size(
+                rect.center(),
+                egui::Vec2::splat(EXPANDER_MARK),
+            ));
+        // Painted from a Ui of its own over the cell, which takes no room from the row.
+        let mut painter_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        let muted = crate::theme::palette::text_muted().to_egui();
+        painter_ui.visuals_mut().widgets.inactive.fg_stroke.color = muted;
+        painter_ui.visuals_mut().widgets.noninteractive.fg_stroke.color = muted;
+        let openness = if open { 1.0 } else { 0.0 };
+        egui::collapsing_header::paint_default_icon(&mut painter_ui, openness, &mark);
+    }
+    response
+}
+
+/// The width of a tree row's expander cell (`tree_expander`): a menu icon's (16).
+pub const EXPANDER_WIDTH: f32 = 16.0;
+
+/// The square egui's triangle is drawn in, three quarters of it inked: 8 of the cell's 16, a
+/// triangle 6 px a side - the size of the ▸ it replaces at the window's 13 px text.
+const EXPANDER_MARK: f32 = 8.0;
 
 /// QLineEdit over `value`, drawn as `options` say: a fill writes the text as given.
 pub fn line_with(
@@ -318,11 +611,18 @@ pub fn line_with(
             Act::ScrollTo => {}
         }
     }
+    // A control's height (theme::style::CONTROL_HEIGHT): egui sizes a one-line field to its text
+    // (19 points at 13 px), and beside the 24-point buttons of its row - a Browse, a Measure - it
+    // stood shorter than they did. Its text centred in that height and FIELD_INSET in from its
+    // left, as a choice's is (field_margin).
     let mut edit = egui::TextEdit::singleline(value)
         .id_salt(name)
         .hint_text(String::from(options.placeholder))
         .password(options.password)
-        .interactive(!options.read_only);
+        .interactive(!options.read_only)
+        .margin(field_margin())
+        .vertical_align(egui::Align::Center)
+        .min_size(egui::vec2(0.0, ui.spacing().interact_size.y));
     if let Some(width) = options.width {
         edit = edit.desired_width(width);
     }
@@ -509,36 +809,31 @@ pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) ->
     }
     let mut picked = None;
     let mut response = if chosen.editable {
+        // One control, as wide as a field alone: the field and the list's arrow inside its end.
         let index = chosen.index;
-        let text = &mut chosen.text;
-        ui.horizontal(|ui| {
-            // The field and the list's arrow beside it, the two as wide as a field alone.
-            let arrow = ui.spacing().interact_size.y;
-            let room = ui.available_width() - arrow - ui.spacing().item_spacing.x;
-            let width = ui.spacing().text_edit_width.min(room);
-            let edit = ui.add(
-                egui::TextEdit::singleline(text)
-                    .id_salt(name)
-                    .desired_width(width),
-            );
-            let list = egui::ComboBox::from_id_salt((name, "items"))
-                .width(arrow)
-                .selected_text("")
-                .show_ui(ui, |ui| {
-                    for (at, item) in items.iter().enumerate() {
-                        if ui.selectable_label(index == Some(at), item).clicked() {
-                            picked = Some(at);
-                        }
-                    }
-                });
-            edit.union(list.response)
+        editable_choice_frame(ui, name, &mut chosen.text, "", None, |ui| {
+            for (at, item) in items.iter().enumerate() {
+                if ui.selectable_label(index == Some(at), item).clicked() {
+                    picked = Some(at);
+                }
+            }
         })
-        .inner
+        .whole()
     } else {
         let current = chosen.current_text(items);
         let index = chosen.index;
         egui::ComboBox::from_id_salt(name)
             .selected_text(current)
+            // The editable choice's chevron (paint_list_arrow), so a choice reads the same
+            // whether it can be typed into or not; egui's own is a filled triangle.
+            .icon(|ui, rect, _, open| {
+                let ink = if open {
+                    crate::theme::palette::text()
+                } else {
+                    crate::theme::palette::text_muted()
+                };
+                paint_list_arrow(ui.painter(), rect, ink.to_egui());
+            })
             .show_ui(ui, |ui| {
                 for (at, item) in items.iter().enumerate() {
                     if ui.selectable_label(index == Some(at), item).clicked() {

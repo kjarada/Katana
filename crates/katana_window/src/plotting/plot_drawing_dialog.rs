@@ -52,11 +52,11 @@ use katana_core::text::{format_general, parse_finite_double};
 use katana_core::{Error, ErrorCode, Result};
 use katana_entity::EnumName;
 
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange};
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name, to_native_separators};
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 
 const USAGE: &str = "usage: PLOT <file.pdf> [paper=A0|A1|A2|A3|A4] [landscape|portrait] \
                      [fit|scale=N] [dpi=N] [style=colour|grey|mono] [lineweight=F] [margin=MM]";
@@ -67,14 +67,9 @@ const MINIMUM_DPI: f64 = 72.0;
 const MAXIMUM_DPI: f64 = 1200.0;
 const MAXIMUM_MARGIN_MM: f64 = 50.0;
 
-/// The dialog's body width: a form whose fields are FIELD_WIDTH wide beside its longest label.
+/// The dialog's body width: its form's fields fill what the labels leave of it, long enough to
+/// read a path and the command it runs.
 const BODY_WIDTH: f32 = 520.0;
-
-/// The width of the form's fields: long enough to read a path and the command it runs.
-const FIELD_WIDTH: f32 = 360.0;
-
-/// The path field's width: the field column less its Browse button.
-const PATH_WIDTH: f32 = FIELD_WIDTH - 76.0;
 
 /// In the order the dialog lists them.
 const PAPERS: [(PaperSize, &str); 5] = [
@@ -468,32 +463,31 @@ impl PlotDrawingDialog {
     fn body(&mut self, ui: &mut Ui, host: &dyn Host) {
         // Wide enough for a path and the line it runs to be read whole.
         ui.set_width(BODY_WIDTH);
-        layout::form_with(ui, "plotDrawingForm", FIELD_WIDTH, |ui| {
-                layout::form_label(ui, "PDF");
-                ui.horizontal(|ui| {
-                    controls::line_with(
-                        ui,
-                        "plotDrawingPath",
-                        &mut self.path,
-                        LineOptions {
-                            placeholder: "the PDF to write",
-                            width: Some(PATH_WIDTH),
-                            ..LineOptions::default()
-                        },
-                    );
-                    if controls::button(ui, "plotDrawingBrowse", "Browse...").clicked() {
-                        self.browse(host);
-                    }
-                });
-                ui.end_row();
+        dialog::form(ui, |form| {
+            form.row("PDF", |ui| {
+                let width = dialog::beside_a_button(ui, "Browse...");
+                controls::line_with(
+                    ui,
+                    "plotDrawingPath",
+                    &mut self.path,
+                    LineOptions {
+                        placeholder: "the PDF to write",
+                        width: Some(width),
+                        ..LineOptions::default()
+                    },
+                );
+                if controls::button(ui, "plotDrawingBrowse", "Browse...").clicked() {
+                    self.browse(host);
+                }
+            });
 
-                layout::form_label(ui, "Paper");
+            form.row("Paper", |ui| {
                 let papers: Vec<String> =
                     PAPERS.iter().map(|(_, name)| String::from(*name)).collect();
                 controls::choice(ui, "plotDrawingPaper", &papers, &mut self.paper);
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Orientation");
+            form.row("Orientation", |ui| {
                 let orientations = [String::from("Landscape"), String::from("Portrait")];
                 controls::choice(
                     ui,
@@ -501,19 +495,20 @@ impl PlotDrawingDialog {
                     &orientations,
                     &mut self.orientation,
                 );
-                ui.end_row();
+            });
 
-                ui.label("");
+            form.under(|ui| {
                 controls::check(
                     ui,
                     "plotDrawingFit",
                     "Fit the drawing to the sheet at a standard scale",
                     &mut self.fit,
                 );
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Scale, when not fitting");
-                ui.add_enabled_ui(!self.fit, |ui| {
+            let fit = self.fit;
+            form.row("Scale, when not fitting", |ui| {
+                ui.add_enabled_ui(!fit, |ui| {
                     controls::spin(
                         ui,
                         "plotDrawingScale",
@@ -521,27 +516,27 @@ impl PlotDrawingDialog {
                         SpinRange::new(1.0, 1_000_000.0, 1.0, 0),
                     );
                 });
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Resolution (dpi)");
+            form.row("Resolution (dpi)", |ui| {
                 controls::spin(
                     ui,
                     "plotDrawingDpi",
                     &mut self.dpi,
                     SpinRange::new(MINIMUM_DPI, MAXIMUM_DPI, 1.0, 0),
                 );
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Margin");
+            form.row("Margin", |ui| {
                 controls::spin(
                     ui,
                     "plotDrawingMargin",
                     &mut self.margin,
                     SpinRange::new(0.0, MAXIMUM_MARGIN_MM, 1.0, 1).with_suffix(" mm"),
                 );
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Colours");
+            form.row("Colours", |ui| {
                 let modes = [
                     String::from("Colour"),
                     String::from("Greyscale"),
@@ -552,29 +547,24 @@ impl PlotDrawingDialog {
                         "Colour as drawn (white printing black), every colour as its grey, or \
                          black ink alone",
                     );
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Line weights");
+            form.row("Line weights", |ui| {
                 controls::spin(
                     ui,
                     "plotDrawingLineWeightScale",
                     &mut self.line_weight,
-                    SpinRange::new(
-                        MINIMUM_LINE_WEIGHT_SCALE,
-                        MAXIMUM_LINE_WEIGHT_SCALE,
-                        0.1,
-                        2,
-                    )
-                    .with_suffix(" x"),
+                    SpinRange::new(MINIMUM_LINE_WEIGHT_SCALE, MAXIMUM_LINE_WEIGHT_SCALE, 0.1, 2)
+                        .with_suffix(" x"),
                 )
                 .on_hover_text(
                     "Every line weight times this: 0.7 for a check plot, 1.4 for a bold one; \
                      text, dashes and symbols keep their size",
                 );
-                ui.end_row();
+            });
 
-                layout::form_label(ui, "Command");
-                let mut command = self.command();
+            let mut command = self.command();
+            form.row("Command", |ui| {
                 controls::line_with(
                     ui,
                     "plotDrawingCommand",
@@ -587,14 +577,16 @@ impl PlotDrawingDialog {
                 .on_hover_text(
                     "The line Plot hands to the command line - type it there and it does the same",
                 );
-                ui.end_row();
             });
+        });
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
         let ready = self.request().is_ok();
-        let (_, (pressed, closed)) = layout::footer(
+        // The one footer (shell::dialog::button_row): the status at the left; Close, then Plot, the
+        // primary, last at the right.
+        let (_, (closed, pressed)) = dialog::button_row(
             ui,
             |ui| {
                 controls::label_as(
@@ -604,15 +596,14 @@ impl PlotDrawingDialog {
                     egui::Label::new(status.as_str()).wrap().selectable(true),
                 );
             },
-            // Drawn from the right: Plot, the primary, last.
             |ui| {
+                let closed = controls::button(ui, "plotDrawingClose", "Close").clicked();
                 let pressed = ui
                     .add_enabled_ui(ready, |ui| {
-                        layout::primary(ui, "plotDrawingPlot", "Plot").clicked()
+                        controls::primary(ui, "plotDrawingPlot", "Plot").clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "plotDrawingClose", "Close").clicked();
-                (pressed, closed)
+                (closed, pressed)
             },
         );
         if pressed {

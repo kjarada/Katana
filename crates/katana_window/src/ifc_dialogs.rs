@@ -56,11 +56,11 @@ use katana_ifc::{
 };
 use katana_survey::subsurface::GradingSettings;
 
-use crate::dialog_layout as layout;
 use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::format::grouped;
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::shell::dialog::{self, labelled};
 use crate::theme;
 
 // ---- the system's file dialogs ------------------------------------------------------------------
@@ -195,7 +195,8 @@ const COMMAND_TIP: &str = "The command this runs, exactly as it could be typed o
                            line, given to katana_cli or sent by an agent";
 
 /// The read-only field showing the line the dialog runs, as it is edited: what a fill writes there
-/// is drawn over by the dialog's line at the next frame.
+/// is drawn over by the dialog's line at the next frame. It fills its row (dialog::labelled), so
+/// it ends where the path fields' Browse buttons do.
 fn command_field(ui: &mut Ui, name: &str, line: &str) {
     let mut shown = String::from(line);
     controls::line_with(
@@ -204,31 +205,23 @@ fn command_field(ui: &mut Ui, name: &str, line: &str) {
         &mut shown,
         LineOptions {
             read_only: true,
-            width: Some(COMMAND_WIDTH),
             ..LineOptions::default()
         },
     )
     .on_hover_text(COMMAND_TIP);
 }
 
-/// The width of a row's label in both dialogs, so their fields line up (the look of 2026-11-16).
-const LABEL_WIDTH: f32 = 140.0;
-
-/// A path field's width; with its Browse button, the command field's.
-const PATH_WIDTH: f32 = 420.0;
-
-/// The command field's width: a path field and its Browse button.
-const COMMAND_WIDTH: f32 = PATH_WIDTH + 80.0;
-
-/// A path field with its placeholder; true when it changed.
+/// A path field with its placeholder, leaving its row the room for the Browse button after it;
+/// true when it changed.
 fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> bool {
+    let width = dialog::beside_a_button(ui, "Browse...");
     controls::line_with(
         ui,
         name,
         value,
         LineOptions {
             placeholder,
-            width: Some(PATH_WIDTH),
+            width: Some(width),
             ..LineOptions::default()
         },
     )
@@ -238,16 +231,11 @@ fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> 
 /// The check label: what stops the line, or what the last run did, in the error colour or the
 /// muted one.
 fn check_label(ui: &mut Ui, name: &str, text: &str, is_error: bool) {
-    let colour = if is_error {
-        theme::error()
-    } else {
-        theme::text_muted()
-    };
     controls::label_as(
         ui,
         name,
         text,
-        egui::Label::new(RichText::new(text).color(colour.to_egui()))
+        egui::Label::new(RichText::new(text).color(dialog::status_colour(is_error)))
             .wrap()
             .selectable(true),
     );
@@ -537,9 +525,12 @@ impl IfcExportDialog {
         let problem = self.check();
         if !problem.is_empty() {
             // What stops the export is said, even over the last result: a disabled button with a
-            // stale "Wrote ..." beside it says nothing.
+            // stale "Wrote ..." beside it says nothing. A file not yet named is where every export
+            // starts, so that is a hint, in the muted text; in red, a fresh dialog read as one that
+            // had already refused something.
             self.showing_result = false;
-            self.say(&problem, true);
+            let named = !path_of(&self.file).is_empty();
+            self.say(&problem, named);
             return;
         }
         if self.showing_result {
@@ -860,8 +851,7 @@ impl IfcExportDialog {
              fences, pits, pipes - the road model as roads, their parts and elements, and an AS \
              5488 investigation graded and typed by its services. Nothing is written as a proxy.",
         );
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "File", LABEL_WIDTH);
+        labelled(ui, "File", |ui| {
             if path_line(
                 ui,
                 "ifcExportFile",
@@ -883,8 +873,7 @@ impl IfcExportDialog {
 
         let state = self.state.clone();
         let mut changed = false;
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Drawing", LABEL_WIDTH);
+        labelled(ui, "Drawing", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcExportEntities",
@@ -907,8 +896,8 @@ impl IfcExportDialog {
                 grouped(state.selected as u64)
             )
         };
-        let indent = LABEL_WIDTH + ui.spacing().item_spacing.x;
-        layout::indented(ui, indent, |ui| {
+        // The other kinds under the first, in the field column (a row with no label).
+        labelled(ui, "", |ui| {
             ui.add_enabled_ui(self.entities, |ui| {
                 changed |= controls::check(
                     ui,
@@ -920,19 +909,20 @@ impl IfcExportDialog {
                 .changed();
             });
         });
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             changed |= controls::check(
-            ui,
-            "ifcExportAlignments",
-            &format!("Alignments ({})", grouped(state.alignments as u64)),
-            &mut self.alignments,
-        )
-        .on_hover_text(
-            "Every alignment, as IfcAlignment: its PIs' design and its profile's, with stations",
-        )
-        .changed();
+                ui,
+                "ifcExportAlignments",
+                &format!("Alignments ({})", grouped(state.alignments as u64)),
+                &mut self.alignments,
+            )
+            .on_hover_text(
+                "Every alignment, as IfcAlignment: its PIs' design and its profile's, with \
+                 stations",
+            )
+            .changed();
         });
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcExportSurfaces",
@@ -946,28 +936,27 @@ impl IfcExportDialog {
             .changed();
         });
         // The road model: NOROADMODEL when unticked (docs/ifc.md, "Road model").
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             changed |= controls::check(
-            ui,
-            "ifcExportRoadModel",
-            &format!(
-                "Road model ({} objects)",
-                grouped(state.road_objects as u64)
-            ),
-            &mut self.road_model,
-        )
-        .on_hover_text(
-            "The road model's 3D objects - its corridors' courses, kerbs and earthworks, and the \
-             road objects - as IfcRoad, its parts and their elements",
-        )
-        .changed();
+                ui,
+                "ifcExportRoadModel",
+                &format!(
+                    "Road model ({} objects)",
+                    grouped(state.road_objects as u64)
+                ),
+                &mut self.road_model,
+            )
+            .on_hover_text(
+                "The road model's 3D objects - its corridors' courses, kerbs and earthworks, and \
+                 the road objects - as IfcRoad, its parts and their elements",
+            )
+            .changed();
         });
         if changed {
             self.choice_changed();
         }
 
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Utility schedule", LABEL_WIDTH);
+        labelled(ui, "Utility schedule", |ui| {
             if path_line(
                 ui,
                 "ifcExportSchedule",
@@ -987,8 +976,7 @@ impl IfcExportDialog {
             }
         });
         let schema_live = !path_of(&self.schedule).is_empty() || !path_of(&self.schema).is_empty();
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Delivery schema", LABEL_WIDTH);
+        labelled(ui, "Delivery schema", |ui| {
             ui.add_enabled_ui(schema_live, |ui| {
                 if path_line(
                     ui,
@@ -1009,8 +997,7 @@ impl IfcExportDialog {
                 );
             }
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Detected spacing (m)", LABEL_WIDTH);
+        labelled(ui, "Detected spacing (m)", |ui| {
             if controls::line(ui, "ifcExportSpacing", &mut self.spacing)
                 .on_hover_text(
                     "The longest detected spacing that keeps QL-B, in metres: a path interpolated \
@@ -1021,15 +1008,15 @@ impl IfcExportDialog {
                 self.choice_changed();
             }
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Classification rules", LABEL_WIDTH);
+        labelled(ui, "Classification rules", |ui| {
+            let width = dialog::beside_buttons(ui, &["Browse...", "Save Default Rules..."]);
             let typed = controls::line_with(
                 ui,
                 "ifcExportRules",
                 &mut self.rules,
                 LineOptions {
                     placeholder: "optional: a project's classification rules (.csv)",
-                    width: Some(PATH_WIDTH - 160.0),
+                    width: Some(width),
                     ..LineOptions::default()
                 },
             )
@@ -1069,45 +1056,57 @@ impl IfcExportDialog {
             egui::Label::new(RichText::new(crs.as_str()).color(theme::text_muted().to_egui()))
                 .wrap(),
         );
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Command", LABEL_WIDTH);
+        labelled(ui, "Command", |ui| {
             let line = self.line();
             command_field(ui, "ifcExportCommand", &line);
         });
-        ui.label("From | Objects | IFC class | System | Why");
+        // What the file holds, by where it came from: the writer's own account, from Preview or
+        // the export just written.
         let rows = self.table();
-        controls::rows(ui, "ifcExportClasses", &rows, &mut self.current_row).on_hover_text(
-            "What the file holds, by where it came from: the writer's own account, from Preview or \
-             the export just written",
+        let shown = dialog::table_or_empty(
+            ui,
+            "ifcExportClasses",
+            &["From", "Objects", "IFC class", "System", "Why"],
+            &rows,
+            self.current_row,
+            "Preview lists what the file will hold, class by class, before anything is written.",
         );
+        if shown.chosen.is_some() {
+            self.current_row = shown.chosen;
+        }
     }
 
-    /// The check under the table and the buttons: kept below the scrolling body.
+    /// The check and the buttons: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let check = self.check_text.clone();
-        check_label(ui, "ifcExportCheck", &check, self.check_error);
+        let check_error = self.check_error;
         // A preview needs everything but the file.
         let preview_live = self.check_without_file().is_empty();
         let export_live = self.check().is_empty();
-        // Preview at the left; Export, the primary, last at the right.
-        let (previewed, (exported, closed)) = layout::footer(
+        // Preview and the check at the left; Close, then Export - the primary - last at the right.
+        let (previewed, (closed, exported)) = dialog::button_row(
             ui,
             |ui| {
-                ui.add_enabled_ui(preview_live, |ui| {
-                    controls::button(ui, "ifcExportPreview", "Preview")
-                        .on_hover_text("What would be written, class by class; no file is written")
-                        .clicked()
-                })
-                .inner
-            },
-            |ui| {
-                let exported = ui
-                    .add_enabled_ui(export_live, |ui| {
-                        layout::primary(ui, "ifcExportExport", "Export").clicked()
+                let previewed = ui
+                    .add_enabled_ui(preview_live, |ui| {
+                        controls::button(ui, "ifcExportPreview", "Preview")
+                            .on_hover_text(
+                                "What would be written, class by class; no file is written",
+                            )
+                            .clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "ifcExportClose", "Close").clicked();
-                (exported, closed)
+                check_label(ui, "ifcExportCheck", &check, check_error);
+                previewed
+            },
+            |ui| {
+                let closed = controls::button(ui, "ifcExportClose", "Close").clicked();
+                let exported = ui
+                    .add_enabled_ui(export_live, |ui| {
+                        controls::primary(ui, "ifcExportExport", "Export").clicked()
+                    })
+                    .inner;
+                (closed, exported)
             },
         );
         if previewed {
@@ -1242,8 +1241,10 @@ impl IfcImportDialog {
     fn recheck(&mut self) {
         let problem = self.check();
         if !problem.is_empty() {
+            // A file not yet named is a hint, in the muted text, as Export IFC's is.
             self.showing_result = false;
-            self.say(&problem, true);
+            let named = !path_of(&self.file).is_empty();
+            self.say(&problem, named);
             return;
         }
         if self.showing_result {
@@ -1418,8 +1419,7 @@ impl IfcImportDialog {
 
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         ui.set_max_width(600.0);
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "File", LABEL_WIDTH);
+        labelled(ui, "File", |ui| {
             if path_line(
                 ui,
                 "ifcImportFile",
@@ -1453,8 +1453,7 @@ impl IfcImportDialog {
             );
         }
         let mut changed = false;
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Bring in", LABEL_WIDTH);
+        labelled(ui, "Bring in", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcImportAlignments",
@@ -1481,8 +1480,7 @@ impl IfcImportDialog {
                 )
                 .changed();
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Place", LABEL_WIDTH);
+        labelled(ui, "Place", |ui| {
             changed |= controls::check(
                 ui,
                 "ifcImportLocal",
@@ -1493,24 +1491,22 @@ impl IfcImportDialog {
             .changed();
         });
         // Moved to the origin, the data is no longer in the file's system.
-        let indent = LABEL_WIDTH + ui.spacing().item_spacing.x;
-        layout::indented(ui, indent, |ui| {
+        labelled(ui, "", |ui| {
             ui.add_enabled_ui(!self.local, |ui| {
                 changed |= controls::check(
-                ui,
-                "ifcImportTakeCrs",
-                "Take the file's coordinate system when the project has none",
-                &mut self.take_crs,
-            )
-            .on_hover_text(
-                "When the file names an EPSG code and the project has no coordinate system, the \
-                 project takes the file's",
-            )
-            .changed();
+                    ui,
+                    "ifcImportTakeCrs",
+                    "Take the file's coordinate system when the project has none",
+                    &mut self.take_crs,
+                )
+                .on_hover_text(
+                    "When the file names an EPSG code and the project has no coordinate system, \
+                     the project takes the file's",
+                )
+                .changed();
             });
         });
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Curves within (m)", LABEL_WIDTH);
+        labelled(ui, "Curves within (m)", |ui| {
             changed |= controls::line(ui, "ifcImportTolerance", &mut self.tolerance)
                 .on_hover_text(
                     "How far a chorded curve - an arc in a polycurve, a transition other than the \
@@ -1521,8 +1517,7 @@ impl IfcImportDialog {
         if changed {
             self.option_changed();
         }
-        ui.horizontal(|ui| {
-            layout::fixed_label(ui, "Command", LABEL_WIDTH);
+        labelled(ui, "Command", |ui| {
             let line = self.line();
             command_field(ui, "ifcImportCommand", &line);
         });
@@ -1531,24 +1526,27 @@ impl IfcImportDialog {
     /// The check and the buttons: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let check = self.check_text.clone();
-        check_label(ui, "ifcImportCheck", &check, self.check_error);
+        let check_error = self.check_error;
         let import_live = self.check().is_empty();
-        // Describe at the left; Import, the primary, last at the right.
-        let (described, (imported, closed)) = layout::footer(
+        // Describe - it reads the file and changes nothing - and the check at the left; Close,
+        // then Import - the primary - last at the right.
+        let (described, (closed, imported)) = dialog::button_row(
             ui,
             |ui| {
-                controls::button(ui, "ifcImportDescribe", "Describe")
+                let described = controls::button(ui, "ifcImportDescribe", "Describe")
                     .on_hover_text("Read the file and say what it holds; nothing is imported")
-                    .clicked()
+                    .clicked();
+                check_label(ui, "ifcImportCheck", &check, check_error);
+                described
             },
             |ui| {
+                let closed = controls::button(ui, "ifcImportClose", "Close").clicked();
                 let imported = ui
                     .add_enabled_ui(import_live, |ui| {
-                        layout::primary(ui, "ifcImportImport", "Import").clicked()
+                        controls::primary(ui, "ifcImportImport", "Import").clicked()
                     })
                     .inner;
-                let closed = layout::button(ui, "ifcImportClose", "Close").clicked();
-                (imported, closed)
+                (closed, imported)
             },
         );
         if described {

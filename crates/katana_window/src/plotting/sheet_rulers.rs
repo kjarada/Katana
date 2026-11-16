@@ -17,6 +17,7 @@
 
 use katana_geometry::{Box2, Point2};
 
+use crate::theme::palette;
 use crate::canvas::{
     Brush, Canvas, Color, Font, FontSize, Pen, PointF, RectF, RenderHint, SizeF, TextFlags,
 };
@@ -70,14 +71,18 @@ impl Default for RulerView {
     }
 }
 
-const RULER_GROUND: Color = Color::rgb(236, 237, 240);
-const RULER_PAPER: Color = Color::rgb(255, 255, 255);
-const RULER_INK: Color = Color::rgb(70, 72, 78);
-/// The ruler's ink lightened to 160 % (QColor::lighter(160) of 70, 72, 78: its value, 78, times
-/// 1.6 at the same hue and saturation).
-const RULER_EDGE: Color = Color::rgb(112, 115, 125);
-const RULER_HIGHLIGHT: Color = Color::rgba(0, 120, 215, 55);
-const RULER_CURSOR: Color = Color::rgb(220, 40, 60);
+// The rulers are chrome, so their colours are the theme's tokens (the look of 2026-11-16): a light
+// grey strip of their own, the C++'s, was the brightest chrome on the screen beside the dark desk.
+// The ruler is the panel's grey; the paper's span along it a step lighter (the hover token), so
+// where the page runs still reads; the ticks and numbers the secondary text; the edge the border.
+const RULER_GROUND: Color = palette::panel();
+const RULER_PAPER: Color = palette::hover();
+const RULER_INK: Color = palette::text_muted();
+const RULER_EDGE: Color = palette::border();
+/// The selection's span: the accent, faint (55 of 255, the C++'s highlight's alpha).
+const RULER_HIGHLIGHT: Color = palette::accent().with_alpha(55);
+/// The pointer's place: the accent, whole.
+const RULER_CURSOR: Color = palette::accent();
 const GRID_LINE: Color = Color::rgba(0, 120, 215, 26);
 const GRID_MAJOR: Color = Color::rgba(0, 120, 215, 52);
 

@@ -97,7 +97,7 @@ use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use super::filter_bar::FilterBar;
 use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::scope_filter_widget::ScopeFilterView;
-use super::style_preview::StylePreview;
+use super::style_preview::{PreviewGround, StylePreview};
 use crate::annotation::dialog_support::{show_dialog, table};
 use crate::canvas::Image;
 use crate::command_word::command_word;
@@ -109,14 +109,21 @@ use crate::drive::mailbox::{
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
 use crate::host::{Host, VerbOutcome};
 use crate::shell::DialogFrame;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::{hidden, offstage, open_file_dialog, save_file_dialog};
 use crate::theme::palette;
 
 const DIALOG: &str = "surveyCodeManagerDialog";
 
 /// The dialog's body width on every tab (the look of 2026-11-16): the code table and, beside it,
-/// the test field, the explanation and the rule form.
-const BODY_WIDTH: f32 = 1000.0;
+/// the test field, the explanation and the rule form (DETAIL_WIDTH). At 1000 the explanation's
+/// four columns ran the Code Table tab to 1170, so the dialog was wider than its tab strip's rule
+/// and wider on that tab than on the others.
+const BODY_WIDTH: f32 = TREE_WIDTH + crate::theme::style::GROUP_GAP + DETAIL_WIDTH;
+
+/// The width of the Code Table tab's right column: the explanation's four columns (Field, Value,
+/// Set by, Decided against) at the Standard text size, and the rule form under them.
+const DETAIL_WIDTH: f32 = 560.0;
 
 /// The code table's width: it scrolls sideways within it when a rule's values are wider.
 const TREE_WIDTH: f32 = 600.0;
@@ -365,13 +372,7 @@ pub(crate) fn tree_rows(
         })
         .show(ui, |ui| {
             if has_header {
-                for header in headers {
-                    ui.label(
-                        RichText::new(*header)
-                            .strong()
-                            .color(palette::text_muted().to_egui()),
-                    );
-                }
+                layout::table_header(ui, headers, false);
                 ui.end_row();
             }
             for (at, line) in lines.iter().enumerate() {
@@ -686,6 +687,10 @@ impl SurveyCodeManagerDialog {
         dialog.show_lines();
         dialog.load_form(document, &SurveyRule::default(), None);
         dialog.update_dirty();
+        // On the viewport's dark ground, as the plan view draws a code's linework and symbol: two
+        // white panes of paper were the brightest things on the screen (the look of 2026-11-16).
+        dialog.linestyle_preview.set_ground(PreviewGround::Screen);
+        dialog.symbol_preview.set_ground(PreviewGround::Screen);
         dialog
     }
 
@@ -1919,11 +1924,12 @@ impl SurveyCodeManagerDialog {
                 }
             }
             let placeholder = "Search keys, descriptions, layers, linestyles, symbols";
-            let response = ui.add(
+            let response = ui.add(layout::field_look(
+                ui,
                 egui::TextEdit::singleline(&mut text)
                     .id_salt("codeTableFilterText")
                     .hint_text(placeholder),
-            );
+            ));
             if let Some(taken) = &taken
                 && taken.posted.act == Act::ScrollTo
             {
@@ -2031,6 +2037,7 @@ impl SurveyCodeManagerDialog {
                 }
             });
             ui.vertical(|ui| {
+                ui.set_width(DETAIL_WIDTH);
                 self.detail_pane(ui, document);
                 ui.separator();
                 self.rule_form_ui(ui);
@@ -2152,8 +2159,8 @@ impl SurveyCodeManagerDialog {
             "Apply Codes",
             "Linework",
         ];
+        // The strip's own rule parts it from the page (a separator under it drew a second).
         controls::tabs(ui, "codeManagerTabs", &titles, &mut self.tab);
-        ui.separator();
         // Every tab is drawn, the ones behind offstage: a driver fills and presses a control of a
         // tab that is not in front, as it did on a hidden Qt page.
         // The previews paint what they show from the drawing.
@@ -2193,7 +2200,7 @@ impl SurveyCodeManagerDialog {
                 if controls::button(ui, "unappliedDiscard", "Discard").clicked() {
                     self.events.push(Event::CloseDiscard);
                 }
-                if layout::primary(ui, "unappliedApply", "Apply").clicked() {
+                if controls::primary(ui, "unappliedApply", "Apply").clicked() {
                     self.events.push(Event::CloseApply);
                 }
             });
@@ -2206,30 +2213,31 @@ impl SurveyCodeManagerDialog {
         }
         let dirty_text = self.dirty_text.clone();
         let events = &mut self.events;
-        layout::footer(
+        // The one footer (shell::dialog::button_row): the buffer's state at the left; Revert,
+        // Close, then Apply, the primary, last at the right.
+        dialog::button_row(
             ui,
             |ui| {
                 controls::label_as(ui, "dirtyIndicator", &dirty_text, egui::Label::new(said));
             },
-            // Drawn from the right: Apply, the primary, last; then Close and Revert.
             |ui| {
                 ui.add_enabled_ui(edited, |ui| {
-                    if layout::primary(ui, "applyMap", "Apply")
-                        .on_hover_text("Make the edited rules the drawing's survey map")
-                        .clicked()
-                    {
-                        events.push(Event::Apply);
-                    }
-                });
-                if layout::button(ui, "closeManager", "Close").clicked() {
-                    events.push(Event::Close);
-                }
-                ui.add_enabled_ui(edited, |ui| {
-                    if layout::button(ui, "revertMap", "Revert")
+                    if controls::button(ui, "revertMap", "Revert")
                         .on_hover_text("Discard the edits and take the drawing's survey map again")
                         .clicked()
                     {
                         events.push(Event::Revert);
+                    }
+                });
+                if controls::button(ui, "closeManager", "Close").clicked() {
+                    events.push(Event::Close);
+                }
+                ui.add_enabled_ui(edited, |ui| {
+                    if controls::primary(ui, "applyMap", "Apply")
+                        .on_hover_text("Make the edited rules the drawing's survey map")
+                        .clicked()
+                    {
+                        events.push(Event::Apply);
                     }
                 });
             },

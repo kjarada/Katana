@@ -46,6 +46,7 @@ use super::survey_dialogs::{
     save_file_dialog,
 };
 use super::survey_templates::{TemplateChoice, saved_layout_templates};
+use crate::dialog_layout::{TABLE_ROW_GAP, table_row_colour};
 use crate::drive::mailbox::{lists_no, no_button};
 use crate::drive::{self, Act, Choice, ControlKind, ControlRecord, TextOptions};
 use crate::format::qt_fixed;
@@ -632,70 +633,107 @@ impl SurveyPointsDock {
             }
         }
 
-        ui.horizontal(|ui| {
-            field(
+        // The filter the panel's width, and what it leaves shown on a line of its own under it in
+        // the secondary text: beside the filter, the status ran off the panel ("Read-only: edit a
+        // point with the drawin...").
+        field(
+            ui,
+            "filter",
+            &mut self.filter,
+            "Filter by point, code or description",
+            "",
+        );
+        let status = self.status.clone();
+        let _ = drive::label_as(
+            ui,
+            "status",
+            &status,
+            egui::Label::new(
+                egui::RichText::new(status.as_str())
+                    .small()
+                    .color(palette::text_muted().to_egui()),
+            )
+            .wrap(),
+        );
+        // The rows shown, in the order shown, and which are selected: the table's row colours.
+        let shown_rows: Vec<usize> = (0..rows.len())
+            .filter(|row| self.matches(&self.points[self.order[*row]]))
+            .collect();
+        let lit: Vec<bool> = shown_rows
+            .iter()
+            .map(|row| selected.contains(&self.points[self.order[*row]].entity))
+            .collect();
+        // Room for the note under the table.
+        let note = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
+        // No points: the table's empty state says so and where they come from, where a header
+        // stood over nothing.
+        let table_rect = if self.points.is_empty() {
+            muted(
                 ui,
-                "filter",
-                &mut self.filter,
-                "Filter by point, code or description",
-                "",
-            );
-            drive::label(ui, "status", &self.status);
-        });
-        let table = egui::ScrollArea::both()
-            .id_salt("surveyPointsTable")
-            .max_height(ui.available_height().max(120.0))
-            .show(ui, |ui| {
-                egui::Grid::new("surveyPointsGrid")
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for (column, title) in POINT_COLUMNS.iter().enumerate() {
-                            let marked = match self.sort {
-                                Some((sorted, true)) if sorted == column => {
-                                    format!("{title} \u{25b2}")
-                                }
-                                Some((sorted, false)) if sorted == column => {
-                                    format!("{title} \u{25bc}")
-                                }
-                                _ => String::from(*title),
-                            };
-                            if ui.button(marked).clicked() {
-                                sort_by = Some(column);
-                            }
-                        }
-                        ui.end_row();
-                        let extend =
-                            ui.input(|input| input.modifiers.command || input.modifiers.ctrl);
-                        for (row, cells) in rows.iter().enumerate() {
-                            let at = self.order[row];
-                            let point = &self.points[at];
-                            if !self.matches(point) {
-                                continue;
-                            }
-                            let is_selected = selected.contains(&point.entity);
-                            for cell in cells {
-                                let response: Response = ui.selectable_label(is_selected, cell);
-                                if response.double_clicked() {
-                                    zoom = Some(at);
-                                }
-                                if response.clicked() {
-                                    let mut ids = if extend {
-                                        selected.clone()
-                                    } else {
-                                        BTreeSet::new()
-                                    };
-                                    if extend && is_selected {
-                                        ids.remove(&point.entity);
-                                    } else {
-                                        ids.insert(point.entity);
-                                    }
-                                    chosen = Some(ids);
+                "The drawing has no survey points: Survey > Import Survey Points brings them in.",
+            )
+            .rect
+        } else {
+            // The design's table (crate::dialog_layout): a raised header of muted titles, a click on
+            // one sorting by it with the direction drawn beside it, faint stripes and the selected
+            // rows lit in the accent. Its headers were raised buttons, and its rows a pill a cell.
+            let table = egui::ScrollArea::both()
+                .id_salt("surveyPointsTable")
+                .max_height((ui.available_height() - note).max(120.0))
+                .show(ui, |ui| {
+                    egui::Grid::new("surveyPointsGrid")
+                        .num_columns(POINT_COLUMNS.len())
+                        .spacing([crate::theme::style::GROUP_GAP, TABLE_ROW_GAP])
+                        .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
+                        .with_row_color(move |row, style| table_row_colour(row, &lit, style))
+                        .show(ui, |ui| {
+                            for (column, title) in POINT_COLUMNS.iter().enumerate() {
+                                let sorted = match self.sort {
+                                    Some((sorted, ascending)) if sorted == column => Some(ascending),
+                                    _ => None,
+                                };
+                                if sort_header(ui, title, sorted).clicked() {
+                                    sort_by = Some(column);
                                 }
                             }
                             ui.end_row();
-                        }
-                    });
-            });
+                            let extend =
+                                ui.input(|input| input.modifiers.command || input.modifiers.ctrl);
+                            for &row in &shown_rows {
+                                let cells = &rows[row];
+                                let at = self.order[row];
+                                let point = &self.points[at];
+                                let is_selected = selected.contains(&point.entity);
+                                for cell in cells {
+                                    let response: Response = ui.add(
+                                        egui::Label::new(cell.as_str())
+                                            .sense(egui::Sense::click())
+                                            .selectable(false)
+                                            .extend(),
+                                    );
+                                    if response.double_clicked() {
+                                        zoom = Some(at);
+                                    }
+                                    if response.clicked() {
+                                        let mut ids = if extend {
+                                            selected.clone()
+                                        } else {
+                                            BTreeSet::new()
+                                        };
+                                        if extend && is_selected {
+                                            ids.remove(&point.entity);
+                                        } else {
+                                            ids.insert(point.entity);
+                                        }
+                                        chosen = Some(ids);
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+            table.inner_rect
+        };
         let mut record = ControlRecord::new("points", ControlKind::Rows);
         record.items = rows.iter().map(|row| row.join(" | ")).collect();
         record.value = self
@@ -706,7 +744,7 @@ impl SurveyPointsDock {
             .map(|point| point.id.clone())
             .unwrap_or_default();
         let response = ui.interact(
-            table.inner_rect,
+            table_rect,
             ui.id().with("surveyPointsRecord"),
             egui::Sense::hover(),
         );
@@ -736,6 +774,36 @@ impl SurveyPointsDock {
             }
         }
     }
+}
+
+/// A sortable column's title in a table's header: muted and strong as every table header is, a
+/// click sorting by it, and while it is sorted by, a small triangle beside it pointing the way the
+/// column runs - painted, since the window's font has no up or down triangle and drew a box.
+fn sort_header(ui: &mut Ui, title: &str, sorted: Option<bool>) -> Response {
+    let ink = palette::text_muted().to_egui();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = crate::theme::style::GAP;
+        let label = ui.add(
+            egui::Label::new(egui::RichText::new(title).strong().color(ink))
+                .sense(egui::Sense::click())
+                .selectable(false),
+        );
+        if let Some(ascending) = sorted {
+            // 8 points across and 5 high: a list arrow's size in the same row.
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+            let centre = rect.center();
+            let (tip, base) = if ascending { (-2.5, 2.5) } else { (2.5, -2.5) };
+            let points = vec![
+                egui::pos2(centre.x - 4.0, centre.y + base),
+                egui::pos2(centre.x + 4.0, centre.y + base),
+                egui::pos2(centre.x, centre.y + tip),
+            ];
+            ui.painter()
+                .add(egui::Shape::convex_polygon(points, ink, egui::Stroke::NONE));
+        }
+        label
+    })
+    .inner
 }
 
 // ---- the Point Report --------------------------------------------------------------------------

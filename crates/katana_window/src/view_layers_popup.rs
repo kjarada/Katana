@@ -10,24 +10,27 @@
 //! same way. The boxes are then read back from the view, so a refused line leaves each where the
 //! view really is. What a view hides is how the person is LOOKING at the drawing, like its zoom;
 //! the Layers panel, which edits the document, is where a layer is switched off in every view.
+//! Its rows are drawn as the Layers panel's are: an eye that is lit while the view shows the row
+//! and faint while it hides it, the name the rest of the row.
 //!
 //! The tree is the document's layer tree, derived from the '/'-separated names (layer_path); a
 //! path segment that is not itself a layer is still a node, and hiding it hides what lies beneath.
-//! A box is ticked when this view does not hide that layer itself. It is greyed, and cannot be
-//! ticked, when the layer cannot show here whatever its box says - the document hides it, or a
-//! parent is hidden in this view: the Layers panel's own greying, for the same reason. A view can
-//! never show what the document hides, so a greyed box offers nothing to tick.
+//! A row's eye is lit (its box ticked, `checked`) when this view does not hide that layer itself.
+//! It is greyed, and cannot be clicked, when the layer cannot show here whatever its eye says -
+//! the document hides it, or a parent is hidden in this view: the Layers panel's own greying, for
+//! the same reason. A view can never show what the document hides, so a greyed eye offers nothing
+//! to switch.
 //!
 //! THE RUST SHAPE. The C++ popup is a QFrame holding the workspace and reading the document
 //! through it; it closes on a click outside it. Here the popup is kept by the workspace
 //! (`ViewWorkspace::with_layers_popup`) and lent the workspace and the window's executor for each
 //! call, and its lists are read again from the drawing, the reference data and the view at each
 //! frame and after each line - what the C++'s rebuild and refreshStates did on their signals. A
-//! click on a row's box is `set_layer_checked`, as the C++ tests set an item's check state.
+//! click on a row's eye is `set_layer_checked`, as the C++ tests set an item's check state.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use egui::{Pos2, RichText, Ui};
+use egui::{Align2, Pos2, RichText, Ui, Vec2};
 use katana_cad::Document;
 use katana_cad::view_set::{ViewId, ViewSet, ViewState};
 use katana_core::error::make_error;
@@ -42,11 +45,17 @@ use crate::drive::registry::{
     ControlKind, ControlRecord, TargetKind, TargetSpec, begin_target, end_target,
 };
 use crate::host::{Host, VerbOutcome};
-use crate::theme::palette;
+// A row of the tree is the Layers panel's list row, and its eye the panel's switch.
+use crate::main_window::panels::LIST_ROW;
+use crate::theme::{palette, style};
 use crate::view_workspace::ViewWorkspace;
 
-/// The popup's least width, in points.
+/// The width of what the popup holds, in points: its note wraps at it and its rows fill it. (Its
+/// least width once; the note took the room egui lends an area and held the popup wider.)
 pub const MINIMUM_WIDTH: f32 = 300.0;
+
+/// How far a row is stepped in for each level of the tree, as the Layers panel steps its rows.
+const DEPTH_STEP: f32 = 14.0;
 
 /// The VIEWS line that does `action` - HIDE, SHOW or ISOLATE - to `layers` in view `view`: what a
 /// click in the popup runs. A name with a blank is quoted (command_word), and a name no line can
@@ -567,20 +576,28 @@ impl ViewLayersPopup {
             return;
         }
         self.after_line(workspace, host);
-        let at = Pos2::new(self.anchor.x - MINIMUM_WIDTH, self.anchor.y);
+        // Its top right corner at the anchor, so it hangs right-aligned under the view's Layers
+        // button whatever it holds.
         let area = egui::Area::new(egui::Id::new(("katanaViewLayersPopup", self.view)))
             .order(egui::Order::Foreground)
-            .fixed_pos(at)
+            .pivot(Align2::RIGHT_TOP)
+            .fixed_pos(self.anchor)
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(MINIMUM_WIDTH);
-                    // Qt::WA_DeleteOnClose, as the C++ made it.
-                    let spec = TargetSpec::new("ViewLayersPopup", TargetKind::Popup, &self.heading)
-                        .deletes_on_close(true);
-                    begin_target(ui, spec);
-                    self.body(ui);
-                    end_target(ui, ui.min_rect());
-                });
+                // A popup as the theme draws one - the panel's grey, a pixel of border, its
+                // corners and shadow - with a panel's padding round what it holds.
+                egui::Frame::popup(ui.style())
+                    .inner_margin(egui::Margin::same(style::PANEL_PADDING as i8))
+                    .show(ui, |ui| {
+                        // One width: the note wraps in it, and the rows fill it.
+                        ui.set_width(MINIMUM_WIDTH);
+                        // Qt::WA_DeleteOnClose, as the C++ made it.
+                        let spec =
+                            TargetSpec::new("ViewLayersPopup", TargetKind::Popup, &self.heading)
+                                .deletes_on_close(true);
+                        begin_target(ui, spec);
+                        self.body(ui);
+                        end_target(ui, ui.min_rect());
+                    });
             });
         // A click outside it closes it, as a Qt popup does.
         let outside = ui.input(|input| {
@@ -624,7 +641,13 @@ impl ViewLayersPopup {
         // is the thing most likely to be misunderstood.
         let note = "Hidden here only. The Layers panel hides a layer in every view and saves it \
                     with the drawing.";
-        controls::label_as(ui, "ViewLayersNote", note, egui::Label::new(note).wrap());
+        controls::label_as(
+            ui,
+            "ViewLayersNote",
+            note,
+            egui::Label::new(RichText::new(note).color(palette::text_muted().to_egui())).wrap(),
+        );
+        ui.add_space(style::GROUP_GAP - style::GAP);
         let mut filter = self.filter.clone();
         if controls::line_with(
             ui,
@@ -632,6 +655,7 @@ impl ViewLayersPopup {
             &mut filter,
             controls::LineOptions {
                 placeholder: "Filter layers",
+                width: Some(ui.available_width()),
                 ..controls::LineOptions::default()
             },
         )
@@ -645,13 +669,29 @@ impl ViewLayersPopup {
         let rows = self.layers.len().clamp(8, 18) as f32;
         let tree = egui::ScrollArea::vertical()
             .id_salt("ViewLayersTreeScroll")
-            .max_height(rows * 22.0)
-            .min_scrolled_height(rows * 22.0)
+            .max_height(rows * LIST_ROW)
+            .min_scrolled_height(rows * LIST_ROW)
+            .auto_shrink([false, true])
             .show(ui, |ui| {
+                // The Layers panel's rows: a list row high, nothing between rows, an eye that
+                // is the row's switch and the name the rest of the row.
+                ui.spacing_mut().interact_size.y = LIST_ROW;
+                ui.spacing_mut().item_spacing = Vec2::new(style::GAP / 2.0, 0.0);
                 for row in self.layers.iter().filter(|row| !row.filtered_out) {
                     ui.horizontal(|ui| {
-                        ui.add_space(row.depth as f32 * 14.0);
-                        let mut checked = row.checked;
+                        ui.add_space(row.depth as f32 * DEPTH_STEP);
+                        let tip = if row.checked {
+                            "Shown in this view: click to hide it here"
+                        } else {
+                            "Hidden in this view: click to show it here"
+                        };
+                        if ui
+                            .add_enabled_ui(row.enabled, |ui| eye(ui, row.checked, tip))
+                            .inner
+                            .clicked()
+                        {
+                            self.asked.push(Asked::Layer(row.path.clone(), !row.checked));
+                        }
                         let mut text = RichText::new(row.label.as_str());
                         if !row.is_layer {
                             text = text.italics();
@@ -659,13 +699,20 @@ impl ViewLayersPopup {
                         if !row.enabled {
                             text = text.color(palette::text_disabled().to_egui());
                         }
-                        let boxed = ui.add_enabled(row.enabled, egui::Checkbox::without_text(&mut checked));
-                        if boxed.changed() {
-                            self.asked.push(Asked::Layer(row.path.clone(), checked));
-                        }
                         let selected = self.current.as_deref() == Some(row.path.as_str());
                         let label = ui
-                            .add_enabled_ui(row.enabled, |ui| ui.selectable_label(selected, text))
+                            .add_enabled_ui(row.enabled, |ui| {
+                                ui.add(
+                                    egui::Button::selectable(selected, text)
+                                        // An empty right end, as the Layers panel's count is,
+                                        // holds the name at the left of a row wider than it:
+                                        // a button centres what it holds.
+                                        .right_text("")
+                                        .frame_when_inactive(false)
+                                        .truncate()
+                                        .min_size(Vec2::new(ui.available_width(), LIST_ROW)),
+                                )
+                            })
                             .inner;
                         if label.on_hover_text(row.tip.as_str()).clicked() {
                             self.asked.push(Asked::Current(row.path.clone()));
@@ -688,7 +735,9 @@ impl ViewLayersPopup {
         );
         controls::custom(ui, &tree, record);
 
+        ui.add_space(style::GROUP_GAP - style::GAP);
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = style::GAP;
             let button = |ui: &mut Ui, name: &str, text: &str, tip: &str, enabled: bool| {
                 ui.add_enabled_ui(enabled, |ui| {
                     controls::button(ui, name, text)
@@ -750,19 +799,50 @@ impl ViewLayersPopup {
         }
 
         if !self.references.is_empty() {
+            ui.add_space(style::GROUP_GAP - style::GAP);
             ui.label(RichText::new("Reference data").strong());
             let list = ui.vertical(|ui| {
+                // The tree's rows again: the eye, then the name, and its kind at the right in
+                // the secondary text.
+                ui.spacing_mut().interact_size.y = LIST_ROW;
+                ui.spacing_mut().item_spacing = Vec2::new(style::GAP / 2.0, 0.0);
                 for row in self.references.iter().filter(|row| !row.filtered_out) {
                     ui.horizontal(|ui| {
-                        let mut checked = row.checked;
+                        let tip = if row.checked {
+                            "Shown in this view: click to hide it here"
+                        } else {
+                            "Hidden in this view: click to show it here"
+                        };
                         if ui
-                            .add_enabled(row.enabled, egui::Checkbox::new(&mut checked, row.name.as_str()))
-                            .on_hover_text(row.tip.as_str())
-                            .changed()
+                            .add_enabled_ui(row.enabled, |ui| eye(ui, row.checked, tip))
+                            .inner
+                            .clicked()
                         {
-                            self.asked.push(Asked::Reference(row.id, checked));
+                            self.asked.push(Asked::Reference(row.id, !row.checked));
                         }
-                        ui.label(row.kind.as_str());
+                        let mut name = RichText::new(row.name.as_str());
+                        if !row.enabled {
+                            name = name.color(palette::text_disabled().to_egui());
+                        }
+                        // The name is the switch's too, as a check box's own text was.
+                        let named = ui
+                            .add_enabled_ui(row.enabled, |ui| {
+                                ui.add(
+                                    egui::Button::new(name)
+                                        .right_text(
+                                            RichText::new(row.kind.as_str())
+                                                .small()
+                                                .color(palette::text_muted().to_egui()),
+                                        )
+                                        .frame_when_inactive(false)
+                                        .truncate()
+                                        .min_size(Vec2::new(ui.available_width(), LIST_ROW)),
+                                )
+                            })
+                            .inner;
+                        if named.on_hover_text(row.tip.as_str()).clicked() {
+                            self.asked.push(Asked::Reference(row.id, !row.checked));
+                        }
                     });
                 }
             });
@@ -775,6 +855,12 @@ impl ViewLayersPopup {
             controls::custom(ui, &list.response, record);
         }
     }
+}
+
+/// A row's switch of what this view shows: the Layers panel's eye (its `row_switch`), lit while
+/// the row is shown here and faint while it is hidden.
+fn eye(ui: &mut Ui, on: bool, tip: &str) -> egui::Response {
+    crate::main_window::panels::row_switch(ui, "LayerVisible", on, tip)
 }
 
 /// What a refused line says, as the Status the popup's buttons answer with.

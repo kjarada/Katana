@@ -253,8 +253,14 @@ impl SurveyParcelDialog {
     }
 
     fn courses_page(ui: &mut Ui, form: &mut ParcelForm) {
-        ui.weak(COURSE_COLUMNS.join(" | "));
-        drive::rows(ui, "parcelCourses", &form.courses, &mut form.course);
+        crate::shell::dialog::pick_table(
+            ui,
+            "parcelCourses",
+            &COURSE_COLUMNS,
+            &form.courses,
+            &mut form.course,
+            "Compute lists the parcel's courses here, one a row.",
+        );
         coloured_label(
             ui,
             "parcelSummary",
