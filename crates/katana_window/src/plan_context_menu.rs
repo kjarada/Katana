@@ -62,10 +62,9 @@ use katana_geometry::polyline_vertices::{check_corner, delete_vertex};
 
 use crate::canvas::Color;
 use crate::command_word::command_word;
-use crate::drive::action::{Action, Menu, MenuItem, action_item};
+use crate::drive::action::{Action, Menu, MenuItem, menu_items_ui};
 use crate::host::{Host, VerbOutcome};
 use crate::shell::dialog::{MenuShown, popup_menu};
-use crate::theme::style::{menu_section, menu_separator};
 
 /// The menu's object name.
 pub const PLAN_CONTEXT_MENU: &str = "planContextMenu";
@@ -686,7 +685,7 @@ impl PlanContextMenu {
     /// driver's press - chose this frame.
     pub fn ui(&self, ui: &mut Ui) -> Option<String> {
         let mut chosen = None;
-        items_ui(ui, &self.menu, &mut chosen);
+        menu_items_ui(ui, &self.menu, &mut chosen);
         chosen
     }
 
@@ -695,31 +694,8 @@ impl PlanContextMenu {
     pub fn popup(&self, ctx: &Context, at: Pos2) -> (MenuShown, Option<String>) {
         let mut chosen = None;
         let shown = popup_menu(ctx, PLAN_CONTEXT_MENU, at, |ui| {
-            items_ui(ui, &self.menu, &mut chosen);
+            menu_items_ui(ui, &self.menu, &mut chosen);
         });
         (shown, chosen)
-    }
-}
-
-fn items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
-    for item in &menu.items {
-        match item {
-            MenuItem::Action(action) => {
-                if action_item(ui, action).clicked() {
-                    *chosen = Some(action.name.clone());
-                }
-            }
-            MenuItem::Section(title) => {
-                menu_section(ui, title);
-            }
-            MenuItem::Separator => {
-                menu_separator(ui);
-            }
-            MenuItem::Menu(under) => {
-                ui.menu_button(under.title.replace('&', ""), |ui| {
-                    items_ui(ui, under, chosen);
-                });
-            }
-        }
     }
 }

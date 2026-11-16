@@ -28,7 +28,7 @@ use egui::{Context, Event, Modifiers, PointerButton, Pos2, Rect, Ui, Vec2, Viewp
 use katana_core::error::make_error;
 use katana_core::{ErrorCode, Status};
 
-use super::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item};
+use super::action::{Action, Menu, ToolBar, ToolBarItem, action_item};
 use super::mailbox::{ActId, ActOutcome, Posted};
 use super::registry::{
     ControlRecord, Part, Snapshot, TargetKind, TargetRecord, TargetSpec, WINDOW, begin_target,
@@ -448,24 +448,12 @@ impl<W: Workbench> WorkbenchHost<W> {
     }
 }
 
-/// A menu drawn as a menu button with its items: a click on an action is the action chosen.
+/// A menu drawn as a menu button with its items (super::action::menu_items_ui, as the window draws
+/// its own): a click on an action is the action chosen.
 fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
     ui.menu_button(menu.title.replace('&', ""), |ui| {
-        for item in &menu.items {
-            match item {
-                MenuItem::Action(action) => {
-                    if action_item(ui, action).clicked() {
-                        *chosen = Some(action.name.clone());
-                    }
-                }
-                MenuItem::Section(title) => {
-                    ui.weak(title.as_str());
-                }
-                MenuItem::Separator => {
-                    ui.separator();
-                }
-                MenuItem::Menu(menu) => menu_ui(ui, menu, chosen),
-            }
-        }
+        crate::shell::dialog::menu_column(ui, |ui| {
+            super::action::menu_items_ui(ui, menu, chosen);
+        });
     });
 }

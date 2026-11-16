@@ -504,12 +504,12 @@ fn snap_mode_action(mode: katana_cad::snapping::SnapMode, modes: SnapModes) -> A
         "Nearest" => ("SnapNearest", "Snap to the nearest point on any entity"),
         _ => ("SnapGrid", "Snap to the grid's points"),
     };
-    act(
-        &format!("viewSnapMode{}", mode.name()),
-        icon,
-        mode.name(),
-        tip,
-    )
+    // The mode's name is the cad layer's, and the action's; what a person reads is British.
+    let text = match mode.name() {
+        "Center" => "Centre",
+        name => name,
+    };
+    act(&format!("viewSnapMode{}", mode.name()), icon, text, tip)
     .checkable(modes & (mode as SnapModes) != 0)
 }
 
@@ -1206,7 +1206,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(import_cloud_action())
         .action(export_cloud_action())
         .action(copc_action())
-        .separator()
+        // Dataset Information reads a vector file, a raster or a point cloud, so it is under none
+        // of the three: a section of its own, where a bare rule left it under Point Cloud's.
+        .section("Any Dataset")
         .action(dataset_info_action())
         .section("Online - Web Services")
         .action(online.clone());
@@ -1218,7 +1220,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             act(
                 "helpCommandReference",
                 "CommandReference",
-                "&Command Reference",
+                "&Command Reference...",
                 "Every command the command line accepts, searchable",
             )
             .shortcut(plain(Key::F1))
@@ -1228,7 +1230,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             act(
                 "helpSheetCommands",
                 "Help",
-                "&Sheets and Plotting Commands",
+                "&Sheets and Plotting Commands...",
                 "The sheet verbs and every option they take (HELP SHEETS)",
             )
             .opens("commandReferenceDialog"),
@@ -1247,7 +1249,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(act(
             "helpAbout",
             "About",
-            "&About Katana",
+            "&About Katana...",
             "Version and build information",
         ));
 
@@ -1600,12 +1602,14 @@ pub fn history_menus(document: &katana_cad::Document) -> [Menu; 2] {
     ]
 }
 
-/// Gives every submenu of `menu`, at any depth, the status tip `signs` keeps for it by its name.
+/// Gives every submenu of `menu`, at any depth, the icon and the status tip `signs` keeps for it
+/// by its name: the icon its item shows in the menu, as every action's item shows its own.
 fn tip_submenus(menu: &mut Menu, signs: &BTreeMap<String, (&'static str, String)>) {
     for item in &mut menu.items {
         if let MenuItem::Menu(sub) = item {
-            if let Some((_, tip)) = signs.get(&sub.name) {
+            if let Some((icon, tip)) = signs.get(&sub.name) {
                 sub.tip.clone_from(tip);
+                sub.icon = icon;
             }
             tip_submenus(sub, signs);
         }

@@ -1,8 +1,8 @@
 //! The twins of tests/qt_widgets/test_theme.cpp's Theme cases that are the theme's (theme::style):
 //! a menu section shows its title, a long choice list scrolls, the command line's font is fixed
 //! pitch and every font follows the text size, the text sizes read back from their names, and a
-//! checked menu item's icon is framed. The two title-bar cases are D's (dock_chrome) and Icons is
-//! I's.
+//! checked menu item shows a tick before its icon. The two title-bar cases are D's (dock_chrome)
+//! and Icons is I's.
 //!
 //! The C++ grabbed each widget into an image and counted its ink. The egui twins read what egui
 //! was asked to paint - its shapes, the input of every renderer - where the C++ read the pixels:
@@ -13,17 +13,15 @@
 use std::collections::BTreeSet;
 
 use egui::epaint::ClippedShape;
-use egui::{Modifiers, Order, PointerButton, Pos2, Rect, Shape, TextStyle, TextureId, Ui};
-use katana_window::canvas::{
-    Brush, Canvas, Color, Font, FontMetrics, FontSize, Image, Pen, PointF, RasterCanvas, RectF,
-    TextMetrics, resolved_family,
-};
+use egui::epaint::ColorMode;
+use egui::{Modifiers, Order, PointerButton, Pos2, Rect, Shape, TextStyle, Ui};
+use katana_window::canvas::{Font, FontMetrics, FontSize, TextMetrics, resolved_family};
 use katana_window::drive::{self, Action, Choice, Harness, action_item};
 use katana_window::shell::popup_menu;
 use katana_window::theme::palette;
 use katana_window::theme::style::{
-    MAX_VISIBLE_ITEMS, apply, menu_icon_cell, menu_section, menu_separator, monospace_font,
-    monospace_font_id, overlay_font, set_text_size, text_size, ui_font,
+    MAX_VISIBLE_ITEMS, MENU_CHECK_WIDTH, MENU_GUTTER_WIDTH, apply, menu_section, menu_separator,
+    monospace_font, monospace_font_id, overlay_font, set_text_size, text_size, ui_font,
 };
 use katana_window::theme::{TextSize, text_size_from, text_size_steps};
 
@@ -101,36 +99,9 @@ fn is_blue(shape: &Shape) -> bool {
     match shape {
         Shape::Rect(rect) => blue(rect.stroke.color) || blue(rect.fill),
         Shape::LineSegment { stroke, .. } => blue(stroke.color),
+        Shape::Path(path) => matches!(path.stroke.color, ColorMode::Solid(color) if blue(color)),
         _ => false,
     }
-}
-
-/// A grid of three lines each way, 16 px: the Grid icon's shape, painted on the canvas as the
-/// icons are.
-fn grid_icon() -> Image {
-    let mut canvas = RasterCanvas::new(16, 16);
-    canvas.set_pen(Pen::new(Color::WHITE));
-    for at in [2.0, 8.0, 14.0] {
-        canvas.draw_line(PointF::new(at + 0.5, 1.0), PointF::new(at + 0.5, 15.0));
-        canvas.draw_line(PointF::new(1.0, at + 0.5), PointF::new(15.0, at + 0.5));
-    }
-    canvas.fill_rect(
-        RectF::new(7.0, 7.0, 3.0, 3.0),
-        &Brush::solid(palette::accent()),
-    );
-    canvas.into_image()
-}
-
-/// One row of a menu: an item with an icon, checked or not - the icon's cell, the text, and the
-/// stylesheet's QMenu::item padding-right after it.
-fn menu_row(ui: &mut Ui, icon: TextureId, checked: bool) -> Rect {
-    ui.horizontal(|ui| {
-        menu_icon_cell(ui, Some(icon), checked);
-        ui.label("Grid");
-        ui.add_space(28.0);
-    })
-    .response
-    .rect
 }
 
 /// The font's size in points; every font of the theme but the overlay's is given in points.
@@ -318,51 +289,70 @@ mod theme {
     }
 
     #[test]
-    fn a_checked_menu_item_with_an_icon_is_framed_and_an_unchecked_one_is_not() {
-        // Grid, Object Snap, Link This View: the stylesheet drew a checkable item that has an
-        // icon with no check mark at all, and on looked exactly like off. Two items alike but
-        // for the check, one above the other, the unchecked one the baseline: what differs is
-        // the checked one's frame - the accent's blue, round the icon, which is 16 px across -
-        // and nothing else.
+    fn a_checked_menu_item_shows_a_tick_before_its_icon_and_an_unchecked_one_does_not() {
+        // Grid, Object Snap, every toolbar of View > Toolbars: egui's selectable button drew a
+        // checkable item that was on as a pill filled with the selection's blue, fourteen of them
+        // a column of pressed keys, and no item showed its icon (the look of 2026-11-16). Two
+        // items alike but for the check, one above the other, the unchecked one the baseline:
+        // what differs is the checked one's tick - the accent, in the check column before the
+        // icon - and nothing else; both show their icon after the check column.
         let mut harness = Harness::new();
         apply(harness.context());
-        let texture = harness.context().load_texture(
-            "grid",
-            grid_icon().to_color_image(),
-            egui::TextureOptions::default(),
+        katana_window::icons::install(
+            harness.context(),
+            katana_window::icons::default_rasteriser().expect("the window's rasteriser"),
         );
-        let icon = texture.id();
+        let on = Action::new("gridOn", "Grid").icon("Grid").checkable(true);
+        let off = Action::new("gridOff", "Grid").icon("Grid").checkable(false);
         let at = Pos2::new(40.0, 40.0);
         let mut on_row = Rect::NOTHING;
         let mut off_row = Rect::NOTHING;
+        let mut padding = 0.0;
         let mut draw = |ui: &mut Ui| {
             let ctx = ui.ctx().clone();
             popup_menu(&ctx, "gridMenu", at, |ui| {
-                on_row = menu_row(ui, icon, true);
-                off_row = menu_row(ui, icon, false);
+                egui::containers::menu::menu_style(ui.style_mut());
+                padding = ui.spacing().button_padding.x;
+                on_row = action_item(ui, &on).rect;
+                off_row = action_item(ui, &off).rect;
             });
         };
         harness.show(&mut draw).expect("the menu is drawn");
         let output = harness.frame(&mut draw);
 
         assert_eq!(on_row.size(), off_row.size());
-        let on = shapes_in(&output.shapes, on_row);
-        let off = shapes_in(&output.shapes, off_row);
+        let on_shapes = shapes_in(&output.shapes, on_row);
+        let off_shapes = shapes_in(&output.shapes, off_row);
         output.drop_without_applying_deltas();
-        let differ: Vec<&Shape> = on.iter().filter(|&shape| !off.contains(shape)).collect();
+        let differ: Vec<&Shape> = on_shapes
+            .iter()
+            .filter(|&shape| !off_shapes.contains(shape))
+            .collect();
         assert!(!differ.is_empty(), "checked and unchecked look alike");
-        let blue = differ.iter().copied().any(is_blue);
-        let framed = differ.iter().fold(Rect::NOTHING, |all, shape| {
+        assert!(differ.iter().copied().any(is_blue), "the tick is the accent");
+        let ticked = differ.iter().fold(Rect::NOTHING, |all, shape| {
             all.union(shape.visual_bounding_rect())
         });
-        assert!(blue, "the frame is the accent");
-        assert!(framed.width() >= 16.0, "round the icon: {framed:?}");
-        assert!(framed.height() >= 16.0, "round the icon: {framed:?}");
+        // Shapes are placed from the row's corner: the check column is the gutter's first
+        // MENU_CHECK_WIDTH, after the item's button padding.
         assert!(
-            framed.right() < on_row.width() / 2.0,
-            "the icon's cell, not the words: {framed:?} in a row {} wide",
-            on_row.width()
+            ticked.left() >= padding - 0.5 && ticked.right() <= padding + MENU_CHECK_WIDTH + 0.5,
+            "the tick in the check column: {ticked:?}"
         );
-        drop(texture);
+        assert!(ticked.width() >= 6.0 && ticked.height() >= 4.0, "a tick, not a dot: {ticked:?}");
+        // The icon - an image, the only mesh a menu item paints - in the gutter after the check
+        // column, on the unchecked item as on the checked one.
+        for shapes in [&on_shapes, &off_shapes] {
+            let icon = shapes
+                .iter()
+                .find(|shape| matches!(shape, Shape::Mesh(_)))
+                .map(Shape::visual_bounding_rect)
+                .expect("the item shows its icon");
+            assert!(
+                icon.left() >= padding + MENU_CHECK_WIDTH - 0.5
+                    && icon.right() <= padding + MENU_GUTTER_WIDTH + 0.5,
+                "the icon in its column: {icon:?}"
+            );
+        }
     }
 }

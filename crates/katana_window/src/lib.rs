@@ -84,11 +84,13 @@ pub mod drive {
     pub mod program;
     pub mod registry;
 
-    pub use action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item, shortcut_text};
+    pub use action::{
+        Action, Menu, MenuItem, ToolBar, ToolBarItem, action_item, menu_items_ui, shortcut_text,
+    };
     pub use controls::{
-        Choice, LineOptions, SpinRange, TextOptions, button, button_as, check, choice, custom,
-        label, label_as, line, line_with, primary, primary_button, radio, rows, spin, tabs, text,
-        text_with, toggle, whole,
+        Choice, LineOptions, SpinRange, TextOptions, button, button_as, check, check_box, choice,
+        custom, label, label_as, line, line_with, primary, primary_button, radio, radio_button,
+        rows, spin, tabs, text, text_with, toggle, tree_expander, whole,
     };
     pub use harness::{HEADLESS_HEIGHT, HEADLESS_WIDTH, Harness, WorkbenchHost};
     pub use mailbox::{Act, ActId, ActOutcome, Posted, Taken};
@@ -138,8 +140,8 @@ pub mod theme {
     pub mod style;
 
     pub use style::{
-        apply, menu_icon_cell, menu_section, menu_separator, monospace_font, monospace_font_id,
-        overflow_arrow, overlay_font, paint_overflow_arrow, set_text_size, text_size, ui_font,
+        apply, menu_section, menu_separator, monospace_font, monospace_font_id, overflow_arrow,
+        overlay_font, paint_menu_gutter, paint_overflow_arrow, set_text_size, text_size, ui_font,
         ui_font_id, visuals,
     };
 }

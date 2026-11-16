@@ -503,16 +503,21 @@ impl ReferenceState {
                     }
                     let visible = self.shown[at].iter().filter(|shown| **shown).count();
                     let open = self.expanded.get(at).copied().unwrap_or(false);
-                    let header = ui.selectable_label(
-                        self.current == Some((at, None)),
-                        RichText::new(format!(
-                            "{} {}   {visible} of {}",
-                            if open { "\u{25be}" } else { "\u{25b8}" },
-                            section.name,
-                            section.entries.len()
-                        ))
-                        .strong(),
-                    );
+                    let header = ui
+                        .horizontal(|ui| {
+                            let expander = crate::drive::controls::tree_expander(ui, Some(open));
+                            let name = ui.selectable_label(
+                                self.current == Some((at, None)),
+                                RichText::new(format!(
+                                    "{}   {visible} of {}",
+                                    section.name,
+                                    section.entries.len()
+                                ))
+                                .strong(),
+                            );
+                            expander.union(name)
+                        })
+                        .inner;
                     if header.clicked() {
                         toggled = Some(at);
                         chosen = Some((at, None));
@@ -525,7 +530,12 @@ impl ReferenceState {
                             continue;
                         }
                         let row = ui
-                            .indent((at, number), |ui| {
+                            .horizontal(|ui| {
+                                // Under its section's name, past the section's expander.
+                                ui.add_space(
+                                    crate::drive::controls::EXPANDER_WIDTH
+                                        + ui.spacing().item_spacing.x,
+                                );
                                 ui.selectable_label(
                                     self.current == Some((at, Some(number))),
                                     format!("{}   {}", entry.title, summary_of(entry)),
