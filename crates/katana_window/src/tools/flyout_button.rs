@@ -2035,26 +2035,43 @@ pub fn tool_bar_strip(
 
     if layout.overflow {
         out.lit = overflow_lit(&strip.items, &layout, expanded);
-        let (width, height) = if vertical {
-            (breadth, EXTENSION_EXTENT)
-        } else {
-            (EXTENSION_EXTENT, breadth)
+        // A bar with every item behind its arrow - a side column's bar under one that took the
+        // column (main_window::layout::column_rooms) - is one button with its first tool's icon
+        // and a family's corner mark, where there is room for it: the arrow alone, under the bar
+        // above's own arrow, read as one sign drawn twice (the third look audit's G).
+        let sign = collapsed_sign(strip, &layout, room_pixels);
+        let (width, height) = match sign {
+            Some(_) => ToolButtonLook::TOOL.button_size(strip.icon_size),
+            None if vertical => (breadth, EXTENSION_EXTENT),
+            None => (EXTENSION_EXTENT, breadth),
         };
-        let end = room_pixels - TOOL_BAR_PADDING_ALONG - EXTENSION_EXTENT;
+        let (end, across) = match sign {
+            Some(_) => (
+                TOOL_BAR_PADDING_ALONG,
+                TOOL_BAR_PADDING_ACROSS + (breadth - if vertical { width } else { height }) / 2,
+            ),
+            None => (
+                room_pixels - TOOL_BAR_PADDING_ALONG - EXTENSION_EXTENT,
+                TOOL_BAR_PADDING_ACROSS,
+            ),
+        };
         let rect = if vertical {
             Rect::from_min_size(
-                bar.min + Vec2::new(TOOL_BAR_PADDING_ACROSS as f32, end as f32),
+                bar.min + Vec2::new(across as f32, end as f32),
                 Vec2::new(width as f32, height as f32),
             )
         } else {
             Rect::from_min_size(
-                bar.min + Vec2::new(end as f32, TOOL_BAR_PADDING_ACROSS as f32),
+                bar.min + Vec2::new(end as f32, across as f32),
                 Vec2::new(width as f32, height as f32),
             )
         };
         let id = egui::Id::new(("katanaToolButton", strip.name.as_str(), OVERFLOW_BUTTON));
         let taken = take(ui, OVERFLOW_BUTTON);
-        let response = ui.interact(rect, id, Sense::click());
+        let mut response = ui.interact(rect, id, Sense::click());
+        if sign.is_some() {
+            response = response.on_hover_text(format!("{}: click for its tools", strip.title));
+        }
         let mut toggled = response.clicked();
         if let Some(taken) = &taken {
             match &taken.posted.act {
@@ -2087,7 +2104,20 @@ pub fn tool_bar_strip(
             checked: expanded,
             disabled: !ui.is_enabled(),
         };
-        let paint = overflow_paint(width, height, vertical, state, out.lit, Color::TRANSPARENT);
+        let paint = match sign {
+            Some(icon) => ButtonPaint {
+                width,
+                height,
+                look: ToolButtonLook::TOOL,
+                icon: ButtonIcon::Named(String::from(icon)),
+                icon_size: strip.icon_size,
+                state,
+                // Lit as the arrow was while a tool it hides runs, as a family's mark is.
+                sign: MenuSign::Mark(mark_ink(&state, out.lit, false)),
+                ground: Color::TRANSPARENT,
+            },
+            None => overflow_paint(width, height, vertical, state, out.lit, Color::TRANSPARENT),
+        };
         show_button(ui, rect, &paint);
         let mut record_of = ControlRecord::new(OVERFLOW_BUTTON, ControlKind::Toggle);
         record_of.checked = Some(expanded);
@@ -2147,6 +2177,21 @@ pub fn tool_bar_strip(
     );
     end_target(ui, bar);
     out
+}
+
+/// The icon a bar with every item hidden is drawn as (`tool_bar_strip`): its first tool's, when
+/// the bar has `room` for a tool button and its padding; None leaves it the overflow arrow.
+fn collapsed_sign(strip: &Strip, layout: &StripLayout, room: i32) -> Option<&'static str> {
+    let (width, height) = ToolButtonLook::TOOL.button_size(strip.icon_size);
+    let along = if strip.vertical { height } else { width };
+    if layout.shown.iter().any(|shown| *shown) || room < along + 2 * TOOL_BAR_PADDING_ALONG {
+        return None;
+    }
+    strip.items.iter().find_map(|item| match item {
+        StripItem::Action { action, .. } if !action.icon.is_empty() => Some(action.icon),
+        StripItem::Family(flyout) if !flyout.default.icon.is_empty() => Some(flyout.default.icon),
+        _ => None,
+    })
 }
 
 /// One shown item of a toolbar, at `rect`.

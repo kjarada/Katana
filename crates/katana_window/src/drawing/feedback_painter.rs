@@ -33,8 +33,9 @@ pub mod overlay {
     use crate::canvas::Color;
     use crate::theme::palette;
 
-    /// A tool's ghost and base points, and the prompt's text: the preview cyan the plan view has
-    /// drawn rubber bands in from the start.
+    /// A tool's ghost and base points: the preview cyan the plan view has drawn rubber bands in
+    /// from the start. (The prompt band's words were cyan too until 2026-11-16; they are the
+    /// chrome's text now, paint_band.)
     pub const fn preview() -> Color {
         Color::rgb(0x4c, 0xc9, 0xf0)
     }
@@ -63,8 +64,8 @@ pub mod overlay {
         Color::rgb(0xf0, 0x40, 0x40)
     }
 
-    /// The backing of the prompt band, a caption or a label: darker than the view, so text over a
-    /// busy drawing stays legible.
+    /// The backing of a caption or a label: darker than the view, so text over a busy drawing
+    /// stays legible. (The prompt band is on the chrome's panel grey, paint_band.)
     pub const fn ground() -> Color {
         Color::rgb(0x12, 0x16, 0x1a)
     }
@@ -1056,25 +1057,53 @@ pub fn paint_band(canvas: &mut dyn Canvas, view: IntRect, text: &str, elide: Eli
     let pad = 4;
     let height = whole_height(canvas.metrics(), &font) as i32 + 2 * pad;
     let band = IntRect::new(view.x, view.bottom() + 1 - height, view.width, height);
-    let fill = overlay::ground().with_alpha(220);
     let line =
         canvas
             .metrics()
             .elided_text(&font, text, elide, f64::from(band.width - 2 * pad - 2));
+    // On the chrome's tokens - the panel's grey, a border along its top, the text colour - with
+    // the accent for the words that say whose prompt it is (the tool's name before its colon).
+    // It was the preview cyan on a darker ground: a second accent hue, beside the theme's blue,
+    // and the brightest words on the screen (the third look audit's H). Most of the way opaque,
+    // so a busy drawing under it does not show through the words.
     canvas.save();
-    canvas.fill_rect(band.to_rect_f(), &Brush::solid(fill));
-    canvas.set_font(font);
-    canvas.set_pen(Pen::new(overlay::preview()));
+    canvas.fill_rect(
+        band.to_rect_f(),
+        &Brush::solid(palette::panel().with_alpha(235)),
+    );
+    canvas.fill_rect(
+        RectF::new(
+            f64::from(band.x),
+            f64::from(band.y),
+            f64::from(band.width),
+            1.0,
+        ),
+        &Brush::solid(palette::border()),
+    );
+    canvas.set_font(font.clone());
     let inner = IntRect::new(
         band.x + pad + 2,
         band.y,
         band.width - (pad + 2) - pad,
         band.height,
     );
+    let flags = TextFlags::aligned(HAlign::Left, VAlign::VCenter);
+    // The name is lit only where the band shows it whole: a line cut at its left has lost it.
+    let head = text
+        .find(": ")
+        .map(|at| &text[..=at])
+        .filter(|head| line.starts_with(head))
+        .unwrap_or("");
+    if !head.is_empty() {
+        canvas.set_pen(Pen::new(palette::accent()));
+        canvas.draw_text_in(inner.to_rect_f(), flags, head);
+    }
+    let advance = canvas.metrics().horizontal_advance(&font, head);
+    canvas.set_pen(Pen::new(palette::text()));
     canvas.draw_text_in(
-        inner.to_rect_f(),
-        TextFlags::aligned(HAlign::Left, VAlign::VCenter),
-        &line,
+        inner.to_rect_f().adjusted(advance, 0.0, 0.0, 0.0),
+        flags,
+        &line[head.len()..],
     );
     canvas.restore();
     line

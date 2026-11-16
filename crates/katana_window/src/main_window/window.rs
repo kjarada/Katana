@@ -359,7 +359,7 @@ impl MainWindow {
         exec.utility_lines = Some(utilities.lines());
         exec.road = Some(Box::new(RoadWorkbench::new(&exec.document)));
         let road_objects = RoadObjectWorkbench::new();
-        // GIS > Online - Web Services.
+        // GIS > Online.
         let outbox = exec.outbox();
         let online = OnlineDataWorkbench::new(
             OnlineServices {

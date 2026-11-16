@@ -244,14 +244,14 @@ impl CustomisationWorkbench {
     /// The Format menu: two titled sections, so a style that draws titles shows what each group is
     /// for.
     pub fn format_menu(&self) -> Menu {
-        let mut menu = Menu::new(FORMAT_MENU, FORMAT_MENU_TITLE).section("Tables and Libraries");
+        let mut menu = Menu::new(FORMAT_MENU, FORMAT_MENU_TITLE).section("Tables and libraries");
         if let Some(layers) = &self.services.layers {
             menu = menu.action(layers.clone());
         }
         menu.action(Self::style_manager_action())
             .action(Self::symbol_library_action())
             .action(Self::code_manager_action())
-            .section("Across the Drawing")
+            .section("Across the drawing")
             .action(Self::global_modify_action())
             .action(Self::purge_action())
     }

@@ -1486,7 +1486,9 @@ mod utility_workbench {
         assert_eq!(
             items,
             [
-                "[Subsurface Utilities (AS 5488)]",
+                // The section in sentence case, as every menu section is (the third look
+                // audit's G).
+                "[Subsurface utilities (AS 5488)]",
                 "utilityDraw",
                 "utilityReport",
                 "utilityVerify",

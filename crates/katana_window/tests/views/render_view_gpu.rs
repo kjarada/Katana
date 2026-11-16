@@ -41,7 +41,9 @@ mod render_view_gpu {
         }
     }
 
-    const BACKGROUND: katana_render::Rgba = rgba(28, 30, 36);
+    // The plan's #1e2329, every view's ground since the look of 2026-11-16 (it was (28, 30,
+    // 36)): FrameSettings' default and the render view's BACKGROUND.
+    const BACKGROUND: katana_render::Rgba = rgba(30, 35, 41);
 
     #[test]
     fn on_the_desktop_the_hosts_layers_are_drawn_by_its_gpu_child() {

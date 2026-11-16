@@ -64,9 +64,10 @@ mod gpu_scene_view {
             .collect()
     }
 
-    /// The pixels of a grabbed frame that are not the view's background (28, 30, 36).
+    /// The pixels of a grabbed frame that are not the view's background (30, 35, 41), the
+    /// plan's #1e2329 since the look of 2026-11-16 (it was (28, 30, 36)).
     fn drawn(grabbed: &Image) -> usize {
-        drawn_pixels(grabbed, rgba(28, 30, 36))
+        drawn_pixels(grabbed, rgba(30, 35, 41))
     }
 
     #[test]

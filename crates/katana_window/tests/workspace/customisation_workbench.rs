@@ -196,7 +196,9 @@ mod customisation_workbench {
                 _ => None,
             })
             .collect();
-        assert_eq!(titles, ["Tables and Libraries", "Across the Drawing"]);
+        // In sentence case, as every menu section is (docs/desktop.md, "The look of the
+        // application"; the third look audit's G found these in title case).
+        assert_eq!(titles, ["Tables and libraries", "Across the drawing"]);
         let bars = bench.bench.tool_bars();
         let tools: Vec<String> = bars[0]
             .items

@@ -672,6 +672,57 @@ mod feedback_painter {
     }
 
     #[test]
+    fn the_band_is_on_the_chromes_tokens_its_tools_name_in_the_accent() {
+        // The third look audit's H: the band's words were the preview cyan, a second accent hue
+        // beside the theme's blue. The tool's name before its colon is the accent, the rest the
+        // text colour, over the panel's grey; no pixel is the cyan.
+        let mut image = Image::new(300, 100);
+        image.fill(palette::viewport());
+        paint_on(&mut image, |canvas| {
+            let _ = paint_band(
+                canvas,
+                IntRect::new(0, 0, 300, 100),
+                "Line: Specify next point or [Undo]",
+                Elide::Middle,
+            );
+        });
+        let panel = palette::panel();
+        let count = |colour: Color, ground: Color| {
+            let mut count = 0;
+            for y in 60..100 {
+                for x in 0..300 {
+                    count += i32::from(ink_of(image.pixel(x, y), colour, ground));
+                }
+            }
+            count
+        };
+        assert!(count(palette::accent(), panel) > 10, "the name in the accent");
+        assert!(count(palette::text(), panel) > count(palette::accent(), panel));
+        // No cyan: a pixel within the cyan's tolerance that is not also an edge pixel of the
+        // accent's words (an anti-aliased blue at part coverage lies within both).
+        let mut cyan = 0;
+        for y in 60..100 {
+            for x in 0..300 {
+                let pixel = image.pixel(x, y);
+                cyan += i32::from(
+                    ink_of(pixel, overlay::preview(), panel)
+                        && !ink_of(pixel, palette::accent(), panel),
+                );
+            }
+        }
+        assert_eq!(cyan, 0, "no cyan");
+        // The accent is the name's alone: left of where its colon ends, the words' end is text.
+        let accent_columns: Vec<u32> = (0..300)
+            .filter(|&x| (60..100).any(|y| ink_of(image.pixel(x, y), palette::accent(), panel)))
+            .collect();
+        let last = *accent_columns.last().expect("the name is drawn");
+        assert!(last < 60, "the accent stops after \"Line:\" ({last})");
+        // The band's ground is the panel's, not the darker overlay ground it was.
+        let ground = image.pixel(298, 98);
+        assert!((i32::from(ground.r) - i32::from(panel.r)).abs() <= 3, "{ground:?}");
+    }
+
+    #[test]
     fn a_run_of_vertices_that_go_is_thinned_and_never_crosses_out_a_kept_vertex() {
         // Straighten on a dense string: "keep" rings at (0,0) and (6,0), pixels (100,200) and
         // (160,200), and the 29 vertices between, 0.2 apart - 2 px - going. An X a vertex was one

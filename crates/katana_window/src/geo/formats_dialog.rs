@@ -93,13 +93,13 @@ fn field(record: &Record, key: &str) -> String {
 /// it shows, which is how --dialog finds it.
 pub fn add_formats_item(menus: &mut GeoMenus) {
     let action = Action::new("gisFormats", "&Formats...")
-        .icon("Processing")
+        .icon("GisFormats")
         .tip(
             "Every format this build of GDAL reads and writes, and each driver's options \
              (FORMATS)",
         )
         .opens("gisFormatsDialog");
-    menus.add_to_gis("Processing - GDAL", action);
+    menus.add_to_gis("Processing", action);
 }
 
 /// The window's one Formats dialog: made the first time its action is triggered, and kept, as

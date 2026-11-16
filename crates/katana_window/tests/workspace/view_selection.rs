@@ -19,6 +19,28 @@ mod view_selection {
 
     use crate::support::Site;
 
+    #[test]
+    fn the_selection_in_every_view_is_the_windows_accent() {
+        // The cad layer cannot see the window's theme, so selection_style writes the accent's
+        // value out (#4c8dff): one colour for what is chosen, in every view and on the chrome.
+        // It was an orange, the hue of an alignment's amber (the third look audit's H).
+        let accent = katana_window::theme::palette::accent();
+        assert_eq!(
+            SELECTION_COLOR,
+            katana_render::framebuffer::rgba(accent.r, accent.g, accent.b)
+        );
+        assert_ne!(
+            accent,
+            katana_window::drawing::feedback_painter::overlay::preview(),
+            "the selection is told from a tool's preview"
+        );
+        assert_ne!(
+            accent,
+            katana_window::drawing::feedback_painter::overlay::grip_hover(),
+            "and from a grip under the cursor"
+        );
+    }
+
     /// A design line from (10, 10) to (40, 30) and an as-built line from (10, 30) to (40, 10), the
     /// design one selected; view 1 hides the as-built layer and view 2 the design one.
     struct DesignAndAsBuilt {

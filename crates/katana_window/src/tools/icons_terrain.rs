@@ -19,8 +19,9 @@ const CENTRE: PointF = PointF::new(12.0, 12.0);
 
 /// The TIN in the fine weight: the object every tool of the family works on, quiet, so that what
 /// each tool does - drawn in the full stroke - is what tells them apart. In the full stroke the
-/// TIN's outline and its four spokes made every icon a crossed square at 20 px.
-fn draw_tin(ink: &mut ToolInk<'_>, with_centre: bool) {
+/// TIN's outline and its four spokes made every icon a crossed square at 20 px. Shared with the
+/// Edit Surface menu's items that act by a scope (icons), so the menu reads as one family.
+pub(crate) fn draw_tin(ink: &mut ToolInk<'_>, with_centre: bool) {
     ink.stroke(&polyline(&CORNERS, true), false, FINE);
     if with_centre {
         for corner in CORNERS {
@@ -64,11 +65,13 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         return true;
     }
     if tool_id == "terrain.edit.deletepoint" {
-        // The centre vertex, ringed and crossed out.
-        draw_tin(ink, true);
-        ink.dot(12.0, 12.0, 1.6, true);
-        ink.line(7.5, 7.5, 16.5, 16.5, true, STROKE);
-        ink.line(16.5, 7.5, 7.5, 16.5, true, STROKE);
+        // Add Point's opposite: the TIN with no spokes, its centre vertex and a short cross over
+        // it. The spokes with a cross corner to corner over them read, at a menu's 16 px, as a
+        // crossed square - the third look audit's "mostly the crossed square".
+        draw_tin(ink, false);
+        ink.dot(12.0, 12.0, 1.6, false);
+        ink.line(9.0, 9.0, 15.0, 15.0, true, STROKE);
+        ink.line(15.0, 9.0, 9.0, 15.0, true, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.movepoint" {
