@@ -1708,7 +1708,7 @@ impl SettingsDialog {
                 draw_problems(ui);
             }
             let mut toggled = false;
-            let mut draw_toggle = |ui: &mut Ui| {
+            let draw_toggle = |ui: &mut Ui| {
                 toggled = controls::check(
                     ui,
                     "settingsShowNotice",
@@ -1721,7 +1721,7 @@ impl SettingsDialog {
             if self.show_notice_shown {
                 // In the field column, under the values it shows the notice of, as every tick of a
                 // form stands (the third look audit's C).
-                dialog::labelled(ui, "", |ui| draw_toggle(ui));
+                dialog::labelled(ui, "", draw_toggle);
             } else {
                 hidden(ui, "settingsShowNotice", draw_toggle);
             }

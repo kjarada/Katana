@@ -191,9 +191,8 @@ enum Pressed {
     Close,
 }
 
-/// The width of a value field in the three forms that is not a number - the prefix and suffix,
-/// the arrowhead's choice (the look of 2026-11-16) - so the three forms sit side by side. A number
-/// is a number box's width (number_row).
+/// The width of the arrowhead's choice (the look of 2026-11-16), so the three forms sit side by
+/// side. A number, a prefix and a suffix are a number box's width (short_row).
 const VALUE_WIDTH: f32 = 110.0;
 
 /// The style list's column: the list, the name field and the buttons under it at one width, the
@@ -218,10 +217,10 @@ fn value_row(form: &mut dialog::Form<'_>, label: &str, add: impl FnOnce(&mut Ui)
     });
 }
 
-/// A row of one of the three forms holding a number: its field a number box's width
-/// (controls::NUMBER_FIELD_WIDTH), as the Text Styles' sizes are - at VALUE_WIDTH the sizes here
-/// were 110 wide against 65 there (the third look audit's C).
-fn number_row(form: &mut dialog::Form<'_>, label: &str, add: impl FnOnce(&mut Ui)) {
+/// A row of one of the three forms holding a number, or a short word (a prefix, a suffix): its
+/// field a number box's width (controls::NUMBER_FIELD_WIDTH), as the Text Styles' sizes are - at
+/// VALUE_WIDTH the sizes here were 110 wide against 65 there (the third look audit's C).
+fn short_row(form: &mut dialog::Form<'_>, label: &str, add: impl FnOnce(&mut Ui)) {
     form.row(label, |ui| {
         dialog::fixed_fields(ui, controls::NUMBER_FIELD_WIDTH);
         add(ui);
@@ -773,7 +772,7 @@ impl DimensionStyleManagerDialog {
             });
             ui.add_space(layout::SECTION_GAP);
             ui.vertical(|ui| {
-                // Three short forms side by side, their values a number's width (value_row); each
+                // Three short forms side by side, their values a number's width (short_row, value_row); each
                 // has its own label column, as a column of a body does.
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = layout::SECTION_GAP * 2.0;
@@ -813,19 +812,19 @@ impl DimensionStyleManagerDialog {
         ui.vertical(|ui| {
             dialog::section(ui, "Text");
             dialog::form(ui, |form| {
-                number_row(form, "Height", |ui| {
+                short_row(form, "Height", |ui| {
                     edit(ui, "dimStyleText", &mut self.text, "")
                         .on_hover_text(format!("Text height{size_tip}"));
                 });
-                number_row(form, "Gap to the line", |ui| {
+                short_row(form, "Gap to the line", |ui| {
                     edit(ui, "dimStyleGap", &mut self.gap, "")
                         .on_hover_text(format!("From the dimension line to its text{size_tip}"));
                 });
-                value_row(form, "Prefix", |ui| {
+                short_row(form, "Prefix", |ui| {
                     edit(ui, "dimStylePrefix", &mut self.prefix, "")
                         .on_hover_text("Written before the number");
                 });
-                value_row(form, "Suffix", |ui| {
+                short_row(form, "Suffix", |ui| {
                     edit(ui, "dimStyleSuffix", &mut self.suffix, "")
                         .on_hover_text("Written after the number, e.g. mm");
                 });
@@ -839,19 +838,19 @@ impl DimensionStyleManagerDialog {
         ui.vertical(|ui| {
             dialog::section(ui, "Lines and arrows");
             dialog::form(ui, |form| {
-                number_row(form, "Extension offset", |ui| {
+                short_row(form, "Extension offset", |ui| {
                     edit(ui, "dimStyleExtOff", &mut self.ext_off, "").on_hover_text(format!(
                         "The gap between a measured point and its extension line{size_tip}"
                     ));
                 });
-                number_row(form, "Extension beyond", |ui| {
+                short_row(form, "Extension beyond", |ui| {
                     edit(ui, "dimStyleExtBeyond", &mut self.ext_beyond, "").on_hover_text(
                         format!(
                             "How far an extension line runs past the dimension line{size_tip}"
                         ),
                     );
                 });
-                number_row(form, "Arrow size", |ui| {
+                short_row(form, "Arrow size", |ui| {
                     edit(ui, "dimStyleArrow", &mut self.arrow, "")
                         .on_hover_text(format!("Arrowhead size{size_tip}"));
                 });
@@ -870,24 +869,22 @@ impl DimensionStyleManagerDialog {
         ui.vertical(|ui| {
             dialog::section(ui, "Units");
             dialog::form(ui, |form| {
-                number_row(form, "Unit scale", |ui| {
+                short_row(form, "Unit scale", |ui| {
                     edit(ui, "dimStyleScale", &mut self.scale, "").on_hover_text(
                         "Multiplies the measurement before it is written: 1000 writes a drawing \
                          in metres in millimetres",
                     );
                 });
-                number_row(form, "Decimal places", |ui| {
+                short_row(form, "Decimal places", |ui| {
                     controls::whole(ui, "dimStyleDecimals", &mut self.decimals, 0..=MOST_DECIMALS)
                         .on_hover_text("Places after the decimal point");
                 });
-                number_row(form, "Round to", |ui| {
+                short_row(form, "Round to", |ui| {
                     edit(ui, "dimStyleRound", &mut self.round, "").on_hover_text(
                         "Rounds the measurement to a multiple of this; 0 for none",
                     );
                 });
-                form.under(|ui| {
-                    check(ui, "dimStyleTrim", "Drop trailing zeros", &mut self.trim);
-                });
+                form.check("dimStyleTrim", "Drop trailing zeros", &mut self.trim);
             });
         });
     }

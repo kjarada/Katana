@@ -2008,6 +2008,9 @@ impl SymbolLibraryDialog {
                     ControlRecord::new("symbolDetails", ControlKind::Other),
                 );
 
+                // A group's gap above the heading: drawn first in a column of its own, the
+                // section adds none itself.
+                ui.add_space(dialog::SECTION_GAP - ui.spacing().item_spacing.y);
                 let actions = ui.vertical(|ui| {
                     dialog::section(ui, "Use");
                     // Rows of the pane's form, in the label column the details share.
@@ -2038,7 +2041,13 @@ impl SymbolLibraryDialog {
                             index: self.target_style,
                             ..controls::Choice::default()
                         };
-                        if controls::choice(ui, "targetStyle", &self.target_styles, &mut style)
+                        if controls::choice_with_hint(
+                            ui,
+                            "targetStyle",
+                            &self.target_styles,
+                            &mut style,
+                            "No style",
+                        )
                             .changed()
                         {
                             self.target_style = style.index;

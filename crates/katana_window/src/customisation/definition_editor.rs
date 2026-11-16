@@ -1792,8 +1792,7 @@ impl DefinitionEditorDialog {
             // Right: what it draws, under headings as every group of a dialog is: a bordered box
             // round each was a second group look (the third look audit's B).
             ui.vertical(|ui| {
-                ui.vertical(|ui| {
-                    dialog::section(ui, "As a symbol, on its insertion point");
+                dialog::section_with(ui, "As a symbol, on its insertion point", |ui| {
                     self.preview.ui(
                         ui,
                         "definitionPreview",
@@ -1802,8 +1801,7 @@ impl DefinitionEditorDialog {
                     );
                 });
                 let line_box = |ui: &mut Ui, preview: &mut StylePreview| {
-                    ui.vertical(|ui| {
-                        dialog::section(ui, "Along a line");
+                    dialog::section_with(ui, "Along a line", |ui| {
                         preview.ui(
                             ui,
                             "definitionLinePreview",

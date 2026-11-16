@@ -363,7 +363,8 @@ mod label_edit_dialog {
 
         bench.draw();
         assert!(!bench.enabled("labelEditApply"));
-        assert_eq!(bench.report("labelEditTarget"), "-");
+        // No label says so in words, not a dash (the third look audit's I).
+        assert_eq!(bench.report("labelEditTarget"), "No label");
         assert!(
             bench
                 .dialog

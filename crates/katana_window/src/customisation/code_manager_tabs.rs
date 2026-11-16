@@ -1227,8 +1227,7 @@ impl SurveyCodeManagerDialog {
             });
             ui.vertical(|ui| {
                 // A headed group, never a bordered box (the third look audit's B).
-                ui.vertical(|ui| {
-                    dialog::section(ui, "Apply the drawing's survey map");
+                dialog::section_with(ui, "Apply the drawing's survey map", |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Code property");
                         if controls::choice(
@@ -1310,8 +1309,7 @@ impl SurveyCodeManagerDialog {
                 ui.horizontal_top(|ui| {
                     // Headed groups side by side, never bordered boxes (the third look audit's B).
                     ui.vertical(|ui| {
-                        ui.vertical(|ui| {
-                            dialog::section(ui, "Control codes");
+                        dialog::section_with(ui, "Control codes", |ui| {
                             // One field a control, in the order the controls are declared in:
                             // the fields are read back by that order. The object name is
                             // "linework" and the control's name capitalised (arcStart:
@@ -1379,8 +1377,7 @@ impl SurveyCodeManagerDialog {
                     });
                     ui.add_space(dialog::SECTION_GAP);
                     ui.vertical(|ui| {
-                        ui.vertical(|ui| {
-                            dialog::section(ui, "Options");
+                        dialog::section_with(ui, "Options", |ui| {
                             ui.horizontal(|ui| {
                                 ui.label("Code property");
                                 if controls::choice(

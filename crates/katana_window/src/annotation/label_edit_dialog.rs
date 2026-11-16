@@ -322,7 +322,8 @@ impl LabelEditDialog {
         self.current = LabelEditForm::default();
         let empty = self.current.clone();
         self.show_form(document, &empty);
-        self.target = String::from("-");
+        // What is missing, in words, where a dash stood for nothing (the third look audit's I).
+        self.target = String::from("No label");
         self.command.clear();
         self.status = String::from(why);
         self.status_error = false;
@@ -537,7 +538,20 @@ impl LabelEditDialog {
             form.row("Label", |ui| {
                 // On its label's line, as a field's text is (dialog::text_value).
                 dialog::text_value(ui, |ui| {
-                    controls::label(ui, "labelEditTarget", &self.target);
+                    // Muted while there is no label, as an empty choice's hint is.
+                    let colour = if enabled {
+                        crate::theme::text()
+                    } else {
+                        crate::theme::text_muted()
+                    };
+                    controls::label_as(
+                        ui,
+                        "labelEditTarget",
+                        &self.target,
+                        egui::Label::new(
+                            egui::RichText::new(self.target.as_str()).color(colour.to_egui()),
+                        ),
+                    );
                 });
             });
 

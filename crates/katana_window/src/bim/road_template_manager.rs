@@ -1129,7 +1129,8 @@ impl Body {
             }
         });
         ui.horizontal(|ui| {
-            ui.spacing_mut().text_edit_width = TEMPLATE_BODY_WIDTH - 80.0;
+            // The field leaves Set its room, so the row ends where the grids do.
+            ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Set");
             field(
                 ui,
                 "roadTemplateComponentKeys",

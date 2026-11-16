@@ -909,7 +909,9 @@ impl SheetCanvas {
         self.lay_image(canvas, self.origin - self.image_origin);
 
         let Some(sheet) = self.current_sheet() else {
-            canvas.set_pen(Pen::new(Color::WHITE));
+            // A hint in the muted text, as every empty pane's: in white it was the brightest
+            // thing on a desk with no paper.
+            canvas.set_pen(Pen::new(crate::theme::text_muted()));
             let _ = canvas.draw_text_in(
                 rect,
                 TextFlags::CENTER,

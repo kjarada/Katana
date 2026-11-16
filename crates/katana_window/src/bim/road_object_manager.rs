@@ -539,7 +539,8 @@ impl Body {
                 }
                 let action_rows = ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().text_edit_width = LIST_WIDTH - 80.0;
+                        // The field leaves Apply its room, so the row ends where the table does.
+                        ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Apply");
                         field(
                             ui,
                             "roadObjectKeys",

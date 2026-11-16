@@ -134,7 +134,13 @@ impl NameBox {
     }
 
     fn ui(&mut self, ui: &mut Ui, name: &str) -> bool {
-        controls::choice(ui, name, &self.items, &mut self.choice).changed()
+        self.ui_with_hint(ui, name, controls::NO_CHOICE)
+    }
+
+    /// The box saying `hint`, muted, while it names nothing: an empty well read as a box that
+    /// failed to fill (the third look audit's I).
+    fn ui_with_hint(&mut self, ui: &mut Ui, name: &str, hint: &str) -> bool {
+        controls::choice_with_hint(ui, name, &self.items, &mut self.choice, hint).changed()
     }
 }
 
@@ -957,7 +963,7 @@ impl GlobalModifyDialog {
                 ("globalModifySetLayer", "Layer", ""),
                 &mut self.set_layer,
                 &mut due,
-                |ui| self.layer.ui(ui, "globalModifyLayer"),
+                |ui| self.layer.ui_with_hint(ui, "globalModifyLayer", "No layer"),
             );
             Self::ticked_row(
                 ui,
@@ -980,7 +986,7 @@ impl GlobalModifyDialog {
                 ("globalModifySetStyle", "Style", ""),
                 &mut self.set_style,
                 &mut due,
-                |ui| self.style.ui(ui, "globalModifyStyle"),
+                |ui| self.style.ui_with_hint(ui, "globalModifyStyle", "No style"),
             );
             Self::ticked_row(
                 ui,
@@ -1151,7 +1157,10 @@ impl GlobalModifyDialog {
                 ("globalModifySetLayerDimStyle", "Dimension style", ""),
                 &mut self.set_layer_dim_style,
                 &mut due,
-                |ui| self.layer_dim_style.ui(ui, "globalModifyLayerDimStyle"),
+                |ui| {
+                    self.layer_dim_style
+                        .ui_with_hint(ui, "globalModifyLayerDimStyle", "No dimension style")
+                },
             );
             Self::ticked_row(
                 ui,

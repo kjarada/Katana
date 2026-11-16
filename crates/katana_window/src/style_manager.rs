@@ -2567,8 +2567,7 @@ impl StyleManagerDialog {
                 // Headed groups, never bordered boxes (the third look audit's B): a box round the
                 // definition and one round the preview were a second group look beside the
                 // headed sections of every other dialog.
-                ui.vertical(|ui| {
-                    dialog::section(ui, "Preview");
+                dialog::section_with(ui, "Preview", |ui| {
                     self.style_preview
                         .ui(ui, "stylePreview", host.document(), STYLE_PREVIEW);
                     ui.horizontal(|ui| {
@@ -2600,8 +2599,7 @@ impl StyleManagerDialog {
     }
 
     fn style_form(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.vertical(|ui| {
-            dialog::section(ui, "Definition");
+        dialog::section_with(ui, "Definition", |ui| {
             controls::label_as(
                 ui,
                 "styleFormTitle",
@@ -2955,8 +2953,7 @@ impl StyleManagerDialog {
                         offstage(ui, name, |ui| face(self, ui, host));
                     }
                 }
-                ui.vertical(|ui| {
-                    dialog::section(ui, "As drawn");
+                dialog::section_with(ui, "As drawn", |ui| {
                     self.linetype_preview.ui(
                         ui,
                         "linetypePreview",
@@ -2990,8 +2987,7 @@ impl StyleManagerDialog {
     }
 
     fn pattern_face(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.vertical(|ui| {
-            dialog::section(ui, "Pattern");
+        dialog::section_with(ui, "Pattern", |ui| {
             let buttons = self.buttons.clone();
             ui.add_enabled_ui(self.pattern_enabled, |ui| {
                 let mut kind_chosen: Option<(usize, Element)> = None;
@@ -3229,8 +3225,7 @@ impl StyleManagerDialog {
     }
 
     fn library_face(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.vertical(|ui| {
-            dialog::section(ui, "Library linestyle");
+        dialog::section_with(ui, "Library linestyle", |ui| {
             // The details as a form, a label column and its values, with the notes under it:
             // drawn as "Group: ..." prose they read as a paragraph (the look audits' T12). The
             // control keeps the text it had, for its drivers.
