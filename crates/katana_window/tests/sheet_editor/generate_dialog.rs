@@ -94,8 +94,18 @@ mod generate_dialog {
         shown.press_in(DIALOG, name);
     }
 
+    /// The line Generate runs: the read-only Command field's text.
     fn line(shown: &Shown) -> String {
-        shown.control("sheetGenerateLine").expect("the line").text
+        shown.control("sheetGenerateLine").expect("the line").value
+    }
+
+    /// Why the choices make no line: the footer's refusal, the Command field empty meanwhile.
+    fn problem(shown: &Shown) -> String {
+        assert_eq!(line(shown), "", "a refused choice shows no command");
+        shown
+            .control("sheetGenerateProblem")
+            .expect("the problem")
+            .text
     }
 
     fn enabled(shown: &Shown, name: &str) -> bool {
@@ -183,6 +193,7 @@ mod generate_dialog {
             "sheetGenerateRotate",
             "sheetGenerateReplace",
             "sheetGenerateLine",
+            "sheetGenerateProblem",
             "sheetGenerateOk",
             "sheetGenerateCancel",
         ] {
@@ -398,7 +409,7 @@ mod generate_dialog {
         press(&mut shown, "sheetGenerateAtStations");
         fill(&mut shown, "sheetGenerateStations", "100, soon");
         assert!(!can_generate(&shown));
-        assert_eq!(line(&shown), "list the chainages to cut, separated by commas");
+        assert_eq!(problem(&shown), "list the chainages to cut, separated by commas");
         fill(&mut shown, "sheetGenerateStations", "");
         assert!(!can_generate(&shown));
 
@@ -412,7 +423,7 @@ mod generate_dialog {
         fill(&mut shown, "sheetGenerateAreaX0", "10");
         fill(&mut shown, "sheetGenerateAreaX1", "10");
         assert!(!can_generate(&shown));
-        assert_eq!(line(&shown), "the window needs a width and a height");
+        assert_eq!(problem(&shown), "the window needs a width and a height");
 
         // A strip's range that is not a number.
         choose(&mut shown, "sheetGenerateLayout", "Plan strips along an alignment");

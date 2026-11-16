@@ -57,6 +57,7 @@ use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name, to_native_separators};
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
+use crate::survey::survey_dialogs::hidden;
 
 const USAGE: &str = "usage: PLOT <file.pdf> [paper=A0|A1|A2|A3|A4] [landscape|portrait] \
                      [fit|scale=N] [dpi=N] [style=colour|grey|mono] [lineweight=F] [margin=MM]";
@@ -253,6 +254,9 @@ pub struct PlotDrawingDialog {
     colour_mode: Choice,
     line_weight: f64,
     status: String,
+    /// Whether the status is a refusal (a field Plot cannot read, a plot not made), said in the
+    /// error colour; a plot made, or a hint, is muted.
+    status_error: bool,
     warnings: String,
     /// Unset, a file that is there is written - as the PLOT verb writes, asking nothing. The
     /// window asks the person, and never in a headless run.
@@ -291,6 +295,7 @@ impl PlotDrawingDialog {
             colour_mode: Choice::at(0),
             line_weight: defaults.line_weight_scale,
             status: String::new(),
+            status_error: false,
             warnings: String::new(),
             confirm_replace: None,
         }
@@ -376,6 +381,7 @@ impl PlotDrawingDialog {
             Ok(made) => made,
             Err(error) => {
                 self.status = error.message;
+                self.status_error = true;
                 return;
             }
         };
@@ -389,10 +395,12 @@ impl PlotDrawingDialog {
                 "Not plotted: {} is there and was kept.",
                 to_native_separators(&made.path)
             );
+            self.status_error = false;
             return;
         }
         let outcome = host.run(&plot_drawing_command_line(&made));
         let last_line = |text: &str| String::from(text.rsplit('\n').next().unwrap_or(""));
+        self.status_error = !outcome.ok;
         self.status = if outcome.ok {
             format!("Plotted: {}", last_line(&outcome.reply))
         } else {
@@ -421,6 +429,7 @@ impl PlotDrawingDialog {
 
     fn browse(&mut self, host: &dyn Host) {
         if host.headless() {
+            self.status_error = false;
             self.status = String::from(
                 "A headless session opens no file dialog: fill plotDrawingPath with the path \
                  instead.",
@@ -582,19 +591,33 @@ impl PlotDrawingDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        // What the plot is without, from the reply's warning records, over the buttons as a reply
+        // is: shown only when the reply had some, so a plot that lost nothing looks as it did.
+        // Hidden, it takes no room (drawn set_invisible() in a scope, it kept a line's room in
+        // every footer: 20 empty points over the buttons, the third look audit's A).
+        let warnings = self.warnings.clone();
+        let warn = |ui: &mut Ui| {
+            controls::label_as(
+                ui,
+                "plotDrawingWarnings",
+                &warnings,
+                egui::Label::new(warnings.as_str()).wrap().selectable(true),
+            );
+        };
+        if warnings.is_empty() {
+            hidden(ui, "plotDrawingWarnings", warn);
+        } else {
+            warn(ui);
+        }
         let status = self.status.clone();
+        let status_error = self.status_error;
         let ready = self.request().is_ok();
-        // The one footer (shell::dialog::button_row): the status at the left; Close, then Plot, the
-        // primary, last at the right.
+        // The one footer (shell::dialog::button_row): the status at the left, muted unless it is
+        // a refusal; Close, then Plot, the primary, last at the right.
         let (_, (closed, pressed)) = dialog::button_row(
             ui,
             |ui| {
-                controls::label_as(
-                    ui,
-                    "plotDrawingStatus",
-                    &status,
-                    egui::Label::new(status.as_str()).wrap().selectable(true),
-                );
+                dialog::status(ui, "plotDrawingStatus", &status, status_error);
             },
             |ui| {
                 let closed = controls::button(ui, "plotDrawingClose", "Close").clicked();
@@ -613,19 +636,5 @@ impl PlotDrawingDialog {
         if closed {
             self.close();
         }
-        // What the plot is without, from the reply's warning records: shown only when the reply
-        // had some, so a plot that lost nothing looks as it did.
-        let warnings = self.warnings.clone();
-        ui.scope(|ui| {
-            if warnings.is_empty() {
-                ui.set_invisible();
-            }
-            controls::label_as(
-                ui,
-                "plotDrawingWarnings",
-                &warnings,
-                egui::Label::new(warnings.as_str()).wrap().selectable(true),
-            );
-        });
     }
 }

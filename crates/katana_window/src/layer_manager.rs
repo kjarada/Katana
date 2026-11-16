@@ -41,7 +41,7 @@ use katana_commands::{
 use katana_entity::layer_path::join_layer_path;
 use katana_entity::{Color, Layer};
 
-use crate::annotation::dialog_support::{show_dialog, spin_value, table};
+use crate::annotation::dialog_support::{TableLook, show_dialog, spin_value, table_look};
 use crate::customisation::customisation_context::CustomisationContext;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::name_picker::NamePicker;
@@ -695,7 +695,10 @@ impl LayerManagerDialog {
             // Read-only: every change goes through the form and a command, so nothing here can
             // run one from inside a view's own change - the shape of the layer-panel crash
             // recorded in docs/cad.md.
-            let shown = table(
+            // The table spans the body, its header and its chosen row from edge to edge, as the
+            // form under it does: as wide as its columns' words it stopped at 520 of a 633 body
+            // (the third look audit's J).
+            let shown = table_look(
                 ui,
                 "layerTable",
                 &HEADERS,
@@ -703,6 +706,10 @@ impl LayerManagerDialog {
                 self.selected,
                 &[],
                 None,
+                TableLook {
+                    fill: true,
+                    ..TableLook::default()
+                },
             );
             if let Some(row) = shown.chosen {
                 self.select_row(host.document(), Some(row));

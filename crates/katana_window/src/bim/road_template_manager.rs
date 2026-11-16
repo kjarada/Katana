@@ -184,7 +184,8 @@ pub fn paint_template_preview(
     road_template: Option<&RoadTemplate>,
     section: Option<&RoadSection>,
 ) {
-    canvas.fill_rect(rect, &Brush::solid(palette::panel()));
+    // The drawing's own ground, as every preview of the window is (the third look audit's H).
+    canvas.fill_rect(rect, &Brush::solid(palette::viewport()));
     canvas.set_render_hint(RenderHint::Antialiasing, true);
     let (Some(road_template), Some(section)) = (road_template, section) else {
         canvas.set_pen(Pen::new(palette::text_muted()));
@@ -1078,12 +1079,13 @@ impl Body {
             check(
                 ui,
                 "roadTemplateOverwrite",
-                "Replace (OVERWRITE)",
+                // The verb's word in the tooltip, not the label (the third look audit's K).
+                "Replace",
                 &mut self.overwrite,
             )
             .on_hover_text(
                 "Export: replace a file already there. Import: replace the templates of the same \
-                 name where they stand",
+                 name where they stand (OVERWRITE)",
             );
         });
 
@@ -1100,28 +1102,9 @@ impl Body {
         );
         let events = self.components.ui(ui);
         self.components_events(events, host.document());
+        // The grids' Apply and Revert are the footer's (footer_ui): what changes the drawing from
+        // a dialog's edits is in its footer, as every dialog's primary is.
         ui.horizontal(|ui| {
-            if button(
-                ui,
-                "roadTemplateApplyComponents",
-                "Apply",
-                "ROADTEMPLATE SET for each edited row: its width, crossfall and layer",
-            )
-            .clicked()
-            {
-                self.apply_components(host);
-            }
-            if button(
-                ui,
-                "roadTemplateRevertComponents",
-                "Revert",
-                "The grid as the drawing holds it again",
-            )
-            .clicked()
-            {
-                self.edited_components.clear();
-                self.fill_components(host.document(), true);
-            }
             self.add_side.ui(ui, "roadTemplateAddSide");
             self.add_kind.ui(ui, "roadTemplateAddKind");
             if button(
@@ -1177,16 +1160,6 @@ impl Body {
         let events = self.courses.ui(ui);
         self.courses_events(events);
         ui.horizontal(|ui| {
-            if button(
-                ui,
-                "roadTemplateApplyCourses",
-                "Apply",
-                "ROADTEMPLATE COURSE ... SET for each edited row",
-            )
-            .clicked()
-            {
-                self.apply_courses(host);
-            }
             field(
                 ui,
                 "roadTemplateCourseName",
@@ -1256,15 +1229,55 @@ impl Body {
         );
     }
 
-    /// The one footer (shell::dialog::button_row): what the last line replied at the left, Close
-    /// at the right.
-    fn footer_ui(&mut self, ui: &mut Ui) {
+    /// The one footer (shell::dialog::button_row): what the last line replied at the left; at the
+    /// right the grids' edits put back (Revert) or applied - the courses', then Close, then the
+    /// components', the primary, last. Each Apply is its grid's one line, so one undo step. Under
+    /// each grid, beside its Add and Remove, the Apply read as one more button of the row (the
+    /// third look audit's A: actions still in the body).
+    fn footer_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = &self.status;
-        let (_, close) = dialog::button_row(
+        let (_, (revert, courses, close, components)) = dialog::button_row(
             ui,
             |ui| status.ui(ui, "roadTemplateStatus"),
-            |ui| button(ui, "roadTemplateClose", "Close", "Close the manager").clicked(),
+            |ui| {
+                let revert = button(
+                    ui,
+                    "roadTemplateRevertComponents",
+                    "Revert",
+                    "The components' grid as the drawing holds it again",
+                )
+                .clicked();
+                let courses = button(
+                    ui,
+                    "roadTemplateApplyCourses",
+                    "Apply Courses",
+                    "ROADTEMPLATE COURSE ... SET for each edited row of the courses",
+                )
+                .clicked();
+                let close = button(ui, "roadTemplateClose", "Close", "Close the manager").clicked();
+                let components = crate::drive::controls::primary(
+                    ui,
+                    "roadTemplateApplyComponents",
+                    "Apply Components",
+                )
+                .on_hover_text(
+                    "ROADTEMPLATE SET for each edited row of the components: its width, \
+                     crossfall and layer",
+                )
+                .clicked();
+                (revert, courses, close, components)
+            },
         );
+        if revert {
+            self.edited_components.clear();
+            self.fill_components(host.document(), true);
+        }
+        if courses {
+            self.apply_courses(host);
+        }
+        if components {
+            self.apply_components(host);
+        }
         if close {
             self.close = true;
         }
@@ -1481,7 +1494,7 @@ impl RoadTemplateManagerDialog {
                 &ctx,
                 &mut lent,
                 |ui, lent| lent.0.body_ui(ui, &mut *lent.1),
-                |ui, lent| lent.0.footer_ui(ui),
+                |ui, lent| lent.0.footer_ui(ui, &mut *lent.1),
             );
             if shown.closed || std::mem::take(&mut self.body.close) {
                 self.open = false;

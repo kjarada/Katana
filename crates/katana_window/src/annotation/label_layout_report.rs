@@ -23,7 +23,8 @@
 //!                              the counts
 //! labelLayoutSelectSuppressed  select the labels with a piece that found no room; disabled when
 //!                              there are none
-//! labelLayoutOutput            the verb's whole reply (read-only)
+//! labelLayoutOutput            the verb's whole reply (read-only; kept for drivers, not shown:
+//!                              the counts and the status say it)
 //! labelLayoutStatus            what happened last
 //! labelLayoutClose             close
 //! ```
@@ -39,7 +40,7 @@ use crate::drive::controls::{self, LineOptions, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
-use crate::theme::palette;
+use crate::survey::survey_dialogs::hidden;
 
 /// The dialog's object name and title.
 const DIALOG: &str = "labelLayoutDialog";
@@ -183,6 +184,8 @@ pub struct LabelLayoutReportDialog {
     select_enabled: bool,
     output: String,
     status: String,
+    /// Whether the status is a refusal, said in the error colour; a run's sentence is muted.
+    status_error: bool,
     run_pressed: bool,
     select_pressed: bool,
     close_pressed: bool,
@@ -211,6 +214,7 @@ impl LabelLayoutReportDialog {
             select_enabled: false,
             output: String::new(),
             status: String::new(),
+            status_error: false,
             run_pressed: false,
             select_pressed: false,
             close_pressed: false,
@@ -228,6 +232,7 @@ impl LabelLayoutReportDialog {
     pub fn run(&mut self, host: &mut dyn Host) -> bool {
         if !self.command_line {
             self.status = String::from("There is no command line to run it on.");
+            self.status_error = true;
             return false;
         }
         let line = label_layout_line(self.collisions);
@@ -238,6 +243,7 @@ impl LabelLayoutReportDialog {
         } else {
             outcome.error.clone()
         };
+        self.status_error = !outcome.ok;
         if !outcome.ok {
             self.show_summary(LabelLayoutSummary::default());
             self.status = if outcome.error.is_empty() {
@@ -251,6 +257,7 @@ impl LabelLayoutReportDialog {
         self.show_summary(summary.clone());
         if !summary.read {
             self.status = String::from("The reply had no counts to read.");
+            self.status_error = true;
             return false;
         }
         self.status = format!(
@@ -267,13 +274,16 @@ impl LabelLayoutReportDialog {
         let line = select_line(&self.summary.suppressed_labels);
         if line.is_empty() {
             self.status = String::from("No label was suppressed.");
+            self.status_error = false;
             return false;
         }
         if !self.command_line {
             self.status = String::from("There is no command line to run it on.");
+            self.status_error = true;
             return false;
         }
         let outcome = host.run(&line);
+        self.status_error = !outcome.ok;
         self.status = if outcome.ok {
             outcome.reply
         } else {
@@ -389,22 +399,27 @@ impl LabelLayoutReportDialog {
                 );
             });
         });
-        ui.add_space(dialog::GROUP_GAP);
-        controls::text_with(
-            ui,
-            "labelLayoutOutput",
-            &mut self.output,
-            TextOptions {
-                read_only: true,
-                rows: 6,
-                monospace: true,
-            },
-        );
+        // The verb's whole reply, kept for a driver to read but not shown: its records are the
+        // counts above and the footer's sentence again, and a box of them under the counts said
+        // everything twice (the third look audit's F).
+        hidden(ui, "labelLayoutOutput", |ui| {
+            controls::text_with(
+                ui,
+                "labelLayoutOutput",
+                &mut self.output,
+                TextOptions {
+                    read_only: true,
+                    rows: 6,
+                    monospace: true,
+                },
+            );
+        });
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let select_enabled = self.select_enabled;
         let status = self.status.clone();
+        let status_error = self.status_error;
         // The one footer (shell::dialog::button_row): Select Suppressed and the status at the left;
         // Close, then Run, the primary, last at the right.
         let (select, (close, run)) = dialog::button_row(
@@ -414,20 +429,13 @@ impl LabelLayoutReportDialog {
                     .add_enabled_ui(select_enabled, |ui| {
                         controls::button(ui, "labelLayoutSelectSuppressed", "Select Suppressed")
                             .on_hover_text(
-                                "Select the labels that found no room, to move them (Edit Label)                                  or give them another style",
+                                "Select the labels that found no room, to move them (Edit Label) \
+                                 or give them another style",
                             )
                             .clicked()
                     })
                     .inner;
-                controls::label_as(
-                    ui,
-                    "labelLayoutStatus",
-                    &status,
-                    egui::Label::new(
-                        egui::RichText::new(status.as_str()).color(palette::text_muted().to_egui()),
-                    )
-                    .wrap(),
-                );
+                dialog::status(ui, "labelLayoutStatus", &status, status_error);
                 select
             },
             |ui| {

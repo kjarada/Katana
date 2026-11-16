@@ -286,7 +286,7 @@ impl Body {
         dialog::labelled(ui, "CSV file", |ui| {
             // The path leaves its three buttons their room beside it.
             ui.spacing_mut().text_edit_width =
-                dialog::beside_buttons(ui, &["Browse...", "Save CSV", "Copy"]);
+                dialog::beside_buttons(ui, &["Browse...", "Save CSV...", "Copy"]);
             field(
                 ui,
                 "corridorQuantitiesCsvPath",
@@ -307,7 +307,8 @@ impl Body {
             if button(
                 ui,
                 "corridorQuantitiesSaveCsv",
-                "Save CSV",
+                // With its ellipsis, as every dialog's Save CSV... reads (the third look audit's K).
+                "Save CSV...",
                 "CORRIDOR QUANTITIES ... csv=: the table as a CSV file",
             )
             .clicked()

@@ -47,6 +47,7 @@ use crate::command_word::{command_word, exact_number};
 use crate::drive::controls::{self, Choice, LineOptions, SpinRange, TextOptions};
 use crate::drive::registry::{TargetKind, TargetSpec, begin_target, end_target};
 use crate::host::Host;
+use crate::shell::dialog;
 use crate::survey::survey_dialogs::{hidden, offstage};
 
 /// How far a curve's chords may stray from the arc, in millimetres for a drawing in metres.
@@ -1225,8 +1226,9 @@ impl SurveyCodeManagerDialog {
                 }
             });
             ui.vertical(|ui| {
-                ui.group(|ui| {
-                    ui.label("Apply the drawing's survey map");
+                // A headed group, never a bordered box (the third look audit's B).
+                ui.vertical(|ui| {
+                    dialog::section(ui, "Apply the drawing's survey map");
                     ui.horizontal(|ui| {
                         ui.label("Code property");
                         if controls::choice(
@@ -1306,9 +1308,10 @@ impl SurveyCodeManagerDialog {
             });
             ui.vertical(|ui| {
                 ui.horizontal_top(|ui| {
-                    ui.group(|ui| {
+                    // Headed groups side by side, never bordered boxes (the third look audit's B).
+                    ui.vertical(|ui| {
                         ui.vertical(|ui| {
-                            ui.label("Control codes");
+                            dialog::section(ui, "Control codes");
                             // One field a control, in the order the controls are declared in:
                             // the fields are read back by that order. The object name is
                             // "linework" and the control's name capitalised (arcStart:
@@ -1374,9 +1377,10 @@ impl SurveyCodeManagerDialog {
                             });
                         });
                     });
-                    ui.group(|ui| {
+                    ui.add_space(dialog::SECTION_GAP);
+                    ui.vertical(|ui| {
                         ui.vertical(|ui| {
-                            ui.label("Options");
+                            dialog::section(ui, "Options");
                             ui.horizontal(|ui| {
                                 ui.label("Code property");
                                 if controls::choice(

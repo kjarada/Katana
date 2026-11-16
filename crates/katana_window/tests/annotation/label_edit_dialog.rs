@@ -219,7 +219,6 @@ mod label_edit_dialog {
             "Select one label, then choose Edit Label."
         );
         bench.draw();
-        assert!(!bench.enabled("labelEditOk"));
         assert!(!bench.enabled("labelEditApply"));
         bench.document_mut().selection_mut().set(vec![1]);
         assert!(!bench.dialog.load_selection(bench.host.document()));
@@ -524,18 +523,16 @@ mod label_dialogs_look {
     }
 
     #[test]
-    fn edit_labels_footer_is_apply_then_close_then_ok_the_primary() {
+    fn edit_labels_footer_is_close_then_apply_its_one_primary() {
         // T5: the dismissing button read Cancel where every other footer's reads Close; its name
-        // and what it does are kept.
+        // and what it does are kept. The third look audit's A: Apply, Close and OK were three
+        // ways out of one non-modal editor; it keeps one primary, Apply, last.
         let bench = edit_label();
         assert_eq!(bench.report("labelEditCancel"), "Close");
+        assert_eq!(bench.report("labelEditApply"), "Apply");
+        assert!(bench.harness.control("labelEditOk").is_none(), "no OK");
         let rect = |name: &str| bench.control(name).rect;
-        let (apply, close, ok) = (
-            rect("labelEditApply"),
-            rect("labelEditCancel"),
-            rect("labelEditOk"),
-        );
-        assert!(apply.right() <= close.left(), "Apply is before Close");
-        assert!(close.right() <= ok.left(), "OK is last");
+        let (close, apply) = (rect("labelEditCancel"), rect("labelEditApply"));
+        assert!(close.right() <= apply.left(), "Apply is last");
     }
 }

@@ -160,7 +160,11 @@ const MINIMUM_VIEWPORT_MM: f64 = 10.0;
 /// move a viewport.
 const DRAG_START_PIXELS: f64 = 3.0;
 
-const DESK: Color = Color::rgb(88, 91, 99);
+/// What the canvas shows round the paper, and all of it with no sheet: the drawing's own dark
+/// ground (palette::viewport), so the paper is the brightest thing in the editor and with no sheet
+/// nothing is. The C++'s mid grey (88, 91, 99) was the brightest thing on the screen with no sheet
+/// (the third look audit's E).
+const DESK: Color = crate::theme::palette::viewport();
 const SELECTION: Color = Color::rgb(0, 120, 215);
 const GUIDE: Color = Color::rgb(230, 60, 160);
 const CROSSING: Color = Color::rgb(0, 150, 70);
@@ -2008,14 +2012,24 @@ impl GenerateDialog {
             |ui, (dialog, _)| dialog.body(ui, plan_view),
             |ui, (dialog, answer)| {
                 let line = dialog.build_line(plan_view);
-                // The one footer (shell::dialog::button_row): Cancel, then Generate, the primary,
-                // last at the right - where the two sat at the left, Generate first and plain.
+                // The one footer (shell::dialog::button_row): why there is no line, a refusal, at
+                // the left; Close, then Generate, the primary, last at the right. Close, not
+                // Cancel: nothing is made until Generate (the third look audit's A); the button
+                // keeps its name.
+                let problem = line.as_ref().err().map(|error| error.message.clone());
                 let ((), (cancelled, ok)) = crate::shell::dialog::button_row(
                     ui,
-                    |_| {},
+                    |ui| {
+                        dialog::status(
+                            ui,
+                            "sheetGenerateProblem",
+                            problem.as_deref().unwrap_or_default(),
+                            true,
+                        );
+                    },
                     |ui| {
                         let cancelled =
-                            controls::button(ui, "sheetGenerateCancel", "Cancel").clicked();
+                            controls::button(ui, "sheetGenerateCancel", "Close").clicked();
                         let ok = ui
                             .add_enabled_ui(line.is_ok(), |ui| {
                                 controls::primary(ui, "sheetGenerateOk", "Generate")
@@ -2070,8 +2084,12 @@ impl GenerateDialog {
             // The paper, for every layout but the plot frames', which bring their own.
             dialog::labelled(ui, "Paper", |ui| {
                 ui.horizontal(|ui| {
-                    // The paper and its orientation a word's width each, the frame's box beside.
-                    dialog::fixed_fields(ui, dialog::SHORT_FIELD_WIDTH);
+                    // The paper and its orientation half the row each. With the frame's box
+                    // beside them at a word's width each, the row ran 35 points past the body
+                    // and every row drawn after it ended there, the Layout above it short (the
+                    // third look audit's D: 532 against 567).
+                    let gap = ui.spacing().item_spacing.x;
+                    dialog::fixed_fields(ui, (ui.available_width() - gap) / 2.0);
                     ui.add_enabled_ui(on.paper, |ui| {
                         controls::choice(ui, "sheetGeneratePaper", &paper_items(), &mut self.paper);
                         let orientations = [String::from("Landscape"), String::from("Portrait")];
@@ -2082,11 +2100,14 @@ impl GenerateDialog {
                             &mut self.orientation,
                         );
                     });
-                    controls::check(ui, "sheetGenerateFrame", "Frame and title block", &mut self.frame_on)
-                        .on_hover_text(
-                            "A portrait sheet has no frame: the title block is laid out for landscape",
-                        );
                 });
+            });
+            // A tick in the field column, under the paper it frames.
+            dialog::labelled(ui, "", |ui| {
+                controls::check(ui, "sheetGenerateFrame", "Frame and title block", &mut self.frame_on)
+                    .on_hover_text(
+                        "A portrait sheet has no frame: the title block is laid out for landscape",
+                    );
             });
 
             // What a fit or the tiles cover.
@@ -2306,19 +2327,27 @@ impl GenerateDialog {
                     );
                 });
             });
+            // The line Generate runs, as it will be typed into the log: what a person learns the
+            // verb from, and what an agent would type instead. The window's one command display,
+            // a read-only field labelled "Command" (the third look audit's F), where a bare line
+            // stood over the footer; empty while the choices make none, the footer saying why.
+            let mut command = self.build_line(plan_view).unwrap_or_default();
+            dialog::labelled(ui, "Command", |ui| {
+                controls::line_with(
+                    ui,
+                    "sheetGenerateLine",
+                    &mut command,
+                    LineOptions {
+                        read_only: true,
+                        ..LineOptions::default()
+                    },
+                )
+                .on_hover_text(
+                    "The line Generate runs - type it on the command line, or give it to \
+                     katana_cli or katana_mcp, and it does the same",
+                );
+            });
         });
-        // The line OK runs, as it will be typed into the log: what a person learns the verb from,
-        // and what an agent would type instead.
-        let line = self.build_line(plan_view);
-        let (text, colour) = match &line {
-            Ok(line) => (line.clone(), None),
-            Err(error) => (error.message.clone(), Some(crate::theme::error().to_egui())),
-        };
-        let mut rich = egui::RichText::new(text.as_str());
-        if let Some(colour) = colour {
-            rich = rich.color(colour);
-        }
-        controls::label_as(ui, "sheetGenerateLine", &text, egui::Label::new(rich).wrap());
         if (
             self.layout.clone(),
             self.alignment.clone(),
@@ -5093,6 +5122,10 @@ impl SheetEditor {
         let mut chosen: Option<String> = None;
         let menus = self.menus(&*host);
         let tool_bar = self.tool_bar(&*host);
+        // What acts on a sheet - a view added, tiled or arranged, the page fitted, checked or
+        // plotted - is greyed while the set has none, as the window's own tools grey with nothing
+        // to act on; triggered by name it still says why it did nothing.
+        let has_sheet = !host.document().sheet_set().sheets.is_empty();
         egui::Panel::top("sheetEditorMenus").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 for menu in menus.iter().take(3) {
@@ -5114,6 +5147,9 @@ impl SheetEditor {
                             // drawn in the button ("Fit Page  Home", "Plot All...  Ctrl+P") it
                             // read as a second word of the button's.
                             let mut shown = action.clone();
+                            if NEEDS_A_SHEET.contains(&action.name.as_str()) {
+                                shown.enabled &= has_sheet;
+                            }
                             let tip = match shown.shortcut.take() {
                                 Some(key) => {
                                     let said = if action.tip.is_empty() {
@@ -5144,7 +5180,9 @@ impl SheetEditor {
                                 "sheetTileButton" => &menus[4],
                                 _ => &menus[5],
                             };
-                            tool_button_menu(ui, name, menu, &mut chosen);
+                            ui.add_enabled_ui(has_sheet, |ui| {
+                                tool_button_menu(ui, name, menu, &mut chosen);
+                            });
                         }
                     }
                 }
@@ -5174,9 +5212,14 @@ impl SheetEditor {
         let checks_height = crate::dialog_layout::last_height(ui, checks_id)
             .unwrap_or(CHECKS_HEIGHT)
             .clamp(CHECKS_LEAST_HEIGHT, CHECKS_HEIGHT);
+        // The side panes on the panel token, as the main window's docks are; the window token
+        // (egui's panel fill) is the frame round them - the menu bar, the toolbar, the status bar.
+        // On the window token the panes read as the gaps between docks (the third look audit's E).
+        let pane = egui::Frame::side_top_panel(ui.style()).fill(crate::theme::panel().to_egui());
         egui::Panel::bottom("sheetChecksDock")
             .resizable(false)
             .exact_size(checks_height)
+            .frame(pane)
             .show(ui, |ui| {
                 if !self.checks.is_visible() {
                     return;
@@ -5186,19 +5229,14 @@ impl SheetEditor {
                 // Measured in a column of its own: the panel holds its content's least height to
                 // the panel's.
                 let content = ui.vertical(|ui| {
-                    // The dock's compact header: its title, and its close button at the right.
+                    // A dock's title bar, as every pane of the main window wears: its icon and
+                    // title, and its close button at the right, a flat tool - a strong word and a
+                    // small framed cross read as a dialog's heading (the third look audit's E).
                     let title = String::from(self.checks.window_title());
-                    egui::Sides::new().show(
-                        ui,
-                        |ui| {
-                            ui.strong(title.as_str());
-                        },
-                        |ui| {
-                            if ui.small_button("\u{d7}").clicked() {
-                                self.checks.close();
-                            }
-                        },
-                    );
+                    let closed = pane_title_bar(ui, "DrawingSummary", &title);
+                    if closed {
+                        self.checks.close();
+                    }
                     self.checks.ui(ui);
                 });
                 let wanted = (content.response.rect.height() + margins)
@@ -5211,6 +5249,7 @@ impl SheetEditor {
         egui::Panel::left("sheetListDock")
             .resizable(false)
             .exact_size(SHEET_LIST_WIDTH)
+            .frame(pane)
             .show(ui, |ui| {
             self.list_ui(ui, &*host);
         });
@@ -5219,11 +5258,12 @@ impl SheetEditor {
         egui::Panel::right("sheetPropertiesDock")
             .resizable(false)
             .exact_size(PROPERTIES_WIDTH)
+            .frame(pane)
             .show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("sheetProperties").show(ui, |ui| {
                 // Its rows share one label column, as a dialog's do. Its boxes and buttons are
                 // drawn across the panel rather than under the fields: at PROPERTIES_WIDTH a box's
-                // words, or "Choose paper for this scale", beside the label column ran past the
+                // words, or "Choose Paper for This Scale", beside the label column ran past the
                 // panel's edge, and the panel's content with them.
                 dialog::form_panel(ui, |ui| self.properties_ui(ui, &*host));
             });
@@ -5357,50 +5397,34 @@ impl SheetEditor {
             }
         }
         ui.horizontal(|ui| {
-            // Five squares a control high, each a glyph or an icon, the words in their tooltips:
-            // "Copy" was a word among glyphs, and the glyphs' buttons were each as wide as their
-            // text (the look audits' T15). Copy is the window's copy icon; the button keeps its
-            // word as its text for its drivers.
-            let side = ui.spacing().interact_size.y;
-            let buttons = [
-                ("sheetListNew", "+", "", "A new blank sheet"),
-                ("sheetListCopy", "Copy", "Copy", "Duplicate this sheet"),
-                ("sheetListRemove", "\u{2212}", "", "Remove this sheet"),
+            // The list's tools as the main window's panels' are (main_window::panels::
+            // panel_tool): flat icons a control high, framed only under the pointer, their names
+            // and what they do in their tooltips - raised framed squares here were a second look
+            // of one thing (the third look audit's E). Each keeps its name for its drivers.
+            let tools = [
+                ("sheetListNew", "New", "New Sheet", "A new blank sheet"),
+                ("sheetListCopy", "Copy", "Copy Sheet", "Duplicate this sheet"),
+                ("sheetListRemove", "Erase", "Remove Sheet", "Remove this sheet"),
             ];
-            for (name, text, icon, tip) in buttons {
-                let face = if icon.is_empty() { text } else { "" };
-                let response = controls::button_as(
-                    ui,
-                    name,
-                    text,
-                    egui::Button::new(face).min_size(egui::vec2(side, side)),
-                )
-                .on_hover_text(tip);
-                if !icon.is_empty() && ui.is_rect_visible(response.rect) {
-                    let size = crate::theme::style::MENU_ICON_SIZE;
-                    crate::icons::show_icon(
-                        ui.painter(),
-                        egui::Rect::from_center_size(response.rect.center(), egui::vec2(size, size)),
-                        icon,
-                        crate::icons::IconMode::Normal,
-                    );
-                }
-                if response.clicked() {
+            for (name, icon, label, tip) in tools {
+                if crate::main_window::panels::panel_tool(ui, name, icon, label, tip).clicked() {
                     self.queued.push(Queued::Trigger(String::from(name)));
                 }
             }
             // Up and Down are arrows painted, not characters: the window's font has no U+2191 or
-            // U+2193, and they were drawn as two empty boxes.
+            // U+2193, and they were drawn as two empty boxes. Flat, as the tools beside them.
             for (name, text, tip, up) in [
                 ("sheetListUp", "Move Up", "Move this sheet up", true),
                 ("sheetListDown", "Move Down", "Move this sheet down", false),
             ] {
-                let side = ui.spacing().interact_size.y;
+                let side = crate::theme::style::CONTROL_HEIGHT;
                 let response = controls::button_as(
                     ui,
                     name,
                     text,
-                    egui::Button::new("").min_size(egui::vec2(side, side)),
+                    egui::Button::new("")
+                        .frame_when_inactive(false)
+                        .min_size(egui::vec2(side, side)),
                 )
                 .on_hover_text(tip);
                 paint_arrow(ui, response.rect, up);
@@ -5697,6 +5721,39 @@ fn paint_arrow(ui: &Ui, rect: egui::Rect, up: bool) {
     let head = half * 0.7;
     painter.line_segment([tip, tip + egui::vec2(-head, -sign * head)], ink);
     painter.line_segment([tip, tip + egui::vec2(head, -sign * head)], ink);
+}
+
+/// The toolbar's actions that act on a sheet: greyed while the set has none.
+const NEEDS_A_SHEET: [&str; 4] = ["sheetFitPage", "sheetCheck", "sheetPlotSheet", "sheetPlotAll"];
+
+/// A pane's title bar, as the main window's docks wear one (dock_chrome): the pane's icon and its
+/// title in the text colour on the pane's own ground, a control high, and a flat close tool at its
+/// right. True when the close tool was clicked.
+fn pane_title_bar(ui: &mut Ui, icon: &str, title: &str) -> bool {
+    let height = crate::theme::style::CONTROL_HEIGHT;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(crate::theme::style::GAP, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let size = crate::theme::style::MENU_ICON_SIZE;
+    let (at, _) = child.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    crate::icons::show_icon(child.painter(), at, icon, crate::icons::IconMode::Normal);
+    child.label(title);
+    let mut closed = false;
+    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        closed = crate::main_window::panels::panel_tool(
+            ui,
+            "sheetChecksClose",
+            "Close",
+            "Close",
+            "Close the Checks pane",
+        )
+        .clicked();
+    });
+    closed
 }
 
 /// The editor's toolbar drawn as the window's toolbars are: a button is flat at rest, its text

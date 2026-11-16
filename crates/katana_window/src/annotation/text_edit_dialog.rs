@@ -433,13 +433,15 @@ impl TextEditDialog {
                         "Height on paper (mm)",
                         "textEditPaper",
                         &mut self.paper,
-                        "Height on paper in mm, drawn at the annotation scale; 0 for the                          style's, or a model height with no style",
+                        "Height on paper in mm, drawn at the annotation scale; 0 for the \
+                         style's, or a model height with no style",
                     ),
                     (
                         "Model height",
                         "textEditHeight",
                         &mut self.height,
-                        "Height in model units; a paper-sized text's is worked out for the                          annotation scale",
+                        "Height in model units; a paper-sized text's is worked out for the \
+                         annotation scale",
                     ),
                 ];
                 for (title, name, value, tip) in lines {
@@ -455,7 +457,8 @@ impl TextEditDialog {
                         &mut self.justify,
                     )
                     .on_hover_text(
-                        "The point the position is: T, M or B for top, middle or bottom (the                          baseline), then L, C or R for left, centre or right",
+                        "The point the position is: T, M or B for top, middle or bottom (the \
+                         baseline), then L, C or R for left, centre or right",
                     );
                 });
                 let lines = [

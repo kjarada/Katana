@@ -98,7 +98,7 @@ use super::filter_bar::FilterBar;
 use super::name_picker::UNDEFINED_NAME_COLOUR;
 use super::scope_filter_widget::ScopeFilterView;
 use super::style_preview::{PreviewGround, StylePreview};
-use crate::annotation::dialog_support::{show_dialog, table};
+use crate::annotation::dialog_support::{TableLook, show_dialog, table_look};
 use crate::canvas::Image;
 use crate::command_word::command_word;
 use crate::dialog_layout::{self as layout, TABLE_COLUMN_GAP, TABLE_ROW_GAP, table_row_colour};
@@ -2079,7 +2079,9 @@ impl SurveyCodeManagerDialog {
                 egui::Label::new(plain.as_str()).wrap(),
             );
             let rows = self.explained_fields();
-            let shown = table(
+            // The table spans the pane, ending where the rule's form under it does: as wide as
+            // its columns' words it ended 29 points short (the third look audit's J).
+            let shown = table_look(
                 ui,
                 "explainFields",
                 &["Field", "Value", "Set by", "Decided against"],
@@ -2087,6 +2089,10 @@ impl SurveyCodeManagerDialog {
                 None,
                 &[],
                 None,
+                TableLook {
+                    fill: true,
+                    ..TableLook::default()
+                },
             );
             if let Some(row) = shown.double_clicked {
                 self.events.push(Event::ExplainActivated(row));
