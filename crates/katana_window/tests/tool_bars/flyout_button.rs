@@ -1471,6 +1471,45 @@ mod tool_bar_overflow {
     use super::*;
 
     #[test]
+    fn a_bar_with_every_tool_hidden_is_one_button_of_its_first_tool_with_a_familys_mark() {
+        // A side column's bar under one that took the column keeps the room of one button
+        // (main_window::layout::collapsed_bar). Drawn as the overflow arrow alone it stood under
+        // Draw's own arrow, two identical chevrons (the third look audit's G); it is its first
+        // tool's icon with the corner mark that says it holds more, and still the overflow
+        // button: a click opens its tools beside it.
+        let built = draw_bar(20);
+        let room = katana_window::main_window::layout::collapsed_bar(20);
+        let mut harness = Harness::new();
+        let shown = show_strip(&mut harness, &built, room);
+        assert!(shown.overflow);
+        assert!(shown.rects.is_empty(), "every tool hidden: {:?}", shown.rects);
+        let paint = shown.overflow_paint.clone().expect("the bar's button is drawn");
+        let first = built.strip().items.iter().find_map(|item| match item {
+            StripItem::Action { action, .. } => Some(action.icon),
+            StripItem::Family(flyout) => Some(flyout.default.icon),
+            _ => None,
+        });
+        assert_eq!(
+            paint.icon,
+            ButtonIcon::Named(String::from(first.expect("the bar has a tool")))
+        );
+        assert!(matches!(paint.sign, MenuSign::Mark(_)), "{:?}", paint.sign);
+        assert_eq!(
+            (paint.width, paint.height),
+            ToolButtonLook::TOOL.button_size(20)
+        );
+        // With room for the arrow only, the arrow it was.
+        let shown = show_strip(&mut harness, &built, 24.0);
+        let paint = shown.overflow_paint.expect("the arrow is drawn");
+        assert!(matches!(paint.icon, ButtonIcon::Overflow { .. }), "{:?}", paint.icon);
+        // And a bar some of whose tools show keeps its arrow.
+        let shown = show_strip(&mut harness, &built, 300.0);
+        assert!(!shown.rects.is_empty());
+        let paint = shown.overflow_paint.expect("the arrow is drawn");
+        assert!(matches!(paint.icon, ButtonIcon::Overflow { .. }), "{:?}", paint.icon);
+    }
+
+    #[test]
     fn a_toolbar_too_short_for_its_buttons_shows_its_whole_overflow_arrow() {
         // The overflow button is 12 px deep; the padding and border every tool button has left
         // its arrow 2 px, a dot. In the button's image the arrow is its two chevrons, each whole:

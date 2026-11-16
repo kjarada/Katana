@@ -4,10 +4,10 @@
 //!
 //! ```text
 //! Where each goes (docs/geoprocessing.md, "Window"):
-//!   GIS > Processing - GDAL   gdalToolbox (X1), gisFormats (I2)
-//!   GIS > Analysis - GDAL     gisBuffer, gisDissolve (V1), gisOverlay (V2),
+//!   GIS > Processing          gdalToolbox (X1), gisFormats (I2)
+//!   GIS > Analysis            gisBuffer, gisDissolve (V1), gisOverlay (V2),
 //!                             gisHull, gisClip (V3), gisSql (V5)
-//!   GIS > Check - GDAL        gisCheck, gisRepair, gisCoverage (V4)
+//!   GIS > Check               gisCheck, gisRepair, gisCoverage (V4)
 //!   Terrain > Analysis        terrainContours (T1), terrainShading (T2),
 //!                             terrainSlope (T3), terrainZonal, terrainDrape
 //!                             (T4), terrainViewshed (T5)
@@ -178,9 +178,9 @@ impl GeoMenuDialogs {
     }
 }
 
-/// One of a package's terrain items: its object name, text, tip and the dialog it opens.
-fn terrain_item(name: &str, text: &str, tip: &str, dialog: &str) -> Action {
-    Action::new(name, text).icon("Processing").tip(tip).opens(dialog)
+/// One of a package's terrain items: its object name, icon, text, tip and the dialog it opens.
+fn terrain_item(name: &str, icon: &'static str, text: &str, tip: &str, dialog: &str) -> Action {
+    Action::new(name, text).icon(icon).tip(tip).opens(dialog)
 }
 
 /// A GIS dialog over the window, boxed as GisToolDialogs keeps it.
@@ -191,13 +191,13 @@ fn boxed<D: GisTool + 'static>(dialog: D) -> Box<dyn GisTool> {
 /// Every package's menu items, from one table with a block per package (buildGeoMenus).
 pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     // ---- F0: GDAL algorithm bridge: no item; the typed GDAL line (X1 is its menu item) ----
-    // ---- X1: GIS > Processing - GDAL > GDAL Toolbox ----
+    // ---- X1: GIS > Processing > GDAL Toolbox ----
     // X: every other letter of "GDAL Toolbox" is another GIS item's once the lanes merge (T Import
     // Vector Data, D Export Surface as DEM, O COPC; and the vector lane's G, A, L and B), and
     // qt_every_shortcut_and_menu_letter_reaches_one_thing_headless refuses a letter shared in one
     // menu.
     menus.add_to_gis(
-        "Processing - GDAL",
+        "Processing",
         Action::new(TOOLBOX, "GDAL Toolbo&x...")
             .icon("Processing")
             .tip(
@@ -207,15 +207,15 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
             .opens("gdalToolboxDialog"),
     );
     // ---- X2: the toolbox's pipeline tab (no item of its own) ----
-    // ---- I2: GIS > Processing - GDAL > Formats ----
+    // ---- I2: GIS > Processing > Formats ----
     add_formats_item(menus);
-    // ---- V1: GIS > Analysis - GDAL > Buffer, Dissolve ----
+    // ---- V1: GIS > Analysis > Buffer, Dissolve ----
     let gis = &mut dialogs.gis;
     add_gis_tool_action(
         menus,
         gis,
-        "Analysis - GDAL",
-        "Processing",
+        "Analysis",
+        "GisBuffer",
         "&Buffer...",
         "Areas around what the scope takes: easements, setbacks (negative), corridors, clearance \
          zones - GIS BUFFER",
@@ -225,32 +225,32 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     add_gis_tool_action(
         menus,
         gis,
-        "Analysis - GDAL",
-        "Processing",
+        "Analysis",
+        "GisDissolve",
         "Di&ssolve...",
         "Merge areas whose properties agree - superlots by owner, one clearance zone - GIS \
          DISSOLVE",
         "gisDissolve",
         |context: GisDialogContext, host: &dyn Host| boxed(GisDissolveDialog::new(context, host)),
     );
-    // ---- V2: GIS > Analysis - GDAL > Overlay ----
+    // ---- V2: GIS > Analysis > Overlay ----
     add_gis_tool_action(
         menus,
         gis,
-        "Analysis - GDAL",
-        "Processing",
+        "Analysis",
+        "GisOverlay",
         "Ov&erlay...",
         "Intersection, difference, union and the rest between two scopes, or a scope and a file - \
          easement area per lot, pipe length per lot - GIS OVERLAY",
         "gisOverlay",
         |context: GisDialogContext, host: &dyn Host| boxed(GisOverlayDialog::new(context, host)),
     );
-    // ---- V3: GIS > Analysis - GDAL > Hull, Clip ----
+    // ---- V3: GIS > Analysis > Hull, Clip ----
     add_gis_tool_action(
         menus,
         gis,
-        "Analysis - GDAL",
-        "Processing",
+        "Analysis",
+        "GisHull",
         "Boundary Around Feat&ures...",
         "The boundary around every point and vertex the scope takes - convex, or concave to \
          follow them in - GIS HULL",
@@ -260,20 +260,20 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     add_gis_tool_action(
         menus,
         gis,
-        "Analysis - GDAL",
-        "Processing",
+        "Analysis",
+        "GisClip",
         "C&lip to Boundary...",
         "Cut what the scope takes to the areas of a second scope or a file - the pieces on a \
          layer, or in place - GIS CLIP",
         "gisClip",
         |context: GisDialogContext, host: &dyn Host| boxed(GisClipDialog::new(context, host)),
     );
-    // ---- V4: GIS > Check - GDAL > Check, Repair, Coverage ----
+    // ---- V4: GIS > Check > Check, Repair, Coverage ----
     add_gis_tool_action(
         menus,
         gis,
-        "Check - GDAL",
-        "Processing",
+        "Check",
+        "GisCheck",
         "Check &Geometry...",
         "Invalid lines and areas - self-intersections and the like - each where it is, optionally \
          marked on a layer - GIS CHECK",
@@ -283,8 +283,8 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     add_gis_tool_action(
         menus,
         gis,
-        "Check - GDAL",
-        "Processing",
+        "Check",
+        "GisRepair",
         "Repair Geo&metry...",
         "Make invalid areas valid in place, ids kept; a bow-tie becomes its two triangles - GIS \
          REPAIR",
@@ -294,20 +294,20 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     add_gis_tool_action(
         menus,
         gis,
-        "Check - GDAL",
-        "Processing",
+        "Check",
+        "GisCoverage",
         "Gaps &and Overlaps...",
         "Overlaps, enclosed gaps and edges that do not match between areas - and cleaning them, \
          only when asked - GIS COVERAGE",
         "gisCoverage",
         |context: GisDialogContext, host: &dyn Host| boxed(GisCoverageDialog::new(context, host)),
     );
-    // ---- V5: GIS > Analysis - GDAL > Query with SQL ----
+    // ---- V5: GIS > Analysis > Query with SQL ----
     add_gis_tool_action(
         menus,
         gis,
-        "Analysis - GDAL",
-        "Processing",
+        "Analysis",
+        "GisSql",
         "Query with S&QL...",
         "Ask the drawing a question in SQL - the easement area per owner - as rows, a selection or \
          new entities - GIS SQL",
@@ -318,10 +318,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         ANALYSIS,
         ANALYSIS_MENU,
-        "Processing",
+        "TerrainContours",
         ANALYSIS_TIP,
         terrain_item(
             CONTOURS,
+            "TerrainContours",
             "&Contours...",
             "Contour lines of a surface or an elevation raster, drawn on layers (CONTOUR)",
             "contoursDialog",
@@ -331,10 +332,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         ANALYSIS,
         ANALYSIS_MENU,
-        "Processing",
+        "TerrainContours",
         ANALYSIS_TIP,
         terrain_item(
             SHADING,
+            "TerrainShading",
             "Terrain S&hading...",
             "Hillshade, colour relief or slope shading of a surface or an elevation raster, kept \
              as a reference raster with its legend (RASTER SHADE)",
@@ -345,10 +347,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         ANALYSIS,
         ANALYSIS_MENU,
-        "Processing",
+        "TerrainContours",
         ANALYSIS_TIP,
         terrain_item(
             SLOPE,
+            "TerrainSlope",
             "&Slope and Aspect...",
             "The slope or aspect of a surface or an elevation raster, and slope classes drawn as \
              areas (RASTER SLOPE, RASTER ASPECT)",
@@ -359,10 +362,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         ANALYSIS,
         ANALYSIS_MENU,
-        "Processing",
+        "TerrainContours",
         ANALYSIS_TIP,
         terrain_item(
             ZONAL,
+            "TerrainZonal",
             "Statistics by &Area...",
             "The mean, range, count and more of a surface or an elevation raster inside each \
              closed shape, written on the shapes as properties (RASTER ZONAL)",
@@ -372,10 +376,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         ANALYSIS,
         ANALYSIS_MENU,
-        "Processing",
+        "TerrainContours",
         ANALYSIS_TIP,
         terrain_item(
             DRAPE,
+            "TerrainDrape",
             "&Drape and Sample Heights...",
             "Give points and line vertices the height of a surface or an elevation raster, or \
              read the height at points (DRAPE, RASTER SAMPLE)",
@@ -386,10 +391,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         ANALYSIS,
         ANALYSIS_MENU,
-        "Processing",
+        "TerrainContours",
         ANALYSIS_TIP,
         terrain_item(
             VIEWSHED,
+            "TerrainViewshed",
             "&Viewshed and Line of Sight...",
             "What can be seen from observers over a surface or an elevation raster, and whether \
              one point can be seen from another (RASTER VIEWSHED, LOS)",
@@ -400,10 +406,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         DEM,
         DEM_MENU,
-        "ExportDem",
+        "GridDem",
         DEM_TIP,
         terrain_item(
             GRID,
+            "GridDem",
             "&Grid Points to DEM...",
             "Grid the points in a scope - their heights, or a property - into a DEM kept as a \
              reference raster (RASTER GRID)",
@@ -414,10 +421,11 @@ pub fn build_geo_menus(menus: &mut GeoMenus, dialogs: &mut GeoMenuDialogs) {
     menus.add_to_terrain(
         DEM,
         DEM_MENU,
-        "ExportDem",
+        "GridDem",
         DEM_TIP,
         terrain_item(
             DEM_TOOLS,
+            "DemTools",
             "DEM &Tools...",
             "Mosaic, clip, fill, reproject, trace and difference DEMs, with cut and fill volumes \
              (RASTER MOSAIC, CLIP, FILL, REPROJECT, FOOTPRINT, DIFFERENCE)",

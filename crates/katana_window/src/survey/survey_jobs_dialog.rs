@@ -456,7 +456,7 @@ impl SurveyJobsDialog {
             let formats: Vec<&str> = EXPORT_FORMATS.iter().map(|(label, _, _)| *label).collect();
             choice_of(ui, "exportFormat", &formats, &mut form.export_format)
                 .on_hover_text("The format, when the file name has no extension saying it");
-            let width = crate::shell::dialog::beside_buttons(ui, &["...", "Export Report"]);
+            let width = crate::shell::dialog::beside_buttons(ui, &["Browse...", "Export Report"]);
             crate::shell::dialog::fixed_fields(ui, width);
             field(
                 ui,
@@ -465,7 +465,7 @@ impl SurveyJobsDialog {
                 "file to export the report to",
                 "",
             );
-            if drive::button(ui, "browseExport", "...")
+            if drive::button(ui, "browseExport", "Browse...")
                 .on_hover_text("Choose the file")
                 .clicked()
             {
@@ -711,11 +711,15 @@ impl SurveyJobsDialog {
             .map(|file| file.name.as_str())
             .collect();
         self.form.job_summary = format!(
-            "{}: {} on layer {}, {} point(s); parser {}; last reduced {}{}.",
+            "{}: {} on layer {}, {}; parser {}; last reduced {}{}.",
             job.id,
             job.name,
             job.layer,
-            job.placed_points.len(),
+            katana_cad::tools::everyday_support::counted(
+                job.placed_points.len(),
+                "point",
+                "points"
+            ),
             job.parser_version,
             short_time(&job.report_created_utc),
             if siblings.is_empty() {
@@ -830,11 +834,18 @@ impl SurveyJobsDialog {
                     }
                     self.form.options.set_project(&raw);
                     self.show_message(&format!(
-                        "Read the job's stored file again with parser {}: {} record(s), {} \
-                         warning(s).",
+                        "Read the job's stored file again with parser {}: {}, {}.",
                         read.parser_version,
-                        read.records_read,
-                        read.warnings.len()
+                        katana_cad::tools::everyday_support::counted(
+                            read.records_read,
+                            "record",
+                            "records"
+                        ),
+                        katana_cad::tools::everyday_support::counted(
+                            read.warnings.len(),
+                            "warning",
+                            "warnings"
+                        )
                     ));
                     self.read = Some(read);
                     self.raw = Some(raw);
@@ -867,10 +878,18 @@ impl SurveyJobsDialog {
                     self.form.new_report.set_report_html(&html);
                     self.show_shifts(host.document(), &outcome.report);
                     self.show_message(&format!(
-                        "Preview: {} point(s); {}; {} observation(s) rejected.",
-                        outcome.points.len(),
+                        "Preview: {}; {}; {} rejected.",
+                        katana_cad::tools::everyday_support::counted(
+                            outcome.points.len(),
+                            "point",
+                            "points"
+                        ),
                         adjustment_summary(&outcome.report),
-                        rejected_observations(&outcome.report)
+                        katana_cad::tools::everyday_support::counted(
+                            rejected_observations(&outcome.report),
+                            "observation",
+                            "observations"
+                        )
                     ));
                     self.outcome = Some(outcome);
                     if then_apply {
@@ -939,7 +958,7 @@ impl SurveyJobsDialog {
         self.form.new_report.show_note("Reducing and adjusting...");
         let started = self.form.task.run(
             &format!(
-                "Reducing and adjusting {size} observation(s) and point(s) of {}",
+                "Reducing and adjusting {size} observations and points of {}",
                 job.source_file_name
             ),
             size > BACKGROUND_OBSERVATIONS,
@@ -1027,12 +1046,16 @@ impl SurveyJobsDialog {
             .map_or_else(|| String::from("-"), |report| adjustment_summary(&report));
         host.log(
             &format!(
-                "Re-adjusted survey job {} ({}): {summary}; {} point(s) moved, {} created, {} \
-                 removed, {} changed by hand and {} deleted by hand ({}), {} not drawn. One \
-                 command - Undo puts the job and its points back.",
+                "Re-adjusted survey job {} ({}): {summary}; {} moved, {} created, {} removed, {} \
+                 changed by hand and {} deleted by hand ({}), {} not drawn. One command - Undo \
+                 puts the job and its points back.",
                 job.id,
                 job.source_file_name,
-                changes.moved.len(),
+                katana_cad::tools::everyday_support::counted(
+                    changes.moved.len(),
+                    "point",
+                    "points"
+                ),
                 changes.created.len(),
                 changes.removed.len(),
                 changes.edited_by_hand.len(),
@@ -1201,8 +1224,8 @@ impl SurveyJobsDialog {
         self.form.shifts = shifts;
         self.form.shift = None;
         let mut text = format!(
-            "{} point(s) against the job's last run: {noticed} move by 1 mm or more",
-            rows.len()
+            "{} against the job's last run: {noticed} move by 1 mm or more",
+            katana_cad::tools::everyday_support::counted(rows.len(), "point", "points")
         );
         if noticed > 0 {
             text.push_str(&format!(
@@ -1286,8 +1309,12 @@ impl SurveyJobsDialog {
             job.id, job.source_file_name
         );
         self.form.remove_with_points_text = format!(
-            "and its {} point(s) on the drawing",
-            job.placed_points.len()
+            "and its {} on the drawing",
+            katana_cad::tools::everyday_support::counted(
+                job.placed_points.len(),
+                "point",
+                "points"
+            )
         );
         self.form.remove_with_points = false;
         self.form.remove_shown = true;

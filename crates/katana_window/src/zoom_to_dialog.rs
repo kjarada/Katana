@@ -23,7 +23,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use egui::{RichText, Ui};
+use egui::Ui;
 use katana_cad::view_set::{NO_VIEW, ViewId, ViewSet};
 use katana_cad::view_verbs::{ZoomRequestKind, zoom_takes};
 use katana_core::Result;
@@ -32,7 +32,6 @@ use crate::customisation::{ScopeFilterWidget, scope_filter_views};
 use crate::drive::controls::{self, Choice};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
-use crate::theme;
 
 /// What the dialog reads of the window.
 #[derive(Default)]
@@ -351,22 +350,20 @@ impl ZoomToDialog {
                     "The view to frame what the scope takes in; the views linked with it follow",
                 )
             });
-            let line = match self.line() {
-                Ok(line) => line,
-                Err(error) => error.describe(),
-            };
-            form.row("Line", |ui| {
-                // On its label's line, as a field's text is.
-                dialog::text_value(ui, |ui| {
-                    controls::label_as(
-                        ui,
-                        "zoomToLine",
-                        &line,
-                        egui::Label::new(RichText::new(line.as_str()).monospace())
-                            .wrap()
-                            .selectable(true),
-                    )
-                })
+            // The line Zoom runs in a read-only field labelled "Command", as every dialog's is: it
+            // was fixed-pitch text labelled "Line", the one dialog that said so. Empty while the
+            // scope writes none; why is the footer's status.
+            let mut line = self.line().unwrap_or_default();
+            form.row("Command", |ui| {
+                controls::line_with(
+                    ui,
+                    "zoomToLine",
+                    &mut line,
+                    controls::LineOptions {
+                        read_only: true,
+                        ..controls::LineOptions::default()
+                    },
+                )
             });
         });
     }
@@ -374,24 +371,24 @@ impl ZoomToDialog {
     /// The status, and the buttons: Close closes; Zoom - the dialog's act, last and in the accent -
     /// keeps it open for the next scope.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        let status = self.status.clone();
-        let colour = if self.status_error {
-            theme::error()
+        // What the last Zoom said, or - before anything was said - why the scope writes no line.
+        let (status, is_error) = if self.status.is_empty() {
+            (
+                self.line()
+                    .err()
+                    .map(|error| error.message)
+                    .unwrap_or_default(),
+                false,
+            )
         } else {
-            theme::text()
+            (self.status.clone(), self.status_error)
         };
-        // The status at the left of the buttons, wrapped in what they leave it.
+        // The status at the left of the buttons, in the one status look (muted, red only for a
+        // refusal; it was the text colour).
         let ((), (close, zoom)) = dialog::button_row(
             ui,
             |ui| {
-                controls::label_as(
-                    ui,
-                    "zoomToStatus",
-                    &status,
-                    egui::Label::new(RichText::new(status.as_str()).color(colour.to_egui()))
-                        .wrap()
-                        .selectable(true),
-                );
+                dialog::status(ui, "zoomToStatus", &status, is_error);
             },
             |ui| {
                 let close = controls::button(ui, "zoomToClose", "Close").clicked();

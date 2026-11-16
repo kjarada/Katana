@@ -42,8 +42,14 @@ mod tool_bar_columns {
     }
 
     #[test]
-    fn a_collapsed_bar_is_its_arrow_and_its_padding() {
-        // tools::flyout_button: 6 of padding at either end of a strip and a 12 point arrow.
-        assert_eq!(collapsed_bar(), 24.0);
+    fn a_collapsed_bar_is_one_tool_button_and_its_padding() {
+        // tools::flyout_button: 6 of padding at either end of a strip and a tool button, its
+        // icon, Qt's 3, a padding of 4 and a border of 1 each side - 33 at a toolbar's 20 px
+        // icons. It was the 12 point overflow arrow, 24 in all, and under Draw's own arrow the
+        // two read as one sign drawn twice (the third look audit's G); the bar is now drawn as
+        // its first tool with a family's corner mark, which opens its tools.
+        assert_eq!(collapsed_bar(20), 6.0 + 33.0 + 6.0);
+        assert_eq!(collapsed_bar(16), 6.0 + 29.0 + 6.0);
+        assert_eq!(collapsed_bar(28), 6.0 + 41.0 + 6.0);
     }
 }

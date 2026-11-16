@@ -305,7 +305,9 @@ impl Default for SceneOptions<'_> {
             selection_ghosts: false,
             grid_color: rgba(70, 72, 82),
             grid_major_color: rgba(92, 95, 108),
-            grid_fade_color: rgba(28, 30, 36),
+            // The views' one ground, the plan's #1e2329 (the window's viewport token) since the
+            // look of 2026-11-16: the 3D view's was (28, 30, 36), a second dark beside it in Quad.
+            grid_fade_color: rgba(30, 35, 41),
             axis_color_x: rgba(170, 75, 75),
             axis_color_y: rgba(75, 150, 75),
             draw_linetypes: true,

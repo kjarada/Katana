@@ -1828,19 +1828,20 @@ impl SymbolLibraryDialog {
         Some(id)
     }
 
-    /// A row of the details pane: said, or not there.
+    /// A row of the details pane: said, or not there. A form's row: the title in the pane's label
+    /// column, the value beside it from one edge (shell::dialog::labelled). Each value had started
+    /// right after its own title ("Prints 3.6 ...", "Survey codes PPCN"), at eleven places down the
+    /// pane (the third look audit's J).
     fn detail(ui: &mut Ui, name: &str, title: &str, text: &str, warned: bool) {
         let row = |ui: &mut Ui| {
-            ui.horizontal_wrapped(|ui| {
-                // The title in the label colour, so the value reads first, as a form's does.
-                if !title.is_empty() {
-                    dialog::form_label(ui, title);
-                }
-                let mut shown = RichText::new(text);
-                if warned {
-                    shown = shown.color(UNDEFINED_NAME_COLOUR.to_egui());
-                }
-                controls::label_as(ui, name, text, egui::Label::new(shown).wrap());
+            dialog::labelled(ui, title, |ui| {
+                dialog::text_value(ui, |ui| {
+                    let mut shown = RichText::new(text);
+                    if warned {
+                        shown = shown.color(UNDEFINED_NAME_COLOUR.to_egui());
+                    }
+                    controls::label_as(ui, name, text, egui::Label::new(shown).wrap());
+                });
             });
         };
         // A row says something or is not there: a built-in shape has no source file, units or
@@ -2007,11 +2008,13 @@ impl SymbolLibraryDialog {
                     ControlRecord::new("symbolDetails", ControlKind::Other),
                 );
 
-                ui.add_space(layout::SECTION_GAP - ui.spacing().item_spacing.y);
+                // A group's gap above the heading: drawn first in a column of its own, the
+                // section adds none itself.
+                ui.add_space(dialog::SECTION_GAP - ui.spacing().item_spacing.y);
                 let actions = ui.vertical(|ui| {
-                    ui.strong("Use");
-                    ui.horizontal(|ui| {
-                        ui.label("Size");
+                    dialog::section(ui, "Use");
+                    // Rows of the pane's form, in the label column the details share.
+                    dialog::labelled(ui, "Size", |ui| {
                         ui.add_enabled_ui(self.actions.size, |ui| {
                             if controls::spin(ui, "assignSize", &mut self.size, SIZE)
                                 .on_hover_text(
@@ -2032,13 +2035,19 @@ impl SymbolLibraryDialog {
                             }
                         });
                     });
-                    ui.horizontal(|ui| {
-                        ui.label("Style");
+                    dialog::labelled(ui, "Style", |ui| {
+                        dialog::fixed_fields(ui, dialog::beside_a_button(ui, "Set on Style"));
                         let mut style = controls::Choice {
                             index: self.target_style,
                             ..controls::Choice::default()
                         };
-                        if controls::choice(ui, "targetStyle", &self.target_styles, &mut style)
+                        if controls::choice_with_hint(
+                            ui,
+                            "targetStyle",
+                            &self.target_styles,
+                            &mut style,
+                            "No style",
+                        )
                             .changed()
                         {
                             self.target_style = style.index;
@@ -2049,8 +2058,8 @@ impl SymbolLibraryDialog {
                             }
                         });
                     });
-                    ui.horizontal(|ui| {
-                        ui.label("With");
+                    dialog::labelled(ui, "With", |ui| {
+                        dialog::fixed_fields(ui, dialog::beside_a_button(ui, "Replace in Styles"));
                         // Choosing or typing a replacement only enables the button beside it.
                         let typed = String::from(self.replace_with.current_text());
                         let chosen = self.replace_with.ui(ui, "replaceWith");
@@ -2069,12 +2078,14 @@ impl SymbolLibraryDialog {
                             }
                         });
                     });
-                    ui.add_enabled_ui(self.actions.select_using, |ui| {
-                        if controls::button(ui, "selectPointsUsing", "Select Points Using")
-                            .clicked()
-                        {
-                            self.events.push(Event::SelectUsing);
-                        }
+                    dialog::labelled(ui, "", |ui| {
+                        ui.add_enabled_ui(self.actions.select_using, |ui| {
+                            if controls::button(ui, "selectPointsUsing", "Select Points Using")
+                                .clicked()
+                            {
+                                self.events.push(Event::SelectUsing);
+                            }
+                        });
                     });
                 });
                 custom(

@@ -1038,7 +1038,7 @@ mod survey_import_wizard {
             assert!(session.logged(sentence), "{sentence}");
         }
         assert!(session.logged(
-            "Imported 5 point(s) from kerb.csv, drawn on fieldwork and then finished by the \
+            "Imported 5 points from kerb.csv, drawn on fieldwork and then finished by the \
              survey codes as follows"
         ));
 

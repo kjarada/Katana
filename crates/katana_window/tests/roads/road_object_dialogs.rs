@@ -1030,7 +1030,7 @@ mod road_object_workbench {
         for item in &menu.items {
             match item {
                 MenuItem::Section(title) => {
-                    assert_eq!(title, "Road Objects", "the section's title")
+                    assert_eq!(title, "Road objects", "the section's title, in sentence case")
                 }
                 MenuItem::Action(action) => {
                     names.push(action.name.clone());

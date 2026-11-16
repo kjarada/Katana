@@ -4,7 +4,7 @@
 //! the tools act on.
 //!
 //! ```text
-//! terrainEditMenu        Terrain > Edit Surface: the tools, then "Levels and Triangles"
+//! terrainEditMenu        Terrain > Edit Surface: the tools, then "Levels and triangles"
 //! SurfaceEditToolBar     surfaceEditActive (the active surface), the tools, the dialogs' items
 //! terrainSurfaceHeights ... terrainSurfaceDeleteBreakline, terrainCombineSurfaces
 //! ```
@@ -27,8 +27,8 @@ use katana_cad::terrain::surface_edit_verbs::{
 use super::surface_edit_dialogs::{
     SurfaceCombineDialog, SurfaceLevelsDialog, SurfaceLevelsKind, surface_levels_prefix,
 };
+use crate::drive::Choice;
 use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem};
-use crate::drive::{Choice, choice};
 use crate::host::Host;
 
 /// One of the dialogs' items: its icon, text, status tip, object name and what it opens.
@@ -79,7 +79,7 @@ const ITEMS: [Item; 8] = [
     // underlined letter: the tools above took the free ones, and --check-shortcuts counts each
     // once.
     Item {
-        icon: "SurfaceEdit",
+        icon: "SurfaceDeletePoints",
         text: "Delete Points Inside Polygons...",
         tip: "Delete the points of the surface inside the polygons a scope takes (breakline and \
               rim points are kept)",
@@ -87,14 +87,14 @@ const ITEMS: [Item; 8] = [
         kind: SurfaceLevelsKind::DeletePoints,
     },
     Item {
-        icon: "SurfaceDeleteLong",
+        icon: "SurfaceDeleteTriangles",
         text: "Delete Triangles by Polygons...",
         tip: "Delete the triangles inside, or outside, the union of the polygons a scope takes",
         name: "terrainSurfaceDeleteTriangles",
         kind: SurfaceLevelsKind::DeleteTriangles,
     },
     Item {
-        icon: "SurfaceLevels",
+        icon: "SurfaceAddPoints",
         text: "Add Points from the Drawing...",
         tip: "Add the points and levelled vertices a scope takes to the surface; a point off it \
               extends it",
@@ -102,7 +102,7 @@ const ITEMS: [Item; 8] = [
         kind: SurfaceLevelsKind::AddPoints,
     },
     Item {
-        icon: "SurfaceEdit",
+        icon: "SurfaceDeleteBreakline",
         text: "Delete Breaklines Along Lines...",
         tip: "Make the breakline edges that lie along the lines a scope takes ordinary edges (the \
               triangles stay; a point on one can then be deleted)",
@@ -184,7 +184,7 @@ impl SurfaceEditUi {
         self.tool_bar = tool_bar;
         self.menu
             .items
-            .push(MenuItem::Section(String::from("Levels and Triangles")));
+            .push(MenuItem::Section(String::from("Levels and triangles")));
         self.tool_bar.items.push(ToolBarItem::Separator);
         for item in &ITEMS {
             let action = Action::new(item.name, item.text)
@@ -264,12 +264,18 @@ impl SurfaceEditUi {
         let has_surfaces = !self.surfaces.is_empty();
         let changed = ui
             .add_enabled_ui(has_surfaces, |ui| {
-                choice(ui, ACTIVE_NAME, &self.surfaces, &mut self.active)
-                    .on_hover_text(
-                        "Active surface: the surface the Edit Surface tools act on. A tool's own \
+                crate::drive::controls::choice_with_hint(
+                    ui,
+                    ACTIVE_NAME,
+                    &self.surfaces,
+                    &mut self.active,
+                    crate::geo::terrain_dialog_parts::NO_SURFACE_HINT,
+                )
+                .on_hover_text(
+                    "Active surface: the surface the Edit Surface tools act on. A tool's own \
                          S option chooses it too.",
-                    )
-                    .changed()
+                )
+                .changed()
             })
             .inner;
         if changed && let Some(index) = self.active.index {

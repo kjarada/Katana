@@ -818,6 +818,10 @@ pub struct LabelStyleManagerDialog {
     /// next look - after the click's frame, as the C++ queued it past the box's own signal.
     queued_enabled: Option<(String, bool)>,
     pressed: Option<LabelPressed>,
+    /// The dialog's least height: the taller tab's as drawn (the Label Styles tab's), so it keeps
+    /// one size as its tabs are turned - it was 570 high on Label Styles and 316 on Auto-Label
+    /// Rules (the third look audit's D).
+    least_height: f32,
 }
 
 impl LabelStyleManagerDialog {
@@ -878,6 +882,7 @@ impl LabelStyleManagerDialog {
             label_counts: BTreeMap::new(),
             queued_enabled: None,
             pressed: None,
+            least_height: 0.0,
         };
         dialog.refresh(document);
         dialog
@@ -1555,7 +1560,13 @@ impl LabelStyleManagerDialog {
             &mut self.frame,
             DialogFrame::new("labelStyleManagerDialog", "Label Styles and Rules"),
         );
+        if self.least_height > 0.0 {
+            frame.set_minimum_height(self.least_height);
+        }
         let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
+        if let Some(drawn) = frame.rect() {
+            self.least_height = self.least_height.max(drawn.height());
+        }
         self.frame = frame;
         match self.pressed.take() {
             Some(LabelPressed::Close) => closed = true,
@@ -1746,8 +1757,15 @@ impl LabelStyleManagerDialog {
                 );
             });
 
-            form.row("Height on paper (0: the text style's)", |ui| {
-                controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER);
+            // Labels of a few words on one line, the detail in the tooltip: "Height on paper (0:
+            // the text style's)" wrapped to two lines in the label column (the third look audit's
+            // J).
+            form.row("Paper height", |ui| {
+                controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER)
+                    .on_hover_text(
+                        "The text's height on paper, drawn at the annotation scale; 0 for the \
+                         text style's",
+                    );
             });
             form.row("Placement", |ui| {
                 combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
@@ -1795,35 +1813,40 @@ impl LabelStyleManagerDialog {
                     "labelStyleMarkerSize",
                     &mut self.marker_size,
                     LABEL_MARKER_SIZE,
+                    "The size of the marker drawn at the labelled point",
                 ),
                 (
-                    "Shortest segment labelled",
+                    "Shortest segment",
                     "labelStyleMinimumLength",
                     &mut self.minimum_length,
                     LABEL_MINIMUM_LENGTH,
+                    "The shortest segment labelled: a shorter one is left without a label",
                 ),
                 (
-                    "Chainage label interval",
+                    "Chainage labels",
                     "labelStyleInterval",
                     &mut self.interval,
                     LABEL_INTERVAL,
+                    "How far apart an alignment's chainage labels are",
                 ),
                 (
-                    "Chainage tick interval",
+                    "Chainage ticks",
                     "labelStyleTickInterval",
                     &mut self.tick,
                     LABEL_TICK,
+                    "How far apart an alignment's chainage ticks are",
                 ),
                 (
                     "Tick length",
                     "labelStyleTickLength",
                     &mut self.tick_length,
                     LABEL_TICK_LENGTH,
+                    "How long a chainage tick is drawn",
                 ),
             ];
-            for (title, name, value, range) in boxes {
+            for (title, name, value, range, tip) in boxes {
                 form.row(title, |ui| {
-                    controls::spin(ui, name, value, range);
+                    controls::spin(ui, name, value, range).on_hover_text(tip);
                 });
             }
         });
@@ -1918,35 +1941,16 @@ impl LabelStyleManagerDialog {
                 self.pressed = Some(LabelPressed::RuleDelete);
             }
         });
-        controls::label(ui, "labelRuleReport", &self.run_report);
-        ui.horizontal(|ui| {
-            if button(ui, "labelRuleClear", "Remove Rule Labels")
-                .on_hover_text(
-                    "Remove the labels the chosen rules made - every rule's when none is chosen \
-                     (AUTOLABEL CLEAR)",
-                )
-                .clicked()
-            {
-                self.pressed = Some(LabelPressed::Clear);
-            }
-            if button(ui, "labelRulePreview", "Preview")
-                .on_hover_text(
-                    "What running the chosen rules would do, changing nothing (AUTOLABEL PREVIEW)",
-                )
-                .clicked()
-            {
-                self.pressed = Some(LabelPressed::Preview);
-            }
-            if button(ui, "labelRuleRun", "Run Rules")
-                .on_hover_text(
-                    "Label what the chosen rules match - every enabled rule when none is chosen - \
-                     as one step (AUTOLABEL RUN)",
-                )
-                .clicked()
-            {
-                self.pressed = Some(LabelPressed::Run);
-            }
-        });
+        // What the last run or preview did, no room while it says nothing. Remove Rule Labels,
+        // Preview and Run Rules, which act on the drawing, are the footer's (`footer`): in the
+        // body under the rule's buttons they were a third row of buttons (the third look audit's
+        // A).
+        layout::quiet_label(
+            ui,
+            "labelRuleReport",
+            &self.run_report,
+            palette::text_muted().to_egui(),
+        );
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
@@ -1954,10 +1958,12 @@ impl LabelStyleManagerDialog {
         // The one footer (shell::dialog::button_row), the front tab's. On Label Styles, Delete and
         // Add Standard Set at the left beside the last refusal, away from Apply (as Text Styles
         // keeps Delete), then Close and Apply, the primary: the three stood under the form with
-        // Apply in the accent in the body (the look audits' T5). On Auto-Label Rules, whose
-        // actions each belong to the rules, Close alone.
+        // Apply in the accent in the body (the look audits' T5). On Auto-Label Rules, Preview,
+        // which reads the drawing, and Remove Rule Labels at the left, then Close and Run Rules,
+        // the primary: the three stood in the body under the rule's own buttons (the third look
+        // audit's A).
         let styles = self.tab == 0;
-        let (left, (closed, applied)) = dialog::button_row(
+        let (left, (closed, primary)) = dialog::button_row(
             ui,
             |ui| {
                 let mut pressed = None;
@@ -1971,6 +1977,25 @@ impl LabelStyleManagerDialog {
                     {
                         pressed = Some(LabelPressed::Defaults);
                     }
+                } else {
+                    if button(ui, "labelRulePreview", "Preview")
+                        .on_hover_text(
+                            "What running the chosen rules would do, changing nothing \
+                             (AUTOLABEL PREVIEW)",
+                        )
+                        .clicked()
+                    {
+                        pressed = Some(LabelPressed::Preview);
+                    }
+                    if button(ui, "labelRuleClear", "Remove Rule Labels")
+                        .on_hover_text(
+                            "Remove the labels the chosen rules made - every rule's when none is \
+                             chosen (AUTOLABEL CLEAR)",
+                        )
+                        .clicked()
+                    {
+                        pressed = Some(LabelPressed::Clear);
+                    }
                 }
                 problem_line(ui, "labelStyleProblem", &problem);
                 pressed
@@ -1979,18 +2004,28 @@ impl LabelStyleManagerDialog {
                 let closed = controls::button(ui, "labelStyleClose", "Close")
                     .on_hover_text("Close the dialog; edits not applied are dropped")
                     .clicked();
-                let applied = styles
-                    && controls::primary(ui, "labelStyleApply", "Apply")
+                let primary = if styles {
+                    controls::primary(ui, "labelStyleApply", "Apply")
                         .on_hover_text("Store the form over the style shown, as one undo step")
-                        .clicked();
-                (closed, applied)
+                        .clicked()
+                        .then_some(LabelPressed::Apply)
+                } else {
+                    controls::primary(ui, "labelRuleRun", "Run Rules")
+                        .on_hover_text(
+                            "Label what the chosen rules match - every enabled rule when none is \
+                             chosen - as one step (AUTOLABEL RUN)",
+                        )
+                        .clicked()
+                        .then_some(LabelPressed::Run)
+                };
+                (closed, primary)
             },
         );
         if let Some(pressed) = left {
             self.pressed = Some(pressed);
         }
-        if applied {
-            self.pressed = Some(LabelPressed::Apply);
+        if let Some(pressed) = primary {
+            self.pressed = Some(pressed);
         }
         if closed {
             self.pressed = Some(LabelPressed::Close);

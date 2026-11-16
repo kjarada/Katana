@@ -40,8 +40,8 @@ use katana_core::text::format_exact_real;
 use katana_terrain::colour_ramp_names;
 
 use super::terrain_dialog_parts::{
-    Framed, WordChoice, command_field, field, invalid, number_of, row, run_buttons, show_framed,
-    why_no_line,
+    Framed, NO_SURFACE_OR_RASTER, WordChoice, command_field, field, invalid, number_of, row,
+    run_buttons, show_framed, why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -122,10 +122,7 @@ fn default_ramp(style: &str) -> &'static str {
 pub fn shading_line(form: &ShadingForm) -> Result<String> {
     let source = form.source.trim();
     if source.is_empty() {
-        return Err(invalid(
-            "Source: there is no surface or raster to shade; build a surface or import a DEM \
-             first",
-        ));
+        return Err(invalid(NO_SURFACE_OR_RASTER));
     }
     let mut line = format!("RASTER SHADE {source} style={}", form.style);
     if lit(&form.style) {

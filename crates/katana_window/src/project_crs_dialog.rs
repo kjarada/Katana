@@ -561,13 +561,6 @@ impl ProjectCrsDialog {
         {
             self.recheck();
         }
-        let check = self.check.clone();
-        controls::label_as(
-            ui,
-            "projectCrsCheck",
-            &check,
-            egui::Label::new(RichText::new(check.as_str())).wrap(),
-        );
     }
 
     /// The list: each group a row that opens and folds it, its systems under it.
@@ -686,17 +679,23 @@ impl ProjectCrsDialog {
 
     /// Set, Cancel and Local Coordinates: kept below the scrolling body.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        // Local Coordinates at the left; Cancel, then Set - the dialog's act, in the accent - at the
-        // right.
+        // Local Coordinates at the left; Close, then Set - the dialog's act, in the accent - at the
+        // right. Close, not Cancel (projectCrsCancel, as it was): nothing changes until Set or
+        // Local Coordinates is pressed, so there is nothing to cancel.
+        // What the typed text names, or why it names nothing, is the status beside Local
+        // Coordinates: the design's one home for a status (it stood under the text box).
+        let check = self.check.clone();
         let (clear, (cancel, set)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
-                controls::button(ui, "projectCrsClear", "Local Coordinates")
+                let clear = controls::button(ui, "projectCrsClear", "Local Coordinates")
                     .on_hover_text("No coordinate system: the drawing's own grid")
-                    .clicked()
+                    .clicked();
+                crate::shell::dialog::status(ui, "projectCrsCheck", &check, false);
+                clear
             },
             |ui| {
-                let cancel = controls::button(ui, "projectCrsCancel", "Cancel").clicked();
+                let cancel = controls::button(ui, "projectCrsCancel", "Close").clicked();
                 let set = controls::primary(ui, "projectCrsApply", "Set").clicked();
                 (cancel, set)
             },

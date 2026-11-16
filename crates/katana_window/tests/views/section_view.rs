@@ -307,17 +307,19 @@ mod section_view {
             self.document.notify_selection_changed();
         }
 
-        /// Pixels of columns 204 to 210, top to bottom of the plot, in the selection's orange:
-        /// red above 200, green 120 to 200, blue under 90 - never the crossings' dashed
-        /// (210, 90, 90), the grid's greys or the ground.
-        fn orange_ink(&mut self) -> usize {
+        /// Pixels of columns 204 to 210, top to bottom of the plot, in the selection's blue (the
+        /// accent, #4c8dff, since the look of 2026-11-16; it was an orange): blue above 200, red
+        /// 50 to 110, green 110 to 170 - never the crossings' dashed (210, 90, 90), the grid's
+        /// greys, the ground or a surface's colour (the nearest, the cyan (100, 205, 205), is
+        /// greener).
+        fn selection_ink(&mut self) -> usize {
             let state = state(&mut self.views, self.id);
             let image = self.view.paint(state, Some(&self.document)).clone();
             let mut ink = 0;
             for y in 10..(image.height() as i32 - 26) {
                 for x in 204..=210 {
                     let c = image.pixel(x as u32, y as u32);
-                    if c.r > 200 && (120..=200).contains(&c.g) && c.b < 90 {
+                    if c.b > 200 && (50..=110).contains(&c.r) && (110..=170).contains(&c.g) {
                         ink += 1;
                     }
                 }
@@ -329,12 +331,12 @@ mod section_view {
     #[test]
     fn a_selected_entitys_crossing_is_drawn_solid_in_the_selection_colour() {
         let mut cut = CutPipe::new();
-        let unselected = cut.orange_ink();
+        let unselected = cut.selection_ink();
         assert_eq!(cut.view.last_selected_crossing_count(), 0);
         assert_eq!(cut.view.last_drawn_crossing_count(), 1);
 
         cut.select();
-        let selected = cut.orange_ink();
+        let selected = cut.selection_ink();
         assert_eq!(cut.view.last_selected_crossing_count(), 1);
         assert_eq!(
             cut.view.last_drawn_crossing_count(),
@@ -353,7 +355,7 @@ mod section_view {
         let mut cut = CutPipe::new();
         assert!(cut.state().layers.hide("pipes"));
         cut.select();
-        let _ = cut.orange_ink();
+        let _ = cut.selection_ink();
         assert_eq!(cut.view.last_hidden_crossing_count(), 1);
         assert_eq!(cut.view.last_drawn_crossing_count(), 0);
         assert_eq!(cut.view.last_selected_crossing_count(), 0);
@@ -361,7 +363,7 @@ mod section_view {
 
         // The view's switch off: no ghost.
         cut.state().selection_ghosts = false;
-        let _ = cut.orange_ink();
+        let _ = cut.selection_ink();
         assert_eq!(cut.view.last_ghost_crossing_count(), 0);
 
         // On again, but the drawing hides the layer: hidden everywhere.
@@ -377,7 +379,7 @@ mod section_view {
         cut.document
             .execute(update_layer(pipes))
             .expect("the layer is hidden");
-        let _ = cut.orange_ink();
+        let _ = cut.selection_ink();
         assert_eq!(cut.view.last_ghost_crossing_count(), 0);
     }
 
@@ -397,7 +399,7 @@ mod section_view {
         let other = cut.document.last_created_entities()[0];
         cut.document.selection_mut().add(other);
         cut.document.notify_selection_changed();
-        let _ = cut.orange_ink();
+        let _ = cut.selection_ink();
         assert_eq!(cut.view.last_hidden_crossing_count(), 1);
         assert_eq!(cut.view.last_ghost_crossing_count(), 0);
     }

@@ -850,7 +850,7 @@ impl OnlineDataWorkbench {
     /// The workbench's menu action, onlineData: it opens the dialog onlineDataDialog.
     pub fn action() -> Action {
         Action::new(ACTION, "O&nline Data...")
-            .icon("ImportRaster")
+            .icon("OnlineData")
             .tip(
                 "Import imagery, elevation and features from public web services - Australian \
                  state and national, and global - into the project's coordinate system",
@@ -930,7 +930,7 @@ impl Workbench for OnlineDataWorkbench {
     fn menus(&self) -> Vec<Menu> {
         vec![
             Menu::new("gisMenu", "&GIS")
-                .section("Online - Web Services")
+                .section("Online")
                 .action(Self::action()),
         ]
     }

@@ -56,9 +56,10 @@ use crate::canvas::{
     Transform,
 };
 use crate::theme::palette;
+use crate::tools::icons_terrain::draw_tin;
 use crate::tools::tool_icons::{
-    FINE, GRID, STROKE, TINT, ToolInk, circle, paint_tool_icon_weighted, polyline, pt, rectangle,
-    start, weight_at,
+    FINE, GRID, STROKE, TINT, ToolInk, arc, circle, paint_tool_icon_weighted, polyline, pt,
+    rectangle, start, weight_at,
 };
 
 /// The application's icons, in their declaration order (icons.hpp).
@@ -361,11 +362,76 @@ pub enum Icon {
     // Survey > Parcel Report: the parcel, and the report's page beside it (Area of
     // Selection keeps the parcel alone).
     SurveyParcelReport,
+    // ---- one icon an item (the look's fifth round, the third audit's G) ----
+    // GIS's eleven processing items, Terrain's Analysis and DEM items and the Reference Data
+    // panel's Build Overviews shared Processing's two boxes; View > Toolbars' icon sizes and Text
+    // Size's four items one icon a menu; four of Edit Surface's items another item's. A menu whose
+    // items look alike is read word by word, so each draws what it does, in the same language:
+    // the data in the quiet tone, what the command makes of it in the bright one.
+    // GIS > Formats: a file's page and, bright, the tag of its format.
+    GisFormats,
+    // GIS > Buffer: a line with its nodes, and the bright band at a distance round it.
+    GisBuffer,
+    // GIS > Dissolve: two areas, the edge between them dashed away, their one outline bright.
+    GisDissolve,
+    // GIS > Overlay: two areas over each other, the part they share bright.
+    GisOverlay,
+    // GIS > Boundary Around Features: a scatter of points and the bright boundary round them.
+    GisHull,
+    // GIS > Clip to Boundary: an area and a dashed frame, the part inside the frame bright.
+    GisClip,
+    // GIS > Query with SQL: a table and the bright mark of a question.
+    GisSql,
+    // GIS > Check Geometry: an area and the bright tick of a check.
+    GisCheck,
+    // GIS > Repair Geometry: a bow-tie, the invalid area, and the bright wrench mending it.
+    GisRepair,
+    // GIS > Gaps and Overlaps: two areas and the bright sliver of the gap between them.
+    GisCoverage,
+    // Terrain > Analysis > Contours: three closed contours, the middle one bright.
+    TerrainContours,
+    // Terrain Shading: a hill under the bright sun, its far flank hatched in shade.
+    TerrainShading,
+    // Slope and Aspect: a slope and, bright, the angle it makes.
+    TerrainSlope,
+    // Statistics by Area: an area and, bright, the bars of what is counted inside it.
+    TerrainZonal,
+    // Drape and Sample Heights: points above the ground and the bright drops onto it.
+    TerrainDrape,
+    // Viewshed and Line of Sight: an eye, the ground and the bright fan of what it sees.
+    TerrainViewshed,
+    // Terrain > DEM > Grid Points to DEM: scattered points and the bright grid made of them.
+    GridDem,
+    // DEM Tools: a grid of cells and the bright wrench that works on it.
+    DemTools,
+    // Reference Data > Build Overviews: a raster's levels, smaller up a pyramid, the top bright.
+    BuildOverviews,
+    // View > Toolbars > Small, Standard and Large Icons: a toolbar with its first button bright,
+    // at each size.
+    ToolbarIconsSmall,
+    ToolbarIconsStandard,
+    ToolbarIconsLarge,
+    // View > Text Size: a bright A at each of the four sizes over a quiet baseline (the
+    // submenu keeps TextSize's two letters).
+    TextSizeSmall,
+    TextSizeStandard,
+    TextSizeLarge,
+    TextSizeExtraLarge,
+    // Terrain > Edit Surface's items that act by a scope, on the Surface Edit tools' fine TIN
+    // (tools::icons_terrain): points inside a dashed polygon struck out; triangles inside a
+    // polygon lit; points of the drawing added; a breakline dashed away.
+    SurfaceDeletePoints,
+    SurfaceDeleteTriangles,
+    SurfaceAddPoints,
+    SurfaceDeleteBreakline,
+    // GIS > Online Data: a globe, the web's data, and Import's arrow down the right. It had Import
+    // Raster's grid, the item above it in the GIS menu.
+    OnlineData,
 }
 
 /// Every value of Icon, in declaration order, for the contact sheet and for the test that every
 /// icon paints something.
-pub const ALL_ICONS: [Icon; 166] = [
+pub const ALL_ICONS: [Icon; 197] = [
     Icon::New,
     Icon::Open,
     Icon::Save,
@@ -532,6 +598,37 @@ pub const ALL_ICONS: [Icon; 166] = [
     Icon::ExportImage,
     Icon::ApplyCodes,
     Icon::SurveyParcelReport,
+    Icon::GisFormats,
+    Icon::GisBuffer,
+    Icon::GisDissolve,
+    Icon::GisOverlay,
+    Icon::GisHull,
+    Icon::GisClip,
+    Icon::GisSql,
+    Icon::GisCheck,
+    Icon::GisRepair,
+    Icon::GisCoverage,
+    Icon::TerrainContours,
+    Icon::TerrainShading,
+    Icon::TerrainSlope,
+    Icon::TerrainZonal,
+    Icon::TerrainDrape,
+    Icon::TerrainViewshed,
+    Icon::GridDem,
+    Icon::DemTools,
+    Icon::BuildOverviews,
+    Icon::ToolbarIconsSmall,
+    Icon::ToolbarIconsStandard,
+    Icon::ToolbarIconsLarge,
+    Icon::TextSizeSmall,
+    Icon::TextSizeStandard,
+    Icon::TextSizeLarge,
+    Icon::TextSizeExtraLarge,
+    Icon::SurfaceDeletePoints,
+    Icon::SurfaceDeleteTriangles,
+    Icon::SurfaceAddPoints,
+    Icon::SurfaceDeleteBreakline,
+    Icon::OnlineData,
 ];
 
 /// Every value of Icon, in declaration order (allIcons).
@@ -709,6 +806,37 @@ impl Icon {
             Self::ExportImage => "ExportImage",
             Self::ApplyCodes => "ApplyCodes",
             Self::SurveyParcelReport => "SurveyParcelReport",
+            Self::GisFormats => "GisFormats",
+            Self::GisBuffer => "GisBuffer",
+            Self::GisDissolve => "GisDissolve",
+            Self::GisOverlay => "GisOverlay",
+            Self::GisHull => "GisHull",
+            Self::GisClip => "GisClip",
+            Self::GisSql => "GisSql",
+            Self::GisCheck => "GisCheck",
+            Self::GisRepair => "GisRepair",
+            Self::GisCoverage => "GisCoverage",
+            Self::TerrainContours => "TerrainContours",
+            Self::TerrainShading => "TerrainShading",
+            Self::TerrainSlope => "TerrainSlope",
+            Self::TerrainZonal => "TerrainZonal",
+            Self::TerrainDrape => "TerrainDrape",
+            Self::TerrainViewshed => "TerrainViewshed",
+            Self::GridDem => "GridDem",
+            Self::DemTools => "DemTools",
+            Self::BuildOverviews => "BuildOverviews",
+            Self::ToolbarIconsSmall => "ToolbarIconsSmall",
+            Self::ToolbarIconsStandard => "ToolbarIconsStandard",
+            Self::ToolbarIconsLarge => "ToolbarIconsLarge",
+            Self::TextSizeSmall => "TextSizeSmall",
+            Self::TextSizeStandard => "TextSizeStandard",
+            Self::TextSizeLarge => "TextSizeLarge",
+            Self::TextSizeExtraLarge => "TextSizeExtraLarge",
+            Self::SurfaceDeletePoints => "SurfaceDeletePoints",
+            Self::SurfaceDeleteTriangles => "SurfaceDeleteTriangles",
+            Self::SurfaceAddPoints => "SurfaceAddPoints",
+            Self::SurfaceDeleteBreakline => "SurfaceDeleteBreakline",
+            Self::OnlineData => "OnlineData",
         }
     }
 
@@ -970,6 +1098,51 @@ fn draw_head(ink: &mut ToolInk<'_>, x: f64, y: f64, dx: f64, dy: f64) {
         true,
         STROKE,
     );
+}
+
+/// An open-ended wrench in the bright tone: its jaw a ring of radius 2.6 about (x, y), open on the
+/// side away from its handle, and the handle running from the ring towards `toward` (degrees
+/// counter-clockwise from east, as on paper). Open, because a closed ring with a handle is a lens:
+/// Zoom To's.
+fn draw_wrench(ink: &mut ToolInk<'_>, x: f64, y: f64, toward: f64) {
+    const JAW: f64 = 2.6;
+    const HANDLE: f64 = 7.5;
+    // The gap is 80 degrees wide, centred opposite the handle.
+    ink.stroke(&arc(x, y, JAW, toward + 180.0 + 40.0, 280.0), true, STROKE);
+    let (dx, dy) = (toward.to_radians().cos(), -toward.to_radians().sin());
+    ink.line(
+        x + JAW * dx,
+        y + JAW * dy,
+        x + (JAW + HANDLE) * dx,
+        y + (JAW + HANDLE) * dy,
+        true,
+        STROKE,
+    );
+}
+
+/// An ellipse inside the rectangle (x, y, w, h).
+fn ellipse(x: f64, y: f64, w: f64, h: f64) -> Path {
+    let mut path = Path::new();
+    path.add_ellipse(RectF::new(x, y, w, h));
+    path
+}
+
+/// A toolbar band with its first button bright, `side` grid units square, and quiet dots for the
+/// buttons after it: View > Toolbars' icon sizes.
+fn draw_toolbar_size(ink: &mut ToolInk<'_>, side: f64) {
+    ink.stroke(&rounded(2.5, 5.0, 19.0, 14.0, 1.5), false, STROKE);
+    ink.stroke(&rounded(5.0, 12.0 - side / 2.0, side, side, 1.0), true, STROKE);
+    let mut x = 5.0 + side + 3.0;
+    while x < 19.5 {
+        ink.dot(x, 12.0, 0.9, false);
+        x += 3.0;
+    }
+}
+
+/// View > Text Size's items: a bright A `height` tall standing on a quiet baseline.
+fn draw_text_size(ink: &mut ToolInk<'_>, height: f64) {
+    ink.line(3.0, 21.0, 21.0, 21.0, false, FINE);
+    draw_letter_a(ink, 12.0, 19.5, height, true);
 }
 
 /// An orthographic standard view: the object in plan, the face seen in the accent and the eye's
@@ -2735,15 +2908,10 @@ pub fn paint_icon_weighted(
             // ---- end road objects ----
             // ---- surface editing (docs/surface_editing.md) ----
             Icon::SurfaceEdit => {
-                // Four triangles round a centre vertex; the vertex in the accent.
-                let rim = polyline(
-                    &[pt(3.0, 19.0), pt(6.0, 5.0), pt(19.0, 4.0), pt(21.0, 18.0)],
-                    true,
-                );
-                ink.stroke(&rim, false, STROKE);
-                for corner in [pt(3.0, 19.0), pt(6.0, 5.0), pt(19.0, 4.0), pt(21.0, 18.0)] {
-                    ink.line(corner.x, corner.y, 12.0, 12.0, false, STROKE);
-                }
+                // Four triangles round a centre vertex, the vertex in the accent. The TIN in the
+                // fine weight, as its tools draw it: in the full stroke its rim and spokes were a
+                // crossed square at a menu's 16 px.
+                draw_tin(ink, true);
                 ink.dot(12.0, 12.0, 2.6, true);
             }
             Icon::SurfaceLevels => {
@@ -3178,6 +3346,309 @@ pub fn paint_icon_weighted(
                 for p in corners {
                     ink.node(p.x, p.y, true);
                 }
+            }
+            // ---- one icon an item (the third audit's G) ------------------------------------
+            Icon::GisFormats => {
+                // A page with its corner folded, two lines of it, and the tag of its format.
+                ink.stroke(
+                    &polyline(
+                        &[
+                            pt(10.0, 20.0),
+                            pt(4.0, 20.0),
+                            pt(4.0, 3.0),
+                            pt(12.0, 3.0),
+                            pt(16.0, 7.0),
+                            pt(16.0, 11.5),
+                        ],
+                        false,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.stroke(
+                    &polyline(&[pt(12.0, 3.0), pt(12.0, 7.0), pt(16.0, 7.0)], false),
+                    false,
+                    FINE,
+                );
+                ink.line(6.5, 9.0, 11.0, 9.0, false, FINE);
+                ink.line(6.5, 12.5, 11.0, 12.5, false, FINE);
+                ink.stroke(&rounded(11.5, 14.0, 10.0, 7.0, 1.5), true, STROKE);
+                ink.line(14.0, 17.5, 19.0, 17.5, true, FINE);
+            }
+            Icon::GisBuffer => {
+                // The line and, round it at a distance, the band: a stadium, its ends the round
+                // caps a buffer has.
+                ink.line(7.5, 12.0, 16.5, 12.0, false, STROKE);
+                ink.node(7.5, 12.0, false);
+                ink.node(16.5, 12.0, false);
+                ink.stroke(&rounded(2.5, 6.5, 19.0, 11.0, 5.5), true, STROKE);
+            }
+            Icon::GisDissolve => {
+                let outline = [
+                    pt(3.0, 8.0),
+                    pt(12.0, 5.0),
+                    pt(20.5, 7.0),
+                    pt(21.0, 17.5),
+                    pt(12.0, 19.0),
+                    pt(4.0, 18.0),
+                ];
+                ink.fill(&polyline(&outline, true), true, TINT);
+                ink.stroke(&polyline(&outline, true), true, STROKE);
+                // The edge the two areas shared, gone.
+                ink.dashed(&polyline(&[pt(12.0, 5.0), pt(12.0, 19.0)], false), false);
+            }
+            Icon::GisOverlay => {
+                ink.fill(&rectangle(9.0, 9.0, 6.5, 6.5), true, TINT);
+                ink.stroke(&rectangle(3.0, 3.5, 12.5, 12.0), false, STROKE);
+                ink.stroke(&rectangle(9.0, 9.0, 12.0, 11.5), false, STROKE);
+                ink.stroke(&rectangle(9.0, 9.0, 6.5, 6.5), true, STROKE);
+            }
+            Icon::GisHull => {
+                for p in [
+                    pt(7.5, 9.5),
+                    pt(12.0, 7.5),
+                    pt(16.0, 11.0),
+                    pt(9.5, 14.0),
+                    pt(14.0, 15.5),
+                    pt(11.5, 11.0),
+                ] {
+                    ink.dot(p.x, p.y, 1.2, false);
+                }
+                ink.stroke(
+                    &polyline(
+                        &[pt(3.5, 9.0), pt(11.5, 3.5), pt(20.0, 9.5), pt(16.0, 20.0), pt(6.5, 18.0)],
+                        true,
+                    ),
+                    true,
+                    STROKE,
+                );
+            }
+            Icon::GisClip => {
+                let shape = polyline(
+                    &[pt(3.0, 12.0), pt(9.0, 3.5), pt(18.5, 6.0), pt(17.0, 17.5), pt(6.0, 19.5)],
+                    true,
+                );
+                ink.stroke(&shape, false, FINE);
+                // What lies inside the frame: what the clip keeps.
+                ink.canvas().save();
+                ink.canvas().set_clip_rect(RectF::new(10.0, 10.0, 11.5, 11.5), true);
+                ink.fill(&shape, true, TINT);
+                ink.stroke(&shape, true, STROKE);
+                ink.canvas().restore();
+                ink.dashed(&rectangle(10.0, 10.0, 11.5, 11.5), false);
+            }
+            Icon::GisSql => {
+                ink.stroke(&rectangle(2.5, 4.0, 12.0, 15.0), false, STROKE);
+                ink.line(2.5, 8.5, 14.5, 8.5, false, FINE);
+                ink.line(2.5, 12.0, 14.5, 12.0, false, FINE);
+                ink.line(2.5, 15.5, 14.5, 15.5, false, FINE);
+                ink.line(7.5, 4.0, 7.5, 19.0, false, FINE);
+                let mut mark = start(15.8, 11.0);
+                mark.cubic_to(pt(15.8, 8.8), pt(17.2, 7.5), pt(18.7, 7.5));
+                mark.cubic_to(pt(20.3, 7.5), pt(21.6, 8.7), pt(21.6, 10.4));
+                mark.cubic_to(pt(21.6, 12.6), pt(18.7, 12.9), pt(18.7, 15.4));
+                ink.stroke(&mark, true, STROKE);
+                ink.dot(18.7, 19.0, 1.2, true);
+            }
+            Icon::GisCheck => {
+                ink.stroke(
+                    &polyline(
+                        &[pt(3.0, 13.0), pt(5.0, 4.0), pt(14.0, 3.0), pt(17.0, 8.5), pt(10.5, 13.5)],
+                        true,
+                    ),
+                    false,
+                    STROKE,
+                );
+                ink.stroke(
+                    &polyline(&[pt(10.5, 16.5), pt(14.0, 20.0), pt(21.0, 12.0)], false),
+                    true,
+                    STROKE,
+                );
+            }
+            Icon::GisRepair => {
+                // A bow-tie: the area that crosses itself, which a repair makes two triangles.
+                ink.stroke(
+                    &polyline(&[pt(3.0, 3.5), pt(13.0, 13.5), pt(13.0, 3.5), pt(3.0, 13.5)], true),
+                    false,
+                    STROKE,
+                );
+                draw_wrench(ink, 18.0, 14.5, 225.0);
+            }
+            Icon::GisCoverage => {
+                let gap = polyline(
+                    &[pt(10.0, 4.0), pt(14.0, 4.0), pt(13.0, 20.0), pt(10.5, 20.0)],
+                    true,
+                );
+                ink.fill(&gap, true, TINT);
+                ink.stroke(
+                    &polyline(&[pt(10.0, 4.0), pt(3.0, 4.0), pt(3.0, 20.0), pt(10.5, 20.0)], false),
+                    false,
+                    STROKE,
+                );
+                ink.stroke(
+                    &polyline(&[pt(14.0, 4.0), pt(21.0, 4.0), pt(21.0, 20.0), pt(13.0, 20.0)], false),
+                    false,
+                    STROKE,
+                );
+                ink.line(10.0, 4.0, 10.5, 20.0, true, STROKE);
+                ink.line(14.0, 4.0, 13.0, 20.0, true, STROKE);
+            }
+            Icon::TerrainContours => {
+                ink.stroke(&ellipse(2.5, 4.0, 19.0, 16.0), false, STROKE);
+                ink.stroke(&ellipse(6.0, 7.5, 12.0, 9.5), true, STROKE);
+                ink.stroke(&ellipse(9.5, 10.5, 5.0, 3.5), false, FINE);
+            }
+            Icon::TerrainShading => {
+                // The far flank's shade first, under the hill's outline.
+                for (x, top) in [(14.5, 10.5), (17.0, 13.0), (19.5, 16.0)] {
+                    ink.line(x, top, x, 19.5, false, FINE);
+                }
+                let mut hill = start(2.5, 19.5);
+                hill.cubic_to(pt(6.5, 12.0), pt(9.0, 7.5), pt(12.0, 7.5));
+                hill.cubic_to(pt(15.0, 7.5), pt(18.0, 13.0), pt(21.5, 19.5));
+                ink.stroke(&hill, false, STROKE);
+                ink.line(2.5, 19.5, 21.5, 19.5, false, STROKE);
+                ink.fill(&circle(5.0, 5.5, 2.3), true, TINT);
+                ink.stroke(&circle(5.0, 5.5, 2.3), true, STROKE);
+            }
+            Icon::TerrainSlope => {
+                ink.stroke(
+                    &polyline(&[pt(3.0, 19.0), pt(21.0, 19.0), pt(21.0, 7.0)], false),
+                    false,
+                    FINE,
+                );
+                ink.line(3.0, 19.0, 21.0, 7.0, false, STROKE);
+                // The angle at the foot: atan(12 / 18) = 33.7 degrees.
+                ink.stroke(&arc(3.0, 19.0, 7.0, 0.0, 33.7), true, STROKE);
+            }
+            Icon::TerrainZonal => {
+                ink.stroke(
+                    &polyline(
+                        &[pt(3.0, 6.5), pt(13.0, 3.0), pt(21.0, 8.0), pt(19.5, 20.5), pt(4.5, 19.5)],
+                        true,
+                    ),
+                    false,
+                    STROKE,
+                );
+                for (x, top) in [(8.5, 13.0), (12.0, 9.5), (15.5, 12.0)] {
+                    ink.line(x, top, x, 17.0, true, STROKE);
+                }
+            }
+            Icon::TerrainDrape => {
+                ink.stroke(
+                    &polyline(&[pt(2.5, 18.5), pt(8.0, 15.5), pt(14.0, 17.5), pt(21.5, 13.5)], false),
+                    false,
+                    STROKE,
+                );
+                // Each point, and the drop to where it meets the ground line: two, since three
+                // drops' heads ran together into a zigzag at 16 px.
+                for (x, ground) in [(6.5, 16.5), (17.0, 15.9)] {
+                    ink.dot(x, 4.0, 1.4, false);
+                    ink.line(x, 6.5, x, ground - 1.2, true, STROKE);
+                    draw_head(ink, x, ground - 1.2, 0.0, 1.0);
+                }
+            }
+            Icon::TerrainViewshed => {
+                let fan = polyline(&[pt(11.0, 8.0), pt(21.5, 3.5), pt(21.5, 13.0)], true);
+                ink.fill(&fan, true, TINT);
+                ink.line(11.0, 8.0, 21.5, 3.5, true, FINE);
+                ink.line(11.0, 8.0, 21.5, 13.0, true, FINE);
+                let mut eye = start(2.0, 8.0);
+                eye.cubic_to(pt(4.0, 4.8), pt(9.0, 4.8), pt(11.0, 8.0));
+                eye.cubic_to(pt(9.0, 11.2), pt(4.0, 11.2), pt(2.0, 8.0));
+                ink.stroke(&eye, false, STROKE);
+                ink.dot(6.5, 8.0, 1.3, false);
+                ink.stroke(
+                    &polyline(&[pt(2.5, 20.0), pt(9.0, 16.5), pt(15.0, 18.5), pt(21.5, 15.5)], false),
+                    false,
+                    STROKE,
+                );
+            }
+            Icon::GridDem => {
+                // The grid made of the points is the result, so it is the bright part, and
+                // COPC's octree (quiet frame, bright subdivision) is not mistaken for it.
+                ink.stroke(&rectangle(3.0, 3.0, 18.0, 18.0), true, STROKE);
+                for at in [9.0, 15.0] {
+                    ink.line(at, 3.0, at, 21.0, true, FINE);
+                    ink.line(3.0, at, 21.0, at, true, FINE);
+                }
+                for p in [
+                    pt(6.0, 6.5),
+                    pt(12.5, 5.0),
+                    pt(17.5, 7.5),
+                    pt(6.5, 12.5),
+                    pt(11.0, 13.5),
+                    pt(17.0, 12.0),
+                    pt(5.5, 18.0),
+                    pt(13.0, 17.5),
+                    pt(18.0, 18.5),
+                ] {
+                    ink.dot(p.x, p.y, 1.1, false);
+                }
+            }
+            Icon::DemTools => {
+                draw_raster_glyph(ink);
+                draw_wrench(ink, 18.5, 5.5, 270.0);
+            }
+            Icon::BuildOverviews => {
+                ink.stroke(&rectangle(2.5, 15.0, 19.0, 5.5), false, STROKE);
+                for x in [7.25, 12.0, 16.75] {
+                    ink.line(x, 15.0, x, 20.5, false, FINE);
+                }
+                ink.stroke(&rectangle(6.0, 9.0, 12.0, 4.5), false, STROKE);
+                ink.line(12.0, 9.0, 12.0, 13.5, false, FINE);
+                ink.fill(&rectangle(9.0, 3.5, 6.0, 4.0), true, TINT);
+                ink.stroke(&rectangle(9.0, 3.5, 6.0, 4.0), true, STROKE);
+            }
+            Icon::ToolbarIconsSmall => draw_toolbar_size(ink, 4.0),
+            Icon::ToolbarIconsStandard => draw_toolbar_size(ink, 6.5),
+            Icon::ToolbarIconsLarge => draw_toolbar_size(ink, 9.5),
+            Icon::TextSizeSmall => draw_text_size(ink, 7.0),
+            Icon::TextSizeStandard => draw_text_size(ink, 10.5),
+            Icon::TextSizeLarge => draw_text_size(ink, 14.0),
+            Icon::TextSizeExtraLarge => draw_text_size(ink, 17.5),
+            Icon::SurfaceDeletePoints => {
+                // The polygon solid: dashed at the full stroke inside the TIN it broke into
+                // a scatter of dashes at 16 px.
+                draw_tin(ink, false);
+                ink.stroke(
+                    &polyline(
+                        &[pt(6.5, 7.5), pt(17.5, 7.0), pt(16.5, 17.0), pt(7.5, 16.0)],
+                        true,
+                    ),
+                    true,
+                    STROKE,
+                );
+                for (x, y) in [(10.5, 11.0), (13.5, 13.0)] {
+                    ink.line(x - 1.7, y - 1.7, x + 1.7, y + 1.7, true, FINE);
+                    ink.line(x + 1.7, y - 1.7, x - 1.7, y + 1.7, true, FINE);
+                }
+            }
+            Icon::SurfaceDeleteTriangles => {
+                draw_tin(ink, true);
+                let polygon = polyline(&[pt(6.5, 9.0), pt(15.5, 7.0), pt(14.0, 17.0)], true);
+                ink.fill(&polygon, true, TINT);
+                ink.stroke(&polygon, true, STROKE);
+            }
+            Icon::SurfaceAddPoints => {
+                draw_tin(ink, false);
+                for (x, y) in [(9.0, 10.0), (14.5, 9.0), (12.0, 15.0)] {
+                    ink.node(x, y, true);
+                }
+            }
+            Icon::SurfaceDeleteBreakline => {
+                draw_tin(ink, true);
+                ink.dashed(&polyline(&[pt(3.0, 13.0), pt(21.0, 9.0)], false), true);
+                ink.line(9.5, 8.5, 14.5, 13.5, true, STROKE);
+                ink.line(14.5, 8.5, 9.5, 13.5, true, STROKE);
+            }
+            Icon::OnlineData => {
+                // The globe in the lower left 15 units, as the GIS data's glyphs, so Import's
+                // arrow fits down the right.
+                ink.stroke(&circle(9.0, 13.5, 6.5), false, STROKE);
+                ink.stroke(&ellipse(6.0, 7.0, 6.0, 13.0), false, FINE);
+                ink.line(2.5, 13.5, 15.5, 13.5, false, FINE);
+                draw_arrow_in(ink);
             }
         }
     }

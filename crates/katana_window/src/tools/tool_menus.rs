@@ -56,6 +56,29 @@ pub const GROUP_ORDER: [&str; 11] = [
     "Select",
 ];
 
+/// A catalogue group's name as a menu section's title: in sentence case, as every section of the
+/// window's menus is (docs/desktop.md, "The look of 2026-11-16"), where the catalogue names a group
+/// in title case ("Surface Edit") because it is also a toolbar's name. A word after the first
+/// keeps its capitals only when it is all capitals or holds a digit (an acronym, "3D"); the
+/// catalogue's own names are kept, so its groups still match by name.
+pub fn sentence_case(title: &str) -> String {
+    title
+        .split(' ')
+        .enumerate()
+        .map(|(at, word)| {
+            let acronym = word.chars().any(|c| c.is_ascii_digit())
+                || (word.chars().filter(|c| c.is_alphabetic()).count() > 1
+                    && !word.chars().any(char::is_lowercase));
+            if at == 0 || acronym {
+                String::from(word)
+            } else {
+                word.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// A menu on the window's menu bar, as `fill_tool_menus` sees the bar: its object name and title.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BarMenu {
@@ -693,7 +716,7 @@ pub fn fill_tool_menus(
             // A menu titles every group, the first too, so a long one reads as its parts
             // (Transform, Edit); a toolbar has no room for words and parts its groups with a line.
             if let Some(menu) = menu.as_mut() {
-                menu.items.push(MenuItem::Section(group[0].group.clone()));
+                menu.items.push(MenuItem::Section(sentence_case(&group[0].group)));
             }
             if !first_group && let Some(bar) = tool_bar.as_mut() {
                 bar.items.push(ToolBarItem::Separator);

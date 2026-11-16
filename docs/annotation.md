@@ -985,8 +985,9 @@ reported one. Now:
   `labelEditDialog`; `crates/katana_window/src/annotation/label_edit_dialog.rs` lists
   every field) opens on the selected label: its style, its own text (ticked,
   or `text=none`), where its text is pinned (ticked, or `at=none` for the
-  placer) and its layer. OK and Apply build the `LABEL SET` line naming only
-  what changed - shown as it will run - and run it through the window's one
+  placer) and its layer. Apply (the footer's primary, after Close) builds
+  the `LABEL SET` line naming only what changed - shown as it will run - and
+  runs it through the window's one
   executor (`docs/desktop.md`), so it is echoed, kept and one undo step. With
   no label selected it says so and runs nothing; it asks nothing in a box.
   A text the command line cannot write is refused in the dialog, naming the

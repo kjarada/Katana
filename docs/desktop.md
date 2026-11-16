@@ -910,6 +910,97 @@ ones (`ScrollStyle::thin`, a handle always shown in 6 points of room): egui's
 default showed none until the pointer was over the area, so a body or a
 menu cut at its fold gave no sign of more.
 
+**The fifth round, the shared parts (the third audit's A, B, C, H, I).** A
+status beside a footer's buttons is one line: `shell::dialog::status` in a
+footer, and any named label in `button_row`'s left part (`label_as` reads
+`beside_footer_buttons`), is cut short in the room the buttons leave, its
+whole text in its tooltip and its record; in a body a status wraps.
+`reply_text` is one line for a Line and wraps for a Text. Wrapped, 21 terrain
+footers were 55 points against 49. Rejected: holding each caller to one line
+by hand - the row decides. A section's heading is the Heading style in the
+strong colour with SECTION_GAP above it; `section_with` holds a group's rows
+and replaces a bordered `ui.group`. A check box under a form's fields is
+`check_row` (or `Form::check`), at the field column, where a check drawn
+alone stood at the labels'. A number is `spin` or `whole`; a number kept as
+text is `number_line`, a box's width. A primary with nothing to run is drawn
+in `add_enabled_ui(can_run, ..)` and greys. An empty choice says what is
+missing, muted: "None" (`NO_CHOICE`), or the caller's words through
+`choice_with_hint`; its value still reads "". Rejected: a hint field on
+`Choice`, which dialogs write out whole. A colour written as text shows its
+swatch: in every table cell (`dialog_layout::table_cell`), in every one-line
+field with room for it (at its right end, so the text never moves as it is
+typed), in `colour_value`, and in the Properties tree.
+
+**The fifth round, the main window, menus, icons and views (the third
+audit's G, H and J).** Every item of a menu has its own icon: GIS's
+processing items, Terrain's Analysis and DEM items, Build Overviews, View >
+Toolbars' icon sizes, Text Size's four sizes and Edit Surface's scope items
+each draw what they do (31 icons in `icons.rs`), and each toolbar's toggle
+shows its bar's first button (`actions::tool_bar_icon`). A menu's section
+titles are in sentence case and name no library ("Vector", "Point cloud",
+"Check"; a catalogue group through `tool_menus::sentence_case`). A side
+column's bar with every tool hidden is one button, its first tool with a
+family's corner mark (`layout::collapsed_bar(icon_size)`, 45 at 20 px): drawn
+as an arrow alone under Draw's arrow, the two read as one sign drawn twice.
+Every view stands on the plan's ground `#1e2329` (3D, elevation and section
+had three other darks). The selection is the accent `#4c8dff` in every view
+("The selection in every view", below). The prompt band is on the chrome's
+tokens with the tool's name in the accent; rejected: the preview cyan, a
+second accent hue. The status bar no longer repeats a running tool's prompt
+(the band and the command field say it). The command log's error lines are
+the error token, and at its end the log starts at a whole logical line
+(`panels::first_whole_line_top`). The status bar's sentence starts with a
+capital. The Vertices table's index is "#", and a table that scrolls across
+shows its bar (`panels::scroll_bar_seen`); Reference Data lists Name, Size and
+Shown, which fit its panel.
+
+**The fifth round, the Format, annotation, BIM, plotting and sheet
+dialogs.** Close is the word for leaving a dialog that changes nothing until
+its primary is pressed (Generate Sheets, Plot Sheets, Page Setup, which said
+Cancel; the control names kept); Cancel then OK is kept only for a
+confirmation (Title Block, Hidden Layers). Edit Label has one primary: Close,
+then Apply (its OK, which applied and closed, is gone), and an empty target
+reads "No label". A refusal is a red status at the footer's left and the
+Command field is then empty (Generate Sheets, Plot Sheets); a hint before
+anything is done is muted. Hidden rows take no room (Plot to PDF's warnings,
+Page Setup's ticks). Leaders and Label Styles keep their tallest tab's height
+once drawn, and move their tabs' actions to the footer (Arrange's Align
+Selected Leaders and Renumber Balloons; Rules' Preview and Run Rules);
+Leaders' "Which leaders..." is a tick, "Only what a scope takes". Settings
+keeps its tallest page's height. Styles and Linetypes' three pages share one
+table top (113) and one action-row y (627): Hatch Patterns has a search field
+too and one row of buttons. The sheet editor stands on the main window's
+tokens (its panes the panel's grey, its desk the viewport's, so with no sheet
+nothing is bright), its list tools are panel tools, its Checks pane has a
+title bar, its sheet actions grey with no sheet, and a sheet row shows
+"{number} {name}" whole with its paper muted under it, lit across the row.
+Previews stand on the viewport's ground (the road objects', the template's
+typical section, the hatch swatch). Words: "Select Matches" (Road Objects, as
+Global Modify), "Save CSV..." everywhere, "Replace" (its verb in the tooltip),
+buttons in Title Case like menu items, singular and plural counted right.
+
+**The fifth round, the GIS, terrain, survey and utility dialogs.** A status
+never carries a field's name before a condition that is the drawing's: one
+sentence says there is no surface (`terrain_dialog_parts::NO_SURFACE`,
+`NO_SURFACE_OR_RASTER`), and a GIS or utility dialog's status is the error's
+words begun with a capital (`why_status`) - Clip said "Nothing to run yet: the
+boundary: the scope: tick ...". Volumes' Measure and Utilities' Run are greyed
+while there is no line. The option dialogs that change nothing until their
+act (Project Coordinate System, the three import dialogs, the placement step)
+leave by Close; the far-apart question keeps Cancel. Every bordered group is
+a headed section. A number kept as text is a `number_line`. Utilities measures
+every tab's captions so its fields keep one edge. Online Data is one column
+wide again (977, where the Box row's choice ran past the column and widened
+every row under it to 1,283). Paper Style Scale and Zoom To show their line in
+a read-only Command field. Command Reference indents a command under its group
+and measures its title column over the whole reference. Viewshed's observers
+are a list well with an empty state. GDAL Toolbox says what to choose before
+an algorithm is chosen, and its catalogue is a tree in the table look. Parcel
+Report's Copy and Save CSV... are its footer's, as Point Report's are; Surface
+Styles' Apply and Revert are its footer's. Counts are written right ("12
+points", "1 problem on 1 entity", `katana_cad::tools::everyday_support::counted`),
+where "point(s)" was; the process tests that read them follow.
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the
@@ -1984,24 +2075,28 @@ highlighted in other views". Plan views already drew the selection in every
 plan view that shows its layer; the rule is now the same for every kind of
 view:
 
-- **Selected and drawn in the view: highlighted.** A plan view keeps the 2 px
-  dashed #FF9F1C it always drew. A 3D or elevation view draws a selected line
-  as a 3 px core of the same orange over a 5 px dark casing (16, 18, 22),
+- **Selected and drawn in the view: highlighted.** A plan view draws it 2 px
+  dashed in the accent, #4c8dff (`katana_cad::selection_style`, held equal to
+  the palette's accent by a test); it was the orange #FF9F1C until the look's
+  fifth round (2026-11-16), the hue of an alignment's own amber, so a selected
+  entity and the alignment beside it were not told apart. A 3D or elevation
+  view draws a selected line as a 3 px core of the same accent over a 5 px
+  dark casing (16, 18, 22),
   which shows a pixel either side on the light face of a hill and the dark
   sky alike, and a selected point 9 px over 11 (an unselected one is 5). A
-  section draws the selected entity's crossing solid, 2 px, in the orange,
+  section draws the selected entity's crossing solid, 2 px, in the accent,
   with a dot at its level, where the other crossings are 1 px red dashes.
 - **Selected, on a layer the drawing shows and the view hides: a ghost** -
   drawn faint, and never picked, snapped to, given grips or plotted there
   (`view_layer_rule::a_ghost_is_neither_picked_nor_snapped_to_nor_given_grips`). A feature selected in
   the design view shows where it is in the as-built view that hides the
-  design layers. In plan it is DOTS of the orange at 60 % (alpha 153), 2 px
+  design layers. In plan it is DOTS of the accent at 60 % (alpha 153), 2 px
   square and 6 px apart, where a selection is dashed, with no fill, hatch,
   linestyle or symbol; a point is a ring of dots; a text, note, leader or
   dimension the outline of the box it draws; a label is not ghosted
   (`docs/plan_view.md`, "Ghosts of the selection", for how and what it
   costs). In 3D and elevation
-  it is one 1 px line of (130, 88, 32) - the orange at 45 % mixed over the
+  it is one 1 px line of (51, 83, 137) - the accent at 45 % mixed over the
   view's ground beforehand, since the software rasteriser draws no alpha -
   with no casing. In a section it is the crossing, 1 px, dotted, at 60 %.
 - **A layer the drawing hides stays hidden everywhere.** A ghost says
@@ -2030,7 +2125,9 @@ before a section knew of the selection. Its surfaces' palette has no orange
 any more: the second colour, the usual design surface's, was CIE76 22.9 from
 the selection's - nearer than the BOUNDARY yellow that had the 3D selection
 recoloured - and a selected crossing's dot sat among that surface's orange
-vertex dots; the nearest is now the yellow, 50.9.
+vertex dots. Since the selection became the accent blue (2026-11-16) the
+second colour, then light blue, is (235, 170, 80); the nearest to the
+selection is now the magenta, CIE76 50.9.
 
 **No grip on a ghost.** A view offers grips only on what it draws:
 `katana_cad::drawing::grips::grips_of_selection` takes the view's `LayerOverrides`, with no default,
@@ -2098,9 +2195,9 @@ Not done:
 
 - A selected line buried under the ground in 3D is hidden by it, as any line
   is; an x-ray pass over everything is the next step.
-- The 3D ghost's (130, 88, 32) was mixed for the empty ground and reads as a
-  brown terrain line over the elevation ramp, whose colours it sits among;
-  plan and section ghosts are dotted orange. A dotted ghost in 3D needs the
+- The 3D ghost's (51, 83, 137) is mixed for the empty ground, and over the
+  elevation ramp it can sit among the ramp's blues; plan and section ghosts
+  are dotted in the accent. A dotted ghost in 3D needs the
   scene to dash an overlay line, which it does not yet.
 - With many entities selected at an overview scale, the 3 px core over the
   5 px casing merges parallel features a few metres apart into one orange

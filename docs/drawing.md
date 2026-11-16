@@ -580,7 +580,7 @@ X, as Chamfer's is, with the two segments the arc is tangent to as its
 Target: a Target ring on the corner with the X over it was that circled X,
 and at the default radius - the arc a pixel or two across - all the
 preview showed. A removed piece is red dashes over a dim stroke, so they
-read over the orange selection dashes; the ghost of what changes, dashed
+read over the selection's accent dashes; the ghost of what changes, dashed
 cyan as every tool's has always been; the polyline in play's vertices as
 the grips' cold squares, hollow, vertex 0 numbered - the grips are hidden
 while a tool runs - drawn FIRST, under every mark, and thinned so no two are

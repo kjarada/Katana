@@ -103,11 +103,6 @@ use crate::survey::survey_dialogs::{hidden, offstage};
 /// The dialog's object name.
 pub const STYLE_MANAGER: &str = "styleManager";
 const TITLE: &str = "Styles and Linetypes";
-/// The colour of a refusal in the dialog's own status line and of an invalid pattern: the theme's
-/// error token (it had a red of its own before the theme had one).
-fn error_colour() -> egui::Color32 {
-    crate::theme::error().to_egui()
-}
 /// The dialog's body width, the same on every page, so it does not change size as its tabs are
 /// turned: the widest page's, the Linetypes table (its seven columns, 908 points at the Standard
 /// text size) beside the detail pane (DETAIL_WIDTH) and a gap. At 940 the Linetypes page ran its
@@ -117,8 +112,9 @@ const BODY_WIDTH: f32 = 1296.0;
 /// The size of the Styles page's preview, beside the table under the definition's form.
 const STYLE_PREVIEW: egui::Vec2 = egui::vec2(360.0, 150.0);
 /// The width of a page's detail pane - the style's form and preview, a linetype's pattern or
-/// library details, a hatch pattern's editor - at the right of its table: the preview's, in its
-/// group (shell::dialog::group_margins, 14 in the window's style).
+/// library details, a hatch pattern's editor - at the right of its table: the preview's and the 14
+/// points of a group's margins (shell::dialog::group_margins) it was once drawn in, kept so the
+/// pane's fields keep their width now that its groups are headed sections.
 pub(crate) const DETAIL_WIDTH: f32 = STYLE_PREVIEW.x + 14.0;
 /// The least height of the dialog, its title bar and footer included, so it keeps one height
 /// whichever tab is in front rather than jumping from 223 points (Diagnostics) to 844 (Linetypes):
@@ -471,6 +467,10 @@ pub struct StyleManagerDialog {
     select_styles_after_reload: Option<Vec<String>>,
     select_linetype_after_reload: Option<(String, LinetypeOrigin)>,
     closing: bool,
+    /// How tall the Styles and the Linetypes pages' tables and detail panes were drawn the last
+    /// frame, before room was added under them (`pad_middle`); the Hatch Patterns tab keeps its
+    /// own (HatchPatternsTab::middle_height).
+    middle_heights: [f32; 2],
     // Last, so it goes first: no delivery reaches a half-dropped dialog.
     watcher: DocumentWatcher,
 }
@@ -583,6 +583,7 @@ impl StyleManagerDialog {
             select_styles_after_reload: None,
             select_linetype_after_reload: None,
             closing: false,
+            middle_heights: [0.0; 2],
             watcher: DocumentWatcher::new(document),
             context,
         };
@@ -1402,12 +1403,16 @@ impl StyleManagerDialog {
             ("One repeat", period_text(row)),
         ];
         if let Some(definition) = document.style_library().find(&row.name) {
+            // In the right number: "1 stroke(s)" read as a shortcut (the third look audit's K).
+            let counted = |count: usize, one: &str, many: &str| {
+                format!("{count} {}", if count == 1 { one } else { many })
+            };
             rows.push((
                 "Strokes",
                 format!(
-                    "{} stroke(s), {} text(s)",
-                    definition.strokes.len(),
-                    definition.texts.len()
+                    "{}, {}",
+                    counted(definition.strokes.len(), "stroke", "strokes"),
+                    counted(definition.texts.len(), "text", "texts")
                 ),
             ));
         }
@@ -2347,6 +2352,8 @@ impl StyleManagerDialog {
             ];
             // The strip's own rule parts it from the page (a separator under it drew a second).
             controls::tabs(ui, "managerTabs", &titles, &mut self.tab);
+            // The Hatch Patterns page's table and editor as tall as the other pages' (pad_middle).
+            self.hatch_patterns.set_middle_height(self.middle_target());
             // A page not in front is still there, as a QTabWidget's is: what it holds can be
             // filled, pressed and read. Only its filter bar is not (see the module comment).
             let pages: [(&str, fn(&mut Self, &mut Ui, &mut dyn Host, bool)); 4] = [
@@ -2356,18 +2363,12 @@ impl StyleManagerDialog {
                 ("diagnosticsPage", Self::diagnostics_page),
             ];
             for (at, (name, page)) in pages.into_iter().enumerate() {
-                let drawn = if at == self.tab {
-                    ui.vertical(|ui| page(self, ui, host, true)).response
+                if at == self.tab {
+                    ui.vertical(|ui| page(self, ui, host, true));
                 } else {
                     offstage(ui, name, |ui| {
-                        ui.vertical(|ui| page(self, ui, host, false)).response
-                    })
-                };
-                // The Hatch Patterns page is made as tall as the Styles page, drawn before it, so
-                // its buttons stand where the other pages' do rather than over a void of 220
-                // points the dialog's least height left under them (the second look audit's N11).
-                if at == 0 {
-                    self.hatch_patterns.set_page_height(drawn.rect.height());
+                        ui.vertical(|ui| page(self, ui, host, false));
+                    });
                 }
             }
             self.prompt_row(ui, host);
@@ -2395,16 +2396,8 @@ impl StyleManagerDialog {
                         self.redo(host);
                     }
                 });
-                let mut said = egui::RichText::new(self.status.as_str());
-                if self.status_is_error {
-                    said = said.color(error_colour());
-                }
-                controls::label_as(
-                    ui,
-                    "statusLine",
-                    &self.status,
-                    egui::Label::new(said).wrap(),
-                );
+                // Muted unless it is a refusal, as every dialog's status is.
+                dialog::status(ui, "statusLine", &self.status, self.status_is_error);
             },
             // Close alone is not held back by a Document that has gone: it is how a person
             // dismisses a dialog that has nothing left to edit.
@@ -2415,8 +2408,38 @@ impl StyleManagerDialog {
         }
     }
 
-    fn hatch_page(&mut self, ui: &mut Ui, host: &mut dyn Host, _front: bool) {
+    fn hatch_page(&mut self, ui: &mut Ui, host: &mut dyn Host, front: bool) {
+        // A search over the table, as the other pages have, so the three tables start at one
+        // height (the third look audit's D: 113 against 85).
+        if front {
+            self.hatch_patterns.filter_ui(ui);
+        }
         self.hatch_patterns.ui(ui, host);
+    }
+
+    /// How tall the three pages' tables and detail panes are drawn: the tallest's, so each page's
+    /// row of buttons, under them, stands at one height whichever tab is in front (the third look
+    /// audit's D: 616, 645 and 560).
+    fn middle_target(&self) -> f32 {
+        self.middle_heights
+            .iter()
+            .copied()
+            .fold(self.hatch_patterns.middle_height(), f32::max)
+    }
+
+    /// Room under a page's table and detail pane, drawn `natural` high, to the tallest page's
+    /// (`middle_target`); `page` is 0 for Styles, 1 for Linetypes. The height is kept for the next
+    /// frame, and a change has the frame laid out again, so the rows a person sees stand level.
+    fn pad_middle(&mut self, ui: &mut Ui, page: usize, natural: f32) {
+        let room = self.middle_target() - natural;
+        if (self.middle_heights[page] - natural).abs() > 0.5 {
+            self.middle_heights[page] = natural;
+            ui.ctx()
+                .request_discard("a page of the style manager measured its table and details");
+        }
+        if room > 0.0 {
+            ui.add_space(room);
+        }
     }
 
     /// A button of a page: drawn enabled or not, with its tip; true when pressed.
@@ -2503,7 +2526,7 @@ impl StyleManagerDialog {
                 self.load_style_form(host.document());
             }
         }
-        ui.horizontal_top(|ui| {
+        let middle = ui.horizontal_top(|ui| {
             table_column(ui, "styleTable", |ui| {
                 let rows: Vec<Vec<String>> = self
                     .style_view
@@ -2541,8 +2564,10 @@ impl StyleManagerDialog {
                 // rather than the dialog's width.
                 ui.set_width(DETAIL_WIDTH);
                 self.style_form(ui, host);
-                ui.group(|ui| {
-                    ui.strong("Preview");
+                // Headed groups, never bordered boxes (the third look audit's B): a box round the
+                // definition and one round the preview were a second group look beside the
+                // headed sections of every other dialog.
+                dialog::section_with(ui, "Preview", |ui| {
                     self.style_preview
                         .ui(ui, "stylePreview", host.document(), STYLE_PREVIEW);
                     ui.horizontal(|ui| {
@@ -2569,12 +2594,12 @@ impl StyleManagerDialog {
                 });
             });
         });
+        self.pad_middle(ui, 0, middle.response.rect.height());
         self.style_buttons(ui, host);
     }
 
     fn style_form(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.group(|ui| {
-            ui.strong("Definition");
+        dialog::section_with(ui, "Definition", |ui| {
             controls::label_as(
                 ui,
                 "styleFormTitle",
@@ -2877,7 +2902,7 @@ impl StyleManagerDialog {
             self.load_linetype_form(host.document());
             self.update_buttons(host.document());
         }
-        ui.horizontal_top(|ui| {
+        let middle = ui.horizontal_top(|ui| {
             table_column(ui, "linetypeTable", |ui| {
                 let rows: Vec<Vec<String>> = self
                     .linetype_view
@@ -2928,8 +2953,7 @@ impl StyleManagerDialog {
                         offstage(ui, name, |ui| face(self, ui, host));
                     }
                 }
-                ui.group(|ui| {
-                    ui.strong("As drawn");
+                dialog::section_with(ui, "As drawn", |ui| {
                     self.linetype_preview.ui(
                         ui,
                         "linetypePreview",
@@ -2954,6 +2978,7 @@ impl StyleManagerDialog {
                 });
             });
         });
+        self.pad_middle(ui, 1, middle.response.rect.height());
         self.linetype_buttons(ui, host);
     }
 
@@ -2962,8 +2987,7 @@ impl StyleManagerDialog {
     }
 
     fn pattern_face(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.group(|ui| {
-            ui.strong("Pattern");
+        dialog::section_with(ui, "Pattern", |ui| {
             let buttons = self.buttons.clone();
             ui.add_enabled_ui(self.pattern_enabled, |ui| {
                 let mut kind_chosen: Option<(usize, Element)> = None;
@@ -3111,15 +3135,12 @@ impl StyleManagerDialog {
                 });
             });
             self.pattern_strip(ui);
-            let mut said = egui::RichText::new(self.pattern_status.as_str());
-            if self.pattern_status_is_error {
-                said = said.color(error_colour());
-            }
-            controls::label_as(
+            // Muted unless it is a refusal, as every status is.
+            dialog::status(
                 ui,
                 "patternStatus",
                 &self.pattern_status,
-                egui::Label::new(said).wrap(),
+                self.pattern_status_is_error,
             );
             ui.horizontal(|ui| {
                 ui.label("Description");
@@ -3204,8 +3225,7 @@ impl StyleManagerDialog {
     }
 
     fn library_face(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        ui.group(|ui| {
-            ui.strong("Library linestyle");
+        dialog::section_with(ui, "Library linestyle", |ui| {
             // The details as a form, a label column and its values, with the notes under it:
             // drawn as "Group: ..." prose they read as a paragraph (the look audits' T12). The
             // control keeps the text it had, for its drivers.

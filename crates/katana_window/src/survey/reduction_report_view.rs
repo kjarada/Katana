@@ -350,9 +350,9 @@ impl ReductionReportView {
             )
         } else {
             format!(
-                "{} sections; {total} value(s) flagged, rejected, failed or outside a tolerance - \
-                 marked in red.",
-                self.sections.len()
+                "{} sections; {} flagged, rejected, failed or outside a tolerance - marked in red.",
+                self.sections.len(),
+                katana_cad::tools::everyday_support::counted(total, "value", "values")
             )
         };
         self.summary_is_error = total != 0;

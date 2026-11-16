@@ -24,7 +24,7 @@ use katana_interop::ReferenceData;
 use katana_terrain::SurfaceStore;
 
 use super::geo_workbench::started_job;
-use crate::drive::{Choice, LineOptions, choice, line_with};
+use crate::drive::{Choice, LineOptions, line_with};
 use crate::host::{Host, JobId, NO_JOB, VerbOutcome};
 
 /// What a source picker offers: a surface, a reference raster or a point cloud, and the words a
@@ -107,14 +107,20 @@ impl SourcePicker {
             .map(|choice| choice.words.as_str())
     }
 
-    /// The picker drawn as `name`.
+    /// The picker drawn as `name`, saying "No surface or raster" while it offers nothing.
     pub fn ui(&mut self, ui: &mut Ui, name: &str) -> Response {
+        self.ui_with_hint(ui, name, super::terrain_dialog_parts::NO_SOURCE_HINT)
+    }
+
+    /// The picker drawn as `name`, saying `hint` while it offers nothing (a picker of rasters
+    /// alone, or of point clouds).
+    pub fn ui_with_hint(&mut self, ui: &mut Ui, name: &str, hint: &str) -> Response {
         let labels: Vec<String> = self
             .choices
             .iter()
             .map(|choice| choice.label.clone())
             .collect();
-        choice(ui, name, &labels, &mut self.chosen)
+        crate::drive::controls::choice_with_hint(ui, name, &labels, &mut self.chosen, hint)
     }
 }
 

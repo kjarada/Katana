@@ -85,7 +85,7 @@ use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
 use crate::dialog_layout as layout;
 use crate::drive::controls::{
-    LineOptions, button_as, custom, label_as, line_with, primary_look, tabs,
+    LineOptions, button_as, custom, line_with, primary_look, tabs,
 };
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
@@ -367,9 +367,11 @@ pub fn road_object_preview(kind: RoadObjectKind, parameters: &[(String, String)]
     build_road_object(&context, &object)
 }
 
-/// What the preview is painted on: the palette's base, as the C++ widget's was.
+/// What the preview is painted on: the drawing's own ground (palette::viewport), as every preview
+/// of the window is - the styles', the dimension styles', the survey codes'. On the panel's
+/// ground, as the C++ widget's was, it was a second preview look (the third look audit's H).
 pub fn object_preview_base() -> Color {
-    palette::panel()
+    palette::viewport()
 }
 
 fn colour_of(colour: &katana_entity::Color) -> Color {
@@ -583,6 +585,10 @@ struct Body {
     /// is right - rather than how a run went, which a refresh keeps: the run's own change to the
     /// drawing reloads the form, and that reload wiped "Added - one undo step." as it was shown.
     status_says_form: bool,
+    /// Whether the status is a refusal - the line refused, no command line to run it on - said in
+    /// the error colour. What the form still wants ("give the station") is a hint, muted, as
+    /// every dialog's hint is: in the text colour it read as a refusal before anything was done.
+    status_error: bool,
     enabled: Enabled,
     preview_model: BimModel,
     preview_across_x: bool,
@@ -691,6 +697,7 @@ impl Body {
                 self.line.clear();
                 self.status = error.message;
                 self.status_says_form = true;
+                self.status_error = false;
                 self.enabled.add = false;
             }
         }
@@ -736,12 +743,14 @@ impl Body {
             Err(error) => {
                 self.status = error.message;
                 self.status_says_form = true;
+                self.status_error = false;
                 return;
             }
         };
         self.status_says_form = false;
         if !self.executor {
             self.status = String::from("There is no command line to run it on here.");
+            self.status_error = true;
             return;
         }
         let outcome = host.run(&made);
@@ -750,6 +759,7 @@ impl Body {
         } else {
             outcome.error.clone()
         };
+        self.status_error = !outcome.ok;
         if !outcome.ok {
             self.status = format!("Refused: {}", outcome.error);
             return;
@@ -1100,8 +1110,10 @@ impl Body {
     fn footer_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let enabled = self.enabled.add;
         let status = self.status.clone();
+        let status_error = self.status_error;
         // The one footer (shell::dialog::button_row): Preview, which reads the drawing, and the
-        // status at the left; Close, then Add, the primary, last at the right.
+        // status, muted unless it is a refusal, at the left; Close, then Add, the primary, last
+        // at the right.
         let (preview, (close, add)) = dialog::button_row(
             ui,
             |ui| {
@@ -1110,12 +1122,7 @@ impl Body {
                         button(ui, "roadObjectPreviewRun", "&Preview", "").clicked()
                     })
                     .inner;
-                label_as(
-                    ui,
-                    "roadObjectStatus",
-                    &status,
-                    egui::Label::new(status.as_str()).wrap(),
-                );
+                dialog::status(ui, "roadObjectStatus", &status, status_error);
                 preview
             },
             |ui| {
@@ -1263,6 +1270,7 @@ impl RoadObjectDialog {
             reply: String::new(),
             status: String::new(),
             status_says_form: false,
+            status_error: false,
             enabled: Enabled::default(),
             preview_model: BimModel::default(),
             preview_across_x: false,

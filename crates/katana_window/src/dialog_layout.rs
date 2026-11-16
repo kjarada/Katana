@@ -119,6 +119,32 @@ pub fn table_header<S: AsRef<str>>(ui: &mut Ui, headers: &[S], fill: bool) {
     }
 }
 
+/// One cell of a table's row (the window's one table, annotation::dialog_support::table_look):
+/// `text` on one line, answering a click and a double click as its row's. A cell whose text is a
+/// colour (#RRGGBB, drive::controls::colour_of_text) has the colour's swatch before it, so a
+/// table of layers or styles shows its colours rather than six digits each (the third look
+/// audit's H) - every table, with nothing for its dialog to do.
+pub fn table_cell(ui: &mut Ui, text: &str) -> Response {
+    let cell = |ui: &mut Ui| {
+        ui.add(
+            egui::Label::new(text)
+                .sense(egui::Sense::click())
+                .selectable(false)
+                .extend(),
+        )
+    };
+    let Some(colour) = controls::colour_of_text(text) else {
+        return cell(ui);
+    };
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = INNER;
+        let swatch = controls::colour_swatch(ui, colour);
+        // The swatch is the cell's as much as its words are: a click on it chooses the row.
+        cell(ui).union(swatch)
+    })
+    .inner
+}
+
 /// An empty table's line under its header: `text` in the secondary text colour, at its own width
 /// from the table's left edge, so the table says it has nothing rather than showing a header over
 /// a void. Not sized to the row: a table in a column of no width of its own would take the
@@ -135,6 +161,11 @@ pub fn empty_table(ui: &mut Ui, text: &str) -> Response {
 /// field or text box it replaced (`kind`, ControlKind::Line or Text), its `value` the text, and a
 /// fill writes it as QLineEdit::setText wrote the read-only field. A refusal (`is_error`) is in the
 /// error token's colour (shell::dialog::status_colour).
+///
+/// What it replaced says how it is shown: a line (ControlKind::Line - the line an action ran) is
+/// ONE line, cut short with the whole of it in its tooltip, as a footer's status is
+/// (shell::dialog::status); a box of text (ControlKind::Text - a reply of records, a load's
+/// report) wraps, as it is read whole.
 pub fn reply_text(
     ui: &mut Ui,
     name: &str,
@@ -163,10 +194,13 @@ pub fn reply_text(
         ui.allocate_exact_size(egui::vec2(width, 0.0), egui::Sense::hover())
             .1
     } else {
-        ui.add(
-            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error)))
-                .wrap(),
-        )
+        let label =
+            egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error)));
+        ui.add(if kind == ControlKind::Line {
+            label.truncate()
+        } else {
+            label.wrap()
+        })
     };
     if let Some(taken) = &taken
         && taken.posted.act == Act::ScrollTo
@@ -309,7 +343,9 @@ pub fn list_well(
                 .show(ui, |ui| {
                     let list = pick_list(ui, name, rows, current);
                     if rows.is_empty() {
-                        empty_table(ui, empty);
+                        // In the middle of the well, as a preview with nothing to show says what
+                        // to choose: at the well's top left it read as the first row of a list.
+                        ui.centered_and_justified(|ui| empty_table(ui, empty));
                     }
                     list
                 })

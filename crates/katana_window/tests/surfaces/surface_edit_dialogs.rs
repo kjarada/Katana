@@ -116,7 +116,10 @@ mod surface_edit_lines {
             value: String::from("1"),
             ..SurfaceLevelsForm::default()
         };
-        assert!(error(surface_levels_line(SurfaceLevelsKind::Heights, &form)).contains("Surface"));
+        assert!(
+            error(surface_levels_line(SurfaceLevelsKind::Heights, &form))
+                .contains("There is no surface")
+        );
         form.surface = String::from("ground");
         form.value = String::from("up");
         assert!(error(surface_levels_line(SurfaceLevelsKind::Heights, &form)).contains("By"));
@@ -188,7 +191,8 @@ mod surface_edit_lines {
         );
         form.surface.clear();
         assert!(
-            error(surface_levels_line(SurfaceLevelsKind::AddPoints, &form)).contains("Surface")
+            error(surface_levels_line(SurfaceLevelsKind::AddPoints, &form))
+                .contains("There is no surface")
         );
     }
 
@@ -396,7 +400,12 @@ mod surface_levels_dialog {
         assert!(!bench.enabled("surfaceThinRun"));
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.control("surfaceThinStatus").text.contains("Surface"));
+        assert!(
+            bench
+                .control("surfaceThinStatus")
+                .text
+                .contains("There is no surface: make one")
+        );
         assert!(bench.control("surfaceThinCommand").text.is_empty());
         assert!(bench.host.lines().is_empty());
     }

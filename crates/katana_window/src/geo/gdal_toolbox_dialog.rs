@@ -188,6 +188,10 @@ struct TreeItem {
     open: bool,
 }
 
+/// How far a level of the catalogue's tree stands in from the one above it: an expander's cell, so
+/// a group's algorithms start under its name.
+const LEVEL_INDENT: f32 = crate::drive::controls::EXPANDER_WIDTH;
+
 /// The datasets one argument reads: one, or several.
 enum InputControl {
     One(BindingPicker),
@@ -723,11 +727,34 @@ impl GdalToolboxDialog {
         }
         let current = self.current;
         let tree = &mut self.tree;
+        // The tree in the table look (dialog_layout's whole_row and cell_text, as the Command
+        // Reference's): a raised header over whole rows, striped, the chosen one lit across the
+        // list, where each name was a pill the size of its words.
+        let row_height = ui.spacing().interact_size.y;
+        let gap = ui.spacing().item_spacing.x;
+        let width = ui.available_width();
+        let header = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(width, row_height));
+        ui.allocate_rect(header, egui::Sense::hover());
+        ui.painter()
+            .rect_filled(header, 0.0, crate::theme::raised().to_egui());
+        crate::dialog_layout::cell_text(
+            ui,
+            header,
+            header.left() + crate::drive::controls::EXPANDER_WIDTH + gap,
+            header.right(),
+            egui::RichText::new("Algorithm")
+                .strong()
+                .color(crate::theme::text_muted().to_egui()),
+        );
+        let confirm_width = crate::shell::dialog::one_line_width(ui, "confirm")
+            + crate::dialog_layout::TABLE_COLUMN_GAP;
         let rect = egui::ScrollArea::vertical()
             .id_salt(NAME)
             .max_height(420.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let mut striped = false;
                 for at in 0..tree.len() {
                     // Shown when the search keeps it and every group above it is open.
                     let mut above = tree[at].parent;
@@ -740,30 +767,58 @@ impl GdalToolboxDialog {
                         continue;
                     }
                     let item = &mut tree[at];
-                    ui.horizontal(|ui| {
-                        ui.add_space(14.0 * item.depth as f32);
-                        // A group's expander, an algorithm's empty cell: a level's names line up.
-                        let expander = crate::drive::controls::tree_expander(
+                    let (rect, row) = crate::dialog_layout::whole_row(
+                        ui,
+                        row_height,
+                        current == Some(at),
+                        striped,
+                    );
+                    striped = !striped;
+                    // A level a step of LEVEL_INDENT in; a group's expander, an algorithm's empty
+                    // cell, so a level's names line up.
+                    let left = rect.left() + LEVEL_INDENT * item.depth as f32;
+                    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(
+                        egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max),
+                    ));
+                    let expander = crate::drive::controls::tree_expander(
+                        &mut cell,
+                        (!item.algorithm).then_some(item.open),
+                    );
+                    let text_left = left + crate::drive::controls::EXPANDER_WIDTH + gap;
+                    let text_right = if item.confirm {
+                        rect.right() - confirm_width
+                    } else {
+                        rect.right()
+                    };
+                    let strong = !item.algorithm;
+                    let mut name = egui::RichText::new(item.name.as_str());
+                    if strong {
+                        name = name.strong();
+                    }
+                    crate::dialog_layout::cell_text(ui, rect, text_left, text_right, name);
+                    let mut tip = item.tip.clone();
+                    if item.confirm {
+                        crate::dialog_layout::cell_text(
                             ui,
-                            (!item.algorithm).then_some(item.open),
+                            rect,
+                            text_right,
+                            rect.right(),
+                            egui::RichText::new("confirm")
+                                .color(crate::theme::text_muted().to_egui()),
                         );
-                        let name = ui
-                            .selectable_label(current == Some(at), item.name.as_str())
-                            .on_hover_text(item.tip.as_str());
-                        if expander.clicked() || name.clicked() {
-                            if item.algorithm {
-                                clicked = Some(at);
-                            } else {
-                                item.open = !item.open;
-                            }
+                        tip.push_str(
+                            "\nChanges or removes data that already exists: runs only when \
+                             Confirm is ticked",
+                        );
+                    }
+                    let row = row.on_hover_text(tip);
+                    if expander.clicked() || row.clicked() {
+                        if item.algorithm {
+                            clicked = Some(at);
+                        } else {
+                            item.open = !item.open;
                         }
-                        if item.confirm {
-                            ui.weak("confirm").on_hover_text(
-                                "Changes or removes data that already exists: runs only when \
-                                 Confirm is ticked",
-                            );
-                        }
-                    });
+                    }
                 }
             })
             .inner_rect;
@@ -794,7 +849,7 @@ impl GdalToolboxDialog {
 
     /// The Output group's fields; true when the kind was changed.
     fn output_ui(&mut self, ui: &mut Ui) -> bool {
-        ui.label("Output");
+        crate::shell::dialog::section(ui, "Output");
         let before = self.output_kind.index;
         let mut kind_changed = row(ui, "To:", |ui| {
             choice(
@@ -835,11 +890,118 @@ impl GdalToolboxDialog {
             check(
                 ui,
                 "gdalOutput.overwrite",
-                "Replace a file already there (OVERWRITE)",
+                "Replace a file already there",
                 &mut self.overwrite,
             );
         });
         kind_changed
+    }
+
+    /// The chosen algorithm's column: its title and documentation, its description, and the
+    /// sections of its inputs, arguments and output. Whether GDAL's Documentation was pressed and
+    /// the output's kind changed.
+    fn algorithm_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) -> (bool, bool) {
+        let mut help = false;
+        let mut kind_changed = false;
+        ui.horizontal(|ui| {
+            let title = self.title.clone();
+            label(ui, "gdalToolboxTitle", &title);
+            let url = self.spec.info.help_url.clone();
+            help = ui
+                .add_enabled_ui(self.help_enabled, |ui| {
+                    button(ui, "gdalToolboxHelp", "GDAL's Documentation")
+                        .on_hover_text(url)
+                        .clicked()
+                })
+                .inner;
+        });
+        let description = self.description.clone();
+        label(ui, "gdalToolboxDescription", &description);
+        // Headed sections, as every group of a dialog is (shell::dialog::section), where they were
+        // bordered boxes.
+        if !self.inputs.is_empty() {
+            crate::shell::dialog::section(ui, "Inputs");
+            let inputs = ui.scope(|ui| {
+                ui.vertical(|ui| {
+                    for input in &mut self.inputs {
+                        ui.label(format!(
+                            "{}{} - {}",
+                            input.spec.name,
+                            if input.spec.required {
+                                " (required)"
+                            } else {
+                                ""
+                            },
+                            input.spec.description
+                        ));
+                        let said = match &mut input.control {
+                            InputControl::One(picker) => {
+                                picker.ui(ui, &*host);
+                                picker.take_said()
+                            }
+                            InputControl::Several(list) => {
+                                list.ui(ui, &*host);
+                                list.picker().take_said()
+                            }
+                        };
+                        if let Some(text) = said {
+                            self.panel.set_status(&text, true);
+                        }
+                    }
+                });
+            });
+            custom(
+                ui,
+                &inputs.response,
+                ControlRecord::new("gdalToolboxInputs", ControlKind::Other),
+            );
+        }
+        crate::shell::dialog::section(ui, "Arguments");
+        let arguments = ui.scope(|ui| {
+            ui.vertical(|ui| {
+                self.arguments.ui(ui);
+            });
+        });
+        custom(
+            ui,
+            &arguments.response,
+            ControlRecord::new("gdalToolboxArguments", ControlKind::Other),
+        );
+        // The Output group is there only for an algorithm that writes a dataset;
+        // hidden, its fields are still there, as a hidden Qt widget's are.
+        if self.output_words.is_empty() {
+            hidden(ui, "gdalToolboxOutput", |ui| {
+                let _ = self.output_ui(ui);
+            });
+        } else {
+            let output = ui.scope(|ui| {
+                ui.vertical(|ui| {
+                    kind_changed = self.output_ui(ui);
+                });
+            });
+            custom(
+                ui,
+                &output.response,
+                ControlRecord::new("gdalToolboxOutput", ControlKind::Other),
+            );
+        }
+        let confirms =
+            self.spec.info.policy == gp::Policy::Confirm && !self.spec.info.path.is_empty();
+        let confirm = &mut self.confirm;
+        let mut draw = |ui: &mut Ui| {
+            check(
+                ui,
+                "gdalToolboxConfirm",
+                "Confirm: this changes or removes data that already exists",
+                confirm,
+            );
+        };
+        if confirms {
+            draw(ui);
+        } else {
+            hidden(ui, "gdalToolboxConfirm", draw);
+        }
+        (help, kind_changed)
     }
 
     fn algorithm_page(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -847,10 +1009,11 @@ impl GdalToolboxDialog {
         let mut clicked = None;
         let mut help = false;
         let mut kind_changed = false;
+        let catalogue_id = ui.id().with("gdalToolboxCatalogueHeight");
         let page = ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
                 // ---- the catalogue ----
-                ui.vertical(|ui| {
+                let catalogue = ui.vertical(|ui| {
                     ui.set_max_width(280.0);
                     searched = line_with(
                         ui,
@@ -858,109 +1021,43 @@ impl GdalToolboxDialog {
                         &mut self.search,
                         LineOptions {
                             placeholder: "search: a name, an alias or a word of the description",
+                            // As wide as the tree under it, whose header spans the column.
+                            width: Some(f32::INFINITY),
                             ..LineOptions::default()
                         },
                     )
                     .changed();
                     clicked = self.tree_ui(ui);
                 });
+                crate::dialog_layout::keep_height(
+                    ui,
+                    catalogue_id,
+                    catalogue.response.rect.height(),
+                );
                 // ---- the algorithm ----
+                let catalogue_height = crate::dialog_layout::last_height(ui, catalogue_id);
                 ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        let title = self.title.clone();
-                        label(ui, "gdalToolboxTitle", &title);
-                        let url = self.spec.info.help_url.clone();
-                        help = ui
-                            .add_enabled_ui(self.help_enabled, |ui| {
-                                button(ui, "gdalToolboxHelp", "GDAL's Documentation")
-                                    .on_hover_text(url)
-                                    .clicked()
-                            })
-                            .inner;
-                    });
-                    let description = self.description.clone();
-                    label(ui, "gdalToolboxDescription", &description);
-                    if !self.inputs.is_empty() {
-                        let inputs = ui.group(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label("Inputs");
-                                for input in &mut self.inputs {
-                                    ui.label(format!(
-                                        "{}{} - {}",
-                                        input.spec.name,
-                                        if input.spec.required {
-                                            " (required)"
-                                        } else {
-                                            ""
-                                        },
-                                        input.spec.description
-                                    ));
-                                    let said = match &mut input.control {
-                                        InputControl::One(picker) => {
-                                            picker.ui(ui, &*host);
-                                            picker.take_said()
-                                        }
-                                        InputControl::Several(list) => {
-                                            list.ui(ui, &*host);
-                                            list.picker().take_said()
-                                        }
-                                    };
-                                    if let Some(text) = said {
-                                        self.panel.set_status(&text, true);
-                                    }
-                                }
-                            });
-                        });
-                        custom(
-                            ui,
-                            &inputs.response,
-                            ControlRecord::new("gdalToolboxInputs", ControlKind::Other),
+                    if self.spec.info.path.is_empty() {
+                        // Before an algorithm is chosen the column says what goes there, muted
+                        // and centred, as an empty preview does; its parts are put away (still
+                        // there for a driver). A lone "Arguments" box and a greyed button over a
+                        // void read as a page that failed to draw.
+                        let height = catalogue_height.unwrap_or(240.0);
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), height),
+                            egui::Sense::hover(),
                         );
-                    }
-                    let arguments = ui.group(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label("Arguments");
-                            self.arguments.ui(ui);
-                        });
-                    });
-                    custom(
-                        ui,
-                        &arguments.response,
-                        ControlRecord::new("gdalToolboxArguments", ControlKind::Other),
-                    );
-                    // The Output group is there only for an algorithm that writes a dataset;
-                    // hidden, its fields are still there, as a hidden Qt widget's are.
-                    if self.output_words.is_empty() {
-                        hidden(ui, "gdalToolboxOutput", |ui| {
-                            let _ = self.output_ui(ui);
+                        crate::dialog_layout::preview_placeholder(
+                            ui,
+                            rect,
+                            "Choose an algorithm on the left to see what it reads, what it \
+                             takes and what it writes.",
+                        );
+                        hidden(ui, "gdalToolboxNoAlgorithm", |ui| {
+                            let _ = self.algorithm_ui(ui, host);
                         });
                     } else {
-                        let output = ui.group(|ui| {
-                            ui.vertical(|ui| {
-                                kind_changed = self.output_ui(ui);
-                            });
-                        });
-                        custom(
-                            ui,
-                            &output.response,
-                            ControlRecord::new("gdalToolboxOutput", ControlKind::Other),
-                        );
-                    }
-                    let confirms = self.spec.info.policy == gp::Policy::Confirm
-                        && !self.spec.info.path.is_empty();
-                    let confirm = &mut self.confirm;
-                    let mut draw = |ui: &mut Ui| {
-                        check(
-                            ui,
-                            "gdalToolboxConfirm",
-                            "Confirm: this changes or removes data that already exists",
-                            confirm,
-                        );
-                    };
-                    if confirms {
-                        draw(ui);
-                    } else {
-                        hidden(ui, "gdalToolboxConfirm", draw);
+                        (help, kind_changed) = self.algorithm_ui(ui, host);
                     }
                 });
             });

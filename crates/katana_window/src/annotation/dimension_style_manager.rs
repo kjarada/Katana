@@ -52,7 +52,7 @@ use katana_entity::tables::{DEFAULT_DIMENSION_STYLE_NAME, arrow_head_from_string
 use katana_entity::{ArrowHead, DimensionGeometry, DimensionStyle, Geometry, validate};
 use katana_geometry::Point2;
 
-use super::dialog_support::{Followed, show_dialog, table};
+use super::dialog_support::{Followed, TableLook, show_dialog, table_look};
 use super::form_widgets::{button, check, describe, edit, problem_line};
 use crate::canvas::{Canvas, Color, Image, Pen, PenCap, PenJoin, PenStyle, RasterCanvas, RenderHint};
 use crate::command_word::exact_number;
@@ -191,9 +191,15 @@ enum Pressed {
     Close,
 }
 
-/// The width of a value field in the three forms (the look of 2026-11-16): a number's, so the
-/// three sit side by side.
+/// The width of the arrowhead's choice (the look of 2026-11-16), so the three forms sit side by
+/// side. A number, a prefix and a suffix are a number box's width (short_row).
 const VALUE_WIDTH: f32 = 110.0;
+
+/// The style list's column: the list, the name field and the buttons under it at one width, the
+/// list's header and chosen row spanning it - the list was as wide as its two columns' words
+/// (204) over a field of 232 (the third look audit's J). egui's own field width less a group's
+/// margins, which the field had.
+const LIST_WIDTH: f32 = 232.0;
 
 /// The width the body is laid out at: the style list beside the three short forms, each a label
 /// column and a value (VALUE_WIDTH), the arrowhead's picture beside its choice - about 220 for the
@@ -207,6 +213,16 @@ const BODY_WIDTH: f32 = 980.0;
 fn value_row(form: &mut dialog::Form<'_>, label: &str, add: impl FnOnce(&mut Ui)) {
     form.row(label, |ui| {
         dialog::fixed_fields(ui, VALUE_WIDTH);
+        add(ui);
+    });
+}
+
+/// A row of one of the three forms holding a number, or a short word (a prefix, a suffix): its
+/// field a number box's width (controls::NUMBER_FIELD_WIDTH), as the Text Styles' sizes are - at
+/// VALUE_WIDTH the sizes here were 110 wide against 65 there (the third look audit's C).
+fn short_row(form: &mut dialog::Form<'_>, label: &str, add: impl FnOnce(&mut Ui)) {
+    form.row(label, |ui| {
+        dialog::fixed_fields(ui, controls::NUMBER_FIELD_WIDTH);
         add(ui);
     });
 }
@@ -700,7 +716,9 @@ impl DimensionStyleManagerDialog {
     fn body(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                let shown = table(
+                ui.set_width(LIST_WIDTH);
+                dialog::fill_fields(ui);
+                let shown = table_look(
                     ui,
                     "dimStyleList",
                     &["Style", "Used by"],
@@ -708,6 +726,10 @@ impl DimensionStyleManagerDialog {
                     self.current,
                     &[],
                     None,
+                    TableLook {
+                        fill: true,
+                        ..TableLook::default()
+                    },
                 );
                 if let Some(at) = shown.chosen
                     && let Some(row) = self.rows.get(at)
@@ -750,7 +772,7 @@ impl DimensionStyleManagerDialog {
             });
             ui.add_space(layout::SECTION_GAP);
             ui.vertical(|ui| {
-                // Three short forms side by side, their values a number's width (value_row); each
+                // Three short forms side by side, their values a number's width (short_row, value_row); each
                 // has its own label column, as a column of a body does.
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = layout::SECTION_GAP * 2.0;
@@ -790,19 +812,19 @@ impl DimensionStyleManagerDialog {
         ui.vertical(|ui| {
             dialog::section(ui, "Text");
             dialog::form(ui, |form| {
-                value_row(form, "Height", |ui| {
+                short_row(form, "Height", |ui| {
                     edit(ui, "dimStyleText", &mut self.text, "")
                         .on_hover_text(format!("Text height{size_tip}"));
                 });
-                value_row(form, "Gap to the line", |ui| {
+                short_row(form, "Gap to the line", |ui| {
                     edit(ui, "dimStyleGap", &mut self.gap, "")
                         .on_hover_text(format!("From the dimension line to its text{size_tip}"));
                 });
-                value_row(form, "Prefix", |ui| {
+                short_row(form, "Prefix", |ui| {
                     edit(ui, "dimStylePrefix", &mut self.prefix, "")
                         .on_hover_text("Written before the number");
                 });
-                value_row(form, "Suffix", |ui| {
+                short_row(form, "Suffix", |ui| {
                     edit(ui, "dimStyleSuffix", &mut self.suffix, "")
                         .on_hover_text("Written after the number, e.g. mm");
                 });
@@ -816,19 +838,19 @@ impl DimensionStyleManagerDialog {
         ui.vertical(|ui| {
             dialog::section(ui, "Lines and arrows");
             dialog::form(ui, |form| {
-                value_row(form, "Extension offset", |ui| {
+                short_row(form, "Extension offset", |ui| {
                     edit(ui, "dimStyleExtOff", &mut self.ext_off, "").on_hover_text(format!(
                         "The gap between a measured point and its extension line{size_tip}"
                     ));
                 });
-                value_row(form, "Extension beyond", |ui| {
+                short_row(form, "Extension beyond", |ui| {
                     edit(ui, "dimStyleExtBeyond", &mut self.ext_beyond, "").on_hover_text(
                         format!(
                             "How far an extension line runs past the dimension line{size_tip}"
                         ),
                     );
                 });
-                value_row(form, "Arrow size", |ui| {
+                short_row(form, "Arrow size", |ui| {
                     edit(ui, "dimStyleArrow", &mut self.arrow, "")
                         .on_hover_text(format!("Arrowhead size{size_tip}"));
                 });
@@ -847,23 +869,22 @@ impl DimensionStyleManagerDialog {
         ui.vertical(|ui| {
             dialog::section(ui, "Units");
             dialog::form(ui, |form| {
-                value_row(form, "Unit scale", |ui| {
+                short_row(form, "Unit scale", |ui| {
                     edit(ui, "dimStyleScale", &mut self.scale, "").on_hover_text(
-                        "Multiplies the measurement before it is written: 1000 writes a drawing                          in metres in millimetres",
+                        "Multiplies the measurement before it is written: 1000 writes a drawing \
+                         in metres in millimetres",
                     );
                 });
-                value_row(form, "Decimal places", |ui| {
+                short_row(form, "Decimal places", |ui| {
                     controls::whole(ui, "dimStyleDecimals", &mut self.decimals, 0..=MOST_DECIMALS)
                         .on_hover_text("Places after the decimal point");
                 });
-                value_row(form, "Round to", |ui| {
+                short_row(form, "Round to", |ui| {
                     edit(ui, "dimStyleRound", &mut self.round, "").on_hover_text(
                         "Rounds the measurement to a multiple of this; 0 for none",
                     );
                 });
-                form.under(|ui| {
-                    check(ui, "dimStyleTrim", "Drop trailing zeros", &mut self.trim);
-                });
+                form.check("dimStyleTrim", "Drop trailing zeros", &mut self.trim);
             });
         });
     }

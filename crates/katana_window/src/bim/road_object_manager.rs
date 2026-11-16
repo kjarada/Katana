@@ -11,7 +11,7 @@
 //! BY SCOPE. Beside the table stand the same "Apply to" and "Only those that match" controls every
 //! dialog on drawing data shows (the shared ScopeFilterWidget, customisation::scope_filter_widget),
 //! and three buttons that put what they say into ROADOBJECT LIST, QUANTITIES and DELETE
-//! (docs/road_objects.md, "Scope and filter"): Select Matching runs LIST <scope> and chooses the
+//! (docs/road_objects.md, "Scope and filter"): Select Matches runs LIST <scope> and chooses the
 //! rows of the objects it took, Quantities runs QUANTITIES <scope> and shows the answer in the
 //! details, Delete Matching runs DELETE <scope> - one undo step. A scope that takes nothing is
 //! said, not refused. The filter's entity-only controls (types, style, text) are to be greyed: a
@@ -64,7 +64,7 @@ use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget, WIDGET_WIDTH};
 use crate::dialog_layout as layout;
-use crate::drive::controls::{custom, label_as};
+use crate::drive::controls::custom;
 use crate::drive::registry::{ControlKind, ControlRecord, simplified};
 use crate::format::qt_fixed;
 use crate::host::{Host, VerbOutcome};
@@ -156,8 +156,10 @@ pub fn road_objects_frame(document: &Document, ids: &[String]) -> Option<Box2> {
     ))
 }
 
-/// The list column's width (the look of 2026-11-16): the object table's columns.
-const LIST_WIDTH: f32 = 600.0;
+/// The list column's width (the look of 2026-11-16): the object table's ten columns at their least
+/// width, 600, and a column's gap after the last - at 600 the header strip ended at "Problem"'s
+/// last letter, the word read as cut at the table's edge (the third look audit's J).
+const LIST_WIDTH: f32 = 600.0 + layout::TABLE_COLUMN_GAP;
 
 /// The manager's body width: the list's column and the scope's (the shared widget's own width,
 /// scope_filter_widget::WIDGET_WIDTH) side by side, parted by a section's gap and the row's own
@@ -175,6 +177,9 @@ struct Body {
     keys: String,
     scope: ScopeFilterWidget,
     status: String,
+    /// Whether the status is a refusal - a line refused, a button that needs one object - said
+    /// in the error colour; a reply is muted, as every dialog's status is.
+    status_error: bool,
     /// The placing dialog asked for by New, on this kind, for the workbench to open.
     place: Option<RoadObjectKind>,
     close: bool,
@@ -339,9 +344,11 @@ impl Body {
     fn execute(&mut self, host: &mut dyn Host, line: &str) -> Option<VerbOutcome> {
         if !self.executor {
             self.status = String::from("There is no command line to run it on here.");
+            self.status_error = true;
             return None;
         }
         let outcome = host.run(line);
+        self.status_error = !outcome.ok;
         self.status = if outcome.ok {
             outcome.reply.clone()
         } else {
@@ -361,6 +368,7 @@ impl Body {
             Ok(words) => Some(words),
             Err(error) => {
                 self.status = format!("Refused: {}", error.message);
+                self.status_error = true;
                 None
             }
         }
@@ -373,6 +381,7 @@ impl Body {
         let keys = simplified(&self.keys);
         if ids.len() != 1 || keys.is_empty() {
             self.status = String::from("Choose one object and give key=value to set.");
+            self.status_error = true;
             return;
         }
         // The keys are spent once they are set; a refused line keeps them to be put right.
@@ -414,6 +423,7 @@ impl Body {
                 "Nothing of those objects is made, so there is nothing to frame: ROADOBJECT \
                  PROBLEMS says why.",
             );
+            self.status_error = true;
             return;
         };
         let line = format!(
@@ -453,6 +463,7 @@ impl Body {
         if self.table.selected_rows() != before {
             self.show_info(host.document_mut());
         }
+        self.status_error = false;
         self.status = format!(
             "{} chosen - {}",
             ids.len(),
@@ -469,6 +480,7 @@ impl Body {
             return;
         };
         if let Some(outcome) = self.execute(host, &format!("ROADOBJECT QUANTITIES {words}")) {
+            self.status_error = false;
             self.status = String::from(outcome.reply.split('\n').next().unwrap_or(""));
             self.info = outcome.reply;
         }
@@ -498,8 +510,14 @@ impl Body {
 
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let chosen = self.table.selected_rows().len();
+        // The scope's column is the taller; the list's action rows stand at its foot, level with
+        // the scope's buttons, and the room above them is the table's: under a short table they
+        // stood at the top over a void 450 by 500 (the third look audit's J).
+        let by_scope_id = ui.id().with("roadObjectByScopeHeight");
+        let actions_id = ui.id().with("roadObjectActionsHeight");
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                let top = ui.cursor().top();
                 // The table's column wide: the details box as wide, the key field less its
                 // button (the look of 2026-11-16).
                 ui.set_width(LIST_WIDTH);
@@ -512,46 +530,51 @@ impl Body {
                 // reply): an empty well 600 by 95 stood under the table's "Nothing to list" (the
                 // second look audit's N6).
                 crate::shell::dialog::reply(ui, "roadObjectInfo", &mut self.info, 6);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().text_edit_width = LIST_WIDTH - 80.0;
-                    field(
-                        ui,
-                        "roadObjectKeys",
-                        &mut self.keys,
-                        "key=value ...   e.g. offset=4.5 height=1.0 (ROADOBJECT KINDS)",
-                        "Apply sets these on the chosen object; Copy makes a copy with them \
-                         (station=, dx= and dy= move the copy, and any other key changes it)",
-                    );
-                    ui.add_enabled_ui(chosen == 1, |ui| {
-                        if button(ui, "roadObjectApply", "&Apply", "").clicked() {
-                            self.press_apply(host);
+                let by_scope = layout::last_height(ui, by_scope_id).unwrap_or(0.0);
+                let actions = layout::last_height(ui, actions_id).unwrap_or(0.0);
+                let room =
+                    by_scope - (ui.cursor().top() - top) - actions - ui.spacing().item_spacing.y;
+                if room > 0.0 {
+                    ui.add_space(room);
+                }
+                let action_rows = ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        // The field leaves Apply its room, so the row ends where the table does.
+                        ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Apply");
+                        field(
+                            ui,
+                            "roadObjectKeys",
+                            &mut self.keys,
+                            "key=value ...   e.g. offset=4.5 height=1.0 (ROADOBJECT KINDS)",
+                            "Apply sets these on the chosen object; Copy makes a copy with them \
+                             (station=, dx= and dy= move the copy, and any other key changes it)",
+                        );
+                        ui.add_enabled_ui(chosen == 1, |ui| {
+                            if button(ui, "roadObjectApply", "&Apply", "").clicked() {
+                                self.press_apply(host);
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        if button(ui, "roadObjectNew", "&New...", "").clicked() {
+                            self.press_new(host);
                         }
+                        ui.add_enabled_ui(chosen == 1, |ui| {
+                            if button(ui, "roadObjectCopy", "C&opy", "").clicked() {
+                                self.press_copy(host);
+                            }
+                        });
+                        ui.add_enabled_ui(chosen > 0, |ui| {
+                            if button(ui, "roadObjectDelete", "&Delete", "").clicked() {
+                                self.press_delete(host);
+                            }
+                            if button(ui, "roadObjectZoom", "&Zoom To", "").clicked() {
+                                self.press_zoom(host);
+                            }
+                        });
                     });
                 });
-                ui.horizontal(|ui| {
-                    if button(ui, "roadObjectNew", "&New...", "").clicked() {
-                        self.press_new(host);
-                    }
-                    ui.add_enabled_ui(chosen == 1, |ui| {
-                        if button(ui, "roadObjectCopy", "C&opy", "").clicked() {
-                            self.press_copy(host);
-                        }
-                    });
-                    ui.add_enabled_ui(chosen > 0, |ui| {
-                        if button(ui, "roadObjectDelete", "&Delete", "").clicked() {
-                            self.press_delete(host);
-                        }
-                        if button(ui, "roadObjectZoom", "&Zoom To", "").clicked() {
-                            self.press_zoom(host);
-                        }
-                    });
-                });
-                label_as(
-                    ui,
-                    "roadObjectManagerStatus",
-                    &self.status,
-                    egui::Label::new(self.status.as_str()).wrap(),
-                );
+                layout::keep_height(ui, actions_id, action_rows.response.rect.height());
             });
             // The shared scope and filter. A road object is a definition on a layer with a plan
             // extent, so the whole drawing is the natural start; the views are the window's.
@@ -560,13 +583,15 @@ impl Body {
             // and its buttons side by side.
             let by_scope = ui.vertical(|ui| {
                 ui.set_width(WIDGET_WIDTH);
-                ui.strong("Road objects by scope");
+                dialog::section(ui, "Road objects by scope");
                 self.scope.ui(ui);
                 ui.horizontal(|ui| {
+                    // "Select Matches", as Global Modify's button reads (the third look audit's
+                    // K); the name is the one the tests press.
                     if button(
                         ui,
                         "roadObjectSelectMatching",
-                        "&Select Matching",
+                        "&Select Matches",
                         "Choose the rows of the objects the scope and the filter take \
                          (ROADOBJECT LIST <scope>)",
                     )
@@ -598,6 +623,7 @@ impl Body {
                     }
                 });
             });
+            layout::keep_height(ui, by_scope_id, by_scope.response.rect.height());
             custom(
                 ui,
                 &by_scope.response,
@@ -606,11 +632,17 @@ impl Body {
         });
     }
 
-    /// The one footer (shell::dialog::button_row): Close at the right.
+    /// The one footer (shell::dialog::button_row): the status at the left, muted unless it is a
+    /// refusal - in the list's column it was a third look of a status, in the text colour; Close
+    /// at the right.
     fn footer_ui(&mut self, ui: &mut Ui) {
+        let status = self.status.clone();
+        let status_error = self.status_error;
         let ((), close) = dialog::button_row(
             ui,
-            |_| {},
+            |ui| {
+                dialog::status(ui, "roadObjectManagerStatus", &status, status_error);
+            },
             |ui| button(ui, "roadObjectManagerClose", "&Close", "").clicked(),
         );
         if close {
@@ -656,12 +688,14 @@ impl RoadObjectManagerDialog {
                 ],
             )
             .extended()
+            .filling()
             .max_height(300.0),
             count: String::new(),
             info: String::new(),
             keys: String::new(),
             scope,
             status: String::new(),
+            status_error: false,
             place: None,
             close: false,
         };

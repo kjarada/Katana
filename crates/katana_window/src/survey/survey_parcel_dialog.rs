@@ -61,6 +61,11 @@ use crate::theme::palette;
 const DEFAULT_LABEL_HEIGHT: f64 = 2.5;
 
 /// The courses table's columns.
+/// The body's width: room for its footer's six buttons - Use Selection, Copy and Save CSV... at
+/// the left, Label Courses, Close and Compute at the right - and a short status between them; at
+/// the 520 a body has by default they ran past the dialog's edge.
+const PARCEL_WIDTH: f32 = 640.0;
+
 const COURSE_COLUMNS: [&str; 5] = ["Course", "From E", "From N", "Bearing", "Distance"];
 
 /// An entity id as the command line takes it: 12 or #12.
@@ -131,7 +136,8 @@ impl SurveyParcelDialog {
                  carries - what PARCEL id and PARCEL id LEGAL print. Label Courses puts a bearing \
                  and distance on every course and the area at the centroid, on the current \
                  layer, as one undo step.",
-            ),
+            )
+            .wide(PARCEL_WIDTH),
             form: ParcelForm {
                 parcel: String::new(),
                 label_height: format_general(DEFAULT_LABEL_HEIGHT, 6),
@@ -158,18 +164,27 @@ impl SurveyParcelDialog {
     pub fn ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         self.form.pressed = None;
         self.form.name_changed = false;
-        // Each filler goes in at the left in the C++, so the last added is first: Use Selection,
-        // then Label Courses.
+        // The footer as the Point Report's: at the left Use Selection, which reads the drawing
+        // into the form, then Copy and Save CSV..., which act on the courses (they stood under
+        // the table in the body); at the right Label Courses - a second verb, which changes the
+        // drawing - Close, and Compute last in the accent.
         let pressed = self.tool.show(
             ui,
             &mut self.form,
             Self::draw_form,
             &[
                 ToolButton::new("useSelection", "Use Selection"),
+                ToolButton::new("parcelCopy", "Copy"),
+                ToolButton::new("parcelCsv", "Save CSV..."),
+            ],
+            &[
+                ToolButton::new("compute", "Compute"),
                 ToolButton::new("label", "Label Courses"),
             ],
-            &[ToolButton::new("compute", "Compute")],
         );
+        if matches!(pressed, Some("parcelCopy" | "parcelCsv")) {
+            self.form.pressed = pressed;
+        }
         if self.form.name_changed {
             self.show_legal();
         }
@@ -267,14 +282,6 @@ impl SurveyParcelDialog {
             &form.summary,
             palette::text().to_egui(),
         );
-        ui.horizontal(|ui| {
-            if drive::button(ui, "parcelCopy", "Copy").clicked() {
-                form.pressed = Some("parcelCopy");
-            }
-            if drive::button(ui, "parcelCsv", "Save CSV...").clicked() {
-                form.pressed = Some("parcelCsv");
-            }
-        });
     }
 
     fn legal_page(ui: &mut Ui, form: &mut ParcelForm) {

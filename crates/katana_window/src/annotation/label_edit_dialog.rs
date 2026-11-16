@@ -2,9 +2,9 @@
 //! words, where its text is pinned and its layer - what LABEL SET changes. The port of
 //! annotation/label_edit_dialog.
 //!
-//! The dialog changes nothing itself. OK and Apply write the LABEL SET line its fields describe -
+//! The dialog changes nothing itself. Apply writes the LABEL SET line its fields describe -
 //! shown as it will run in labelEditCommand - naming only what differs from the label as it is,
-//! and hand it to the window's one executor (host::Host::run), so the line is echoed, kept in the
+//! and hands it to the window's one executor (host::Host::run), so the line is echoed, kept in the
 //! history and one undo step like a typed one; the reply or the refusal comes back into
 //! labelEditStatus. There is nothing it can do that an agent cannot do by typing the line it shows.
 //! The line is made by `label_set_line`, a pure function of the fields, tested without a window.
@@ -33,9 +33,8 @@
 //!                     unticked: at=none, the placer puts it
 //! labelEditEasting, labelEditNorthing
 //! labelEditLayer      the layer the label is on
-//! labelEditCommand    the line OK and Apply run (read-only)
-//! labelEditOk         run the line, and close when it worked
-//! labelEditApply      run the line and stay open
+//! labelEditCommand    the line Apply runs (read-only)
+//! labelEditApply      run the line and stay open: the footer's one primary
 //! labelEditCancel     Close: close without running anything
 //! labelEditStatus     what happened last
 //! ```
@@ -233,7 +232,9 @@ pub struct LabelEditDialog {
     layer: Choice,
     command: String,
     status: String,
-    ok_pressed: bool,
+    /// Whether the status is a refusal - a field the line cannot write, a line refused - said in
+    /// the error colour; what the dialog merely reports is muted.
+    status_error: bool,
     apply_pressed: bool,
     cancel_pressed: bool,
 }
@@ -259,7 +260,7 @@ impl LabelEditDialog {
             layer: Choice::editable(""),
             command: String::new(),
             status: String::new(),
-            ok_pressed: false,
+            status_error: false,
             apply_pressed: false,
             cancel_pressed: false,
         }
@@ -321,9 +322,11 @@ impl LabelEditDialog {
         self.current = LabelEditForm::default();
         let empty = self.current.clone();
         self.show_form(document, &empty);
-        self.target = String::from("-");
+        // What is missing, in words, where a dash stood for nothing (the third look audit's I).
+        self.target = String::from("No label");
         self.command.clear();
         self.status = String::from(why);
+        self.status_error = false;
     }
 
     /// Shows label `id`; false, with the reason in the status, when it is not a label.
@@ -363,6 +366,7 @@ impl LabelEditDialog {
         let current = self.current.clone();
         self.show_form(document, &current);
         self.status.clear();
+        self.status_error = false;
         self.update_line();
         true
     }
@@ -390,7 +394,7 @@ impl LabelEditDialog {
     fn show_form(&mut self, document: &Document, form: &LabelEditForm) {
         let model = document.model();
         self.styles = model.label_styles.names();
-        // A label whose style has gone still shows it, so OK does not change it unasked; LABEL
+        // A label whose style has gone still shows it, so Apply does not change it unasked; LABEL
         // SET refuses nothing for it, the painter draws nothing.
         if !form.style.is_empty() && !self.styles.contains(&form.style) {
             self.styles.push(form.style.clone());
@@ -448,8 +452,10 @@ impl LabelEditDialog {
             Err(error) => {
                 self.command.clear();
                 self.status = error.message;
+                self.status_error = true;
             }
             Ok(made) => {
+                self.status_error = false;
                 self.status = if made.is_empty() {
                     String::from("Nothing to change.")
                 } else {
@@ -468,21 +474,25 @@ impl LabelEditDialog {
             Ok(made) => made,
             Err(error) => {
                 self.status = error.message;
+                self.status_error = true;
                 return false;
             }
         };
         if made.is_empty() {
             self.status = String::from("Nothing to change.");
+            self.status_error = false;
             return true;
         }
         if !self.command_line {
             self.status = String::from("There is no command line to run it on.");
+            self.status_error = true;
             return false;
         }
         let outcome = host.run(&made);
         // What the line changed is heard as it ran, as the C++'s listener heard it.
         self.look(host.document());
         if !outcome.ok {
+            self.status_error = true;
             self.status = if outcome.error.is_empty() {
                 String::from("The line was refused.")
             } else {
@@ -493,6 +503,7 @@ impl LabelEditDialog {
         // The label as it now is, so the next Apply compares against it.
         let id = self.current.id;
         self.load_form(host.document(), id);
+        self.status_error = false;
         self.status = if outcome.reply.is_empty() {
             String::from("Done.")
         } else {
@@ -501,8 +512,8 @@ impl LabelEditDialog {
         true
     }
 
-    /// Draws the dialog for this frame; false once it is closed (OK that worked, Cancel, or the
-    /// title bar's close button).
+    /// Draws the dialog for this frame; false once it is closed (Close, or the title bar's close
+    /// button).
     pub fn ui(&mut self, ctx: &Context, host: &mut dyn Host) -> bool {
         self.look(host.document());
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, TITLE));
@@ -511,9 +522,6 @@ impl LabelEditDialog {
         let mut open = !closed;
         if std::mem::take(&mut self.apply_pressed) {
             self.apply(host);
-        }
-        if std::mem::take(&mut self.ok_pressed) && self.apply(host) {
-            open = false;
         }
         if std::mem::take(&mut self.cancel_pressed) {
             open = false;
@@ -530,7 +538,20 @@ impl LabelEditDialog {
             form.row("Label", |ui| {
                 // On its label's line, as a field's text is (dialog::text_value).
                 dialog::text_value(ui, |ui| {
-                    controls::label(ui, "labelEditTarget", &self.target);
+                    // Muted while there is no label, as an empty choice's hint is.
+                    let colour = if enabled {
+                        crate::theme::text()
+                    } else {
+                        crate::theme::text_muted()
+                    };
+                    controls::label_as(
+                        ui,
+                        "labelEditTarget",
+                        &self.target,
+                        egui::Label::new(
+                            egui::RichText::new(self.target.as_str()).color(colour.to_egui()),
+                        ),
+                    );
                 });
             });
 
@@ -638,7 +659,7 @@ impl LabelEditDialog {
                         ..LineOptions::default()
                     },
                 )
-                .on_hover_text("The line OK and Apply run, as it would be typed");
+                .on_hover_text("The line Apply runs, as it would be typed");
             });
         });
         if changed {
@@ -649,45 +670,30 @@ impl LabelEditDialog {
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
         let enabled = self.current.id != 0;
         let status = self.status.clone();
-        // The one footer (shell::dialog::button_row): the status at the left; Apply (the
-        // secondary, before Close as Edit Text's Revert is), Close, then OK, the primary, last at
-        // the right. Close is labelEditCancel, as it was: it closes without running anything,
-        // which every other dialog's footer calls Close (the look audits' T5).
-        let (_, (ok, cancel, apply)) = dialog::button_row(
+        // The one footer (shell::dialog::button_row): the status at the left, muted unless it is
+        // a refusal; Close, then Apply, the primary, last at the right. One primary: Apply, Close
+        // and OK were three ways out of one non-modal editor, OK being Apply then Close (the
+        // third look audit's A); kept open beside the drawing as the managers are, it applies and
+        // stays. Close is labelEditCancel, as it was: it closes without running anything.
+        let (_, (cancel, apply)) = dialog::button_row(
             ui,
             |ui| {
-                controls::label_as(
-                    ui,
-                    "labelEditStatus",
-                    &status,
-                    // The text colour, not muted: the status is also where a refusal is said.
-                    egui::Label::new(status.as_str()).wrap(),
-                );
+                dialog::status(ui, "labelEditStatus", &status, self.status_error);
             },
             |ui| {
+                let cancel = controls::button(ui, "labelEditCancel", "Close")
+                    .on_hover_text("Close the dialog; edits not applied are dropped")
+                    .clicked();
                 let apply = ui
                     .add_enabled_ui(enabled, |ui| {
-                        controls::button(ui, "labelEditApply", "Apply")
+                        controls::primary(ui, "labelEditApply", "Apply")
                             .on_hover_text("Run the line and keep the dialog open")
                             .clicked()
                     })
                     .inner;
-                let cancel = controls::button(ui, "labelEditCancel", "Close")
-                    .on_hover_text("Close the dialog; edits not applied are dropped")
-                    .clicked();
-                let ok = ui
-                    .add_enabled_ui(enabled, |ui| {
-                        controls::primary(ui, "labelEditOk", "OK")
-                            .on_hover_text("Run the line, and close the dialog when it worked")
-                            .clicked()
-                    })
-                    .inner;
-                (ok, cancel, apply)
+                (cancel, apply)
             },
         );
-        if ok {
-            self.ok_pressed = true;
-        }
         if apply {
             self.apply_pressed = true;
         }

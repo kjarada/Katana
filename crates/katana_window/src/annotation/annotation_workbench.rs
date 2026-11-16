@@ -194,7 +194,7 @@ impl AnnotationWorkbench {
     /// The Format menu's Annotation Styles section.
     pub fn format_menu(&self) -> Menu {
         Menu::new(FORMAT_MENU, FORMAT_MENU_TITLE)
-            .section("Annotation Styles")
+            .section("Annotation styles")
             .action(Self::text_styles_action())
             .action(Self::label_styles_action())
             .action(Self::dimension_styles_action())
@@ -296,7 +296,7 @@ impl AnnotationWorkbench {
             )
             .opens("textEditDialog");
         self.annotate_items
-            .push(MenuItem::Section(String::from("Edit Annotation")));
+            .push(MenuItem::Section(String::from("Edit annotation")));
         self.annotate_items.push(MenuItem::Action(action.clone()));
         action
     }
@@ -342,7 +342,7 @@ impl AnnotationWorkbench {
         };
         if !last_is_edit_text {
             self.annotate_items
-                .push(MenuItem::Section(String::from("Edit Annotation")));
+                .push(MenuItem::Section(String::from("Edit annotation")));
         }
         self.annotate_items.push(MenuItem::Action(edit_label));
         self.annotate_items.push(MenuItem::Action(label_layout));
@@ -378,7 +378,7 @@ impl AnnotationWorkbench {
             ),
         ];
         self.annotate_items
-            .push(MenuItem::Section(String::from("Leader Manager")));
+            .push(MenuItem::Section(String::from("Leader manager")));
         for (name, text, tip, icon) in entries {
             let action = Action::new(name, &with_mnemonic(text, &mut taken))
                 .icon(icon)

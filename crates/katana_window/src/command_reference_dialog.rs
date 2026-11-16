@@ -602,11 +602,13 @@ impl ReferenceState {
                             striped,
                         );
                         striped = !striped;
-                        // Under its section's name, past the section's expander.
+                        // Under its section's name, a step further in than it (LEAF_INDENT), so a
+                        // command reads as its group's: level with the group's name, the two
+                        // were told apart only by the name's weight.
                         cell_text(
                             ui,
                             rect,
-                            rect.left() + indent,
+                            rect.left() + indent + LEAF_INDENT,
                             rect.left() + indent + titles,
                             RichText::new(entry.title.as_str()),
                         );
@@ -647,19 +649,18 @@ impl ReferenceState {
         self.detail_ui(ui);
     }
 
-    /// How wide the title column is: the widest title shown and a column's gap, at most
-    /// TITLE_COLUMN, so a long one is cut short rather than pushing every summary across.
+    /// How wide the title column is: the widest of every group's name and every command's title
+    /// (a step in, LEAF_INDENT) and a column's gap, at most TITLE_COLUMN, so a long one is cut
+    /// short rather than pushing every summary across. Measured over the whole reference, open or
+    /// not and shown or not, so the summaries keep one edge: measured over what was open, the
+    /// column moved from 163 to 194 when a group was opened.
     fn title_column(&self, ui: &Ui) -> f32 {
         let mut widest: f32 = 0.0;
-        for (at, section) in self.sections.iter().enumerate() {
-            if !self.expanded.get(at).copied().unwrap_or(false) {
-                widest = widest.max(crate::shell::dialog::one_line_width(ui, &section.name));
-                continue;
-            }
-            for (number, entry) in section.entries.iter().enumerate() {
-                if self.entry_shown(at, number) {
-                    widest = widest.max(crate::shell::dialog::one_line_width(ui, &entry.title));
-                }
+        for section in &self.sections {
+            widest = widest.max(crate::shell::dialog::one_line_width(ui, &section.name));
+            for entry in &section.entries {
+                widest = widest
+                    .max(LEAF_INDENT + crate::shell::dialog::one_line_width(ui, &entry.title));
             }
         }
         (widest + crate::dialog_layout::TABLE_COLUMN_GAP).min(TITLE_COLUMN)
@@ -731,6 +732,10 @@ impl ReferenceState {
 /// The widest the tree's title column grows: a command of two words ("SHEETS PAGESETUP") and its
 /// gap. A group's long label is cut short at it rather than pushing every summary across.
 const TITLE_COLUMN: f32 = 220.0;
+
+/// How far a command's title stands in from its group's name: an expander's cell, so the titles
+/// start under the groups' own names a step in, as a tree's children do.
+const LEAF_INDENT: f32 = crate::drive::controls::EXPANDER_WIDTH;
 
 /// How many lines of the chosen entry show before its well scrolls.
 const DETAIL_ROWS: f32 = 6.0;

@@ -17,7 +17,7 @@ use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result};
 use katana_entity::EntityId;
 
-use crate::drive::{LineOptions, button, check, label_as, line_with};
+use crate::drive::{LineOptions, button, check, line_with};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 
@@ -85,6 +85,8 @@ struct SelectByIdState {
     add: bool,
     zoom: bool,
     status: String,
+    /// Whether the status is a refusal (shell::dialog::status_colour).
+    status_error: bool,
     select: bool,
     close: bool,
 }
@@ -97,6 +99,7 @@ impl Default for SelectByIdState {
             // Framing is the default.
             zoom: true,
             status: String::new(),
+            status_error: false,
             select: false,
             close: false,
         }
@@ -105,7 +108,7 @@ impl Default for SelectByIdState {
 
 impl SelectByIdState {
     fn body(&mut self, ui: &mut Ui) {
-        crate::shell::dialog::labelled(ui, "Ids:", |ui| {
+        crate::shell::dialog::labelled(ui, "IDs:", |ui| {
             line_with(
                 ui,
                 "selectByIdIds",
@@ -136,21 +139,19 @@ impl SelectByIdState {
                 &mut self.zoom,
             )
         });
-        ui.add_space(crate::shell::dialog::GROUP_GAP);
-        label_as(
-            ui,
-            "selectByIdStatus",
-            &self.status,
-            egui::Label::new(self.status.as_str()).wrap(),
-        );
     }
 
     fn footer(&mut self, ui: &mut Ui) {
-        // Close closes it; Select - the dialog's act, last and in the accent - keeps it open for the
-        // next id.
+        // The status at the left, the design's one home for it (it stood in the body, under the
+        // ticks); Close closes it; Select - the dialog's act, last and in the accent - keeps it
+        // open for the next id.
+        let status = self.status.clone();
+        let is_error = self.status_error;
         crate::shell::dialog::button_row(
             ui,
-            |_| {},
+            |ui| {
+                crate::shell::dialog::status(ui, "selectByIdStatus", &status, is_error);
+            },
             |ui| {
                 if button(ui, "selectByIdClose", "Close").clicked() {
                     self.close = true;
@@ -205,12 +206,14 @@ impl SelectByIdDialog {
             Ok(ids) => ids,
             Err(error) => {
                 self.state.status = error.describe();
+                self.state.status_error = true;
                 return false;
             }
         };
         let current = host.document().selection().ids();
         let line = select_by_id_line(&ids, &current, self.state.add);
         let outcome = host.run(&line);
+        self.state.status_error = !outcome.ok;
         if !outcome.ok {
             self.state.status = outcome.error;
             return false;

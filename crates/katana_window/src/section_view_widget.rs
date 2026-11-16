@@ -59,7 +59,9 @@ const ZOOM_PER_NOTCH: f64 = 1.15;
 const SELECTED_CROSSING_PIXELS: f64 = 2.0;
 const SELECTED_CROSSING_DOT: f64 = 3.5;
 
-const BACKGROUND: Color = Color::rgb(24, 26, 32);
+/// The plan's ground (the viewport token), every view's: it was (24, 26, 32), a third dark beside
+/// the plan's and the 3D view's in Quad (the third look audit's H).
+const BACKGROUND: Color = palette::viewport();
 const GRID: Color = Color::rgb(48, 52, 62);
 const GRID_MAJOR: Color = Color::rgb(74, 80, 94);
 const AXIS: Color = Color::rgb(150, 158, 175);
@@ -67,13 +69,14 @@ const TEXT: Color = Color::rgb(196, 202, 214);
 const CROSSING: Color = Color::rgb(210, 90, 90);
 
 /// A distinct colour per surface, in the order they were cut. Existing ground first, then design:
-/// the two a section almost always carries. None near the selection's orange (selection_style),
-/// which marks a selected crossing and its dot: the second was (235, 170, 80), CIE76 22.9 from it,
-/// so the usual design surface's vertex dots hid the selected crossing's. The nearest now is the
-/// yellow, 50.9.
+/// the two a section almost always carries. None near the selection's colour (selection_style),
+/// which marks a selected crossing and its dot. With the selection orange the second was (235,
+/// 170, 80), CIE76 22.9 from it, and was made the light blue (130, 175, 245); with the selection
+/// the accent's blue (#4c8dff, 2026-11-16) that blue was 28.8 from it and the orange is 118.2.
+/// The nearest now is the magenta, 50.9.
 const SURFACE_COLORS: [Color; 5] = [
     Color::rgb(120, 200, 120),
-    Color::rgb(130, 175, 245),
+    Color::rgb(235, 170, 80),
     Color::rgb(220, 120, 200),
     Color::rgb(100, 205, 205),
     Color::rgb(230, 230, 130),

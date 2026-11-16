@@ -102,4 +102,111 @@ mod menu_texts {
             "GIS's groups are all titled sections"
         );
     }
+
+    /// The icons of `menu`'s own items (not its submenus'), with their names.
+    fn item_icons(menu: &Menu) -> Vec<(String, &'static str)> {
+        menu.actions()
+            .into_iter()
+            .map(|action| (action.name.clone(), action.icon))
+            .collect()
+    }
+
+    #[test]
+    fn the_menus_whose_items_shared_one_icon_give_each_item_its_own() {
+        // The third look audit's G: GIS's eleven processing items and Terrain's Analysis and DEM
+        // items shared one icon, View > Toolbars' thirteen toolbars one window, Text Size's four
+        // one "A", and Edit Surface's scope items the crossed square or another item's icon.
+        let window = MainWindow::new();
+        for name in [
+            "gisMenu",
+            "terrainAnalysisMenu",
+            "terrainDemMenu",
+            "viewToolBars",
+            "viewTextSize",
+            "terrainEditMenu",
+        ] {
+            let icons = item_icons(&menu(&window, name));
+            assert!(icons.len() >= 2, "the premise: {name} has its items ({icons:?})");
+            let mut shared = Vec::new();
+            for (at, (item, icon)) in icons.iter().enumerate() {
+                assert!(
+                    katana_window::icons::is_named_icon(icon),
+                    "{name} > {item} has no icon of the set ({icon:?})"
+                );
+                for (other, theirs) in &icons[at + 1..] {
+                    if icon == theirs {
+                        shared.push(format!("{item} and {other}: {icon}"));
+                    }
+                }
+            }
+            assert!(shared.is_empty(), "{name}'s items sharing an icon: {shared:?}");
+        }
+    }
+
+    #[test]
+    fn a_toolbars_item_shows_its_first_buttons_icon() {
+        // Each toggle of View > Toolbars shows the icon of its bar's first button, so a bar is
+        // found by its look: File's New, Draw's Select, GIS's Import Vector Data.
+        let window = MainWindow::new();
+        let toolbars = menu(&window, "viewToolBars");
+        let icon_of = |name: &str| {
+            toolbars
+                .actions()
+                .into_iter()
+                .find(|action| action.name == name)
+                .map(|action| action.icon)
+                .unwrap_or_else(|| panic!("View > Toolbars has {name}"))
+        };
+        assert_eq!(icon_of("viewToolBarFile"), "New");
+        assert_eq!(icon_of("viewToolBarEdit"), "Undo");
+        assert_eq!(icon_of("viewToolBarProperties"), "Properties");
+        assert_eq!(icon_of("viewToolBarDraw"), "Select");
+        assert_eq!(icon_of("viewToolBarGIS"), "ImportVector");
+        // The icon sizes say their sizes.
+        assert_eq!(icon_of("viewToolBarIconsSmall"), "ToolbarIconsSmall");
+        assert_eq!(icon_of("viewToolBarIconsLarge"), "ToolbarIconsLarge");
+    }
+
+    #[test]
+    fn every_menu_section_title_is_in_sentence_case_and_names_no_library() {
+        // docs/desktop.md: a menu's section title is in sentence case, small and muted. The third
+        // look audit found "Coordinate Geometry", "Tables and Libraries", "Across the Drawing"
+        // and GIS's "Vector - GDAL", "Point Cloud - PDAL" - which library does the work is not
+        // what a person chooses a command by.
+        let window = MainWindow::new();
+        fn walk(menu: &Menu, titles: &mut Vec<String>) {
+            for item in &menu.items {
+                match item {
+                    MenuItem::Section(title) => titles.push(title.clone()),
+                    MenuItem::Menu(sub) => walk(sub, titles),
+                    MenuItem::Action(_) | MenuItem::Separator => {}
+                }
+            }
+        }
+        let mut titles = Vec::new();
+        for menu in &window.composed().menus {
+            walk(menu, &mut titles);
+        }
+        assert!(titles.len() >= 30, "the premise: the menus' sections ({titles:?})");
+        // A word after the first in title case: a capital, then a small letter.
+        let title_case = |word: &str| {
+            let mut letters = word.chars().filter(|c| c.is_alphabetic());
+            matches!(
+                (letters.next(), letters.next()),
+                (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase()
+            )
+        };
+        let wrong: Vec<&String> = titles
+            .iter()
+            .filter(|title| {
+                title.split(' ').skip(1).any(title_case)
+                    || title.contains("GDAL")
+                    || title.contains("PDAL")
+            })
+            .collect();
+        assert!(wrong.is_empty(), "section titles not in sentence case: {wrong:?}");
+        for title in ["Coordinate geometry", "Point cloud", "Vector", "Tables and libraries"] {
+            assert!(titles.iter().any(|each| each == title), "{title} in {titles:?}");
+        }
+    }
 }

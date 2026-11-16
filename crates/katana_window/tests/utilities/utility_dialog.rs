@@ -505,32 +505,36 @@ mod utility_dialog {
     }
 
     #[test]
-    fn bad_input_runs_nothing_and_says_why() {
+    fn bad_input_greys_run_and_says_why() {
+        // Run is greyed while the fields write no line, as every run dialog's primary is (the
+        // third look audit: it was lit beside "choose the utility schedule first"), so nothing
+        // can be run; the status says why.
         let executor = Executor::new();
         let mut bench = dialog_bench(executor.context(), host(false));
         bench.dialog.show_tool(UtilityTool::Draw);
         bench.draw();
-        bench.press("utilityRun");
+        assert!(!bench.enabled("utilityRun"));
         assert!(executor.lines().is_empty());
         let status = bench.text("utilityStatus");
         assert!(status.contains("utility schedule"), "{status}");
 
         bench.fill("utilitySchedule", "C:/survey/schedule.csv");
+        assert!(bench.enabled("utilityRun"));
         bench.fill("utilitySpacing", "10 m");
-        bench.press("utilityRun");
+        assert!(!bench.enabled("utilityRun"));
         assert!(executor.lines().is_empty());
         assert!(bench.text("utilityStatus").contains("not '10 m'"));
 
         bench.fill("utilitySpacing", "");
         bench.dialog.show_tool(UtilityTool::Clearance);
         bench.draw();
-        bench.press("utilityRun");
+        assert!(!bench.enabled("utilityRun"));
         assert!(executor.lines().is_empty());
         assert!(bench.text("utilityStatus").contains("design"));
 
         bench.dialog.show_tool(UtilityTool::Check);
         bench.draw();
-        bench.press("utilityRun");
+        assert!(!bench.enabled("utilityRun"));
         assert!(executor.lines().is_empty());
         assert!(bench.text("utilityStatus").contains("delivery schema"));
         // Nothing ran, so there is nothing to copy or save.
@@ -1486,7 +1490,9 @@ mod utility_workbench {
         assert_eq!(
             items,
             [
-                "[Subsurface Utilities (AS 5488)]",
+                // The section in sentence case, as every menu section is (the third look
+                // audit's G).
+                "[Subsurface utilities (AS 5488)]",
                 "utilityDraw",
                 "utilityReport",
                 "utilityVerify",

@@ -109,7 +109,7 @@ use super::document_watcher::{DocumentChanges, DocumentWatcher};
 use super::style_preview::{DefinitionAs, PreviewGround, StylePreview};
 use crate::annotation::dialog_support::show_dialog;
 use crate::command_word::exact_number;
-use crate::drive::controls::{self, Choice, LineOptions, TextOptions, custom};
+use crate::drive::controls::{self, Choice, LineOptions, NUMBER_FIELD_WIDTH, TextOptions, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -1647,7 +1647,12 @@ impl DefinitionEditorDialog {
                             }
                         });
                     });
+                    // The numbers are number-box wide, as the modes' boxes below are: a number in
+                    // a field filling the row, or half of it, read as a sentence to type (the third
+                    // look audit's C). Text fields still, which the form keeps as typed and reads
+                    // when it is saved.
                     form.row("Length", |ui| {
+                        dialog::fixed_fields(ui, NUMBER_FIELD_WIDTH);
                         ui.add_enabled_ui(live, |ui| {
                             self.line_field(
                                 ui,
@@ -1660,6 +1665,7 @@ impl DefinitionEditorDialog {
                         });
                     });
                     form.row("Factor", |ui| {
+                        dialog::fixed_fields(ui, NUMBER_FIELD_WIDTH);
                         ui.add_enabled_ui(live, |ui| {
                             self.line_field(
                                 ui,
@@ -1701,10 +1707,8 @@ impl DefinitionEditorDialog {
                         form.row(pair.label, |ui| {
                             ui.add_enabled_ui(pair.enabled, |ui| {
                                 ui.horizontal(|ui| {
-                                    // The x and the y share the field's room, half each.
-                                    let half =
-                                        (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                                    dialog::fixed_fields(ui, half);
+                                    // The x and the y side by side, each a number box wide.
+                                    dialog::fixed_fields(ui, NUMBER_FIELD_WIDTH);
                                     for (name, value) in pair.names.into_iter().zip(pair.values) {
                                         self.line_field(ui, name, pair.tip, "0", value);
                                     }
@@ -1785,10 +1789,10 @@ impl DefinitionEditorDialog {
                 });
             });
 
-            // Right: what it draws.
+            // Right: what it draws, under headings as every group of a dialog is: a bordered box
+            // round each was a second group look (the third look audit's B).
             ui.vertical(|ui| {
-                ui.group(|ui| {
-                    ui.label("As a symbol, on its insertion point");
+                dialog::section_with(ui, "As a symbol, on its insertion point", |ui| {
                     self.preview.ui(
                         ui,
                         "definitionPreview",
@@ -1797,8 +1801,7 @@ impl DefinitionEditorDialog {
                     );
                 });
                 let line_box = |ui: &mut Ui, preview: &mut StylePreview| {
-                    ui.group(|ui| {
-                        ui.label("Along a line");
+                    dialog::section_with(ui, "Along a line", |ui| {
                         preview.ui(
                             ui,
                             "definitionLinePreview",
@@ -1845,11 +1848,12 @@ impl DefinitionEditorDialog {
         // What is wrong, or what names it; then the buttons.
         let mut issues = self.issues.clone();
         let issues_error = self.issues_error;
-        // A hint or a note is a muted line, as every dialog's status is
-        // (dialog_layout::reply_text): in a read-only box 800 by 80 a one-line hint was the
-        // largest thing in the footer (the second look audit's N6). A refusal - a verb's answer of
-        // several lines - stays a box as high as its lines, five at most, in the text colour
-        // framed in the error's.
+        // A hint or a note is the footer's status, muted, beside the buttons as every dialog's
+        // is (shell::dialog::status): in a read-only box 800 by 80 a one-line hint was the
+        // largest thing in the footer (the second look audit's N6), and on a line of its own
+        // over the buttons it made a footer 68 high against the others' 49 (the third look
+        // audit's A). A refusal - a verb's answer of several lines - stays a box over the
+        // buttons as high as its lines, five at most, in the text colour framed in the error's.
         if issues_error {
             let rows = issues.lines().count().clamp(1, 5);
             let shown = controls::text_with(
@@ -1867,14 +1871,6 @@ impl DefinitionEditorDialog {
                 0.0,
                 egui::Stroke::new(1.0, palette::error().to_egui()),
                 egui::StrokeKind::Inside,
-            );
-        } else {
-            crate::dialog_layout::reply_text(
-                ui,
-                "definitionIssues",
-                &mut issues,
-                ControlKind::Text,
-                false,
             );
         }
 
@@ -1945,6 +1941,9 @@ impl DefinitionEditorDialog {
                         pressed = Some(Pressed::Delete);
                     }
                 });
+                if !issues_error {
+                    dialog::status(ui, "definitionIssues", &issues, false);
+                }
                 pressed
             },
             |ui| {

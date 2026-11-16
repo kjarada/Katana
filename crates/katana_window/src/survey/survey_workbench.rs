@@ -255,22 +255,22 @@ impl Workbench for SurveyWorkbench {
     fn menus(&self) -> Vec<Menu> {
         // Sections rather than plain separators, as the GIS menu has them: a style that draws
         // their titles says what each group is for.
-        let mut menu = Menu::new("surveyMenu", "&Survey").section("Survey Points");
+        let mut menu = Menu::new("surveyMenu", "&Survey").section("Survey points");
         for each in self.survey_points_actions() {
             menu = menu.action(each);
         }
-        menu = menu.section("Coordinate Geometry");
+        menu = menu.section("Coordinate geometry");
         for each in Self::geometry_actions() {
             menu = menu.action(each);
         }
-        menu = menu.section("Traverse and Levelling");
+        menu = menu.section("Traverse and levelling");
         for each in Self::traverse_actions() {
             menu = menu.action(each);
         }
         menu = menu
             .section("Coordinates")
             .action(Self::converter_action())
-            .section("Survey Coding");
+            .section("Survey coding");
         for each in [
             &self.services.code_manager,
             &self.services.apply_survey_codes,
