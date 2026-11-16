@@ -33,7 +33,7 @@ use super::drape_dialog::{PICK_TIP, point_words};
 use super::point_pick::PointPick;
 use super::terrain_dialog_parts::{
     Framed, command_field, field, host_views, invalid, number_of, one_column, remove_current, row,
-    run_buttons, show_framed, without_blanks,
+    run_buttons, show_framed, why_no_line, without_blanks,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
@@ -42,7 +42,7 @@ use super::terrain_dialog_support::{
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
 use crate::drive::{button, check, rows, tabs};
 use crate::host::Host;
-use crate::shell::DialogFrame;
+use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::offstage;
 
 /// The Viewshed tab's fields, as its line is written from them.
@@ -479,6 +479,9 @@ impl ViewshedDialog {
             self.source.ui(ui, "viewshedSource");
         });
         let (add, pick) = row(ui, "Observer:", |ui| {
+            // The field leaves Add and Pick their room: filling the row, it pushed them 95 past
+            // the body's edge, and every field under it followed them there.
+            dialog::fixed_fields(ui, dialog::beside_buttons(ui, &["Add", "Pick"]));
             let add = ui
                 .add_enabled_ui(!from_scope, |ui| {
                     let typed = field(ui, "viewshedObserver", &mut self.observer, "x,y");
@@ -502,7 +505,12 @@ impl ViewshedDialog {
                 .id_salt("viewshedObserversScroll")
                 .max_height(90.0)
                 .show(ui, |ui| {
-                    rows(ui, "viewshedObservers", &listed, &mut self.observers_current);
+                    rows(
+                        ui,
+                        "viewshedObservers",
+                        &listed,
+                        &mut self.observers_current,
+                    );
                 });
         });
         let removable = !from_scope && !self.observers.is_empty();
@@ -540,7 +548,12 @@ impl ViewshedDialog {
             );
         });
         row(ui, "Draw visible area on:", |ui| {
-            field(ui, "viewshedAreas", &mut self.areas, "blank: no areas drawn");
+            field(
+                ui,
+                "viewshedAreas",
+                &mut self.areas,
+                "blank: no areas drawn",
+            );
         });
         row(ui, "Name:", |ui| {
             field(ui, "viewshedName", &mut self.name, "the source's");
@@ -566,11 +579,14 @@ impl ViewshedDialog {
     /// The Viewshed page's reply and buttons, in the dialog's footer: Close only while the page is
     /// in front (`close`). Whether Close was clicked.
     fn viewshed_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
-        let ready = viewshed_line(&self.viewshed_form()).is_ok();
+        let made = viewshed_line(&self.viewshed_form());
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "viewshedReply", self.viewshed_runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("viewshedPreview", ready)),
+            ("viewshedStatus", &why),
             ("viewshedRun", "Compute", ready),
             close,
         );
@@ -590,6 +606,7 @@ impl ViewshedDialog {
             self.los_source.ui(ui, "losSource");
         });
         let pick_observer = row(ui, "Observer:", |ui| {
+            dialog::fixed_fields(ui, dialog::beside_a_button(ui, "Pick"));
             field(ui, "losObserver", &mut self.los_observer, "x,y");
             ui.add_enabled_ui(can_pick, |ui| {
                 button(ui, "losPickObserver", "Pick")
@@ -599,6 +616,7 @@ impl ViewshedDialog {
             .inner
         });
         let pick_target = row(ui, "Target:", |ui| {
+            dialog::fixed_fields(ui, dialog::beside_a_button(ui, "Pick"));
             field(ui, "losTarget", &mut self.los_target, "x,y");
             ui.add_enabled_ui(can_pick, |ui| {
                 button(ui, "losPickTarget", "Pick")
@@ -634,9 +652,17 @@ impl ViewshedDialog {
     /// The Line of Sight page's reply and Check, in the dialog's footer: Close only while the page
     /// is in front (`close`). Whether Close was clicked.
     fn los_footer(&mut self, ui: &mut Ui, host: &mut dyn Host, close: Option<&str>) -> bool {
-        let ready = los_line(&self.los_form()).is_ok();
+        let made = los_line(&self.los_form());
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "losReply", self.los_runner.reply_mut());
-        let pressed = run_buttons(ui, None, ("losRun", "Check", ready), close);
+        let pressed = run_buttons(
+            ui,
+            None,
+            ("losStatus", &why),
+            ("losRun", "Check", ready),
+            close,
+        );
         if pressed.run {
             self.run_los(host);
         }
@@ -676,7 +702,9 @@ impl Framed for ViewshedDialog {
         // The page not in front keeps its buttons and reply, off the dialog, as its fields are.
         let closed = if self.tab == 0 {
             let closed = self.viewshed_footer(ui, host, Some("viewshedClose"));
-            offstage(ui, "viewshedLosFooter", |ui| self.los_footer(ui, host, None));
+            offstage(ui, "viewshedLosFooter", |ui| {
+                self.los_footer(ui, host, None)
+            });
             closed
         } else {
             offstage(ui, "viewshedViewshedFooter", |ui| {

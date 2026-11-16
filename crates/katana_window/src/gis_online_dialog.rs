@@ -72,8 +72,7 @@ use crate::drive::controls::custom;
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::drive::{
-    Choice, LineOptions, SpinRange, button, check, choice, label, label_as, line_with, spin,
-    whole,
+    Choice, LineOptions, SpinRange, button, check, choice, label, label_as, line_with, spin, whole,
 };
 use crate::shell::DialogFrame;
 use crate::survey::survey_dialogs::hidden;
@@ -1097,11 +1096,9 @@ impl OnlineDataDialog {
                 let indent = ui.spacing().indent * depth as f32;
                 if item.is_layer() {
                     rows.push(format!("{} | {}", item.text, item.kind));
-                    let chosen = current
-                        .as_ref()
-                        .is_some_and(|(provider, layer)| {
-                            *provider == item.provider && *layer == item.layer
-                        });
+                    let chosen = current.as_ref().is_some_and(|(provider, layer)| {
+                        *provider == item.provider && *layer == item.layer
+                    });
                     let shown = format!("{}   {}", item.text, item.kind);
                     let picked = ui
                         .horizontal(|ui| {
@@ -1293,16 +1290,17 @@ impl OnlineDataDialog {
         });
         // The project's coordinate system, and the way to set it: an import needs one, and the
         // dialog suggests the zone of the box being fetched.
-        let set_crs = ui
-            .horizontal(|ui| {
-                ui.label("Project CRS:");
+        // Rows of the form, their labels in its column without a colon: a bare "Project CRS:"
+        // and "Key:" stood at the column's left edge with their fields off the fields' edge.
+        let set_crs = crate::shell::dialog::labelled(ui, "Project CRS", |ui| {
+            crate::shell::dialog::text_value(ui, |ui| {
                 label(ui, "onlineProjectCrs", &self.project_crs);
-                ui.add_enabled_ui(context.can_choose_project_crs(), |ui| {
-                    button(ui, "onlineSetProjectCrs", "Set Project CRS...").clicked()
-                })
-                .inner
+            });
+            ui.add_enabled_ui(context.can_choose_project_crs(), |ui| {
+                button(ui, "onlineSetProjectCrs", "Set Project CRS...").clicked()
             })
-            .inner;
+            .inner
+        });
         crate::shell::dialog::labelled(ui, "Use CRS:", |ui| {
             line_with(
                 ui,
@@ -1314,25 +1312,24 @@ impl OnlineDataDialog {
                 },
             );
         });
-        let save = ui
-            .horizontal(|ui| {
-                ui.label("Key:");
-                ui.add_enabled_ui(applies.key, |ui| {
-                    line_with(
-                        ui,
-                        "onlineKey",
-                        &mut self.key,
-                        LineOptions {
-                            placeholder: "kept in Katana's settings, never in the project",
-                            password: true,
-                            ..LineOptions::default()
-                        },
-                    );
-                    button(ui, "onlineSaveKey", "Save Key").clicked()
-                })
-                .inner
+        let save = crate::shell::dialog::labelled(ui, "Key", |ui| {
+            let width = crate::shell::dialog::beside_a_button(ui, "Save Key");
+            ui.add_enabled_ui(applies.key, |ui| {
+                line_with(
+                    ui,
+                    "onlineKey",
+                    &mut self.key,
+                    LineOptions {
+                        placeholder: "kept in Katana's settings, never in the project",
+                        password: true,
+                        width: Some(width),
+                        ..LineOptions::default()
+                    },
+                );
+                button(ui, "onlineSaveKey", "Save Key").clicked()
             })
-            .inner;
+            .inner
+        });
 
         // Advanced: a deadline. A person can always cancel from the status bar; this is for an
         // import left to run, and for a script's.
@@ -1498,9 +1495,7 @@ pub fn limits_text(layer: &OnlineLayer) -> String {
             layer.days,
             number(layer.max_cloud)
         ),
-        OnlineServiceType::Cog | OnlineServiceType::File | OnlineServiceType::Ckan => {
-            String::new()
-        }
+        OnlineServiceType::Cog | OnlineServiceType::File | OnlineServiceType::Ckan => String::new(),
     }
 }
 

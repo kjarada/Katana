@@ -38,6 +38,7 @@ use katana_cad::{CrsChoice, Document, DocumentChange, ListenerHandle};
 use katana_core::text::parse_finite_double;
 use katana_gis::reproject::transform_point;
 
+use crate::command_reference_dialog::{cell_text, whole_row};
 use crate::drive::controls::{self, LineOptions};
 use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
@@ -542,7 +543,11 @@ impl ProjectCrsDialog {
             }
         });
         self.list_ui(ui, host);
-        ui.label("Or type an EPSG code, WKT or a PROJ string (blank for local coordinates):");
+        // A note over its field, muted and without a colon as the form's labels are.
+        crate::shell::dialog::note(
+            ui,
+            "Or type an EPSG code, WKT or a PROJ string (blank for local coordinates)",
+        );
         if controls::line_with(
             ui,
             "projectCrsText",
@@ -596,31 +601,46 @@ impl ProjectCrsDialog {
             .max_height(260.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
+                // Whole rows, a group's with the window's tree expander: the groups were "-" and
+                // "+" typed before their titles, and a chosen row a pill the size of its text.
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let height = ui.spacing().interact_size.y;
+                let indent = controls::EXPANDER_WIDTH + ui.spacing().item_spacing.x;
+                let mut striped = false;
                 for (at, group) in groups.iter().enumerate() {
-                    // Plain marks, which every font the window may carry draws.
-                    let arrow = if group.expanded { "-" } else { "+" };
-                    if ui
-                        .selectable_label(
-                            current_item == Some((at, None)),
-                            format!("{arrow} {}", group.title),
-                        )
-                        .clicked()
-                    {
+                    let (rect, row) =
+                        whole_row(ui, height, current_item == Some((at, None)), striped);
+                    striped = !striped;
+                    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    let expander = controls::tree_expander(&mut cell, Some(group.expanded));
+                    cell_text(
+                        ui,
+                        rect,
+                        rect.left() + indent,
+                        rect.right(),
+                        RichText::new(group.title.as_str()).strong(),
+                    );
+                    if row.clicked() || expander.clicked() {
                         toggled = Some(at);
                     }
                     if !group.expanded {
                         continue;
                     }
                     for (choice, entry) in group.choices.iter().enumerate() {
-                        let row = ui
-                            .horizontal(|ui| {
-                                ui.add_space(18.0);
-                                ui.selectable_label(
-                                    current_item == Some((at, Some(choice))),
-                                    format!("{}   {}", entry.name, entry.id),
-                                )
-                            })
-                            .inner;
+                        let (rect, row) = whole_row(
+                            ui,
+                            height,
+                            current_item == Some((at, Some(choice))),
+                            striped,
+                        );
+                        striped = !striped;
+                        cell_text(
+                            ui,
+                            rect,
+                            rect.left() + indent,
+                            rect.right(),
+                            RichText::new(format!("{}   {}", entry.name, entry.id)),
+                        );
                         if row.clicked() {
                             clicked = Some((at, Some(choice)));
                         }

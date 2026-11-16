@@ -162,8 +162,14 @@ struct DataChoice {
 impl DataChoice {
     fn new(entries: &[(&str, &str)]) -> Self {
         Self {
-            items: entries.iter().map(|(shown, _)| String::from(*shown)).collect(),
-            data: entries.iter().map(|(_, data)| String::from(*data)).collect(),
+            items: entries
+                .iter()
+                .map(|(shown, _)| String::from(*shown))
+                .collect(),
+            data: entries
+                .iter()
+                .map(|(_, data)| String::from(*data))
+                .collect(),
             chosen: Choice::at(0),
         }
     }
@@ -372,10 +378,7 @@ impl VectorImportDialog {
             crs: DataChoice::new(&[
                 ("As the file has them", ""),
                 ("Into the project's coordinate system", "project"),
-                (
-                    "Set the project's from the file, if it has none",
-                    "adopt",
-                ),
+                ("Set the project's from the file, if it has none", "adopt"),
             ]),
             assume_crs: String::new(),
             placement,
@@ -582,9 +585,8 @@ impl VectorImportDialog {
                 continue;
             }
             if record.get("ran") == Some("no") {
-                self.match_count = String::from(
-                    "The scope takes nothing of the drawing: nothing would be read.",
-                );
+                self.match_count =
+                    String::from("The scope takes nothing of the drawing: nothing would be read.");
                 return;
             }
             let text = |key: &str| record.get(key).unwrap_or("?");
@@ -627,12 +629,8 @@ impl VectorImportDialog {
                     // Preview and what it counted at the left: they read the file and import
                     // nothing.
                     let said = lent.0.match_count.clone();
-                    let (previewed, buttons) = ok_cancel_beside(
-                        ui,
-                        "vectorImportDialog",
-                        "Import",
-                        ready,
-                        |ui| {
+                    let (previewed, buttons) =
+                        ok_cancel_beside(ui, "vectorImportDialog", "Import", ready, |ui| {
                             let previewed = ui
                                 .add_enabled_ui(ready, |ui| {
                                     button(ui, "vectorImportPreview", "Preview")
@@ -656,8 +654,7 @@ impl VectorImportDialog {
                                 .wrap(),
                             );
                             previewed
-                        },
-                    );
+                        });
                     if previewed {
                         *lent.3 = true;
                     }
@@ -877,10 +874,7 @@ impl RasterImportDialog {
             has_subdatasets: !source.subdatasets.is_empty(),
             crs: DataChoice::new(&[
                 ("Keep the project's coordinate system", ""),
-                (
-                    "Set the project's from the raster, if it has none",
-                    "adopt",
-                ),
+                ("Set the project's from the raster, if it has none", "adopt"),
             ]),
             result: None,
         }
@@ -1145,12 +1139,13 @@ impl PointCloudImportDialog {
         });
         self.classification
             .ui(ui, "pointCloudImportClasses", "Classification:", "");
-        ui.horizontal(|ui| {
-            ui.label(if self.copc {
-                "Level of detail:"
-            } else {
-                "Level of detail (COPC only):"
-            });
+        // A row of the form: its label in the column, without a colon.
+        let detail = if self.copc {
+            "Level of detail"
+        } else {
+            "Level of detail (COPC only)"
+        };
+        crate::shell::dialog::labelled(ui, detail, |ui| {
             ui.add_enabled_ui(self.copc, |ui| {
                 check(
                     ui,

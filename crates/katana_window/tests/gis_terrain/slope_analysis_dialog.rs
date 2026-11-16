@@ -141,9 +141,13 @@ mod slope_analysis_dialog {
     }
 
     #[test]
-    fn with_nothing_to_analyse_run_is_off_and_the_command_says_why() {
+    fn with_nothing_to_analyse_run_is_off_and_the_status_says_why() {
         let bench = bench(ran_host());
         assert!(!bench.enabled("slopeRun"));
-        assert!(bench.placeholder("slopeCommand").contains("Source"));
+        // Why there is no line is the footer's status; the Command field holds the line only,
+        // and shows no sentence in its place.
+        assert!(bench.text("slopeStatus").contains("Source"));
+        assert!(bench.text("slopeCommand").is_empty());
+        assert!(bench.placeholder("slopeCommand").is_empty());
     }
 }

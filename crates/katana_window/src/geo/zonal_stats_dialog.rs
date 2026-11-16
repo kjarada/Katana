@@ -22,7 +22,7 @@ use katana_core::Result;
 
 use super::terrain_dialog_parts::{
     Framed, WordChoice, check_list, command_field, field, host_views, invalid, row, run_buttons,
-    show_framed,
+    show_framed, why_no_line,
 };
 use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, terrain_reply_field,
@@ -125,9 +125,7 @@ pub fn zonal_line(form: &ZonalForm) -> Result<String> {
     let csv = form.csv.trim();
     if !csv.is_empty() {
         let Some(word) = line_word(&format!("csv={csv}")) else {
-            return Err(invalid(
-                "CSV file: a file name cannot hold a double quote",
-            ));
+            return Err(invalid("CSV file: a file name cannot hold a double quote"));
         };
         line.push_str(&format!(" {word}"));
         if form.overwrite {
@@ -333,11 +331,14 @@ impl Framed for ZonalStatsDialog {
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let _ = self.runner.poll();
-        let ready = self.command().is_ok();
+        let made = self.command();
+        let ready = made.is_ok();
+        let why = why_no_line(&made);
         terrain_reply_field(ui, "zonalReply", self.runner.reply_mut());
         let pressed = run_buttons(
             ui,
             Some(("zonalPreview", ready)),
+            ("zonalStatus", &why),
             ("zonalRun", "Measure", ready),
             Some("zonalClose"),
         );

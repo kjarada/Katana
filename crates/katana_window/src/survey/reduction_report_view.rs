@@ -308,6 +308,8 @@ pub struct ReductionReportView {
     current: Option<usize>,
     scroll_to: Option<usize>,
     above: bool,
+    /// Whether it shows a sentence rather than a report (`show_note`).
+    note: bool,
 }
 
 impl ReductionReportView {
@@ -322,6 +324,7 @@ impl ReductionReportView {
             current: None,
             scroll_to: None,
             above: false,
+            note: false,
         };
         view.show_note("No report yet.");
         view
@@ -333,6 +336,7 @@ impl ReductionReportView {
 
     /// Shows a report rendered by survey's render_html.
     pub fn set_report_html(&mut self, html: &str) {
+        self.note = false;
         self.sections.clear();
         let screen = screen_html(html, Some(&mut self.sections));
         self.lines = view_lines(&screen);
@@ -356,6 +360,7 @@ impl ReductionReportView {
 
     /// Shows a sentence instead of a report ("No preview yet").
     pub fn show_note(&mut self, note: &str) {
+        self.note = true;
         self.sections.clear();
         self.current = None;
         self.scroll_to = None;
@@ -415,7 +420,18 @@ impl ReductionReportView {
                 &self.summary,
                 summary_colour,
             );
-            if self.above {
+            if self.note {
+                // A sentence in place of a report is said where the report would start, muted, in
+                // the body's text: in the report's fixed pitch, beside an empty list of sections,
+                // "No job chosen." floated in the middle of a void. The empty list is still there
+                // for a driver, off the dialog.
+                crate::survey::survey_dialogs::offstage(
+                    ui,
+                    &format!("{}NoteSections", self.name),
+                    |ui| self.sections_ui(ui, 96.0),
+                );
+                self.note_ui(ui);
+            } else if self.above {
                 self.sections_ui(ui, 96.0);
                 self.browser_ui(ui);
             } else {
@@ -461,6 +477,17 @@ impl ReductionReportView {
         if changed && let Some(row) = current {
             self.show_section(row);
         }
+    }
+
+    /// The note `show_note` gave, muted at the top left, recorded as the browser's text.
+    fn note_ui(&mut self, ui: &mut Ui) {
+        let text = self.plain_text();
+        let response = ui.add(
+            Label::new(RichText::new(text.as_str()).color(palette::text_muted().to_egui())).wrap(),
+        );
+        let mut record = ControlRecord::new(&format!("{}Browser", self.name), ControlKind::Text);
+        record.value = text;
+        drive::custom(ui, &response, record);
     }
 
     fn browser_ui(&mut self, ui: &mut Ui) {

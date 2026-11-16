@@ -124,8 +124,10 @@ mod gdal_toolbox {
         bench.fill("gdalInput.input.File", "C:/data/dem.tif");
         bench.fill("gdalArg.interval", "0");
         assert!(bench.text("gdalToolboxCommand").is_empty());
-        let why = bench.placeholder("gdalToolboxCommand");
+        // Why is the footer's status, not a sentence in the Command field.
+        let why = bench.text("gdalToolboxStatus");
         assert!(why.contains("interval must be above 0"), "{why}");
+        assert!(bench.placeholder("gdalToolboxCommand").is_empty());
         // Run is off, so nothing can be run: the harness refuses a press of it, where Qt's click
         // did nothing.
         assert!(!bench.enabled("gdalToolboxRun"));
@@ -150,7 +152,7 @@ mod gdal_toolbox {
         bench.fill("gdalArg.filename", "C:/tmp/old.tif");
         // Until it is ticked there is no line to run.
         assert!(bench.text("gdalToolboxCommand").is_empty());
-        assert!(bench.placeholder("gdalToolboxCommand").contains("Confirm"));
+        assert!(bench.text("gdalToolboxStatus").contains("Confirm"));
         bench.tick("gdalToolboxConfirm", true);
         assert_eq!(
             bench.text("gdalToolboxCommand"),
@@ -179,14 +181,16 @@ mod gdal_toolbox {
             .arguments()
             .number_range("distance")
             .expect("distance is a number box");
-        assert!(bench.dialog.arguments().set_value(
-            "distance",
-            &katana_core::text::format_exact_real(minimum)
-        ));
+        assert!(
+            bench
+                .dialog
+                .arguments()
+                .set_value("distance", &katana_core::text::format_exact_real(minimum))
+        );
         bench.draw();
         assert!(
             bench
-                .placeholder("gdalToolboxCommand")
+                .text("gdalToolboxStatus")
                 .contains("distance is required")
         );
     }
