@@ -33,23 +33,18 @@
 //! under the HKCU subkey `base`, so that a test writes and deletes keys of its own and never the
 //! machine's RunOnce or Uninstall entries. Nothing in the production programs calls it; the helper
 //! built for the tests (--registry-base) does.
-
-#![allow(
-    unsafe_code,
-    reason = "The registry is reached through its Win32 calls, which are foreign functions."
-)]
+//!
+//! The calls themselves are win32::registry's safe wrappers (docs/rust.md, "Unsafe confined to
+//! FFI modules").
 
 use crate::registry::RegistryOps;
+use crate::win32::WideName;
+use crate::win32::registry::{create_key, delete_value, get_default_value, open_key};
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result, Status};
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
-use std::ptr::{null, null_mut};
-use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegFlushKey,
-    RegGetValueW, RegOpenKeyExW, RegSetValueExW,
-};
 
 // The values of the Windows SDK's headers (winerror.h, winnt.h, winreg.h).
 const ERROR_SUCCESS: u32 = 0;
@@ -59,7 +54,6 @@ const ERROR_MORE_DATA: u32 = 234;
 const ERROR_UNSUPPORTED_TYPE: u32 = 1630;
 const KEY_QUERY_VALUE: u32 = 0x0001;
 const KEY_SET_VALUE: u32 = 0x0002;
-const REG_SZ: u32 = 1;
 const RRF_RT_REG_SZ: u32 = 0x0000_0002;
 const MAX_PATH: usize = 260;
 
@@ -77,10 +71,8 @@ fn is_missing(status: u32) -> bool {
     status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND
 }
 
-fn terminated(text: &[u16]) -> Vec<u16> {
-    let mut out = text.to_vec();
-    out.push(0);
-    out
+fn terminated(text: &[u16]) -> WideName {
+    WideName::from_units(text.to_vec())
 }
 
 // A key path for a message: the registry's names are UTF-16, a message is UTF-8.
@@ -90,21 +82,10 @@ fn narrow(text: &[u16]) -> String {
 
 // The bytes of a REG_SZ: the text and its terminator, as UTF-16 in the machine's order.
 fn reg_sz_bytes(text: &[u16]) -> Vec<u8> {
-    terminated(text)
-        .iter()
+    text.iter()
+        .chain([&0])
         .flat_map(|unit| unit.to_ne_bytes())
         .collect()
-}
-
-struct Key(HKEY);
-
-impl Drop for Key {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            // SAFETY: the key is one this Key opened, closed once.
-            unsafe { RegCloseKey(self.0) };
-        }
-    }
 }
 
 struct WindowsRegistry {
@@ -132,24 +113,11 @@ impl RegistryOps for WindowsRegistry {
         let subkey = terminated(&path);
         let mut value = vec![0u16; MAX_PATH];
         for _ in 0..8 {
-            let mut bytes = (value.len() * 2) as u32;
             // The default value (no name), a string; environment variables in an expandable one
             // are expanded, as an installer may have written %LOCALAPPDATA%. RRF_RT_REG_SZ alone
             // asks for exactly that: without RRF_NOEXPAND an expandable string is expanded and
             // handed back AS a REG_SZ, so it passes the restriction.
-            // SAFETY: `subkey` is NUL-terminated; `value` holds `bytes` bytes, which the call
-            // writes at most; the type pointer may be null.
-            let status = unsafe {
-                RegGetValueW(
-                    HKEY_CURRENT_USER,
-                    subkey.as_ptr(),
-                    null(),
-                    RRF_RT_REG_SZ,
-                    null_mut(),
-                    value.as_mut_ptr().cast(),
-                    &mut bytes,
-                )
-            };
+            let (status, bytes) = get_default_value(&subkey, RRF_RT_REG_SZ, &mut value);
             if status == ERROR_SUCCESS {
                 // The text ends at the first NUL of the BUFFER, which was all NULs before the
                 // call - not at the size reported. For an expandable string that size is the
@@ -210,45 +178,21 @@ impl RegistryOps for WindowsRegistry {
         }
         let path = self.under(RUN_ONCE_KEY);
         let subkey = terminated(&path);
-        let mut key = Key(null_mut());
         // KEY_QUERY_VALUE is what RegFlushKey asks of the handle; nothing is read through it.
-        // SAFETY: `subkey` is NUL-terminated; no class, no security attributes, no disposition;
-        // the key handle is written to a Key, which closes it.
-        let status = unsafe {
-            RegCreateKeyExW(
-                HKEY_CURRENT_USER,
-                subkey.as_ptr(),
-                0,
-                null(),
-                0,
-                KEY_SET_VALUE | KEY_QUERY_VALUE,
-                null(),
-                &mut key.0,
-                null_mut(),
-            )
+        let key = match create_key(&subkey, KEY_SET_VALUE | KEY_QUERY_VALUE) {
+            Ok(key) => key,
+            Err(status) => {
+                return Err(registry_error(
+                    ErrorCode::InvalidState,
+                    "the RunOnce key cannot be opened",
+                    status,
+                    &format!("HKCU\\{}", narrow(&path)),
+                ));
+            }
         };
-        if status != ERROR_SUCCESS {
-            return Err(registry_error(
-                ErrorCode::InvalidState,
-                "the RunOnce key cannot be opened",
-                status,
-                &format!("HKCU\\{}", narrow(&path)),
-            ));
-        }
         let value_name = terminated(&wide_name);
         let data = reg_sz_bytes(&wide_command);
-        // SAFETY: the key is open for setting values; the name is NUL-terminated and `data` holds
-        // the bytes the call is told.
-        let status = unsafe {
-            RegSetValueExW(
-                key.0,
-                value_name.as_ptr(),
-                0,
-                REG_SZ,
-                data.as_ptr(),
-                data.len() as u32,
-            )
-        };
+        let status = key.set_string(&value_name, &data);
         if status != ERROR_SUCCESS {
             return Err(registry_error(
                 ErrorCode::InvalidState,
@@ -259,8 +203,7 @@ impl RegistryOps for WindowsRegistry {
         }
         // To the disk now (see the top). Best effort: the value is written either way, and an
         // entry that is only late is still better than none.
-        // SAFETY: the key is open with KEY_QUERY_VALUE.
-        unsafe { RegFlushKey(key.0) };
+        key.flush();
         Ok(())
     }
 
@@ -275,9 +218,7 @@ impl RegistryOps for WindowsRegistry {
         let path = self.under(RUN_ONCE_KEY);
         let subkey = terminated(&path);
         let value_name = terminated(&wide_name);
-        // SAFETY: both strings are NUL-terminated.
-        let status =
-            unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey.as_ptr(), value_name.as_ptr()) };
+        let status = delete_value(&subkey, &value_name);
         if status == ERROR_SUCCESS || is_missing(status) {
             return Ok(()); // already gone is gone
         }
@@ -294,45 +235,22 @@ impl RegistryOps for WindowsRegistry {
         let name: Vec<u16> = display_name.encode_utf16().collect();
         let path = self.under(UNINSTALL_KEY);
         let subkey = terminated(&path);
-        let mut key = Key(null_mut());
         // Opened, never created: only the installer makes this key, and an archive install has
         // none (Settings > Apps lists what an installer registered, nothing else).
-        // SAFETY: `subkey` is NUL-terminated; the key handle is written to a Key, which closes it.
-        let status = unsafe {
-            RegOpenKeyExW(
-                HKEY_CURRENT_USER,
-                subkey.as_ptr(),
-                0,
-                KEY_SET_VALUE,
-                &mut key.0,
-            )
-        };
-        if is_missing(status) {
-            return Ok(());
-        }
-        if status != ERROR_SUCCESS {
-            return Err(registry_error(
-                ErrorCode::InvalidState,
-                "the Uninstall key cannot be opened",
-                status,
-                &format!("HKCU\\{}", narrow(&path)),
-            ));
-        }
-        let write = |value_name: &str, text: &[u16]| -> u32 {
-            let value_name = terminated(&value_name.encode_utf16().collect::<Vec<u16>>());
-            let data = reg_sz_bytes(text);
-            // SAFETY: the key is open for setting values; the name is NUL-terminated and `data`
-            // holds the bytes the call is told.
-            unsafe {
-                RegSetValueExW(
-                    key.0,
-                    value_name.as_ptr(),
-                    0,
-                    REG_SZ,
-                    data.as_ptr(),
-                    data.len() as u32,
-                )
+        let key = match open_key(&subkey, KEY_SET_VALUE) {
+            Ok(key) => key,
+            Err(status) if is_missing(status) => return Ok(()),
+            Err(status) => {
+                return Err(registry_error(
+                    ErrorCode::InvalidState,
+                    "the Uninstall key cannot be opened",
+                    status,
+                    &format!("HKCU\\{}", narrow(&path)),
+                ));
             }
+        };
+        let write = |value_name: &str, text: &[u16]| -> u32 {
+            key.set_string(&WideName::from_text(value_name), &reg_sz_bytes(text))
         };
         let mut status = write("DisplayVersion", &version);
         if status == ERROR_SUCCESS {

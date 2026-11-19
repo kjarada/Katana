@@ -5,8 +5,9 @@
 //!
 //! No binding crate: as for the GDAL spike (docs/rust.md), the declarations
 //! are of exactly what the C++ uses, so nothing is generated and nothing else
-//! of PROJ is reachable. Only `proj_internal` calls these; it states why each
-//! call is sound.
+//! of PROJ is reachable. Only `proj_internal`, the parent of this module and
+//! the crate's one unsafe module, calls these; it states why each call is
+//! sound. The rest of the crate reads only the constants and type aliases.
 //!
 //! The C enumerations are `int`-sized, so each is an `c_int` alias with its
 //! values as constants: a value PROJ returns that Rust does not list must not
@@ -213,34 +214,34 @@ pub(crate) const PROJ_SPATIAL_CRITERION_PARTIAL_INTERSECTION: ProjSpatialCriteri
 #[allow(clippy::too_many_arguments, reason = "The signatures are PROJ's.")]
 unsafe extern "C" {
     // ---- contexts ------------------------------------------------------------
-    pub(crate) fn proj_context_create() -> *mut PjContext;
-    pub(crate) fn proj_context_destroy(ctx: *mut PjContext) -> *mut PjContext;
-    pub(crate) fn proj_context_set_search_paths(
+    pub(super) fn proj_context_create() -> *mut PjContext;
+    pub(super) fn proj_context_destroy(ctx: *mut PjContext) -> *mut PjContext;
+    pub(super) fn proj_context_set_search_paths(
         ctx: *mut PjContext,
         count_paths: c_int,
         paths: *const *const c_char,
     );
-    pub(crate) fn proj_context_set_enable_network(ctx: *mut PjContext, enabled: c_int) -> c_int;
-    pub(crate) fn proj_context_get_database_path(ctx: *mut PjContext) -> *const c_char;
-    pub(crate) fn proj_log_level(ctx: *mut PjContext, log_level: PjLogLevel) -> PjLogLevel;
-    pub(crate) fn proj_log_func(ctx: *mut PjContext, app_data: *mut c_void, logf: PjLogFunction);
-    pub(crate) fn proj_context_errno(ctx: *mut PjContext) -> c_int;
-    pub(crate) fn proj_context_errno_string(ctx: *mut PjContext, err: c_int) -> *const c_char;
-    pub(crate) fn proj_info() -> PjInfo;
+    pub(super) fn proj_context_set_enable_network(ctx: *mut PjContext, enabled: c_int) -> c_int;
+    pub(super) fn proj_context_get_database_path(ctx: *mut PjContext) -> *const c_char;
+    pub(super) fn proj_log_level(ctx: *mut PjContext, log_level: PjLogLevel) -> PjLogLevel;
+    pub(super) fn proj_log_func(ctx: *mut PjContext, app_data: *mut c_void, logf: PjLogFunction);
+    pub(super) fn proj_context_errno(ctx: *mut PjContext) -> c_int;
+    pub(super) fn proj_context_errno_string(ctx: *mut PjContext, err: c_int) -> *const c_char;
+    pub(super) fn proj_info() -> PjInfo;
 
     // ---- objects and transformation -------------------------------------------
-    pub(crate) fn proj_create(ctx: *mut PjContext, definition: *const c_char) -> *mut Pj;
-    pub(crate) fn proj_create_crs_to_crs_from_pj(
+    pub(super) fn proj_create(ctx: *mut PjContext, definition: *const c_char) -> *mut Pj;
+    pub(super) fn proj_create_crs_to_crs_from_pj(
         ctx: *mut PjContext,
         source_crs: *const Pj,
         target_crs: *const Pj,
         area: *mut PjArea,
         options: *const *const c_char,
     ) -> *mut Pj;
-    pub(crate) fn proj_normalize_for_visualization(ctx: *mut PjContext, obj: *const Pj) -> *mut Pj;
-    pub(crate) fn proj_destroy(p: *mut Pj) -> *mut Pj;
-    pub(crate) fn proj_trans(p: *mut Pj, direction: PjDirection, coord: PjCoord) -> PjCoord;
-    pub(crate) fn proj_trans_generic(
+    pub(super) fn proj_normalize_for_visualization(ctx: *mut PjContext, obj: *const Pj) -> *mut Pj;
+    pub(super) fn proj_destroy(p: *mut Pj) -> *mut Pj;
+    pub(super) fn proj_trans(p: *mut Pj, direction: PjDirection, coord: PjCoord) -> PjCoord;
+    pub(super) fn proj_trans_generic(
         p: *mut Pj,
         direction: PjDirection,
         x: *mut f64,
@@ -256,24 +257,24 @@ unsafe extern "C" {
         st: usize,
         nt: usize,
     ) -> usize;
-    pub(crate) fn proj_coord(x: f64, y: f64, z: f64, t: f64) -> PjCoord;
-    pub(crate) fn proj_errno(p: *const Pj) -> c_int;
-    pub(crate) fn proj_errno_reset(p: *const Pj) -> c_int;
-    pub(crate) fn proj_factors(p: *mut Pj, lp: PjCoord) -> PjFactors;
+    pub(super) fn proj_coord(x: f64, y: f64, z: f64, t: f64) -> PjCoord;
+    pub(super) fn proj_errno(p: *const Pj) -> c_int;
+    pub(super) fn proj_errno_reset(p: *const Pj) -> c_int;
+    pub(super) fn proj_factors(p: *mut Pj, lp: PjCoord) -> PjFactors;
 
     // ---- ISO 19111 ------------------------------------------------------------
-    pub(crate) fn proj_get_type(obj: *const Pj) -> PjType;
-    pub(crate) fn proj_is_equivalent_to_with_ctx(
+    pub(super) fn proj_get_type(obj: *const Pj) -> PjType;
+    pub(super) fn proj_is_equivalent_to_with_ctx(
         ctx: *mut PjContext,
         obj: *const Pj,
         other: *const Pj,
         criterion: PjComparisonCriterion,
     ) -> c_int;
-    pub(crate) fn proj_is_crs(obj: *const Pj) -> c_int;
-    pub(crate) fn proj_get_name(obj: *const Pj) -> *const c_char;
-    pub(crate) fn proj_get_id_auth_name(obj: *const Pj, index: c_int) -> *const c_char;
-    pub(crate) fn proj_get_id_code(obj: *const Pj, index: c_int) -> *const c_char;
-    pub(crate) fn proj_get_area_of_use(
+    pub(super) fn proj_is_crs(obj: *const Pj) -> c_int;
+    pub(super) fn proj_get_name(obj: *const Pj) -> *const c_char;
+    pub(super) fn proj_get_id_auth_name(obj: *const Pj, index: c_int) -> *const c_char;
+    pub(super) fn proj_get_id_code(obj: *const Pj, index: c_int) -> *const c_char;
+    pub(super) fn proj_get_area_of_use(
         ctx: *mut PjContext,
         obj: *const Pj,
         out_west_lon_degree: *mut f64,
@@ -282,31 +283,31 @@ unsafe extern "C" {
         out_north_lat_degree: *mut f64,
         out_area_name: *mut *const c_char,
     ) -> c_int;
-    pub(crate) fn proj_as_wkt(
+    pub(super) fn proj_as_wkt(
         ctx: *mut PjContext,
         obj: *const Pj,
         wkt_type: PjWktType,
         options: *const *const c_char,
     ) -> *const c_char;
-    pub(crate) fn proj_as_proj_string(
+    pub(super) fn proj_as_proj_string(
         ctx: *mut PjContext,
         obj: *const Pj,
         string_type: PjProjStringType,
         options: *const *const c_char,
     ) -> *const c_char;
-    pub(crate) fn proj_get_source_crs(ctx: *mut PjContext, obj: *const Pj) -> *mut Pj;
+    pub(super) fn proj_get_source_crs(ctx: *mut PjContext, obj: *const Pj) -> *mut Pj;
 
-    pub(crate) fn proj_create_operation_factory_context(
+    pub(super) fn proj_create_operation_factory_context(
         ctx: *mut PjContext,
         authority: *const c_char,
     ) -> *mut PjOperationFactoryContext;
-    pub(crate) fn proj_operation_factory_context_destroy(ctx: *mut PjOperationFactoryContext);
-    pub(crate) fn proj_operation_factory_context_set_desired_accuracy(
+    pub(super) fn proj_operation_factory_context_destroy(ctx: *mut PjOperationFactoryContext);
+    pub(super) fn proj_operation_factory_context_set_desired_accuracy(
         ctx: *mut PjContext,
         factory_ctx: *mut PjOperationFactoryContext,
         accuracy: f64,
     );
-    pub(crate) fn proj_operation_factory_context_set_area_of_interest(
+    pub(super) fn proj_operation_factory_context_set_area_of_interest(
         ctx: *mut PjContext,
         factory_ctx: *mut PjOperationFactoryContext,
         west_lon_degree: f64,
@@ -314,44 +315,44 @@ unsafe extern "C" {
         east_lon_degree: f64,
         north_lat_degree: f64,
     );
-    pub(crate) fn proj_operation_factory_context_set_spatial_criterion(
+    pub(super) fn proj_operation_factory_context_set_spatial_criterion(
         ctx: *mut PjContext,
         factory_ctx: *mut PjOperationFactoryContext,
         criterion: ProjSpatialCriterion,
     );
-    pub(crate) fn proj_operation_factory_context_set_grid_availability_use(
+    pub(super) fn proj_operation_factory_context_set_grid_availability_use(
         ctx: *mut PjContext,
         factory_ctx: *mut PjOperationFactoryContext,
         grid_use: ProjGridAvailabilityUse,
     );
-    pub(crate) fn proj_operation_factory_context_set_allow_ballpark_transformations(
+    pub(super) fn proj_operation_factory_context_set_allow_ballpark_transformations(
         ctx: *mut PjContext,
         factory_ctx: *mut PjOperationFactoryContext,
         allow: c_int,
     );
-    pub(crate) fn proj_create_operations(
+    pub(super) fn proj_create_operations(
         ctx: *mut PjContext,
         source_crs: *const Pj,
         target_crs: *const Pj,
         operation_context: *const PjOperationFactoryContext,
     ) -> *mut PjObjList;
-    pub(crate) fn proj_list_get_count(result: *const PjObjList) -> c_int;
-    pub(crate) fn proj_list_get(
+    pub(super) fn proj_list_get_count(result: *const PjObjList) -> c_int;
+    pub(super) fn proj_list_get(
         ctx: *mut PjContext,
         result: *const PjObjList,
         index: c_int,
     ) -> *mut Pj;
-    pub(crate) fn proj_list_destroy(result: *mut PjObjList);
+    pub(super) fn proj_list_destroy(result: *mut PjObjList);
 
-    pub(crate) fn proj_crs_get_geodetic_crs(ctx: *mut PjContext, crs: *const Pj) -> *mut Pj;
-    pub(crate) fn proj_crs_get_sub_crs(
+    pub(super) fn proj_crs_get_geodetic_crs(ctx: *mut PjContext, crs: *const Pj) -> *mut Pj;
+    pub(super) fn proj_crs_get_sub_crs(
         ctx: *mut PjContext,
         crs: *const Pj,
         index: c_int,
     ) -> *mut Pj;
-    pub(crate) fn proj_crs_get_coordinate_system(ctx: *mut PjContext, crs: *const Pj) -> *mut Pj;
-    pub(crate) fn proj_cs_get_axis_count(ctx: *mut PjContext, cs: *const Pj) -> c_int;
-    pub(crate) fn proj_cs_get_axis_info(
+    pub(super) fn proj_crs_get_coordinate_system(ctx: *mut PjContext, crs: *const Pj) -> *mut Pj;
+    pub(super) fn proj_cs_get_axis_count(ctx: *mut PjContext, cs: *const Pj) -> c_int;
+    pub(super) fn proj_cs_get_axis_info(
         ctx: *mut PjContext,
         cs: *const Pj,
         index: c_int,
@@ -363,8 +364,8 @@ unsafe extern "C" {
         out_unit_auth_name: *mut *const c_char,
         out_unit_code: *mut *const c_char,
     ) -> c_int;
-    pub(crate) fn proj_get_ellipsoid(ctx: *mut PjContext, obj: *const Pj) -> *mut Pj;
-    pub(crate) fn proj_ellipsoid_get_parameters(
+    pub(super) fn proj_get_ellipsoid(ctx: *mut PjContext, obj: *const Pj) -> *mut Pj;
+    pub(super) fn proj_ellipsoid_get_parameters(
         ctx: *mut PjContext,
         ellipsoid: *const Pj,
         out_semi_major_metre: *mut f64,
@@ -373,23 +374,23 @@ unsafe extern "C" {
         out_inv_flattening: *mut f64,
     ) -> c_int;
 
-    pub(crate) fn proj_coordoperation_is_instantiable(
+    pub(super) fn proj_coordoperation_is_instantiable(
         ctx: *mut PjContext,
         coordoperation: *const Pj,
     ) -> c_int;
-    pub(crate) fn proj_coordoperation_has_ballpark_transformation(
+    pub(super) fn proj_coordoperation_has_ballpark_transformation(
         ctx: *mut PjContext,
         coordoperation: *const Pj,
     ) -> c_int;
-    pub(crate) fn proj_coordoperation_requires_per_coordinate_input_time(
+    pub(super) fn proj_coordoperation_requires_per_coordinate_input_time(
         ctx: *mut PjContext,
         coordoperation: *const Pj,
     ) -> c_int;
-    pub(crate) fn proj_coordoperation_get_grid_used_count(
+    pub(super) fn proj_coordoperation_get_grid_used_count(
         ctx: *mut PjContext,
         coordoperation: *const Pj,
     ) -> c_int;
-    pub(crate) fn proj_coordoperation_get_grid_used(
+    pub(super) fn proj_coordoperation_get_grid_used(
         ctx: *mut PjContext,
         coordoperation: *const Pj,
         index: c_int,
@@ -401,11 +402,11 @@ unsafe extern "C" {
         out_open_license: *mut c_int,
         out_available: *mut c_int,
     ) -> c_int;
-    pub(crate) fn proj_coordoperation_get_accuracy(ctx: *mut PjContext, obj: *const Pj) -> f64;
+    pub(super) fn proj_coordoperation_get_accuracy(ctx: *mut PjContext, obj: *const Pj) -> f64;
 
     // ---- geodesic.h -------------------------------------------------------------
-    pub(crate) fn geod_init(g: *mut GeodGeodesic, a: f64, f: f64);
-    pub(crate) fn geod_direct(
+    pub(super) fn geod_init(g: *mut GeodGeodesic, a: f64, f: f64);
+    pub(super) fn geod_direct(
         g: *const GeodGeodesic,
         lat1: f64,
         lon1: f64,
@@ -415,7 +416,7 @@ unsafe extern "C" {
         plon2: *mut f64,
         pazi2: *mut f64,
     );
-    pub(crate) fn geod_inverse(
+    pub(super) fn geod_inverse(
         g: *const GeodGeodesic,
         lat1: f64,
         lon1: f64,

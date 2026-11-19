@@ -1,24 +1,31 @@
 //! INTERNAL to the geodesy crate: ownership of PROJ handles, capture of PROJ
 //! diagnostics, and the calls into PROJ the public modules make. The port of
-//! src/katana_geodesy/proj_internal.{hpp,cpp}. This module and `ffi` are the
-//! only ones that touch PROJ: no PROJ type reaches the public interface, and
-//! the other modules are safe code, but for the `unsafe impl Send` of the two
-//! types that own a context.
+//! src/katana_geodesy/proj_internal.{hpp,cpp}. This module and its child
+//! `ffi` are the only ones that touch PROJ, and the crate's only unsafe code:
+//! no PROJ type reaches the public interface, and the other modules are safe
+//! Rust (docs/rust.md, "Unsafe confined to FFI modules").
 //!
 //! Every wrapper takes the owners (`ProjContext`, `PjPtr`, ...) rather than raw
 //! pointers, so a handle handed to PROJ is always live, and copies every string
-//! PROJ returns before the next call on its object can invalidate it.
+//! PROJ returns before the next call on its object can invalidate it. Every
+//! owner of a handle made in a context holds a counted link to that context,
+//! so the context is destroyed after the last of them, whatever order they
+//! are dropped in; and the only owner that may move to another thread is
+//! `ProjHandles`, which holds a context with every handle made in it.
 
 #![allow(
     unsafe_code,
     reason = "Owns PROJ's handles and calls its C API; every unsafe block states why it is sound."
 )]
 
+pub(crate) mod ffi;
+
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::mem::{MaybeUninit, offset_of};
 use std::path::Path;
 use std::ptr::{self, NonNull};
+use std::rc::Rc;
 use std::sync::{Mutex, MutexGuard};
 
 use katana_core::library_data::{bundled_proj_data_directory, proj_data_directory};
@@ -27,7 +34,6 @@ use katana_core::{Error, ErrorCode, Result};
 use crate::coordinate::Coordinate;
 use crate::coordinate_reference_system::AxisInfo;
 use crate::coordinate_transformer::{GridFile, NamedCoordinate};
-use crate::ffi;
 
 // Upper bound of the captured log. A batch of millions of out-of-domain points
 // makes PROJ log one line per point; only the first lines are diagnostic.
@@ -50,61 +56,167 @@ fn default_context_lock() -> MutexGuard<'static, ()> {
 
 // ---- owners ----------------------------------------------------------------------
 
-/// Owns one `PJ`, destroyed on drop. A PJ must be destroyed before the context
-/// it was made in; every owner of both declares the PJ first (Rust drops
-/// fields in declaration order).
-pub(crate) struct PjPtr(NonNull<ffi::Pj>);
+/// Owns one `PJ_CONTEXT`, destroyed when the last link to it is dropped: the
+/// `ProjContext` and every PJ, list and factory context made in it hold one
+/// (`Rc`), so PROJ never sees a handle whose context is gone.
+struct ContextHandle {
+    raw: NonNull<ffi::PjContext>,
+    // The log callback writes here. Boxed, so that the address handed to PROJ
+    // stays put while the handle moves (before it is put in its Rc); a
+    // RefCell, because PROJ calls back while Rust holds the context by shared
+    // reference.
+    log: Box<RefCell<String>>,
+}
+
+impl ContextHandle {
+    /// A fresh context with the network disabled (results must not depend on
+    /// what happens to be downloadable), looking for proj.db in `data` when
+    /// given, else where PROJ looks. None when PROJ cannot allocate one.
+    fn open(data: Option<&Path>) -> Option<ContextHandle> {
+        let raw = {
+            let _guard = default_context_lock();
+            // SAFETY: no preconditions; the copy PROJ makes of its default
+            // context is serialised against proj_info() by the guard.
+            unsafe { ffi::proj_context_create() }
+        };
+        let handle = ContextHandle {
+            raw: NonNull::new(raw)?,
+            log: Box::new(RefCell::new(String::new())),
+        };
+        let app_data = ptr::from_ref::<RefCell<String>>(&handle.log)
+            .cast_mut()
+            .cast::<c_void>();
+        // SAFETY: the context was just created and is this value's. app_data
+        // is the boxed log, which outlives the context: Drop destroys the
+        // context before the box is freed, and the box never moves.
+        unsafe {
+            ffi::proj_log_func(handle.raw.as_ptr(), app_data, Some(log_callback));
+            ffi::proj_log_level(handle.raw.as_ptr(), ffi::PJ_LOG_ERROR);
+            ffi::proj_context_set_enable_network(handle.raw.as_ptr(), 0);
+        }
+        if let Some(data) = data {
+            // Before proj.db is first opened (has_database). UTF-8, as PROJ
+            // takes a path.
+            let path = c_string(&generic_utf8(data));
+            let paths = [path.as_ptr()];
+            // SAFETY: a live context and one live NUL-terminated string,
+            // which PROJ copies.
+            unsafe { ffi::proj_context_set_search_paths(handle.raw.as_ptr(), 1, paths.as_ptr()) };
+        }
+        Some(handle)
+    }
+
+    /// Forces PROJ to locate and open proj.db now, so that a broken
+    /// installation is reported as such instead of as a confusing "crs not
+    /// found" later; true when it opens. What went wrong is left in the
+    /// diagnostics.
+    fn has_database(&self) -> bool {
+        // SAFETY: a live context; the path it returns is only tested for NULL.
+        !unsafe { ffi::proj_context_get_database_path(self.raw.as_ptr()) }.is_null()
+    }
+
+    fn consume_diagnostics(&self) -> String {
+        let mut text = String::new();
+        // SAFETY: a live context.
+        let code = unsafe { ffi::proj_context_errno(self.raw.as_ptr()) };
+        if code != 0 {
+            // SAFETY: a live context; the text is copied before the next call.
+            let reason = unsafe { c_text(ffi::proj_context_errno_string(self.raw.as_ptr(), code)) };
+            text = format!("PROJ error {code}: {reason}");
+        }
+        {
+            let log = self.log.borrow();
+            if !log.is_empty() {
+                if !text.is_empty() {
+                    text.push_str("; ");
+                }
+                text.push_str("PROJ log: ");
+                text.push_str(&log);
+            }
+        }
+        self.clear_diagnostics();
+        text
+    }
+
+    fn clear_diagnostics(&self) {
+        self.log.borrow_mut().clear();
+    }
+}
+
+impl Drop for ContextHandle {
+    fn drop(&mut self) {
+        // SAFETY: the context is this value's, destroyed once. Every PJ, list
+        // and factory context made in it held a link to this handle, so the
+        // last of them has been destroyed before this runs.
+        unsafe { ffi::proj_context_destroy(self.raw.as_ptr()) };
+    }
+}
+
+/// Owns one `PJ`, destroyed on drop, before the context it was made in (the
+/// link it holds keeps that alive).
+pub(crate) struct PjPtr {
+    raw: NonNull<ffi::Pj>,
+    context: Rc<ContextHandle>,
+}
 
 impl PjPtr {
-    fn from_raw(object: *mut ffi::Pj) -> Option<Self> {
-        NonNull::new(object).map(Self)
+    fn from_raw(object: *mut ffi::Pj, context: &ProjContext) -> Option<Self> {
+        NonNull::new(object).map(|raw| Self {
+            raw,
+            context: Rc::clone(&context.handle),
+        })
     }
 
     fn raw(&self) -> *mut ffi::Pj {
-        self.0.as_ptr()
+        self.raw.as_ptr()
     }
 }
 
 impl Drop for PjPtr {
     fn drop(&mut self) {
-        // SAFETY: the PJ is owned by this value alone, and is destroyed once.
+        // SAFETY: the PJ is owned by this value alone, and is destroyed once,
+        // here; its context is alive, as `self.context` (dropped after this
+        // body) links to it.
         unsafe { ffi::proj_destroy(self.raw()) };
     }
 }
 
 /// Owns one `PJ_OBJ_LIST`.
-pub(crate) struct PjListPtr(NonNull<ffi::PjObjList>);
+pub(crate) struct PjListPtr {
+    raw: NonNull<ffi::PjObjList>,
+    _context: Rc<ContextHandle>,
+}
 
 impl Drop for PjListPtr {
     fn drop(&mut self) {
         // SAFETY: the list is owned by this value alone, and is destroyed once.
-        unsafe { ffi::proj_list_destroy(self.0.as_ptr()) };
+        unsafe { ffi::proj_list_destroy(self.raw.as_ptr()) };
     }
 }
 
 /// Owns one `PJ_OPERATION_FACTORY_CONTEXT`.
-pub(crate) struct PjFactoryContextPtr(NonNull<ffi::PjOperationFactoryContext>);
+pub(crate) struct PjFactoryContextPtr {
+    raw: NonNull<ffi::PjOperationFactoryContext>,
+    _context: Rc<ContextHandle>,
+}
 
 impl Drop for PjFactoryContextPtr {
     fn drop(&mut self) {
         // SAFETY: the factory context is owned by this value alone, and is
         // destroyed once.
-        unsafe { ffi::proj_operation_factory_context_destroy(self.0.as_ptr()) };
+        unsafe { ffi::proj_operation_factory_context_destroy(self.raw.as_ptr()) };
     }
 }
 
-/// Owns one `PJ_CONTEXT`. A PROJ context (and every PJ created in it) may be
-/// used by one thread at a time, so each public object owns its own
-/// `ProjContext` and nothing is shared or global.
+/// A `PJ_CONTEXT`. A PROJ context (and every PJ created in it) may be used by
+/// one thread at a time, so each public object owns its own `ProjContext` and
+/// nothing is shared or global. Not Send: the PJs made in it link to it, and
+/// only `ProjHandles`, which holds them all, may move.
 ///
 /// PROJ's log output is routed into the context's diagnostic buffer instead of
 /// stderr, and is attached to the `Error` returned to the caller.
 pub(crate) struct ProjContext {
-    context: *mut ffi::PjContext,
-    // The log callback writes here. Boxed, so that the address handed to PROJ
-    // stays put when the ProjContext moves; a RefCell, because PROJ calls back
-    // while Rust holds the context by shared reference.
-    log: Box<RefCell<String>>,
+    handle: Rc<ContextHandle>,
 }
 
 impl ProjContext {
@@ -112,23 +224,20 @@ impl ProjContext {
     /// on what happens to be downloadable) and verifies that proj.db can be
     /// opened. Fails with `NotFound` otherwise.
     pub(crate) fn create() -> Result<ProjContext> {
-        let mut context = ProjContext {
-            context: ptr::null_mut(),
-            log: Box::new(RefCell::new(String::new())),
+        let could_not_allocate = || {
+            Error::new(
+                ErrorCode::Internal,
+                "PROJ could not allocate a context",
+            )
         };
         // In a relocated Linux prefix PROJ's own search path is wrong
         // (katana_core::library_data), and Katana points it at the data
         // beside libproj.
         let pointed = proj_data_directory();
-        if context.open(pointed.as_deref()) {
-            context.clear_diagnostics();
-            return Ok(context);
-        }
-        if context.context.is_null() {
-            return Err(Error::new(
-                ErrorCode::Internal,
-                "PROJ could not allocate a context",
-            ));
+        let first = ContextHandle::open(pointed.as_deref()).ok_or_else(could_not_allocate)?;
+        if first.has_database() {
+            first.clear_diagnostics();
+            return Ok(ProjContext::with_handle(first));
         }
 
         // PROJ could not open proj.db where it looked. That is not always a
@@ -141,29 +250,28 @@ impl ProjContext {
         // (An explicit choice that WORKS is kept: this is reached only when it
         // does not.)
         let mut detail = format!("search paths: {}", library_info().search_path);
-        let diagnostics = context.consume_diagnostics();
+        let diagnostics = first.consume_diagnostics();
         if !diagnostics.is_empty() {
             detail = format!("{detail}; {diagnostics}");
         }
+        // The failed context is destroyed before the next is made, as the
+        // C++ reopens its one context.
+        drop(first);
         let bundled = bundled_proj_data_directory();
         if let Some(bundled_path) = bundled
             && bundled != pointed
         {
-            if context.open(Some(bundled_path.as_path())) {
-                context.clear_diagnostics();
-                return Ok(context);
-            }
-            if context.context.is_null() {
-                return Err(Error::new(
-                    ErrorCode::Internal,
-                    "PROJ could not allocate a context",
-                ));
+            let second =
+                ContextHandle::open(Some(bundled_path.as_path())).ok_or_else(could_not_allocate)?;
+            if second.has_database() {
+                second.clear_diagnostics();
+                return Ok(ProjContext::with_handle(second));
             }
             detail = format!(
                 "{detail}; the data beside libproj, {}, did not open either",
                 bundled_path.to_string_lossy()
             );
-            let diagnostics = context.consume_diagnostics();
+            let diagnostics = second.consume_diagnostics();
             if !diagnostics.is_empty() {
                 detail = format!("{detail}: {diagnostics}");
             }
@@ -201,54 +309,14 @@ impl ProjContext {
         .with_context(detail))
     }
 
-    // Makes a fresh context - the old one, if any, is destroyed - looking for
-    // proj.db in `data` when given, else where PROJ looks; true when proj.db
-    // opens. What went wrong is left in the diagnostics.
-    fn open(&mut self, data: Option<&Path>) -> bool {
-        if !self.context.is_null() {
-            // SAFETY: the context is this value's, and no PJ made in it is
-            // alive: open() runs only inside create(), before any object.
-            unsafe { ffi::proj_context_destroy(self.context) };
-            self.context = ptr::null_mut();
+    fn with_handle(handle: ContextHandle) -> ProjContext {
+        ProjContext {
+            handle: Rc::new(handle),
         }
-        self.log.borrow_mut().clear();
-        self.context = {
-            let _guard = default_context_lock();
-            // SAFETY: no preconditions; the copy PROJ makes of its default
-            // context is serialised against proj_info() by the guard.
-            unsafe { ffi::proj_context_create() }
-        };
-        if self.context.is_null() {
-            return false;
-        }
-        let app_data = ptr::from_ref::<RefCell<String>>(&self.log)
-            .cast_mut()
-            .cast::<c_void>();
-        // SAFETY: the context was just created and is this value's. app_data
-        // is the boxed log, which outlives the context: Drop destroys the
-        // context before the box is freed.
-        unsafe {
-            ffi::proj_log_func(self.context, app_data, Some(log_callback));
-            ffi::proj_log_level(self.context, ffi::PJ_LOG_ERROR);
-            ffi::proj_context_set_enable_network(self.context, 0);
-        }
-        if let Some(data) = data {
-            // Before proj.db is first opened below. UTF-8, as PROJ takes a
-            // path.
-            let path = c_string(&generic_utf8(data));
-            let paths = [path.as_ptr()];
-            // SAFETY: one live NUL-terminated string, which PROJ copies.
-            unsafe { ffi::proj_context_set_search_paths(self.context, 1, paths.as_ptr()) };
-        }
-        // Forces PROJ to locate and open proj.db now, so that a broken
-        // installation is reported as such instead of as a confusing "crs not
-        // found" later.
-        // SAFETY: a live context; the path it returns is only tested for NULL.
-        !unsafe { ffi::proj_context_get_database_path(self.context) }.is_null()
     }
 
     fn raw(&self) -> *mut ffi::PjContext {
-        self.context
+        self.handle.raw.as_ptr()
     }
 
     /// PROJ's description of the latest failure: the context errno text
@@ -256,40 +324,69 @@ impl ProjContext {
     /// buffer. (PROJ offers no public way to reset a context errno, so call
     /// this only directly after a PROJ call that reported failure.)
     pub(crate) fn consume_diagnostics(&self) -> String {
-        let mut text = String::new();
-        // SAFETY: a live context (create() returns only a context that is).
-        let code = unsafe { ffi::proj_context_errno(self.context) };
-        if code != 0 {
-            // SAFETY: a live context; the text is copied before the next call.
-            let reason = unsafe { c_text(ffi::proj_context_errno_string(self.context, code)) };
-            text = format!("PROJ error {code}: {reason}");
-        }
-        {
-            let log = self.log.borrow();
-            if !log.is_empty() {
-                if !text.is_empty() {
-                    text.push_str("; ");
-                }
-                text.push_str("PROJ log: ");
-                text.push_str(&log);
-            }
-        }
-        self.clear_diagnostics();
-        text
+        self.handle.consume_diagnostics()
     }
 
     pub(crate) fn clear_diagnostics(&self) {
-        self.log.borrow_mut().clear();
+        self.handle.clear_diagnostics();
     }
 }
 
-impl Drop for ProjContext {
-    fn drop(&mut self) {
-        if !self.context.is_null() {
-            // SAFETY: the context is this value's; every PJ made in it has
-            // been destroyed, as its owners drop it first.
-            unsafe { ffi::proj_context_destroy(self.context) };
+/// A context with the `N` PJs made in it that an object keeps, owned as one
+/// value: the form in which PROJ handles move to another thread (the C++'s
+/// one-object-per-thread model, a transformer or calculator handed over).
+///
+/// `new` checks that the PJs were made in the context and that no other
+/// handle of that context exists, and the value hands out the PJs only by
+/// shared reference and the context not at all, so no handle of it can be
+/// made or kept outside: moving the value moves every user of the context.
+pub(crate) struct ProjHandles<const N: usize> {
+    objects: [PjPtr; N],
+    context: ProjContext,
+}
+
+// SAFETY: PROJ lets a context, and every PJ made in it, be used from any
+// thread, one thread at a time. A ProjHandles holds its context together with
+// every handle that links to it (new() counts the links: the context's own
+// plus one per PJ held, so nothing else of the context exists), it gives out
+// no way to make another (the context is never lent), and PjPtr is not Clone;
+// so moving the value moves every user of the context and of its link count.
+// It is not Sync (the links are Rc, the log a RefCell): one thread at a time.
+unsafe impl<const N: usize> Send for ProjHandles<N> {}
+
+impl<const N: usize> ProjHandles<N> {
+    /// `Internal` when a PJ was made in another context, or when a handle of
+    /// this context (a PJ, a list, a factory context) is still alive outside
+    /// the value: either would be shared with the thread the value moves to.
+    pub(crate) fn new(context: ProjContext, objects: [PjPtr; N]) -> Result<ProjHandles<N>> {
+        let made_here = objects
+            .iter()
+            .all(|object| Rc::ptr_eq(&object.context, &context.handle));
+        if !made_here || Rc::strong_count(&context.handle) != N + 1 {
+            return Err(Error::new(
+                ErrorCode::Internal,
+                "PROJ objects kept together must be made in their context and be its only ones",
+            ));
         }
+        Ok(ProjHandles { objects, context })
+    }
+
+    pub(crate) fn objects(&self) -> &[PjPtr; N] {
+        &self.objects
+    }
+
+    /// As `ProjContext::consume_diagnostics`.
+    pub(crate) fn consume_diagnostics(&self) -> String {
+        self.context.consume_diagnostics()
+    }
+
+    pub(crate) fn clear_diagnostics(&self) {
+        self.context.clear_diagnostics();
+    }
+
+    /// As `describe_errno`, in this value's context.
+    pub(crate) fn describe_errno(&self, proj_errno: c_int) -> String {
+        describe_errno(&self.context, proj_errno)
     }
 }
 
@@ -300,8 +397,8 @@ unsafe extern "C" fn log_callback(app_data: *mut c_void, _level: c_int, message:
     if app_data.is_null() || message.is_null() {
         return;
     }
-    // SAFETY: app_data is the boxed RefCell of the ProjContext that registered
-    // this callback, alive for as long as its context is.
+    // SAFETY: app_data is the boxed RefCell of the ContextHandle that
+    // registered this callback, alive for as long as its context is.
     let log = unsafe { &*app_data.cast::<RefCell<String>>() };
     let Ok(mut log) = log.try_borrow_mut() else {
         return;
@@ -376,7 +473,8 @@ pub(crate) fn create_crs(context: &ProjContext, definition: &str) -> Result<PjPt
     let text = c_string(definition.as_bytes());
     // SAFETY: a live context and a NUL-terminated definition; the PJ returned
     // is owned by the PjPtr.
-    let object = PjPtr::from_raw(unsafe { ffi::proj_create(context.raw(), text.as_ptr()) });
+    let raw = unsafe { ffi::proj_create(context.raw(), text.as_ptr()) };
+    let object = PjPtr::from_raw(raw, context);
     let Some(object) = object else {
         return Err(Error::new(
             ErrorCode::InvalidCrs,
@@ -472,22 +570,26 @@ pub(crate) fn get_id_code(object: &PjPtr, index: c_int) -> String {
 
 pub(crate) fn get_source_crs(context: &ProjContext, object: &PjPtr) -> Option<PjPtr> {
     // SAFETY: a live context and PJ; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_get_source_crs(context.raw(), object.raw()) })
+    let raw = unsafe { ffi::proj_get_source_crs(context.raw(), object.raw()) };
+    PjPtr::from_raw(raw, context)
 }
 
 pub(crate) fn crs_get_sub_crs(context: &ProjContext, crs: &PjPtr, index: c_int) -> Option<PjPtr> {
     // SAFETY: a live context and PJ; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_crs_get_sub_crs(context.raw(), crs.raw(), index) })
+    let raw = unsafe { ffi::proj_crs_get_sub_crs(context.raw(), crs.raw(), index) };
+    PjPtr::from_raw(raw, context)
 }
 
 pub(crate) fn crs_get_coordinate_system(context: &ProjContext, crs: &PjPtr) -> Option<PjPtr> {
     // SAFETY: a live context and PJ; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_crs_get_coordinate_system(context.raw(), crs.raw()) })
+    let raw = unsafe { ffi::proj_crs_get_coordinate_system(context.raw(), crs.raw()) };
+    PjPtr::from_raw(raw, context)
 }
 
 pub(crate) fn crs_get_geodetic_crs(context: &ProjContext, crs: &PjPtr) -> Option<PjPtr> {
     // SAFETY: a live context and PJ; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_crs_get_geodetic_crs(context.raw(), crs.raw()) })
+    let raw = unsafe { ffi::proj_crs_get_geodetic_crs(context.raw(), crs.raw()) };
+    PjPtr::from_raw(raw, context)
 }
 
 pub(crate) fn cs_get_axis_count(context: &ProjContext, system: &PjPtr) -> c_int {
@@ -636,7 +738,8 @@ pub(crate) fn get_area_of_use_name(context: &ProjContext, object: &PjPtr) -> Opt
 
 pub(crate) fn get_ellipsoid(context: &ProjContext, object: &PjPtr) -> Option<PjPtr> {
     // SAFETY: a live context and PJ; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_get_ellipsoid(context.raw(), object.raw()) })
+    let raw = unsafe { ffi::proj_get_ellipsoid(context.raw(), object.raw()) };
+    PjPtr::from_raw(raw, context)
 }
 
 /// The semi-major axis (metres) and inverse flattening of an ellipsoid.
@@ -752,8 +855,11 @@ pub(crate) fn create_operation_factory_context(
 ) -> Option<PjFactoryContextPtr> {
     // SAFETY: a live context; a NULL authority means any; the factory context
     // returned is owned by the PjFactoryContextPtr.
-    NonNull::new(unsafe { ffi::proj_create_operation_factory_context(context.raw(), ptr::null()) })
-        .map(PjFactoryContextPtr)
+    let raw = unsafe { ffi::proj_create_operation_factory_context(context.raw(), ptr::null()) };
+    NonNull::new(raw).map(|raw| PjFactoryContextPtr {
+        raw,
+        _context: Rc::clone(&context.handle),
+    })
 }
 
 pub(crate) fn set_spatial_criterion(
@@ -765,7 +871,7 @@ pub(crate) fn set_spatial_criterion(
     unsafe {
         ffi::proj_operation_factory_context_set_spatial_criterion(
             context.raw(),
-            factory.0.as_ptr(),
+            factory.raw.as_ptr(),
             criterion,
         );
     }
@@ -780,7 +886,7 @@ pub(crate) fn set_grid_availability_use(
     unsafe {
         ffi::proj_operation_factory_context_set_grid_availability_use(
             context.raw(),
-            factory.0.as_ptr(),
+            factory.raw.as_ptr(),
             grid_use,
         );
     }
@@ -795,7 +901,7 @@ pub(crate) fn set_allow_ballpark_transformations(
     unsafe {
         ffi::proj_operation_factory_context_set_allow_ballpark_transformations(
             context.raw(),
-            factory.0.as_ptr(),
+            factory.raw.as_ptr(),
             c_int::from(allow),
         );
     }
@@ -810,7 +916,7 @@ pub(crate) fn set_area_of_interest(
     unsafe {
         ffi::proj_operation_factory_context_set_area_of_interest(
             context.raw(),
-            factory.0.as_ptr(),
+            factory.raw.as_ptr(),
             west,
             south,
             east,
@@ -828,7 +934,7 @@ pub(crate) fn set_desired_accuracy(
     unsafe {
         ffi::proj_operation_factory_context_set_desired_accuracy(
             context.raw(),
-            factory.0.as_ptr(),
+            factory.raw.as_ptr(),
             accuracy,
         );
     }
@@ -847,25 +953,30 @@ pub(crate) fn create_operations(
             context.raw(),
             source_crs.raw(),
             target_crs.raw(),
-            factory.0.as_ptr(),
+            factory.raw.as_ptr(),
         )
     })
-    .map(PjListPtr)
+    .map(|raw| PjListPtr {
+        raw,
+        _context: Rc::clone(&context.handle),
+    })
 }
 
 pub(crate) fn list_get_count(list: &PjListPtr) -> c_int {
     // SAFETY: a live list.
-    unsafe { ffi::proj_list_get_count(list.0.as_ptr()) }
+    unsafe { ffi::proj_list_get_count(list.raw.as_ptr()) }
 }
 
 pub(crate) fn list_get(context: &ProjContext, list: &PjListPtr, index: c_int) -> Option<PjPtr> {
     // SAFETY: a live context and list; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_list_get(context.raw(), list.0.as_ptr(), index) })
+    let raw = unsafe { ffi::proj_list_get(context.raw(), list.raw.as_ptr(), index) };
+    PjPtr::from_raw(raw, context)
 }
 
 pub(crate) fn normalize_for_visualization(context: &ProjContext, object: &PjPtr) -> Option<PjPtr> {
     // SAFETY: a live context and PJ; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe { ffi::proj_normalize_for_visualization(context.raw(), object.raw()) })
+    let raw = unsafe { ffi::proj_normalize_for_visualization(context.raw(), object.raw()) };
+    PjPtr::from_raw(raw, context)
 }
 
 /// The operation from one CRS to another, with no area and no options.
@@ -876,7 +987,7 @@ pub(crate) fn create_crs_to_crs_from_pj(
 ) -> Option<PjPtr> {
     // SAFETY: a live context and two live PJs; NULL area and options are
     // allowed; the PJ returned is owned by the PjPtr.
-    PjPtr::from_raw(unsafe {
+    let raw = unsafe {
         ffi::proj_create_crs_to_crs_from_pj(
             context.raw(),
             source_crs.raw(),
@@ -884,7 +995,8 @@ pub(crate) fn create_crs_to_crs_from_pj(
             ptr::null_mut(),
             ptr::null(),
         )
-    })
+    };
+    PjPtr::from_raw(raw, context)
 }
 
 // ---- transformation ----------------------------------------------------------------
@@ -977,15 +1089,26 @@ pub(crate) fn trans_generic_named<T: NamedCoordinate>(
     if coordinates.is_empty() {
         return;
     }
+    // The offsets are the members' (offset_of!, in the sealed trait's two
+    // impls); checked here as well, when the function is instantiated, so
+    // that no type can hand PROJ a pointer past or across its value.
+    const {
+        let size = size_of::<T>();
+        let align = align_of::<f64>();
+        assert!(align_of::<T>() >= align && size % align == 0);
+        assert!(T::X_OFFSET % align == 0 && T::X_OFFSET + size_of::<f64>() <= size);
+        assert!(T::Y_OFFSET % align == 0 && T::Y_OFFSET + size_of::<f64>() <= size);
+        assert!(T::HEIGHT_OFFSET % align == 0 && T::HEIGHT_OFFSET + size_of::<f64>() <= size);
+    }
     let stride = size_of::<T>();
     let count = coordinates.len();
     let base = coordinates.as_mut_ptr().cast::<u8>();
     let member = |offset: usize| base.wrapping_add(offset).cast::<f64>();
     // SAFETY: a live PJ; the named types are repr(C) structs of three doubles,
-    // and the offsets are their members' (offset_of!), so each pointer
-    // addresses a double of the first of `count` contiguous values, stepped by
-    // their size, all within the exclusively borrowed slice; the epoch is one
-    // live double.
+    // and the offsets are their members' (offset_of!; aligned and inside the
+    // value, as checked above), so each pointer addresses a double of the
+    // first of `count` contiguous values, stepped by their size, all within
+    // the exclusively borrowed slice; the epoch is one live double.
     unsafe {
         ffi::proj_trans_generic(
             operation.raw(),
@@ -1077,4 +1200,63 @@ pub(crate) fn geodesic_direct(
         );
     }
     (end_latitude, end_longitude, azimuth_at_end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // EPSG:4326's name in the EPSG registry, which PROJ's database carries.
+    const WGS84_NAME: &str = "WGS 84";
+
+    fn context() -> ProjContext {
+        ProjContext::create().expect("PROJ's data is installed")
+    }
+
+    #[test]
+    fn a_pj_keeps_its_context_alive_after_the_context_value_is_dropped() {
+        let context = context();
+        let object = create_crs(&context, "EPSG:4326").expect("EPSG:4326 is a CRS");
+        drop(context);
+        // The PJ's link still holds the PJ_CONTEXT, so PROJ reads a live one.
+        assert_eq!(get_name(&object), WGS84_NAME);
+    }
+
+    #[test]
+    fn handles_kept_together_refuse_a_pj_made_in_another_context() {
+        let mine = context();
+        let theirs = context();
+        let object = create_crs(&theirs, "EPSG:4326").expect("EPSG:4326 is a CRS");
+        let refused = ProjHandles::new(mine, [object]).err().expect("refused");
+        assert_eq!(refused.code, ErrorCode::Internal);
+    }
+
+    #[test]
+    fn handles_kept_together_refuse_while_another_handle_of_the_context_lives() {
+        let context = context();
+        let kept = create_crs(&context, "EPSG:4326").expect("EPSG:4326 is a CRS");
+        let outside = create_crs(&context, "EPSG:4326").expect("EPSG:4326 is a CRS");
+        let refused = ProjHandles::new(context, [kept]).err().expect("refused");
+        assert_eq!(refused.code, ErrorCode::Internal);
+        drop(outside);
+
+        // Without the second PJ, the same arrangement is accepted.
+        let context = self::context();
+        let kept = create_crs(&context, "EPSG:4326").expect("EPSG:4326 is a CRS");
+        assert!(ProjHandles::new(context, [kept]).is_ok());
+    }
+
+    #[test]
+    fn handles_kept_together_move_to_another_thread_and_answer_there() {
+        let context = context();
+        let object = create_crs(&context, "EPSG:4326").expect("EPSG:4326 is a CRS");
+        let handles = ProjHandles::new(context, [object]).expect("the context's only PJ");
+        let name = std::thread::spawn(move || {
+            let [object] = handles.objects();
+            get_name(object)
+        })
+        .join()
+        .expect("the thread finishes");
+        assert_eq!(name, WGS84_NAME);
+    }
 }

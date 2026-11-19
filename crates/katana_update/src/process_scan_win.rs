@@ -44,32 +44,22 @@
 //! inside that interval is possible in principle and would only make the helper wait for the wrong
 //! process until the 60 s limit and then report "Katana is still running"; the person presses
 //! Retry. The trait has no process creation time to tell the two apart.
-
-#![allow(
-    unsafe_code,
-    reason = "Toolhelp, the process queries and the path calls are Win32 foreign functions."
-)]
+//!
+//! The calls themselves are win32::process's and win32::fs's safe wrappers (docs/rust.md,
+//! "Unsafe confined to FFI modules"); this process's own id is std's (GetCurrentProcessId).
 
 use crate::process::{ProcessOps, RunningProgram};
+use crate::win32::process::{
+    compare_ordinal_ignoring_case, exit_code, first_process, image_name, next_process,
+    open_process, process_entry, snapshot, wait,
+};
+use crate::win32::{WideName, fs, last_error};
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result};
 use std::ffi::OsString;
-use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::io::OwnedHandle;
 use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::Globalization::CompareStringOrdinal;
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, GetFinalPathNameByHandleW, GetFullPathNameW, GetLongPathNameW,
-};
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
-};
-use windows_sys::Win32::System::Threading::{
-    GetCurrentProcessId, GetExitCodeProcess, OpenProcess, QueryFullProcessImageNameW,
-    WaitForSingleObject,
-};
 
 // The values of the Windows SDK's headers (winerror.h, winnt.h, winbase.h, fileapi.h,
 // tlhelp32.h, stringapiset.h).
@@ -95,31 +85,12 @@ const COLON: u16 = b':' as u16;
 const DOT: u16 = b'.' as u16;
 const TILDE: u16 = b'~' as u16;
 
-struct Handle(HANDLE);
-
-impl Handle {
-    fn valid(&self) -> bool {
-        !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE
-    }
-}
-
-impl Drop for Handle {
-    fn drop(&mut self) {
-        if self.valid() {
-            // SAFETY: the handle is one this Handle owns, closed once.
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-}
-
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
 
-fn terminated(text: &[u16]) -> Vec<u16> {
-    let mut out = text.to_vec();
-    out.push(0);
-    out
+fn terminated(text: &[u16]) -> WideName {
+    WideName::from_units(text.to_vec())
 }
 
 // A path in one form: backslashes only, no \\?\ or \\.\ prefix, no "." or empty segment, ".."
@@ -194,10 +165,7 @@ fn long_name(path: &[u16]) -> Vec<u16> {
     let input = terminated(path);
     let mut buffer = vec![0u16; path.len() + 64];
     for _ in 0..3 {
-        // SAFETY: `input` is NUL-terminated and `buffer` holds as many units as the call is told.
-        let length =
-            unsafe { GetLongPathNameW(input.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
-                as usize;
+        let length = fs::long_path_name(&input, &mut buffer) as usize;
         if length == 0 {
             return path.to_vec();
         }
@@ -214,32 +182,19 @@ fn long_name(path: &[u16]) -> Vec<u16> {
 // links, subst drives); empty when it cannot be opened.
 fn final_name(path: &[u16]) -> Vec<u16> {
     let input = terminated(path);
-    // SAFETY: `input` is NUL-terminated; no security attributes and no template are given.
-    let folder = Handle(unsafe {
-        CreateFileW(
-            input.as_ptr(),
-            0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            null(),
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            null_mut(),
-        )
-    });
-    if !folder.valid() {
+    let Some(folder) = fs::create_file(
+        &input,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+    ) else {
         return Vec::new();
-    }
+    };
     let mut buffer = vec![0u16; 512];
     for _ in 0..3 {
-        // SAFETY: the handle is open, and `buffer` holds as many units as the call is told.
-        let length = unsafe {
-            GetFinalPathNameByHandleW(
-                folder.0,
-                buffer.as_mut_ptr(),
-                buffer.len() as u32,
-                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
-            )
-        } as usize;
+        let length =
+            folder.final_path_name(&mut buffer, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) as usize;
         if length == 0 {
             return Vec::new();
         }
@@ -271,16 +226,7 @@ fn absolute_text(root: &Path) -> Vec<u16> {
     let input = terminated(&text);
     let mut buffer = vec![0u16; MAX_PATH];
     for _ in 0..3 {
-        // SAFETY: `input` is NUL-terminated, `buffer` holds as many units as the call is told, and
-        // the file-part pointer may be null.
-        let length = unsafe {
-            GetFullPathNameW(
-                input.as_ptr(),
-                buffer.len() as u32,
-                buffer.as_mut_ptr(),
-                null_mut(),
-            )
-        } as usize;
+        let length = fs::full_path_name(&input, &mut buffer) as usize;
         if length == 0 {
             return text;
         }
@@ -315,34 +261,21 @@ fn is_under(root: &[u16], path: &[u16]) -> bool {
     if root.is_empty() || path.len() <= root.len() {
         return false;
     }
-    // SAFETY: both pointers name `root.len()` units of live slices; the counts are given, so no
-    // terminator is read.
-    let compared = unsafe {
-        CompareStringOrdinal(
-            path.as_ptr(),
-            root.len() as i32,
-            root.as_ptr(),
-            root.len() as i32,
-            1,
-        )
-    };
-    if compared != CSTR_EQUAL {
+    // The first root.len() units of the path against the root, case folded as NTFS folds it.
+    if compare_ordinal_ignoring_case(&path[..root.len()], root) != CSTR_EQUAL {
         return false;
     }
     root.last() == Some(&BACKSLASH) || path[root.len()] == BACKSLASH
 }
 
 // A Toolhelp snapshot of the processes, or the error when it cannot be taken.
-fn take_snapshot() -> std::result::Result<Handle, u32> {
+fn take_snapshot() -> std::result::Result<OwnedHandle, u32> {
     let mut error = 0u32;
     for _ in 0..5 {
-        // SAFETY: two integer arguments; the handle returned is owned by the Handle.
-        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-        if snapshot != INVALID_HANDLE_VALUE {
-            return Ok(Handle(snapshot));
+        match snapshot(TH32CS_SNAPPROCESS) {
+            Ok(snapshot) => return Ok(snapshot),
+            Err(code) => error = code,
         }
-        // SAFETY: reads this thread's last error.
-        error = unsafe { GetLastError() };
         if error != ERROR_BAD_LENGTH {
             // ERROR_BAD_LENGTH is the one transient failure the API documents.
             break;
@@ -363,8 +296,7 @@ struct WindowsProcessOps;
 
 impl ProcessOps for WindowsProcessOps {
     fn current_pid(&self) -> u64 {
-        // SAFETY: no arguments.
-        u64::from(unsafe { GetCurrentProcessId() })
+        u64::from(std::process::id())
     }
 
     fn is_alive(&self, pid: u64) -> bool {
@@ -374,17 +306,13 @@ impl ProcessOps for WindowsProcessOps {
         if pid == 0 {
             return false;
         }
-        // SAFETY: integer arguments; the handle returned is owned by the Handle.
-        let process =
-            Handle(unsafe { OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) });
-        if !process.valid() {
+        let Some(process) = open_process(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, pid)
+        else {
             // No such process is "not alive"; a process we may not open is one that exists.
-            // SAFETY: reads this thread's last error.
-            return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
-        }
-        // SAFETY: the handle is open, with the right to wait on it.
-        let waited = unsafe { WaitForSingleObject(process.0, 0) };
-        waited == WAIT_TIMEOUT
+            return last_error() == ERROR_ACCESS_DENIED;
+        };
+        // Opened with the right to wait on it.
+        wait(&process, 0) == WAIT_TIMEOUT
     }
 
     fn holders_under(&self, root: &Path) -> Result<Vec<RunningProgram>> {
@@ -398,51 +326,30 @@ impl ProcessOps for WindowsProcessOps {
 
         let snapshot = take_snapshot().map_err(scan_failed)?;
 
-        // SAFETY: no arguments.
-        let this = unsafe { GetCurrentProcessId() };
+        let this = std::process::id();
         let mut holders: Vec<RunningProgram> = Vec::new();
         let mut image = vec![0u16; 32768]; // the longest path Windows has
-        // SAFETY: PROCESSENTRY32W is plain data; all zeros is a valid value, and dwSize is set.
-        let mut entry: PROCESSENTRY32W = unsafe { zeroed() };
-        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
-        // SAFETY: the snapshot is open and `entry` is a PROCESSENTRY32W whose size is set.
-        if unsafe { Process32FirstW(snapshot.0, &mut entry) } == 0 {
+        let mut entry = process_entry();
+        if !first_process(&snapshot, &mut entry) {
             // A snapshot holds this process at the least, so one with no first entry was not
             // read: an error, and never the answer "nobody is running" (see the top).
-            // SAFETY: reads this thread's last error.
-            return Err(scan_failed(unsafe { GetLastError() }));
+            return Err(scan_failed(last_error()));
         }
         loop {
             let id = entry.th32ProcessID;
             // This process is never its own holder; 0 is the idle process.
             if id != this && id != 0 {
-                // SAFETY: integer arguments; the handle returned is owned by the Handle.
-                let process =
-                    Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, id) });
-                // Not valid: exited since the snapshot, or not ours to open (see the top).
-                if process.valid() {
+                // None: exited since the snapshot, or not ours to open (see the top).
+                if let Some(process) = open_process(PROCESS_QUERY_LIMITED_INFORMATION, id) {
                     // A process that has ended holds nothing, though its id and its image name stay
                     // readable for as long as anybody keeps a handle to it (the program that
                     // started it and has not yet collected its exit code, say). An exit code of 259
                     // itself reads as "still running", which only errs towards naming a holder.
-                    let mut exit_code = 0u32;
-                    // SAFETY: the handle is open with the right to query; the out-pointer is ours.
-                    let ended = unsafe { GetExitCodeProcess(process.0, &mut exit_code) } != 0
-                        && exit_code != STILL_ACTIVE;
+                    let ended = exit_code(&process).is_some_and(|code| code != STILL_ACTIVE);
                     if !ended {
-                        let mut length = image.len() as u32;
-                        // SAFETY: `image` holds `length` units; the call writes at most that many
-                        // and says how many it wrote.
-                        let named = unsafe {
-                            QueryFullProcessImageNameW(
-                                process.0,
-                                0,
-                                image.as_mut_ptr(),
-                                &mut length,
-                            )
-                        } != 0;
-                        if named && length != 0 {
-                            let mut path = normalised(&image[..length as usize]);
+                        let named = image_name(&process, &mut image);
+                        if let Some(length) = named.filter(|&length| length != 0) {
+                            let mut path = normalised(&image[..length]);
                             let mut under =
                                 spellings.iter().any(|spelling| is_under(spelling, &path));
                             if !under && path.contains(&TILDE) {
@@ -466,8 +373,7 @@ impl ProcessOps for WindowsProcessOps {
                     }
                 }
             }
-            // SAFETY: as for Process32FirstW.
-            if unsafe { Process32NextW(snapshot.0, &mut entry) } == 0 {
+            if !next_process(&snapshot, &mut entry) {
                 break;
             }
         }

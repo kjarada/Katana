@@ -14,7 +14,7 @@ the first thing to know before touching any of it:
 |---|---|
 | Survey calculation engine | `katana_survey` - `cogo.rs`, `traverse.rs`, `angles.rs`, `leveling.rs`, `least_squares.rs`, `network_adjustment.rs`, `error_propagation.rs`, `statistics.rs` |
 | Normalized survey model | `crates/katana_survey/src/data_model.rs` - `SurveyPoint` and four observation kinds |
-| Coordinate systems | `katana_geodesy` - CRS, transformer, units, ellipsoid, geodesic, grid factors, PROJ behind its FFI (`crates/katana_geodesy/src/ffi.rs`) |
+| Coordinate systems | `katana_geodesy` - CRS, transformer, units, ellipsoid, geodesic, grid factors, PROJ behind its FFI (`crates/katana_geodesy/src/proj_internal/ffi.rs`) |
 | XML reading | a strict reader, then private to `archive12d`, now `katana_core::xml::read_xml` |
 
 So this programme is an *exchange* subsystem and a *user interface*, not a

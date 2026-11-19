@@ -21,7 +21,7 @@ use katana_math::numerics::{DEG_TO_RAD, RAD_TO_DEG, nearly_equal, tolerance};
 use crate::coordinate::{GeographicCoordinate, ProjectedCoordinate, UNSPECIFIED_EPOCH};
 use crate::coordinate_reference_system::{self, CoordinateReferenceSystem, CrsKind};
 use crate::ffi;
-use crate::proj_internal::{self, PjPtr, ProjContext};
+use crate::proj_internal::{self, ProjContext, ProjHandles};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GridFactors {
@@ -94,23 +94,14 @@ impl sealed::Sealed for ProjectedCoordinate {
 }
 
 pub struct GridFactorCalculator {
-    // Rust drops fields in declaration order, the reverse of C++: the PJ
-    // objects come first so that they are destroyed before their context.
-    projected: PjPtr,     // the projected CRS (a BoundCRS wrapper removed)
-    to_geographic: PjPtr, // projected -> base geographic CRS, normalised lon/lat order
-    context: ProjContext,
+    // The projected CRS (a BoundCRS wrapper removed) and the operation from it
+    // to its base geographic CRS (normalised lon/lat order), with the context
+    // they were made in: as for CoordinateTransformer, together they may move
+    // to another thread, where one thread uses them; Send, not Sync.
+    proj: ProjHandles<2>,
     crs: CoordinateReferenceSystem,
     radians_per_geographic_unit: f64,
 }
-
-// SAFETY: as for CoordinateTransformer - the calculator owns its context and
-// the PJs made in it together and shares them with nothing, so it may move to
-// another thread, where it is used by that one thread; it is not Sync.
-#[allow(
-    unsafe_code,
-    reason = "A calculator may move to another thread, as the C++'s clone-per-thread model needs."
-)]
-unsafe impl Send for GridFactorCalculator {}
 
 impl fmt::Debug for GridFactorCalculator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -205,10 +196,12 @@ impl GridFactorCalculator {
             };
 
         context.clear_diagnostics();
+        // Everything else made in the context goes first: the calculator keeps
+        // the context with its two PJs and nothing more of it.
+        drop((geographic, system));
+        let proj = ProjHandles::new(context, [projected_object, to_geographic])?;
         Ok(GridFactorCalculator {
-            projected: projected_object,
-            to_geographic,
-            context,
+            proj,
             crs: projected.clone(),
             radians_per_geographic_unit,
         })
@@ -259,21 +252,22 @@ impl GridFactorCalculator {
             ));
         }
 
-        self.context.clear_diagnostics();
-        proj_internal::errno_reset(&self.to_geographic);
+        self.proj.clear_diagnostics();
+        let [_, to_geographic] = self.proj.objects();
+        proj_internal::errno_reset(to_geographic);
         let (x, y) = proj_internal::trans_xy(
-            &self.to_geographic,
+            to_geographic,
             ffi::PJ_FWD,
             [position.easting, position.northing, 0.0, UNSPECIFIED_EPOCH],
         );
-        let proj_errno = proj_internal::errno(&self.to_geographic);
+        let proj_errno = proj_internal::errno(to_geographic);
         if proj_errno != 0 || !x.is_finite() || !y.is_finite() {
             let reason = if proj_errno != 0 {
-                proj_internal::describe_errno(&self.context, proj_errno)
+                self.proj.describe_errno(proj_errno)
             } else {
                 String::from("PROJ returned no coordinate")
             };
-            proj_internal::errno_reset(&self.to_geographic);
+            proj_internal::errno_reset(to_geographic);
             return Err(Error::new(
                 ErrorCode::InvalidArgument,
                 "grid position cannot be converted to latitude/longitude",
@@ -287,10 +281,11 @@ impl GridFactorCalculator {
     }
 
     fn evaluate(&mut self, longitude_radians: f64, latitude_radians: f64) -> Result<GridFactors> {
-        self.context.clear_diagnostics();
-        proj_internal::errno_reset(&self.projected);
-        let factors = proj_internal::factors(&self.projected, longitude_radians, latitude_radians);
-        let proj_errno = proj_internal::errno(&self.projected);
+        self.proj.clear_diagnostics();
+        let [projected, _] = self.proj.objects();
+        proj_internal::errno_reset(projected);
+        let factors = proj_internal::factors(projected, longitude_radians, latitude_radians);
+        let proj_errno = proj_internal::errno(projected);
 
         // On failure PROJ returns an all-zero struct and sets the errno.
         if proj_errno != 0
@@ -299,15 +294,15 @@ impl GridFactorCalculator {
             || !factors.meridian_convergence.is_finite()
         {
             let mut reason = if proj_errno != 0 {
-                proj_internal::describe_errno(&self.context, proj_errno)
+                self.proj.describe_errno(proj_errno)
             } else {
                 String::from("PROJ returned no factors")
             };
-            let log = self.context.consume_diagnostics();
+            let log = self.proj.consume_diagnostics();
             if !log.is_empty() {
                 reason = format!("{reason}; {log}");
             }
-            proj_internal::errno_reset(&self.projected);
+            proj_internal::errno_reset(projected);
             return Err(Error::new(
                 ErrorCode::InvalidArgument,
                 "grid factors cannot be evaluated at this position (outside the domain of the \

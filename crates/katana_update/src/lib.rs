@@ -7,6 +7,11 @@
 //! driven in-process by tests with fakes. Every method takes `&self`, as one C++ reference is
 //! handed to the apply, the journal and the test at once: an implementation that keeps state
 //! (a fake's record, [`FaultFs`]'s counters) keeps it in a `Cell` or a `RefCell`.
+//!
+//! The system calls behind the real seams are in two modules of their own, `win32` (one child
+//! per area) and `posix`, the crate's only unsafe code but for signature.rs's environment
+//! hardening, whose caller's promise is part of its signature (docs/rust.md, "Unsafe confined to
+//! FFI modules").
 
 pub mod apply;
 pub mod check;
@@ -29,6 +34,8 @@ pub mod long_path;
 pub mod manifest;
 pub mod paths;
 pub mod plan;
+#[cfg(not(windows))]
+mod posix;
 pub mod process;
 #[cfg(not(windows))]
 mod process_scan_posix;
@@ -52,6 +59,8 @@ pub mod stage;
 pub mod state;
 pub mod trust;
 pub mod version;
+#[cfg(windows)]
+mod win32;
 
 pub use apply::{
     APPLIER_PROTOCOL, ApplyOutcome, ApplyRequest, ApplyResult, ApplyServices, ApplyTimings,

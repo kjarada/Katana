@@ -508,15 +508,16 @@ fn running_executable() -> Result<PathBuf> {
 // std::filesystem::equivalent on Windows: the volume and the file index of each, read from a
 // handle that may be a folder's (FILE_FLAG_BACKUP_SEMANTICS) and that lets every other process on.
 // std opens the handle and closes it; it has no stable way to read the index (MetadataExt's
-// volume_serial_number and file_index are unstable), so that one call stays a Win32 one.
+// volume_serial_number and file_index are unstable), so that one call stays a Win32 one, in
+// win32::fs (file_information).
 #[cfg(windows)]
 mod windows {
-    use std::fs::{File, OpenOptions};
+    use crate::win32::fs::file_information;
+    use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
     use std::path::Path;
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     pub(super) fn file_identity(path: &Path) -> Option<(u32, u32, u32)> {
@@ -528,26 +529,11 @@ mod windows {
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
             .open(path)
             .ok()?;
-        let information = information_of(&file)?;
+        let information = file_information(&file)?;
         Some((
             information.dwVolumeSerialNumber,
             information.nFileIndexHigh,
             information.nFileIndexLow,
         ))
-    }
-
-    #[allow(
-        unsafe_code,
-        reason = "GetFileInformationByHandle, the file's volume and index, has no stable std equivalent"
-    )]
-    fn information_of(file: &File) -> Option<BY_HANDLE_FILE_INFORMATION> {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
-
-        let mut information = BY_HANDLE_FILE_INFORMATION::default();
-        // SAFETY: the handle is `file`'s, open for the length of the call, and `information` is a
-        // writable struct of the type the call fills.
-        let read = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) };
-        (read != 0).then_some(information)
     }
 }
