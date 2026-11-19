@@ -105,8 +105,6 @@ pub const FLOAT_HEADER: f32 = 18.0;
 pub const FLOAT_WIDTH: f32 = 320.0;
 /// How far from the bars of a side a drop still docks there, as a new line next to them.
 pub const NEW_LINE_ZONE: f32 = 10.0;
-/// The grip before a toolbar that shows no name: its length along the bar.
-pub const GRIP: i32 = 6;
 
 /// The window's places of its toolbars, in their order along their lines.
 pub type Places = Vec<(String, BarPlace)>;
@@ -477,6 +475,89 @@ impl MenuPanels {
     pub fn set_band(&mut self, side: Side, breadth: f32) {
         self.bands[side.index()] = breadth.clamp(LEAST_BAND, MOST_BAND);
     }
+}
+
+/// What an item of a torn-off menu is to the flow of its columns (`flow_columns`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlowItem {
+    /// An action or a submenu.
+    Item,
+    /// A titled section: it begins a group, and is never the last of a column.
+    Section,
+    /// A rule: it begins a group, and is left out where it would begin a column.
+    Separator,
+}
+
+/// A torn-off menu's items, of `kinds` and `heights`, flowed into columns `room` high with
+/// `spacing` between the items of a column: each column filled to the room, then the next. A
+/// group - a section's title or a rule and the items up to the next - starts a new column when it
+/// does not fit under the items before it but fits a column of its own, so a section is not
+/// split where it need not be; a group taller than a column runs on from where the last ended. A
+/// section's title is never the last of a column, and a rule never the first (it parts nothing
+/// there, and is left out). Every item lies wholly inside the room, unless one alone is taller.
+///
+/// For a menu docked along the top or the bottom (`MainWindow::menu_panels_ui`): drawn as one
+/// column, as down a side, a band of some six items' height showed four of Draw's forty and left
+/// the rest of the window's width empty (the sixth look audit).
+pub fn flow_columns(kinds: &[FlowItem], heights: &[f32], room: f32, spacing: f32) -> Vec<Vec<usize>> {
+    let height = |index: usize| heights.get(index).copied().unwrap_or(0.0);
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, kind) in kinds.iter().enumerate() {
+        if *kind != FlowItem::Item || groups.is_empty() {
+            groups.push(Vec::new());
+        }
+        if let Some(group) = groups.last_mut() {
+            group.push(index);
+        }
+    }
+    let stacked = |items: &[usize]| -> f32 {
+        items.iter().map(|&index| height(index)).sum::<f32>()
+            + spacing * items.len().saturating_sub(1) as f32
+    };
+    let fits = |used: f32, column: &[usize], extent: f32| {
+        let gap = if column.is_empty() { 0.0 } else { spacing };
+        used + gap + extent <= room
+    };
+    let mut columns: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut used = 0.0;
+    for group in groups {
+        let body = match group.first() {
+            Some(&first) if kinds[first] == FlowItem::Separator => &group[1..],
+            _ => &group[..],
+        };
+        let started = columns
+            .last()
+            .is_some_and(|column| !column.is_empty() && !fits(used, column, stacked(&group)));
+        if started && stacked(body) <= room {
+            columns.push(Vec::new());
+            used = 0.0;
+        }
+        for (at, &index) in group.iter().enumerate() {
+            let kind = kinds[index];
+            // A title needs its first item under it in the same column.
+            let extent = match (kind, group.get(at + 1)) {
+                (FlowItem::Section, Some(&next)) => height(index) + spacing + height(next),
+                _ => height(index),
+            };
+            let full = columns
+                .last()
+                .is_some_and(|column| !column.is_empty() && !fits(used, column, extent));
+            if full {
+                columns.push(Vec::new());
+                used = 0.0;
+            }
+            let Some(column) = columns.last_mut() else {
+                continue;
+            };
+            if kind == FlowItem::Separator && column.is_empty() {
+                continue;
+            }
+            used += if column.is_empty() { 0.0 } else { spacing } + height(index);
+            column.push(index);
+        }
+    }
+    columns.retain(|column| !column.is_empty());
+    columns
 }
 
 /// The dock object name of `menu`'s torn-off panel: its drive target and its chrome's.

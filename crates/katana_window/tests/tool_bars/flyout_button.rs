@@ -1771,3 +1771,63 @@ mod tool_bar_overflow {
         }
     }
 }
+
+mod tool_bar_separators {
+    use super::*;
+
+    /// A strip of two buttons parted by a separator, along a row or down a column.
+    fn parted(vertical: bool) -> Strip {
+        let button = |name: &str| StripItem::Action {
+            action: Action::new(name, name).icon("draw.circle"),
+            tool: false,
+            tooltip: String::from(name),
+        };
+        Strip {
+            name: String::from("PartedToolBar"),
+            title: String::from("Parted"),
+            vertical,
+            icon_size: 20,
+            items: vec![button("first"), StripItem::Separator, button("second")],
+        }
+    }
+
+    #[test]
+    fn a_separator_is_drawn_across_the_whole_bar_along_a_row_and_down_a_column() {
+        // Its cell was its own 11 by 9 and its rule, 4 points in from either end of the 9, a
+        // single point: every bar's separators were grey dots, read as gaps (the sixth look
+        // audit). Its cell spans the bar's buttons, 33 points at 20 point icons.
+        for vertical in [false, true] {
+            let strip = parted(vertical);
+            let mut harness = Harness::new();
+            let mut shown = None;
+            harness.frame(|ui| {
+                shown = Some(tool_bar_strip(
+                    ui,
+                    &strip,
+                    200.0,
+                    &mut |_ui: &mut Ui, _rect: Rect, _name: &str| false,
+                ));
+            });
+            let shown = shown.expect("the toolbar is drawn");
+            let separator = shown
+                .rects
+                .iter()
+                .find(|(name, _)| name.is_empty())
+                .map(|(_, rect)| *rect)
+                .expect("the separator is drawn");
+            let first = shown
+                .rects
+                .iter()
+                .find(|(name, _)| name == "first")
+                .map(|(_, rect)| *rect)
+                .expect("the first button");
+            if vertical {
+                assert_eq!(separator.width(), first.width(), "across the column");
+                assert_eq!(separator.min.x, first.min.x);
+            } else {
+                assert_eq!(separator.height(), first.height(), "across the row");
+                assert_eq!(separator.min.y, first.min.y);
+            }
+        }
+    }
+}

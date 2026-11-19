@@ -323,6 +323,20 @@ fn gutter_id() -> egui::Id {
     egui::Id::new("katanaMenuGutter")
 }
 
+/// The id of the space after a menu item's shortcut or submenu arrow (`right_trail`).
+fn trail_id() -> egui::Id {
+    egui::Id::new("katanaMenuTrail")
+}
+
+/// The space after a menu item's shortcut or submenu arrow, so they stand as far in from the
+/// menu's right edge as its icons do from its left: the button's padding and a check column's
+/// width (theme::style::MENU_CHECK_WIDTH), the gap egui leaves before an atom included. They sat
+/// the button's 2 points from the edge against the icons' 14 (the sixth look audit).
+fn right_trail(ui: &Ui) -> egui::Atom<'static> {
+    let width = (crate::theme::style::MENU_CHECK_WIDTH - ui.spacing().icon_spacing).max(0.0);
+    egui::Atom::custom(trail_id(), egui::vec2(width, 0.0))
+}
+
 /// A menu item's button: its gutter (theme::style::MENU_GUTTER_WIDTH, a menu icon high) then
 /// `text`, unframed until the pointer is on it wherever it is drawn - a menu bar's popup gives its
 /// items egui's menu style, a popup of the window's own (shell::popup_menu) does not.
@@ -345,7 +359,7 @@ pub fn action_item(ui: &mut Ui, action: &Action) -> Response {
         let text = action.display_text();
         let mut button = item_button(text.clone());
         if let Some(shortcut) = &action.shortcut {
-            button = button.shortcut_text(shortcut_text(shortcut));
+            button = button.shortcut_text((shortcut_text(shortcut), right_trail(ui)));
         }
         let shown = button.atom_ui(ui);
         if let Some(gutter) = shown.rect(gutter_id()) {
@@ -439,6 +453,14 @@ fn items_ui(
     // window's own rather than egui's (shell::popup_menu, a step's menu), which gave every item a
     // button's border.
     egui::containers::menu::menu_style(ui.style_mut());
+    if torn.is_some() {
+        // A popup of the menu bar is as wide as its widest item, whose text never wraps: egui
+        // sizes the popup before its column scrolls, and the scroll bar that a menu taller than
+        // the screen then shows took its width from the items - View > Toolbars' Show Toolbar
+        // Names wrapped onto two lines once the tear-off line no longer made every menu 590
+        // points wide.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+    }
     if let Some(torn) = torn.as_deref_mut() {
         let line = tear_off_line(ui, menu);
         if line.clicked() {
@@ -446,31 +468,47 @@ fn items_ui(
         }
     }
     for item in &menu.items {
-        match item {
-            MenuItem::Action(action) => {
-                if action_item(ui, action).clicked() && !action.name.is_empty() {
-                    *chosen = Some(action.name.clone());
-                }
+        let _ = item_ui(ui, item, chosen, torn.as_deref_mut());
+    }
+}
+
+/// One item of a menu drawn into a menu's `ui` as `menu_items_ui` draws each, with what it drew:
+/// for a torn-off menu that lays its items out itself, in columns along a band
+/// (main_window::docking_ui). The caller gives `ui` egui's menu look
+/// (egui::containers::menu::menu_style), as `menu_items_ui` does.
+pub fn menu_item_ui(ui: &mut Ui, item: &MenuItem, chosen: &mut Option<String>) -> Response {
+    item_ui(ui, item, chosen, None)
+}
+
+fn item_ui(
+    ui: &mut Ui,
+    item: &MenuItem,
+    chosen: &mut Option<String>,
+    torn: Option<&mut Option<(String, egui::Pos2)>>,
+) -> Response {
+    match item {
+        MenuItem::Action(action) => {
+            let response = action_item(ui, action);
+            if response.clicked() && !action.name.is_empty() {
+                *chosen = Some(action.name.clone());
             }
-            MenuItem::Section(title) => {
-                crate::theme::menu_section(ui, title);
-            }
-            MenuItem::Separator => {
-                crate::theme::menu_separator(ui);
-            }
-            MenuItem::Menu(submenu) => {
-                submenu_item(ui, submenu, |ui| {
-                    crate::shell::dialog::menu_column(ui, |ui| {
-                        items_ui(ui, submenu, chosen, torn.as_deref_mut());
-                    });
-                });
-            }
+            response
         }
+        MenuItem::Section(title) => crate::theme::menu_section(ui, title),
+        MenuItem::Separator => crate::theme::menu_separator(ui),
+        MenuItem::Menu(submenu) => submenu_item(ui, submenu, |ui| {
+            crate::shell::dialog::menu_column(ui, |ui| {
+                items_ui(ui, submenu, chosen, torn);
+            });
+        }),
     }
 }
 
 /// The tear-off line's height: a dashed rule and a few points over and under it to click.
 pub const TEAR_OFF_HEIGHT: f32 = 9.0;
+/// The least the tear-off line asks of a menu's width: a few dashes between its 6 point insets.
+/// Every menu's items are wider, so it never widens one.
+pub const TEAR_OFF_LEAST_WIDTH: f32 = 48.0;
 
 /// The object name of `menu`'s tear-off line: `tearOff` and the menu's object name with its first
 /// letter upper case ("tearOffViewMenu"), as the action that tears it off is named after it
@@ -493,9 +531,17 @@ pub fn tear_off_name(menu: &str) -> String {
 pub fn tear_off_line(ui: &mut Ui, menu: &Menu) -> Response {
     let name = tear_off_name(&menu.name);
     let taken = take(ui, &name);
-    let width = ui.available_width().max(48.0);
-    let (rect, mut response) =
-        ui.allocate_exact_size(egui::vec2(width, TEAR_OFF_HEIGHT), egui::Sense::click());
+    // The line takes the menu's width and never sets it. egui lays a popup out first in a sizing
+    // pass, unjustified, offered its default area's width; a line as wide as that room made every
+    // menu that wide - 590 points, where File needs 201 and Edit 157 - and flung the shortcuts
+    // and submenu arrows to its far edge (the sixth look audit). Asked for its least width, it is
+    // that in the sizing pass, and the column's whole width afterwards, since a menu's column is
+    // justified (`Ui::allocate_response` gives a justified layout's widget the full width).
+    let mut response = ui.allocate_response(
+        egui::vec2(TEAR_OFF_LEAST_WIDTH, TEAR_OFF_HEIGHT),
+        egui::Sense::click(),
+    );
+    let rect = response.rect;
     let hovered = response.hovered();
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -559,9 +605,11 @@ pub fn tear_off_line(ui: &mut Ui, menu: &Menu) -> Response {
 /// The item that opens `submenu` (egui's SubMenuButton in a menu, a MenuButton elsewhere, as
 /// `Ui::menu_button` chooses): its icon in the gutter its siblings have, its title, and the arrow
 /// egui draws a submenu with; `add` draws what it opens.
-fn submenu_item(ui: &mut Ui, submenu: &Menu, add: impl FnOnce(&mut Ui)) {
-    let button = item_button(submenu.title.replace('&', ""))
-        .right_text(egui::containers::menu::SubMenuButton::RIGHT_ARROW);
+fn submenu_item(ui: &mut Ui, submenu: &Menu, add: impl FnOnce(&mut Ui)) -> Response {
+    let button = item_button(submenu.title.replace('&', "")).right_text((
+        egui::containers::menu::SubMenuButton::RIGHT_ARROW,
+        right_trail(ui),
+    ));
     let response = if egui::containers::menu::is_in_menu(ui) {
         egui::containers::menu::SubMenuButton::from_button(button)
             .ui(ui, add)
@@ -585,13 +633,85 @@ fn submenu_item(ui: &mut Ui, submenu: &Menu, add: impl FnOnce(&mut Ui)) {
     if ui.is_rect_visible(gutter) {
         crate::theme::style::paint_menu_gutter(ui.painter(), gutter, submenu.icon, false);
     }
+    response
 }
 
 #[cfg(test)]
 mod tests {
     use egui::{Key, KeyboardShortcut, Modifiers};
 
-    use super::{Action, Menu, shortcut_text};
+    use super::{Action, Menu, menu_items_tearable_ui, menu_items_ui, shortcut_text};
+
+    /// A menu like File: sections, items with and without shortcuts, a submenu.
+    fn file_like() -> Menu {
+        Menu::new("fileMenu", "&File")
+            .section("Drawing")
+            .action(
+                Action::new("fileNew", "&New")
+                    .icon("New")
+                    .shortcut(KeyboardShortcut::new(Modifiers::COMMAND, Key::N)),
+            )
+            .action(
+                Action::new("fileSaveAs", "Save &As...")
+                    .icon("SaveAs")
+                    .shortcut(KeyboardShortcut::new(
+                        Modifiers::COMMAND | Modifiers::SHIFT,
+                        Key::S,
+                    )),
+            )
+            .section("Import and export")
+            .submenu(Menu::new("fileImportMenu", "&Import").icon("Import"))
+            .action(Action::new("fileQuit", "&Quit").icon("Quit"))
+    }
+
+    /// The width of `menu` popped up as the menu bar pops one up - an Area, laid out first in
+    /// egui's sizing pass, framed as a menu with its items in one column - with its tear-off line
+    /// when `tearable`, after the frames that settle it.
+    fn popup_width(menu: &Menu, tearable: bool) -> f32 {
+        let mut harness = crate::drive::Harness::new();
+        let mut width = 0.0;
+        for _ in 0..4 {
+            let _ = harness.frame(|ui| {
+                let shown = egui::Area::new(egui::Id::new("menuUnderTest"))
+                    .fixed_pos(egui::pos2(10.0, 10.0))
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::menu(ui.style()).show(ui, |ui| {
+                            ui.with_layout(
+                                egui::Layout::top_down_justified(egui::Align::Min),
+                                |ui| {
+                                    crate::shell::dialog::menu_column(ui, |ui| {
+                                        let mut chosen = None;
+                                        let mut torn = None;
+                                        if tearable {
+                                            menu_items_tearable_ui(ui, menu, &mut chosen, &mut torn);
+                                        } else {
+                                            menu_items_ui(ui, menu, &mut chosen);
+                                        }
+                                    });
+                                },
+                            );
+                        });
+                    });
+                width = shown.response.rect.width();
+            });
+        }
+        width
+    }
+
+    #[test]
+    fn a_menus_tear_off_line_takes_the_menus_width_and_never_widens_it() {
+        // The line asked for the room egui's sizing pass offers a popup, and every menu was 590
+        // points wide: File needs some 200 (the sixth look audit).
+        let menu = file_like();
+        let without = popup_width(&menu, false);
+        let with = popup_width(&menu, true);
+        assert!(without > 100.0, "the premise: the menu is drawn ({without})");
+        assert!(
+            (with - without).abs() <= 1.0,
+            "with its tear-off line {with}, without {without}"
+        );
+        assert!(with < 300.0, "{with}");
+    }
 
     #[test]
     fn a_shortcut_is_written_as_qts_portable_text() {

@@ -2021,7 +2021,10 @@ pub fn tool_bar_strip(
         )
     };
     for (index, item) in strip.items.iter().enumerate() {
-        let rect = place(layout.offsets[index], sizes[index]);
+        let rect = place(
+            layout.offsets[index],
+            separator_cell(item, sizes[index], breadth, vertical),
+        );
         if layout.shown[index] {
             draw_strip_item(ui, rect, item, strip, widget, &mut out);
             out.rects.push((String::from(item.name()), rect));
@@ -2179,6 +2182,52 @@ pub fn tool_bar_strip(
     out
 }
 
+/// The cell an item is drawn in: its own size, but a separator across the whole of the bar's
+/// `breadth`, so its rule crosses the bar as QToolBar's did (a 1 point line, 4 points short of
+/// either side of a row's bar, 5 of a column's). Its cell was its own 11 by 9, and the rule drawn
+/// 4 points in from either end of 9 points was one point long: every toolbar's separators were
+/// grey dots, read as blank gaps (the sixth look audit).
+pub fn separator_cell(item: &StripItem, size: (i32, i32), breadth: i32, vertical: bool) -> (i32, i32) {
+    match (item, vertical) {
+        (StripItem::Separator, true) => (breadth, size.1),
+        (StripItem::Separator, false) => (size.0, breadth),
+        _ => size,
+    }
+}
+
+/// A separator's rule in its cell (`separator_cell`): across a row's bar, 4 points short of
+/// either side (QToolBar::separator's margin: 4px 5px); across a column's, 5 short.
+pub fn separator_rule(cell: Rect, vertical: bool) -> [Pos2; 2] {
+    if vertical {
+        let y = cell.center().y;
+        [
+            Pos2::new(cell.left() + 5.0, y),
+            Pos2::new(cell.right() - 5.0, y),
+        ]
+    } else {
+        let x = cell.center().x;
+        [
+            Pos2::new(x, cell.top() + 4.0),
+            Pos2::new(x, cell.bottom() - 4.0),
+        ]
+    }
+}
+
+/// The width a floating toolbar asked to be `width` wide is drawn at: the least that lays its
+/// items out in as few rows as `width` does (`wrap_strip`). Filling each row in turn to `width`
+/// left the last row ragged - Terrain floated at 320 was seven buttons and then one alone under
+/// them, with 50 points to spare on the first row (the sixth look audit); the least width for
+/// the same rows shares the buttons out between them, and the bar has no empty end.
+pub fn balanced_wrap_width(sizes: &[(i32, i32)], separators: &[bool], width: i32) -> i32 {
+    let rows = wrap_strip(sizes, separators, width).rows;
+    let least = sizes.iter().map(|size| size.0).max().unwrap_or(0) + 2 * TOOL_BAR_PADDING_ALONG;
+    // The rows a greedy wrap takes never grow with the width, so the first width from the least
+    // up that needs no more rows is the least that does.
+    (least.min(width)..=width)
+        .find(|&each| wrap_strip(sizes, separators, each).rows <= rows)
+        .unwrap_or(width)
+}
+
 /// Where a floating toolbar's items go when they wrap in a width (main_window::docking_ui): each
 /// item's offset from the bar's corner, which are shown - a separator that would begin or end a
 /// row parts nothing and is not - how many rows there are, and the bar's size.
@@ -2290,7 +2339,7 @@ pub fn tool_bar_wrapped(
             continue;
         }
         let (x, y) = layout.offsets[index];
-        let (item_width, item_height) = sizes[index];
+        let (item_width, item_height) = separator_cell(item, sizes[index], breadth, false);
         let rect = Rect::from_min_size(
             bar.min + Vec2::new(x as f32, (y + (breadth - item_height) / 2) as f32),
             Vec2::new(item_width as f32, item_height as f32),
@@ -2345,21 +2394,18 @@ fn draw_strip_item(
             status = shown.status_tip;
         }
         StripItem::Separator => {
+            let line = separator_rule(rect, strip.vertical);
+            // On a whole device pixel at any scale, so it is a crisp line one pixel wide: centred
+            // on a half point it was two blurred pixels at 125 %.
+            let painter = ui.painter();
             let line = if strip.vertical {
-                let y = rect.center().y.floor() + 0.5;
-                [
-                    Pos2::new(rect.left() + 5.0, y),
-                    Pos2::new(rect.right() - 5.0, y),
-                ]
+                let y = painter.round_to_pixel_center(line[0].y);
+                [Pos2::new(line[0].x, y), Pos2::new(line[1].x, y)]
             } else {
-                let x = rect.center().x.floor() + 0.5;
-                [
-                    Pos2::new(x, rect.top() + 4.0),
-                    Pos2::new(x, rect.bottom() - 4.0),
-                ]
+                let x = painter.round_to_pixel_center(line[0].x);
+                [Pos2::new(x, line[0].y), Pos2::new(x, line[1].y)]
             };
-            ui.painter()
-                .line_segment(line, egui::Stroke::new(1.0, palette::border().to_egui()));
+            painter.line_segment(line, egui::Stroke::new(1.0, palette::border().to_egui()));
         }
         StripItem::Widget { name, .. } => {
             if widget(ui, rect, name) {

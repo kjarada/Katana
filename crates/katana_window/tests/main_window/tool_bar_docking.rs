@@ -11,11 +11,14 @@ use katana_window::drive::headless::Headless;
 use katana_window::drive::DrivenWindow;
 use katana_window::main_window::actions::BarPlace;
 use katana_window::main_window::docking::{
-    DropSpot, DropZones, FloatAt, PanelPlace, Side, apply_drop, drop_spot, normalise,
-    panel_drop_side, parse_action, DockingAction,
+    DropSpot, DropZones, FloatAt, FlowItem, PanelPlace, Side, apply_drop, drop_spot,
+    flow_columns, normalise, panel_drop_side, parse_action, DockingAction,
 };
+use katana_window::main_window::docking_ui::{GRIP_DOT, grip_dots};
 use katana_window::main_window::layout;
-use katana_window::tools::flyout_button::wrap_strip;
+use katana_window::tools::flyout_button::{
+    StripItem, balanced_wrap_width, separator_cell, separator_rule, wrap_strip,
+};
 
 /// The window drawn until it is idle, and the runner that drew it.
 fn settled(window: &mut MainWindow) -> Headless {
@@ -412,16 +415,164 @@ mod tool_bar_docking {
         assert!(window.trigger("viewToolBarPlace:DraftingToolBar:left:0").is_err());
     }
 
+
+    /// Every action of `bar` drawn on it and not behind an arrow.
+    fn every_tool_shown(window: &MainWindow, headless: &Headless, bar: &str) {
+        let frame = headless.snapshot();
+        let composed = window.composed();
+        let (toolbar, _) = composed
+            .bars
+            .iter()
+            .find(|(each, _)| each.name == bar)
+            .unwrap_or_else(|| panic!("the window has a toolbar {bar}"));
+        assert!(!toolbar.actions().is_empty());
+        for action in toolbar.actions() {
+            let control = frame
+                .control(bar, &action.name)
+                .unwrap_or_else(|| panic!("{} is drawn on {bar}", action.name));
+            assert!(control.visible, "{} of {bar} is not behind an arrow", action.name);
+        }
+    }
+
+    #[test]
+    fn a_bar_docked_to_a_full_side_takes_a_line_of_its_own_and_shows_its_tools() {
+        // Modify fills the right column at 1360 x 860, Draw and Annotate the left. Docked to
+        // the end of the column already there, Draw was one button long with its tools behind
+        // an arrow (drawn=1321,761,39,45, the sixth look audit); as Dock Top does, a side opens
+        // a line of its own for a bar that does not fit whole on one it has.
+        let mut window = MainWindow::new();
+        window.trigger("viewToolBarDockDrawRight").expect("docked right");
+        assert_eq!(place_of(&window, "ModifyToolBar"), BarPlace::Right(0));
+        assert_eq!(place_of(&window, "DrawToolBar"), BarPlace::Right(1));
+        let headless = settled(&mut window);
+        let draw = drawn(&headless, "DrawToolBar");
+        let modify = drawn(&headless, "ModifyToolBar");
+        assert!(draw.height() > 300.0, "Draw has its column's length: {draw:?}");
+        assert!(draw.max.x <= modify.min.x + 0.5, "inside Modify's column: {draw:?} {modify:?}");
+        // GIS docked left goes beside Draw's old column, now Annotate's, and shows every tool.
+        window.trigger("viewToolBarDockGISLeft").expect("docked left");
+        let headless = settled(&mut window);
+        let gis = place_of(&window, "GISToolBar");
+        assert_eq!(gis.docked().map(|(side, _)| side), Some(Side::Left));
+        every_tool_shown(&window, &headless, "GISToolBar");
+        // A bar that fits whole under another on a side joins its line: Survey docked to the
+        // bottom, then Terrain beside it.
+        window.trigger("viewToolBarDockSurveyBottom").expect("docked bottom");
+        window.trigger("viewToolBarDockTerrainBottom").expect("docked bottom");
+        assert_eq!(place_of(&window, "SurveyToolBar"), BarPlace::Bottom(0));
+        assert_eq!(place_of(&window, "TerrainToolBar"), BarPlace::Bottom(0));
+        let headless = settled(&mut window);
+        every_tool_shown(&window, &headless, "TerrainToolBar");
+    }
+
+    #[test]
+    fn a_broad_bar_docked_down_a_side_takes_a_column_of_its_own_and_narrows_none() {
+        // The Properties bar's style box is 214 points; down the left beside Draw it made the
+        // column 220 broad, Draw's buttons in its first 39 points and a void beside them.
+        let mut window = MainWindow::new();
+        window.trigger("viewToolBarDockPropertiesLeft").expect("docked left");
+        assert_eq!(place_of(&window, "DrawToolBar"), BarPlace::Left(0));
+        assert_eq!(place_of(&window, "PropertiesToolBar"), BarPlace::Left(1));
+        let headless = settled(&mut window);
+        let draw = drawn(&headless, "DrawToolBar");
+        let properties = drawn(&headless, "PropertiesToolBar");
+        assert!(draw.width() <= layout::SIDE + 0.5, "Draw's column stays narrow: {draw:?}");
+        assert!(properties.min.x >= draw.max.x - 0.5, "{properties:?} beside {draw:?}");
+        // Placed on Draw's column all the same, by a precise place, each bar is drawn at its own
+        // breadth against the window's edge: Draw claims no void beside its buttons.
+        window
+            .trigger("viewToolBarPlace:PropertiesToolBar:left:0")
+            .expect("placed");
+        let headless = settled(&mut window);
+        let draw = drawn(&headless, "DrawToolBar");
+        let properties = drawn(&headless, "PropertiesToolBar");
+        assert!(draw.width() <= layout::SIDE + 0.5, "{draw:?}");
+        assert!(properties.width() > 200.0, "{properties:?}");
+        assert_eq!(draw.min.x, properties.min.x, "both against the window's edge");
+    }
+
+    #[test]
+    fn a_grip_is_clear_of_its_bars_name_and_the_windows_edge_and_centred_on_its_buttons() {
+        for (icons, size) in [("viewToolBarIconsStandard", 20), ("viewToolBarIconsLarge", 28)] {
+            let mut window = MainWindow::new();
+            window.trigger(icons).expect(icons);
+            assert_eq!(window.ui.bars.icon_size, size);
+            let headless = settled(&mut window);
+            let frame = headless.snapshot();
+            let file = drawn(&headless, "FileToolBar");
+            let dots = grip_dots(file.min, layout::bar_breadth(size), false);
+            let ink_left = dots.iter().map(|dot| dot.x).fold(f32::MAX, f32::min) - GRIP_DOT;
+            let ink_right = dots.iter().map(|dot| dot.x).fold(f32::MIN, f32::max) + GRIP_DOT;
+            let name = frame
+                .control("FileToolBar", "toolBarName")
+                .expect("the File bar shows its name")
+                .rect;
+            // The dots touched the word ("#File"): a gap of 4 to 6 points now, and clear of the
+            // window's edge, which the first bar of a row starts at.
+            let gap = name.min.x - ink_right;
+            assert!((4.0..=6.0).contains(&gap), "{icons}: {gap} between the grip and File");
+            assert_eq!(file.min.x, window.ui.docking.screen.min.x);
+            assert!(ink_left - file.min.x >= 1.5, "{icons}: {ink_left} from the edge");
+            // Centred on the buttons' middle line, which with large icons is not the line's.
+            let button = frame
+                .control("FileToolBar", "fileNew")
+                .expect("File's New button")
+                .rect;
+            let middle = dots.iter().map(|dot| dot.y).sum::<f32>() / dots.len() as f32;
+            assert!(
+                (middle - button.center().y).abs() <= 1.0,
+                "{icons}: the grip's middle {middle} against New's {}",
+                button.center().y
+            );
+        }
+    }
+
+    #[test]
+    fn a_floating_bar_shares_its_buttons_between_its_rows_and_has_no_empty_end() {
+        // Terrain floated at the width a menu item floats a bar at was seven buttons over one
+        // alone (the sixth look audit): drawn at the least width for its rows, no row is a lone
+        // button while another has room to spare.
+        let mut window = MainWindow::new();
+        window
+            .trigger("viewToolBarPlace:TerrainToolBar:float:400,300,320")
+            .expect("floated");
+        let headless = settled(&mut window);
+        let bar = drawn(&headless, "TerrainToolBar");
+        assert!(bar.width() <= 320.0, "{bar:?}");
+        let frame = headless.snapshot();
+        let mut rows: Vec<(f32, usize)> = Vec::new();
+        for control in frame
+            .in_target("TerrainToolBar")
+            .filter(|control| control.visible && bar.contains_rect(control.rect))
+            .filter(|control| control.rect.height() > 20.0)
+        {
+            let y = control.rect.center().y.round();
+            match rows.iter_mut().find(|(at, _)| (*at - y).abs() < 2.0) {
+                Some((_, count)) => *count += 1,
+                None => rows.push((y, 1)),
+            }
+        }
+        rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(rows.len() >= 2, "the premise: Terrain wraps at 320: {rows:?}");
+        let most = rows.iter().map(|(_, count)| *count).max().unwrap_or(0);
+        let least = rows.iter().map(|(_, count)| *count).min().unwrap_or(0);
+        assert!(most - least <= 2, "rows shared out: {rows:?}");
+        every_tool_shown(&window, &headless, "TerrainToolBar");
+    }
+
     #[test]
     fn a_headless_run_reports_where_each_bar_and_torn_off_menu_is() {
         let mut window = MainWindow::new();
         window.trigger("viewToolBarDockDrawRight").expect("docked");
         window.trigger("viewMenuTearOffViewMenu").expect("torn off");
         settled(&mut window);
+        // Draw docked right takes a column of its own beside Modify's, which it does not fit
+        // under (`a_bar_docked_to_a_full_side_takes_a_line_of_its_own_and_shows_its_tools`): it
+        // was put at the end of Modify's column, at=1, until the sixth look audit.
         let draw = window.docking_report("DrawToolBar").expect("a toolbar's report");
-        assert!(draw.starts_with("place=right:0 at=1 shown=yes drawn="), "{draw}");
+        assert!(draw.starts_with("place=right:1 at=0 shown=yes drawn="), "{draw}");
         let layout_report = window.docking_report("toolBarLayout").expect("the layout");
-        assert!(layout_report.contains("DrawToolBar=right:0"), "{layout_report}");
+        assert!(layout_report.contains("DrawToolBar=right:1"), "{layout_report}");
         assert!(layout_report.contains("viewMenuTornOff=float:"), "{layout_report}");
         let panel = window.docking_report("viewMenuTornOff").expect("the panel");
         assert!(panel.starts_with("place=float:"), "{panel}");
@@ -539,6 +690,79 @@ mod torn_off_menus {
             window.ui.docking.panels.find("drawMenu").map(|panel| panel.place),
             Some(PanelPlace::Docked(Side::Right))
         );
+    }
+}
+
+mod torn_off_flow {
+    use super::*;
+
+    #[test]
+    fn a_torn_off_menu_along_the_bottom_flows_its_items_into_columns_none_cut() {
+        // In one column, a bottom band of some six items' height showed four of Draw's forty and
+        // left the rest of the window's width empty (the sixth look audit).
+        let mut window = MainWindow::new();
+        window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+        window
+            .trigger("viewMenuPanelDockDrawMenuBottom")
+            .expect("docked along the bottom");
+        let headless = settled(&mut window);
+        let panel = drawn(&headless, "drawMenuTornOff");
+        let frame = headless.snapshot();
+        let items: Vec<Rect> = frame
+            .in_target("drawMenuTornOff")
+            .filter(|control| control.visible && panel.intersects(control.rect))
+            .filter(|control| !control.name.starts_with("Dock"))
+            .map(|control| control.rect)
+            .collect();
+        let mut columns: Vec<f32> = items.iter().map(|rect| rect.min.x.round()).collect();
+        columns.sort_by(f32::total_cmp);
+        columns.dedup();
+        assert!(columns.len() >= 3, "flowed into columns: {columns:?}");
+        assert!(items.len() >= 12, "more than one column's worth shown: {}", items.len());
+        for rect in &items {
+            assert!(rect.max.y <= panel.max.y + 0.5, "{rect:?} is cut at the band's bottom {panel:?}");
+        }
+        // Down a side it is one column still.
+        window
+            .trigger("viewMenuPanelDockDrawMenuLeft")
+            .expect("docked left");
+        let headless = settled(&mut window);
+        let panel = drawn(&headless, "drawMenuTornOff");
+        let frame = headless.snapshot();
+        let mut lefts: Vec<f32> = frame
+            .in_target("drawMenuTornOff")
+            .filter(|control| control.visible && panel.contains_rect(control.rect))
+            .filter(|control| !control.name.starts_with("Dock"))
+            .map(|control| control.rect.min.x.round())
+            .collect();
+        lefts.sort_by(f32::total_cmp);
+        lefts.dedup();
+        assert_eq!(lefts.len(), 1, "{lefts:?}");
+    }
+
+    #[test]
+    fn every_menu_of_the_menu_bar_has_an_icon_its_torn_off_panel_shows() {
+        // A menu of the menu bar opens from no item and had none: its panel's title bar showed
+        // the generic panel icon.
+        let window = MainWindow::new();
+        let composed = window.composed();
+        for menu in &composed.menus {
+            assert!(
+                katana_window::icons::is_named_icon(menu.icon),
+                "{} has an icon: {:?}",
+                menu.name,
+                menu.icon
+            );
+        }
+        let draw = composed
+            .menus
+            .iter()
+            .find(|menu| menu.name == "drawMenu")
+            .expect("the Draw menu");
+        let toggle = composed
+            .action("viewToolBarDraw")
+            .expect("View > Toolbars > Draw");
+        assert_eq!(draw.icon, toggle.icon, "the icon its toolbar is listed with");
     }
 }
 
@@ -779,6 +1003,100 @@ mod docking_model {
         assert_eq!(BarPlace::from_text("float:1,2"), None);
         assert_eq!(BarPlace::from_text("top:x"), None);
         assert_eq!(BarPlace::from_text(""), None);
+    }
+
+    #[test]
+    fn a_menu_flows_into_columns_its_sections_whole_where_they_fit_and_no_rule_first() {
+        use FlowItem::{Item, Section, Separator};
+        // Sections 20 high, items 24, 100 a column, nothing between them.
+        let kinds = [Section, Item, Item, Section, Item, Item, Item];
+        let heights = [20.0, 24.0, 24.0, 20.0, 24.0, 24.0, 24.0];
+        // The first group takes 68; the second's 92 does not fit under it, and fits a column of
+        // its own.
+        assert_eq!(
+            flow_columns(&kinds, &heights, 100.0, 0.0),
+            vec![vec![0, 1, 2], vec![3, 4, 5, 6]]
+        );
+        // A group taller than a column runs on, its title never last in one: 20 + 3 x 24 = 92,
+        // and the fourth item starts the next.
+        let tall = [Section, Item, Item, Item, Item, Item];
+        let tall_heights = [20.0, 24.0, 24.0, 24.0, 24.0, 24.0];
+        assert_eq!(
+            flow_columns(&tall, &tall_heights, 100.0, 0.0),
+            vec![vec![0, 1, 2, 3], vec![4, 5]]
+        );
+        // A title that would end a column goes to the next with its first item: 3 x 24 = 72, and
+        // 72 + 20 + 24 is past 90.
+        let late = [Item, Item, Item, Section, Item];
+        let late_heights = [24.0, 24.0, 24.0, 20.0, 24.0];
+        assert_eq!(
+            flow_columns(&late, &late_heights, 90.0, 0.0),
+            vec![vec![0, 1, 2], vec![3, 4]]
+        );
+        // A rule that would begin a column is left out; one between items is kept. The spacing
+        // counts between items: 3 x 24 + 2 x 4 = 80 fits 82, a fourth does not.
+        let ruled = [Item, Item, Item, Separator, Item, Separator, Item];
+        let ruled_heights = [24.0, 24.0, 24.0, 9.0, 24.0, 9.0, 24.0];
+        assert_eq!(
+            flow_columns(&ruled, &ruled_heights, 82.0, 4.0),
+            vec![vec![0, 1, 2], vec![4, 5, 6]]
+        );
+        // Every column's items fit the room.
+        for (kinds, heights, room) in [
+            (&kinds[..], &heights[..], 100.0),
+            (&tall[..], &tall_heights[..], 100.0),
+            (&late[..], &late_heights[..], 90.0),
+        ] {
+            for column in flow_columns(kinds, heights, room, 0.0) {
+                let used: f32 = column.iter().map(|&index| heights[index]).sum();
+                assert!(used <= room, "{column:?}: {used} of {room}");
+            }
+        }
+        // Nothing: no column.
+        assert!(flow_columns(&[], &[], 100.0, 0.0).is_empty());
+    }
+
+    #[test]
+    fn a_wrapped_bar_is_drawn_at_the_least_width_for_its_rows() {
+        // Eight 33 point buttons in 255 points: seven a row (6 + 7 x 33 + 6 x 2 + 6 = 255), the
+        // eighth alone under them. The least width for two rows is four a row:
+        // 6 + 4 x 33 + 3 x 2 + 6 = 150.
+        let sizes = [(33, 33); 8];
+        let separators = [false; 8];
+        let ragged = wrap_strip(&sizes, &separators, 255);
+        assert_eq!(ragged.rows, 2);
+        assert_eq!(ragged.offsets[7], (6, 38), "the eighth alone");
+        let width = balanced_wrap_width(&sizes, &separators, 255);
+        assert_eq!(width, 150);
+        let shared = wrap_strip(&sizes, &separators, width);
+        assert_eq!(shared.rows, 2);
+        assert_eq!(shared.offsets[4], (6, 38), "the fifth starts the second row");
+        // In one row it is the row's own width; at its widest item's it stays there.
+        assert_eq!(balanced_wrap_width(&sizes, &separators, 400), 6 + 8 * 33 + 7 * 2 + 6);
+        assert_eq!(balanced_wrap_width(&sizes, &separators, 45), 45);
+        assert_eq!(balanced_wrap_width(&[], &[], 100), 12);
+    }
+
+    #[test]
+    fn a_toolbars_separator_is_a_rule_across_the_bar_not_a_dot() {
+        // A separator's own size is 11 by 9: drawn 4 points in from either end of its 9, its
+        // rule was a point long. Its cell spans the bar's breadth, and the rule crosses it 4
+        // points short of either side along a row, 5 down a column.
+        let item = StripItem::Separator;
+        assert_eq!(separator_cell(&item, (11, 9), 33, false), (11, 33));
+        assert_eq!(separator_cell(&item, (11, 9), 33, true), (33, 9));
+        let row = separator_rule(Rect::from_min_size(Pos2::new(100.0, 3.0), egui::vec2(11.0, 33.0)), false);
+        assert_eq!(row[1].y - row[0].y, 25.0);
+        assert_eq!(row[0].x, 105.5);
+        let column = separator_rule(Rect::from_min_size(Pos2::new(3.0, 100.0), egui::vec2(33.0, 9.0)), true);
+        assert_eq!(column[1].x - column[0].x, 23.0);
+        // Any other item keeps its size.
+        let widget = StripItem::Widget {
+            name: String::from("w"),
+            width: 40,
+            height: 20,
+        };
+        assert_eq!(separator_cell(&widget, (40, 20), 33, false), (40, 20));
     }
 
     #[test]

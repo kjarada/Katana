@@ -475,11 +475,10 @@ pub fn menu_text_indent(ui: &Ui) -> f32 {
 /// for hover.
 pub fn paint_menu_gutter(painter: &Painter, gutter: Rect, icon: &str, checked: bool) {
     if checked {
-        let check = Rect::from_min_size(
-            gutter.left_top(),
-            vec2(MENU_CHECK_WIDTH, gutter.height()),
-        );
-        paint_menu_tick(painter, check.center());
+        painter.add(Shape::line(
+            menu_tick(gutter).to_vec(),
+            Stroke::new(MENU_TICK_STROKE, accent().to_egui()),
+        ));
     }
     if !icon.is_empty() {
         let place = Rect::from_min_size(
@@ -493,17 +492,21 @@ pub fn paint_menu_gutter(painter: &Painter, gutter: Rect, icon: &str, checked: b
     }
 }
 
-/// The tick of a checked menu item, centred on `centre`: 8 px across and 6 high, in the accent, a
-/// stroke of 1.5 - the icons' weight at a menu's size.
-fn paint_menu_tick(painter: &Painter, centre: Pos2) {
-    painter.add(Shape::line(
-        vec![
-            pos2(centre.x - 4.0, centre.y),
-            pos2(centre.x - 1.5, centre.y + 2.5),
-            pos2(centre.x + 4.0, centre.y - 3.5),
-        ],
-        Stroke::new(1.5, accent().to_egui()),
-    ));
+/// The tick's stroke: the icons' weight at a menu's size.
+pub const MENU_TICK_STROKE: f32 = 1.5;
+
+/// The tick of a checked menu item in `gutter`'s check column: 7 points across and 6 high, in the
+/// accent (`paint_menu_gutter`), held to the column's left so a clear gap parts it from the icon.
+/// It was 8 across, centred in the column, and its stroke ended a point and a quarter short of the
+/// icon - the two read as one mark (the sixth look audit). Now its ink ends some three points
+/// before the icon's square, and starts as far in from the item's edge as the column allows.
+pub fn menu_tick(gutter: Rect) -> [Pos2; 3] {
+    let centre = pos2(gutter.left() + 4.5, gutter.center().y);
+    [
+        pos2(centre.x - 3.5, centre.y + 0.5),
+        pos2(centre.x - 1.0, centre.y + 3.0),
+        pos2(centre.x + 3.5, centre.y - 3.0),
+    ]
 }
 
 // ---- the toolbar's overflow arrow ----------------------------------------------------------------
