@@ -25,8 +25,10 @@ use crate::window_support::Scratch;
 const TEXT: &str = "Text";
 const TEMPLATE: &str = "Template (read off the entity)";
 const LABEL_STYLE: &str = "Label style's template";
-/// The text style boxes' first entry: the default text style (data "").
-const DEFAULT_STYLE: &str = "(default: Standard)";
+/// The text style boxes' first entry: the default text style (data ""), "Standard (default)" -
+/// said as the Settings dialog says its default, where it read "(default: Standard)" (the fifth
+/// look audit).
+const DEFAULT_STYLE: &str = "Standard (default)";
 
 fn manager(host: RecordingHost) -> Bench<LeaderManagerDialog> {
     Bench::new(host, |document| {

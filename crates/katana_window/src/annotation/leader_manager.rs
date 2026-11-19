@@ -1257,8 +1257,10 @@ impl LeaderManagerDialog {
     fn fill_styles(&mut self, model: &Model) {
         self.leader.fill_label_styles(model);
         self.for_note.fill_label_styles(model);
-        self.leader.fill_text_styles(model, "(default: Standard)");
-        self.for_note.fill_text_styles(model, "(default: Standard)");
+        // The default said as the Settings dialog says its own ("Katana Standard (default)"),
+        // where "(default: Standard)" was a bracketed word of its own (the fifth look audit).
+        self.leader.fill_text_styles(model, "Standard (default)");
+        self.for_note.fill_text_styles(model, "Standard (default)");
     }
 
     /// The leaders the list shows: every one, or those the "Which leaders..." scope takes

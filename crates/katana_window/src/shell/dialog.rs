@@ -1342,6 +1342,17 @@ impl DialogFrame {
                 let mut footer_rect = None;
                 let mut footer_top = None;
                 if let Some(footer) = footer.take() {
+                    // The footer starts on a whole pixel, so its rule and its 49 points are the
+                    // same pixels in every dialog: after a body ending part way through a pixel
+                    // the rule was rounded one way and the dialog's bottom the other, and four
+                    // footers measured 50 (Leaders, Settings, Symbol Library, Edit Text; the
+                    // fifth look audit).
+                    let at = ui.cursor().min.y;
+                    let per_point = ui.pixels_per_point();
+                    let snapped = (at * per_point).ceil() / per_point;
+                    if snapped > at {
+                        ui.add_space(snapped - at);
+                    }
                     footer_top = Some(ui.cursor().min.y);
                     let row_width = scope
                         .response

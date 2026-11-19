@@ -33,6 +33,68 @@ mod dialog_layout {
     const HALF_A_POINT: f32 = 0.5;
 
     #[test]
+    fn a_footer_is_one_height_whatever_fraction_of_a_pixel_its_body_ends_on() {
+        // The fifth look audit: four footers measured 50 pixels where every other is 49 - their
+        // bodies ended part way through a pixel, and the rule over the footer was rounded one way
+        // and the dialog's bottom the other. The footer starts on a whole pixel, so a body of any
+        // height has the same footer: its button a whole number of pixels from the dialog's top
+        // and the same distance above the dialog's bottom.
+        let mut harness = offscreen_harness();
+        let mut frames: Vec<DialogFrame> = (0..4)
+            .map(|at| DialogFrame::new(&format!("fraction{at}Dialog"), "Fraction"))
+            .collect();
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            for (at, frame) in frames.iter_mut().enumerate() {
+                frame.place(egui::pos2(0.0, 150.0 * at as f32));
+                frame.show(
+                    &ctx,
+                    &mut (),
+                    |ui, _| {
+                        // A body ending 0, a quarter, a half and three quarters into a pixel.
+                        ui.add_space(20.0 + 0.25 * at as f32);
+                        drive::label(ui, &format!("fraction{at}Body"), "A body");
+                    },
+                    |ui, _| {
+                        button_row(
+                            ui,
+                            |_| {},
+                            |ui| {
+                                drive::button(ui, &format!("fraction{at}Close"), "Close");
+                            },
+                        );
+                    },
+                );
+            }
+        };
+        harness.show(&mut draw).expect("the dialogs are drawn");
+        harness.frame(&mut draw).drop_without_applying_deltas();
+        let mut under = Vec::new();
+        for at in 0..4 {
+            let dialog = harness
+                .target_record(&format!("fraction{at}Dialog"))
+                .expect("a target")
+                .rect;
+            let close = harness
+                .control(&format!("fraction{at}Close"))
+                .expect("drawn")
+                .rect;
+            let from_top = close.top() - dialog.top();
+            assert!(
+                (from_top - from_top.round()).abs() < 0.01,
+                "dialog {at}: Close is {from_top} from the top, part way through a pixel"
+            );
+            under.push(dialog.bottom() - close.bottom());
+        }
+        for at in 1..4 {
+            assert!(
+                (under[at] - under[0]).abs() < 0.01,
+                "the footers differ under their buttons: {under:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_footers_buttons_end_at_the_right_edge_with_the_primary_last() {
         let mut harness = offscreen_harness();
         let mut frame = DialogFrame::new("buttonsDialog", "Buttons");

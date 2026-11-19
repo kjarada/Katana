@@ -1124,15 +1124,17 @@ once; the Survey Code Manager's Issues says "Checked 1103 rules being edited."
 under "No issues", where it said "0 errors and 0 warnings" too. Import Point
 Cloud's estimate is a row of its form ("Reads"), not a line at the body's edge;
 GDAL Formats' footer says "Line: FORMATS ...", not the bare word. Corridor
-Quantities writes m² and m³. Survey > Export Survey Points hands its `SURVEY EXPORT` line to the
+Quantities writes m² and m³. Leaders' text style says its default as Settings
+does, "Standard (default)". A footer starts on a whole pixel, so it is 49
+whatever fraction of a pixel its body ends on: four footers (Leaders,
+Settings, Symbol Library, Edit Text) measured 50. Survey > Export Survey Points hands its `SURVEY EXPORT` line to the
 executor (`docs/survey.md`, "Point files on the command line"). Not done: an
 arrow's CamelCase token ("ClosedFilled") is shown as written, Grid's height
 source (its items are property names after "geometry"), the
-footers a pixel tall (Leaders, Settings, Symbol Library, Edit Text, 50), the
 numbers still kept as text (Viewshed's heights, Surface From's Most points,
 Alignment Manager's Start chainage), the zero placeholders (Global Modify's
-Symbol, Leaders' Along and At x, Dimension Styles' Round to), "(default:
-Standard)", "(default)" and "(no menu)", the manager pattern for Dimension and
+Symbol, Leaders' Along and At x, Dimension Styles' Round to), Layers'
+"(default)" and Keyboard Shortcuts' "(no menu)", the manager pattern for Dimension and
 Surface Styles, and the import wizard's line (`docs/survey.md`).
 
 **The main window, third round.** A panel's tools are 24 point squares (the
