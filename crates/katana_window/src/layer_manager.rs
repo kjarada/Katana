@@ -58,7 +58,10 @@ use crate::survey::survey_dialogs::hidden;
 /// The dialog's name as a drive target (see the module comment).
 pub const LAYER_MANAGER: &str = "layerManager";
 const TITLE: &str = "Layers";
-const DEFAULT_DIMENSION_STYLE: &str = "(default)";
+/// What the dimension style list says for a layer of none of its own, whose dimensions take the
+/// drawing's default style: words, not a bracketed "(default)" (the sixth look audit's H), and
+/// not "Default", which a style may be called.
+const DEFAULT_DIMENSION_STYLE: &str = "Drawing default";
 /// The dialog's body width: the layer table's nine columns, its buttons, and the form under them.
 const BODY_WIDTH: f32 = 620.0;
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 2).with_suffix(" mm on paper");

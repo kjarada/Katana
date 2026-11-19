@@ -442,11 +442,28 @@ pub enum Icon {
     // GIS > Online Data: a globe, the web's data, and Import's arrow down the right. It had Import
     // Raster's grid, the item above it in the GIS menu.
     OnlineData,
+    // View > Meshes Seen from Above (2026-11-19's sixth look audit, I): the Faces item and the
+    // submenu a shaded triangle mesh, Footprints a dashed outline, Hidden the eye struck. Faces
+    // was View Top's small square, read as a bullet, and Footprints GIS's hull in GIS teal - a
+    // view setting is General.
+    MeshFaces,
+    MeshFootprint,
+    MeshHidden,
+    // A toolbar's Place menu, Dock Top / Left / Right / Bottom: the window, the band on that side
+    // bright and an arrow into it, at Float's size - they borrowed the view cube's faces, drawn in
+    // ten units where Float's box is sixteen.
+    DockTop,
+    DockLeft,
+    DockRight,
+    DockBottom,
+    // The sheet list's Copy Sheet: two whole sheets, the front one's title block bright. It had
+    // Modify > Copy's, in drafting cyan; a sheet's tool is Plotting's.
+    SheetCopy,
 }
 
 /// Every value of Icon, in declaration order, for the contact sheet and for the test that every
 /// icon paints something.
-pub const ALL_ICONS: [Icon; 197] = [
+pub const ALL_ICONS: [Icon; 205] = [
     Icon::New,
     Icon::Open,
     Icon::Save,
@@ -644,6 +661,14 @@ pub const ALL_ICONS: [Icon; 197] = [
     Icon::SurfaceAddPoints,
     Icon::SurfaceDeleteBreakline,
     Icon::OnlineData,
+    Icon::MeshFaces,
+    Icon::MeshFootprint,
+    Icon::MeshHidden,
+    Icon::DockTop,
+    Icon::DockLeft,
+    Icon::DockRight,
+    Icon::DockBottom,
+    Icon::SheetCopy,
 ];
 
 /// Every value of Icon, in declaration order (allIcons).
@@ -852,6 +877,14 @@ impl Icon {
             Self::SurfaceAddPoints => "SurfaceAddPoints",
             Self::SurfaceDeleteBreakline => "SurfaceDeleteBreakline",
             Self::OnlineData => "OnlineData",
+            Self::MeshFaces => "MeshFaces",
+            Self::MeshFootprint => "MeshFootprint",
+            Self::MeshHidden => "MeshHidden",
+            Self::DockTop => "DockTop",
+            Self::DockLeft => "DockLeft",
+            Self::DockRight => "DockRight",
+            Self::DockBottom => "DockBottom",
+            Self::SheetCopy => "SheetCopy",
         }
     }
 
@@ -1021,7 +1054,15 @@ impl Icon {
             | Self::TextSizeSmall
             | Self::TextSizeStandard
             | Self::TextSizeLarge
-            | Self::TextSizeExtraLarge => Discipline::General,
+            | Self::TextSizeExtraLarge
+            // How the views draw meshes, and where a toolbar docks: the window's settings.
+            | Self::MeshFaces
+            | Self::MeshFootprint
+            | Self::MeshHidden
+            | Self::DockTop
+            | Self::DockLeft
+            | Self::DockRight
+            | Self::DockBottom => Discipline::General,
             // Draw and Modify, and the drafting aids beside them: the grid and the snaps.
             Self::Point
             | Self::Line
@@ -1131,7 +1172,7 @@ impl Icon {
             | Self::ImportIfc
             | Self::ExportIfc => Discipline::Roads,
             // Plotting and sheets: output on paper or as a picture.
-            Self::Plot | Self::Sheets | Self::PlotSheets | Self::ExportImage => {
+            Self::Plot | Self::Sheets | Self::PlotSheets | Self::ExportImage | Self::SheetCopy => {
                 Discipline::Plotting
             }
             // Format and customisation: layers, styles, symbols, codes, the annotation styles (the
@@ -3986,9 +4027,78 @@ pub fn paint_icon_weighted(
                 ink.line(2.5, 13.5, 15.5, 13.5, false, FINE);
                 draw_arrow_in(ink);
             }
+            Icon::MeshFaces => {
+                // A triangle split into four faces, two of them shaded in the two tones: a mesh
+                // seen from above, filled and shaded by slope, as Faces draws it.
+                let (top, left, right) = (pt(12.0, 3.5), pt(3.0, 20.0), pt(21.0, 20.0));
+                let (a, b, c) = (pt(7.5, 11.75), pt(16.5, 11.75), pt(12.0, 20.0));
+                ink.fill(&polyline(&[a, b, c], true), true, TINT);
+                ink.fill(&polyline(&[top, a, b], true), false, TINT);
+                ink.stroke(&polyline(&[top, left, right], true), false, STROKE);
+                ink.stroke(&polyline(&[a, b, c], true), true, FINE);
+            }
+            Icon::MeshFootprint => {
+                // The dashed outline of a hull, bright, round faint faces: the footprint drawn
+                // in place of the faces.
+                ink.stroke(
+                    &polyline(&[pt(9.0, 8.0), pt(15.5, 9.5), pt(12.0, 15.5)], true),
+                    false,
+                    FINE,
+                );
+                ink.dashed(
+                    &polyline(
+                        &[pt(3.5, 9.0), pt(11.0, 3.5), pt(20.5, 7.0), pt(19.0, 18.5), pt(6.0, 20.0)],
+                        true,
+                    ),
+                    true,
+                );
+            }
+            Icon::MeshHidden => {
+                // Layer Visible's eye, struck: not drawn in the plan views.
+                let mut eye = start(2.5, 12.0);
+                eye.cubic_to(pt(7.0, 4.5), pt(17.0, 4.5), pt(21.5, 12.0));
+                eye.cubic_to(pt(17.0, 19.5), pt(7.0, 19.5), pt(2.5, 12.0));
+                ink.stroke(&eye, false, STROKE);
+                ink.stroke(&circle(12.0, 12.0, 3.4), false, STROKE);
+                ink.line(4.0, 20.0, 20.0, 4.0, true, STROKE);
+            }
+            Icon::DockTop => draw_dock(ink, pt),
+            Icon::DockLeft => draw_dock(ink, |x, y| pt(y, x)),
+            Icon::DockRight => draw_dock(ink, |x, y| pt(GRID - y, x)),
+            Icon::DockBottom => draw_dock(ink, |x, y| pt(x, GRID - y)),
+            Icon::SheetCopy => {
+                // The sheet behind whole, the front one's title block bright, as Sheets' is.
+                ink.stroke(&rounded(3.0, 3.0, 11.5, 14.0, 0.8), false, STROKE);
+                ink.fill(&rounded(9.5, 7.0, 11.5, 14.0, 0.8), false, TINT);
+                ink.stroke(&rounded(9.5, 7.0, 11.5, 14.0, 0.8), false, STROKE);
+                ink.line(9.5, 17.5, 21.0, 17.5, true, FINE);
+                ink.line(15.0, 17.5, 15.0, 21.0, true, FINE);
+            }
         }
     }
     canvas.restore();
+}
+
+/// A Dock icon, drawn for the top and laid on its side by `at` (a point of the top's drawing to
+/// the side's): Float's window, sixteen units square, the band along the side bright and an arrow
+/// into it from the middle.
+fn draw_dock(ink: &mut ToolInk<'_>, at: impl Fn(f64, f64) -> PointF) {
+    let band = polyline(&[at(4.0, 4.0), at(20.0, 4.0), at(20.0, 9.0), at(4.0, 9.0)], true);
+    ink.fill(&band, true, TINT);
+    ink.stroke(
+        &polyline(&[at(4.0, 4.0), at(20.0, 4.0), at(20.0, 20.0), at(4.0, 20.0)], true),
+        false,
+        STROKE,
+    );
+    let rule = (at(4.0, 9.0), at(20.0, 9.0));
+    ink.line(rule.0.x, rule.0.y, rule.1.x, rule.1.y, true, STROKE);
+    let (tail, tip) = (at(12.0, 17.5), at(12.0, 12.0));
+    ink.line(tail.x, tail.y, tip.x, tip.y, false, STROKE);
+    ink.stroke(
+        &polyline(&[at(9.5, 14.5), at(12.0, 12.0), at(14.5, 14.5)], false),
+        false,
+        STROKE,
+    );
 }
 
 // ---- the application icon ----------------------------------------------------------------------

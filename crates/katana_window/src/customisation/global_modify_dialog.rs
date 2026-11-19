@@ -1019,11 +1019,14 @@ impl GlobalModifyDialog {
                         let arrow = controls::list_arrow_width(ui) + ui.spacing().item_spacing.x;
                         dialog::fixed_fields(ui, dialog::beside_a_button(ui, "000000.000") - arrow);
                         let named = self.symbol.ui(ui, "globalModifySymbol");
+                        // Its 0 is the symbol's own size, said in words as the style managers'
+                        // symbol sizes say it: "0.000" read as a size of nothing (the sixth look
+                        // audit's H).
                         let sized = controls::spin(
                             ui,
                             "globalModifySymbolSize",
                             &mut self.symbol_size,
-                            size_range(1e6, 3),
+                            size_range(1e6, 3).with_special_text("Its own size"),
                         )
                         .on_hover_text("Width in model units; 0 is the symbol's own size")
                         .changed();

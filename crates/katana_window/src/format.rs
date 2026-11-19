@@ -25,10 +25,18 @@ pub fn plan_point(point: &Point2) -> String {
 /// do. A locale with another separator (a stop, a thin space) is not reproduced - recorded under
 /// "Not done" (docs/rust.md).
 pub fn grouped(value: u64) -> String {
-    let digits = format!("{value}");
     if !locale_groups_digits() {
-        return digits;
+        return format!("{value}");
     }
+    grouped_in_threes(value)
+}
+
+/// Thousands grouped in threes with a comma whatever the locale: "40,000". What a text that sits
+/// beside a description of a file shows, the description being grouped so (katana_interop's
+/// dataset_info), so one dialog does not say "40,000 points" over "Every point: 40000." under a
+/// C locale (the sixth look audit's H).
+pub fn grouped_in_threes(value: u64) -> String {
+    let digits = format!("{value}");
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (at, digit) in digits.chars().enumerate() {
         if at != 0 && (digits.len() - at).is_multiple_of(3) {

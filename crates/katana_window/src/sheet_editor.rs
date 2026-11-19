@@ -2558,7 +2558,11 @@ impl TitleBlockDialog {
             |ui, (dialog, answer)| dialog.body(ui, logo, answer),
             |ui, (_, answer)| {
                 // The one footer (shell::dialog::button_row): Cancel, then OK, the primary, last
-                // at the right - where the two sat at the left, OK plain.
+                // at the right - where the two sat at the left, OK plain. Cancel and OK, not
+                // Close and Apply: the dialog is modal, and but for the logo (stored by its own
+                // button at once) it changes nothing until OK applies every page as one undo
+                // step - a confirmation, so a choice of the two (kept on the sixth look audit's
+                // question).
                 let ((), (cancelled, ok)) = crate::shell::dialog::button_row(
                     ui,
                     |_| {},
@@ -5435,7 +5439,9 @@ impl SheetEditor {
             let has_sheet = at < count;
             let tools = [
                 ("sheetListNew", "New", "New Sheet", "A new blank sheet", true),
-                ("sheetListCopy", "Copy", "Copy Sheet", "Duplicate this sheet", has_sheet),
+                // A sheet's own copy, in Plotting's hue: Modify > Copy's was drafting cyan (the
+                // sixth look audit's I).
+                ("sheetListCopy", "SheetCopy", "Copy Sheet", "Duplicate this sheet", has_sheet),
                 ("sheetListRemove", "Erase", "Remove Sheet", "Remove this sheet", has_sheet),
             ];
             for (name, icon, label, tip, enabled) in tools {
@@ -5485,8 +5491,11 @@ impl SheetEditor {
             ui.horizontal(|ui| {
                 ui.label("Name");
                 controls::line(ui, "sheetRenameName", &mut name);
-                let ok = controls::button(ui, "sheetRenameOk", "OK").clicked();
+                // Cancel, then OK last, as every confirmation's pair stands (the Title Block's
+                // and Hidden Layers' footers, Layers' name prompt): this row alone had OK first
+                // (the sixth look audit's H).
                 let cancel = controls::button(ui, "sheetRenameCancel", "Cancel").clicked();
+                let ok = controls::button(ui, "sheetRenameOk", "OK").clicked();
                 if ok {
                     self.queued.push(Queued::RenameSheet(at, name.clone()));
                 } else if !cancel {
