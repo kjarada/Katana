@@ -1,6 +1,8 @@
 //! The twin of tests/dxf/test_codes.cpp: the indexed colours, true colour,
 //! lineweights, the text codes and the exact degrees, against values worked
-//! out by hand.
+//! out by hand. The indexed colours are the entity layer's table, re-exported
+//! (katana_entity::indexed_colours, which its own tests check against the
+//! published table); these check that DXF reads that table.
 
 use katana_dxf::{
     RADIANS_PER_DEGREE, encode_text, exact_degrees, indexed_colour, nearest_indexed_colour,
@@ -48,8 +50,11 @@ mod dxf_codes {
         assert_eq!(indexed_colour(50), Some(rgb(255, 255, 0)));
         assert_eq!(indexed_colour(90), Some(rgb(0, 255, 0)));
         assert_eq!(indexed_colour(170), Some(rgb(0, 0, 255)));
-        // Hue 1 (15 degrees): red full, green a quarter of 255 = 63.75 -> 64.
-        assert_eq!(indexed_colour(20), Some(rgb(255, 64, 0)));
+        // Hue 1 (15 degrees): red full, green a quarter of 255 = 63.75, which
+        // the published table (acadrgb.txt; katana_entity::indexed_colours)
+        // gives as 63. This said 64 while the hues were computed and rounded
+        // to the nearest; the table is the definition, not the formula.
+        assert_eq!(indexed_colour(20), Some(rgb(255, 63, 0)));
         // The grey ramp.
         assert_eq!(indexed_colour(250), Some(rgb(51, 51, 51)));
         assert_eq!(indexed_colour(255), Some(rgb(255, 255, 255)));

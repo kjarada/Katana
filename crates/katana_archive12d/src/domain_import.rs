@@ -6,7 +6,7 @@ use std::f64::consts::PI;
 
 use katana_core::error::{Error, ErrorCode, Result};
 use katana_core::text::{format_exact_real, parse_integer, unescape_typed};
-use katana_entity::colour_names::{fold_colour_name, resolve_colour};
+use katana_entity::colour_names::{colour_index_of_name, fold_colour_name, resolve_colour};
 use katana_entity::entity::set_heights;
 use katana_entity::entity_geometry::bounding_box;
 use katana_entity::layer_path::validate_layer_path;
@@ -539,6 +539,9 @@ struct Importer<'a> {
     coloured_tins: usize,
     point_strings_split: usize,
     points_from_strings: usize,
+    /// Colour names nothing resolves, as first written, in first-use order:
+    /// said once, in one line, by finish_warnings.
+    unknown_colours: Vec<String>,
 }
 
 impl<'a> Importer<'a> {
@@ -564,6 +567,7 @@ impl<'a> Importer<'a> {
             coloured_tins: 0,
             point_strings_split: 0,
             points_from_strings: 0,
+            unknown_colours: Vec::new(),
         }
     }
 
@@ -635,17 +639,21 @@ impl<'a> Importer<'a> {
         self.plan(vertex.x, vertex.y)
     }
 
+    // The RGB of a colour name: the customisation's, a standard name's or an
+    // AutoCAD Colour Index name's ("acad 040"). A name none of them knows is
+    // left to the inherited colour and noted for the one line finish_warnings
+    // says. Names that MEAN the inherited colour are not noted: "no colour",
+    // and "acad 0" / "acad 256" (ByBlock, ByLayer).
     fn colour_for(&mut self, name: &str) -> Option<Color> {
         let rgb = resolve_colour(&self.options.colours, name);
         let folded = fold_colour_name(name);
         if rgb.is_none()
             && !folded.is_empty()
             && folded != "no colour"
+            && colour_index_of_name(&folded).is_none()
             && self.noted.insert(format!("colour:{folded}"))
         {
-            self.problem(format!(
-                "colour \"{name}\" is not in the standard or active customisation palette; its name is kept and the inherited colour is used"
-            ));
+            self.unknown_colours.push(String::from(name));
         }
         rgb
     }
@@ -2296,6 +2304,32 @@ impl<'a> Importer<'a> {
     }
 
     fn finish_warnings(&mut self) {
+        // One line for every colour name nothing resolved, not one per name:
+        // a real archive's meshes carried four such names on hundreds of
+        // meshes, and the four were one fact - the colour file that defines them was
+        // not here. The archive does not define them (it carries names, no
+        // RGB), so the line says where they can be defined instead.
+        if !self.unknown_colours.is_empty() {
+            let count = self.unknown_colours.len();
+            let mut names: Vec<String> = self
+                .unknown_colours
+                .iter()
+                .take(MAX_NAMED_PROBLEMS)
+                .map(|name| format!("\"{name}\""))
+                .collect();
+            if count > MAX_NAMED_PROBLEMS {
+                names.push(format!("and {} more", count - MAX_NAMED_PROBLEMS));
+            }
+            let (noun, verb) = if count == 1 {
+                ("colour name", "is")
+            } else {
+                ("colour names", "are")
+            };
+            self.result.warnings.push(format!(
+                "{count} {noun} {verb} not a standard name, an AutoCAD Colour Index name (\"acad 040\") or one of the active customisation's colours, so what they colour keeps the name and the inherited colour: {}. The program that wrote the archive defines them in a colour file of its own; give them their RGB in the customisation's \"colours\" and import again",
+                names.join(", ")
+            ));
+        }
         if self.named_problems > MAX_NAMED_PROBLEMS {
             let further = self.named_problems - MAX_NAMED_PROBLEMS;
             self.result.warnings.push(format!(

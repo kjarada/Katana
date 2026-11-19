@@ -176,6 +176,36 @@ pub struct MeshItem {
     pub held: Arc<TriangleMesh>,
 }
 
+impl MeshItem {
+    /// An archive's mesh as the views draw it. Its colour is `flat_color`, which BOTH the plan's
+    /// footprint (plan_painter's draw_mesh_footprints) and the 3D view take, and a face's own
+    /// colour (the archive's `face_infos`, in `face_colors`) goes before it in 3D. A colour the import found no RGB for
+    /// leaves the mesh, or the face, its default clay.
+    pub fn imported(mesh: katana_archive12d::ImportedMesh) -> Self {
+        let clay = katana_render::rgba(190, 170, 140);
+        let to_rgba = |colour: &Option<katana_entity::Color>, fallback| match colour {
+            Some(colour) => katana_render::rgba(colour.r, colour.g, colour.b),
+            None => fallback,
+        };
+        let base = to_rgba(&mesh.color, clay);
+        let faces = mesh
+            .face_colors
+            .iter()
+            .map(|colour| to_rgba(colour, base))
+            .collect();
+        Self {
+            scene: SceneMesh {
+                name: mesh.name.clone(),
+                mesh: None,
+                flat_color: base,
+                face_colors: faces,
+                ..SceneMesh::default()
+            },
+            held: Arc::new(mesh.mesh),
+        }
+    }
+}
+
 /// The drawing's surfaces as the views draw them, the meshes an import brought and the road
 /// model's objects (see the module comment).
 #[derive(Clone, Default)]
@@ -1288,31 +1318,10 @@ impl Executor {
     /// GeoServices::imported: an archive's meshes held and shown, and the 3D view opened once for
     /// a surface or a mesh.
     fn show_imported(&mut self, shown: katana_app::geo::ImportShown) {
-        // A colour Katana has no RGB for leaves the mesh its default clay.
-        let clay = katana_render::rgba(190, 170, 140);
         let surfaces = shown.surfaces;
         let any_mesh = !shown.meshes.is_empty();
         for mesh in shown.meshes {
-            let to_rgba = |colour: &Option<katana_entity::Color>, fallback| match colour {
-                Some(colour) => katana_render::rgba(colour.r, colour.g, colour.b),
-                None => fallback,
-            };
-            let base = to_rgba(&mesh.color, clay);
-            let faces = mesh
-                .face_colors
-                .iter()
-                .map(|colour| to_rgba(colour, base))
-                .collect();
-            self.add_mesh(MeshItem {
-                scene: SceneMesh {
-                    name: mesh.name.clone(),
-                    mesh: None,
-                    flat_color: base,
-                    face_colors: faces,
-                    ..SceneMesh::default()
-                },
-                held: Arc::new(mesh.mesh),
-            });
+            self.add_mesh(MeshItem::imported(mesh));
         }
         if surfaces != 0 || any_mesh {
             self.with_parts(|workspace, parts| {
