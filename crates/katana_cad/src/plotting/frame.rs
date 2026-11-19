@@ -67,6 +67,23 @@ static COMPILED_IN_FRAMES: [(&str, &[u8]); 2] = [
     ),
 ];
 
+/// The words a person reads for each compiled-in frame, by its name: Page Setup's Frame lists
+/// these, where it listed the names themselves ("a3_landscape", the eighth look audit). The name
+/// stays what a line, a sheet and a customisation say.
+static COMPILED_IN_TITLES: [(&str, &str); 2] = [
+    (BUILT_IN_FRAME_ID, "A3 landscape"),
+    ("nsw_a3_utility_cross_section", "A3 utility cross-section"),
+];
+
+/// The title a person reads for frame `name`: a compiled-in frame's own, and the name itself for
+/// any other (one a sheet names that this build does not have), so nothing is ever shown blank.
+pub fn frame_title(name: &str) -> String {
+    COMPILED_IN_TITLES
+        .iter()
+        .find(|(compiled, _)| *compiled == name)
+        .map_or_else(|| String::from(name), |(_, title)| String::from(*title))
+}
+
 /// The user slots a frame has when its description does not list them: all
 /// three, which is what the default frame was measured to leave
 /// (resources/plot_frames/a3_landscape.json's "_about").

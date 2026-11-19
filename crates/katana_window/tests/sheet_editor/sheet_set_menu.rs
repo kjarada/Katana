@@ -297,6 +297,7 @@ mod sheet_set_menu {
     #[test]
     fn page_setup_lists_the_frames_on_offer_and_runs_the_one_chosen_as_its_line() {
         const FRAME: &str = "nsw_a3_utility_cross_section";
+        const FRAME_TITLE: &str = "A3 utility cross-section";
         let mut document = Document::new(None);
         document
             .install_customisation(
@@ -317,13 +318,17 @@ mod sheet_set_menu {
         shown.draw();
         let frame = shown.control("pageSetupFrame").expect("the Frame choice");
         assert!(frame.visible);
-        assert_eq!(frame.items, vec![String::from("a3_landscape"), String::from(FRAME)]);
-        assert_eq!(frame.value, "a3_landscape");
+        // Listed by title (frame::frame_title); the line, the set and its sheets keep the name.
+        assert_eq!(
+            frame.items,
+            vec![String::from("A3 landscape"), String::from(FRAME_TITLE)]
+        );
+        assert_eq!(frame.value, "A3 landscape");
         // Nothing else chosen: Save names no frame, so no sheet's frame is touched by it.
         let unchanged = shown.editor.plot_dialog().expect("the dialog").page_setup_line();
         assert!(!unchanged.contains("frame="), "{unchanged}");
 
-        shown.fill_in("pageSetupDialog", "pageSetupFrame", FRAME);
+        shown.fill_in("pageSetupDialog", "pageSetupFrame", FRAME_TITLE);
         let line = shown.editor.plot_dialog().expect("the dialog").page_setup_line();
         assert_eq!(
             line,
@@ -354,8 +359,8 @@ mod sheet_set_menu {
         shown.trigger("sheetPageSetup");
         shown.draw();
         let frame = shown.control("pageSetupFrame").expect("the Frame choice");
-        assert_eq!(frame.items, vec![String::from("a3_landscape")]);
-        assert_eq!(frame.value, "a3_landscape");
+        assert_eq!(frame.items, vec![String::from("A3 landscape")]);
+        assert_eq!(frame.value, "A3 landscape");
     }
 
     #[test]

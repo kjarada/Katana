@@ -73,6 +73,29 @@ fn drag(window: &mut MainWindow, headless: &mut Headless, from: Pos2, to: Pos2) 
 mod tool_bar_docking {
     use super::*;
 
+    // The eighth look audit: the Draw column's inner rule beside the Layers panel's own border
+    // drew a seam two pixels wide. Worked by hand: a column 0..39 with a panel starting at 39.
+    #[test]
+    fn a_column_draws_no_inner_rule_where_a_panels_border_is_beside_it_and_one_elsewhere() {
+        let column = Rect::from_min_max(Pos2::new(0.0, 140.0), Pos2::new(39.0, 805.0));
+        let panel = Rect::from_min_max(Pos2::new(39.0, 145.0), Pos2::new(279.0, 455.0));
+        assert!(!layout::column_rules_its_inner_side(Side::Left, column, &[panel]));
+        // A panel a column further in, or none: the column's rule is the only one.
+        let further = panel.translate(egui::vec2(39.0, 0.0));
+        assert!(layout::column_rules_its_inner_side(Side::Left, column, &[further]));
+        assert!(layout::column_rules_its_inner_side(Side::Left, column, &[]));
+        // A panel touching but wholly above or below the column is not beside it.
+        let above = Rect::from_min_max(Pos2::new(39.0, 0.0), Pos2::new(279.0, 140.0));
+        assert!(layout::column_rules_its_inner_side(Side::Left, column, &[above]));
+        // Down the right, the inner side is the column's left: a panel ending there.
+        let right = Rect::from_min_max(Pos2::new(1321.0, 140.0), Pos2::new(1360.0, 805.0));
+        let properties = Rect::from_min_max(Pos2::new(1081.0, 145.0), Pos2::new(1321.0, 805.0));
+        assert!(!layout::column_rules_its_inner_side(Side::Right, right, &[properties]));
+        assert!(layout::column_rules_its_inner_side(Side::Right, right, &[panel]));
+        // A row rules nothing of its own.
+        assert!(!layout::column_rules_its_inner_side(Side::Top, column, &[]));
+    }
+
     #[test]
     fn a_bar_docked_to_each_side_lands_there_runs_along_it_and_keeps_its_actions_by_name() {
         for side in [Side::Left, Side::Right, Side::Bottom, Side::Top] {

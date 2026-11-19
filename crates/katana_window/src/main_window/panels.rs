@@ -490,9 +490,19 @@ impl MainWindow {
                 Side::Right => &geometry.right_columns,
                 Side::Bottom => &geometry.bottom_rows,
             };
+            let panels: Vec<Rect> = [
+                geometry.layers,
+                geometry.lower_left,
+                geometry.properties,
+                geometry.command_line,
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
             for ((line, bars), rect) in arranged.lines[side.index()].iter().zip(rects) {
                 zones.lines.push((side, *line, *rect));
-                self.bar_line_ui(ui, side, *line, *rect, bars, &mut zones);
+                let inner_rule = layout::column_rules_its_inner_side(side, *rect, &panels);
+                self.bar_line_ui(ui, side, *line, *rect, bars, inner_rule, &mut zones);
             }
         }
         self.new_line_zones(geometry, &mut zones);
@@ -521,6 +531,10 @@ impl MainWindow {
     /// One line of docked toolbars at `rect`: a row shares its length as Qt's toolbar layout did
     /// (`row_rooms`), a column as `column_rooms` does; each bar is drawn with its grip and its
     /// handle, and recorded where a drop lands.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The line's place, its bars and whether it rules its inner side are each the caller's to say."
+    )]
     fn bar_line_ui(
         &mut self,
         ui: &mut Ui,
@@ -528,6 +542,7 @@ impl MainWindow {
         line: usize,
         rect: Rect,
         bars: &[&ToolBar],
+        inner_rule: bool,
         zones: &mut DropZones,
     ) {
         let icon_size = self.ui.bars.icon_size;
@@ -541,7 +556,9 @@ impl MainWindow {
                     docked.items.first(),
                     Some(ToolBarItem::Widget(name)) if name.starts_with("toolBarName:")
                 );
-                (self.strip_of(&docked, vertical, icon_size), named)
+                let mut strip = self.strip_of(&docked, vertical, icon_size);
+                strip.inner_rule = inner_rule;
+                (strip, named)
             })
             .collect();
         let naturals: Vec<i32> = strips
@@ -632,6 +649,7 @@ impl MainWindow {
             vertical,
             icon_size,
             items,
+            inner_rule: true,
         }
     }
 
@@ -1075,6 +1093,15 @@ impl MainWindow {
                         }
                     });
                     end_target(ui, shown.response.rect);
+                    // A short rule between the tray and the message, as between the readouts at
+                    // the right: run on, the tray's last button read as the message's first word
+                    // (the eighth look audit).
+                    let (rule, _) = ui.allocate_exact_size(Vec2::new(1.0, 12.0), Sense::hover());
+                    ui.painter().vline(
+                        ui.painter().round_to_pixel_center(rule.center().x),
+                        rule.y_range(),
+                        egui::Stroke::new(1.0, palette::border().to_egui()),
+                    );
                     ui.add_space(crate::theme::style::GROUP_GAP);
                 }
                 ui.add(egui::Label::new(RichText::new(message.as_str()).small()).truncate());
@@ -1141,7 +1168,12 @@ impl MainWindow {
         let menu = menu.clone();
         let mut chosen: Option<String> = None;
         let mut torn: Option<(String, Pos2)> = None;
+        // A Menu by its kind, as the menu bar's popups are, so a row's trailing room is a popup's
+        // (drive::action, `is_in_menu`): as a plain Area this grab drew the rows 3 px from the
+        // edge after a click had them 20 px in, and showed what no click shows (the eighth look
+        // audit).
         let area = egui::Area::new(egui::Id::new(("katanaStepMenu", name.as_str())))
+            .kind(egui::UiKind::Menu)
             .order(egui::Order::Foreground)
             .fixed_pos(ui.max_rect().min)
             .show(ui.ctx(), |ui| {

@@ -633,7 +633,12 @@ impl PlotDialog {
                 controls::choice(ui, "plotFormat", &formats, &mut self.format);
             });
             // The title frame the set's sheets plot in: a setting of the set, not of one plot.
-            let frames = self.frames.clone();
+            // Listed by title ("A3 landscape"); the name chosen is what the line says.
+            let frames: Vec<String> = self
+                .frames
+                .iter()
+                .map(|name| katana_cad::plotting::frame::frame_title(name))
+                .collect();
             form_row(ui, page_setup, "Frame", "pageSetupRowFrame", &mut |ui| {
                 controls::choice(ui, "pageSetupFrame", &frames, &mut self.plot_frame).on_hover_text(
                     "The title frame every sheet with a frame plots in: the default, or one the \
