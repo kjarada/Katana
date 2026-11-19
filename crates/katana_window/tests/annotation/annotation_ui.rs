@@ -420,21 +420,33 @@ mod annotation_managers_look {
     }
 
     #[test]
-    fn label_styles_apply_is_the_footers_primary_after_close_and_delete_is_at_its_left() {
+    fn label_styles_apply_is_the_footers_primary_after_close_and_delete_is_the_lists() {
         // T5: Delete, Add Standard Set and an accent Apply stood under the form, in the body.
+        // The fourth look audit: Delete is one of the list's tools, beside New under it, in every
+        // style manager - it stood in the footer beside Apply in two and under the list in two.
         let bench = themed(Bench::new(interpreter_host(), LabelStyleManagerDialog::new));
         let rect = |name: &str| bench.control(name).rect;
         let (close, apply) = (rect("labelStyleClose"), rect("labelStyleApply"));
         assert!(apply.left() >= close.right(), "Apply is after Close");
         assert!((apply.center().y - close.center().y).abs() <= HALF_A_POINT);
-        for name in ["labelStyleDelete", "labelStyleDefaults"] {
-            let button = rect(name);
-            assert!(button.right() <= close.left(), "{name} is before Close");
-            assert!(
-                (button.center().y - close.center().y).abs() <= HALF_A_POINT,
-                "{name} is on the footer's row"
-            );
-        }
+        let defaults = rect("labelStyleDefaults");
+        assert!(defaults.right() <= close.left(), "Add Standard Set is before Close");
+        assert!(
+            (defaults.center().y - close.center().y).abs() <= HALF_A_POINT,
+            "Add Standard Set is on the footer's row"
+        );
+        let (new, delete, list) = (
+            rect("labelStyleNew"),
+            rect("labelStyleDelete"),
+            rect("labelStyleList"),
+        );
+        assert!(
+            (delete.center().y - new.center().y).abs() <= HALF_A_POINT,
+            "Delete is on New's row"
+        );
+        assert!(delete.left() >= new.right(), "Delete is after New");
+        assert!(delete.top() >= list.bottom(), "Delete is under the list");
+        assert!(delete.bottom() < close.top(), "Delete is not the footer's");
     }
 
     #[test]
@@ -463,15 +475,15 @@ mod annotation_managers_look {
         bench.dialog.select(bench.host.document(), "Standard");
         bench.draw();
         let list = bench.control("textStyleList").rect;
+        // The new name under the list fills the column, New and Delete in a row under it.
         let name = bench.control("textStyleNewName").rect;
-        let new = bench.control("textStyleNew").rect;
         // The well's border and margin, a point and two each side, and a scroll bar's room.
-        let room = new.right() - name.left() - list.width();
+        let room = name.width() - list.width();
         assert!(
             (0.0..=20.0).contains(&room),
             "the list is {} wide in a column of {}",
             list.width(),
-            new.right() - name.left()
+            name.width()
         );
     }
 }

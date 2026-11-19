@@ -538,7 +538,17 @@ impl SheetChecksDock {
     /// a double-click or Enter on a row going to it. A fill of the list makes the row whose
     /// severity cell is the text current, as a click does.
     pub fn ui(&mut self, ui: &mut Ui) {
-        controls::label(ui, "sheetChecksSummary", &self.summary);
+        let empty = self.rows.is_empty();
+        // With nothing listed the summary is the table's one note, under its header: over an
+        // empty table, "Not checked yet." and "Nothing to list: ..." were two notes stacked (the
+        // fourth look audit's 5). Recorded where it was, taking no room.
+        if empty {
+            crate::survey::survey_dialogs::hidden(ui, "sheetChecksSummary", |ui| {
+                controls::label(ui, "sheetChecksSummary", &self.summary);
+            });
+        } else {
+            controls::label(ui, "sheetChecksSummary", &self.summary);
+        }
         let name = "sheetChecksList";
         let taken = take(ui, name);
         if let Some(taken) = &taken {
@@ -561,7 +571,11 @@ impl SheetChecksDock {
         let chosen: Vec<bool> = (0..self.rows.len())
             .map(|at| self.current == Some(at))
             .collect();
-        let empty = self.rows.is_empty();
+        let note = if self.runs == 0 {
+            String::from("Not checked yet: Check Sheets lists what a plot would get wrong.")
+        } else {
+            self.summary.clone()
+        };
         let response = egui::ScrollArea::vertical()
             .id_salt(name)
             .max_height(180.0)
@@ -572,7 +586,9 @@ impl SheetChecksDock {
                     .min_row_height(ui.spacing().interact_size.y - TABLE_ROW_GAP)
                     .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
                     .show(ui, |ui| {
-                    table_header(ui, &["", "Sheet", "View", "Problem", "Fix"], true);
+                    // Every column named: an empty first header cell stood 55 points wide over
+                    // the severities (the fourth look audit's 5).
+                    table_header(ui, &["Severity", "Sheet", "View", "Problem", "Fix"], true);
                     ui.end_row();
                     for (at, row) in self.rows.iter().enumerate() {
                         let colour = match row.severity {
@@ -601,10 +617,7 @@ impl SheetChecksDock {
                     }
                 });
                 if empty {
-                    empty_table(
-                        ui,
-                        "Nothing to list: Check Sheets lists what a plot would get wrong",
-                    );
+                    empty_table(ui, &note);
                 }
             })
             .inner_rect;

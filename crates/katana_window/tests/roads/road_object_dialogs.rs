@@ -478,7 +478,7 @@ mod road_object_dialog {
         d.fill("roadObjectTo", "twenty");
         assert!(!d.enabled("roadObjectAdd"));
         let status = d.text("roadObjectStatus");
-        assert!(status.contains("to must be a number"), "{status}");
+        assert!(status.contains("To must be a number"), "{status}");
     }
 
     #[test]

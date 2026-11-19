@@ -1712,7 +1712,8 @@ impl SettingsDialog {
                 toggled = controls::check(
                     ui,
                     "settingsShowNotice",
-                    "Show Notice",
+                    // A check box's text is a label: sentence case, where buttons are Title Case.
+                    "Show notice",
                     &mut self.show_notice,
                 )
                 .on_hover_text(SHOW_NOTICE_TIP)

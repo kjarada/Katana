@@ -198,8 +198,10 @@ const CHIP_NAMES: [&str; 5] = [
     "Vertex mode",
 ];
 
-/// The symbol's width on the ground: 0 is not a size, it is "the definition's own".
-const SIZE: SpinRange = SpinRange::new(0.0, 10000.0, 0.5, 3).with_suffix(" m");
+/// The symbol's width on the ground: 0 is not a size, it is "the definition's own" - said in
+/// those words, where "0.000 m" read as a symbol of no size (the fourth look audit's 3).
+/// Its unit is the row's label's ("Size (m)"): egui keeps a box's suffix after its special words.
+const SIZE: SpinRange = SpinRange::new(0.0, 10000.0, 0.5, 3).with_special_text("Its own size");
 
 const FILE_FILTERS: [(&str, &[&str]); 2] = [
     ("Katana customisation", &["customisation.json", "json"]),
@@ -2014,7 +2016,7 @@ impl SymbolLibraryDialog {
                 let actions = ui.vertical(|ui| {
                     dialog::section(ui, "Use");
                     // Rows of the pane's form, in the label column the details share.
-                    dialog::labelled(ui, "Size", |ui| {
+                    dialog::labelled(ui, "Size (m)", |ui| {
                         ui.add_enabled_ui(self.actions.size, |ui| {
                             if controls::spin(ui, "assignSize", &mut self.size, SIZE)
                                 .on_hover_text(

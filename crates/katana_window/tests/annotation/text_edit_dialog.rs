@@ -93,7 +93,7 @@ mod text_edit_dialog {
         assert_eq!(bench.dialog.text_id(), 1);
         assert_eq!(bench.value("textEditPosition"), "10,20");
         assert_eq!(bench.value("textEditHeight"), "2.5");
-        assert_eq!(bench.value("textEditStyle"), "(none)");
+        assert_eq!(bench.value("textEditStyle"), "None");
         assert_eq!(bench.value("textEditJustify"), "BL");
 
         bench.fill("textEditText", "PIT 12\\nIL 10.50");
@@ -138,7 +138,7 @@ mod text_edit_dialog {
         assert_eq!(bench.lines().len(), 1, "runs nothing");
 
         // The style back to none, and a paper height of its own.
-        bench.fill("textEditStyle", "(none)");
+        bench.fill("textEditStyle", "None");
         bench.fill("textEditPaper", "5");
         assert!(
             bench.dialog.apply(&mut bench.host),

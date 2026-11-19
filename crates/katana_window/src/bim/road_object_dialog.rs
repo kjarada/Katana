@@ -85,9 +85,10 @@ use crate::customisation::document_watcher::DocumentWatcher;
 use crate::customisation::scope_filter_widget::{ScopeChoice, ScopeFilterWidget};
 use crate::dialog_layout as layout;
 use crate::drive::controls::{
-    LineOptions, button_as, custom, line_with, primary_look, tabs,
+    LineOptions, button_as, custom, line_with, number_line, primary_look, tabs,
 };
 use crate::drive::registry::{ControlKind, ControlRecord};
+use crate::geo::terrain_dialog_parts::why_status;
 use crate::host::Host;
 use crate::shell::dialog::{self, DialogFrame};
 use crate::theme::palette;
@@ -530,6 +531,9 @@ struct ParameterField {
     placeholder: String,
     text: String,
     choice: Option<Combo>,
+    /// A number (ParameterType::Number): drawn as a number's short well (number_line), where it
+    /// filled the form's row as a name does (the fourth look audit's 2).
+    number: bool,
 }
 
 impl ParameterField {
@@ -695,7 +699,9 @@ impl Body {
             }
             Err(error) => {
                 self.line.clear();
-                self.status = error.message;
+                // Begun with a capital, as a status is: the error's words start in lower case to
+                // follow a field's name ("give the station", the fourth look audit's words).
+                self.status = why_status(&error.message);
                 self.status_says_form = true;
                 self.status_error = false;
                 self.enabled.add = false;
@@ -741,7 +747,7 @@ impl Body {
         let made = match road_object_add_line(&asked) {
             Ok(made) => made,
             Err(error) => {
-                self.status = error.message;
+                self.status = why_status(&error.message);
                 self.status_says_form = true;
                 self.status_error = false;
                 return;
@@ -813,6 +819,12 @@ impl Body {
                             changed |= edited;
                             None
                         }
+                        None if parameter.number => Some(number_line(
+                            ui,
+                            &parameter.object_name,
+                            &mut parameter.text,
+                            &parameter.placeholder,
+                        )),
                         None => Some(line_with(
                             ui,
                             &parameter.object_name,
@@ -917,7 +929,8 @@ impl Body {
                 },
             );
             // The stations and offsets are the alignment's, so they sit in under it; a row each,
-            // so every field starts at the form's edge.
+            // so every field starts at the form's edge. Each a number's short well
+            // (`enabled_number`), what it is in the tooltip rather than a placeholder that sized it.
             ui.indent("roadObjectAlongAlignment", |ui| {
                 for (label_text, enabled, name, value, placeholder) in [
                     (
@@ -939,18 +952,26 @@ impl Body {
                         self.enabled.offset,
                         "roadObjectOffset",
                         &mut self.offset,
-                        "0 (left of the centreline +)",
+                        "0",
                     ),
                     (
                         "Spacing",
                         self.enabled.spacing,
                         "roadObjectSpacing",
                         &mut self.spacing,
-                        "one every ... m",
+                        "metres",
                     ),
                 ] {
                     dialog::labelled(ui, label_text, |ui| {
-                        changed |= enabled_field(ui, enabled, name, value, placeholder);
+                        let tip = match name {
+                            "roadObjectStation" => "Where along the alignment it goes",
+                            "roadObjectTo" => "Where a run along the alignment ends",
+                            "roadObjectOffset" => {
+                                "Metres from the centreline: left of it positive, right negative"
+                            }
+                            _ => "One every so many metres between Station and To",
+                        };
+                        changed |= enabled_number(ui, enabled, name, value, placeholder, tip);
                     });
                 }
             });
@@ -1040,16 +1061,24 @@ impl Body {
                     }
                 });
                 dialog::labelled(ui, "Crossfall (%)", |ui| {
-                    changed |= enabled_field(
+                    changed |= enabled_number(
                         ui,
                         self.enabled.crossfall,
                         "roadObjectCrossfall",
                         &mut self.crossfall,
-                        "0 %",
+                        "0",
+                        "The fall across, percent",
                     );
                 });
                 dialog::labelled(ui, "Raised by (m)", |ui| {
-                    changed |= enabled_field(ui, true, "roadObjectDz", &mut self.dz, "0 m");
+                    changed |= enabled_number(
+                        ui,
+                        true,
+                        "roadObjectDz",
+                        &mut self.dz,
+                        "0",
+                        "Metres above the heights it takes",
+                    );
                 });
             });
             custom(
@@ -1193,6 +1222,24 @@ fn enabled_field(
     .inner
 }
 
+/// A number kept as text drawn enabled or not, a number's short well (drive::controls::
+/// number_line) with `tip`: true when a person or a driver changed it.
+fn enabled_number(
+    ui: &mut Ui,
+    enabled: bool,
+    name: &str,
+    value: &mut String,
+    placeholder: &str,
+    tip: &str,
+) -> bool {
+    ui.add_enabled_ui(enabled, |ui| {
+        number_line(ui, name, value, placeholder)
+            .on_hover_text(tip)
+            .changed()
+    })
+    .inner
+}
+
 /// The Road Objects placing dialog (see the module comment).
 pub struct RoadObjectDialog {
     frame: DialogFrame,
@@ -1232,6 +1279,7 @@ impl RoadObjectDialog {
                     placeholder,
                     text: String::new(),
                     choice,
+                    number: spec.r#type == ParameterType::Number,
                 });
             }
             pages.push(fields);

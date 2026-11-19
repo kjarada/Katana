@@ -161,6 +161,10 @@ pub fn road_objects_frame(document: &Document, ids: &[String]) -> Option<Box2> {
 /// last letter, the word read as cut at the table's edge (the third look audit's J).
 const LIST_WIDTH: f32 = 600.0 + layout::TABLE_COLUMN_GAP;
 
+/// The least rows the object table keeps room for, its header among them, when the screen leaves
+/// the scope's column too short to set its height.
+const TABLE_LEAST_ROWS: f32 = 4.0;
+
 /// The manager's body width: the list's column and the scope's (the shared widget's own width,
 /// scope_filter_widget::WIDGET_WIDTH) side by side, parted by a section's gap and the row's own
 /// spacing (theme::style's GROUP_GAP across). At the frame's own 520 the list took the whole body
@@ -511,10 +515,12 @@ impl Body {
     fn body_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let chosen = self.table.selected_rows().len();
         // The scope's column is the taller; the list's action rows stand at its foot, level with
-        // the scope's buttons, and the room above them is the table's: under a short table they
-        // stood at the top over a void 450 by 500 (the third look audit's J).
+        // the scope's buttons, and the room above them is the table's - it fills it, empty too
+        // (Table::set_room): under a short table they stood at the top over a void 450 by 500 (the
+        // third look audit's J), and at the foot under an empty table the void was between (the
+        // fourth look audit's "For 10").
         let by_scope_id = ui.id().with("roadObjectByScopeHeight");
-        let actions_id = ui.id().with("roadObjectActionsHeight");
+        let below_id = ui.id().with("roadObjectBelowTableHeight");
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 let top = ui.cursor().top();
@@ -523,58 +529,65 @@ impl Body {
                 ui.set_width(LIST_WIDTH);
                 ui.spacing_mut().text_edit_width = LIST_WIDTH;
                 crate::drive::controls::label(ui, "roadObjectCount", &self.count);
+                let by_scope = layout::last_height(ui, by_scope_id).unwrap_or(0.0);
+                let below = layout::last_height(ui, below_id).unwrap_or(0.0);
+                let room = by_scope
+                    - (ui.cursor().top() - top)
+                    - below
+                    - ui.spacing().item_spacing.y;
+                // At least a few rows' room, on a screen too short for the scope's column.
+                self.table
+                    .set_room(room.max(layout::rows_height(ui, TABLE_LEAST_ROWS)));
                 if self.table.ui(ui).selection_changed {
                     self.show_info(host.document_mut());
                 }
-                // The chosen object's details, drawn only once there are some (shell::dialog::
-                // reply): an empty well 600 by 95 stood under the table's "Nothing to list" (the
-                // second look audit's N6).
-                crate::shell::dialog::reply(ui, "roadObjectInfo", &mut self.info, 6);
-                let by_scope = layout::last_height(ui, by_scope_id).unwrap_or(0.0);
-                let actions = layout::last_height(ui, actions_id).unwrap_or(0.0);
-                let room =
-                    by_scope - (ui.cursor().top() - top) - actions - ui.spacing().item_spacing.y;
-                if room > 0.0 {
-                    ui.add_space(room);
-                }
-                let action_rows = ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        // The field leaves Apply its room, so the row ends where the table does.
-                        ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Apply");
-                        field(
-                            ui,
-                            "roadObjectKeys",
-                            &mut self.keys,
-                            "key=value ...   e.g. offset=4.5 height=1.0 (ROADOBJECT KINDS)",
-                            "Apply sets these on the chosen object; Copy makes a copy with them \
-                             (station=, dx= and dy= move the copy, and any other key changes it)",
-                        );
-                        ui.add_enabled_ui(chosen == 1, |ui| {
-                            if button(ui, "roadObjectApply", "&Apply", "").clicked() {
-                                self.press_apply(host);
-                            }
+                let below_table = ui.vertical(|ui| {
+                    // The chosen object's details, drawn only once there are some
+                    // (shell::dialog::reply): an empty well 600 by 95 stood under the table's
+                    // "Nothing to list" (the second look audit's N6).
+                    crate::shell::dialog::reply(ui, "roadObjectInfo", &mut self.info, 6);
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            // The field leaves Apply its room, so the row ends where the table
+                            // does.
+                            ui.spacing_mut().text_edit_width =
+                                dialog::beside_a_button(ui, "Apply");
+                            field(
+                                ui,
+                                "roadObjectKeys",
+                                &mut self.keys,
+                                "key=value ...   e.g. offset=4.5 height=1.0 (ROADOBJECT KINDS)",
+                                "Apply sets these on the chosen object; Copy makes a copy with \
+                                 them (station=, dx= and dy= move the copy, and any other key \
+                                 changes it)",
+                            );
+                            ui.add_enabled_ui(chosen == 1, |ui| {
+                                if button(ui, "roadObjectApply", "&Apply", "").clicked() {
+                                    self.press_apply(host);
+                                }
+                            });
                         });
-                    });
-                    ui.horizontal(|ui| {
-                        if button(ui, "roadObjectNew", "&New...", "").clicked() {
-                            self.press_new(host);
-                        }
-                        ui.add_enabled_ui(chosen == 1, |ui| {
-                            if button(ui, "roadObjectCopy", "C&opy", "").clicked() {
-                                self.press_copy(host);
+                        ui.horizontal(|ui| {
+                            if button(ui, "roadObjectNew", "&New...", "").clicked() {
+                                self.press_new(host);
                             }
-                        });
-                        ui.add_enabled_ui(chosen > 0, |ui| {
-                            if button(ui, "roadObjectDelete", "&Delete", "").clicked() {
-                                self.press_delete(host);
-                            }
-                            if button(ui, "roadObjectZoom", "&Zoom To", "").clicked() {
-                                self.press_zoom(host);
-                            }
+                            ui.add_enabled_ui(chosen == 1, |ui| {
+                                if button(ui, "roadObjectCopy", "C&opy", "").clicked() {
+                                    self.press_copy(host);
+                                }
+                            });
+                            ui.add_enabled_ui(chosen > 0, |ui| {
+                                if button(ui, "roadObjectDelete", "&Delete", "").clicked() {
+                                    self.press_delete(host);
+                                }
+                                if button(ui, "roadObjectZoom", "&Zoom To", "").clicked() {
+                                    self.press_zoom(host);
+                                }
+                            });
                         });
                     });
                 });
-                layout::keep_height(ui, actions_id, action_rows.response.rect.height());
+                layout::keep_height(ui, below_id, below_table.response.rect.height());
             });
             // The shared scope and filter. A road object is a definition on a layer with a plan
             // extent, so the whole drawing is the natural start; the views are the window's.
@@ -675,7 +688,7 @@ impl RoadObjectManagerDialog {
             table: Table::new(
                 "roadObjectTable",
                 &[
-                    "Id",
+                    "ID",
                     "Kind",
                     "Name",
                     "Placement",

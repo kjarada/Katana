@@ -20,7 +20,7 @@ use crate::support::{Bench, interpreter_host, leader, run};
 
 const TEMPLATE: &str = "Template (read off the entity)";
 /// The preset box's first entry: no preset.
-const NO_PRESET: &str = "(none: the note as typed)";
+const NO_PRESET: &str = "None: the note as typed";
 
 /// A drawing holding the plane "ground".
 fn ground_host() -> RecordingHost {

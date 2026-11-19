@@ -578,7 +578,8 @@ mod leader_manager {
         assert_eq!(bench.value("leaderForTextStyle"), "Notes");
         bench.fill("leaderForNoteKind", TEMPLATE);
         assert_eq!(bench.value("leaderForTextStyle"), DEFAULT_STYLE);
-        assert_eq!(number(&bench, "leaderForPaperHeight"), 0.0);
+        // 0, the text style's own height, which the box says in words rather than "0.000 mm".
+        assert_eq!(bench.value("leaderForPaperHeight"), "Text style's");
     }
 
     #[test]
