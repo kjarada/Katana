@@ -1931,6 +1931,24 @@ a Menu by its kind now, as the menu bar's popups are. A short rule parts
 the tray of minimised items from the status message, as the readouts are
 parted at the right.
 
+**Where the look rounds ended (the ninth audit, 9.1, 2026-11-20).** The
+owner's ask of 2026-11-16 was rounds until the window looked good; the
+ninth audit scored 9.1, with no regression in 311 shots, and the rounds
+stopped there. Not done, the audit's remaining polish, worst first:
+
+- The command log, three rows high, shows only the end of a long record
+  (a far import's warning starts mid-sentence at the top): nothing keeps
+  the start of the newest record in view.
+- The sheet editor's Checks panel sizes its columns from what it holds, so
+  Fix's header jumps when results arrive; fixed widths would hold still.
+- The status bar's rules have uneven gaps either side (8 and 16 points at
+  the tray's, 16 and 16, 8 and 9, 16 and 8 at the readouts').
+- Road Objects' scope greys some filter rows and not others.
+- A floating torn-off Draw menu shows the Select arrow as its icon; a
+  narrow torn-off menu docked down a side wraps its long rows; Layers keeps
+  Revert at the left of its footer; the tear-off line's dashes end 6 to 9
+  points from the right edge by their phase, 6 from the left.
+
 ### The icons' colours: discipline and function (2026-11-19)
 
 The owner, on 2026-11-19: "make the icons colorful based on their discipline
