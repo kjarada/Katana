@@ -398,7 +398,7 @@ impl GisTool for VectorExportDialog {
                 "vectorExportCreationOptions",
                 "Creation options:",
                 &mut self.creation_options,
-                "none, e.g. VERSION=1.4",
+                "No options, e.g. VERSION=1.4",
                 "co=: the driver's creation options, KEY=VALUE separated by blanks, each checked \
                  against its list (FORMATS OPTIONS <driver>)",
             );
@@ -407,7 +407,7 @@ impl GisTool for VectorExportDialog {
                 "vectorExportLayerOptions",
                 "Layer options:",
                 &mut self.layer_options,
-                "none, e.g. SPATIAL_INDEX=NO",
+                "No options, e.g. SPATIAL_INDEX=NO",
                 "lco=: the driver's layer creation options, checked likewise",
             );
             dialog::labelled(ui, "Text:", |ui| {

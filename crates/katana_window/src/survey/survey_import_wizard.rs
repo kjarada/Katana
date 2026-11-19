@@ -1056,7 +1056,7 @@ impl SurveyImportWizard {
                 "comment",
                 &mut form.comment,
                 drive::LineOptions {
-                    placeholder: "none",
+                    placeholder: "No prefix",
                     width: Some(80.0),
                     ..drive::LineOptions::default()
                 },
@@ -1198,7 +1198,7 @@ impl SurveyImportWizard {
                     enabled,
                     "target",
                     &mut form.target,
-                    "none - or an EPSG code to transform into",
+                    "No transform - or an EPSG code",
                     "",
                 );
             });

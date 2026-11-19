@@ -1391,7 +1391,8 @@ impl VolumesDialog {
                         )
                         .on_hover_text("Three or more corners, x,y or x,y,z, separated by blanks");
                     });
-                    ui.add_enabled_ui(self.boundary == Boundary::Scope, |ui| {
+                    // Its "Apply to" a heading's gap under the corners (headed_enabled_ui).
+                    crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, self.boundary == Boundary::Scope, |ui| {
                         self.scope.ui(ui);
                     });
                 })

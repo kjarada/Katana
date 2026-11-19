@@ -354,7 +354,9 @@ pub fn surface_combine_line(form: &SurfaceCombineForm) -> Result<String> {
     match form.mode {
         SurfaceCombineMode::Merge => {
             if form.merge.len() < 2 {
-                return Err(invalid("Surfaces: tick at least two to merge"));
+                // One sentence, no field's name before it (the fourth look audit's status
+                // wording).
+                return Err(invalid("Tick at least two surfaces to merge"));
             }
             let mut line = String::from("SURFACE MERGE");
             for surface in &form.merge {
@@ -718,7 +720,7 @@ impl Framed for SurfaceLevelsDialog {
         // The scope is what the data dialogs are about, so it is not behind a tick box there.
         let asked = !boxed || self.inside;
         if let Some(scope) = &mut self.scope {
-            ui.add_enabled_ui(asked, |ui| {
+            crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, asked, |ui| {
                 scope.ui(ui);
             });
         }
@@ -977,16 +979,11 @@ impl SurfaceCombineDialog {
     }
 
     fn merge_page(&mut self, ui: &mut Ui) {
-        // With no surface the page says so at the fields' edge, and the list and its Up and Down
-        // are put away (still there for a driver): a disabled Up and Down stood beside an empty
-        // line.
+        // With no surface the list and its Up and Down are put away (still there for a driver): a
+        // disabled Up and Down stood beside an empty line. Why there is nothing to merge is the
+        // footer's status, the dialog's one home for it (NO_SURFACE); a note here said it
+        // again in other words ("No surfaces to merge" over "Surfaces: tick at least two").
         if self.merge.is_empty() {
-            row(ui, "", |ui| {
-                dialog::note(
-                    ui,
-                    "No surfaces to merge: make them with Terrain > Surface From",
-                )
-            });
             hidden(ui, "surfaceCombineMergeEmpty", |ui| self.merge_list_ui(ui));
             return;
         }
@@ -1077,7 +1074,7 @@ impl SurfaceCombineDialog {
                     .on_hover_text("How far to raise the copy; negative lowers it");
             });
         });
-        ui.add_enabled_ui(mode == SurfaceCombineMode::Clip, |ui| {
+        crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, mode == SurfaceCombineMode::Clip, |ui| {
             self.scope.ui(ui);
         });
     }
@@ -1130,16 +1127,23 @@ impl Framed for SurfaceCombineDialog {
     }
 
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        // Nothing to run until the fields say a line; the status says why.
+        // Nothing to run until the fields say a line; the status says why - with no surface to
+        // merge, that there is none, in the words every surface dialog says it in, rather than
+        // asking for ticks on a list that is not there.
         let made = self.command();
         let ready = made.is_ok();
+        let why = if !ready && self.mode() == SurfaceCombineMode::Merge && self.merge.is_empty() {
+            String::from(NO_SURFACE)
+        } else {
+            why_no_line(&made)
+        };
         terrain_reply_field(ui, "surfaceCombineReply", &mut self.reply);
         // Preview and the status at the left, as they change nothing; Close, then Run - the
         // dialog's act, in the accent - at the right.
         let pressed = run_buttons(
             ui,
             Some(("surfaceCombinePreview", ready)),
-            ("surfaceCombineStatus", &why_no_line(&made)),
+            ("surfaceCombineStatus", &why),
             ("surfaceCombineRun", "Run", ready),
             Some("surfaceCombineClose"),
         );

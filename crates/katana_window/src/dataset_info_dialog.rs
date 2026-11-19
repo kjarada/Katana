@@ -10,7 +10,8 @@
 //! datasetInfoDialog     the dialog
 //! datasetInfoTabs       Summary, Fields, Bands, JSON
 //! datasetInfoSummary    the records that are not a field or a band: the dataset, raster,
-//!                       layers, subdatasets, point cloud
+//!                       layers, subdatasets, point cloud - recorded as they read, shown as a
+//!                       heading a record and a label and value a field
 //! datasetInfoFields     a table: Layer, Field, Type, Width
 //! datasetInfoBands      a table: Band, Type, No data, Min, Max, Mean, Std dev, Overviews
 //! datasetInfoJson       GDAL's own JSON (INFO ... JSON), indented
@@ -84,6 +85,38 @@ fn readable(record: &Record) -> String {
     words.join(" ")
 }
 
+/// A record's word or a field's key as a heading or a label reads: in sentence case, its
+/// underscores spaces, an abbreviation in capitals ("crs" is CRS, "nodata" No data).
+fn key_words(key: &str) -> String {
+    match key {
+        "crs" | "srs" | "id" | "epsg" | "copc" | "wkt" => return key.to_ascii_uppercase(),
+        "nodata" => return String::from("No data"),
+        _ => {}
+    }
+    let words = key.replace('_', " ");
+    let mut characters = words.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => String::new(),
+    }
+}
+
+/// Label and value rows, in the body's one label column (`shell::dialog::form`), each value text
+/// on its label's line (`text_value`) and wrapped: what a file is, read as a form rather than as a
+/// box of raw `key=value` records (the fourth look audit's 6). A row with no label is a line of
+/// its own under the fields.
+pub(crate) fn value_rows(ui: &mut Ui, rows: &[(String, String)]) {
+    crate::shell::dialog::form(ui, |form| {
+        for (label, value) in rows {
+            form.row(label, |ui| {
+                crate::shell::dialog::text_value(ui, |ui| {
+                    ui.add(egui::Label::new(value.as_str()).wrap())
+                })
+            });
+        }
+    });
+}
+
 /// QFileInfo::fileName: what follows the path's last separator.
 fn file_name(path: &str) -> &str {
     let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
@@ -107,6 +140,11 @@ pub struct DatasetInfoDialog {
     statistics: BTreeMap<String, Vec<String>>,
     tab: usize,
     summary: String,
+    /// The summary's records as they are shown: each record's word and its fields.
+    summary_records: Vec<(String, Vec<(String, String)>)>,
+    /// The tallest page drawn yet: every tab keeps it, so the dialog does not change height as
+    /// its tabs are turned.
+    page_height: f32,
     fields: Vec<Vec<String>>,
     bands: Vec<Vec<String>>,
     json: String,
@@ -131,6 +169,8 @@ impl DatasetInfoDialog {
             statistics: BTreeMap::new(),
             tab: 0,
             summary: String::new(),
+            summary_records: Vec::new(),
+            page_height: 0.0,
             fields: Vec::new(),
             bands: Vec::new(),
             json: String::new(),
@@ -248,6 +288,7 @@ impl DatasetInfoDialog {
         }
         self.described = true;
         let mut summary: Vec<String> = Vec::new();
+        let mut summary_records = Vec::new();
         let mut checked: Vec<String> = Vec::new();
         self.fields.clear();
         self.bands.clear();
@@ -286,9 +327,11 @@ impl DatasetInfoDialog {
                 checked.push(readable(&record));
             } else if record.kind != "overview" {
                 summary.push(readable(&record));
+                summary_records.push((record.kind.clone(), record.fields.clone()));
             }
         }
         self.summary = summary.join("\n");
+        self.summary_records = summary_records;
         self.reply = checked.join("\n");
     }
 
@@ -334,7 +377,11 @@ impl DatasetInfoDialog {
         let mut copy = false;
         for (page, title) in TABS.iter().enumerate() {
             if page == self.tab {
+                let top = ui.cursor().min.y;
                 copy |= self.page(ui, page);
+                let drawn = ui.cursor().min.y - top;
+                self.page_height = self.page_height.max(drawn);
+                ui.add_space(self.page_height - drawn);
             } else {
                 // A page not in front is still there to be read and pressed, as a hidden tab's
                 // widgets are.
@@ -370,7 +417,23 @@ impl DatasetInfoDialog {
         };
         match page {
             0 => {
-                text_with(ui, "datasetInfoSummary", &mut self.summary, fixed);
+                // The records as they read, for a driver and the tests, taking no room; shown as
+                // a heading a record and its fields label and value rows, where a box of raw
+                // records in a fixed pitch stood (the fourth look audit's 6).
+                crate::survey::survey_dialogs::hidden(ui, "datasetInfoSummary", |ui| {
+                    text_with(ui, "datasetInfoSummary", &mut self.summary, fixed);
+                });
+                if self.summary_records.is_empty() {
+                    crate::shell::dialog::note(ui, "Nothing has been read from the file.");
+                }
+                for (kind, fields) in &self.summary_records {
+                    crate::shell::dialog::section(ui, &key_words(kind));
+                    let rows: Vec<(String, String)> = fields
+                        .iter()
+                        .map(|(key, value)| (key_words(key), value.clone()))
+                        .collect();
+                    value_rows(ui, &rows);
+                }
                 false
             }
             1 => {

@@ -43,7 +43,7 @@ use katana_surveyio::{
 
 use super::survey_dialogs::{
     SurveyToolFrame, ToolButton, choice_of, coloured_label, field, form_row, muted, no_file_dialog,
-    save_file_dialog,
+    number_if, save_file_dialog,
 };
 use super::survey_templates::{TemplateChoice, saved_layout_templates};
 use crate::dialog_layout::{TABLE_ROW_GAP, table_row_colour};
@@ -296,13 +296,16 @@ impl SurveyExportDialog {
                 ui,
                 "comment",
                 &mut form.comment,
-                "none",
+                "No prefix",
                 "A field that would start a line with it is quoted",
             )
         });
+        // A whole number kept as text, so a typed one out of range is refused in the dialog's own
+        // sentence: a short well, as a number box is (the fourth look audit's 2).
         form_row(ui, "Decimals:", |ui| {
-            field(
+            number_if(
                 ui,
+                true,
                 "decimals",
                 &mut form.decimals,
                 "0 to 12",
@@ -988,7 +991,15 @@ impl SurveyPointReportDialog {
         } else {
             drawing_survey_points(document, &SurveyImportOptions::default())
         };
-        self.form.scope = if selected {
+        // None is said as none: "All 0 survey points in the drawing" counted a nothing (the fourth
+        // look audit's words).
+        self.form.scope = if self.points.is_empty() {
+            String::from(if selected {
+                "No survey point is selected."
+            } else {
+                "No survey points in the drawing."
+            })
+        } else if selected {
             format!(
                 "The {} selected.",
                 katana_cad::tools::everyday_support::counted(

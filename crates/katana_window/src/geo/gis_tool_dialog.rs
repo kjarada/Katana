@@ -783,6 +783,22 @@ pub fn gis_field(
     })
 }
 
+/// `gis_field` for a number kept as text (`number_line`): a short well, as a number box is, where
+/// a full-width field stood among the boxes of other forms (the fourth look audit's 2). Text, not
+/// a box: a blank leaves the option to the verb, and a typed one is the verb's to read and refuse.
+pub fn gis_number(
+    ui: &mut Ui,
+    name: &str,
+    label: &str,
+    value: &mut String,
+    placeholder: &str,
+    tip: &str,
+) -> egui::Response {
+    dialog::labelled(ui, label, |ui| {
+        crate::drive::controls::number_line(ui, name, value, placeholder).on_hover_text(tip)
+    })
+}
+
 /// A check box under a dialog's fields, lined up with them (in the form's second column).
 pub fn gis_check(ui: &mut Ui, name: &str, text: &str, on: &mut bool) -> egui::Response {
     dialog::labelled(ui, "", |ui| crate::drive::check(ui, name, text, on))

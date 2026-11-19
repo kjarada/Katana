@@ -508,11 +508,12 @@ impl ProjectCrsDialog {
             "projectCrsSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search: mga 56, gda2020, utm 55s, 27700 ...",
+                placeholder: "Search...",
                 width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
         )
+        .on_hover_text("A code or words of a name: mga 56, gda2020, utm 55s, 27700 ...")
         .changed()
         {
             let filter = self.search.clone();
@@ -685,6 +686,10 @@ impl ProjectCrsDialog {
         // What the typed text names, or why it names nothing, is the status beside Local
         // Coordinates: the design's one home for a status (it stood under the text box).
         let check = self.check.clone();
+        // Nothing typed or chosen is nothing to set: Set greys (the fourth look audit's 1). Its
+        // act with an empty box, CRS CLEAR, is Local Coordinates' - the button beside it that says
+        // so - and `apply` still takes an empty box for a caller that means it.
+        let can_set = !self.text.trim().is_empty();
         let (clear, (cancel, set)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
@@ -696,7 +701,11 @@ impl ProjectCrsDialog {
             },
             |ui| {
                 let cancel = controls::button(ui, "projectCrsCancel", "Close").clicked();
-                let set = controls::primary(ui, "projectCrsApply", "Set").clicked();
+                let set = ui
+                    .add_enabled_ui(can_set, |ui| {
+                        controls::primary(ui, "projectCrsApply", "Set").clicked()
+                    })
+                    .inner;
                 (cancel, set)
             },
         );

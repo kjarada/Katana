@@ -148,14 +148,49 @@ impl CommandShown {
 }
 
 /// What the file is, above the options, in the words Dataset Information uses: the same
-/// format_description, so the dialog and the info window cannot describe one file two ways.
+/// format_description, so the dialog and the info window cannot describe one file two ways. Shown
+/// as the form's label and value rows (`dataset_info_dialog::value_rows`), where it was a block of
+/// bold fixed-pitch lines over the form (the fourth look audit's 6).
 fn summary_label(ui: &mut Ui, summary: &str) {
-    // The file's own words, never markup.
-    ui.label(
-        RichText::new(summary)
-            .monospace()
-            .color(palette::text_muted().to_egui()),
+    crate::dataset_info_dialog::value_rows(ui, &description_rows(summary));
+}
+
+/// format_description's lines as label and value rows: "Kind: vector (GeoJSON)" is the row Kind,
+/// an indented line (a layer of the file) a row of its own under the line it belongs to, and a
+/// line that is not "label: value" a value alone. The first line, the file's name, is left out:
+/// the dialog's title says it.
+pub(crate) fn description_rows(summary: &str) -> Vec<(String, String)> {
+    summary
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| match line.split_once(": ") {
+            Some((label, value)) => (String::from(label), String::from(value)),
+            None => (String::new(), String::from(line)),
+        })
+        .collect()
+}
+
+/// A whole number of a form whose 0 means "all" (or "as the file has it"): a number box that
+/// reads `zero` at 0 - a spin box's special text - where it read a bare "0" ("At most 0", "Band
+/// 0"; the fourth look audit's 3). A fill is a whole number from 0 to `most`, as it was.
+fn whole_or(
+    ui: &mut Ui,
+    name: &str,
+    value: &mut i64,
+    most: i64,
+    zero: &'static str,
+) -> egui::Response {
+    let mut number = *value as f64;
+    let response = spin(
+        ui,
+        name,
+        &mut number,
+        SpinRange::new(0.0, most as f64, 1.0, 0).with_special_text(zero),
     );
+    *value = number.round() as i64;
+    response
 }
 
 /// A choice whose items each stand for a word of the line (QComboBox's item data).
@@ -688,6 +723,10 @@ impl VectorImportDialog {
 
     fn body(&mut self, ui: &mut Ui, command: &mut CommandShown) {
         summary_label(ui, &self.summary);
+        // The headings of the two columns begin at the columns' tops, where `section` cannot see
+        // the rows above them: the gap a heading has over the form, given here (the Layers
+        // heading stood 4 points under the summary).
+        ui.add_space((crate::shell::dialog::SECTION_GAP - ui.spacing().item_spacing.y).max(0.0));
         ui.horizontal_top(|ui| {
             // The options take what the scope's group, at the scope's own width, leaves them.
             let options_width = ui.available_width()
@@ -741,7 +780,7 @@ impl VectorImportDialog {
                     "vectorImportSql",
                     "SQL:",
                     &mut self.sql,
-                    "none, e.g. SELECT * FROM parcels WHERE area_m2 > 7000",
+                    "No query, e.g. SELECT * FROM parcels WHERE area_m2 > 7000",
                     "A SELECT run on the file; its rows are imported in place of its layers \
                      (sql=)",
                 );
@@ -755,7 +794,8 @@ impl VectorImportDialog {
                     "every attribute",
                     "Only these attributes become properties, a,b (fields=)",
                 );
-                check(
+                // At the fields' edge, as every check box of a form is.
+                crate::shell::dialog::check_row(
                     ui,
                     "vectorImportAttributes",
                     "Keep feature attributes as entity properties",
@@ -772,7 +812,7 @@ impl VectorImportDialog {
                 );
                 crate::shell::dialog::labelled(ui, "At most:", |ui| {
                     // 0 is "every feature" (the box's special value).
-                    whole(ui, "vectorImportMax", &mut self.max, 0..=SPIN_MAX)
+                    whole_or(ui, "vectorImportMax", &mut self.max, SPIN_MAX, "Every feature")
                         .on_hover_text("At most this many features (max=); 0 is every feature");
                 });
                 text_row(
@@ -780,7 +820,7 @@ impl VectorImportDialog {
                     "vectorImportOpenOptions",
                     "Open options:",
                     &mut self.open_options,
-                    "none, e.g. FLATTEN_NESTED_ATTRIBUTES=YES",
+                    "No options, e.g. FLATTEN_NESTED_ATTRIBUTES=YES",
                     "The driver's open options, KEY=VALUE separated by blanks (oo=); each is \
                      checked against the driver's own list. FORMATS OPTIONS <driver> lists them.",
                 );
@@ -813,7 +853,7 @@ impl VectorImportDialog {
                     &mut self.use_scope,
                 );
                 let limited = self.use_scope;
-                ui.add_enabled_ui(limited, |ui| {
+                crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, limited, |ui| {
                     self.scope.ui(ui);
                     check(
                         ui,
@@ -978,7 +1018,14 @@ impl RasterImportDialog {
             .ui(ui, "rasterImportMaxPixels", "Display resolution:", "");
         crate::shell::dialog::labelled(ui, "Band:", |ui| {
             // 0 is "As the file's colours" (the box's special value).
-            whole(ui, "rasterImportBand", &mut self.band, 0..=self.bands).on_hover_text(
+            whole_or(
+                ui,
+                "rasterImportBand",
+                &mut self.band,
+                self.bands,
+                "The file's colours",
+            )
+            .on_hover_text(
                 "One band alone, as grey (band=): a multispectral image's near infrared, or one \
                  grid of a stack; 0 is as the file's colours",
             );

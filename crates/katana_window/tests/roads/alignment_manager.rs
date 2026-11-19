@@ -156,7 +156,9 @@ mod alignment_manager {
         assert_eq!(cell_text(&d, "alignmentList", 0, 0), "road");
         assert_eq!(cell_text(&d, "alignmentList", 0, 1), "3");
         assert_eq!(cell_text(&d, "alignmentList", 0, 4), "200.000");
-        assert_eq!(cell_text(&d, "alignmentList", 0, 5), "none");
+        // No profile is the design's one empty word, "None" (drive::controls::NO_CHOICE; the
+        // fourth look audit's 3), where the cell read "none".
+        assert_eq!(cell_text(&d, "alignmentList", 0, 5), "None");
         assert_eq!(d.dialog.current_alignment(), "road");
 
         // Typed on the command line, not in the dialog: the watcher reloads it, keeping the

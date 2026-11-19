@@ -147,6 +147,9 @@ impl SelectByIdState {
         // open for the next id.
         let status = self.status.clone();
         let is_error = self.status_error;
+        // No id typed is nothing to select: Select greys (the fourth look audit's 1), where a
+        // press could only be refused.
+        let can_select = !self.ids.trim().is_empty();
         crate::shell::dialog::button_row(
             ui,
             |ui| {
@@ -156,7 +159,13 @@ impl SelectByIdState {
                 if button(ui, "selectByIdClose", "Close").clicked() {
                     self.close = true;
                 }
-                if crate::drive::primary(ui, "selectByIdSelect", "Select").clicked() {
+                if ui
+                    .add_enabled_ui(can_select, |ui| {
+                        crate::drive::primary(ui, "selectByIdSelect", "Select")
+                    })
+                    .inner
+                    .clicked()
+                {
                     self.select = true;
                 }
             },
