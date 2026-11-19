@@ -92,15 +92,18 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use katana_cad::linework_verbs::{SurveyImportFinish, survey_import_finish};
-use katana_cad::survey_finish::{SurveyFinishReport, SurveyFinishSkip};
+use katana_cad::survey_finish::{
+    SharedFinishReport, SurveyFinishEarlier, SurveyFinishReport, SurveyFinishSkip,
+    with_survey_finish,
+};
 use katana_cad::survey_job::{default_reduction, reduction_context_for};
-use katana_cad::survey_points::{DrawingSurveyPoint, drawing_survey_points};
+use katana_cad::survey_points::{DrawingSurveyPoint, drawing_survey_points, import_survey_points};
 use katana_cad::{
-    CommandInterpreter, Document, ImportSurveyJobCommand, SurveyImportOptions, SurveyJob,
-    SurveyJobFile, SurveyJobImport,
+    CommandInterpreter, Document, ExistingPointPolicy, ImportSurveyJobCommand,
+    SurveyImportOptions, SurveyJob, SurveyJobFile, SurveyJobImport, SurveyPointImportReport,
 };
 use katana_core::civil_date::now_utc;
 use katana_core::error::make_error;
@@ -118,19 +121,28 @@ use katana_survey::{
     ReductionSettings, SurveyProject,
 };
 use katana_surveyio::{
-    MAX_SURVEY_FILE_BYTES, PROBE_BYTES, ReadOptions, ReadResult, detect_format, format_registry,
-    probe_of, read_survey, report_input_for, siblings_in_folder,
+    DELIMITED_POINTS_FORMAT_ID, DelimitedImportOptions, MAX_SURVEY_FILE_BYTES, PROBE_BYTES,
+    ReadOptions, ReadResult, ReadWarning, detect_format, format_registry, layout_template,
+    parse_delimited_points, parse_layout_template, probe_of, read_survey, report_input_for,
+    siblings_in_folder,
 };
 
 use crate::import_records::{path_from_text, path_text, record_number, record_text};
+use crate::survey_export_verb;
 
-const USAGE: &str = "SURVEY READ <file> [FORMAT <id>] | SURVEY IMPORT <file> [FORMAT <id>] \
-                     [LAYER <path>] [SETTINGS <file>] [SET <key>=<value> ...] [CODES on|off] \
-                     [LINEWORK on|off]";
+const USAGE: &str = "SURVEY READ <file> [FORMAT <id>] [LAYOUT <template> UNIT <unit>] | \
+                     SURVEY IMPORT <file> [FORMAT <id>] [LAYER <path>] [SETTINGS <file>] \
+                     [SET <key>=<value> ...] [CODES on|off] [LINEWORK on|off] \
+                     [LAYOUT <template> UNIT <unit>] | SURVEY EXPORT <file> ...";
 
 // The words that begin an option, and so end SET's items: a key of the
 // settings text is never one of them.
-const OPTIONS: [&str; 6] = ["FORMAT", "LAYER", "SETTINGS", "SET", "CODES", "LINEWORK"];
+const OPTIONS: [&str; 8] = [
+    "FORMAT", "LAYER", "SETTINGS", "SET", "CODES", "LINEWORK", "LAYOUT", "UNIT",
+];
+
+// The options SURVEY READ takes; IMPORT takes them all.
+const READ_OPTIONS: [&str; 3] = ["FORMAT", "LAYOUT", "UNIT"];
 
 // Warnings listed in the reply; the rest are counted. The job's report keeps
 // every one of them (Survey > Survey Jobs).
@@ -173,6 +185,13 @@ struct SurveyLine {
     /// drawing's customisation decides (cad's survey_import_finish).
     codes: Option<bool>,
     linework: Option<bool>,
+    /// LAYOUT: a delimited point file's column layout, as a layout template
+    /// (surveyio's parse_layout_template), which makes the file a point list
+    /// read through it rather than a field file read by its format's reader.
+    layout: Option<String>,
+    /// UNIT, the unit that point file's numbers are in: required with LAYOUT,
+    /// since a point file never says and none is assumed.
+    unit: Option<String>,
 }
 
 fn refused(why: String) -> Error {
@@ -198,7 +217,7 @@ fn parse(line: &str) -> Result<SurveyLine> {
     let mut i = 3;
     while i < words.len() {
         let option = option_named(&words[i]);
-        if option.is_empty() || (!parsed.import && option != "FORMAT") {
+        if option.is_empty() || (!parsed.import && !READ_OPTIONS.contains(&option)) {
             return Err(refused(format!(
                 "'{}' is not an option of SURVEY {}",
                 words[i],
@@ -244,10 +263,41 @@ fn parse(line: &str) -> Result<SurveyLine> {
             } else {
                 parsed.linework = Some(on);
             }
+        } else if option == "LAYOUT" {
+            parsed.layout = Some(value.clone());
+        } else if option == "UNIT" {
+            parsed.unit = Some(value.clone());
         } else {
             parsed.settings_file = Some(value.clone());
         }
         i += 2;
+    }
+    // A point list read through a layout: its unit is said, and nothing it
+    // has not got is asked of it.
+    if parsed.layout.is_some() {
+        if parsed.unit.is_none() {
+            return Err(refused(String::from(
+                "a point file does not say what unit its numbers are in: give UNIT metres, \
+                 feet, usfeet or links with LAYOUT (there is no default - a wrong unit scales \
+                 the whole survey)",
+            )));
+        }
+        if !parsed.format.is_empty() && !same_word(&parsed.format, DELIMITED_POINTS_FORMAT_ID) {
+            return Err(refused(format!(
+                "LAYOUT reads a delimited point file ({DELIMITED_POINTS_FORMAT_ID}), not {}",
+                parsed.format
+            )));
+        }
+        if parsed.settings_file.is_some() || !parsed.set.is_empty() {
+            return Err(refused(String::from(
+                "a point file read through LAYOUT has no observations to reduce: SETTINGS and \
+                 SET are for a field file",
+            )));
+        }
+    } else if parsed.unit.is_some() {
+        return Err(refused(String::from(
+            "UNIT is the unit of a point file read through LAYOUT; a field file states its own",
+        )));
     }
     Ok(parsed)
 }
@@ -950,11 +1000,141 @@ pub fn is_survey_line(line: &str) -> bool {
     equals_ignoring_case(&text[..end], b"SURVEY")
 }
 
+// SURVEY READ | IMPORT <file> LAYOUT <template> UNIT <unit>: a delimited point
+// file read through the layout a person states, as the import wizard's Layout
+// page reads it (surveyio's parse_delimited_points; read_survey has no reader
+// for a point list, whose column order is never guessed), and imported as the
+// wizard's Import imports it: the points drawn by cad's import_survey_points,
+// refusing an id the drawing already has (the wizard's default policy), then
+// coded and strung by the one finish (with_survey_finish, the points strung by
+// their codes alone) - ONE undo step. No survey job is kept: a point list has
+// no observations to reduce again. The coordinates are drawn as the file
+// writes them, in metres; nothing is transformed (the wizard's System step has
+// no word here yet: docs/survey.md, "Not done").
+//
+// The reply is the field-file path's: survey, content, declared and warning
+// records, then `layout layout=<template> unit=<unit>`; for IMPORT `imported
+// entities=<points drawn> layer=<layer> without_elevation=<n>`, each of the
+// import's warnings as `import_warning`, and the finish's coded and linework
+// records.
+fn run_point_list(
+    document: &mut Document,
+    parsed: &SurveyLine,
+    layout_text: &str,
+    bytes: &[u8],
+    name: &str,
+) -> Result<String> {
+    let layout = parse_layout_template(layout_text)?;
+    let unit_text = parsed.unit.as_deref().unwrap_or_default();
+    let Some(unit) = survey_export_verb::unit_named(unit_text) else {
+        return Err(refused(format!(
+            "UNIT is metres, feet, usfeet or links, not '{unit_text}'"
+        )));
+    };
+    let options = DelimitedImportOptions {
+        unit,
+        encoding: None,
+    };
+    let imported = parse_delimited_points(bytes, &layout, name, &options)?;
+    let read = ReadResult {
+        project: imported.project,
+        warnings: imported
+            .warnings
+            .iter()
+            .map(|message| ReadWarning {
+                file_name: String::from(name),
+                record: 0,
+                message: message.clone(),
+            })
+            .collect(),
+        records_read: imported.records_read,
+        records_skipped: imported.records_skipped,
+        parser_version: format_registry()
+            .find(&imported.format_id)
+            .map(|descriptor| descriptor.parser_version)
+            .unwrap_or_default(),
+        format_id: imported.format_id,
+        ..ReadResult::default()
+    };
+    let mut reply = describe_read(&read, name);
+    reply.push_str(&format!(
+        "\nlayout layout={} unit={}",
+        record_text(&layout_template(&layout)),
+        survey_export_verb::unit_word(unit)
+    ));
+    if !parsed.import {
+        return Ok(reply);
+    }
+
+    let finish = survey_import_finish(document, parsed.codes, parsed.linework);
+    let mut import_options = SurveyImportOptions::default();
+    if let Some(layer) = &parsed.layer {
+        import_options.layer.clone_from(layer);
+    }
+    let mut report = SurveyPointImportReport::default();
+    let points = import_survey_points(
+        document,
+        &read.project,
+        &import_options,
+        ExistingPointPolicy::Refuse,
+        Some(&mut report),
+    )?;
+    let finished: SharedFinishReport = Arc::new(Mutex::new(SurveyFinishReport::default()));
+    let Some(whole) = with_survey_finish(
+        document,
+        points,
+        SurveyProject::default(),
+        &import_options,
+        finish.options.clone(),
+        Some(Arc::clone(&finished)),
+        SurveyFinishEarlier::default(),
+    ) else {
+        return Err(make_error(
+            ErrorCode::InvalidState,
+            "nothing to import: the file holds no point with coordinates",
+            name,
+        ));
+    };
+    document.execute(whole)?;
+    let finished = finished
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    reply.push_str(&format!(
+        "\nimported entities={} layer={} without_elevation={}",
+        report.import.points,
+        record_text(&import_options.layer),
+        report.import.points_without_elevation
+    ));
+    for warning in report.warnings.iter().take(LISTED_WARNINGS) {
+        reply.push_str(&format!("\nimport_warning text={}", record_text(warning)));
+    }
+    if report.warnings.len() > LISTED_WARNINGS {
+        reply.push_str(&format!(
+            "\nimport_warnings_more={}",
+            report.warnings.len() - LISTED_WARNINGS
+        ));
+    }
+    reply.push_str(&finish_records(&finish, Some(&finished)));
+    Ok(reply)
+}
+
 /// Runs a SURVEY line on `document`. InvalidArgument for a line the grammar
 /// above does not take; the settings parser's, the detection's, the reader's
 /// or the import's own error otherwise, with the drawing unchanged.
 pub fn run_survey_line(document: &mut Document, line: &str) -> Result<String> {
+    // SURVEY EXPORT writes the drawing's points and changes nothing; its
+    // grammar is its own (survey_export_verb).
+    if survey_export_verb::is_survey_export_line(&CommandInterpreter::tokenize(line)?) {
+        return survey_export_verb::run_survey_export(document, line);
+    }
     let parsed = parse(line)?;
+    if let Some(layout) = &parsed.layout {
+        let path = path_from_text(&parsed.path);
+        let bytes = read_bytes(&path, "the file")?;
+        let name = source_file_name(&path_text(&path));
+        return run_point_list(document, &parsed, layout, &bytes, &name);
+    }
     let wanted = if parsed.import {
         Some(settings_request(&parsed)?)
     } else {
@@ -1101,5 +1281,15 @@ pub fn survey_help_text() -> &'static str {
         "          customisation does; the reply's coded and linework records say what\n",
         "          was done, or \"none\" and why (reason=off, no-survey-codes,\n",
         "          no-codes-in-file, no-rule-matches, no-points)\n",
+        "          SURVEY READ|IMPORT <file> LAYOUT <template> UNIT <unit> [LAYER <path>]\n",
+        "          [CODES on|off] [LINEWORK on|off]  a delimited point file (CSV, TXT)\n",
+        "          read through its column layout, e.g. LAYOUT\n",
+        "          \"P,N,E,Z,C,D;delimiter=comma;header=1\" UNIT metres: its points drawn,\n",
+        "          coded and strung in one undo step, as the import wizard does\n",
+        "          SURVEY EXPORT <file> [LAYOUT <template>] [DECIMALS <n>]\n",
+        "          [UNIT metres|feet|usfeet|links] [<scope> [WHERE ...]]  the drawing's\n",
+        "          survey points (or those among what the scope takes) written to a\n",
+        "          delimited point file: LAYOUT a layout template, by default\n",
+        "          P,E,N,Z,C,D;delimiter=comma;header=1;quote=double, DECIMALS 3, metres\n",
     )
 }

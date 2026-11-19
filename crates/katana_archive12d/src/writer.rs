@@ -18,9 +18,9 @@ use katana_core::text::format_exact_real;
 use crate::archive::{
     AlignmentPart, ArcString, Archive, AttributeList, AttributeValue, Breakline, CircleString,
     DraftingLeader, DraftingReference, DrainageRecord, DrainageString, Element, Field, FieldList,
-    LasCloud, ModelRecord, PlotFrame, Segment, SegmentKind, SolvedGeometry, StringHeader,
-    StringKind, SuperAlignment, SuperTin, TextString, Tin, Trimesh, TrimeshInfo, Vertex,
-    VertexString,
+    LasCloud, ModelRecord, PlotFrame, Polymesh, PolymeshLoop, Segment, SegmentKind,
+    SolvedGeometry, StringHeader, StringKind, SuperAlignment, SuperTin, TextString, Tin, Trimesh,
+    TrimeshInfo, Vertex, VertexString,
 };
 use crate::reader::parse_real;
 use crate::text_utilities::{equals_ignoring_case, format_hex_real, format_real};
@@ -1121,7 +1121,97 @@ impl<'a> Writer<'a> {
         self.flags("edge_flags", &mesh.edge_flags);
         self.infos("face_infos", &mesh.face_infos);
         self.flags("face_flags", &mesh.face_flags);
+        if let Some(polymesh) = &mesh.polymesh {
+            self.write_polymesh(polymesh);
+        }
         self.close();
+        self.close();
+    }
+
+    // A polymesh as the reader reads it (reader.rs, "polymesh"): every index
+    // written from 1 again, and only what the file had.
+    fn write_polymesh(&mut self, polymesh: &Polymesh) {
+        self.open("polymesh");
+        if let Some(info) = &polymesh.info {
+            self.info_fields(info);
+        }
+        self.open("faces");
+        for face in &polymesh.faces {
+            self.open("face");
+            if !face.valid.is_empty() {
+                self.pair("valid", &word(&face.valid));
+            }
+            if let Some(info) = &face.info {
+                self.info_fields(info);
+            }
+            if let Some(normal) = face.normal {
+                let text = self.triple(normal);
+                self.pair("normal", &text);
+            }
+            self.indices("face_indices", &face.triangles);
+            self.value_block(
+                "edge_indices",
+                face.edge_indices.iter().map(|value| format!("{value}")),
+            );
+            if let Some(boundary) = &face.boundary {
+                self.polymesh_loop("boundary", boundary);
+            }
+            if !face.holes.is_empty() {
+                self.open("holes");
+                for hole in &face.holes {
+                    self.polymesh_loop("hole", hole);
+                }
+                self.close();
+            }
+            self.close();
+        }
+        self.close();
+        self.value_block(
+            "edge_indices",
+            polymesh.edge_indices.iter().map(|value| format!("{value}")),
+        );
+        self.close();
+    }
+
+    fn info_fields(&mut self, info: &TrimeshInfo) {
+        self.open("info");
+        self.pair("flag", &format!("{}", info.flag));
+        self.pair("key", &format!("{}", info.key));
+        self.pair("colour", &quoted(&info.colour));
+        self.pair("name", &quoted(&info.name));
+        self.close();
+    }
+
+    fn triple(&self, values: [f64; 3]) -> String {
+        format!(
+            "{} {} {}",
+            self.real(values[0]),
+            self.real(values[1]),
+            self.real(values[2])
+        )
+    }
+
+    // Zero-based indices, written from 1.
+    fn indices(&mut self, keyword: &str, values: &[u32]) {
+        self.value_block(
+            keyword,
+            values
+                .iter()
+                .map(|&value| format!("{}", u64::from(value) + 1)),
+        );
+    }
+
+    fn polymesh_loop(&mut self, keyword: &str, ring: &PolymeshLoop) {
+        self.open(keyword);
+        if let Some(centroid) = ring.centroid {
+            let text = self.triple(centroid);
+            self.pair("centroid", &text);
+        }
+        if let Some(radius) = ring.radius {
+            let text = self.real(radius);
+            self.pair("radius", &text);
+        }
+        self.indices("vertex_indices", &ring.vertices);
         self.close();
     }
 

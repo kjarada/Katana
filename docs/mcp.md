@@ -156,6 +156,12 @@ Properties panel reads them. No tool of its own was added: the verb's
 records are already the structured answer, and a tool would be a second
 spelling of it.
 
+A delimited point file (CSV, TXT) is read and imported by the same verbs
+given its column layout and unit, `SURVEY IMPORT <file> LAYOUT <template>
+UNIT metres`, and the drawing's survey points are written to one by `SURVEY
+EXPORT <file>`, both through `katana_run_commands` (`docs/survey.md`, "Point
+files on the command line: LAYOUT, UNIT and SURVEY EXPORT").
+
 A survey field file - any format the survey import reads, the opcode field
 file (`.fld`) and the Sokkia SDR file (`.sdr`,
 `mcp_server::an_agent_reads_and_imports_a_sokkia_sdr_file`) among them - is read and

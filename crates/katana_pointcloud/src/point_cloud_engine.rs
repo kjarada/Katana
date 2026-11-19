@@ -198,20 +198,62 @@ fn infer_unguarded(path: &Path, for_writing: bool) -> String {
 // to.
 //
 // With that resolution an int32 spans +/-2 147 km, less than a projected
-// northing of 7 410 km, so the offset must move the origin to the data:
-// "auto" has PDAL take it from the points' minimum.
+// northing of 7 410 km, so the offset must move the origin to the data.
+//
+// The offset is a WHOLE METRE near the middle of the points, never PDAL's
+// "auto". "auto" is the exact middle of the bounds (measured with PDAL 2.10.2:
+// points from Z 20.111 to 25.444 got offset_z 22.7775), and a millimetre value
+// stored as round((value - 22.7775) / 0.001) comes back half a millimetre
+// off: every height of that cloud moved by 0.5 mm, a survey quoted to the
+// millimetre written as one it was not. An offset on the millimetre grid - a
+// whole metre is - stores every millimetre value as an exact integer. The
+// middle, not the minimum, keeps the int32's reach either side of it.
+// "auto" stays only where the bounds are not known (a non-LAS source whose
+// header gives none, converted to COPC).
 const LAS_SCALE: &str = "0.001";
-const LAS_OFFSET: &str = "auto";
+const LAS_AUTO_OFFSET: &str = "auto";
 
-fn add_millimetre_scale(options: &mut Vec<StageOption>) {
-    for (scale, offset) in [
-        ("scale_x", "offset_x"),
-        ("scale_y", "offset_y"),
-        ("scale_z", "offset_z"),
-    ] {
-        options.push((scale, Vec::from(LAS_SCALE)));
-        options.push((offset, Vec::from(LAS_OFFSET)));
+// The offset of one axis whose points run from `min` to `max`: the whole metre
+// at or below their middle, as text PDAL reads; "auto" for bounds not known.
+fn las_offset(min: f64, max: f64) -> Vec<u8> {
+    if !(min.is_finite() && max.is_finite() && min <= max) {
+        return Vec::from(LAS_AUTO_OFFSET);
     }
+    // Halved first: min + max can overflow where neither does.
+    let middle = (min / 2.0 + max / 2.0).floor();
+    format_exact_real(middle).into_bytes()
+}
+
+fn add_millimetre_scale(options: &mut Vec<StageOption>, bounds: Option<&PointCloudBounds>) {
+    let known = bounds.filter(|bounds| !bounds.empty());
+    let axes = [
+        ("scale_x", "offset_x", known.map(|b| (b.min_x, b.max_x))),
+        ("scale_y", "offset_y", known.map(|b| (b.min_y, b.max_y))),
+        ("scale_z", "offset_z", known.map(|b| (b.min_z, b.max_z))),
+    ];
+    for (scale, offset, range) in axes {
+        options.push((scale, Vec::from(LAS_SCALE)));
+        let value = match range {
+            Some((min, max)) => las_offset(min, max),
+            None => Vec::from(LAS_AUTO_OFFSET),
+        };
+        options.push((offset, value));
+    }
+}
+
+// The bounds of `points`, read from the points themselves: a cloud's own
+// `bounds` may be the file's header, or empty for a cloud made in memory.
+fn bounds_of_points(points: &[PointCloudPoint]) -> PointCloudBounds {
+    let mut bounds = PointCloudBounds::default();
+    for point in points {
+        bounds.min_x = bounds.min_x.min(point.x);
+        bounds.min_y = bounds.min_y.min(point.y);
+        bounds.min_z = bounds.min_z.min(point.z);
+        bounds.max_x = bounds.max_x.max(point.x);
+        bounds.max_y = bounds.max_y.max(point.y);
+        bounds.max_z = bounds.max_z.max(point.z);
+    }
+    bounds
 }
 
 // A double as PDAL's Options::add writes it (Utils::toString(value, 15)):
@@ -553,6 +595,17 @@ impl PointCloudEngine {
         if driver.is_empty() {
             return Err(no_reader(source));
         }
+        let las_source = driver == "readers.las" || driver == "readers.copc";
+        // A source with no LAS header to forward takes the millimetre with
+        // an offset from its bounds, which its header gives where it has
+        // them (add_millimetre_scale says why not "auto"); a header that
+        // cannot be read leaves "auto", and the conversion's own read says
+        // what is wrong with the file.
+        let source_bounds = if las_source {
+            None
+        } else {
+            self.read_header(source).ok().map(|header| header.bounds)
+        };
         guarded(
             ErrorCode::FileExportFailure,
             "PDAL could not write the COPC file",
@@ -568,11 +621,10 @@ impl PointCloudEngine {
                 // with PDAL 2.10.2: a 0.0001-scale LAS converted with
                 // forward=all kept 0.0001, and with forward=all plus
                 // scale_x=0.001 came out at 0.001).
-                let las_source = driver == "readers.las" || driver == "readers.copc";
                 if las_source {
                     writer_options.push(("forward", Vec::from("all")));
                 } else {
-                    add_millimetre_scale(&mut writer_options);
+                    add_millimetre_scale(&mut writer_options, source_bounds.as_ref());
                 }
                 let stages = [
                     Stage {
@@ -658,7 +710,8 @@ impl PointCloudEngine {
                 // false), which ALazIsCompressedAndReadsBackAsTheSamePoints
                 // holds it to.
                 if driver == "writers.las" || driver == "writers.copc" {
-                    add_millimetre_scale(&mut writer_options);
+                    let bounds = bounds_of_points(&cloud.points);
+                    add_millimetre_scale(&mut writer_options, Some(&bounds));
                 }
                 // PointView::setSpatialReference is private, so the CRS is
                 // declared to the writer instead - which is also where it

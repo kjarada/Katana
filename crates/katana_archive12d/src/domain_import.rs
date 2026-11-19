@@ -528,6 +528,10 @@ struct Importer<'a> {
     named_problems: usize,
     trimeshes_empty: usize,
     trimesh_faces_dropped: usize,
+    /// Meshes with a polymesh, and the polygonal faces their polymeshes
+    /// group the triangles into.
+    polymeshes: usize,
+    polymesh_faces: usize,
     partly_invisible: usize,
     symbols_left: usize,
     leader_references: usize,
@@ -551,6 +555,8 @@ impl<'a> Importer<'a> {
             named_problems: 0,
             trimeshes_empty: 0,
             trimesh_faces_dropped: 0,
+            polymeshes: 0,
+            polymesh_faces: 0,
             partly_invisible: 0,
             symbols_left: 0,
             leader_references: 0,
@@ -2123,6 +2129,11 @@ impl<'a> Importer<'a> {
         if self.options.attributes_as_properties {
             flatten_attributes(&trimesh.attributes, "", &mut imported.properties);
         }
+        if let Some(polymesh) = &trimesh.polymesh {
+            self.polymeshes += 1;
+            self.polymesh_faces += polymesh.faces.len();
+            imported.polymesh_faces_in_file = polymesh.faces.len();
+        }
 
         imported.mesh.vertices.reserve(trimesh.vertices.len());
         for vertex in &trimesh.vertices {
@@ -2301,6 +2312,12 @@ impl<'a> Importer<'a> {
             self.result.warnings.push(format!(
                 "{} mesh faces were dropped: they name a vertex that does not exist, repeat one, or have no height",
                 self.trimesh_faces_dropped
+            ));
+        }
+        if self.polymeshes != 0 {
+            self.result.warnings.push(format!(
+                "{} meshes group their triangles into {} polymesh faces (named, coloured polygons such as a layer's sides): every triangle is imported and drawn, the grouping is read and not drawn, and an export of the drawing does not write it",
+                self.polymeshes, self.polymesh_faces
             ));
         }
         if self.partly_invisible != 0 {

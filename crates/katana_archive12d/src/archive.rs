@@ -642,6 +642,46 @@ pub struct TrimeshInfo {
     pub name: String,
 }
 
+/// A loop of a polymesh face - its `boundary`, or one `hole` of its `holes` -
+/// as the file states it: a centroid and a radius, and the loop's vertices,
+/// zero-based into the mesh's.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PolymeshLoop {
+    pub centroid: Option<[f64; 3]>,
+    pub radius: Option<f64>,
+    pub vertices: Vec<u32>,
+}
+
+/// One face of a `polymesh`: a polygon the mesh's triangles make up, with its
+/// own presentation (`info`: "PT1 Side", "acad 040").
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PolymeshFace {
+    /// `valid`, as written ("true"); empty where the file gives none.
+    pub valid: String,
+    pub info: Option<TrimeshInfo>,
+    pub normal: Option<[f64; 3]>,
+    /// `face_indices`: the triangles the face is made of, zero-based into the
+    /// mesh's faces.
+    pub triangles: Vec<u32>,
+    /// `edge_indices`, as written: what they index is not established.
+    pub edge_indices: Vec<i64>,
+    pub boundary: Option<PolymeshLoop>,
+    pub holes: Vec<PolymeshLoop>,
+}
+
+/// `polymesh` inside a `trimesh_3d`: the mesh's triangles grouped into the
+/// polygonal faces they make - a pavement layer's top, bottom and sides. No
+/// geometry of its own: every triangle it names is one of the mesh's faces.
+/// Not in the manual's section on primitive_3d; read from the writing
+/// program's own exports (docs/interop.md, "The 12d Archive format").
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Polymesh {
+    pub info: Option<TrimeshInfo>,
+    pub faces: Vec<PolymeshFace>,
+    /// `edge_indices`, as written.
+    pub edge_indices: Vec<i64>,
+}
+
 /// `primitive_3d { trimesh_3d { ... } }`: a closed or open mesh of triangles,
 /// counter-clockwise seen from OUTSIDE. Indices zero-based here.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -666,6 +706,8 @@ pub struct Trimesh {
     pub edge_flags: Vec<u32>,
     pub face_infos: Vec<TrimeshInfo>,
     pub face_flags: Vec<u32>,
+    /// The `polymesh` block, where the file has one.
+    pub polymesh: Option<Polymesh>,
 }
 
 /// The C++ std::variant of the twelve element types, in its order.

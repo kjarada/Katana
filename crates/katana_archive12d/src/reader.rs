@@ -27,9 +27,9 @@ use katana_core::text_encoding::{decode_text, to_string as encoding_name};
 use crate::archive::{
     AlignmentPart, AlignmentSource, ArcString, Archive, Attribute, AttributeList, AttributeValue,
     Breakline, CircleString, DraftingLeader, DraftingReference, DrainageRecord, DrainageString,
-    Element, Field, FieldList, LasCloud, LasPoint, ModelRecord, PlotFrame, Segment, SegmentKind,
-    SolvedGeometry, StringHeader, StringKind, SuperAlignment, SuperTin, TextString, Tin, Trimesh,
-    TrimeshInfo, Vertex, VertexString, to_string,
+    Element, Field, FieldList, LasCloud, LasPoint, ModelRecord, PlotFrame, Polymesh, PolymeshFace,
+    PolymeshLoop, Segment, SegmentKind, SolvedGeometry, StringHeader, StringKind, SuperAlignment,
+    SuperTin, TextString, Tin, Trimesh, TrimeshInfo, Vertex, VertexString, to_string,
 };
 use crate::lexer::{Lexer, Token, TokenKind};
 use crate::text_utilities::{
@@ -551,6 +551,42 @@ fn apply_null(z: &mut Option<f64>, null_value: f64) {
     if *z == Some(null_value) {
         *z = None;
     }
+}
+
+// Numbers written from 1, zero-based; one that names nothing (0, negative or
+// past 32 bits) becomes u32::MAX, which keep_named then leaves out.
+fn one_based(written: &[i64]) -> Vec<u32> {
+    written
+        .iter()
+        .map(|&value| {
+            u32::try_from(value)
+                .ok()
+                .and_then(|value| value.checked_sub(1))
+                .unwrap_or(u32::MAX)
+        })
+        .collect()
+}
+
+// Keeps, in a polymesh, only the triangles and vertices the mesh has: a face's
+// triangle `t` must be below `triangles`, a loop's vertex below `vertices`.
+// Returns how many it left out.
+fn keep_named(polymesh: &mut Polymesh, triangles: usize, vertices: usize) -> usize {
+    let mut dropped = 0;
+    let mut keep = |indices: &mut Vec<u32>, below: usize| {
+        let before = indices.len();
+        indices.retain(|&index| (index as usize) < below);
+        dropped += before - indices.len();
+    };
+    for face in &mut polymesh.faces {
+        keep(&mut face.triangles, triangles);
+        if let Some(boundary) = &mut face.boundary {
+            keep(&mut boundary.vertices, vertices);
+        }
+        for hole in &mut face.holes {
+            keep(&mut hole.vertices, vertices);
+        }
+    }
+    dropped
 }
 
 fn apply_null_all(vertices: &mut [Vertex], null_value: f64) {
@@ -2877,6 +2913,8 @@ impl<'a> Reader<'a> {
                 self.read_index_block(&word, &mut mesh.edge_flags);
             } else if word == "face_flags" && block {
                 self.read_index_block(&word, &mut mesh.face_flags);
+            } else if word == "polymesh" && block && mesh.polymesh.is_none() {
+                mesh.polymesh = Some(self.read_polymesh());
             } else {
                 self.read_unknown(&key, &word, &mut mesh.extras, false);
             }
@@ -2885,6 +2923,18 @@ impl<'a> Reader<'a> {
         self.path.pop();
         if self.failed() {
             return;
+        }
+        if let Some(polymesh) = &mut mesh.polymesh {
+            // The triangles as the file lists them: faces is three point
+            // numbers a triangle, and build_triangles below keeps them one
+            // for one or fails.
+            let dropped = keep_named(polymesh, faces.len() / 3, mesh.vertices.len());
+            if dropped != 0 {
+                self.warn(format!(
+                    "trimesh \"{}\": its polymesh names {dropped} triangles or vertices the mesh does not have; they are left out of its faces",
+                    mesh.name
+                ));
+            }
         }
         // Manual 1.4.9: vertices and faces are MANDATORY.
         if mesh.vertices.is_empty() {
@@ -2960,6 +3010,192 @@ impl<'a> Reader<'a> {
                 name: row[3].clone(),
             });
         }
+    }
+
+    // ---- polymesh: the mesh's triangles grouped into polygonal faces ---------
+    //
+    // polymesh { info { ... } faces { face { valid true info { ... }
+    //   normal x y z face_indices { t ... } edge_indices { e ... }
+    //   boundary { centroid x y z radius r vertex_indices { v ... } }
+    //   holes { hole { centroid ... radius ... vertex_indices { ... } } ... } }
+    //   ... } edge_indices { ... } }
+    //
+    // As the writing program exports it (version 15.01.08.60); the manual's
+    // primitive_3d section does not describe it. face_indices number the
+    // mesh's TRIANGLES from 1 - in the exports read they run to the triangle
+    // count, past the vertex count - and vertex_indices its vertices. Indices
+    // are kept zero-based and checked once the whole trimesh_3d is read
+    // (keep_named); anything else in the block is read as unknown and said.
+
+    fn read_polymesh(&mut self) -> Polymesh {
+        let mut polymesh = Polymesh::default();
+        if !self.expect_open("polymesh") {
+            return polymesh;
+        }
+        self.path.push(String::from("polymesh"));
+        let mut unknown = FieldList::default();
+        while !self.at_block_end() {
+            let key = self.next();
+            let word = lower(key.raw);
+            let block = self.peek().kind == TokenKind::Open;
+            if key.is_word() && word == "info" && block {
+                polymesh.info = Some(self.read_info_fields(&word));
+            } else if key.is_word() && word == "faces" && block {
+                self.read_polymesh_faces(&mut polymesh.faces);
+            } else if key.is_word() && word == "edge_indices" && block {
+                self.read_integer_block(&word, &mut polymesh.edge_indices);
+            } else {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            }
+        }
+        self.expect_close("polymesh");
+        self.path.pop();
+        polymesh
+    }
+
+    fn read_polymesh_faces(&mut self, out: &mut Vec<PolymeshFace>) {
+        if !self.expect_open("faces") {
+            return;
+        }
+        self.path.push(String::from("faces"));
+        let mut unknown = FieldList::default();
+        while !self.at_block_end() {
+            let key = self.next();
+            let word = lower(key.raw);
+            if key.is_word() && word == "face" && self.peek().kind == TokenKind::Open {
+                out.push(self.read_polymesh_face());
+            } else {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            }
+        }
+        self.expect_close("faces");
+        self.path.pop();
+    }
+
+    fn read_polymesh_face(&mut self) -> PolymeshFace {
+        let mut face = PolymeshFace::default();
+        if !self.expect_open("face") {
+            return face;
+        }
+        self.path.push(String::from("face"));
+        let mut unknown = FieldList::default();
+        while !self.at_block_end() {
+            let key = self.next();
+            let word = lower(key.raw);
+            let block = self.peek().kind == TokenKind::Open;
+            if !key.is_word() {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            } else if word == "valid" && !block {
+                face.valid = self.next_value(&word);
+            } else if word == "info" && block {
+                face.info = Some(self.read_info_fields(&word));
+            } else if word == "normal" && !block {
+                face.normal = self.next_triple(&word);
+            } else if word == "face_indices" && block {
+                let mut written = Vec::new();
+                self.read_integer_block(&word, &mut written);
+                face.triangles = one_based(&written);
+            } else if word == "edge_indices" && block {
+                self.read_integer_block(&word, &mut face.edge_indices);
+            } else if word == "boundary" && block {
+                face.boundary = Some(self.read_polymesh_loop(&word));
+            } else if word == "holes" && block {
+                self.read_polymesh_holes(&mut face.holes);
+            } else {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            }
+        }
+        self.expect_close("face");
+        self.path.pop();
+        face
+    }
+
+    fn read_polymesh_holes(&mut self, out: &mut Vec<PolymeshLoop>) {
+        if !self.expect_open("holes") {
+            return;
+        }
+        self.path.push(String::from("holes"));
+        let mut unknown = FieldList::default();
+        while !self.at_block_end() {
+            let key = self.next();
+            let word = lower(key.raw);
+            if key.is_word() && word == "hole" && self.peek().kind == TokenKind::Open {
+                out.push(self.read_polymesh_loop(&word));
+            } else {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            }
+        }
+        self.expect_close("holes");
+        self.path.pop();
+    }
+
+    // `boundary { ... }` or `hole { ... }`.
+    fn read_polymesh_loop(&mut self, what: &str) -> PolymeshLoop {
+        let mut ring = PolymeshLoop::default();
+        if !self.expect_open(what) {
+            return ring;
+        }
+        self.path.push(String::from(what));
+        let mut unknown = FieldList::default();
+        while !self.at_block_end() {
+            let key = self.next();
+            let word = lower(key.raw);
+            let block = self.peek().kind == TokenKind::Open;
+            if key.is_word() && word == "centroid" && !block {
+                ring.centroid = self.next_triple(&word);
+            } else if key.is_word() && word == "radius" && !block {
+                ring.radius = self.next_nullable_real(&word);
+            } else if key.is_word() && word == "vertex_indices" && block {
+                let mut written = Vec::new();
+                self.read_integer_block(&word, &mut written);
+                ring.vertices = one_based(&written);
+            } else {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            }
+        }
+        self.expect_close(what);
+        self.path.pop();
+        ring
+    }
+
+    // `info { flag 0 key 255 colour "acad 040" name "PT1 Side" }`: the
+    // presentation of a polymesh or one of its faces, the four values of a
+    // face_infos row as key=value pairs.
+    fn read_info_fields(&mut self, what: &str) -> TrimeshInfo {
+        let mut info = TrimeshInfo::default();
+        if !self.expect_open(what) {
+            return info;
+        }
+        self.path.push(String::from(what));
+        let mut unknown = FieldList::default();
+        while !self.at_block_end() {
+            let key = self.next();
+            let word = lower(key.raw);
+            let block = self.peek().kind == TokenKind::Open;
+            if key.is_word() && word == "flag" && !block {
+                info.flag = parse_integer(self.next_value(&word)).unwrap_or(0);
+            } else if key.is_word() && word == "key" && !block {
+                info.key = parse_integer(self.next_value(&word)).unwrap_or(0);
+            } else if key.is_word() && (word == "colour" || word == "color") && !block {
+                info.colour = self.next_colour(&word);
+            } else if key.is_word() && word == "name" && !block {
+                info.name = self.next_value(&word);
+            } else {
+                self.read_unknown(&key, &word, &mut unknown, false);
+            }
+        }
+        self.expect_close(what);
+        self.path.pop();
+        info
+    }
+
+    // Three numbers after a keyword (`normal 0 0 1`, `centroid x y z`); None
+    // when any is a null.
+    fn next_triple(&mut self, keyword: &str) -> Option<[f64; 3]> {
+        let x = self.next_nullable_real(keyword);
+        let y = self.next_nullable_real(keyword);
+        let z = self.next_nullable_real(keyword);
+        Some([x?, y?, z?])
     }
 
     fn read_index_block(&mut self, what: &str, out: &mut Vec<u32>) {

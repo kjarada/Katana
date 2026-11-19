@@ -2441,3 +2441,8 @@ endif()
 if(KATANA_TEST_CLI)
     include("${CMAKE_CURRENT_SOURCE_DIR}/road_cli.cmake")
 endif()
+# ---- survey points written and read (docs/survey.md, "SURVEY EXPORT") ----
+# SURVEY EXPORT's cli.* tests, in survey_io_cli.cmake beside this one.
+if(KATANA_TEST_CLI)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/survey_io_cli.cmake")
+endif()

@@ -27,9 +27,9 @@ pub mod writer;
 pub use archive::{
     AlignmentPart, AlignmentSource, ArcString, Archive, Attribute, AttributeList, AttributeValue,
     Breakline, CircleString, DraftingLeader, DraftingReference, DrainageRecord, DrainageString,
-    Element, Field, FieldList, LasCloud, LasPoint, ModelRecord, PlotFrame, Segment, SegmentKind,
-    SolvedGeometry, StringHeader, StringKind, SuperAlignment, SuperTin, TextString, Tin, Trimesh,
-    TrimeshInfo, Vertex, VertexString, element_keyword,
+    Element, Field, FieldList, LasCloud, LasPoint, ModelRecord, PlotFrame, Polymesh, PolymeshFace,
+    PolymeshLoop, Segment, SegmentKind, SolvedGeometry, StringHeader, StringKind, SuperAlignment,
+    SuperTin, TextString, Tin, Trimesh, TrimeshInfo, Vertex, VertexString, element_keyword,
 };
 pub use coverage::{ElementCoverage, Handling, element_coverage};
 pub use domain::{

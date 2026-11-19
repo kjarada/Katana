@@ -194,7 +194,7 @@ extension.
 
 | Format (id) | Import | Export | Parser | Notes |
 |---|---|---|---|---|
-| Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
+| Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed; on a line through `LAYOUT` and `UNIT`, and written by `SURVEY EXPORT` ("Point files on the command line", below) |
 | Leica GSI (`leica-gsi`): GSI-8 and GSI-16, mixed or not; any extension when every line is a GSI block | yes | no | 1.2 | total station words only (a digital level's are counted, not read); declares no coordinate system; a sexagesimal angle whose word writes 60 seconds in their place is read as the next minute; a circle reading past a full circle, and a negative vertical reading, are refused; a shot with no zenith angle read keeps its own horizontal distance and height difference (32, 33) (see "Leica GSI" below) |
 | Opcode field file (`opcode-field-file`): `.fld`, tab-separated records opening with a numeric opcode, total-station and GNSS (RTK) jobs | yes | no | 1.2 | opcodes 02, 03, 04, 05, 06, 07, 09, 16, 20, 29, 41, 42, 43, 44, 71, 72, 73, 99, 100, 124, 125, 128, 129, 138, 139 and -2 read; every other opcode skipped with a warning naming it; an RTK position written as 02 with its receiver's "GNSS Solution" is a GNSS position, any other 02 an entered coordinate; a setup's backsight is its first 04 that can orient it; a backsight's stated azimuth kept apart from its circle reading; every measurement of a point keeps its attributes; offsets move the shot they follow; a resected setup's station is computed by the reduction's resection from its 128 ... 129 block, the checks after it checking it (the file states no station); the coordinate system is declared by name from the header comments, never as a guessed EPSG code |
 | Sokkia SDR (`sokkia-sdr`): `.sdr`, the SDR33 and SDR2x layouts, a header record `00` naming `SDR33` or `SDR2x` | yes | no | 1.0 | records 00 to 13 read; records marked deleted (`DD`) skipped by name; derived views (09 MC, 11 with distances) and road, template, GPS and levelling records skipped with a warning, a shot with no raw twin said to be lost; units from the header - an undefined angle or distance unit refused, an undefined pressure or temperature unit warned about and not read, a `13DU` followed; coordinates in the header's order (1 N-E-Elev; 2 E-N-Elev and Trimble's 3 east first, each with a warning), a point's latest kept, an observation's POS view (after its 09 or 11) never over a position record; collimation (04) applied per face until another instrument type or job; declares no coordinate system |
@@ -2415,11 +2415,91 @@ Not done:
 - A job imported with `LINEWORK off` and strung afterwards by `LINEWORK` is
   strung by code, not as the file strung it (`docs/survey_coding.md`,
   "`LINEWORK` on the command line", Not done).
-- A delimited point list cannot be imported by the verb at all
-  (`katana_surveyio::reader::read_survey` has no reader for one). The wizard imports one and
-  codes and strings it in the same command ("The import wizard", below); from
-  a line its points are coded and strung afterwards, by `CODE` and
-  `LINEWORK`.
+- (Done on 2026-11-19: a delimited point list is imported by the verb through
+  `LAYOUT` and `UNIT`, coded and strung in the same step - "Point files on
+  the command line", next.)
+
+## Point files on the command line: LAYOUT, UNIT and SURVEY EXPORT
+
+Added 2026-11-19, from a check of every import and export. Until then a
+delimited point file - the CSV of points every surveyor sends - could be
+imported only through the window's wizard: `SURVEY IMPORT pts.csv` was refused
+("cannot import them in one step"), because `katana_surveyio::reader::read_survey`
+has no reader for a point list, whose column order is never guessed. And
+Survey > Export Survey Points wrote its file inside the dialog, with no verb at
+all, so `katana_cli` and `katana_mcp` could not write the drawing's points,
+where every feature is to reach all three front ends.
+
+```
+SURVEY READ|IMPORT <file> LAYOUT <template> UNIT metres|feet|usfeet|links
+                   [LAYER <path>] [CODES on|off] [LINEWORK on|off]
+SURVEY EXPORT <file> [LAYOUT <template>] [DECIMALS <n>] [UNIT <unit>]
+                     [<scope> [WHERE ...]]
+```
+
+- **The layout is the template text a saved layout holds**
+  (`katana_surveyio::parse_layout_template`): `"P,N,E,Z,C,D;delimiter=comma;header=1;quote=double"`.
+  One grammar for the wizard's saved templates, the dialog and the line.
+- **`UNIT` is required with `LAYOUT`**, as the wizard's System step has no
+  default: a point file never says, and a wrong unit scales the whole survey.
+  `UNIT` without `LAYOUT` is refused (a field file states its own units), and
+  so are `SETTINGS` and `SET` with it (a point list has no observations to
+  reduce) and a `FORMAT` other than `delimited-points`.
+- **The import is the wizard's Import** (`survey_verbs::run_point_list`): the
+  file read by `katana_surveyio::parse_delimited_points`, the points drawn by
+  `katana_cad::survey_points::import_survey_points` with the wizard's default
+  policy - an id the drawing already has refuses the import - and coded and
+  strung by the one finish (`katana_cad::survey_finish::with_survey_finish`),
+  ONE undo step. No survey job is kept: there is nothing to reduce again. The
+  reply is the field-file path's `survey`, `content`, `declared` and `warning`
+  records, then `layout layout=<template> unit=<unit>`, and for IMPORT
+  `imported entities=<points drawn> layer=<layer> without_elevation=<n>`, the
+  import's warnings as `import_warning`, and the `coded` and `linework`
+  records.
+- **`SURVEY EXPORT`** (`crates/katana_app/src/survey_export_verb.rs`) writes
+  what the dialog writes, through the same writer
+  (`katana_surveyio::write_delimited_points`), with the dialog's defaults: the
+  layout `P,E,N,Z,C,D;delimiter=comma;header=1;quote=double`, 3 decimals,
+  metres. No scope word is every survey point of the drawing (the dialog's
+  All); a scope - the shared grammar, `docs/cad.md`, "Scope and filter" - is
+  the survey points among what it took, the rest counted as `not_points`; a
+  scope that takes nothing is reported (`export ... ran=no reason="the scope
+  took nothing"`) and writes no file. A drawing with no survey points is
+  refused. The file is written beside its place and renamed over it, so a
+  failed write leaves nothing. The reply: `exported file= kind=survey-points
+  points= layout= decimals= unit= without_elevation= not_points= bytes=`,
+  then the `scope` record when a scope was given.
+- *Rejected:* reading a point file without a layout by taking
+  `propose_layout`'s answer when it is Decided (a header naming the
+  coordinates). The wizard shows that proposal to a person before it is used;
+  a line has nobody to show it to, and the format's rule is that the column
+  order is never guessed. A header that names the columns costs the line one
+  word to say.
+- *Rejected:* the unit words of the reports ("US survey feet"): a line's word
+  has no blanks, so `usfeet`.
+
+Tests: `survey_export_verb::*` and `survey_point_list::*`
+(`crates/katana_app/tests/file_verbs/survey_export.rs`), and
+`cli.survey_export_writes_the_drawings_survey_points_and_another_reader_reads_them`,
+whose file GDAL's CSV driver reads back (`tests/cli/survey_io_cli.cmake`).
+
+Not done:
+
+- Survey > Export Survey Points still writes its file itself
+  (`crates/katana_window/src/survey/survey_points_ui.rs`, `export_points`)
+  rather than building the `SURVEY EXPORT` line and handing it to the
+  executor; its choices are the verb's words one for one (Columns, Delimiter,
+  Header and Quotes the `LAYOUT` template; Decimals; Write In the `UNIT`; All
+  or Selected no scope word or `SELECTION`). Both call the one writer, so
+  the same points with the same choices make the same rows; Selected writes
+  them in the selection's order, `SELECTION` in entity id order.
+- The window's command line runs `SURVEY EXPORT` without its plan views, so
+  `VIEW` is refused there as it is headless; `AREA` names the window.
+- `LAYOUT` imports the coordinates as the file writes them: the wizard's
+  System step (a declared and a target EPSG code,
+  `katana_cad::survey_points::transform_survey_project`) and its other
+  policies for an id the drawing already has (skip, replace, keep both) and a
+  layer per code have no words yet.
 
 ## The reduction's resection
 

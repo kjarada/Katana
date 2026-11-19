@@ -11,3 +11,5 @@
 
 mod ifc;
 mod survey;
+// SURVEY EXPORT, which has no C++ twin: it was added on 2026-11-19.
+mod survey_export;
