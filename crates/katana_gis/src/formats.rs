@@ -17,15 +17,9 @@
 //! `formats()` is read once, into a OnceLock, as the C++'s function-local
 //! static is.
 
-#![allow(
-    unsafe_code,
-    reason = "Reads GDAL's driver manager and identifies files through it; every call states why it is sound."
-)]
-
 use std::collections::BTreeSet;
 use std::ffi::{CStr, c_int};
 use std::path::Path;
-use std::ptr;
 use std::sync::OnceLock;
 
 use katana_core::error::make_error;
@@ -34,9 +28,11 @@ use katana_core::text::parse_finite_double;
 use katana_core::{ErrorCode, Result, Status};
 
 use crate::cpl_error_collector::quiet_errors;
+use crate::ffi::dataset::{self, Dataset, DatasetHandle, Driver};
+use crate::ffi::error::last_error_message;
+use crate::ffi::xml::{XmlDocument, XmlNode};
 use crate::ffi::{cpl, gdal, minixml};
 use crate::formats_detail::{extension_of_file_name, file_name_of, open_names};
-use crate::gdal_adapter::{description_of, driver_by_name, metadata_item};
 use crate::gdal_registry::ensure_registered;
 
 // ---- the curated overlay -------------------------------------------------------------------
@@ -291,13 +287,8 @@ fn words(text: Option<String>) -> Vec<String> {
 }
 
 /// Whether a driver's capability is set (CPLTestBool of its metadata item).
-fn flag(driver: gdal::GdalDriverH, key: &CStr) -> bool {
-    // SAFETY: a registered driver and NUL-terminated key and domain; the
-    // value is the driver's own, tested at once.
-    unsafe {
-        let value = gdal::GDALGetMetadataItem(driver.cast(), key.as_ptr(), c"".as_ptr());
-        !value.is_null() && cpl::CPLTestBool(value)
-    }
+fn flag(driver: Driver, key: &CStr) -> bool {
+    driver.flag(key)
 }
 
 /// For a name a raster driver identified: the vector driver that identifies
@@ -305,30 +296,18 @@ fn flag(driver: gdal::GdalDriverH, key: &CStr) -> bool {
 /// against a raster driver's sniff (it says why). None where no vector driver
 /// claims the name, or where the raster opens, which is then the reading.
 fn vector_reading_where_raster_fails(name: &CStr) -> Option<String> {
-    // SAFETY: a NUL-terminated name and no lists; the driver returned lives
-    // as long as the process.
-    let vector_driver = unsafe {
-        gdal::GDALIdentifyDriverEx(name.as_ptr(), gdal::GDAL_OF_VECTOR, ptr::null(), ptr::null())
-    };
-    if vector_driver.is_null() || !flag(vector_driver, gdal::GDAL_DCAP_VECTOR) {
+    let vector_driver = Driver::identify(name, gdal::GDAL_OF_VECTOR)
+        .filter(|driver| flag(*driver, gdal::GDAL_DCAP_VECTOR))?;
+    let raster = Dataset::open(
+        name,
+        gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER,
+        &cpl::CStringList::new(),
+    );
+    if let Some(raster) = raster {
+        drop(raster); // closed at once
         return None;
     }
-    // SAFETY: a NUL-terminated name and no lists; the dataset returned is
-    // closed at once.
-    unsafe {
-        let raster = gdal::GDALOpenEx(
-            name.as_ptr(),
-            gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER,
-            ptr::null(),
-            ptr::null(),
-            ptr::null(),
-        );
-        if !raster.is_null() {
-            gdal::GDALClose(raster);
-            return None;
-        }
-    }
-    Some(description_of(vector_driver.cast()))
+    Some(vector_driver.description())
 }
 
 /// The extension of a name, compound ones whole where a format claims them:
@@ -360,10 +339,11 @@ fn extension_of(path: &Path) -> String {
     extension_of_name(&cpl::native_path(path))
 }
 
-fn read_format(driver: gdal::GdalDriverH) -> Format {
-    let name = description_of(driver.cast());
-    let description =
-        metadata_item(driver.cast(), gdal::GDAL_DMD_LONGNAME).unwrap_or_else(|| name.clone());
+fn read_format(driver: Driver) -> Format {
+    let name = driver.description();
+    let description = driver
+        .metadata_item(gdal::GDAL_DMD_LONGNAME)
+        .unwrap_or_else(|| name.clone());
     let raster = flag(driver, gdal::GDAL_DCAP_RASTER);
     let vector = flag(driver, gdal::GDAL_DCAP_VECTOR);
     let open = flag(driver, gdal::GDAL_DCAP_OPEN);
@@ -381,18 +361,21 @@ fn read_format(driver: gdal::GdalDriverH) -> Format {
         && create
         && (flag(driver, gdal::GDAL_DCAP_CREATE_LAYER)
             || flag(driver, gdal::GDAL_DCAP_CREATE_FIELD));
-    let declares_types = metadata_item(driver.cast(), gdal::GDAL_DMD_CREATIONDATATYPES)
+    let declares_types = driver
+        .metadata_item(gdal::GDAL_DMD_CREATIONDATATYPES)
         .is_some_and(|types| !types.is_empty());
     let write_raster = raster && (create || copy) && (!vector || declares_types);
     let virtual_io = flag(driver, gdal::GDAL_DCAP_VIRTUALIO);
-    let mut extensions = words(metadata_item(driver.cast(), gdal::GDAL_DMD_EXTENSIONS));
+    let mut extensions = words(driver.metadata_item(gdal::GDAL_DMD_EXTENSIONS));
     if extensions.is_empty() {
-        extensions = words(metadata_item(driver.cast(), gdal::GDAL_DMD_EXTENSION));
+        extensions = words(driver.metadata_item(gdal::GDAL_DMD_EXTENSION));
     }
-    let connection_prefix =
-        metadata_item(driver.cast(), gdal::GDAL_DMD_CONNECTION_PREFIX).unwrap_or_default();
+    let connection_prefix = driver
+        .metadata_item(gdal::GDAL_DMD_CONNECTION_PREFIX)
+        .unwrap_or_default();
     // GDAL gives a page of its site ("drivers/vector/gpkg.html").
-    let help_url = metadata_item(driver.cast(), gdal::GDAL_DMD_HELPTOPIC)
+    let help_url = driver
+        .metadata_item(gdal::GDAL_DMD_HELPTOPIC)
         .map(|page| {
             if page.starts_with("http") {
                 page
@@ -417,43 +400,15 @@ fn read_format(driver: gdal::GdalDriverH) -> Format {
     }
 }
 
-/// The nodes of a sibling chain of a parsed tree, from `first`.
-///
-/// # Safety
-///
-/// `first` is NULL or a node of a tree that stays alive, and unchanged,
-/// while the nodes are used.
-unsafe fn siblings<'a>(
-    first: *const minixml::CplXmlNode,
-) -> impl Iterator<Item = &'a minixml::CplXmlNode> {
-    // SAFETY: NULL or a live node (the caller's contract).
-    let first = unsafe { first.as_ref() };
-    // SAFETY: a sibling link of a live node is NULL or a live node of the
-    // same tree.
-    std::iter::successors(first, |node| unsafe { node.ps_next.cast_const().as_ref() })
-}
-
 /// `EQUAL(node->pszValue, word)`: the node's name, ignoring ASCII case.
-fn named(node: &minixml::CplXmlNode, word: &str) -> bool {
-    // SAFETY: an element's value is its name, a live NUL-terminated string
-    // of the live tree (or NULL).
-    !node.psz_value.is_null()
-        && unsafe { CStr::from_ptr(node.psz_value) }
-            .to_bytes()
-            .eq_ignore_ascii_case(word.as_bytes())
+fn named(node: XmlNode<'_>, word: &str) -> bool {
+    node.value()
+        .is_some_and(|value| value.to_bytes().eq_ignore_ascii_case(word.as_bytes()))
 }
 
 /// `CPLGetXMLValue(node, path, "")`.
-fn xml_value(node: &minixml::CplXmlNode, path: Option<&CStr>) -> String {
-    // SAFETY: a live node of a live tree, NULL or a NUL-terminated path and
-    // an empty default; the value is the tree's own, copied at once.
-    unsafe {
-        cpl::decoded(minixml::CPLGetXMLValue(
-            node,
-            path.map_or(ptr::null(), CStr::as_ptr),
-            c"".as_ptr(),
-        ))
-    }
+fn xml_value(node: XmlNode<'_>, path: Option<&CStr>) -> String {
+    node.xml_value(path)
 }
 
 fn parse_options(xml: Option<String>) -> Vec<FormatOption> {
@@ -462,24 +417,20 @@ fn parse_options(xml: Option<String>) -> Vec<FormatOption> {
         return options;
     };
     let text = cpl::c_string(&xml);
-    // SAFETY: a NUL-terminated document; the tree returned is destroyed below.
-    let root = unsafe { minixml::CPLParseXMLString(text.as_ptr()) };
-    if root.is_null() {
+    let Some(tree) = XmlDocument::parse(&text) else {
         return options;
-    }
-    // SAFETY: the tree lives, unchanged, until it is destroyed below.
-    for list in unsafe { siblings(root) } {
-        if list.e_type != minixml::CXT_ELEMENT {
+    };
+    for list in tree.first().and_siblings() {
+        if list.node_type() != minixml::CXT_ELEMENT {
             continue;
         }
-        // SAFETY: a child link of a node of the same live tree.
-        for node in unsafe { siblings(list.ps_child) } {
-            if node.e_type != minixml::CXT_ELEMENT || !named(node, "Option") {
+        for node in list.children() {
+            if node.node_type() != minixml::CXT_ELEMENT || !named(node, "Option") {
                 continue;
             }
-            // SAFETY: a child link of a node of the same live tree.
-            let choices = unsafe { siblings(node.ps_child) }
-                .filter(|value| value.e_type == minixml::CXT_ELEMENT && named(value, "Value"))
+            let choices = node
+                .children()
+                .filter(|value| value.node_type() == minixml::CXT_ELEMENT && named(*value, "Value"))
                 .map(|value| xml_value(value, None))
                 .collect();
             let option = FormatOption {
@@ -497,27 +448,14 @@ fn parse_options(xml: Option<String>) -> Vec<FormatOption> {
             }
         }
     }
-    // SAFETY: the tree CPLParseXMLString made, destroyed once after its last use.
-    unsafe { minixml::CPLDestroyXMLNode(root) };
+    drop(tree); // destroyed once, after its last use
     options
 }
 
 /// Whether the dataset holds rasters: bands, or raster subdatasets (a
 /// GeoPackage of several tile tables has no bands of its own).
-fn holds_raster(dataset: gdal::GdalDatasetH) -> bool {
-    // SAFETY: a live dataset; its metadata list is its own, read at once.
-    unsafe {
-        if gdal::GDALGetRasterCount(dataset) > 0 {
-            return true;
-        }
-        let subdatasets = gdal::GDALGetMetadata(dataset.cast(), c"SUBDATASETS".as_ptr());
-        !subdatasets.is_null() && !(*subdatasets).is_null()
-    }
-}
-
-fn last_error_message() -> String {
-    // SAFETY: this thread's last error message, copied at once.
-    unsafe { cpl::decoded(cpl::CPLGetLastErrorMsg()) }
+fn holds_raster(dataset: &DatasetHandle) -> bool {
+    dataset.raster_count() > 0 || dataset.has_metadata(c"SUBDATASETS")
 }
 
 // ---- the registry ---------------------------------------------------------------------------
@@ -530,13 +468,11 @@ pub fn formats() -> &'static [Format] {
     ALL.get_or_init(|| {
         ensure_registered();
         let mut out = Vec::new();
-        // SAFETY: the driver manager's count; registered above.
-        let count = unsafe { gdal::GDALGetDriverCount() };
-        for i in 0..count {
-            // SAFETY: one of the registered drivers, which live as long as
-            // the process.
-            let driver = unsafe { gdal::GDALGetDriver(i) };
-            if driver.is_null() || HIDDEN.contains(&description_of(driver.cast()).as_str()) {
+        for i in 0..Driver::count() {
+            let Some(driver) = Driver::at(i) else {
+                continue;
+            };
+            if HIDDEN.contains(&driver.description().as_str()) {
                 continue;
             }
             let format = read_format(driver);
@@ -573,11 +509,10 @@ pub fn format_options(driver: &str) -> Result<FormatOptions> {
         )
     };
     let format = find_format(driver).ok_or_else(not_found)?;
-    let gdal_driver = driver_by_name(&format.driver);
-    if gdal_driver.is_null() {
+    let Some(gdal_driver) = Driver::by_name(&format.driver) else {
         return Err(not_found());
-    }
-    let list = |key: &CStr| parse_options(metadata_item(gdal_driver.cast(), key));
+    };
+    let list = |key: &CStr| parse_options(gdal_driver.metadata_item(key));
     Ok(FormatOptions {
         open: list(gdal::GDAL_DMD_OPENOPTIONLIST),
         creation: list(gdal::GDAL_DMD_CREATIONOPTIONLIST),
@@ -700,16 +635,12 @@ pub fn vector_writer_for(path: &Path) -> Result<String> {
     // KML for a .kml, GeoJSON before JSON-FG for a .json), the first Katana
     // offers taken.
     let name = cpl::c_string(format!("katana.{extension}"));
-    // SAFETY: a NUL-terminated name; the list GDAL returns is copied and
-    // freed by take_string_list.
-    let candidates = unsafe {
-        cpl::take_string_list(gdal::GDALGetOutputDriversForDatasetName(
-            name.as_ptr(),
-            gdal::GDAL_OF_VECTOR as c_int,
-            false,
-            false,
-        ))
-    }
+    let candidates = dataset::output_drivers_for_dataset_name(
+        &name,
+        gdal::GDAL_OF_VECTOR as c_int,
+        false,
+        false,
+    )
     .unwrap_or_default();
     for candidate in &candidates {
         if let Some(format) = offered(&String::from_utf8_lossy(candidate)) {
@@ -837,24 +768,16 @@ pub fn identify_content(path: &Path) -> Result<Content> {
     let mut reason = String::new();
     for name in &names.names {
         let name_c = cpl::c_string(name);
-        // SAFETY: a NUL-terminated name and no lists; the driver returned
-        // lives as long as the process.
-        let identified = unsafe {
-            gdal::GDALIdentifyDriverEx(
-                name_c.as_ptr(),
-                gdal::GDAL_OF_RASTER | gdal::GDAL_OF_VECTOR,
-                ptr::null(),
-                ptr::null(),
-            )
-        };
-        if identified.is_null() {
+        let Some(identified) =
+            Driver::identify(&name_c, gdal::GDAL_OF_RASTER | gdal::GDAL_OF_VECTOR)
+        else {
             if reason.is_empty() {
                 reason = last_error_message();
             }
             continue;
-        }
+        };
         let mut content = Content {
-            driver: description_of(identified.cast()),
+            driver: identified.description(),
             name: String::from_utf8_lossy(name).into_owned(),
             raster: false,
             vector: false,
@@ -883,35 +806,23 @@ pub fn identify_content(path: &Path) -> Result<Content> {
             content.vector = vector;
             return Ok(content);
         }
-        // SAFETY: a NUL-terminated name and no lists; the dataset returned
-        // is closed below.
-        let dataset = unsafe {
-            gdal::GDALOpenEx(
-                name_c.as_ptr(),
-                gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER | gdal::GDAL_OF_VECTOR,
-                ptr::null(),
-                ptr::null(),
-                ptr::null(),
-            )
-        };
-        if dataset.is_null() {
+        let Some(dataset) = Dataset::open(
+            &name_c,
+            gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER | gdal::GDAL_OF_VECTOR,
+            &cpl::CStringList::new(),
+        ) else {
             let message = last_error_message();
             if !message.is_empty() {
                 reason = message;
             }
             continue;
+        };
+        if let Some(driver) = dataset.driver() {
+            content.driver = driver.description();
         }
-        // SAFETY: a live dataset.
-        let driver = unsafe { gdal::GDALGetDatasetDriver(dataset) };
-        if !driver.is_null() {
-            content.driver = description_of(driver.cast());
-        }
-        content.raster = holds_raster(dataset);
-        // SAFETY: a live dataset, then closed once.
-        unsafe {
-            content.vector = gdal::GDALDatasetGetLayerCount(dataset) > 0;
-            gdal::GDALClose(dataset);
-        }
+        content.raster = holds_raster(&dataset);
+        content.vector = dataset.layer_count() > 0;
+        drop(dataset); // closed once
         return Ok(content);
     }
     if !names.ambiguity.is_empty() {

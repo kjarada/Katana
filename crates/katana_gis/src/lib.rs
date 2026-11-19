@@ -4,8 +4,15 @@
 //! reached through hand-written declarations of exactly the C functions the
 //! C++ calls (`ffi`, checked at build time by native/ffi_check.c), and no
 //! GDAL type reaches the public interface.
+//!
+//! Every `unsafe` of the crate is in `ffi`: the declarations, and the safe
+//! owners and views over them (docs/rust.md, "GDAL's unsafe confined to
+//! katana_gis's FFI modules"). Every other module is covered by the
+//! workspace's `unsafe_code = "deny"`.
 
 mod ffi {
+    // The C declarations, one file per header family (cpl.rs says how they
+    // are checked), with the boundary's text helpers in cpl.rs.
     pub(crate) mod algorithm;
     pub(crate) mod cpl;
     pub(crate) mod curl;
@@ -14,6 +21,18 @@ mod ffi {
     pub(crate) mod minixml;
     pub(crate) mod ogr;
     pub(crate) mod osr;
+
+    // The safe owners and views the rest of the crate calls.
+    pub(crate) mod dataset;
+    pub(crate) mod error;
+    pub(crate) mod gdal_algorithm;
+    pub(crate) mod geometry;
+    pub(crate) mod srs;
+    pub(crate) mod transfer;
+    pub(crate) mod xml;
+
+    #[cfg(test)]
+    mod tests;
 }
 
 mod cpl_error_collector;

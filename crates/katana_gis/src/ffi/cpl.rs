@@ -275,6 +275,24 @@ pub(crate) unsafe fn bytes_of(text: *const c_char) -> Vec<u8> {
     unsafe { CStr::from_ptr(text) }.to_bytes().to_vec()
 }
 
+/// A copy of a text GDAL allocated for the caller, decoded lossily, and the
+/// text freed (`CPLFree`); None for NULL.
+///
+/// # Safety
+///
+/// `text` is NULL or a live NUL-terminated string GDAL allocated with
+/// CPLMalloc (or VSIMalloc) and that nothing else frees.
+pub(crate) unsafe fn take_text(text: *mut c_char) -> Option<String> {
+    if text.is_null() {
+        return None;
+    }
+    // SAFETY: a live NUL-terminated string (the caller's contract).
+    let copy = unsafe { decoded(text) };
+    // SAFETY: GDAL's allocation, freed once, after the copy.
+    unsafe { VSIFree(text.cast()) };
+    Some(copy)
+}
+
 /// The C string a std::string's c_str() hands GDAL: the text up to its first
 /// NUL, where GDAL would stop reading.
 pub(crate) fn c_string(text: impl AsRef<[u8]>) -> CString {
@@ -379,6 +397,148 @@ impl CStringList {
     /// utilities' options: GDALTranslateOptionsNew copies its argv).
     pub(crate) fn as_argv(&self) -> *mut *mut c_char {
         self.as_ptr().cast_mut().cast()
+    }
+
+    /// How many strings the list holds.
+    pub(crate) fn len(&self) -> usize {
+        self.strings.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.strings.is_empty()
+    }
+
+    /// The strings, without their terminators, in the list's order.
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &[u8]> {
+        self.strings.iter().map(|text| text.as_bytes())
+    }
+}
+
+// ---- configuration --------------------------------------------------------------------
+
+/// Whether GDAL's configuration has `key`, from the environment or set
+/// (`CPLGetConfigOption(key, NULL) != NULL`).
+pub(crate) fn has_config_option(key: &CStr) -> bool {
+    // SAFETY: a NUL-terminated key and a NULL default; the answer is only
+    // tested, never read.
+    !unsafe { CPLGetConfigOption(key.as_ptr(), ptr::null()) }.is_null()
+}
+
+/// `CPLSetConfigOption(key, value)`: GDAL's global configuration.
+pub(crate) fn set_config_option(key: &CStr, value: &CStr) {
+    // SAFETY: NUL-terminated key and value; GDAL copies both.
+    unsafe { CPLSetConfigOption(key.as_ptr(), value.as_ptr()) };
+}
+
+/// `CPLGetThreadLocalConfigOption(key, NULL)`, copied: None when this thread
+/// has not set it.
+pub(crate) fn thread_local_config_option(key: &CStr) -> Option<CString> {
+    // SAFETY: a NUL-terminated key and a NULL default.
+    let value = unsafe { CPLGetThreadLocalConfigOption(key.as_ptr(), ptr::null()) };
+    // SAFETY: NULL or this thread's value, a NUL-terminated string GDAL
+    // keeps, copied before anything can replace it.
+    (!value.is_null()).then(|| CString::from(unsafe { CStr::from_ptr(value) }))
+}
+
+/// `CPLSetThreadLocalConfigOption(key, value)`; None unsets it.
+pub(crate) fn set_thread_local_config_option(key: &CStr, value: Option<&CStr>) {
+    let value = value.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: a NUL-terminated key and NULL or a NUL-terminated value; GDAL
+    // copies both, for this thread only.
+    unsafe { CPLSetThreadLocalConfigOption(key.as_ptr(), value) };
+}
+
+// ---- the virtual file system ------------------------------------------------------------
+
+/// `VSIReadDirRecursive(path)`: every entry under the folder, folders ending
+/// in '/', as GDAL's bytes; None when GDAL lists nothing (no such folder).
+pub(crate) fn read_dir_recursive(path: &CStr) -> Option<Vec<Vec<u8>>> {
+    // SAFETY: a NUL-terminated path; the list GDAL returns is the caller's,
+    // copied and freed by take_string_list.
+    unsafe { take_string_list(VSIReadDirRecursive(path.as_ptr())) }
+}
+
+/// `VSIStatL(path, &status)`: the status when GDAL finds the path.
+pub(crate) fn stat(path: &CStr) -> Option<VsiStatBufL> {
+    let mut status = VsiStatBufL::zeroed();
+    // SAFETY: a NUL-terminated name and a status buffer of the platform's
+    // VSIStatBufL size (asserted above and in native/ffi_check.c).
+    (unsafe { VSIStatL(path.as_ptr(), &raw mut status) } == 0).then_some(status)
+}
+
+/// `VSIMkdirRecursive(path, mode)`: 0 when the folder is there.
+pub(crate) fn mkdir_recursive(path: &CStr, mode: std::ffi::c_long) -> c_int {
+    // SAFETY: a NUL-terminated path.
+    unsafe { super::algorithm::VSIMkdirRecursive(path.as_ptr(), mode) }
+}
+
+/// `VSIRmdirRecursive(path)`: 0 when the folder and everything in it went.
+pub(crate) fn rmdir_recursive(path: &CStr) -> c_int {
+    // SAFETY: a NUL-terminated path.
+    unsafe { super::algorithm::VSIRmdirRecursive(path.as_ptr()) }
+}
+
+/// `CPLGetPID()`: the calling thread's id, whatever its name says.
+pub(crate) fn thread_id() -> i64 {
+    // SAFETY: no argument.
+    unsafe { super::algorithm::CPLGetPID() }
+}
+
+/// A file of GDAL's virtual file system, open; closed (`VSIFCloseL`) by
+/// `close`, or on drop when it was not.
+pub(crate) struct VsiFile {
+    file: std::ptr::NonNull<VsiLFile>,
+    // Not Send: GDAL's handles are used on the thread that opened them here.
+    _thread: PhantomData<*const ()>,
+}
+
+impl VsiFile {
+    /// `VSIFOpenL(path, mode)`: None when GDAL cannot open it.
+    pub(crate) fn open(path: &CStr, mode: &CStr) -> Option<Self> {
+        // SAFETY: NUL-terminated name and mode; the handle returned is owned
+        // by the value made from it.
+        let file = unsafe { VSIFOpenL(path.as_ptr(), mode.as_ptr()) };
+        std::ptr::NonNull::new(file).map(|file| Self {
+            file,
+            _thread: PhantomData,
+        })
+    }
+
+    /// `VSIFReadL(buffer, 1, buffer.len(), file)`: how many bytes were read.
+    /// An empty buffer is not asked for.
+    pub(crate) fn read(&mut self, buffer: &mut [u8]) -> usize {
+        if buffer.is_empty() {
+            return 0;
+        }
+        // SAFETY: an open file this value owns and a buffer of buffer.len()
+        // writable bytes.
+        unsafe { VSIFReadL(buffer.as_mut_ptr().cast(), 1, buffer.len(), self.file.as_ptr()) }
+    }
+
+    /// `VSIFWriteL(bytes, 1, bytes.len(), file)`: how many bytes were
+    /// written. Nothing is not asked for.
+    pub(crate) fn write(&mut self, bytes: &[u8]) -> usize {
+        if bytes.is_empty() {
+            return 0;
+        }
+        // SAFETY: an open file this value owns and bytes.len() readable bytes.
+        unsafe { VSIFWriteL(bytes.as_ptr().cast(), 1, bytes.len(), self.file.as_ptr()) }
+    }
+
+    /// `VSIFCloseL`: 0 when the file closed cleanly - for an archive being
+    /// written, when its central directory was written.
+    pub(crate) fn close(self) -> c_int {
+        let file = self.file.as_ptr();
+        std::mem::forget(self);
+        // SAFETY: the file this value owned, closed once (Drop will not run).
+        unsafe { VSIFCloseL(file) }
+    }
+}
+
+impl Drop for VsiFile {
+    fn drop(&mut self) {
+        // SAFETY: the file this value owns, closed once.
+        unsafe { VSIFCloseL(self.file.as_ptr()) };
     }
 }
 

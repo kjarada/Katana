@@ -22,19 +22,17 @@
 //! same), and its progress function a `Sync` closure: GDAL may call it from a
 //! thread of its own. The callback catches a panic of the closure, cancels
 //! the warp, and raises the panic again once GDAL has returned.
-
-#![allow(
-    unsafe_code,
-    reason = "Reads coordinate systems and warps rasters through GDAL's C API; every call states why it is sound."
-)]
+//!
+//! Every GDAL call is a safe method of the FFI modules' owners (ffi/srs.rs's
+//! references and transformation, ffi/dataset.rs's datasets and utilities),
+//! so this module is safe code.
 
 use std::any::Any;
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_int};
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
-use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -43,11 +41,17 @@ use katana_core::text::{format_fixed, format_general, is_ascii_space};
 use katana_core::{Error, ErrorCode, Result, Status};
 
 use crate::cpl_error_collector::QuietHandler;
+use crate::ffi::dataset::{
+    self, BuildVrtOptions, Dataset, DatasetHandle, TranslateOptions, VectorTranslateOptions,
+    WarpAppOptions,
+};
+use crate::ffi::error::{last_error_message as last_gdal_error_message, reset_last_error};
+use crate::ffi::srs::CoordinateTransformation;
 use crate::ffi::{cpl, gdal, ogr, osr};
 use crate::formats_detail::remove_path;
 use crate::gdal_adapter::VectorFeature;
 use crate::gdal_registry::ensure_registered;
-use crate::ogr_detail::{SpatialReference, exported_wkt};
+use crate::ogr_detail::SpatialReference;
 
 /// No-data for a warped elevation: below any ground on Earth (the Dead Sea
 /// shore is -430 m, the deepest trench about -11 000 m) and exactly
@@ -165,8 +169,7 @@ fn number(value: f64) -> String {
 }
 
 fn last_error_message() -> String {
-    // SAFETY: this thread's last error message, copied at once.
-    unsafe { cpl::decoded(cpl::CPLGetLastErrorMsg()) }
+    last_gdal_error_message()
 }
 
 /// `std::min` and `std::max` on doubles, as the C++ has them.
@@ -244,31 +247,13 @@ fn crs_of(text: &str) -> Result<SpatialReference> {
     Ok(reference)
 }
 
-/// An OGRCoordinateTransformation Rust owns.
-struct Transform(NonNull<osr::OgrCoordinateTransformationHs>);
-
-impl Transform {
-    fn raw(&self) -> osr::OgrCoordinateTransformationH {
-        self.0.as_ptr()
-    }
-}
-
-impl Drop for Transform {
-    fn drop(&mut self) {
-        // SAFETY: the transformation is owned by this value alone, destroyed once.
-        unsafe { osr::OCTDestroyCoordinateTransformation(self.raw()) };
-    }
-}
-
-fn make_transform(from: &str, to: &str) -> Result<Transform> {
+fn make_transform(from: &str, to: &str) -> Result<CoordinateTransformation> {
     let source = crs_of(from)?;
     let target = crs_of(to)?;
     let quiet = QuietHandler::push();
-    // SAFETY: two live references, which the transformation copies; it is
-    // owned by the Transform made below.
-    let transform = unsafe { osr::OCTNewCoordinateTransformation(source.raw(), target.raw()) };
+    let transform = CoordinateTransformation::new(&source, &target);
     drop(quiet);
-    NonNull::new(transform).map(Transform).ok_or_else(|| {
+    transform.ok_or_else(|| {
         make_error(
             ErrorCode::InvalidCrs,
             "PROJ has no transformation between these systems",
@@ -289,27 +274,17 @@ struct ThreadConfig {
 
 impl ThreadConfig {
     fn set(&mut self, key: &'static CStr, value: &str) {
-        // SAFETY: a NUL-terminated key and a NULL default.
-        let previous = unsafe { cpl::CPLGetThreadLocalConfigOption(key.as_ptr(), ptr::null()) };
-        // SAFETY: NULL or this thread's value, copied before it is replaced.
-        let previous =
-            (!previous.is_null()).then(|| CString::from(unsafe { CStr::from_ptr(previous) }));
+        let previous = cpl::thread_local_config_option(key);
         self.saved.push((key, previous));
-        let value = cpl::c_string(value);
-        // SAFETY: NUL-terminated key and value; GDAL copies both.
-        unsafe { cpl::CPLSetThreadLocalConfigOption(key.as_ptr(), value.as_ptr()) };
+        cpl::set_thread_local_config_option(key, Some(cpl::c_string(value).as_c_str()));
     }
 }
 
 impl Drop for ThreadConfig {
     fn drop(&mut self) {
+        // On the thread that set the options (the guard is not Send).
         for (key, previous) in self.saved.iter().rev() {
-            let previous = previous
-                .as_ref()
-                .map_or(ptr::null(), |value| value.as_ptr());
-            // SAFETY: a NUL-terminated key and NULL or a NUL-terminated value,
-            // on the thread that set the option.
-            unsafe { cpl::CPLSetThreadLocalConfigOption(key.as_ptr(), previous) };
+            cpl::set_thread_local_config_option(key, previous.as_deref());
         }
     }
 }
@@ -323,12 +298,8 @@ struct ProgressState<'a> {
     panic: Mutex<Option<Box<dyn Any + Send>>>,
 }
 
-extern "C" fn warp_progress(fraction: f64, _message: *const c_char, data: *mut c_void) -> c_int {
-    if data.is_null() {
-        return cpl::TRUE;
-    }
-    // SAFETY: the state warp_to_geotiff handed GDAL, alive for the warp.
-    let state = unsafe { &*data.cast::<ProgressState<'_>>() };
+/// What the warp's progress answers GDAL: TRUE to go on, FALSE to stop.
+fn warp_progress(state: &ProgressState<'_>, fraction: f64) -> c_int {
     let reported = catch_unwind(AssertUnwindSafe(|| {
         if let Some(progress) = state.progress {
             progress(fraction);
@@ -349,40 +320,15 @@ extern "C" fn warp_progress(fraction: f64, _message: *const c_char, data: *mut c
     }
 }
 
-/// A GDAL dataset Rust owns, closed on drop.
-struct Dataset(NonNull<gdal::GdalDatasetHs>);
-
-impl Dataset {
-    fn from_raw(handle: gdal::GdalDatasetH) -> Option<Self> {
-        NonNull::new(handle).map(Self)
-    }
-
-    fn raw(&self) -> gdal::GdalDatasetH {
-        self.0.as_ptr()
-    }
-}
-
-impl Drop for Dataset {
-    fn drop(&mut self) {
-        // SAFETY: the dataset is owned by this value alone, closed once.
-        unsafe { gdal::GDALClose(self.raw()) };
-    }
-}
-
+/// A raster opened read-only, closed when the Dataset goes.
 fn open_raster(path: &str) -> Option<Dataset> {
     let name = cpl::c_string(path);
     let quiet = QuietHandler::push();
-    // SAFETY: a NUL-terminated name and no lists; the dataset is owned by
-    // the Dataset returned.
-    let opened = Dataset::from_raw(unsafe {
-        gdal::GDALOpenEx(
-            name.as_ptr(),
-            gdal::GDAL_OF_RASTER | gdal::GDAL_OF_READONLY,
-            ptr::null(),
-            ptr::null(),
-            ptr::null(),
-        )
-    });
+    let opened = Dataset::open(
+        &name,
+        gdal::GDAL_OF_RASTER | gdal::GDAL_OF_READONLY,
+        &cpl::CStringList::new(),
+    );
     drop(quiet);
     opened
 }
@@ -409,9 +355,8 @@ fn prepare_source(
             last_error_message(),
         ));
     };
-    let dataset = opened.raw();
-    // SAFETY: a live dataset.
-    let bands = unsafe { gdal::GDALGetRasterCount(dataset) };
+    let dataset: &DatasetHandle = &opened;
+    let bands = dataset.raster_count();
     if bands < 1 {
         return Err(Error::new(
             ErrorCode::FileImportFailure,
@@ -438,31 +383,23 @@ fn prepare_source(
         // An image a service returned for a box may not declare the no-data
         // it was asked to use (exportImage's noData=-32767): declared here,
         // so the warp does not blend it into real heights at the edges.
-        let mut has_no_data: c_int = cpl::FALSE;
-        // SAFETY: a live dataset's first band and an out flag.
-        unsafe {
-            gdal::GDALGetRasterNoDataValue(
-                gdal::GDALGetRasterBand(dataset, 1),
-                &raw mut has_no_data,
-            )
-        };
-        if has_no_data == cpl::FALSE && source.bounds.is_some() {
+        let has_no_data = dataset
+            .band(1)
+            .and_then(|band| band.no_data_value())
+            .is_some();
+        if !has_no_data && source.bounds.is_some() {
             arguments.add("-a_nodata");
             arguments.add(number(ELEVATION_NO_DATA));
         }
     } else {
-        // SAFETY: a live dataset and its bands.
-        let (paletted, has_alpha) = unsafe {
-            let first = gdal::GDALGetRasterBand(dataset, 1);
-            (
-                !gdal::GDALGetRasterColorTable(first).is_null(),
-                bands >= 4
-                    || (bands == 2
-                        && gdal::GDALGetRasterColorInterpretation(gdal::GDALGetRasterBand(
-                            dataset, 2,
-                        )) == gdal::GCI_ALPHA_BAND),
-            )
-        };
+        let paletted = dataset
+            .band(1)
+            .is_some_and(|first| first.color_table().is_some());
+        let has_alpha = bands >= 4
+            || (bands == 2
+                && dataset
+                    .band(2)
+                    .is_some_and(|second| second.color_interpretation() == gdal::GCI_ALPHA_BAND));
         if paletted {
             arguments.add("-expand");
             arguments.add("rgba");
@@ -490,17 +427,12 @@ fn prepare_source(
             arguments.add("Byte");
         }
     }
-    // SAFETY: an argument list GDAL copies; the options are freed below.
-    let options = unsafe { gdal::GDALTranslateOptionsNew(arguments.as_argv(), ptr::null_mut()) };
+    let options = TranslateOptions::new(&arguments);
     let quiet = QuietHandler::push();
-    // SAFETY: an empty name (an in-memory VRT), a live source and the options
-    // (NULL takes GDAL's defaults); the dataset is owned by the Dataset made.
-    let prepared = Dataset::from_raw(unsafe {
-        gdal::GDALTranslate(c"".as_ptr(), dataset, options, ptr::null_mut())
-    });
+    // An empty name: an in-memory VRT.
+    let prepared = dataset::translate(c"", dataset, &options);
     drop(quiet);
-    // SAFETY: the options made above, freed once.
-    unsafe { gdal::GDALTranslateOptionsFree(options) };
+    drop(options);
     let Some(prepared) = prepared else {
         return Err(make_error(
             ErrorCode::FileImportFailure,
@@ -594,25 +526,21 @@ pub fn transform_box(crs_box: &CrsBox, from_crs: &str, to_crs: &str) -> Result<C
         ));
     }
     let transform = make_transform(from_crs, to_crs)?;
-    let mut out = CrsBox::default();
+    let mut bounds = [0.0; 4];
     let quiet = QuietHandler::push();
-    // SAFETY: a live transformation and four out values.
-    let ok = unsafe {
-        osr::OCTTransformBounds(
-            transform.raw(),
-            crs_box.min_x,
-            crs_box.min_y,
-            crs_box.max_x,
-            crs_box.max_y,
-            &raw mut out.min_x,
-            &raw mut out.min_y,
-            &raw mut out.max_x,
-            &raw mut out.max_y,
-            21,
-        )
-    };
+    let ok = transform.transform_bounds(
+        [crs_box.min_x, crs_box.min_y, crs_box.max_x, crs_box.max_y],
+        &mut bounds,
+        21,
+    );
     drop(quiet);
-    if ok == cpl::FALSE || !out.min_x.is_finite() || !out.max_y.is_finite() || !out.valid() {
+    let out = CrsBox {
+        min_x: bounds[0],
+        min_y: bounds[1],
+        max_x: bounds[2],
+        max_y: bounds[3],
+    };
+    if !ok || !out.min_x.is_finite() || !out.max_y.is_finite() || !out.valid() {
         return Err(make_error(
             ErrorCode::InvalidCrs,
             "the area cannot be expressed in the service's coordinate system",
@@ -627,17 +555,8 @@ pub fn transform_point(x: f64, y: f64, from_crs: &str, to_crs: &str) -> Result<[
     let transform = make_transform(from_crs, to_crs)?;
     let mut px = x;
     let mut py = y;
-    // SAFETY: a live transformation, one x and one y, and no z.
-    let ok = unsafe {
-        osr::OCTTransform(
-            transform.raw(),
-            1,
-            &raw mut px,
-            &raw mut py,
-            ptr::null_mut(),
-        )
-    };
-    if ok == cpl::FALSE || !px.is_finite() || !py.is_finite() {
+    let ok = transform.transform_point(&mut px, &mut py);
+    if !ok || !px.is_finite() || !py.is_finite() {
         return Err(make_error(
             ErrorCode::InvalidCrs,
             "the point cannot be transformed",
@@ -668,19 +587,7 @@ pub fn reproject_features(
             let mut success = vec![cpl::FALSE; part.len()];
             // A part GDAL's int count cannot hold is cut to the int's range;
             // the vertices beyond it stay unconverted and refuse below.
-            let count = c_int::try_from(part.len()).unwrap_or(c_int::MAX);
-            // SAFETY: a live transformation and `count` x, y and success
-            // values; no z.
-            unsafe {
-                osr::OCTTransformEx(
-                    transform.raw(),
-                    count,
-                    xs.as_mut_ptr(),
-                    ys.as_mut_ptr(),
-                    ptr::null_mut(),
-                    success.as_mut_ptr(),
-                )
-            };
+            transform.transform_points(&mut xs, &mut ys, &mut success);
             for (i, point) in part.iter_mut().enumerate() {
                 if success[i] == cpl::FALSE || !xs[i].is_finite() || !ys[i].is_finite() {
                     return Err(make_error(
@@ -717,40 +624,27 @@ pub fn probe_raster(path: &str, user_agent: &str, timeout_seconds: i32) -> Resul
             last_error_message(),
         ));
     };
-    let dataset = opened.raw();
-    // SAFETY: a live dataset.
-    let (width, height, band_count) = unsafe {
-        (
-            gdal::GDALGetRasterXSize(dataset),
-            gdal::GDALGetRasterYSize(dataset),
-            gdal::GDALGetRasterCount(dataset),
-        )
-    };
+    let dataset: &DatasetHandle = &opened;
+    let (width, height, band_count) = (
+        dataset.raster_x_size(),
+        dataset.raster_y_size(),
+        dataset.raster_count(),
+    );
     let data_type = if band_count > 0 {
-        // SAFETY: a live dataset's first band; the name is GDAL's static
-        // text, copied at once.
-        unsafe {
-            cpl::decoded(gdal::GDALGetDataTypeName(gdal::GDALGetRasterDataType(
-                gdal::GDALGetRasterBand(dataset, 1),
-            )))
-        }
+        dataset
+            .band(1)
+            .map(|band| dataset::data_type_name(band.data_type()))
+            .unwrap_or_default()
     } else {
         String::new()
     };
-    // SAFETY: a live dataset; its spatial reference is its own.
-    let reference = unsafe { gdal::GDALGetSpatialRef(dataset) };
-    let crs_wkt = if reference.is_null() {
-        String::new()
-    } else {
-        // SAFETY: a live spatial reference the dataset owns.
-        unsafe { exported_wkt(reference) }.unwrap_or_default()
-    };
+    let crs_wkt = dataset
+        .spatial_ref()
+        .and_then(|reference| reference.exported_wkt())
+        .unwrap_or_default();
     let mut geotransform = [0.0_f64; 6];
     let mut lon_lat_bounds = None;
-    // SAFETY: a live dataset and six doubles.
-    if !crs_wkt.is_empty()
-        && unsafe { gdal::GDALGetGeoTransform(dataset, geotransform.as_mut_ptr()) } == cpl::CE_NONE
-    {
+    if !crs_wkt.is_empty() && dataset.geo_transform(&mut geotransform) == cpl::CE_NONE {
         let x0 = geotransform[0];
         let x1 = geotransform[0] + geotransform[1] * f64::from(width);
         let y0 = geotransform[3];
@@ -910,70 +804,43 @@ pub fn warp_to_geotiff(
             arguments.add(argument);
         }
     }
-    // SAFETY: an argument list GDAL copies; the options are freed below.
-    let warp_options = unsafe { gdal::GDALWarpAppOptionsNew(arguments.as_argv(), ptr::null_mut()) };
+    let warp_options = WarpAppOptions::new(&arguments);
     let state = ProgressState {
         stop,
         progress,
         panic: Mutex::new(None),
     };
-    if !warp_options.is_null() {
-        // SAFETY: live options, a callback that catches every panic, and the
-        // state, alive until the options are freed after the warp.
-        unsafe {
-            gdal::GDALWarpAppOptionsSetProgress(
-                warp_options,
-                Some(warp_progress),
-                ptr::from_ref(&state).cast_mut().cast(),
-            );
-        }
-    }
+    // Catches every panic of the closure; the state outlives the warp.
+    let report = |fraction: f64| warp_progress(&state, fraction);
 
-    let mut handles: Vec<gdal::GdalDatasetH> = prepared.iter().map(Dataset::raw).collect();
+    let mut sources: Vec<&DatasetHandle> = Vec::with_capacity(prepared.len());
+    for dataset in &prepared {
+        sources.push(dataset);
+    }
     let target = cpl::c_string(cpl::native_path(output));
     if let Some(parent) = output.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let mut usage_error: c_int = cpl::FALSE;
     let quiet = {
-        // SAFETY: clears this thread's last error.
-        unsafe { cpl::CPLErrorReset() };
+        reset_last_error();
         QuietHandler::push()
     };
-    // SAFETY: a NUL-terminated name, no destination dataset, the live source
-    // handles, the options and an out flag; the dataset returned is closed
-    // below.
-    let warped = unsafe {
-        gdal::GDALWarp(
-            target.as_ptr(),
-            ptr::null_mut(),
-            handles.len() as c_int,
-            handles.as_mut_ptr(),
-            warp_options,
-            &raw mut usage_error,
-        )
-    };
+    // The dataset returned is closed below.
+    let warped = dataset::warp(&target, &sources, &warp_options, &report);
     drop(quiet);
-    // SAFETY: the options made above (or NULL), freed once.
-    unsafe { gdal::GDALWarpAppOptionsFree(warp_options) };
+    drop(warp_options);
     let warp_error = last_error_message();
-    let close = |dataset: gdal::GdalDatasetH| {
-        if !dataset.is_null() {
-            // SAFETY: the warped dataset, closed once.
-            unsafe { gdal::GDALClose(dataset) };
-        }
-    };
     if let Some(payload) = state
         .panic
         .into_inner()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
     {
-        close(warped);
+        drop(warped); // closed once
         remove_path(output);
         resume_unwind(payload);
     }
-    if warped.is_null() || stopped() {
-        close(warped);
+    if warped.is_none() || stopped() {
+        drop(warped); // closed once
         remove_path(output);
         if stopped() {
             return Err(Error::new(ErrorCode::InvalidState, "cancelled"));
@@ -984,12 +851,11 @@ pub fn warp_to_geotiff(
             warp_error,
         ));
     }
-    // SAFETY: the warped dataset, read and then closed once.
-    unsafe {
-        result.width = gdal::GDALGetRasterXSize(warped);
-        result.height = gdal::GDALGetRasterYSize(warped);
+    if let Some(dataset) = &warped {
+        result.width = dataset.raster_x_size();
+        result.height = dataset.raster_y_size();
     }
-    close(warped);
+    drop(warped); // read, then closed once
     Ok(result)
 }
 
@@ -1018,17 +884,11 @@ pub fn clip_vector_file(input: &Path, crs_box: &CrsBox, output: &Path) -> Status
     }
     let name = cpl::c_string(cpl::native_path(input));
     let quiet = QuietHandler::push();
-    // SAFETY: a NUL-terminated name and no lists; the dataset is owned by the
-    // Dataset made.
-    let source = Dataset::from_raw(unsafe {
-        gdal::GDALOpenEx(
-            name.as_ptr(),
-            gdal::GDAL_OF_VECTOR | gdal::GDAL_OF_READONLY,
-            ptr::null(),
-            ptr::null(),
-            ptr::null(),
-        )
-    });
+    let source = Dataset::open(
+        &name,
+        gdal::GDAL_OF_VECTOR | gdal::GDAL_OF_READONLY,
+        &cpl::CStringList::new(),
+    );
     drop(quiet);
     let Some(source) = source else {
         return Err(make_error(
@@ -1050,9 +910,7 @@ pub fn clip_vector_file(input: &Path, crs_box: &CrsBox, output: &Path) -> Status
     arguments.add("-nlt");
     arguments.add("PROMOTE_TO_MULTI");
     arguments.add("-skipfailures");
-    // SAFETY: an argument list GDAL copies; the options are freed below.
-    let options =
-        unsafe { gdal::GDALVectorTranslateOptionsNew(arguments.as_argv(), ptr::null_mut()) };
+    let options = VectorTranslateOptions::new(&arguments);
     if let Some(parent) = output.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1065,28 +923,14 @@ pub fn clip_vector_file(input: &Path, crs_box: &CrsBox, output: &Path) -> Status
     partial.push(format!(".part-{}.gpkg", random_suffix()));
     let partial = PathBuf::from(partial);
     let partial_name = cpl::c_string(cpl::native_path(&partial));
-    let mut sources = [source.raw()];
-    let mut usage_error: c_int = cpl::FALSE;
     let quiet = {
-        // SAFETY: clears this thread's last error.
-        unsafe { cpl::CPLErrorReset() };
+        reset_last_error();
         QuietHandler::push()
     };
-    // SAFETY: a NUL-terminated name, no destination dataset, one live source,
-    // the options and an out flag; the dataset is owned by the Dataset made.
-    let clipped = Dataset::from_raw(unsafe {
-        gdal::GDALVectorTranslate(
-            partial_name.as_ptr(),
-            ptr::null_mut(),
-            1,
-            sources.as_mut_ptr(),
-            options,
-            &raw mut usage_error,
-        )
-    });
+    let sources: [&DatasetHandle; 1] = [&source];
+    let clipped = dataset::vector_translate(&partial_name, &sources, &options);
     drop(quiet);
-    // SAFETY: the options made above (or NULL), freed once.
-    unsafe { gdal::GDALVectorTranslateOptionsFree(options) };
+    drop(options);
     let Some(clipped) = clipped else {
         remove_path(&partial);
         return Err(make_error(
@@ -1160,25 +1004,12 @@ pub fn build_true_colour_vrt(
     }
     let mut stack_arguments = cpl::CStringList::new();
     stack_arguments.add("-separate");
-    // SAFETY: an argument list GDAL copies; the options are freed below.
-    let stack_options =
-        unsafe { gdal::GDALBuildVRTOptionsNew(stack_arguments.as_argv(), ptr::null_mut()) };
+    let stack_options = BuildVrtOptions::new(&stack_arguments);
     let quiet = QuietHandler::push();
-    // SAFETY: an empty name (an in-memory VRT), three NUL-terminated source
-    // names and the options; the dataset is owned by the Dataset made.
-    let stacked = Dataset::from_raw(unsafe {
-        gdal::GDALBuildVRT(
-            c"".as_ptr(),
-            3,
-            ptr::null_mut(),
-            names.as_ptr(),
-            stack_options,
-            ptr::null_mut(),
-        )
-    });
+    // An empty name (an in-memory VRT) over the three source names.
+    let stacked = dataset::build_vrt(c"", &names, &stack_options);
     drop(quiet);
-    // SAFETY: the options made above (or NULL), freed once.
-    unsafe { gdal::GDALBuildVRTOptionsFree(stack_options) };
+    drop(stack_options);
     let Some(stacked) = stacked else {
         return Err(make_error(
             ErrorCode::FileImportFailure,
@@ -1208,26 +1039,15 @@ pub fn build_true_colour_vrt(
     ] {
         arguments.add(argument);
     }
-    // SAFETY: an argument list GDAL copies; the options are freed below.
-    let options = unsafe { gdal::GDALTranslateOptionsNew(arguments.as_argv(), ptr::null_mut()) };
+    let options = TranslateOptions::new(&arguments);
     if let Some(parent) = output.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let output_name = cpl::c_string(cpl::native_path(output));
     let quiet = QuietHandler::push();
-    // SAFETY: a NUL-terminated name, the live stack and the options; the
-    // dataset is owned by the Dataset made.
-    let composite = Dataset::from_raw(unsafe {
-        gdal::GDALTranslate(
-            output_name.as_ptr(),
-            stacked.raw(),
-            options,
-            ptr::null_mut(),
-        )
-    });
+    let composite = dataset::translate(&output_name, &stacked, &options);
     drop(quiet);
-    // SAFETY: the options made above (or NULL), freed once.
-    unsafe { gdal::GDALTranslateOptionsFree(options) };
+    drop(options);
     if composite.is_none() {
         return Err(make_error(
             ErrorCode::FileImportFailure,
