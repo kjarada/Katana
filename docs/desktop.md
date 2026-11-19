@@ -1478,6 +1478,19 @@ image of `resources/katana.ico` is in the built program, and its version
 strings are. Not done: `katana_cli.exe`, `katana_mcp.exe` and
 `katana_updater.exe` carry neither, as in the C++.
 
+`katana.exe` is a Windows GUI program (`windows_subsystem = "windows"` in
+`crates/katana_window/src/bin/katana/main.rs`): as a console program,
+starting it opened a console window beside the main one (the owner,
+2026-11-19). Started from a console with its output not
+redirected, it attaches to that console
+(`katana_app::console::attach_parent_console`), so `--report`, `--screenshot`
+and the other headless switches still print where they were typed; started
+with its output piped - a test, the updater's health check - Windows hands it
+the pipes. The console does not wait for a GUI program, so a script that
+needs the exit code runs it with `start /wait` or reads it from a pipe.
+Rejected: `FreeConsole` at start-up, which still flashes the console open.
+Tested by the same file: the PE header's Subsystem field is 2 (GUI).
+
 **Every menu item has an icon and says what it does.** Until 2026-09-26
 sixty menu items had no icon or no status tip, or neither: the snap modes,
 the viewport layouts, the standard 3D views, Deselect, Quit, the annotation

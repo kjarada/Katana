@@ -10,8 +10,15 @@
 //! The window's 3D views take the software rasteriser on the desktop too, for now: the window is
 //! made before eframe's wgpu device exists (drive::run makes it as the switches are read), and
 //! handing it that device afterwards is left (docs/rust.md, "Not done").
+//!
+//! On Windows it is a GUI program, so starting it opens no console window beside the main one
+//! (the owner, 2026-11-19: "when i open katana i get an additional cmd"); started from a console,
+//! it borrows that one for its headless reports (`katana_app::console::attach_parent_console`).
+//! Rejected: FreeConsole at start-up, which still flashes the console open first.
 
-use katana_app::console::Terminal;
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
+use katana_app::console::{Terminal, attach_parent_console};
 use katana_window::MainWindow;
 use katana_window::drive::desktop::{Desktop, TITLE};
 use katana_window::drive::run::{program_arguments, run};
@@ -26,6 +33,7 @@ impl eframe::App for Shown<'_, '_> {
 }
 
 fn main() {
+    attach_parent_console();
     let arguments = program_arguments();
     let mut console = Terminal;
     let code = run(

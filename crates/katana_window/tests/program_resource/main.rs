@@ -90,3 +90,28 @@ fn katana_exe_names_the_product_and_the_projects_version() {
         );
     }
 }
+
+/// The Subsystem field of a PE image's optional header (Microsoft's "PE Format": e_lfanew at
+/// 0x3C names the "PE\0\0" signature; the 20-byte COFF header follows it, then the optional
+/// header, whose Subsystem is at offset 68 in both PE32 and PE32+).
+fn pe_subsystem(image: &[u8]) -> u16 {
+    let dword = |at: usize| {
+        u32::from_le_bytes([image[at], image[at + 1], image[at + 2], image[at + 3]]) as usize
+    };
+    let signature = dword(0x3C);
+    assert_eq!(&image[signature..signature + 4], b"PE\0\0", "a PE image");
+    let subsystem = signature + 4 + 20 + 68;
+    u16::from_le_bytes([image[subsystem], image[subsystem + 1]])
+}
+
+// katana.exe is a GUI program (IMAGE_SUBSYSTEM_WINDOWS_GUI, 2), so starting it opens no console
+// window beside the main one (the owner, 2026-11-19: "when i open katana i get an additional
+// cmd"). The test's own program, a console one (IMAGE_SUBSYSTEM_WINDOWS_CUI, 3), proves the
+// field is read where it is; both values are the PE format's.
+#[test]
+fn katana_exe_is_a_windows_gui_program_and_opens_no_console() {
+    assert_eq!(pe_subsystem(&program()), 2, "katana.exe's subsystem");
+    let console = std::fs::read(std::env::current_exe().expect("the test's own path"))
+        .expect("the test program is read");
+    assert_eq!(pe_subsystem(&console), 3, "a console program reads as one: the parse is right");
+}
