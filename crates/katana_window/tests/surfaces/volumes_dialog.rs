@@ -285,7 +285,10 @@ mod volumes_dialog {
         assert!(!bench.enabled("volumesRun"));
         assert_eq!(
             bench.text("volumesStatus"),
-            "There is no surface: make one with Terrain > Surface From"
+            // Shortened to one line beside a 546-wide footer's buttons, where the longer
+            // sentence was cut at "Terrain > S..." (the fifth look audit); it still names the
+            // menu item that makes one.
+            "No surface: Terrain > Surface From"
         );
     }
 
@@ -411,15 +414,20 @@ mod volumes_dialog {
 
     #[test]
     fn make_envelope_with_no_surface_or_a_refused_name_says_why_and_changes_nothing() {
-        // No surfaces: a line cannot be made, naming what is missing, and nothing runs.
+        // No surfaces: a line cannot be made, naming what is missing, and nothing runs. Make
+        // Envelope and Make Cut/Fill Map are greyed then - lit, they invited a press that could
+        // only be refused (the fifth look audit) - and the footer's status says what is missing.
         {
-            let mut bench = bench(interpreter_host());
+            let bench = bench(interpreter_host());
             let none = bench.dialog.envelope_line();
             let error = none.expect_err("no surface, no line");
-            assert!(error.message.contains("no surface"), "{}", error.message);
-            bench.press("volumesEnvelope");
+            // terrain_dialog_parts::NO_SURFACE, shortened to one footer line (the fifth look
+            // audit): "No surface: Terrain > Surface From".
+            assert!(error.message.contains("No surface"), "{}", error.message);
+            assert!(!bench.enabled("volumesEnvelope"));
+            assert!(!bench.enabled("volumesCutFillMap"));
             assert!(bench.host.lines().is_empty());
-            assert!(bench.text("volumesStatus").contains("no surface"));
+            assert!(bench.text("volumesStatus").contains("No surface"));
         }
         // The verb's refusal reaches the status and the drawing is as it was: a name the drawing
         // already has.

@@ -35,9 +35,10 @@ use katana_entity::entity::{property_to_string, type_name};
 use katana_entity::{EntityId, PropertyValue};
 
 use crate::dialog_layout as layout;
+use crate::drive::controls::token_choice;
 use crate::drive::mailbox::lists_no;
 use crate::drive::{
-    Choice, ControlKind, ControlRecord, LineOptions, button, choice, custom, line_with, registry,
+    Choice, ControlKind, ControlRecord, LineOptions, button, custom, line_with, registry,
 };
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -370,18 +371,10 @@ impl AttributeManagerDialog {
                 tree_ui(ui, state, &rows, chosen);
                 ui.add_space(layout::GAP);
                 let types: Vec<String> = TYPES.iter().map(|t| String::from(*t)).collect();
+                // Name, Type, Value: what an attribute is, then what it holds - the order the
+                // tree's columns and the ATTRIBUTE verb read, where the form ran Value, Type, Name
+                // (the fifth look audit).
                 dialog::form(ui, |form| {
-                    form.row("Value", |ui| {
-                        line_with(
-                            ui,
-                            "attributeValue",
-                            &mut state.value,
-                            LineOptions::default(),
-                        );
-                    });
-                    form.row("Type", |ui| {
-                        choice(ui, "attributeType", &types, &mut state.kind);
-                    });
                     form.row("Name", |ui| {
                         line_with(
                             ui,
@@ -391,6 +384,18 @@ impl AttributeManagerDialog {
                                 placeholder: "use / to nest, e.g. Asset/Dimensions/Size",
                                 ..LineOptions::default()
                             },
+                        );
+                    });
+                    form.row("Type", |ui| {
+                        // The types are the verb's tokens ("text"), shown in sentence case.
+                        token_choice(ui, "attributeType", &types, &mut state.kind);
+                    });
+                    form.row("Value", |ui| {
+                        line_with(
+                            ui,
+                            "attributeValue",
+                            &mut state.value,
+                            LineOptions::default(),
                         );
                     });
                 });

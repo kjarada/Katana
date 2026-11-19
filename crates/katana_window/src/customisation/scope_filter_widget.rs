@@ -686,6 +686,56 @@ impl ScopeFilterWidget {
         }
     }
 
+    /// What the widget shows while it does not apply: its heading and its one line.
+    fn unused_lines(&self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
+            // The heading greyed with the rest; the line under it muted but whole, as a note is -
+            // faded twice it could not be read.
+            dialog::section(ui, &self.heading_text());
+            let note = self.unused_note().to_owned();
+            ui.scope(|ui| {
+                ui.set_opacity(1.0);
+                dialog::note(ui, &note);
+            });
+        });
+    }
+
+    /// How tall the widget is drawn in use, its controls whole, as `ui` draws it in `column` - a
+    /// column of a row `width` wide (true), or a body's own column (false) - measured in a sizing
+    /// pass (shell::dialog::measured_height) and drawing nothing. With `measure_unused`, what a
+    /// dialog whose layout follows whether its scope applies (Subsurface Utilities) sizes the
+    /// layout it is not showing by. Nothing done since the last frame is lost: an edit is still
+    /// reported by the next `ui`.
+    pub fn measure_in_use(&mut self, ui: &mut Ui, width: f32, column: bool) -> f32 {
+        let pending = self.pending;
+        let salt = self.object_name();
+        let height = dialog::measured_height(ui, ("katanaScopeInUse", salt), width, |ui| {
+            if column {
+                // In a row, as the widget reads its width (dialog::in_a_column).
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(width);
+                        self.ui(ui);
+                    });
+                });
+            } else {
+                self.ui(ui);
+            }
+        });
+        self.pending = pending;
+        height
+    }
+
+    /// How tall the widget is drawn while it does not apply (its heading and one line) `width`
+    /// wide, with no field above it (see `measure_in_use`).
+    pub fn measure_unused(&self, ui: &mut Ui, width: f32) -> f32 {
+        let salt = self.object_name();
+        dialog::measured_height(ui, ("katanaScopeUnused", salt), width, |ui| {
+            self.unused_lines(ui);
+        })
+    }
+
     /// Draws the controls; true when any was edited this frame - by a person or a driver - or by a
     /// setter since the last frame.
     ///
@@ -722,17 +772,7 @@ impl ScopeFilterWidget {
             };
             ui.set_width(width.max(0.0));
             if unused {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
-                    // The heading greyed with the rest; the line under it muted but whole, as a
-                    // note is - faded twice it could not be read.
-                    dialog::section(ui, &self.heading_text());
-                    let note = self.unused_note().to_owned();
-                    ui.scope(|ui| {
-                        ui.set_opacity(1.0);
-                        dialog::note(ui, &note);
-                    });
-                });
+                self.unused_lines(ui);
                 let salt = self.object_name();
                 crate::drive::controls::withdrawn(ui, &salt, |ui| {
                     // Laid out as it would be, and not drawn: its records and its answers to a

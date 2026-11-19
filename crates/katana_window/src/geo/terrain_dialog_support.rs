@@ -109,7 +109,14 @@ impl SourcePicker {
 
     /// The picker drawn as `name`, saying "No surface or raster" while it offers nothing.
     pub fn ui(&mut self, ui: &mut Ui, name: &str) -> Response {
-        self.ui_with_hint(ui, name, super::terrain_dialog_parts::NO_SOURCE_HINT)
+        let empty = self.choices.is_empty();
+        let response = self.ui_with_hint(ui, name, super::terrain_dialog_parts::NO_SOURCE_HINT);
+        if empty {
+            // The ways to one, whole: the footer's status names the first only, to fit its line.
+            response.on_hover_text("Make a surface with Terrain > Surface From, or import a DEM")
+        } else {
+            response
+        }
     }
 
     /// The picker drawn as `name`, saying `hint` while it offers nothing (a picker of rasters

@@ -1343,11 +1343,11 @@ pub struct RoadTemplateManagerDialog {
 impl RoadTemplateManagerDialog {
     /// The manager over `document`, shown, its first template chosen.
     pub fn new(document: &Document) -> Self {
-        let mut add_side = Combo::new();
+        let mut add_side = Combo::of_tokens();
         for each in ["both", "left", "right"] {
             add_side.add_item(each);
         }
-        let mut add_kind = Combo::new();
+        let mut add_kind = Combo::of_tokens();
         for kind in [
             ComponentKind::Lane,
             ComponentKind::Shoulder,

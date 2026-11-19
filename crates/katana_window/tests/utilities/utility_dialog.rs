@@ -179,6 +179,55 @@ fn interpreted(
 mod utility_dialog {
     use super::*;
 
+    /// The dialog's size as the last frame drew it.
+    fn shown_size(bench: &Bench<UtilityToolsDialog>) -> egui::Vec2 {
+        bench
+            .harness
+            .target_record("utilityDialog")
+            .expect("the dialog is drawn")
+            .rect
+            .size()
+    }
+
+    #[test]
+    fn every_tab_of_one_layout_keeps_one_size_whichever_the_source() {
+        // The fifth look audit: 353 high on Report and 771 on Regrade, each tab as tall as its
+        // page. Every tab shown in the front's layout is now the tallest's height: all seven
+        // while the drawing is read, the scope beside the tabs; Draw to Check while a schedule
+        // is, the scope's one line over them. Regrade and Schedule read the drawing either way.
+        let executor = Executor::new();
+        let mut bench = dialog_bench(executor.context(), host(false));
+        let mut sizes = Vec::new();
+        for source in [UtilitySource::Drawing, UtilitySource::File] {
+            bench.dialog.set_source(source);
+            let mut first = None;
+            for tool in UTILITY_TOOLS {
+                let beside = source == UtilitySource::Drawing
+                    || matches!(tool, UtilityTool::Regrade | UtilityTool::Schedule);
+                if source == UtilitySource::File && beside {
+                    continue;
+                }
+                bench.dialog.show_tool(tool);
+                bench.draw();
+                let shown = shown_size(&bench);
+                let first = *first.get_or_insert(shown);
+                assert!(
+                    (shown - first).length() <= 0.5,
+                    "{source:?} {tool:?}: {shown:?}, where the first tab was {first:?}"
+                );
+            }
+            sizes.push(first.expect("a tab was shown"));
+        }
+        // One width in either layout; and Regrade, which reads the drawing beside the scope
+        // whatever the source, is the drawing layout's size under a schedule too - the size of
+        // its own layout, not one the tabs under a schedule are held to.
+        assert!((sizes[1].x - sizes[0].x).abs() <= 0.5, "one width: {sizes:?}");
+        bench.dialog.show_tool(UtilityTool::Regrade);
+        bench.draw();
+        let regrade = shown_size(&bench);
+        assert!((regrade - sizes[0]).length() <= 0.5, "{regrade:?} {sizes:?}");
+    }
+
     #[test]
     fn every_control_has_its_object_name() {
         let executor = Executor::new();

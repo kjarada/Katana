@@ -62,7 +62,7 @@ mod viewshed_line {
     fn what_cannot_be_written_is_refused_naming_the_field() {
         let mut form = ViewshedForm::default();
         // No source: the one sentence every dialog reading a surface or a raster says it in.
-        assert!(message(&form).contains("There is no surface or raster"));
+        assert!(message(&form).contains("No surface or raster"));
         form.source = String::from("SURFACE ground");
         assert!(message(&form).contains("Observers"));
         form.observers = vec![String::from("1,2")];
@@ -209,7 +209,7 @@ mod viewshed_dialog {
         assert!(
             bench
                 .text("viewshedStatus")
-                .contains("There is no surface or raster")
+                .contains("No surface or raster")
         );
         assert!(bench.placeholder("viewshedCommand").is_empty());
     }

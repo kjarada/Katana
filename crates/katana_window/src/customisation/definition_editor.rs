@@ -302,10 +302,13 @@ fn cites_every(shown: &str, lines: &[String]) -> bool {
     !lines.is_empty() && lines.iter().all(|line| shown.contains(line.as_str()))
 }
 
-/// A choice over `items` by its row: true when a person or a driver chose another.
+/// A choice over `items` by its row: true when a person or a driver chose another. Its items are
+/// the format's own words ("world", "paper", "diameter") or words already in sentence case, so
+/// they are shown in sentence case (drive::controls::token_choice), the word still what is
+/// recorded and filled; an empty item is "None", muted.
 pub(crate) fn index_choice(ui: &mut Ui, name: &str, items: &[String], index: &mut usize) -> bool {
     let mut chosen = Choice::at(*index);
-    let changed = controls::choice(ui, name, items, &mut chosen).changed();
+    let changed = controls::token_choice(ui, name, items, &mut chosen).changed();
     if let Some(at) = chosen.index {
         *index = at;
     }

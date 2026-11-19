@@ -26,8 +26,10 @@ use crate::host::UserSettings;
 /// The settings' group the templates are kept in: the C++'s QSettings group.
 pub const TEMPLATE_GROUP: &str = "survey/templates";
 
-/// The first item of a list of templates: none chosen.
-pub const NO_TEMPLATE: &str = "(saved templates)";
+/// The first item of a list of templates: none chosen. Shown "No template", muted
+/// (drive::controls::empty_item_words), as every empty choice says it: "(saved templates)" was a
+/// bracketed word of its own (the fifth look audit).
+pub const NO_TEMPLATE: &str = "(no template)";
 
 fn key_of(name: &str) -> String {
     format!("{TEMPLATE_GROUP}/{name}")

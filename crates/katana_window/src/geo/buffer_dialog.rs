@@ -26,7 +26,8 @@ use super::gis_tool_dialog::{
     GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target, gis_number,
     gis_scope, gis_word,
 };
-use crate::drive::{Choice, choice};
+use crate::drive::Choice;
+use crate::drive::controls::token_choice;
 use crate::host::Host;
 use crate::shell::dialog;
 
@@ -159,10 +160,12 @@ impl Words {
         }
     }
 
-    /// The choice under `label`, named `name`, with `tip`.
+    /// The choice under `label`, named `name`, with `tip`. Its items are a verb's tokens, shown
+    /// in sentence case ("Both", "Round") as every other choice's values are, the token still
+    /// what is recorded and filled (drive::controls::token_choice).
     pub(crate) fn ui(&mut self, ui: &mut Ui, name: &str, label: &str, tip: &str) {
         dialog::labelled(ui, label, |ui| {
-            choice(ui, name, &self.items, &mut self.chosen).on_hover_text(tip);
+            token_choice(ui, name, &self.items, &mut self.chosen).on_hover_text(tip);
         });
     }
 }

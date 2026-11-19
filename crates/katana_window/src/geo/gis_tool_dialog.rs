@@ -449,6 +449,20 @@ pub trait GisTool {
     /// Draws the dialog's own fields, beside the scope.
     fn fields_ui(&mut self, ui: &mut Ui, host: &mut dyn Host);
 
+    /// Draws what the dialog shows under its scope, in the scope's column: nothing, unless a
+    /// dialog's fields beside a second scope leave its column too tall - Clip's and Overlay's
+    /// result options, which ran their column past a 1360 x 860 screen's height and were cut at
+    /// its fold (the fifth look audit) while the scope's column stood half empty.
+    fn under_scope_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        let _ = (ui, host);
+    }
+
+    /// Whether `under_scope_ui` draws anything: the place under the scope is laid out only then,
+    /// as an empty one still took a row's spacing under the scope of every other GIS dialog.
+    fn has_under_scope(&self) -> bool {
+        false
+    }
+
     /// What a reply says, in a sentence for <d>Status; a dialog may say more.
     fn summary(&self, reply: &str) -> String {
         gis_summary(reply)
@@ -658,10 +672,20 @@ fn body<T: GisTool + ?Sized>(tool: &mut T, ui: &mut Ui, host: &mut dyn Host) {
     ui.set_max_width(tool.frame().width);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0 * dialog::GROUP_GAP;
-        if let Some(scope) = tool.frame_mut().scope.as_mut() {
+        if tool.frame().scope.is_some() {
             ui.vertical(|ui| {
                 ui.set_max_width(SCOPE_WIDTH);
-                scope.ui(ui);
+                if let Some(scope) = tool.frame_mut().scope.as_mut() {
+                    scope.ui(ui);
+                }
+                // Spaced as the fields' column is.
+                if tool.has_under_scope() {
+                    ui.scope(|ui| {
+                        ui.spacing_mut().item_spacing.x = dialog::GROUP_GAP;
+                        ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
+                        tool.under_scope_ui(ui, host);
+                    });
+                }
             });
         }
         // The fields' column is a form of its own (dialog::form_panel): its rows share a label

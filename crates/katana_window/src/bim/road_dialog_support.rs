@@ -255,11 +255,23 @@ pub struct Combo {
     items: Vec<String>,
     data: Vec<String>,
     choice: Choice,
+    /// Its items are a verb's tokens ("both", "lane", "automatic"), shown in sentence case
+    /// (`of_tokens`); a box of names the drawing holds shows them as written.
+    tokens: bool,
 }
 
 impl Combo {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A box whose items are a verb's tokens, shown in sentence case as every other choice's
+    /// values are, the token still what is recorded and filled (drive::controls::token_choice).
+    pub fn of_tokens() -> Self {
+        Self {
+            tokens: true,
+            ..Self::default()
+        }
     }
 
     /// An editable box (QComboBox::setEditable(true)): a name it does not list may be typed.
@@ -370,7 +382,11 @@ impl Combo {
 
     /// Draws it as the choice `name` (F0's QComboBox): true when a person or a driver changed it.
     pub fn ui(&mut self, ui: &mut Ui, name: &str) -> bool {
-        choice(ui, name, &self.items, &mut self.choice).changed()
+        if self.tokens {
+            crate::drive::controls::token_choice(ui, name, &self.items, &mut self.choice).changed()
+        } else {
+            choice(ui, name, &self.items, &mut self.choice).changed()
+        }
     }
 }
 

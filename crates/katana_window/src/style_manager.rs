@@ -1116,7 +1116,9 @@ impl StyleManagerDialog {
     }
 
     fn fill_hatches(&mut self, document: &Document) {
-        let mut choices = vec![KeptChoice::new("(ByLayer)", "")];
+        // The layer's own hatch, said as the program says it everywhere else: ByLayer, without
+        // brackets (the fifth look audit).
+        let mut choices = vec![KeptChoice::new("ByLayer", "")];
         for name in document.model().hatch_patterns.names() {
             choices.push(KeptChoice::new(&name, &name));
         }

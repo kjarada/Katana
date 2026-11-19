@@ -61,7 +61,7 @@ mod contour_line {
             ..ContourForm::default()
         };
         // No source: the one sentence every dialog reading a surface or a raster says it in.
-        assert!(message(&form).contains("There is no surface or raster"));
+        assert!(message(&form).contains("No surface or raster"));
         form.source = String::from("SURFACE ground");
         for interval in ["", "0", "-1", "one"] {
             form.interval = String::from(interval);
@@ -174,7 +174,7 @@ mod contours_dialog {
         assert!(
             bench
                 .text("contourStatus")
-                .contains("There is no surface or raster")
+                .contains("No surface or raster")
         );
         assert!(bench.text("contourCommand").is_empty());
         assert!(bench.placeholder("contourCommand").is_empty());

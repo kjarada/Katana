@@ -1262,20 +1262,20 @@ impl UtilityToolsDialog {
                     .on_hover_text(
                         "Draw takes the lines, polylines and points a survey or an import left in \
                          the drawing and draws them as services; Report, Verify, Clearance and \
-                         Check read the services UTILITY DRAW drew, each line whole. Both by the \
-                         scope and filter below. Regrade and Schedule always read what is drawn",
+                         Check read the services UTILITY DRAW drew, each line whole, where a \
+                         scope that takes part of a line takes all of it. Both by the scope and \
+                         filter below. Regrade and Schedule always read what is drawn",
                     )
                     .clicked()
                     {
                         self.source = UtilitySource::Drawing;
                     }
                 });
-                note(
-                    ui,
-                    "in the scope and filter on the left: for Draw, the survey's or an import's \
-                     lines and points, drawn as services; for the others, the lines UTILITY DRAW \
-                     drew, where a scope that takes part of a line takes all of it",
-                );
+                // Where the scope is in either layout: under this section. What each tab reads of
+                // the drawing is the radio's tooltip; said here, the note wrapped to two lines
+                // beside the radio and named "the left", where the scope is not when it is unused
+                // (the fifth look audit).
+                note(ui, "chosen by the scope and filter below");
             });
         });
         controls::custom(
@@ -1284,17 +1284,34 @@ impl UtilityToolsDialog {
             ControlRecord::new("utilitySourceGroup", ControlKind::Other),
         );
 
-        // ---- the scope and filter beside the tabs that read them ----
-        ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-            ui.vertical(|ui| {
-                ui.set_max_width(SCOPE_WIDTH);
-                ui.add_enabled_ui(drawing, |ui| {
-                    self.scope.ui(ui);
+        // ---- the scope and filter, and the tabs that read them ----
+        // Every tab is the tallest tab's height (`tallest_tab`), so the dialog keeps one size as
+        // the tabs are turned: drawn as tall as the page in front, it was 353 high on Report and
+        // 771 on Regrade (the fifth look audit). A scope that applies stands at the left of the
+        // tabs; one that does not is its one line under "Services from", and the tabs have the
+        // body's width - beside them it left a column some 400 by 350 empty.
+        let tallest = self.tallest_tab(ui, &*host);
+        ui.vertical(|ui| {
+            ui.set_min_height(tallest);
+            if drawing {
+                ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(SCOPE_WIDTH);
+                        self.scope.ui(ui);
+                    });
+                    ui.vertical(|ui| {
+                        self.tools_ui(ui, &*host, tool, true);
+                    });
                 });
-            });
-            ui.vertical(|ui| {
-                self.tools_ui(ui, &*host, drawing);
-            });
+            } else {
+                ui.vertical(|ui| {
+                    ui.set_width(SCOPE_WIDTH);
+                    ui.add_enabled_ui(false, |ui| {
+                        self.scope.ui(ui);
+                    });
+                });
+                self.tools_ui(ui, &*host, tool, false);
+            }
         });
 
         // ---- the line, as it will run: read again, after what this frame's controls changed ----
@@ -1374,50 +1391,82 @@ impl UtilityToolsDialog {
         }
     }
 
-    /// The fields every grading tool shares, then the tabs and the page in front.
-    fn tools_ui(&mut self, ui: &mut Ui, host: &dyn Host, drawing: bool) {
-        let tool = self.tool;
-        // The detected spacing grades and the minimum cover flags what was graded; Draw, Report
-        // and Regrade grade. Shared by them, as the verb's SPACING and MINCOVER are, so a drawing
-        // and a report of one schedule are graded and flagged alike.
-        let grades = matches!(
-            tool,
-            UtilityTool::Draw | UtilityTool::Report | UtilityTool::Regrade
-        );
-        // The placeholders show the library's own defaults, read from its settings, so what they
-        // say cannot drift from what a blank option gets.
-        let grading = GradingSettings::default();
-        hold_label_column(ui);
-        ui.add_enabled_ui(grades, |ui| {
-            labelled(ui, "Detected spacing (m):", |ui| {
-                number_field(
+    /// The height under "Services from" of the tallest tab shown in the front tab's layout: a tab
+    /// that reads the drawing beside the scope in use (the taller of the two), one that reads a
+    /// schedule under the scope's one line. Every such tab is measured each frame in a sizing
+    /// pass (shell::dialog::measured_height), so the tallest is known whichever tab the dialog
+    /// opens on and whichever is in front. Only the tabs of the front's layout: with a schedule
+    /// chosen, Regrade and Schedule still read the drawing beside the scope, and their height
+    /// held under Report left some 400 points empty under its note.
+    fn tallest_tab(&mut self, ui: &mut Ui, host: &dyn Host) -> f32 {
+        let width = ui.available_width();
+        let beside = (width - SCOPE_WIDTH - ui.spacing().item_spacing.x).max(0.0);
+        let scope_in_use = self.scope.measure_in_use(ui, SCOPE_WIDTH, true);
+        // Under the section above it, the scope's line has a heading's gap over it.
+        let scope_unused = self.scope.measure_unused(ui, SCOPE_WIDTH)
+            + (crate::shell::dialog::SECTION_GAP - ui.spacing().item_spacing.y).max(0.0)
+            + ui.spacing().item_spacing.y;
+        let source = self.source;
+        let reads_drawing = |tool: UtilityTool| {
+            matches!(tool, UtilityTool::Regrade | UtilityTool::Schedule)
+                || source == UtilitySource::Drawing
+        };
+        let front = reads_drawing(self.tool);
+        let mut tallest: f32 = 0.0;
+        for at in 0..UTILITY_TOOL_COUNT {
+            let tool = UtilityTool::from_index(at);
+            let drawing = reads_drawing(tool);
+            if drawing != front {
+                continue;
+            }
+            let height = if drawing {
+                let page = crate::shell::dialog::measured_height(
                     ui,
-                    "utilitySpacing",
-                    &mut self.spacing,
-                    &format!("{} m", default_of(grading.maximum_detected_spacing)),
-                    "SPACING: the longest segment a detected path may span and stay QL-B; a longer \
-                     one was interpolated, not traced, and grades QL-C. The project \
-                     specification's figure, not the standard's",
+                    ("utilityTabBeside", at),
+                    beside,
+                    |ui| self.tools_ui(ui, host, tool, true),
                 );
-            });
-            labelled(ui, "Minimum cover (m):", |ui| {
-                number_field(
-                    ui,
-                    "utilityMinCover",
-                    &mut self.min_cover,
-                    "not tested",
-                    "MINCOVER: flag every vertex whose cover is less than this - in the report's \
-                     findings, and on each drawn point (utility.cover_below_minimum). Left blank, \
-                     cover is given, not tested",
-                );
-            });
-        });
+                page.max(scope_in_use)
+            } else {
+                scope_unused
+                    + crate::shell::dialog::measured_height(
+                        ui,
+                        ("utilityTabUnder", at),
+                        width,
+                        |ui| self.tools_ui(ui, host, tool, false),
+                    )
+            };
+            tallest = tallest.max(height);
+        }
+        tallest
+    }
 
+    /// The tabs, then for `tool`'s page the fields every grading tool shares and the page.
+    fn tools_ui(&mut self, ui: &mut Ui, host: &dyn Host, tool: UtilityTool, drawing: bool) {
+        hold_label_column(ui);
+        // The tabs head the column: under the shared fields they stood mid-dialog under two
+        // greyed rows on every tab that does not grade (the fifth look audit).
         let mut current = tool.index();
         if controls::tabs(ui, "utilityTabs", &TAB_TITLES, &mut current).changed() {
             self.tool = UtilityTool::from_index(current);
         }
-        match self.tool {
+        // The detected spacing grades and the minimum cover flags what was graded; Draw, Report
+        // and Regrade grade. Shared by them, as the verb's SPACING and MINCOVER are, so a drawing
+        // and a report of one schedule are graded and flagged alike. On a tab that does not grade
+        // they are withdrawn - recorded, refused as disabled, as when they were drawn greyed -
+        // and take no room.
+        let grades = matches!(
+            tool,
+            UtilityTool::Draw | UtilityTool::Report | UtilityTool::Regrade
+        );
+        if grades {
+            self.grading_fields(ui);
+        } else {
+            controls::withdrawn(ui, "utilityGrading", |ui| {
+                ui.add_enabled_ui(false, |ui| self.grading_fields(ui));
+            });
+        }
+        match tool {
             UtilityTool::Draw => self.draw_page(ui, drawing),
             UtilityTool::Report => note(
                 ui,
@@ -1501,6 +1550,35 @@ impl UtilityToolsDialog {
                 });
             }
         }
+    }
+
+    /// Detected spacing and Minimum cover, the fields every grading tool shares.
+    fn grading_fields(&mut self, ui: &mut Ui) {
+        // The placeholders show the library's own defaults, read from its settings, so what they
+        // say cannot drift from what a blank option gets.
+        let grading = GradingSettings::default();
+        labelled(ui, "Detected spacing (m):", |ui| {
+            number_field(
+                ui,
+                "utilitySpacing",
+                &mut self.spacing,
+                &format!("{} m", default_of(grading.maximum_detected_spacing)),
+                "SPACING: the longest segment a detected path may span and stay QL-B; a longer \
+                 one was interpolated, not traced, and grades QL-C. The project \
+                 specification's figure, not the standard's",
+            );
+        });
+        labelled(ui, "Minimum cover (m):", |ui| {
+            number_field(
+                ui,
+                "utilityMinCover",
+                &mut self.min_cover,
+                "not tested",
+                "MINCOVER: flag every vertex whose cover is less than this - in the report's \
+                 findings, and on each drawn point (utility.cover_below_minimum). Left blank, \
+                 cover is given, not tested",
+            );
+        });
     }
 
     fn draw_page(&mut self, ui: &mut Ui, drawing: bool) {

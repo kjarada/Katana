@@ -580,10 +580,23 @@ impl SurveyCodeManagerDialog {
             ]);
             tabs.issue_rules.push(issue.rule);
         }
-        tabs.issues_summary = format!(
-            "{errors} errors and {warnings} warnings in the {} rules being edited.",
-            self.buffer.size()
-        );
+        // With none, the table's own empty state says so: "0 errors and 0 warnings" under "No
+        // issues" said it twice (the fifth look audit).
+        tabs.issues_summary = if errors == 0 && warnings == 0 {
+            format!(
+                "Checked {}.",
+                katana_cad::tools::everyday_support::counted(
+                    self.buffer.size(),
+                    "rule being edited",
+                    "rules being edited"
+                )
+            )
+        } else {
+            format!(
+                "{errors} errors and {warnings} warnings in the {} rules being edited.",
+                self.buffer.size()
+            )
+        };
         tabs.issues_title = if self.issues.is_empty() {
             String::from("Issues")
         } else {

@@ -168,14 +168,18 @@ impl SurveyParcelDialog {
         // into the form, then Copy and Save CSV..., which act on the courses (they stood under
         // the table in the body); at the right Label Courses - a second verb, which changes the
         // drawing - Close, and Compute last in the accent.
+        // Copy and Save CSV... act on the courses Compute made: greyed before it, where they
+        // stood lit (the fifth look audit). Label Courses stays lit: it labels the parcel named
+        // by its own line (PARCEL <id> LABEL), Compute or not.
+        let computed = self.report.is_some();
         let pressed = self.tool.show(
             ui,
             &mut self.form,
             Self::draw_form,
             &[
                 ToolButton::new("useSelection", "Use Selection"),
-                ToolButton::new("parcelCopy", "Copy"),
-                ToolButton::new("parcelCsv", "Save CSV..."),
+                ToolButton::new("parcelCopy", "Copy").enabled(computed),
+                ToolButton::new("parcelCsv", "Save CSV...").enabled(computed),
             ],
             &[
                 ToolButton::new("compute", "Compute"),

@@ -1456,15 +1456,23 @@ impl VolumesDialog {
             });
     }
 
+    /// The results' tools. Each greys with nothing to act on - Copy with no table, Save CSV...
+    /// while the fields write no line, the two surfaces' makers with no two surfaces - where they
+    /// stood lit under an empty table (the fifth look audit); a line they can make but the verb
+    /// refuses still says why when pressed.
     fn file_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
+        let has_table = !self.table.rows.is_empty();
+        let measures = self.line().is_ok();
         dialog::labelled(ui, "Results:", |ui| {
             let width = dialog::beside_buttons(ui, &["Copy", "Browse...", "Save CSV..."]);
-            if button(ui, "volumesCopy", "Copy")
-                .on_hover_text("The table on the clipboard, tab-separated with its header")
-                .clicked()
-            {
-                *asked = Some(Asked::Copy);
-            }
+            ui.add_enabled_ui(has_table, |ui| {
+                if button(ui, "volumesCopy", "Copy")
+                    .on_hover_text("The table on the clipboard, tab-separated with its header")
+                    .clicked()
+                {
+                    *asked = Some(Asked::Copy);
+                }
+            });
             line_with(
                 ui,
                 "volumesCsvPath",
@@ -1480,20 +1488,23 @@ impl VolumesDialog {
                 *asked = Some(Asked::Browse);
             }
             // "Save CSV...", as every dialog's is: with no file named it asks for one.
-            if button(ui, "volumesSaveCsv", "Save CSV...")
-                .on_hover_text(
-                    "The line run again with csv= the file: the quantities as a table, with the \
-                     method and its inputs on every row. Nothing is written when nothing is \
-                     measured.",
-                )
-                .clicked()
-            {
-                *asked = Some(Asked::SaveCsv);
-            }
+            ui.add_enabled_ui(measures, |ui| {
+                if button(ui, "volumesSaveCsv", "Save CSV...")
+                    .on_hover_text(
+                        "The line run again with csv= the file: the quantities as a table, with \
+                         the method and its inputs on every row. Nothing is written when nothing \
+                         is measured.",
+                    )
+                    .clicked()
+                {
+                    *asked = Some(Asked::SaveCsv);
+                }
+            });
         });
     }
 
     fn map_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
+        let two_surfaces = self.surface_pair().is_ok();
         dialog::labelled(ui, "Map name:", |ui| {
             // The field leaves the button and its icon their room.
             let width = dialog::beside_a_button(ui, "Make Cut/Fill Map")
@@ -1513,19 +1524,22 @@ impl VolumesDialog {
             // The button's icon, painted beside it: the drive's buttons carry text only.
             let (icon, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
             show_icon(ui.painter(), icon, "CutFillMap", IconMode::Normal);
-            if button(ui, "volumesCutFillMap", "Make Cut/Fill Map")
-                .on_hover_text(
-                    "The top minus the base as a new surface in the Cut Fill style: SURFACE \
-                     DIFFERENCE",
-                )
-                .clicked()
-            {
-                *asked = Some(Asked::CutFillMap);
-            }
+            ui.add_enabled_ui(two_surfaces, |ui| {
+                if button(ui, "volumesCutFillMap", "Make Cut/Fill Map")
+                    .on_hover_text(
+                        "The top minus the base as a new surface in the Cut Fill style: SURFACE \
+                         DIFFERENCE",
+                    )
+                    .clicked()
+                {
+                    *asked = Some(Asked::CutFillMap);
+                }
+            });
         });
     }
 
     fn envelope_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
+        let two_surfaces = self.surface_pair().is_ok();
         dialog::labelled(ui, "Envelope:", |ui| {
             ui.spacing_mut().combo_width = ENVELOPE_SIDE_WIDTH;
             self.envelope_side
@@ -1546,15 +1560,18 @@ impl VolumesDialog {
                 },
             )
             .on_hover_text("The envelope's name; blank for base-top-max or base-top-min");
-            if button(ui, "volumesEnvelope", "Make Envelope")
-                .on_hover_text(
-                    "The higher or lower of the base and the top as a new surface in the \
-                     drawing's default style (real levels, not a difference): SURFACE ENVELOPE",
-                )
-                .clicked()
-            {
-                *asked = Some(Asked::Envelope);
-            }
+            ui.add_enabled_ui(two_surfaces, |ui| {
+                if button(ui, "volumesEnvelope", "Make Envelope")
+                    .on_hover_text(
+                        "The higher or lower of the base and the top as a new surface in the \
+                         drawing's default style (real levels, not a difference): SURFACE \
+                         ENVELOPE",
+                    )
+                    .clicked()
+                {
+                    *asked = Some(Asked::Envelope);
+                }
+            });
         });
     }
 }

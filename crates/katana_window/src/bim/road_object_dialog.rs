@@ -514,12 +514,27 @@ pub fn paint_object_preview(
 /// text size, whose fields and source note it holds.
 const PAGE_WIDTH: f32 = 600.0;
 
-/// The preview's size, in points: an elevation of the kind, under its page beside the source.
-const PREVIEW_SIZE: (f32, f32) = (220.0, 160.0);
+/// The preview's size, in points: an elevation of the kind, under its page beside the source. 130
+/// high, where it was 160, so the kind's column - Culvert's thirteen rows, the preview, the
+/// heights and the name - stands whole beside the placement under a 1360 x 860 screen with the
+/// line Add runs shown under the footer's buttons.
+const PREVIEW_SIZE: (f32, f32) = (220.0, 130.0);
 
-/// The width the body is laid out at: a page's, every field of the dialog ending at its one right
-/// edge; the kind's source and the preview share the row under the page.
-const BODY_WIDTH: f32 = PAGE_WIDTH;
+/// The width of the placement's column, at the right of the kind's: the scope's own
+/// (scope_filter_widget::WIDGET_WIDTH), which it keeps in a column of a row, so its fields end
+/// where the placement's do.
+const PLACEMENT_WIDTH: f32 = crate::customisation::scope_filter_widget::WIDGET_WIDTH;
+
+/// The gap between the kind's column and the placement's: two group gaps, as between a GIS
+/// dialog's scope and its fields.
+const COLUMN_GAP: f32 = 2.0 * dialog::GROUP_GAP;
+
+/// The width the body is laid out at: the kind's column - its tabs, page, source and preview, its
+/// heights and its name - and the placement's beside it. In one column, under the page, the
+/// placement and its scope ran the dialog past a 1360 x 860 screen's height and its body scrolled,
+/// cutting the Heights and Object rows at its fold (632 x 844 on Safety barrier, 626 x 781 on
+/// Guide posts; the fifth look audit).
+const BODY_WIDTH: f32 = PAGE_WIDTH + COLUMN_GAP + PLACEMENT_WIDTH;
 
 /// One page's parameter field: a text field, or a choice whose first item is the default (no
 /// data) and the rest the kind's words.
@@ -804,9 +819,8 @@ impl Body {
 
     // ---- drawing --------------------------------------------------------------------------------
 
-    fn page_ui(&mut self, ui: &mut Ui) -> bool {
+    fn page_ui(&mut self, ui: &mut Ui, index: usize) -> bool {
         let mut changed = false;
-        let index = self.kind_index;
         let Some(page) = self.pages.get_mut(index) else {
             return false;
         };
@@ -849,10 +863,32 @@ impl Body {
 
     fn body_ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
-        // ---- the pages and the preview ----
-        // The page is the body's width, so its fields end where the placement's do: beside the
-        // preview they ended 236 points short of every field under them (612 against 848). The
-        // kind's source and the preview share the row under the page.
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let kind = ui.vertical(|ui| {
+                ui.set_width(PAGE_WIDTH);
+                ui.spacing_mut().item_spacing.x = dialog::GROUP_GAP;
+                self.kind_column(ui)
+            });
+            changed |= kind.inner;
+            ui.add_space(COLUMN_GAP);
+            let placed = ui.vertical(|ui| {
+                ui.set_width(PLACEMENT_WIDTH);
+                ui.spacing_mut().item_spacing.x = dialog::GROUP_GAP;
+                self.placement_column(ui)
+            });
+            changed |= placed.inner;
+        });
+        changed
+    }
+
+    /// The kind's column: its tabs, the page in front - as tall as the tallest kind's, so the
+    /// dialog keeps one size as the kinds are turned - the kind's source beside its preview, and
+    /// what it stands on and what it is called. True when a field was edited.
+    fn kind_column(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
+        // The page is the column's width, so its fields end where the heights' and the name's
+        // do; the kind's source and the preview share the row under the page.
         let titles: Vec<&str> = road_object_kinds()
             .iter()
             .map(|&kind| kind_title(kind))
@@ -860,7 +896,22 @@ impl Body {
         if tabs(ui, "roadObjectKinds", &titles, &mut self.kind_index).changed() {
             changed = true;
         }
-        if self.page_ui(ui) {
+        // Every kind's page measured each frame (dialog::measured_height), so the tallest is
+        // known whichever kind is in front: drawn as tall as its own, the page moved everything
+        // under it as the kinds were turned (Sign's ten rows, Guide posts' five).
+        let mut tallest: f32 = 0.0;
+        for index in 0..self.pages.len() {
+            let height = dialog::measured_height(ui, ("roadObjectPage", index), PAGE_WIDTH, |ui| {
+                self.page_ui(ui, index);
+            });
+            tallest = tallest.max(height);
+        }
+        let index = self.kind_index;
+        let page = ui.vertical(|ui| {
+            ui.set_min_height(tallest);
+            self.page_ui(ui, index)
+        });
+        if page.inner {
             changed = true;
         }
         ui.add_space(dialog::GROUP_GAP);
@@ -894,157 +945,8 @@ impl Body {
                 },
             );
         });
-
-        // ---- where it goes ----
-        // A section under a heading, as the dialog's other parts are, rather than a box: each
-        // way of placing is its radio button in the label column with its fields beside it.
-        let placement = ui.vertical(|ui| {
-            dialog::section(ui, "Placement");
-            // A radio button is its row's label, and the row's two closures are drawn together:
-            // what it chose is said as `picked`, the change counted once both are drawn.
-            let mut picked = false;
-            dialog::row_with_check(
-                ui,
-                "Along an alignment",
-                |ui| {
-                    if radio(
-                        ui,
-                        "roadObjectPlaceAlignment",
-                        "Along an &alignment",
-                        self.place == Place::Alignment,
-                    )
-                    .clicked()
-                        && self.place != Place::Alignment
-                    {
-                        self.place = Place::Alignment;
-                        picked = true;
-                    }
-                },
-                |ui| {
-                    ui.add_enabled_ui(self.enabled.alignment, |ui| {
-                        if self.alignment.ui(ui, "roadObjectAlignment") {
-                            changed = true;
-                        }
-                    });
-                },
-            );
-            // The stations and offsets are the alignment's, so they sit in under it; a row each,
-            // so every field starts at the form's edge. Each a number's short well
-            // (`enabled_number`), what it is in the tooltip rather than a placeholder that sized it.
-            ui.indent("roadObjectAlongAlignment", |ui| {
-                for (label_text, enabled, name, value, placeholder) in [
-                    (
-                        "Station",
-                        self.enabled.station,
-                        "roadObjectStation",
-                        &mut self.station,
-                        "chainage",
-                    ),
-                    (
-                        "To",
-                        self.enabled.to,
-                        "roadObjectTo",
-                        &mut self.to,
-                        "end chainage",
-                    ),
-                    (
-                        "Offset",
-                        self.enabled.offset,
-                        "roadObjectOffset",
-                        &mut self.offset,
-                        "0",
-                    ),
-                    (
-                        "Spacing",
-                        self.enabled.spacing,
-                        "roadObjectSpacing",
-                        &mut self.spacing,
-                        "metres",
-                    ),
-                ] {
-                    dialog::labelled(ui, label_text, |ui| {
-                        let tip = match name {
-                            "roadObjectStation" => "Where along the alignment it goes",
-                            "roadObjectTo" => "Where a run along the alignment ends",
-                            "roadObjectOffset" => {
-                                "Metres from the centreline: left of it positive, right negative"
-                            }
-                            _ => "One every so many metres between Station and To",
-                        };
-                        changed |= enabled_number(ui, enabled, name, value, placeholder, tip);
-                    });
-                }
-            });
-            dialog::row_with_check(
-                ui,
-                "At points typed",
-                |ui| {
-                    if radio(
-                        ui,
-                        "roadObjectPlacePoints",
-                        "At points &typed",
-                        self.place == Place::Points,
-                    )
-                    .clicked()
-                        && self.place != Place::Points
-                    {
-                        self.place = Place::Points;
-                        picked = true;
-                    }
-                },
-                |ui| {
-                    changed |= enabled_field(
-                        ui,
-                        self.enabled.points,
-                        "roadObjectPoints",
-                        &mut self.points,
-                        "x,y[,z] x,y[,z] ...",
-                    );
-                },
-            );
-            ui.horizontal(|ui| {
-                if radio(
-                    ui,
-                    "roadObjectPlaceLines",
-                    "Along &lines in the drawing",
-                    self.place == Place::Lines,
-                )
-                .clicked()
-                    && self.place != Place::Lines
-                {
-                    self.place = Place::Lines;
-                    changed = true;
-                }
-                // Not "&drawing": Add is A&dd, and two widgets with one mnemonic make the key go
-                // to neither - it cycles between them.
-                if radio(
-                    ui,
-                    "roadObjectPlaceDrawnPoints",
-                    "At points in the dra&wing",
-                    self.place == Place::DrawnPoints,
-                )
-                .clicked()
-                    && self.place != Place::DrawnPoints
-                {
-                    self.place = Place::DrawnPoints;
-                    changed = true;
-                }
-            });
-            changed |= picked;
-            ui.add_enabled_ui(self.enabled.scope, |ui| {
-                if self.scope.ui(ui) {
-                    changed = true;
-                }
-            });
-        });
-        custom(
-            ui,
-            &placement.response,
-            ControlRecord::new("roadObjectPlacement", ControlKind::Other),
-        );
-
         // ---- what it stands on, and what it is called ----
-        // Two columns of the body's width, parted by a gap: the row's own GROUP_GAP and one more.
+        // Two columns of the kind's column, parted by a gap: the row's own GROUP_GAP and one more.
         ui.horizontal_top(|ui| {
             let column = ((ui.available_width() - 2.0 * dialog::GROUP_GAP) / 2.0).max(0.0);
             let heights = ui.vertical(|ui| {
@@ -1133,6 +1035,173 @@ impl Body {
                 ControlRecord::new("roadObjectCommon", ControlKind::Other),
             );
         });
+        changed
+    }
+
+    /// The placement's column: how the objects are placed, and the scope of what in the drawing
+    /// they are placed on. True when a field was edited.
+    fn placement_column(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
+        // ---- where it goes ----
+        // A section under a heading, as the dialog's other parts are, rather than a box: each
+        // way of placing is its radio button in the label column with its fields beside it.
+        let placement = ui.vertical(|ui| {
+            dialog::section(ui, "Placement");
+            // A radio button is its row's label, and the row's two closures are drawn together:
+            // what it chose is said as `picked`, the change counted once both are drawn.
+            let mut picked = false;
+            dialog::row_with_check(
+                ui,
+                "Along an alignment",
+                |ui| {
+                    if radio(
+                        ui,
+                        "roadObjectPlaceAlignment",
+                        "Along an &alignment",
+                        self.place == Place::Alignment,
+                    )
+                    .clicked()
+                        && self.place != Place::Alignment
+                    {
+                        self.place = Place::Alignment;
+                        picked = true;
+                    }
+                },
+                |ui| {
+                    ui.add_enabled_ui(self.enabled.alignment, |ui| {
+                        if self.alignment.ui(ui, "roadObjectAlignment") {
+                            changed = true;
+                        }
+                    });
+                },
+            );
+            // The stations and offsets are the alignment's, so they sit in under it, each a
+            // number's short well (`enabled_number`), what it is in the tooltip rather than a
+            // placeholder that sized it. In two pairs side by side, each pair a form of its own
+            // (Station and To, Offset and Spacing): a row each, the four made the placement's
+            // column too tall to stand beside the kind's with its scope in use.
+            ui.indent("roadObjectAlongAlignment", |ui| {
+                ui.columns(2, |columns| {
+                    let [first, second] = columns else {
+                        return;
+                    };
+                    let rows = [
+                        (
+                            "Station",
+                            self.enabled.station,
+                            "roadObjectStation",
+                            &mut self.station,
+                            "chainage",
+                            "Where along the alignment it goes",
+                        ),
+                        (
+                            "To",
+                            self.enabled.to,
+                            "roadObjectTo",
+                            &mut self.to,
+                            "end chainage",
+                            "Where a run along the alignment ends",
+                        ),
+                        (
+                            "Offset",
+                            self.enabled.offset,
+                            "roadObjectOffset",
+                            &mut self.offset,
+                            "0",
+                            "Metres from the centreline: left of it positive, right negative",
+                        ),
+                        (
+                            "Spacing",
+                            self.enabled.spacing,
+                            "roadObjectSpacing",
+                            &mut self.spacing,
+                            "metres",
+                            "One every so many metres between Station and To",
+                        ),
+                    ];
+                    // Each pair a form of its own (dialog::form_panel), its labels measured in it:
+                    // sharing the column of "Along an alignment" above, the first pair's wells
+                    // were left 56 wide and cut "chainage" to "chai...".
+                    let [station, to, offset, spacing] = rows;
+                    for (column, pair) in [(first, [station, offset]), (second, [to, spacing])] {
+                        dialog::form_panel(column, |ui| {
+                            for (label_text, enabled, name, value, placeholder, tip) in pair {
+                                dialog::labelled(ui, label_text, |ui| {
+                                    changed |=
+                                        enabled_number(ui, enabled, name, value, placeholder, tip);
+                                });
+                            }
+                        });
+                    }
+                });
+            });
+            dialog::row_with_check(
+                ui,
+                "At points typed",
+                |ui| {
+                    if radio(
+                        ui,
+                        "roadObjectPlacePoints",
+                        "At points &typed",
+                        self.place == Place::Points,
+                    )
+                    .clicked()
+                        && self.place != Place::Points
+                    {
+                        self.place = Place::Points;
+                        picked = true;
+                    }
+                },
+                |ui| {
+                    changed |= enabled_field(
+                        ui,
+                        self.enabled.points,
+                        "roadObjectPoints",
+                        &mut self.points,
+                        "x,y[,z] x,y[,z] ...",
+                    );
+                },
+            );
+            ui.horizontal(|ui| {
+                if radio(
+                    ui,
+                    "roadObjectPlaceLines",
+                    "Along &lines in the drawing",
+                    self.place == Place::Lines,
+                )
+                .clicked()
+                    && self.place != Place::Lines
+                {
+                    self.place = Place::Lines;
+                    changed = true;
+                }
+                // Not "&drawing": Add is A&dd, and two widgets with one mnemonic make the key go
+                // to neither - it cycles between them.
+                if radio(
+                    ui,
+                    "roadObjectPlaceDrawnPoints",
+                    "At points in the dra&wing",
+                    self.place == Place::DrawnPoints,
+                )
+                .clicked()
+                    && self.place != Place::DrawnPoints
+                {
+                    self.place = Place::DrawnPoints;
+                    changed = true;
+                }
+            });
+            changed |= picked;
+            ui.add_enabled_ui(self.enabled.scope, |ui| {
+                if self.scope.ui(ui) {
+                    changed = true;
+                }
+            });
+        });
+        custom(
+            ui,
+            &placement.response,
+            ControlRecord::new("roadObjectPlacement", ControlKind::Other),
+        );
         changed
     }
 
@@ -1266,8 +1335,10 @@ impl RoadObjectDialog {
                     }
                     combo
                 });
+                // No default: the empty value said as every empty value is ("None", where a lower
+                // "none" read as a value typed; the fifth look audit).
                 let placeholder = if spec.default_text.is_empty() {
-                    String::from("none")
+                    String::from(crate::drive::controls::NO_CHOICE)
                 } else {
                     format!("default: {}", spec.default_text)
                 };
@@ -1284,7 +1355,7 @@ impl RoadObjectDialog {
             }
             pages.push(fields);
         }
-        let mut heights = Combo::new();
+        let mut heights = Combo::of_tokens();
         heights.add_item_with_data("automatic", "");
         for word in ["profile", "surface", "line"] {
             heights.add_item_with_data(word, word);

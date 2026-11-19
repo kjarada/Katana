@@ -32,6 +32,7 @@ use super::terrain_dialog_parts::{Framed, field, host_views, invalid, row, show_
 use crate::customisation::{DocumentWatcher, ScopeChoice, ScopeFilterWidget};
 use crate::drive::controls::{custom, number_line};
 use crate::drive::registry::{ControlKind, ControlRecord};
+use crate::drive::controls::token_choice;
 use crate::drive::{Choice, check, choice};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
@@ -372,7 +373,8 @@ impl GridDemDialog {
     fn options(&mut self, ui: &mut Ui) {
         dialog::section(ui, "Grid");
         let method_changed = row(ui, "Method:", |ui| {
-            choice(ui, "gridMethod", &self.methods, &mut self.method)
+            // GDAL's method names are the verb's tokens, shown in sentence case (token_choice).
+            token_choice(ui, "gridMethod", &self.methods, &mut self.method)
                 .on_hover_text(
                     "GDAL's gridding method (method=): linear interpolates over a triangulation \
                      of the points and reproduces a plane exactly; invdist and invdistnn weight \

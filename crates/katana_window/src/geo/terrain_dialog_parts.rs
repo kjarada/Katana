@@ -24,8 +24,10 @@ use crate::shell::{DialogFrame, dialog};
 /// every such dialog, where three said it three ways ("there is no surface; make one first
 /// (Terrain > Surface From)", "the drawing has no surface yet; make one with ...", "there is no
 /// surface to export; build one from the Terrain menu"). No field's name before it: the
-/// condition is the drawing's, not a field's.
-pub(crate) const NO_SURFACE: &str = "There is no surface: make one with Terrain > Surface From";
+/// condition is the drawing's, not a field's. Short enough for one line beside the buttons of a
+/// dialog 546 wide: "There is no surface: make one with Terrain > Surface From" was cut there at
+/// "Terrain > S..." (the fifth look audit), and the menu item is what the sentence must carry.
+pub(crate) const NO_SURFACE: &str = "No surface: Terrain > Surface From";
 
 /// What a choice of the drawing's surfaces says while the drawing has none
 /// (drive::controls::choice_with_hint), muted in the control: the Surface Edit toolbar's, the
@@ -38,9 +40,9 @@ pub(crate) const NO_SOURCE_HINT: &str = "No surface or raster";
 
 /// Why a dialog that reads a surface or a raster writes no line while the drawing has neither,
 /// in the same words in each (Contours, Drape and Sample, Slope, Shading, Viewshed, Statistics
-/// by Area), where each said it with its own verb.
-pub(crate) const NO_SURFACE_OR_RASTER: &str =
-    "There is no surface or raster: make a surface with Terrain > Surface From, or import a DEM";
+/// by Area), where each said it with its own verb. As short as NO_SURFACE, for the same reason;
+/// importing a DEM, the other way to a raster, is in the source choice's tooltip.
+pub(crate) const NO_SURFACE_OR_RASTER: &str = "No surface or raster: Terrain > Surface From";
 
 /// InvalidArgument saying `message`: why a dialog's fields write no line.
 pub(crate) fn invalid(message: impl Into<String>) -> Error {

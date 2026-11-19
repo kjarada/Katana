@@ -61,7 +61,7 @@ mod slope_line {
     fn what_cannot_be_written_is_refused_naming_the_field() {
         let mut form = SlopeForm::default();
         // No source: the one sentence every dialog reading a surface or a raster says it in.
-        assert!(message(&form).contains("There is no surface or raster"));
+        assert!(message(&form).contains("No surface or raster"));
         form.source = String::from("SURFACE ground");
         form.classes = String::from("five");
         assert!(message(&form).contains("Classes"));
@@ -150,7 +150,7 @@ mod slope_analysis_dialog {
         assert!(
             bench
                 .text("slopeStatus")
-                .contains("There is no surface or raster")
+                .contains("No surface or raster")
         );
         assert!(bench.text("slopeCommand").is_empty());
         assert!(bench.placeholder("slopeCommand").is_empty());

@@ -33,6 +33,7 @@ use katana_core::{Error, ErrorCode, Result};
 use katana_interop::export::vector_export_formats;
 
 use crate::customisation::ScopeChoice;
+use crate::drive::controls::token_choice;
 use crate::drive::{Choice, choice};
 use crate::geo::gis_tool_dialog::{
     GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_file_field,
@@ -387,7 +388,8 @@ impl GisTool for VectorExportDialog {
                  already is refused",
             );
             dialog::labelled(ui, "Coordinates:", |ui| {
-                choice(ui, "vectorExportCrs", &self.crs_items, &mut self.crs).on_hover_text(
+                // "project" and "native" are the verb's tokens, shown in sentence case.
+                token_choice(ui, "vectorExportCrs", &self.crs_items, &mut self.crs).on_hover_text(
                     "project: the project's coordinate system (a GeoJSON in longitude and \
                      latitude, as RFC 7946 says); native: the project's where the format allows \
                      it; a code: the coordinates moved into it (crs=)",

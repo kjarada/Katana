@@ -1123,7 +1123,7 @@ impl PointCloudImportDialog {
                 grouped(self.point_count)
             )
         } else {
-            format!("Every point - {}.", grouped(self.point_count))
+            format!("Every point: {}.", grouped(self.point_count))
         };
         // A class filter thins after the step, and how much depends on the file: say so rather
         // than print a number that is only an upper bound.
@@ -1231,7 +1231,17 @@ impl PointCloudImportDialog {
                 );
             });
         });
-        ui.label(RichText::new(self.estimate()).color(palette::text_muted().to_egui()));
+        // What the choices will read, as a row of the form: a muted line at the body's left
+        // edge, under the fields' column, read as a stray sentence (the fifth look audit).
+        let estimate = self.estimate();
+        crate::shell::dialog::labelled(ui, "Reads", |ui| {
+            crate::shell::dialog::text_value(ui, |ui| {
+                ui.add(
+                    egui::Label::new(RichText::new(estimate).color(palette::text_muted().to_egui()))
+                        .wrap(),
+                );
+            });
+        });
         command.ui(ui, "pointCloudImportCommand");
     }
 }

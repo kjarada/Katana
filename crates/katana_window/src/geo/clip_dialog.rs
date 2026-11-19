@@ -25,6 +25,7 @@ use super::gis_tool_dialog::{
     gis_layer_target, gis_scope, gis_word,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
+use crate::drive::controls::withdrawn;
 use crate::drive::radio;
 use crate::host::Host;
 use crate::ifc_dialogs::{get_open_file_name, to_native_separators};
@@ -209,8 +210,11 @@ impl GisTool for GisClipDialog {
         crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, !file, |ui| {
             self.by.ui(ui);
         });
+        // The file's rows only while a file is the boundary; with the drawing's areas they are
+        // withdrawn - recorded, and refused as disabled as when they were greyed - and take no
+        // room: three greyed rows under the boundary's scope ran the column past the screen.
         let mut browse = false;
-        ui.add_enabled_ui(file, |ui| {
+        let mut rows = |ui: &mut Ui| {
             browse = gis_file_field(
                 ui,
                 ("gisClipByFile", "gisClipByFileBrowse"),
@@ -235,7 +239,26 @@ impl GisTool for GisClipDialog {
                 "e.g. kind='site'",
                 "where=: an SQL WHERE clause on the file's fields",
             );
-        });
+        };
+        if file {
+            rows(ui);
+        } else {
+            withdrawn(ui, "gisClipByFileRows", |ui| {
+                ui.add_enabled_ui(false, |ui| rows(ui));
+            });
+        }
+        if browse {
+            self.browse(&*host);
+        }
+    }
+
+    /// What is made of the cut, under the scope of what is cut.
+    fn has_under_scope(&self) -> bool {
+        true
+    }
+
+    fn under_scope_ui(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+        dialog::section(ui, "Result");
         gis_check(
             ui,
             "gisClipReplace",
@@ -257,8 +280,5 @@ impl GisTool for GisClipDialog {
                 "TO LAYER: the layer the pieces are drawn on, the entities left whole",
             );
         });
-        if browse {
-            self.browse(&*host);
-        }
     }
 }
