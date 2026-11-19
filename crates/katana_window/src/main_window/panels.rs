@@ -2520,11 +2520,13 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
                 ui.spacing_mut().text_edit_width = ui.available_width();
                 command_log_box(ui, &mut log)
             });
-        // At its end, the log starts at a whole logical line: a line wrapped over the log's top
-        // showed its last words alone ("in."), and at Extra Large a pixel or two of the row above
-        // the first whole one - its descenders - showed over it (the third look audit's J). What
-        // is above the first row that starts a line is covered with the log's own ground. Only at
-        // the end: scrolled back, a person reads a long line part by part.
+        // At its end, the log starts at a whole row: at Extra Large a pixel or two of the row cut
+        // by the log's top - its descenders - showed over the first whole one (the third look
+        // audit's J), so what is above the first whole row is covered with the log's own ground.
+        // A row is a row whether or not it starts a line: covering down to the first row that
+        // starts one left the top row blank where a wrapped line's last row was (the seventh look
+        // audit), which the third audit's "in." alone had led to. Only at the end: scrolled back,
+        // a person reads a long line part by part.
         let (galley, galley_pos) = &shown.inner;
         let at_end = shown.state.offset.y + 1.0
             >= shown.content_size.y - shown.inner_rect.height();
@@ -2643,17 +2645,15 @@ fn command_log_box(ui: &mut Ui, log: &mut String) -> (std::sync::Arc<egui::Galle
     // What a person reads: each error's sentence, its code (InvalidState:, NotFound:) left in
     // the log's record - what --report, the drivers and the tests read - and in what a line hands
     // back, as the status bar shows it (command_log::without_error_code). The log printed the
-    // enum's names, "ParseFailure: ..." (the fourth look audit).
+    // enum's names, "ParseFailure: ..." (the fourth look audit). An error is in the error colour
+    // and a warning ("Warning: ...") in the warning colour (command_log::log_line_colour): a
+    // warning in the body's white read as a reply (the seventh look audit).
     let mut shown = shown_log(log);
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
         let mut job = egui::text::LayoutJob::default();
         for line in text.as_str().split_inclusive('\n') {
-            let colour = if line.starts_with("! ") {
-                palette::error()
-            } else {
-                palette::text()
-            };
+            let colour = crate::command_log::log_line_colour(line);
             job.append(
                 line,
                 0.0,
@@ -2690,8 +2690,9 @@ fn command_log_box(ui: &mut Ui, log: &mut String) -> (std::sync::Arc<egui::Galle
 }
 
 /// How far down from the log's top (`view_top`) its own ground is painted over what is drawn
-/// there, the log's galley drawn at `at`: to the top of the INK of its first whole line
-/// (`first_whole_line_top`), on a whole pixel above it - None when there is nothing to cover.
+/// there, the log's galley drawn at `at`: to the top of the INK of its first whole row, a line's
+/// first or a wrapped line's later one, on a whole pixel above it - None when there is nothing to
+/// cover.
 ///
 /// To the ink, not the row's top: a glyph's descender may reach below its row, and at Extra Large
 /// the row above the first whole one - wholly above the view but for its descenders - showed a
@@ -2702,9 +2703,6 @@ pub fn log_cover_bottom(galley: &egui::Galley, at: Pos2, view_top: f32) -> Optio
     let row = galley
         .rows
         .iter()
-        .enumerate()
-        .filter(|(index, _)| *index == 0 || galley.rows[index - 1].ends_with_newline)
-        .map(|(_, row)| row)
         .find(|row| at.y + row.pos.y >= view_top - 0.5)?;
     let top = at.y + row.pos.y;
     let ink = row.visuals.mesh_bounds;

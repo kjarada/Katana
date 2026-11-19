@@ -302,7 +302,7 @@ add; Rust never does unasked.
 kernel module opts out of the workspace's `unsafe_code` denial. Since Rust
 1.86 a `#[target_feature]` function may be safe and is a safe call from one
 with the same features (implied ones counting: AVX2 implies AVX, SSE4.2 ...
-SSE2), and since 1.87 every `core::arch` intrinsic that takes no pointer is a
+SSE2), and since 1.87 every intrinsic of the standard library's arch module that takes no pointer is a
 safe call inside such a function; both checked against the sources (rustc's
 unsafety check of a call into a target-feature function, and stdarch's
 declarations, where only the loads and stores - `_mm256_loadu_pd`,

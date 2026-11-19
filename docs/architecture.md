@@ -247,9 +247,11 @@ the hand-written SIMD kernels removed in favour of their scalar twins
 (superseded on 2026-11-20: the kernels stay, made safe, for their speed),
 and `#![forbid(unsafe_code)]` in every crate but the two shim boundaries of
 GDAL's algorithm framework and PDAL. The part that called no C library - the
-task pool, the rasteriser's disjoint writes, the GPU upload's byte view, the
-tests that set the environment - was made safe on 2026-11-19 (`docs/rust.md`,
-"Unsafe that calls no C library, removed"); the rest is in its "Not done".
+GPU upload's byte view, the tests that set the environment - was made safe on
+2026-11-19 (`docs/rust.md`, "Unsafe that calls no C library, removed"); the
+task pool's lending of a borrowed closure to its warm workers and the
+rasteriser's disjoint writes stay unsafe, their safe forms measured and
+refused (there); the rest is in its "Not done".
 
 The check runs in every suite as the test runner's `rust_layering` (with
 Python found), beside its `rust_layering_catches_*` cases on those fixtures,
@@ -372,14 +374,10 @@ the types are not `Sync` where that matters, so the compiler says so. What runs 
 through one primitive:
 [`katana_core::TaskPool`](../crates/katana_core/src/task_pool.rs).
 
-* **What it is.** The calling thread and up to one worker fewer than the
-  machine's hardware threads (`TaskPool::shared()`, never destroyed), the
-  workers started for each call in a `thread::scope` and joined before it
-  returns: a worker kept warm between calls would run a closure borrowed
-  from the caller's frame, which only `unsafe` can say, and the pool is safe
-  Rust (since 2026-11-19). No more workers are started than there are chunks
-  beside the caller's first. It offers one operation, "run this index range
-  across the cores":
+* **What it is.** A pool of `std::thread`s, created once and kept warm
+  (`TaskPool::shared()`, never destroyed), with one worker fewer than the
+  machine's hardware threads; the calling thread is the last worker. It
+  offers one operation, "run this index range across the cores":
   `parallel_ranges(begin, end, grain, body)` and its grain-1 form
   `parallel_for`. There are no futures and no task
   graphs, because nothing needs them.
@@ -395,7 +393,7 @@ through one primitive:
   chunks are skipped, and the first is resumed on the caller after the
   workers have stopped (an exception in the C++ build).
 * **Grain is measured, not guessed.** A chunk must cost well above what
-  handing it to a worker costs; `TinSurface::elevations_at` records its
+  publishing a job to the pool costs; `TinSurface::elevations_at` records its
   grain of 256 positions with the measurement it came from, and runs inline
   below one grain.
 

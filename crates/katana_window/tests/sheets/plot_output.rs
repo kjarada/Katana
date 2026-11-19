@@ -314,6 +314,7 @@ mod plot_output {
             dpi: 150.0,
             file_name_pattern: String::from("{number} {name}"),
             file_per_sheet: true,
+            ..PageSetup::default()
         };
         let asked = plot_request_for(&setup, "C:/out", "2-3");
         assert_eq!(asked.format, PlotFormat::PdfPerSheet);
@@ -356,6 +357,7 @@ mod plot_output {
             line_weight_scale: 0.8,
             file_per_sheet: true,
             file_name_pattern: String::from("{n} {name}"),
+            ..PageSetup::default()
         };
         let words_of = |words: &[&str]| -> Vec<String> {
             words.iter().map(|word| String::from(*word)).collect()

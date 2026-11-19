@@ -1311,8 +1311,9 @@ outside its layering check.
 
 Edition 2024; `rust-version` 1.98, the older of the two compilers. `unsafe`
 is denied in the workspace's lints and allowed only where a module must be
-unsafe - an FFI adapter, an OS call, a SIMD kernel's entry - each saying
-why. Taking `unsafe` out altogether is decided and under way: the part that
+unsafe - an FFI adapter, an OS call, a SIMD kernel's entry, the task pool's
+warm workers and the rasteriser's disjoint writes (both measured, below) -
+each saying why. Taking `unsafe` out altogether is decided and under way: the part that
 called no C library is done (below), the SIMD kernels are safe functions
 behind one entry each (`docs/performance.md`, "Safe kernels"), the rest is
 Not done. Clippy runs with
@@ -1327,32 +1328,38 @@ unchanged, but for the helper that sets a variable (below). Not built when
 written: the before-and-after measurements the hot paths owe, in Release,
 are the integration build's.
 
-- **The task pool** (`crates/katana_core/src/task_pool.rs`) erased its
-  body's type behind a raw pointer so that workers kept warm between calls
-  could run a closure borrowed from the caller's frame. A call now starts its
-  helpers in a `thread::scope`, which borrows the body as the compiler can
-  check and joins them before the call returns. The contract is the one the
-  tests hold: the same chunking (a shared cursor, `grain` indices a chunk),
-  the first panic resumed on the caller and the others dropped there, a call
-  made while another has the helpers run inline (nested ones included), the
-  output the serial run's whatever the count. No more helpers are started
-  than there are chunks beside the caller's first. The price is a thread
-  started per helper per call, where a warm worker was woken: a HOT PATH, to
-  be measured (the rasteriser calls the pool five times a frame or more).
-  Rejected: keeping the warm workers (only `unsafe` can lend them a borrowed
-  closure); rayon (not in the lock file, and its nesting and panics are not
-  the contract, as above); crossbeam's scope (in the lock file, and it starts
-  threads per call as std's does).
+- **The task pool** (`crates/katana_core/src/task_pool.rs`) STAYS unsafe:
+  its body's type is erased behind a raw pointer so that workers kept warm
+  between calls run a closure borrowed from the caller's frame, which only
+  `unsafe` can say. The safe form written - each call's helpers started in a
+  `thread::scope` and joined before it returns, every contract test passing
+  - was measured and refused for its speed (CLAUDE.md section 5).
+  Measured on 2026-11-20 by `crates/katana_render/benches/rasterise.rs`
+  (a 1600 x 1000 frame of 115,200 triangles, 4,000 lines and 2,000 points;
+  WSL, 24 threads, Release), base and changed builds alternated six rounds
+  with an A/A control, ratios of the medians: a dispatch 1.87 (A/A 1.02), a frame
+  on the shared pool 1.64-1.85 (A/A 0.99), on one thread 1.08 (A/A 1.03):
+  every 3D, elevation and section frame some two-thirds slower, for a thread
+  started per helper per call. Rejected with it: rayon (not in the lock file,
+  and its nesting and panics are not the contract); crossbeam's scope (it
+  starts threads per call as std's does).
 - **The rasteriser's disjoint writes** (`crates/katana_render/src/disjoint.rs`)
-  shared one raw pointer between the tasks. The buffers are now cut first,
-  with `chunks_mut` and `split_at_mut`, into exactly the parts the tasks are
-  numbered by - an item, a `grain`-sized range, a tile's piece of each of
-  its rows - and each part is put behind a mutex of its own that only its
-  task locks: uncontended, once a task, never a pixel. Cutting the
-  framebuffer into tiles is one pass over its rows each fill and sweep
-  (1,080 rows of 30 pieces at 1920 x 1080): a HOT PATH, to be measured. Rejected:
-  an API on the pool that hands each task its `&mut` chunk (one shared
-  iterator behind one lock, which every task would contend for).
+  STAY unsafe: one raw pointer shared between the tasks, each writing only
+  the part its index names, which rests on the pool's contract that each
+  index runs once. The safe form written - the buffers cut first with
+  `chunks_mut` and `split_at_mut` into exactly the tasks' parts, each behind
+  a mutex only its task locks - passed every test and was measured and
+  refused (CLAUDE.md section 5); cutting the framebuffer into its tiles'
+  pieces of every row is a pass of allocations each fill and sweep.
+  Measured on 2026-11-20 by `crates/katana_render/benches/rasterise.rs`
+  (a 1600 x 1000 frame of 115,200 triangles, 4,000 lines and 2,000 points;
+  WSL, 24 threads, Release), base and changed builds alternated six rounds
+  with an A/A control, ratios of the medians: with the pool kept and the
+  safe disjoint writes, a frame on the pool 1.09-1.12 (A/A 0.95-1.02) and on
+  one thread 1.03 (A/A 1.00); with both kept, 1.03 and 0.98 (A/A 1.01 and
+  0.98), inside the noise - so the safe SIMD kernels cost nothing measured
+  here. Rejected: an API on the pool that hands each task its `&mut` chunk
+  (one shared iterator behind one lock, which every task would contend for).
 - **The GPU upload** (`crates/katana_gpu/src/plain.rs`) viewed the records'
   memory as bytes through an `unsafe trait`. Each record now says its bytes,
   field by field, native-endian, and the upload writes them straight into the

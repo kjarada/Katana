@@ -19,6 +19,11 @@
 use std::arch::aarch64::*;
 
 /// A register of two doubles, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn f64x2(values: &[f64; 2]) -> float64x2_t {
@@ -26,6 +31,11 @@ pub fn f64x2(values: &[f64; 2]) -> float64x2_t {
 }
 
 /// The two doubles of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn f64x2_lanes(value: float64x2_t) -> [f64; 2] {
@@ -33,6 +43,11 @@ pub fn f64x2_lanes(value: float64x2_t) -> [f64; 2] {
 }
 
 /// A 64-bit register of two floats, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn f32x2(values: &[f32; 2]) -> float32x2_t {
@@ -40,6 +55,11 @@ pub fn f32x2(values: &[f32; 2]) -> float32x2_t {
 }
 
 /// A register of four floats, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn f32x4(values: &[f32; 4]) -> float32x4_t {
@@ -48,6 +68,11 @@ pub fn f32x4(values: &[f32; 4]) -> float32x4_t {
 }
 
 /// The four floats of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn f32x4_lanes(value: float32x4_t) -> [f32; 4] {
@@ -60,6 +85,11 @@ pub fn f32x4_lanes(value: float32x4_t) -> [f32; 4] {
 }
 
 /// The two 32-bit integers of a 64-bit register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn i32x2_lanes(value: int32x2_t) -> [i32; 2] {
@@ -67,6 +97,11 @@ pub fn i32x2_lanes(value: int32x2_t) -> [i32; 2] {
 }
 
 /// A register of four 32-bit integers, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn i32x4(values: &[i32; 4]) -> int32x4_t {
@@ -75,6 +110,11 @@ pub fn i32x4(values: &[i32; 4]) -> int32x4_t {
 }
 
 /// A register of four unsigned 32-bit words (colours), lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn u32x4(values: &[u32; 4]) -> uint32x4_t {
@@ -83,6 +123,11 @@ pub fn u32x4(values: &[u32; 4]) -> uint32x4_t {
 }
 
 /// The four unsigned 32-bit words of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn u32x4_lanes(value: uint32x4_t) -> [u32; 4] {
@@ -95,6 +140,11 @@ pub fn u32x4_lanes(value: uint32x4_t) -> [u32; 4] {
 }
 
 /// The two unsigned 64-bit integers of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn u64x2_lanes(value: uint64x2_t) -> [u64; 2] {
@@ -102,6 +152,11 @@ pub fn u64x2_lanes(value: uint64x2_t) -> [u64; 2] {
 }
 
 /// The two signed 64-bit integers of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn i64x2_lanes(value: int64x2_t) -> [i64; 2] {
@@ -109,6 +164,11 @@ pub fn i64x2_lanes(value: int64x2_t) -> [i64; 2] {
 }
 
 /// A register of sixteen bytes, byte k in lane k.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn u8x16(bytes: &[u8; 16]) -> uint8x16_t {
@@ -121,6 +181,11 @@ pub fn u8x16(bytes: &[u8; 16]) -> uint8x16_t {
 }
 
 /// The sixteen bytes of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `neon`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "neon")]
 pub fn u8x16_lanes(value: uint8x16_t) -> [u8; 16] {

@@ -36,6 +36,11 @@ use std::arch::x86::*;
 use std::arch::x86_64::*;
 
 /// A register of two doubles, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn f64x2(values: &[f64; 2]) -> __m128d {
@@ -43,6 +48,11 @@ pub fn f64x2(values: &[f64; 2]) -> __m128d {
 }
 
 /// The two doubles of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn f64x2_lanes(value: __m128d) -> [f64; 2] {
@@ -53,6 +63,11 @@ pub fn f64x2_lanes(value: __m128d) -> [f64; 2] {
 }
 
 /// A register of four floats, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn f32x4(values: &[f32; 4]) -> __m128 {
@@ -61,6 +76,11 @@ pub fn f32x4(values: &[f32; 4]) -> __m128 {
 
 /// The four floats of a register, lane 0 first: lane k is moved to lane 0
 /// (SHUFPS) and read there.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn f32x4_lanes(value: __m128) -> [f32; 4] {
@@ -73,6 +93,11 @@ pub fn f32x4_lanes(value: __m128) -> [f32; 4] {
 }
 
 /// A register of four 32-bit integers, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn i32x4(values: &[i32; 4]) -> __m128i {
@@ -80,6 +105,11 @@ pub fn i32x4(values: &[i32; 4]) -> __m128i {
 }
 
 /// The four 32-bit integers of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn i32x4_lanes(value: __m128i) -> [i32; 4] {
@@ -93,6 +123,11 @@ pub fn i32x4_lanes(value: __m128i) -> [i32; 4] {
 
 /// A register of four unsigned 32-bit words (colours), lane 0 first; `as`
 /// between u32 and i32 keeps the bits.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn u32x4(values: &[u32; 4]) -> __m128i {
@@ -100,6 +135,11 @@ pub fn u32x4(values: &[u32; 4]) -> __m128i {
 }
 
 /// The four unsigned 32-bit words of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn u32x4_lanes(value: __m128i) -> [u32; 4] {
@@ -109,6 +149,11 @@ pub fn u32x4_lanes(value: __m128i) -> [u32; 4] {
 /// A register of sixteen bytes, byte 0 in the lowest lane, as a load from
 /// memory places them: x86 is little-endian, so the 32-bit lane k is bytes
 /// 4k .. 4k + 4 read little-endian.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn u8x16(bytes: &[u8; 16]) -> __m128i {
@@ -119,6 +164,11 @@ pub fn u8x16(bytes: &[u8; 16]) -> __m128i {
 }
 
 /// The sixteen bytes of a register, in memory order.
+///
+/// # Safety
+///
+/// Called from a function that has `sse2`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "sse2")]
 pub fn u8x16_lanes(value: __m128i) -> [u8; 16] {
@@ -130,6 +180,11 @@ pub fn u8x16_lanes(value: __m128i) -> [u8; 16] {
 }
 
 /// A register of four doubles, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn f64x4(values: &[f64; 4]) -> __m256d {
@@ -137,6 +192,11 @@ pub fn f64x4(values: &[f64; 4]) -> __m256d {
 }
 
 /// The four doubles of a register, lane 0 first: the low half, then the high.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn f64x4_lanes(value: __m256d) -> [f64; 4] {
@@ -146,6 +206,11 @@ pub fn f64x4_lanes(value: __m256d) -> [f64; 4] {
 }
 
 /// A register of eight floats, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn f32x8(values: &[f32; 8]) -> __m256 {
@@ -155,6 +220,11 @@ pub fn f32x8(values: &[f32; 8]) -> __m256 {
 }
 
 /// The eight floats of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn f32x8_lanes(value: __m256) -> [f32; 8] {
@@ -164,6 +234,11 @@ pub fn f32x8_lanes(value: __m256) -> [f32; 8] {
 }
 
 /// A register of eight 32-bit integers, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn i32x8(values: &[i32; 8]) -> __m256i {
@@ -173,6 +248,11 @@ pub fn i32x8(values: &[i32; 8]) -> __m256i {
 }
 
 /// The eight 32-bit integers of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn i32x8_lanes(value: __m256i) -> [i32; 8] {
@@ -182,6 +262,11 @@ pub fn i32x8_lanes(value: __m256i) -> [i32; 8] {
 }
 
 /// A register of eight unsigned 32-bit words (colours), lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn u32x8(values: &[u32; 8]) -> __m256i {
@@ -189,6 +274,11 @@ pub fn u32x8(values: &[u32; 8]) -> __m256i {
 }
 
 /// The eight unsigned 32-bit words of a register, lane 0 first.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn u32x8_lanes(value: __m256i) -> [u32; 8] {
@@ -197,6 +287,11 @@ pub fn u32x8_lanes(value: __m256i) -> [u32; 8] {
 
 /// A register of thirty-two bytes, byte 0 in the lowest lane, as u8x16 lays
 /// them.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn u8x32(bytes: &[u8; 32]) -> __m256i {
@@ -216,6 +311,11 @@ pub fn u8x32(bytes: &[u8; 32]) -> __m256i {
 }
 
 /// The thirty-two bytes of a register, in memory order.
+///
+/// # Safety
+///
+/// Called from a function that has `avx`, it is safe; from any other, only once
+/// the CPU is known to have it.
 #[inline]
 #[target_feature(enable = "avx")]
 pub fn u8x32_lanes(value: __m256i) -> [u8; 32] {
