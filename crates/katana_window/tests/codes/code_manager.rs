@@ -337,7 +337,9 @@ mod survey_code_manager {
         // Groups in name order; the bare `*` says no group. "TEST - TEXT" holds both text codes.
         let text = heading(&tree, "TEST - TEXT").expect("TEST - TEXT");
         assert_eq!(text.children.len(), 2);
-        assert!(heading(&tree, "(no group)").is_some());
+        // Said "No group" as every empty value is (drive::controls::no_value_hint), where it read
+        // "(no group)" (the fifth look audit).
+        assert!(heading(&tree, "No group").is_some());
         // AC*'s row: its two rules beneath it, and what it resolves to - the feature rule's layer
         // and the vertex symbol with its size.
         let furniture = heading(&tree, "TEST - FURNITURE").expect("TEST - FURNITURE");

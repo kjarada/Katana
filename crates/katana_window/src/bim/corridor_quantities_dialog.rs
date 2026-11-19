@@ -139,7 +139,7 @@ impl Body {
                         )
                     } else {
                         format!(
-                            "Cut {measured} m3, fill {} m3, net {} m3 (fill less cut) over {} \
+                            "Cut {measured} m³, fill {} m³, net {} m³ (fill less cut) over {} \
                              objects",
                             value("fill"),
                             value("net"),
@@ -149,7 +149,7 @@ impl Body {
                     summary.insert(0, said);
                 }
                 "total" => summary.push(format!(
-                    "{} {}: {} of them, {} m long, {} m2, {} m3",
+                    "{} {}: {} of them, {} m long, {} m², {} m³",
                     value("kind"),
                     value("material"),
                     value("count"),
@@ -304,27 +304,33 @@ impl Body {
             {
                 self.press_browse(host);
             }
-            if button(
-                ui,
-                "corridorQuantitiesSaveCsv",
-                // With its ellipsis, as every dialog's Save CSV... reads (the third look audit's K).
-                "Save CSV...",
-                "CORRIDOR QUANTITIES ... csv=: the table as a CSV file",
-            )
-            .clicked()
-            {
-                self.press_save(host);
-            }
-            if button(
-                ui,
-                "corridorQuantitiesCopy",
-                "Copy",
-                "The table to the clipboard, tab separated",
-            )
-            .clicked()
-            {
-                self.press_copy(host);
-            }
+            // Save CSV... and Copy act on the listing: greyed while nothing is listed, where they
+            // stood lit under an empty table (the fifth look audit).
+            let listed = self.table.row_count() > 0;
+            ui.add_enabled_ui(listed, |ui| {
+                if button(
+                    ui,
+                    "corridorQuantitiesSaveCsv",
+                    // With its ellipsis, as every dialog's Save CSV... reads (the third look
+                    // audit's K).
+                    "Save CSV...",
+                    "CORRIDOR QUANTITIES ... csv=: the table as a CSV file",
+                )
+                .clicked()
+                {
+                    self.press_save(host);
+                }
+                if button(
+                    ui,
+                    "corridorQuantitiesCopy",
+                    "Copy",
+                    "The table to the clipboard, tab separated",
+                )
+                .clicked()
+                {
+                    self.press_copy(host);
+                }
+            });
         });
         // Under the path it is about, lined up with the fields.
         let overwrite = &mut self.overwrite;
@@ -373,6 +379,8 @@ impl CorridorQuantitiesDialog {
             watcher: DocumentWatcher::new(document),
             executor: true,
             corridor: Combo::new(),
+            // Square and cubic metres written as units are (m², m³), where the table said
+            // "m2" and "m3" (the fifth look audit); the window's face has both signs.
             table: Table::new(
                 "corridorQuantitiesTable",
                 &[
@@ -382,8 +390,8 @@ impl CorridorQuantitiesDialog {
                     "Width (m)",
                     "Depth (m)",
                     "Height (m)",
-                    "Area (m2)",
-                    "Volume (m3)",
+                    "Area (m²)",
+                    "Volume (m³)",
                 ],
             )
             .max_height(320.0)

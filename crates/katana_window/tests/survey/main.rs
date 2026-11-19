@@ -25,6 +25,7 @@ pub mod window_support;
 
 mod parcel_dialog;
 mod reduction_options_widget;
+mod survey_export_dialog;
 mod survey_import_wizard;
 mod survey_jobs_dialog;
 

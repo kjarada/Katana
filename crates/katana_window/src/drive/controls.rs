@@ -857,18 +857,18 @@ pub fn label(ui: &mut Ui, name: &str, text: &str) -> Response {
 /// A label drawn as `label` - coloured, wrapped - whose text is `text`.
 ///
 /// Beside a footer's buttons (the left part of shell::dialog::button_row) a label is a status, and
-/// a status is ONE line however its caller asked for it: cut short with an ellipsis, the whole
-/// text in its tooltip (egui's Label shows an elided text whole on hover). Wrapped there, a
-/// sentence stood two lines high and made its footer 55 points where every other is 49 (21
-/// terrain dialogs; the third look audit's A).
+/// a status is ONE line beside the buttons however its caller asked for it while it fits there:
+/// wrapped there, a sentence stood two lines high and made its footer 55 points where every other
+/// is 49 (21 terrain dialogs; the third look audit's A). One too long for that room is drawn whole
+/// above the buttons (shell::dialog::footer_label), where cut short it lost its guidance (the
+/// fifth look audit).
 pub fn label_as(ui: &mut Ui, name: &str, text: &str, label: egui::Label) -> Response {
     let taken = take(ui, name);
-    let label = if crate::shell::dialog::beside_footer_buttons(ui) {
-        label.truncate()
+    let response = if crate::shell::dialog::beside_footer_buttons(ui) {
+        crate::shell::dialog::footer_label(ui, text, label)
     } else {
-        label
+        ui.add(label)
     };
-    let response = ui.add(label);
     if let Some(taken) = &taken {
         match &taken.posted.act {
             Act::Fill(fill) => refuse_fill(ui, taken, name, fill),

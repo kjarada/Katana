@@ -978,7 +978,9 @@ impl SurveyImportWizard {
             }
         });
         form_row(ui, "Or use:", |ui| {
-            let mut presets = vec!["(presets)"];
+            // The first item is none chosen, shown "No preset", muted (empty_item_words), where
+            // "(presets)" was a bracketed word of its own (the fifth look audit).
+            let mut presets = vec!["(no preset)"];
             presets.extend(
                 all_column_presets()
                     .iter()

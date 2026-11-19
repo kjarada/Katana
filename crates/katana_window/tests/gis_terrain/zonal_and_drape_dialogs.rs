@@ -66,7 +66,7 @@ mod zonal_line {
             ..ZonalForm::default()
         };
         // No source: the one sentence every dialog reading a surface or a raster says it in.
-        assert!(message(&form).contains("There is no surface or raster"));
+        assert!(message(&form).contains("No surface or raster"));
         form.source = String::from("SURFACE ground");
         form.stats.clear();
         assert!(message(&form).contains("Statistics"));
@@ -146,7 +146,7 @@ mod zonal_stats_dialog {
         assert!(
             bench
                 .text("zonalStatus")
-                .contains("There is no surface or raster")
+                .contains("No surface or raster")
         );
         assert!(bench.text("zonalCommand").is_empty());
         assert!(bench.placeholder("zonalCommand").is_empty());

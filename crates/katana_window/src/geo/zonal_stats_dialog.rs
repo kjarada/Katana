@@ -28,6 +28,7 @@ use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, terrain_reply_field,
     terrain_sources,
 };
+use crate::customisation::scope_filter_widget::WIDGET_WIDTH;
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
 use crate::host::Host;
 use crate::shell::DialogFrame;
@@ -62,6 +63,10 @@ impl Default for ZonalForm {
         }
     }
 }
+
+/// The width of the fields' column beside the zones' scope: the scope's own (WIDGET_WIDTH), so
+/// the two columns are one width.
+const FIELDS_WIDTH: f32 = WIDGET_WIDTH;
 
 /// What the list offers, in the verb's words, the first five ticked: the verb's own default set.
 const STAT_CHOICES: [(&str, &str, bool); 10] = [
@@ -153,7 +158,8 @@ impl ZonalStatsDialog {
         scope.views = host_views(host);
         scope.set_choice(ScopeChoice::Selection);
         let mut dialog = Self {
-            frame: DialogFrame::new("zonalStatsDialog", "Statistics by Area"),
+            frame: DialogFrame::new("zonalStatsDialog", "Statistics by Area")
+                .width(WIDGET_WIDTH + 2.0 * crate::shell::dialog::GROUP_GAP + FIELDS_WIDTH),
             visible: false,
             source: SourcePicker::default(),
             scope,
@@ -277,27 +283,12 @@ impl ZonalStatsDialog {
             self.hide();
         }
     }
-}
 
-impl Framed for ZonalStatsDialog {
-    fn frame_mut(&mut self) -> &mut DialogFrame {
-        &mut self.frame
-    }
-
-    fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    /// The source and the statistics' fields, beside the zones' scope.
+    fn fields(&mut self, ui: &mut Ui) {
         row(ui, "Source:", |ui| {
             self.source.ui(ui, "zonalSource");
         });
-        // Its "Apply to" a heading's gap under Source, as every heading has.
-        crate::geo::terrain_dialog_parts::heading_gap(ui);
-        ui.scope(|ui| {
-            self.scope.ui(ui);
-        })
-        .response
-        .on_hover_text(
-            "The zones: the closed shapes these take. Open lines and points bound no area and \
-             are left out.",
-        );
         row(ui, "Statistics:", |ui| {
             ui.vertical(|ui| {
                 // The list as tall as its ten rows, so it never scrolls: held to 120 it was a
@@ -326,6 +317,39 @@ impl Framed for ZonalStatsDialog {
                 "Replace the file if it is there",
                 &mut self.overwrite,
             );
+        });
+    }
+}
+
+impl Framed for ZonalStatsDialog {
+    fn frame_mut(&mut self) -> &mut DialogFrame {
+        &mut self.frame
+    }
+
+    fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+        // The zones' scope at the left of the fields, as a GIS dialog's is: under them, with the
+        // ten statistics, the body was some 1,000 points tall and scrolled whole on a 1360 x 860
+        // screen (the fifth look audit).
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0 * crate::shell::dialog::GROUP_GAP;
+            ui.vertical(|ui| {
+                ui.set_width(WIDGET_WIDTH);
+                ui.scope(|ui| {
+                    self.scope.ui(ui);
+                })
+                .response
+                .on_hover_text(
+                    "The zones: the closed shapes these take. Open lines and points bound no area \
+                     and are left out.",
+                );
+            });
+            ui.vertical(|ui| {
+                ui.set_width(FIELDS_WIDTH);
+                ui.spacing_mut().item_spacing.x = crate::shell::dialog::GROUP_GAP;
+                ui.spacing_mut().item_spacing.y = crate::shell::dialog::FORM_SPACING.y;
+                // A form of its own beside the scope, its labels in a column of their own.
+                crate::shell::dialog::form_panel(ui, |ui| self.fields(ui));
+            });
         });
         command_field(ui, "zonalCommand", &self.command());
     }

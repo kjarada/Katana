@@ -433,7 +433,18 @@ impl FormatsDialog {
             ui,
             |ui| {
                 label(ui, "gisFormatsCount", &count);
-                label(ui, "gisFormatsCommand", &command).on_hover_text(
+                // Said as the line it is, muted: the bare word "FORMATS" beside the count read as
+                // a stray token (the fifth look audit). Recorded as the line alone.
+                crate::drive::controls::label_as(
+                    ui,
+                    "gisFormatsCommand",
+                    &command,
+                    egui::Label::new(
+                        egui::RichText::new(format!("Line: {command}"))
+                            .color(crate::theme::palette::text_muted().to_egui()),
+                    ),
+                )
+                .on_hover_text(
                     "The line this table shows; type it, or put it in a script, for the same \
                      records",
                 );

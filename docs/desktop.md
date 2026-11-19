@@ -1081,6 +1081,81 @@ the thumbnail under it, and its ticks wrap in the field column. Not done: the
 Symbol Library's Use rows run past its details column, so its preview ends
 short of them.
 
+**The seventh round (the fifth audit, 2026-11-19).** One size on every tab,
+nothing cut: a dialog of tabs measures every tab each frame in a sizing pass
+(`shell::dialog::measured_height` - drawn nowhere, taking no room, its
+controls neither recorded nor reachable, so a page not in front is measured
+without its names being drawn twice) and gives the front the tallest's height.
+Subsurface Utilities is 765 high on every tab that reads the drawing (it was
+353 on Report, 771 on Regrade); its scope stands beside the tabs only while it
+applies, and with a schedule chosen it is its one line under "Services from"
+and the tabs have the body's width (the 400 by 350 empty column is gone; Draw
+to Check share one smaller size, Regrade and Schedule, which always read the
+drawing, keep theirs). Its tabs head their column; Detected spacing and
+Minimum cover are drawn on the three tabs that grade and withdrawn on the rest
+(recorded, refused as disabled, as when they were greyed). Road Objects is two
+columns, the kind's (tabs, the tallest kind's page - Culvert's thirteen rows -,
+source and preview, heights and name) and the placement's (with its scope), 1042
+by 834 on every kind with its scope in use or not, where it was 626 to 632 by
+781 to 844 with its body scrolled and the Heights and Object rows cut; the
+alignment's four numbers are two pairs, each pair a form of its own.
+Clip and Overlay keep their file rows withdrawn until a file is chosen, and
+put what is made of the result under the subject's scope
+(`under_scope_ui`): 773 and 829 high, where both were 844 and cut at "Result
+layer" and "Keep overlay's". Statistics by Area is two columns, its zones'
+scope beside its fields: 842 by 689, where its whole body scrolled at 552 by
+844. *Rejected:* the tallest tab's height over every layout of Utilities - it
+held Report 400 points over an empty page; and a third column for Road
+Objects' scope, which a 1360-wide screen does not hold.
+
+**The seventh round: a status is whole, and the tools grey.** A status too long
+for the room the footer's buttons leave is drawn whole, wrapped, in a band
+across the footer above them (`shell::dialog::footer_label`, from
+`drive::controls::label_as`; the band's height kept by `button_row` and
+settled as its right end's width is); one that fits is one line beside them as
+before, so the common footer stays 49. Cut to one line, the guidance was lost
+at its "..." in some sixteen dialogs 546 wide. The common conditions are
+shorter too: "No surface: Terrain > Surface From", "No surface or raster:
+Terrain > Surface From" (importing a DEM in the source choice's tooltip), "No
+point cloud: import one (File > Import)". Rejected: the dialog widened to its
+status, and a tooltip alone. Every tool with nothing to act on greys: Leaders'
+Arrange acts (and they stand at the footer's right, Align Selected Leaders the
+primary), Volumes' Copy with no table, Save CSV... with no line, Make Cut/Fill
+Map and Make Envelope with no two surfaces, Corridor Quantities' Save CSV... and
+Copy with nothing listed, Point Report's Copy and Save CSV... with no points,
+Parcel Report's Copy and Save CSV... before Compute (Label Courses stays lit: it
+labels the parcel its line names, Compute or not), Survey Jobs' tools with no
+job chosen, Surface Styles' Revert with nothing to put back. Revert stands at
+the footer's left in Layers and the Survey Code Manager, as in every manager.
+A verb's tokens show in sentence case through `token_choice` (Buffer, Hull,
+Overlay, Repair, SQL, Gaps and Overlaps through `Words`; Grid's method,
+Shading's ramp and variant, Export Drawing's coordinates, Export Survey Points'
+delimiter, quotes and unit, Survey Codes' and the Definition Editor's fixed
+choices, the Road Template's side and kind, Road Objects' Heights from as a
+`Combo::of_tokens`, Attributes' type, and every enumeration of the Leaders and
+Label Styles forms through `form_widgets::combo` - arrow, frame, kind,
+placement, marker); the token is still what is recorded and filled. Overlay's second scope is headed "Overlay features". Every search field
+says `SEARCH_HINT`, what it searches in its tooltip (`FilterBar`). Empty words
+say "None" or "No ...": "(presets)", "(saved templates)", "(no group)", Road
+Objects' "none" placeholders; Hatch's "(ByLayer)" is ByLayer. Attributes' form
+reads Name, Type, Value. Project Coordinate System says "no coordinate system"
+once; the Survey Code Manager's Issues says "Checked 1103 rules being edited."
+under "No issues", where it said "0 errors and 0 warnings" too. Import Point
+Cloud's estimate is a row of its form ("Reads"), not a line at the body's edge;
+GDAL Formats' footer says "Line: FORMATS ...", not the bare word. Corridor
+Quantities writes m² and m³. Leaders' text style says its default as Settings
+does, "Standard (default)". A footer starts on a whole pixel, so it is 49
+whatever fraction of a pixel its body ends on: four footers (Leaders,
+Settings, Symbol Library, Edit Text) measured 50. Survey > Export Survey Points hands its `SURVEY EXPORT` line to the
+executor (`docs/survey.md`, "Point files on the command line"). Not done: an
+arrow's CamelCase token ("ClosedFilled") is shown as written, Grid's height
+source (its items are property names after "geometry"), the
+numbers still kept as text (Viewshed's heights, Surface From's Most points,
+Alignment Manager's Start chainage), the zero placeholders (Global Modify's
+Symbol, Leaders' Along and At x, Dimension Styles' Round to), Layers'
+"(default)" and Keyboard Shortcuts' "(no menu)", the manager pattern for Dimension and
+Surface Styles, and the import wizard's line (`docs/survey.md`).
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the
@@ -5604,7 +5679,13 @@ they are easiest to break:
   takes several rather than being run in a loop by the dialog.
 - **A dialog's footer is `shell::dialog::button_row`**: Preview and a status
   at the left, then Close, then the primary action last in the accent; a
-  reply over it only once there is one (`reply`).
+  reply over it only once there is one (`reply`). A status longer than the
+  room beside the buttons is whole above them, never cut.
+- **A dialog of tabs is one size on every tab**: every page measured each
+  frame (`shell::dialog::measured_height`), the front given the tallest's
+  height; never a least height kept from a frame as drawn.
+- **A tool with nothing to act on is greyed**, and a primary with nothing to
+  run; a form that does not read keeps its button lit, so a press says why.
 - **A form is `shell::dialog`'s form**, never a hand-built `egui::Grid` of
   labels and fields; a Grid is for a table (the Title Block's revision
   cells), and lines up only its own cells.

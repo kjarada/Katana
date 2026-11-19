@@ -118,7 +118,7 @@ mod surface_edit_lines {
         };
         assert!(
             error(surface_levels_line(SurfaceLevelsKind::Heights, &form))
-                .contains("There is no surface")
+                .contains("No surface")
         );
         form.surface = String::from("ground");
         form.value = String::from("up");
@@ -192,7 +192,7 @@ mod surface_edit_lines {
         form.surface.clear();
         assert!(
             error(surface_levels_line(SurfaceLevelsKind::AddPoints, &form))
-                .contains("There is no surface")
+                .contains("No surface")
         );
     }
 
@@ -411,7 +411,7 @@ mod surface_levels_dialog {
             bench
                 .control("surfaceThinStatus")
                 .text
-                .contains("There is no surface: make one")
+                .contains("No surface: Terrain > Surface From")
         );
         assert!(bench.control("surfaceThinCommand").text.is_empty());
         assert!(bench.host.lines().is_empty());

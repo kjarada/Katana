@@ -44,8 +44,9 @@
 //! with is here too, so a dialog mostly says what it holds: `form` and `labelled` (a label column
 //! every row of a body shares, the fields filling the rest - or, where one must not fill,
 //! `fixed_fields`, `beside_a_button`), `check_row` (a check box in the field column), `button_row`
-//! (what reads the drawing and the one-line `status` at the left; Close and the dialog's primary
-//! action, drive::controls::primary, last at the right), `note`, and `section` / `section_with` (a
+//! (what reads the drawing and the `status` at the left - one line, or whole above the buttons
+//! when it is longer than their room; Close and the dialog's primary action,
+//! drive::controls::primary, last at the right), `note`, and `section` / `section_with` (a
 //! group is a heading over its rows, never a box).
 //! A button in a footer is FOOTER_BUTTON_WIDTH at least (drive::controls reads `in_footer`). This
 //! is the window's ONE form: dialog_layout's grid of fixed-width fields, written beside it, was
@@ -161,8 +162,23 @@ pub fn in_footer(ui: &Ui) -> bool {
         .any(|frame| frame.tags().contains(FOOTER_TAG))
 }
 
-/// The tag of a `button_row`'s left part, which `beside_footer_buttons` reads.
+/// The tag of a `button_row`'s left part, which `beside_footer_buttons` reads. Its value is the
+/// row's `StatusBand`.
 const ROW_LEADING_TAG: &str = "katanaButtonRowLeading";
+
+/// What a `button_row` lends a status too long for the room its buttons leave it
+/// (`footer_label`): the band above the buttons, across the whole row, where it is drawn whole and
+/// wrapped.
+#[derive(Clone, Copy, Debug)]
+struct StatusBand {
+    /// Where the height the band needs this pass is gathered: the most any status of the row
+    /// needs.
+    needed: Id,
+    /// The band's width: the row's.
+    width: f32,
+    /// The band, when the last pass found a status that needed one.
+    slot: Option<Rect>,
+}
 
 /// Whether `ui` is the left part of a `button_row` - where a dialog's status stands beside its
 /// buttons - so a label drawn in it is one line (drive::controls::label_as).
@@ -299,26 +315,46 @@ pub(crate) fn footer_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui:
 /// is FOOTER_BUTTON_WIDTH at least.
 ///
 /// A status at the left (`status`, or any named label) has the room the buttons leave - the row
-/// less `trailing`'s width - and is ONE line in it, cut short with the whole text in its tooltip
-/// (drive::controls::label_as): a row of buttons is a control high whatever its status says.
+/// less `trailing`'s width - and is ONE line in it while it fits there. One that does not fit is
+/// drawn whole, wrapped, in a band across the row ABOVE the buttons (`footer_label`), and the row
+/// of buttons stays a control high: cut short to one line, the guidance a status carries was lost
+/// at its "..." ("There is no surface: make one with Terrain > S...", in some sixteen dialogs 546
+/// wide; the fifth look audit). A short status keeps the footer one row, as before.
 ///
 /// egui lays a row out left to right as it is drawn, so what pushes `trailing` to the right is its
 /// width as the last frame measured it (kept in the context's memory); a frame that finds it
 /// changed asks for the frame to be laid out again (`Context::request_discard`), as the dialog
-/// frame does for its own measure, so the row a person sees is the settled one.
+/// frame does for its own measure, so the row a person sees is the settled one. The band's height
+/// is kept and settled the same way.
 pub fn button_row<L, R>(
     ui: &mut Ui,
     leading: impl FnOnce(&mut Ui) -> L,
     trailing: impl FnOnce(&mut Ui) -> R,
 ) -> (L, R) {
     ui.scope_builder(
-        UiBuilder::new().ui_stack_info(UiStackInfo::default().with_tag(FOOTER_TAG)),
+        UiBuilder::new()
+            .layout(Layout::top_down(Align::Min))
+            .ui_stack_info(UiStackInfo::default().with_tag(FOOTER_TAG)),
         |ui| {
-            ui.horizontal(|ui| {
+            let band_id = ui.make_persistent_id("katanaButtonRowBand");
+            let band: f32 = ui.data(|data| data.get_temp(band_id)).unwrap_or(0.0);
+            let needed = band_id.with("needed");
+            ui.data_mut(|data| data.insert_temp(needed, 0.0_f32));
+            let width = ui.available_width();
+            let slot = (band > 0.0).then(|| {
+                ui.allocate_exact_size(Vec2::new(width, band), Sense::hover())
+                    .0
+            });
+            let status_band = StatusBand {
+                needed,
+                width,
+                slot,
+            };
+            let row = ui.horizontal(|ui| {
                 let id = ui.make_persistent_id("katanaButtonRowTrailing");
                 let wanted: f32 = ui.data(|data| data.get_temp(id)).unwrap_or(0.0);
-                // What is at the left - buttons, and a status cut short to one line - is held to
-                // the row less the right end, so it never runs under the buttons.
+                // What is at the left - buttons, and a status of one line - is held to the row
+                // less the right end, so it never runs under the buttons.
                 let room = Vec2::new(
                     (ui.available_width() - wanted - ui.spacing().item_spacing.x).max(0.0),
                     ui.spacing().interact_size.y,
@@ -326,8 +362,10 @@ pub fn button_row<L, R>(
                 let left = ui
                     .allocate_ui_with_layout(room, *ui.layout(), |ui| {
                         ui.scope_builder(
-                            UiBuilder::new()
-                                .ui_stack_info(UiStackInfo::default().with_tag(ROW_LEADING_TAG)),
+                            UiBuilder::new().ui_stack_info(
+                                UiStackInfo::default()
+                                    .with_tag_value(ROW_LEADING_TAG, status_band),
+                            ),
                             leading,
                         )
                         .inner
@@ -346,11 +384,64 @@ pub fn button_row<L, R>(
                         .request_discard("a dialog's row of buttons measured its right end");
                 }
                 (left, drawn.inner)
-            })
-            .inner
+            });
+            let wanted: f32 = ui.data(|data| data.get_temp(needed)).unwrap_or(0.0);
+            if (wanted - band).abs() > 0.5 {
+                ui.data_mut(|data| data.insert_temp(band_id, wanted));
+                ui.ctx()
+                    .request_discard("a dialog's status needed a band above its buttons");
+            }
+            row.inner
         },
     )
     .inner
+}
+
+/// A named label drawn in a `button_row`'s left part (`ui`) - a dialog's status - reading `text`:
+/// ONE line beside the buttons while it fits in the room they leave, and otherwise whole, wrapped,
+/// in the band the row keeps above its buttons (`button_row`). The pass that first finds it too
+/// long has no band yet and draws it cut short; the row then asks for the frame to be laid out
+/// again with the band. What drive::controls::label_as draws a label beside a footer's buttons
+/// with.
+pub fn footer_label(ui: &mut Ui, text: &str, label: egui::Label) -> egui::Response {
+    let band = ui.stack().iter().find_map(|frame| {
+        frame
+            .tags()
+            .get_downcast::<StatusBand>(ROW_LEADING_TAG)
+            .copied()
+    });
+    // A status drawn hidden (Edit Text's, while a refusal stands in its place) asks for no
+    // band: it would hold an empty one over the buttons.
+    let fits = one_line_width(ui, text) <= ui.available_width() + 0.5 || !ui.is_visible();
+    let Some(band) = band.filter(|_| !fits) else {
+        return ui.add(label.truncate());
+    };
+    let height = ui
+        .painter()
+        .layout(
+            String::from(text),
+            TextStyle::Body.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+            band.width,
+        )
+        .size()
+        .y;
+    ui.data_mut(|data| {
+        let most: f32 = data.get_temp(band.needed).unwrap_or(0.0);
+        data.insert_temp(band.needed, most.max(height));
+    });
+    match band.slot {
+        // A child placed in the band, which moves nothing in the row: the band's room is already
+        // the row's (button_row allocated it above the buttons).
+        Some(slot) => ui
+            .new_child(
+                UiBuilder::new()
+                    .max_rect(slot)
+                    .layout(Layout::top_down(Align::Min)),
+            )
+            .add(label.wrap()),
+        None => ui.add(label.truncate()),
+    }
 }
 
 /// A dialog's form (QFormLayout): its rows (`Form::row`) one under another, FORM_SPACING apart.
@@ -484,6 +575,32 @@ pub fn form_panel<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
+/// How tall `add` lays out `width` wide at `ui`'s cursor, measured in a sizing pass: drawn
+/// nowhere, taking no room, and its controls neither recorded nor reachable by a driver
+/// (drive::registry::live), so a part drawn elsewhere - a tab's page not in front, a layout the
+/// dialog does not show now - is measured without its names being drawn twice. What a dialog of
+/// tabs gives every tab the tallest's height by (Subsurface Utilities, Road Objects), where a page
+/// drawn only when in front made the dialog jump size as the tabs were turned. `salt` keeps the
+/// measures of one dialog apart.
+pub fn measured_height(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    width: f32,
+    add: impl FnOnce(&mut Ui),
+) -> f32 {
+    let room = Rect::from_min_size(ui.cursor().min, Vec2::new(width, f32::INFINITY));
+    let mut measure = ui.new_child(
+        UiBuilder::new()
+            .id_salt(("katanaMeasured", salt))
+            .max_rect(room)
+            .layout(Layout::top_down(Align::Min))
+            .sizing_pass()
+            .invisible(),
+    );
+    add(&mut measure);
+    measure.min_rect().height()
+}
+
 /// Whether `ui` is a column of a row of its dialog's body - a scope beside a dialog's fields, the
 /// second of two forms side by side - rather than the body's own column: some layout between it
 /// and the body runs left to right. Outside a dialog's body (a panel, a test's bare `Ui`) it is
@@ -534,10 +651,10 @@ pub fn body_span(ui: &Ui) -> Option<egui::Rangef> {
 /// refusal. One helper where dialogs each drew their own (a run dialog's status, a check's count).
 ///
 /// In a footer - its place, at the left of `button_row` beside the buttons - it is ONE line in the
-/// room the buttons leave, cut short with an ellipsis and the whole text in its tooltip: wrapped,
-/// a sentence made its footer a line taller than every other (the third look audit's A). In a
-/// body (a manager's refusal under its form) it wraps at the body's width, where a refusal is read
-/// whole.
+/// room the buttons leave while it fits there (wrapped beside them, a sentence made its footer a
+/// line taller than every other; the third look audit's A), and whole above the buttons when it
+/// does not (`footer_label`). In a body (a manager's refusal under its form) it wraps at the
+/// body's width, where a refusal is read whole.
 pub fn status(ui: &mut Ui, name: &str, text: &str, is_error: bool) -> egui::Response {
     let label = egui::Label::new(RichText::new(text).color(status_colour(is_error)));
     let label = if in_footer(ui) {
@@ -1225,6 +1342,17 @@ impl DialogFrame {
                 let mut footer_rect = None;
                 let mut footer_top = None;
                 if let Some(footer) = footer.take() {
+                    // The footer starts on a whole pixel, so its rule and its 49 points are the
+                    // same pixels in every dialog: after a body ending part way through a pixel
+                    // the rule was rounded one way and the dialog's bottom the other, and four
+                    // footers measured 50 (Leaders, Settings, Symbol Library, Edit Text; the
+                    // fifth look audit).
+                    let at = ui.cursor().min.y;
+                    let per_point = ui.pixels_per_point();
+                    let snapped = (at * per_point).ceil() / per_point;
+                    if snapped > at {
+                        ui.add_space(snapped - at);
+                    }
                     footer_top = Some(ui.cursor().min.y);
                     let row_width = scope
                         .response

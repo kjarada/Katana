@@ -1448,7 +1448,8 @@ impl SurveyCodeManagerDialog {
                 None => {
                     let mut heading = FlatRow::new(TreeAt::Group(groups.len()), 0);
                     heading.cells[KEY_COLUMN] = if row.combined.group.is_empty() {
-                        String::from("(no group)")
+                        // An empty value said as every empty value is (the fifth look audit).
+                        crate::drive::controls::no_value_hint("group")
                     } else {
                         row.combined.group.clone()
                     };
@@ -2250,22 +2251,25 @@ impl SurveyCodeManagerDialog {
         }
         let dirty_text = self.dirty_text.clone();
         let events = &mut self.events;
-        // The one footer (shell::dialog::button_row): the buffer's state at the left; Revert,
-        // Close, then Apply, the primary, last at the right.
-        dialog::button_row(
+        // The one footer (shell::dialog::button_row): Revert - it takes the drawing's map back
+        // into the buffer - and the buffer's state at the left, as every manager's (the fifth
+        // look audit: it stood beside Close); Close, then Apply, the primary, last at the right.
+        let (reverted, ()) = dialog::button_row(
             ui,
             |ui| {
+                let reverted = ui
+                    .add_enabled_ui(edited, |ui| {
+                        controls::button(ui, "revertMap", "Revert")
+                            .on_hover_text(
+                                "Discard the edits and take the drawing's survey map again",
+                            )
+                            .clicked()
+                    })
+                    .inner;
                 controls::label_as(ui, "dirtyIndicator", &dirty_text, egui::Label::new(said));
+                reverted
             },
             |ui| {
-                ui.add_enabled_ui(edited, |ui| {
-                    if controls::button(ui, "revertMap", "Revert")
-                        .on_hover_text("Discard the edits and take the drawing's survey map again")
-                        .clicked()
-                    {
-                        events.push(Event::Revert);
-                    }
-                });
                 if controls::button(ui, "closeManager", "Close").clicked() {
                     events.push(Event::Close);
                 }
@@ -2279,5 +2283,8 @@ impl SurveyCodeManagerDialog {
                 });
             },
         );
+        if reverted {
+            self.events.push(Event::Revert);
+        }
     }
 }

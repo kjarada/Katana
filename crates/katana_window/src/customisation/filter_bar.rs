@@ -45,6 +45,8 @@ struct Chip {
 pub struct FilterBar {
     text: String,
     placeholder: String,
+    /// What the field searches (`set_placeholder_text`), its tooltip; empty for none.
+    tip: String,
     chips: Vec<Chip>,
     chip: Option<usize>,
     changes: FilterBarChanges,
@@ -57,6 +59,7 @@ impl FilterBar {
         Self {
             text: String::new(),
             placeholder: String::from(crate::drive::controls::SEARCH_HINT),
+            tip: String::new(),
             chips: chips
                 .iter()
                 .map(|label| Chip {
@@ -93,8 +96,12 @@ impl FilterBar {
         }
     }
 
+    /// What the field searches, said in its tooltip ("Search keys, descriptions, layers ..."):
+    /// the field itself says SEARCH_HINT, as every search field does. As the placeholder each
+    /// manager's own sentence was cut at the field's end and read differently from the next
+    /// (the fifth look audit: Styles, Linetypes, Hatch, Symbol Library, Code Manager).
     pub fn set_placeholder_text(&mut self, text: &str) {
-        self.placeholder = String::from(text);
+        self.tip = String::from(text);
     }
 
     /// The checked chip, in the order the labels were given; None when there are no chips (the
@@ -153,6 +160,11 @@ impl FilterBar {
                     ..LineOptions::default()
                 },
             );
+            let field = if self.tip.is_empty() {
+                field
+            } else {
+                field.on_hover_text(self.tip.as_str())
+            };
             if field.changed() {
                 self.changes.text = Some(self.text.clone());
             }

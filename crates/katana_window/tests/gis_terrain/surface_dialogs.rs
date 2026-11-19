@@ -78,7 +78,10 @@ mod surface_from_line {
             kind: SurfaceFromKind::Raster,
             ..SurfaceFromForm::default()
         };
-        assert!(message(&raster).contains("Source"));
+        // No source is the drawing's condition, said as one ("No raster: import one (File >
+        // Import)") rather than after the field's name, as NO_SURFACE is (the fifth and seventh
+        // look rounds: a status names no field before a condition of the drawing).
+        assert!(message(&raster).contains("No raster"));
         raster.source = String::from("RASTER 1");
         raster.area = String::from("0,0,40");
         assert!(message(&raster).contains("Window"));
@@ -150,7 +153,8 @@ mod surface_from_dialog {
         assert!(!bench.enabled("surfaceFromRun"));
         // Why there is no line is the footer's status; the Command field holds the line only,
         // and shows no sentence in its place.
-        assert!(bench.text("surfaceFromStatus").contains("no raster"));
+        // "No raster: import one (File > Import)", short enough for one footer line.
+        assert!(bench.text("surfaceFromStatus").contains("No raster"));
         assert!(bench.placeholder("surfaceFromCommand").is_empty());
         assert!(bench.host.lines().is_empty());
     }

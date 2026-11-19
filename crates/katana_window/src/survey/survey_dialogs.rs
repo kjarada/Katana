@@ -186,6 +186,18 @@ pub(crate) fn choice_of(ui: &mut Ui, name: &str, items: &[&str], chosen: &mut Ch
     drive::choice(ui, name, &items, chosen)
 }
 
+/// `choice_of` over a format's or a verb's tokens ("comma", "double", "metres"), shown in sentence
+/// case, the token still what is recorded and filled (drive::controls::token_choice).
+pub(crate) fn token_choice_of(
+    ui: &mut Ui,
+    name: &str,
+    items: &[&str],
+    chosen: &mut Choice,
+) -> Response {
+    let items: Vec<String> = items.iter().map(|item| String::from(*item)).collect();
+    drive::controls::token_choice(ui, name, &items, chosen)
+}
+
 /// A file dialog to save to, on the desktop only: a headless session opens none, and the
 /// callers refuse before they get here (the plan's section 4.1, "No hidden modality").
 pub(crate) fn save_file_dialog(
@@ -299,11 +311,23 @@ fn sentence(text: &str) -> String {
 pub struct ToolButton {
     pub name: &'static str,
     pub text: &'static str,
+    /// False greys it: a tool with nothing to act on (Parcel Report's Copy before Compute).
+    pub enabled: bool,
 }
 
 impl ToolButton {
     pub const fn new(name: &'static str, text: &'static str) -> Self {
-        Self { name, text }
+        Self {
+            name,
+            text,
+            enabled: true,
+        }
+    }
+
+    /// The button greyed unless `enabled`.
+    pub const fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
     }
 }
 
@@ -434,7 +458,12 @@ impl SurveyToolFrame {
                     |ui| {
                         let mut clicked: Option<&'static str> = None;
                         for filler in fillers {
-                            if drive::button(ui, filler.name, filler.text).clicked() {
+                            if ui
+                                .add_enabled_ui(filler.enabled, |ui| {
+                                    drive::button(ui, filler.name, filler.text).clicked()
+                                })
+                                .inner
+                            {
                                 clicked = Some(filler.name);
                             }
                         }
@@ -451,7 +480,12 @@ impl SurveyToolFrame {
                             None => (None, verbs),
                         };
                         for verb in others {
-                            if drive::button(ui, verb.name, verb.text).clicked() {
+                            if ui
+                                .add_enabled_ui(verb.enabled, |ui| {
+                                    drive::button(ui, verb.name, verb.text).clicked()
+                                })
+                                .inner
+                            {
                                 clicked = Some(verb.name);
                             }
                         }
@@ -459,7 +493,11 @@ impl SurveyToolFrame {
                             clicked = Some("close");
                         }
                         if let Some(verb) = first
-                            && drive::primary(ui, verb.name, verb.text).clicked()
+                            && ui
+                                .add_enabled_ui(verb.enabled, |ui| {
+                                    drive::primary(ui, verb.name, verb.text).clicked()
+                                })
+                                .inner
                         {
                             clicked = Some(verb.name);
                         }

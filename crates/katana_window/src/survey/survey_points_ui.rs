@@ -2,8 +2,10 @@
 //! Report (survey_points_ui.hpp/.cpp).
 //!
 //! As with every survey dialog, nothing survey-specific is computed here: the points come from
-//! katana_cad's drawing_survey_points / survey_points_among, the file is written by surveyio's
-//! delimited writer, the report text by format_point_report and point_report_csv.
+//! katana_cad's drawing_survey_points / survey_points_among, the export file is written by the
+//! SURVEY EXPORT line the dialog hands to the command executor (katana_app's
+//! survey_export_verb, through surveyio's delimited writer), the report text by
+//! format_point_report and point_report_csv.
 //!
 //! Object names (the headless --dialog and --survey-dock switches use them):
 //!
@@ -25,25 +27,26 @@ use egui::{Context, Response, Ui};
 use katana_cad::SurveyImportOptions;
 use katana_cad::survey_points::{
     DrawingSurveyPoint, drawing_survey_points, format_point_report, point_report_csv,
-    survey_points_among, to_survey_point,
+    survey_points_among,
 };
 use katana_core::error::make_error;
 use katana_core::path_text::{path_from_utf8, path_to_utf8};
-use katana_core::text::parse_integer;
+use katana_cad::annotation::command_words::command_word;
+use katana_core::text::{ReplyRecord, parse_integer, read_reply_record};
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_entity::EntityId;
 use katana_geometry::{Box2, Point2};
 use katana_survey::LinearUnit;
 use katana_survey::data_model::to_string as unit_name;
 use katana_surveyio::{
-    ColumnRole, DelimitedExportOptions, DelimitedLayout, Delimiter, MAXIMUM_EXPORT_DECIMALS,
-    Quoting, all_column_presets, column_preset_named, layout_template, parse_layout_template,
-    preset_columns, template_letter, to_string as surveyio_name, write_delimited_points,
+    ColumnRole, DelimitedLayout, Delimiter, MAXIMUM_EXPORT_DECIMALS, Quoting, all_column_presets,
+    column_preset_named, parse_layout_template, preset_columns, template_letter,
+    to_string as surveyio_name,
 };
 
 use super::survey_dialogs::{
     SurveyToolFrame, ToolButton, choice_of, coloured_label, field, form_row, muted, no_file_dialog,
-    number_if, save_file_dialog,
+    number_if, save_file_dialog, token_choice_of,
 };
 use super::survey_templates::{TemplateChoice, saved_layout_templates};
 use crate::dialog_layout::{TABLE_ROW_GAP, table_row_colour};
@@ -61,6 +64,9 @@ const UNITS: [LinearUnit; 4] = [
     LinearUnit::UsSurveyFeet,
     LinearUnit::Links,
 ];
+
+/// The units' words on a SURVEY EXPORT line, in UNITS' order.
+const UNIT_WORDS: [&str; 4] = ["metres", "feet", "usfeet", "links"];
 
 /// The delimiters, in the Delimiter choice's order.
 const DELIMITERS: [Delimiter; 4] = [
@@ -258,7 +264,9 @@ impl SurveyExportDialog {
             let (_, chosen) = form.template.ui(ui, "template", &form.templates);
             form.template_chosen = chosen;
         });
-        let mut presets = vec!["(presets)"];
+        // The first item is none chosen, shown "No preset", muted (empty_item_words), where
+        // "(presets)" was a bracketed word of its own (the fifth look audit).
+        let mut presets = vec!["(no preset)"];
         presets.extend(names_of(all_column_presets()));
         form_row(ui, "Preset:", |ui| {
             form.preset_chosen = choice_of(ui, "preset", &presets, &mut form.preset)
@@ -276,7 +284,7 @@ impl SurveyExportDialog {
             )
         });
         form_row(ui, "Delimiter:", |ui| {
-            choice_of(ui, "delimiter", &names_of(&DELIMITERS), &mut form.delimiter)
+            token_choice_of(ui, "delimiter", &names_of(&DELIMITERS), &mut form.delimiter)
                 .on_hover_text("What separates the fields")
         });
         // At the fields' edge, as every check box of a form is.
@@ -288,7 +296,7 @@ impl SurveyExportDialog {
         )
         .on_hover_text("With it, the import wizard reads the column order back without asking");
         form_row(ui, "Quotes:", |ui| {
-            choice_of(ui, "quoting", &names_of(&QUOTINGS), &mut form.quoting)
+            token_choice_of(ui, "quoting", &names_of(&QUOTINGS), &mut form.quoting)
                 .on_hover_text("Double quotes round a field that needs them (RFC 4180), or none")
         });
         form_row(ui, "Comment prefix:", |ui| {
@@ -314,7 +322,7 @@ impl SurveyExportDialog {
         });
         let units: Vec<&str> = UNITS.iter().map(|unit| unit_name(*unit)).collect();
         form_row(ui, "Write in:", |ui| {
-            choice_of(ui, "unit", &units, &mut form.unit)
+            token_choice_of(ui, "unit", &units, &mut form.unit)
                 .on_hover_text("The unit the coordinates are written in")
         });
     }
@@ -352,7 +360,11 @@ impl SurveyExportDialog {
         Ok(())
     }
 
-    fn export_points(&self, host: &mut dyn Host) -> Result<String> {
+    /// The SURVEY EXPORT line the form says (docs/survey.md, "Point files on the command line"):
+    /// the file, the layout template of Columns, Delimiter, Header, Quotes and Comment prefix,
+    /// DECIMALS, UNIT from Write In, and SELECTION for "Selected survey points". InvalidArgument,
+    /// in the dialog's words, for a field the line cannot carry.
+    pub fn export_line(&self) -> Result<String> {
         let form = &self.form;
         let path = form.file.trim();
         if path.is_empty() {
@@ -361,8 +373,9 @@ impl SurveyExportDialog {
                 "choose the file to write",
             ));
         }
-        // surveyio's own template text, read by its own parser: the export takes exactly the
-        // layouts a saved template may hold.
+        // surveyio's own template text, read by its own parser here so a layout it refuses is
+        // said before a line is made: the export takes exactly the layouts a saved template may
+        // hold.
         let mut text = format!(
             "{};delimiter={};header={};quote={}",
             form.columns.trim(),
@@ -374,7 +387,7 @@ impl SurveyExportDialog {
             text.push_str(";comment=");
             text.push_str(form.comment.trim());
         }
-        let layout = parse_layout_template(&text)?;
+        parse_layout_template(&text)?;
         let decimals = match parse_integer(form.decimals.trim()) {
             Some(decimals) if (0..=i64::from(MAXIMUM_EXPORT_DECIMALS)).contains(&decimals) => {
                 decimals
@@ -387,51 +400,83 @@ impl SurveyExportDialog {
                 ));
             }
         };
-
-        let document = host.document();
-        let selected = form.scope.index == Some(1);
-        let mut not_points = 0;
-        let points: Vec<DrawingSurveyPoint> = if selected {
-            let ids = document.selection().ids();
-            if ids.is_empty() {
-                return Err(Error::new(
-                    ErrorCode::InvalidState,
-                    "nothing is selected - select survey points, or write all of them",
-                ));
-            }
-            let pick = survey_points_among(document, &ids, &SurveyImportOptions::default());
-            not_points = pick.not_survey_points;
-            pick.points
+        let unit = UNIT_WORDS[form.unit.index.unwrap_or(0).min(UNIT_WORDS.len() - 1)];
+        // The template always in quotes: it is one word whatever its comment prefix holds.
+        let layout = command_word(&text)?;
+        let layout = if layout.starts_with('"') {
+            layout
         } else {
-            drawing_survey_points(document, &SurveyImportOptions::default())
+            format!("\"{layout}\"")
         };
-        if points.is_empty() {
+        let mut line = format!(
+            "SURVEY EXPORT {} LAYOUT {layout} DECIMALS {decimals} UNIT {unit}",
+            command_word(path)?
+        );
+        if form.scope.index == Some(1) {
+            line.push_str(" SELECTION");
+        }
+        Ok(line)
+    }
+
+    /// Export: the SURVEY EXPORT line handed to the window's command executor, as if it had
+    /// been typed - one code path with katana_cli and katana_mcp, logged - and its reply said as
+    /// the dialog's sentence. The dialog wrote the file itself until 2026-11-19, beside the verb
+    /// that writes it the same way (the import and export check).
+    fn export_points(&self, host: &mut dyn Host) -> Result<String> {
+        let line = self.export_line()?;
+        let selected = self.form.scope.index == Some(1);
+        // Said in the dialog's words before a line is run: SELECTION of nothing is a scope that
+        // takes nothing, which the verb reports rather than refuses.
+        if selected && host.document().selection().ids().is_empty() {
+            return Err(Error::new(
+                ErrorCode::InvalidState,
+                "nothing is selected - select survey points, or write all of them",
+            ));
+        }
+        let outcome = host.run(&line);
+        if !outcome.ok {
+            let why = if outcome.error.is_empty() {
+                format!("{line} was refused")
+            } else {
+                outcome.error.clone()
+            };
+            return Err(Error::new(ErrorCode::InvalidArgument, why));
+        }
+        let records: Vec<ReplyRecord> = outcome
+            .reply
+            .split('\n')
+            .filter_map(read_reply_record)
+            .collect();
+        let Some(exported) = records
+            .iter()
+            .find(|record| record.words.first().map(String::as_str) == Some("exported"))
+        else {
             return Err(Error::new(
                 ErrorCode::InvalidState,
                 if selected {
                     "none of the selection is a survey point (a point entity with a point number)"
                 } else {
-                    "the drawing has no survey points (point entities with a point number)"
+                    "nothing was written"
                 },
             ));
-        }
-        let without_elevation = points
-            .iter()
-            .filter(|point| point.elevation.is_none())
-            .count();
-        let survey_points: Vec<_> = points.iter().map(to_survey_point).collect();
-        let options = DelimitedExportOptions {
-            decimals: decimals as i32,
-            unit: UNITS[form.unit.index.unwrap_or(0).min(UNITS.len() - 1)],
         };
-        let bytes = write_delimited_points(&survey_points, &layout, &options)?;
-        write_file(path, bytes.as_bytes())?;
+        let count = |key: &str| {
+            exported
+                .value(key)
+                .and_then(parse_integer)
+                .unwrap_or(0)
+        };
+        let points = usize::try_from(count("points")).unwrap_or(0);
+        let without_elevation = count("without_elevation");
+        let not_points = count("not_points");
+        let unit = UNITS[self.form.unit.index.unwrap_or(0).min(UNITS.len() - 1)];
         let mut report = format!(
-            "Exported {} to {} - layout {}, {decimals} decimals, in {}.",
-            katana_cad::tools::everyday_support::counted(points.len(), "point", "points"),
-            file_name_of(path),
-            layout_template(&layout),
-            unit_name(options.unit)
+            "Exported {} to {} - layout {}, {} decimals, in {}.",
+            katana_cad::tools::everyday_support::counted(points, "point", "points"),
+            file_name_of(self.form.file.trim()),
+            exported.value("layout").unwrap_or(""),
+            exported.value("decimals").unwrap_or(""),
+            unit_name(unit)
         );
         if without_elevation != 0 {
             report.push_str(&if without_elevation == 1 {
@@ -919,7 +964,9 @@ impl SurveyPointReportDialog {
                     &REPORT_HEADERS,
                     &form.rows,
                     None,
-                    "No survey points to list.",
+                    // What to do: the line above already says there are none (said twice, the
+                    // fifth look audit).
+                    "Select survey points, or add some and press Refresh.",
                 );
                 super::survey_dialogs::offstage(ui, "reportText", |ui| {
                     drive::text_with(
@@ -945,17 +992,19 @@ impl SurveyPointReportDialog {
                     }
                     pressed
                 };
+                // Copy and Save CSV... act on the points listed: greyed with none, where they
+                // stood lit beside an empty table (the fifth look audit).
+                let listed = !form.rows.is_empty();
                 let (left, right) = crate::shell::dialog::button_row(
                     ui,
                     |ui| {
-                        pick(
-                            ui,
-                            &[
-                                ("refresh", "Refresh"),
-                                ("copy", "Copy"),
-                                ("saveCsv", "Save CSV..."),
-                            ],
-                        )
+                        let refreshed = pick(ui, &[("refresh", "Refresh")]);
+                        let acted = ui
+                            .add_enabled_ui(listed, |ui| {
+                                pick(ui, &[("copy", "Copy"), ("saveCsv", "Save CSV...")])
+                            })
+                            .inner;
+                        refreshed.or(acted)
                     },
                     |ui| pick(ui, &[("close", "Close")]),
                 );

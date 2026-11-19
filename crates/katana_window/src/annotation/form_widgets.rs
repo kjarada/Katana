@@ -69,7 +69,9 @@ pub fn problem_line(ui: &mut Ui, name: &str, text: &str) -> Response {
 }
 
 /// An enumeration's names in a choice named `name`, by value: `values` in their order, each shown
-/// as its `to_string` name, `chosen` the one chosen.
+/// as its `to_string` name in sentence case ("point", "none" shown "Point", "None"; the verbs'
+/// tokens, drive::controls::token_choice), the name still what is recorded and filled, `chosen`
+/// the one chosen.
 pub fn combo<E: EnumName + PartialEq>(
     ui: &mut Ui,
     name: &str,
@@ -84,7 +86,7 @@ pub fn combo<E: EnumName + PartialEq>(
         index: values.iter().position(|value| value == chosen),
         ..Choice::default()
     };
-    let response = controls::choice(ui, name, &items, &mut choice);
+    let response = controls::token_choice(ui, name, &items, &mut choice);
     if let Some(value) = choice.index.and_then(|at| values.get(at)) {
         *chosen = *value;
     }

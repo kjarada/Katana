@@ -680,6 +680,53 @@ mod road_object_dialog {
             .expect("the dialog");
         assert!(shown.rect.height() <= 700.0, "{}", shown.rect.height());
     }
+
+    #[test]
+    fn every_kind_keeps_one_size_and_the_dialog_fits_a_1360_by_860_screen_whole() {
+        // The fifth look audit: 632 x 844 on Safety barrier, 626 x 837 on Light poles, 626 x 781
+        // on Guide posts - the page drawn as tall as its own kind's - and at 844, the room of a
+        // 1360 x 860 screen, its body scrolled with the Heights and Object rows cut at the fold.
+        // Every kind's page is now the tallest kind's height, and the placement stands beside the
+        // kind's column, so the dialog is one size on every kind and shorter than the room, with
+        // its scope in use as well as unused.
+        let host = site();
+        let dialog = RoadObjectDialog::new(host.document());
+        let mut d = Driven::on(
+            Harness::with_screen(1360.0, 860.0),
+            host,
+            dialog,
+            "roadObjectDialog",
+        );
+        let room = 860.0 - 2.0 * katana_window::shell::dialog::MARGIN;
+        let size = |d: &Driven<RoadObjectDialog>| {
+            d.harness
+                .target_record("roadObjectDialog")
+                .expect("the dialog")
+                .rect
+                .size()
+        };
+        for place in ["roadObjectPlaceAlignment", "roadObjectPlaceLines"] {
+            d.press(place);
+            let mut first = None;
+            for &kind in road_object_kinds() {
+                d.fill(
+                    "roadObjectKinds",
+                    katana_cad::road::road_objects::kind_title(kind),
+                );
+                let shown = size(&d);
+                let first = *first.get_or_insert(shown);
+                assert!(
+                    (shown - first).length() <= 0.5,
+                    "{place}: {kind:?} is {shown:?}, the first kind {first:?}"
+                );
+                assert!(
+                    shown.y < room - 0.5,
+                    "{place}: {kind:?} is {} high, held to the room {room}: its body scrolls",
+                    shown.y
+                );
+            }
+        }
+    }
 }
 
 /// The manager on a site of three objects, in this order:

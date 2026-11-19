@@ -878,14 +878,14 @@ impl LayerManagerDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let status = self.status.clone();
         let is_error = self.status_is_error;
-        // The one footer (shell::dialog::button_row): the status at the left; Revert, Close, then
-        // Save Changes, the primary, last at the right. Revert and Save stood under the form with
-        // Save in the accent in the body (the look audits' T5). Like the body, the form's two
-        // buttons take nothing while the dialog shows no drawing.
+        // The one footer (shell::dialog::button_row): Revert - it reads the layer back into the
+        // form - and the status at the left, as every manager's (the fifth look audit: it stood
+        // beside Close); Close, then Save Changes, the primary, last at the right. Revert and Save
+        // stood under the form with Save in the accent in the body (the look audits' T5). Like
+        // the body, the form's two buttons take nothing while the dialog shows no drawing.
         let orphan = self.orphan;
-        let (_, (reverted, close, saved)) = dialog::button_row(
+        let (reverted, (close, saved)) = dialog::button_row(
             ui,
-            |ui| dialog::status(ui, "layerStatus", &status, is_error),
             |ui| {
                 let reverted = ui
                     .add_enabled_ui(!orphan, |ui| {
@@ -894,6 +894,10 @@ impl LayerManagerDialog {
                             .clicked()
                     })
                     .inner;
+                dialog::status(ui, "layerStatus", &status, is_error);
+                reverted
+            },
+            |ui| {
                 let close = controls::button(ui, "closeButton", "Close").clicked();
                 let saved = ui
                     .add_enabled_ui(!orphan, |ui| {
@@ -902,7 +906,7 @@ impl LayerManagerDialog {
                             .clicked()
                     })
                     .inner;
-                (reverted, close, saved)
+                (close, saved)
             },
         );
         if reverted {

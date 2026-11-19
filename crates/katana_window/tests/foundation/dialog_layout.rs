@@ -33,6 +33,68 @@ mod dialog_layout {
     const HALF_A_POINT: f32 = 0.5;
 
     #[test]
+    fn a_footer_is_one_height_whatever_fraction_of_a_pixel_its_body_ends_on() {
+        // The fifth look audit: four footers measured 50 pixels where every other is 49 - their
+        // bodies ended part way through a pixel, and the rule over the footer was rounded one way
+        // and the dialog's bottom the other. The footer starts on a whole pixel, so a body of any
+        // height has the same footer: its button a whole number of pixels from the dialog's top
+        // and the same distance above the dialog's bottom.
+        let mut harness = offscreen_harness();
+        let mut frames: Vec<DialogFrame> = (0..4)
+            .map(|at| DialogFrame::new(&format!("fraction{at}Dialog"), "Fraction"))
+            .collect();
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            for (at, frame) in frames.iter_mut().enumerate() {
+                frame.place(egui::pos2(0.0, 150.0 * at as f32));
+                frame.show(
+                    &ctx,
+                    &mut (),
+                    |ui, _| {
+                        // A body ending 0, a quarter, a half and three quarters into a pixel.
+                        ui.add_space(20.0 + 0.25 * at as f32);
+                        drive::label(ui, &format!("fraction{at}Body"), "A body");
+                    },
+                    |ui, _| {
+                        button_row(
+                            ui,
+                            |_| {},
+                            |ui| {
+                                drive::button(ui, &format!("fraction{at}Close"), "Close");
+                            },
+                        );
+                    },
+                );
+            }
+        };
+        harness.show(&mut draw).expect("the dialogs are drawn");
+        harness.frame(&mut draw).drop_without_applying_deltas();
+        let mut under = Vec::new();
+        for at in 0..4 {
+            let dialog = harness
+                .target_record(&format!("fraction{at}Dialog"))
+                .expect("a target")
+                .rect;
+            let close = harness
+                .control(&format!("fraction{at}Close"))
+                .expect("drawn")
+                .rect;
+            let from_top = close.top() - dialog.top();
+            assert!(
+                (from_top - from_top.round()).abs() < 0.01,
+                "dialog {at}: Close is {from_top} from the top, part way through a pixel"
+            );
+            under.push(dialog.bottom() - close.bottom());
+        }
+        for at in 1..4 {
+            assert!(
+                (under[at] - under[0]).abs() < 0.01,
+                "the footers differ under their buttons: {under:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_footers_buttons_end_at_the_right_edge_with_the_primary_last() {
         let mut harness = offscreen_harness();
         let mut frame = DialogFrame::new("buttonsDialog", "Buttons");
@@ -521,22 +583,27 @@ mod dialog_layout {
     }
 
     #[test]
-    fn a_status_beside_the_buttons_is_one_line_cut_short_and_whole_in_its_tooltip() {
+    fn a_status_that_fits_beside_the_buttons_is_one_line_and_a_longer_one_is_whole_above_them() {
         // The third look audit (A): 21 terrain dialogs wrapped their status to two lines beside
-        // the buttons, a 55 point footer against the standard 49. A status there is one line in
-        // the room the buttons leave, cut short, its whole text in its tooltip and its record -
-        // whether drawn by shell::dialog::status or by a dialog's own wrapped named label.
+        // the buttons, a 55 point footer against the standard 49. So a status that fits there is
+        // one line beside them - even one whose caller asked for it wrapped. The fifth look audit:
+        // cut short to that line, a longer status lost its guidance at the "..." ("There is no
+        // surface: make one with Terrain > S..."). So one too long for the room is drawn whole,
+        // wrapped, in a band above the buttons, which stay one row at the right - whether drawn by
+        // shell::dialog::status or by a dialog's own wrapped named label.
         let long = "the drawing has no surface yet; make one with Terrain > Surface From, then \
                     choose it here, set the interval and run this again";
+        let fitting = "tick a layer";
         let mut harness = offscreen_harness();
         let mut frames = [
             DialogFrame::new("shortStatusDialog", "Short"),
+            DialogFrame::new("fittingDialog", "Fitting"),
             DialogFrame::new("statusDialog", "Status"),
             DialogFrame::new("ownLabelDialog", "Own Label"),
         ];
         let mut draw = |ui: &mut Ui| {
             let ctx = ui.ctx().clone();
-            let [short, helper, own] = &mut frames;
+            let [short, fits, helper, own] = &mut frames;
             let footer = |ui: &mut Ui, prefix: &str, text: &str, by_helper: bool| {
                 button_row(
                     ui,
@@ -560,8 +627,9 @@ mod dialog_layout {
             };
             for (frame, prefix, text, by_helper, at) in [
                 (short, "short", "nothing to run yet", true, 0.0),
-                (helper, "helper", long, true, 200.0),
-                (own, "own", long, false, 400.0),
+                (fits, "fits", fitting, false, 150.0),
+                (helper, "helper", long, true, 300.0),
+                (own, "own", long, false, 500.0),
             ] {
                 frame.place(egui::pos2(0.0, at));
                 frame.show(
@@ -575,57 +643,83 @@ mod dialog_layout {
             }
         };
         harness.show(&mut draw).expect("the dialogs are drawn");
-        ctx_show_every_tooltip(&harness);
         harness.frame(&mut draw).drop_without_applying_deltas();
         let output = harness.frame(&mut draw);
         let shapes = flat(&output.shapes);
         output.drop_without_applying_deltas();
         let one_line = harness.control("shortStatus").expect("drawn").rect.height();
-        for prefix in ["helper", "own"] {
+        let height = |name: &str| harness.target_record(name).expect("a target").rect.height();
+
+        // One that fits: one line beside Close, its footer the short one's.
+        let fits = harness.control("fitsStatus").expect("drawn").rect;
+        let close = harness.control("fitsClose").expect("drawn").rect;
+        assert!((fits.height() - one_line).abs() <= HALF_A_POINT, "one line: {fits:?}");
+        assert!(fits.right() <= close.left(), "beside Close: {fits:?} {close:?}");
+        assert!((fits.center().y - close.center().y).abs() <= 2.0, "level with Close");
+        assert!((height("fittingDialog") - height("shortStatusDialog")).abs() <= HALF_A_POINT);
+
+        for (prefix, dialog_name) in [("helper", "statusDialog"), ("own", "ownLabelDialog")] {
+            let dialog = harness.target_record(dialog_name).expect("a target").rect;
             let status = harness.control(&format!("{prefix}Status")).expect("drawn");
             let close = harness.control(&format!("{prefix}Close")).expect("drawn").rect;
+            let run = harness.control(&format!("{prefix}Run")).expect("drawn").rect;
+            assert_eq!(harness.report(&format!("{prefix}Status")).expect("read"), long);
             assert!(
-                (status.rect.height() - one_line).abs() <= HALF_A_POINT,
-                "{prefix}: the status is {} high, a line is {one_line}",
+                status.rect.height() >= 2.0 * one_line - HALF_A_POINT,
+                "{prefix}: the status is {} high, wrapped over lines of {one_line}",
                 status.rect.height()
             );
             assert!(
-                status.rect.right() <= close.left(),
-                "{prefix}: the status runs to {} past Close at {}",
-                status.rect.right(),
-                close.left()
+                status.rect.bottom() <= close.top() + HALF_A_POINT,
+                "{prefix}: the status ends at {} under Close's top {}",
+                status.rect.bottom(),
+                close.top()
             );
-            assert_eq!(harness.report(&format!("{prefix}Status")).expect("read"), long);
-            // Painted cut short in its place; whole, uncut, in its tooltip elsewhere.
+            // Across the footer from its padding to its padding, not in the room beside Close.
+            let left_edge = dialog.left() + 1.0 + PADDING;
+            let right_edge = dialog.right() - 1.0 - PADDING;
+            assert!(
+                (status.rect.left() - left_edge).abs() <= HALF_A_POINT,
+                "{prefix}: the status starts the footer"
+            );
+            assert!(
+                status.rect.right() <= right_edge + HALF_A_POINT,
+                "{prefix}: the status stays in the footer"
+            );
+            assert!(
+                status.rect.width() > close.left() - left_edge,
+                "{prefix}: the status has more than the room beside the buttons"
+            );
+            // The buttons are still one row at the right, the primary last.
+            assert!((close.top() - run.top()).abs() <= HALF_A_POINT, "{prefix}: one row");
+            assert!(
+                (run.right() - right_edge).abs() <= HALF_A_POINT,
+                "{prefix}: Run ends the row"
+            );
+            // Painted whole, over lines, and nothing in its place cut short.
             let painted = inside(&shapes, status.rect);
             assert!(
                 painted.iter().any(|shape| matches!(
                     shape,
-                    Shape::Text(text) if text.galley.elided && text.galley.rows.len() == 1
+                    Shape::Text(text) if !text.galley.elided && text.galley.rows.len() >= 2
                 )),
-                "{prefix}: the status is one line cut short"
+                "{prefix}: the status is painted whole, over lines"
             );
             assert!(
-                shapes.iter().any(|shape| matches!(
+                !painted.iter().any(|shape| matches!(
                     shape,
-                    Shape::Text(text) if !text.galley.elided
-                        && text.galley.text() == long
-                        && !status.rect.contains_rect(text.visual_bounding_rect())
+                    Shape::Text(text) if text.galley.elided
                 )),
-                "{prefix}: the whole text is in its tooltip"
+                "{prefix}: nothing in it is cut short"
+            );
+            // The footer is taller by the band and the gap under it, and by nothing more.
+            let taller = height(dialog_name) - height("shortStatusDialog");
+            assert!(
+                (taller - (status.rect.height() + FORM_SPACING.y)).abs() <= 1.0,
+                "{prefix}: the footer is {taller} taller for a band {} high",
+                status.rect.height()
             );
         }
-        // A footer of a long status is the height of one of a short one.
-        let height = |name: &str| harness.target_record(name).expect("a target").rect.height();
-        assert!((height("statusDialog") - height("shortStatusDialog")).abs() <= HALF_A_POINT);
-    }
-
-    /// Every tooltip shown whether hovered or not (egui's Memory::everything_is_visible), so a
-    /// test reads one without a pointer's timing.
-    fn ctx_show_every_tooltip(harness: &katana_window::drive::Harness) {
-        harness
-            .context()
-            .memory_mut(|memory| memory.set_everything_is_visible(true));
     }
 
     #[test]

@@ -86,7 +86,7 @@ mod shading_line {
     fn what_cannot_be_written_is_refused_naming_the_field() {
         let mut form = ShadingForm::default();
         // No source: the one sentence every dialog reading a surface or a raster says it in.
-        assert!(message(&form).contains("There is no surface or raster"));
+        assert!(message(&form).contains("No surface or raster"));
         form.source = String::from("RASTER 1");
         form.style = String::from("slope");
         form.range_min = String::from("0");
@@ -188,7 +188,7 @@ mod terrain_shading_dialog {
         assert!(
             bench
                 .text("shadingStatus")
-                .contains("There is no surface or raster")
+                .contains("No surface or raster")
         );
         assert!(bench.text("shadingCommand").is_empty());
         assert!(bench.placeholder("shadingCommand").is_empty());

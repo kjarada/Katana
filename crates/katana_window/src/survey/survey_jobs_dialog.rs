@@ -425,6 +425,9 @@ impl SurveyJobsDialog {
             summary(ui);
         }
         let busy = form.task.busy();
+        // The job's tools act on the job chosen: greyed with none (no jobs, or none picked), where
+        // they stood lit over an empty table (the fifth look audit).
+        let chosen = form.current.is_some_and(|row| row < form.jobs.len());
         ui.horizontal(|ui| {
             let buttons = [
                 (
@@ -443,11 +446,13 @@ impl SurveyJobsDialog {
                     "Take the job off the list, with or without its points",
                 ),
             ];
-            for (name, text, tip) in buttons {
-                if drive::button(ui, name, text).on_hover_text(tip).clicked() {
-                    form.pressed.push(name);
+            ui.add_enabled_ui(chosen, |ui| {
+                for (name, text, tip) in buttons {
+                    if drive::button(ui, name, text).on_hover_text(tip).clicked() {
+                        form.pressed.push(name);
+                    }
                 }
-            }
+            });
         });
         // The export on a row of its own: its format, then the file filling what its two buttons
         // leave. Squeezed beside the job's buttons, the file field was 40 wide ("fil...").
@@ -471,12 +476,14 @@ impl SurveyJobsDialog {
             {
                 form.pressed.push("browseExport");
             }
-            if drive::button(ui, "exportReport", "Export Report")
-                .on_hover_text("Write the job's report: HTML as kept, plain text, or PDF")
-                .clicked()
-            {
-                form.pressed.push("exportReport");
-            }
+            ui.add_enabled_ui(chosen, |ui| {
+                if drive::button(ui, "exportReport", "Export Report")
+                    .on_hover_text("Write the job's report: HTML as kept, plain text, or PDF")
+                    .clicked()
+                {
+                    form.pressed.push("exportReport");
+                }
+            });
         });
         // Removal is confirmed here, on the page: a box would stop a headless run.
         let mut remove_row = |ui: &mut Ui| {

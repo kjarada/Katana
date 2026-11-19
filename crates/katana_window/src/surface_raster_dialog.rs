@@ -105,10 +105,12 @@ pub fn surface_from_line(form: &SurfaceFromForm) -> Result<String> {
     } else {
         let source = form.source.trim();
         if source.is_empty() {
+            // The drawing's condition and where to mend it, short enough for one line beside the
+            // footer's buttons, as terrain_dialog_parts::NO_SURFACE is (the fifth look audit).
             return Err(invalid(if form.kind == SurfaceFromKind::Cloud {
-                "Source: there is no point cloud to build a surface from"
+                "No point cloud: import one (File > Import)"
             } else {
-                "Source: there is no raster to build a surface from"
+                "No raster: import one (File > Import)"
             }));
         }
         line.push_str(source);

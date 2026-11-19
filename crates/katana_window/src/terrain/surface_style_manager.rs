@@ -1605,12 +1605,16 @@ impl Framed for SurfaceStyleManagerDialog {
         let status = self.status.clone();
         let is_error = self.status_is_error;
         let can_apply = !self.apply_line(host.document()).is_empty();
-        let style_chosen = self.chosen(host.document()).is_some();
+        // Revert greys with nothing to put back - the form as the drawing's style is - where it
+        // stood lit over an unedited form (the fifth look audit); a field that does not read is
+        // an edit it puts back.
+        let revertable = self.chosen(host.document()).is_some()
+            && (can_apply || self.read(host.document()).is_err());
         let (revert, (close, apply)) = crate::shell::dialog::button_row(
             ui,
             |ui| {
                 let revert = ui
-                    .add_enabled_ui(style_chosen, |ui| {
+                    .add_enabled_ui(revertable, |ui| {
                         button(ui, "surfaceStyleRevert", "Revert")
                             .on_hover_text("The form back to the drawing's style")
                             .clicked()

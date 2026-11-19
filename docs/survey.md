@@ -2478,21 +2478,48 @@ SURVEY EXPORT <file> [LAYOUT <template>] [DECIMALS <n>] [UNIT <unit>]
 - *Rejected:* the unit words of the reports ("US survey feet"): a line's word
   has no blanks, so `usfeet`.
 
+- **Survey > Export Survey Points hands its line to the executor** (since
+  2026-11-19, the seventh look round): Export builds
+  `SURVEY EXPORT <file> LAYOUT "<columns>;delimiter=..;header=..;quote=..[;comment=..]" DECIMALS <n> UNIT <unit> [SELECTION]`
+  from its fields - Columns, Delimiter, Header, Quotes and Comment prefix the
+  `LAYOUT` template (always quoted, one word whatever the prefix holds);
+  Decimals; Write In the `UNIT`; All no scope word, Selected `SELECTION` -
+  and hands it to the window's command executor as if it had been typed
+  (`SurveyExportDialog::export_line`, `export_points` in
+  `crates/katana_window/src/survey/survey_points_ui.rs`), so the dialog, the
+  window's command line, `katana_cli` and `katana_mcp` are one code path and
+  the line is logged. The dialog's sentence ("Exported 12 points to pts.csv -
+  layout ..., 3 decimals, in metres.") is made from the verb's `exported`
+  record. What the dialog still says in its own words, before a line runs: a
+  file not named, a layout or decimals that do not read, and Selected with
+  nothing selected (the verb would report a scope that took nothing rather
+  than refuse it). Selected now writes in entity id order, as `SELECTION`
+  does, where the dialog wrote the selection's order. *Rejected:* keeping
+  the dialog's own writer beside the verb's - two writers of one file are a
+  second way of doing one thing, and a dialog does no work of its own: it
+  hands a line over, as every dialog does.
+
 Tests: `survey_export_verb::*` and `survey_point_list::*`
-(`crates/katana_app/tests/file_verbs/survey_export.rs`), and
+(`crates/katana_app/tests/file_verbs/survey_export.rs`),
+`survey_export_dialog::*` (`crates/katana_window/tests/survey/survey_export_dialog.rs`:
+the line the dialog hands over, the file the verb writes from it, and the
+refusals that run nothing), and
 `cli.survey_export_writes_the_drawings_survey_points_and_another_reader_reads_them`,
 whose file GDAL's CSV driver reads back (`tests/cli/survey_io_cli.cmake`).
 
 Not done:
 
-- Survey > Export Survey Points still writes its file itself
-  (`crates/katana_window/src/survey/survey_points_ui.rs`, `export_points`)
-  rather than building the `SURVEY EXPORT` line and handing it to the
-  executor; its choices are the verb's words one for one (Columns, Delimiter,
-  Header and Quotes the `LAYOUT` template; Decimals; Write In the `UNIT`; All
-  or Selected no scope word or `SELECTION`). Both call the one writer, so
-  the same points with the same choices make the same rows; Selected writes
-  them in the selection's order, `SELECTION` in entity id order.
+- The import wizard's delimited Import still imports in the dialog
+  (`SurveyImportWizard::import_now`) rather than handing over
+  `SURVEY IMPORT <file> LAYOUT ... UNIT ...`. The line covers a plain
+  import - the layout, the unit, the layer, codes and linework on or off -
+  but not what the wizard's other steps say: the System step's declared and
+  target EPSG codes (a transformation), the existing-point policy (replace or
+  skip an id the drawing has; the verb refuses one), a layer per code, and
+  the review report the wizard writes before the import. Handing over the
+  line only when none of those is asked would be two code paths for one
+  button; the verb's grammar should grow `FROM <epsg> TO <epsg>` and
+  `EXISTING replace|skip` first, then the wizard hand over every import.
 - The window's command line runs `SURVEY EXPORT` without its plan views, so
   `VIEW` is refused there as it is headless; `AREA` names the window.
 - `LAYOUT` imports the coordinates as the file writes them: the wizard's

@@ -47,7 +47,8 @@ use super::terrain_dialog_support::{
     SourcePicker, TerrainRun, TerrainSourceKinds, fill_sources, line_word, number_list,
     terrain_reply_field, terrain_sources,
 };
-use crate::drive::{Choice, SpinRange, button, check, choice, spin};
+use crate::drive::controls::token_choice;
+use crate::drive::{Choice, SpinRange, button, check, spin};
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_save_file_name};
 use crate::shell::DialogFrame;
@@ -234,11 +235,13 @@ impl TerrainShadingDialog {
             azimuth: 315.0,
             altitude: 45.0,
             z_factor: 1.0,
+            // Shown in sentence case, as every choice's values are; the verb's word is the item's
+            // data (the fifth look audit: "regular" was the raw token).
             variant: WordChoice::new(&[
-                ("regular", "regular"),
-                ("combined", "combined"),
-                ("multidirectional", "multidirectional"),
-                ("igor", "igor"),
+                ("Regular", "regular"),
+                ("Combined", "combined"),
+                ("Multidirectional", "multidirectional"),
+                ("Igor", "igor"),
             ]),
             ramps,
             ramp,
@@ -428,7 +431,8 @@ impl Framed for TerrainShadingDialog {
         });
         row(ui, "Ramp:", |ui| {
             ui.add_enabled_ui(coloured, |ui| {
-                choice(ui, "shadingRamp", &self.ramps, &mut self.ramp).on_hover_text(
+                // The ramps are the verb's tokens, shown in sentence case (token_choice).
+                token_choice(ui, "shadingRamp", &self.ramps, &mut self.ramp).on_hover_text(
                     "A built-in ramp, or the path of a GDAL colour-map file typed in.",
                 );
             });

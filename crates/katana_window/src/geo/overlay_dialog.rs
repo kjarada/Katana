@@ -32,6 +32,7 @@ use super::gis_tool_dialog::{
     gis_layer_target, gis_scope, gis_word,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
+use crate::drive::controls::withdrawn;
 use crate::drive::radio;
 use crate::host::Host;
 use crate::shell::dialog;
@@ -153,6 +154,10 @@ pub struct GisOverlayDialog {
 impl GisOverlayDialog {
     pub fn new(context: GisDialogContext, host: &dyn Host) -> Self {
         let mut with = ScopeFilterWidget::new("gisOverlayWith");
+        // Its heading names what it picks - what the subject is overlaid with - where a second
+        // "Apply to" beside the subject's own read as a second scope of what is cut up (the
+        // fifth look audit; Clip's boundary is "Boundary areas").
+        with.set_heading("Overlay features");
         with.views = context.views_fn();
         with.set_choice(ScopeChoice::Layers);
         let mut frame = GisToolFrame::new("gisOverlay", "Overlay", context, host, true);
@@ -269,11 +274,13 @@ impl GisTool for GisOverlayDialog {
             }
         });
         let file = self.from_file;
-        ui.add_enabled_ui(!file, |ui| {
+        crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, !file, |ui| {
             self.with.ui(ui);
         });
+        // The file's rows only while a file is overlaid; otherwise withdrawn - recorded, refused
+        // as disabled as when they were greyed - taking no room (as Clip's).
         let mut browse = false;
-        ui.add_enabled_ui(file, |ui| {
+        let mut rows = |ui: &mut Ui| {
             browse = gis_file_field(
                 ui,
                 ("gisOverlayWithFile", "gisOverlayWithFileBrowse"),
@@ -298,15 +305,15 @@ impl GisTool for GisOverlayDialog {
                 "e.g. kind='corridor'",
                 "where=: an SQL WHERE clause on the file's fields",
             );
-        });
-        gis_field(
-            ui,
-            "gisOverlayKeep",
-            "Keep subject's:",
-            &mut self.keep,
-            "all its properties",
-            "keep=a,b | all | none: the subject's properties each piece carries",
-        );
+        };
+        if file {
+            rows(ui);
+        } else {
+            withdrawn(ui, "gisOverlayWithFileRows", |ui| {
+                ui.add_enabled_ui(false, |ui| rows(ui));
+            });
+        }
+        // What each piece carries of the overlay, under what the overlay is.
         gis_field(
             ui,
             "gisOverlayKeepWith",
@@ -314,6 +321,28 @@ impl GisTool for GisOverlayDialog {
             &mut self.keep_with,
             "all its properties",
             "keepwith=a,b | all | none: the overlay's properties each piece carries",
+        );
+        if browse {
+            self.browse(&*host);
+        }
+    }
+
+    /// What is made of the pieces, under the scope of the subject: what each keeps of the
+    /// subject, where they go, and the rows' file. Beside the overlay's scope they ran its column
+    /// past a 1360 x 860 screen's height, cut at "Keep overlay's" (the fifth look audit).
+    fn has_under_scope(&self) -> bool {
+        true
+    }
+
+    fn under_scope_ui(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+        dialog::section(ui, "Result");
+        gis_field(
+            ui,
+            "gisOverlayKeep",
+            "Keep subject's:",
+            &mut self.keep,
+            "all its properties",
+            "keep=a,b | all | none: the subject's properties each piece carries",
         );
         gis_field(
             ui,
@@ -338,8 +367,5 @@ impl GisTool for GisOverlayDialog {
             "Replace the CSV file if it exists",
             &mut self.overwrite,
         );
-        if browse {
-            self.browse(&*host);
-        }
     }
 }

@@ -956,6 +956,10 @@ pub struct LeaderManagerDialog {
     renumber_order: BalloonOrder,
     renumber_scoped: bool,
     arrange_report: String,
+    /// Whether Align Selected Leaders has leaders to align, and Renumber Balloons balloons to
+    /// number (`update_arrange_ready`): each greys with nothing to act on.
+    align_ready: bool,
+    renumber_ready: bool,
 
     pressed: Option<Pressed>,
     /// Set by the document when the drawing is replaced (File > New, Open): the next refresh
@@ -1073,6 +1077,8 @@ impl LeaderManagerDialog {
             renumber_order: BalloonOrder::Id,
             renumber_scoped: false,
             arrange_report: String::new(),
+            align_ready: false,
+            renumber_ready: false,
             pressed: None,
             replaced,
             _replaced_registration,
@@ -1251,8 +1257,10 @@ impl LeaderManagerDialog {
     fn fill_styles(&mut self, model: &Model) {
         self.leader.fill_label_styles(model);
         self.for_note.fill_label_styles(model);
-        self.leader.fill_text_styles(model, "(default: Standard)");
-        self.for_note.fill_text_styles(model, "(default: Standard)");
+        // The default said as the Settings dialog says its own ("Katana Standard (default)"),
+        // where "(default: Standard)" was a bracketed word of its own (the fifth look audit).
+        self.leader.fill_text_styles(model, "Standard (default)");
+        self.for_note.fill_text_styles(model, "Standard (default)");
     }
 
     /// The leaders the list shows: every one, or those the "Which leaders..." scope takes
@@ -2507,6 +2515,32 @@ impl LeaderManagerDialog {
         &self.arrange_report
     }
 
+    /// Whether Arrange's two acts have anything to act on: Align Selected Leaders the leaders the
+    /// Arrange scope takes, Renumber Balloons the balloons - those the scope takes, or the
+    /// drawing's. Lit with nothing selected, each invited a press that changed nothing (the fifth
+    /// look audit). Controls that cannot be read keep them lit, so a press says why (as Make for
+    /// Selection is kept).
+    fn update_arrange_ready(&mut self, document: &Document) {
+        let mut why = String::new();
+        let taken = leaders_taken(document, &self.arrange_scope, Some(&mut why));
+        let unreadable = !why.is_empty();
+        self.align_ready = unreadable || !taken.is_empty();
+        // A balloon is a leader in a circle; BALLOON RENUMBER numbers those that say a number.
+        let balloon = |id: &EntityId| {
+            document
+                .model()
+                .entities
+                .find(*id)
+                .and_then(leader_of)
+                .is_some_and(|leader| leader.callout == CalloutShape::Circle)
+        };
+        self.renumber_ready = if self.renumber_scoped {
+            unreadable || taken.iter().any(balloon)
+        } else {
+            all_leaders(document).iter().any(balloon)
+        };
+    }
+
     // ---- the frame ---------------------------------------------------------------------------
 
     /// Draws the dialog for this frame - the drawing's changes since the last delivered first, as
@@ -2516,6 +2550,7 @@ impl LeaderManagerDialog {
         if let Some(changes) = self.watcher.deliver(host.document()) {
             self.refresh(host.document(), changes);
         }
+        self.update_arrange_ready(host.document());
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, TITLE));
         frame.set_body_width(BODY_WIDTH);
         // One size on every tab is the body's (`body`, every tab measured): a least height kept
@@ -3364,14 +3399,17 @@ impl LeaderManagerDialog {
         // The one footer (shell::dialog::button_row), the front tab's: on Leader, Freeze Note and
         // Detach Tip at the left beside the last refusal, away from Apply (as Text Styles keeps
         // Delete), then Close and Apply, the primary; on For Selection, Close and Make for
-        // Selection; on Arrange, whose two actions each belong to a section and neither is the
-        // other's lesser, both at the left and Close alone at the right. The tabs' actions stood
-        // in their bodies, under the forms, with the footer empty but for Close (the look audits'
+        // Selection; on Arrange, Close, Renumber Balloons and Align Selected Leaders - the tab's
+        // acts, at the right where every tab's act is, Align the primary as its section is the
+        // tab's first; at the left they read as tools beside a status (the fifth look audit).
+        // Each greys with nothing to act on (`update_arrange_ready`). The tabs' actions stood in
+        // their bodies, under the forms, with the footer empty but for Close (the look audits'
         // T5; Arrange's, the third look audit's A).
         let tab = self.tab;
         let (freeze, detach) = (self.freeze_enabled, self.detach_enabled);
         let apply = self.apply_enabled;
         let make = self.for_takes_any;
+        let (align, renumber) = (self.align_ready, self.renumber_ready);
         let (freeze_tip, detach_tip) = (self.freeze_tip.clone(), self.detach_tip.clone());
         let (left, (closed, primary)) = dialog::button_row(
             ui,
@@ -3394,22 +3432,6 @@ impl LeaderManagerDialog {
                             pressed = Some(Pressed::Detach);
                         }
                     });
-                }
-                if tab == 2 {
-                    if button(ui, "leaderAlign", "Align Selected Leaders")
-                        .on_hover_text(
-                            "Line up the notes of the leaders Apply to takes (LEADER ALIGN)",
-                        )
-                        .clicked()
-                    {
-                        pressed = Some(Pressed::Align);
-                    }
-                    if button(ui, "balloonRenumber", "Renumber Balloons")
-                        .on_hover_text("Number the balloons again (BALLOON RENUMBER)")
-                        .clicked()
-                    {
-                        pressed = Some(Pressed::Renumber);
-                    }
                 }
                 problem_line(ui, "leaderProblem", &problem);
                 pressed
@@ -3443,7 +3465,30 @@ impl LeaderManagerDialog {
                         })
                         .inner
                         .then_some(Pressed::Make),
-                    _ => None,
+                    _ => {
+                        let renumbered = ui
+                            .add_enabled_ui(renumber, |ui| {
+                                button(ui, "balloonRenumber", "Renumber Balloons")
+                                    .on_hover_text("Number the balloons again (BALLOON RENUMBER)")
+                                    .clicked()
+                            })
+                            .inner;
+                        let aligned = ui
+                            .add_enabled_ui(align, |ui| {
+                                controls::primary(ui, "leaderAlign", "Align Selected Leaders")
+                                    .on_hover_text(
+                                        "Line up the notes of the leaders Apply to takes \
+                                         (LEADER ALIGN)",
+                                    )
+                                    .clicked()
+                            })
+                            .inner;
+                        if aligned {
+                            Some(Pressed::Align)
+                        } else {
+                            renumbered.then_some(Pressed::Renumber)
+                        }
+                    }
                 };
                 (closed, primary)
             },

@@ -122,9 +122,9 @@ pub fn project_crs_label(document: &Document) -> String {
 pub fn crs_check_text(typed: &str, place: Option<(f64, f64)>) -> String {
     let typed = typed.trim();
     if typed.is_empty() {
-        return String::from(
-            "Local coordinates: no coordinate system. Online data and reprojection need one.",
-        );
+        // "No coordinate system" is said once, by the dialog's "Now:" line above: said here too
+        // it was the dialog's first and last line (the fifth look audit).
+        return String::from("Local coordinates: online data and reprojection need a system.");
     }
     let description = match describe_coordinate_system(typed) {
         Ok(description) => description,
