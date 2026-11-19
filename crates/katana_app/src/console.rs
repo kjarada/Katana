@@ -42,6 +42,41 @@ impl Console for Terminal {
     }
 }
 
+/// For a Windows GUI program (katana.exe, `windows_subsystem = "windows"`): started from a
+/// console with its output not redirected, it is attached to that console, so a headless
+/// switch's report (`--report`, `--screenshot`) prints there as it did when the program was a
+/// console one. Started from Explorer there is no console to attach and nothing happens;
+/// started with its output piped (a test, the updater's health check), Windows hands it the
+/// pipes and it keeps them. Elsewhere it does nothing.
+pub fn attach_parent_console() {
+    #[cfg(windows)]
+    windows_console::attach_unless_redirected();
+}
+
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "The console calls are Win32 functions; std has no way to attach to a parent's console."
+)]
+mod windows_console {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
+    };
+
+    pub(super) fn attach_unless_redirected() {
+        // SAFETY: GetStdHandle reads this process's standard output handle; it takes no pointer
+        // and touches no memory of ours.
+        let out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        if out.is_null() || out == INVALID_HANDLE_VALUE {
+            // SAFETY: AttachConsole attaches this process to its parent's console, or fails
+            // (no parent console, one already attached) and changes nothing; it takes no pointer.
+            // A failure is ignored: the window runs without a console, as from Explorer.
+            let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+        }
+    }
+}
+
 /// What a line printed, held: katana_mcp's capture of a line, and a test's.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Captured {
