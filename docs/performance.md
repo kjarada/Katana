@@ -298,6 +298,44 @@ inline function's AVX2 copy reaching baseline code, and the Rust needs none
 of them (`docs/rust.md`, "Porting rules"). No kernel fuses a multiply and an
 add; Rust never does unasked.
 
+**Safe kernels (2026-11-20).** Every kernel is a safe function, and no
+kernel module opts out of the workspace's `unsafe_code` denial. Since Rust
+1.86 a `#[target_feature]` function may be safe and is a safe call from one
+with the same features (implied ones counting: AVX2 implies AVX, SSE4.2 ...
+SSE2), and since 1.87 every `core::arch` intrinsic that takes no pointer is a
+safe call inside such a function; both checked against the sources (rustc's
+unsafety check of a call into a target-feature function, and stdarch's
+declarations, where only the loads and stores - `_mm256_loadu_pd`,
+`_mm256_maskstore_ps`, `vld1q_f64`, `vld2q_u8`, `vst4q_f32`, ... - are still
+`unsafe fn`). So the kernels take slices and never a pointer: a register is
+built from the elements with a `set` intrinsic and comes back as an array
+lane by lane, through `crates/katana_core/src/simd/x86_lanes.rs` and
+`crates/katana_core/src/simd/neon_lanes.rs`, shared by every crate's
+kernels. Consecutive elements so built fold into the one
+unaligned load the pointer form was, and lanes copied out whole into one
+store; no lane is converted, so the bits are the bits. Where a kernel wrote
+through a masked store, the fill on AVX2 now writes a block the tile's row
+holds whole as a blend of the new pixels and the old (the other lanes given
+back unchanged, as NEON's fill already did), and a block past the row's end
+lane by lane; the text narrowing writes into a `[u8]` or a String's spare
+capacity through one slot trait instead of a raw pointer. What stays unsafe:
+in each crate's dispatch module (`text_kernels.rs`, the geometry, render,
+scene and packing `simd` entries) the call into a kernel, one line an entry
+under the one proof that the level is one the processor runs; the baseline
+facade's two entries into SSE2 or NEON, compiled only where the target has
+them; and, in `append_ascii_utf16`, the String's spare capacity reached
+through its `Vec` and its length set over what was written, since a safe
+append would validate or copy every byte a second time. Rejected:
+`transmute` between an array and a register (unsafe), `std::simd` (not
+stable), a crate that wraps the conversions (`safe_arch`, `bytemuck`: a new
+dependency for a dozen lines), and removing the kernels for their scalar
+references, which the 2026-11-16 decision proposed: the references give the
+same bits but forfeit the speed in the table below (validation 8x,
+decoding 2x), and the safe form keeps it. A single unsafe call a crate was
+rejected too: a target-feature function implements no `Fn` trait and is no
+safe fn pointer, so one generic entry would need a job enum a crate, more
+code around the same one line of reasoning.
+
 | kernel | called from | from | scalar reference |
 |---|---|---|---|
 | UTF-16 to UTF-8, ASCII runs (`crates/katana_core/src/simd/`) | `decode_text`, both byte orders | any length | the unit loop, taking over at the first non-ASCII unit |
@@ -388,11 +426,15 @@ the fixed cost it repays is the same.
   meshes' faces in plan (`crates/katana_window/benches/mesh_plan.rs`, a plain
   program with no benchmark library; figures in `docs/plan_view.md`, "Meshes
   in plan").
-- **The hand-written SIMD kernels are to be removed.** On 2026-11-16 the
-  owner decided that `unsafe` goes wherever it can, the kernels with it,
-  their scalar references staying and the speed measured before and after
-  (`docs/architecture.md`, "Layering"; `docs/rust.md`, "Not done"). That
-  measurement needs the benchmarks above.
+- **The safe kernels' speed is unmeasured.** The kernels were made safe on
+  2026-11-20 rather than removed ("Safe kernels" above); that the folds into
+  single loads and stores happened, and that no kernel slowed, needs the
+  benchmarks above, run before and after. The changed kernels: the UTF-8
+  validator and the UTF-16 narrowing (also the baseline facade's compare and
+  select), the point transform, bounds and projection, the rasteriser's
+  vertex transform and fill (the fill's masked stores became whole-block
+  blends), the scene's lift, normals, vertices, faces and fade, and the
+  GPU packing (whose per-vertex store is the likeliest to have changed).
 - **Nothing was measured on ARM**, and the Rust's NEON kernels have not been
   compiled.
 - **Uncovered by any benchmark, then and now:** the per-frame drawing path,

@@ -3,6 +3,7 @@
     any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
 ))]
 use crate::cpu_features::{SimdLevel, active_simd_level};
+use std::mem::MaybeUninit;
 
 pub fn valid_utf8_scalar(bytes: &[u8]) -> bool {
     let mut at = 0;
@@ -53,9 +54,11 @@ pub fn valid_utf8_scalar(bytes: &[u8]) -> bool {
     true
 }
 
+/// Whether `bytes` is valid UTF-8: the kernel of the active SIMD level from
+/// 64 bytes, else the byte loop.
 #[allow(
     unsafe_code,
-    reason = "Only a detected, enabled kernel receives the slice's exact bounds; short inputs stay scalar."
+    reason = "Entering a target-feature kernel, only on a processor found to run it."
 )]
 pub fn valid_utf8(bytes: &[u8]) -> bool {
     #[cfg(all(
@@ -68,20 +71,50 @@ pub fn valid_utf8(bytes: &[u8]) -> bool {
             any(target_arch = "x86", target_arch = "x86_64")
         ))]
         if active_simd_level() == SimdLevel::Avx2 {
-            return unsafe { crate::simd::text_avx2::valid_utf8(bytes.as_ptr(), bytes.len()) == 1 };
+            // SAFETY: the level is AVX2 only on a processor found to run AVX2
+            // (cpu_features' set_simd_level refuses a level it cannot run).
+            return unsafe { crate::simd::text_avx2::valid_utf8(bytes) == 1 };
         }
         #[cfg(all(feature = "simd-kernels", target_arch = "aarch64"))]
         if active_simd_level() == SimdLevel::Neon {
-            return unsafe { crate::simd::text_neon::valid_utf8(bytes.as_ptr(), bytes.len()) == 1 };
+            // SAFETY: NEON is part of every AArch64 target.
+            return unsafe { crate::simd::text_neon::valid_utf8(bytes) == 1 };
         }
     }
     valid_utf8_scalar(bytes)
 }
 
-#[allow(
-    unsafe_code,
-    reason = "Checked slice bounds supply the shared scalar narrowing loop's exact capacity."
-)]
+/// A byte a narrowing writes: one of a byte slice, or of a String's spare
+/// capacity, which is not yet initialised. One narrowing serves both, so the
+/// kernels never see a raw pointer.
+pub(crate) trait AsciiSlot {
+    fn set(&mut self, byte: u8);
+}
+
+impl AsciiSlot for u8 {
+    fn set(&mut self, byte: u8) {
+        *self = byte;
+    }
+}
+
+impl AsciiSlot for MaybeUninit<u8> {
+    fn set(&mut self, byte: u8) {
+        *self = MaybeUninit::new(byte);
+    }
+}
+
+/// `bytes` into `out` from `at`: a kernel's whole step, which LLVM makes one
+/// store.
+#[cfg(all(
+    feature = "simd-kernels",
+    any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub(crate) fn put<S: AsciiSlot>(out: &mut [S], at: usize, bytes: &[u8]) {
+    for (slot, &byte) in out[at..at + bytes.len()].iter_mut().zip(bytes) {
+        slot.set(byte);
+    }
+}
+
 pub fn narrow_ascii_utf16_scalar(
     input: &[u8],
     units: usize,
@@ -89,13 +122,9 @@ pub fn narrow_ascii_utf16_scalar(
     out: &mut [u8],
 ) -> usize {
     assert!(units <= input.len() / 2 && units <= out.len());
-    unsafe { narrow_scalar_unchecked(input.as_ptr(), units, little_endian, out.as_mut_ptr()) }
+    narrow_scalar_from(input, 0, units, little_endian, out)
 }
 
-#[allow(
-    unsafe_code,
-    reason = "Slice bounds establish the raw narrowing kernel's input and output capacity."
-)]
 pub fn narrow_ascii_utf16(
     input: &[u8],
     units: usize,
@@ -103,50 +132,62 @@ pub fn narrow_ascii_utf16(
     out: &mut [u8],
 ) -> usize {
     assert!(units <= input.len() / 2 && units <= out.len());
-    unsafe { narrow_unchecked(input.as_ptr(), units, little_endian, out.as_mut_ptr()) }
+    narrow(input, units, little_endian, out)
 }
 
+/// The ASCII prefix of the first `units` units of `input`, narrowed into
+/// `out` from 0: the kernel's whole steps, then the unit loop from where they
+/// stop. Every slot before the count returned is written, and no other.
+fn narrow<S: AsciiSlot>(input: &[u8], units: usize, little_endian: bool, out: &mut [S]) -> usize {
+    let from = narrowed_by_kernel(input, units, little_endian, out);
+    narrow_scalar_from(input, from, units, little_endian, out)
+}
+
+/// How many units the active level's kernel narrowed, whole steps of 32
+/// while every unit is ASCII; 0 at the scalar level.
 #[allow(
     unsafe_code,
-    reason = "Both callers reserve or check all units; kernels write only ASCII and the returned prefix length."
+    reason = "Entering a target-feature kernel, only on a processor found to run it."
 )]
-unsafe fn narrow_unchecked(
-    input: *const u8,
+fn narrowed_by_kernel<S: AsciiSlot>(
+    input: &[u8],
     units: usize,
     little_endian: bool,
-    out: *mut u8,
+    out: &mut [S],
 ) -> usize {
     #[cfg(all(
         feature = "simd-kernels",
         any(target_arch = "x86", target_arch = "x86_64")
     ))]
     if active_simd_level() == SimdLevel::Avx2 {
+        // SAFETY: as valid_utf8's.
         return unsafe {
             crate::simd::text_avx2::narrow_ascii_utf16(input, units, little_endian, out)
         };
     }
     #[cfg(all(feature = "simd-kernels", target_arch = "aarch64"))]
     if active_simd_level() == SimdLevel::Neon {
+        // SAFETY: as valid_utf8's.
         return unsafe {
             crate::simd::text_neon::narrow_ascii_utf16(input, units, little_endian, out)
         };
     }
-    unsafe { narrow_scalar_unchecked(input, units, little_endian, out) }
+    let _ = (input, units, little_endian, out);
+    0
 }
 
-#[allow(
-    unsafe_code,
-    reason = "Callers validate or reserve the full input/output span; only the ASCII prefix is read and written."
-)]
-unsafe fn narrow_scalar_unchecked(
-    input: *const u8,
+/// The unit loop, from unit `from` until the first non-ASCII unit or
+/// `units`: where it stopped.
+fn narrow_scalar_from<S: AsciiSlot>(
+    input: &[u8],
+    from: usize,
     units: usize,
     little_endian: bool,
-    out: *mut u8,
+    out: &mut [S],
 ) -> usize {
-    let mut index = 0;
-    while index < units {
-        let pair = unsafe { [*input.add(2 * index), *input.add(2 * index + 1)] };
+    let mut index = from;
+    let (pairs, _) = input[2 * from..2 * units].as_chunks::<2>();
+    for (&pair, slot) in pairs.iter().zip(&mut out[from..units]) {
         let unit = if little_endian {
             u16::from_le_bytes(pair)
         } else {
@@ -155,31 +196,36 @@ unsafe fn narrow_scalar_unchecked(
         if unit >= 0x80 {
             break;
         }
-        unsafe { out.add(index).write(unit as u8) };
+        slot.set(unit as u8);
         index += 1;
     }
     index
 }
 
+/// The ASCII prefix of `input`'s UTF-16 units appended to `out`: how many
+/// units it took.
 #[allow(
     unsafe_code,
-    reason = "Narrowing writes only ASCII into reserved spare capacity; no uninitialised bytes enter the String length."
+    reason = "A String's spare capacity is reached only through its Vec, and only set_len takes written bytes into its length; a safe append would validate or copy every byte again."
 )]
 pub(crate) fn append_ascii_utf16(input: &[u8], little_endian: bool, out: &mut String) -> usize {
     let units = input.len() / 2;
     out.reserve(units);
-    let length = out.len();
-    unsafe {
-        let bytes = out.as_mut_vec();
-        let written = narrow_unchecked(
-            input.as_ptr(),
-            units,
-            little_endian,
-            bytes.as_mut_ptr().add(length),
-        );
-        bytes.set_len(length + written);
-        written
-    }
+    // SAFETY: the narrowing adds only ASCII, which is UTF-8, so the String
+    // stays valid.
+    let bytes = unsafe { out.as_mut_vec() };
+    let length = bytes.len();
+    let written = narrow(
+        input,
+        units,
+        little_endian,
+        &mut bytes.spare_capacity_mut()[..units],
+    );
+    // SAFETY: narrow wrote every slot of the spare capacity before `written`
+    // (no more than the `units` reserved above), so the new length covers
+    // only initialised bytes.
+    unsafe { bytes.set_len(length + written) };
+    written
 }
 
 #[cfg(all(

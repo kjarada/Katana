@@ -15,11 +15,10 @@
 //! params   doubles, at the PARAM_* indices below.
 //! colours  0xAARRGGBB, as render's Rgba.
 //! ```
-
-#![allow(
-    unsafe_code,
-    reason = "Runtime-selected SIMD instructions are confined to the kernels, entered only with proof that the processor runs them."
-)]
+//!
+//! The kernels are safe functions of slices (scene_avx2.rs, scene_neon.rs);
+//! the one unsafe step, entering a target-feature function from code without
+//! the feature, is in the five entries below, each resting on a Kernels.
 
 use katana_geometry::Point3;
 
@@ -88,6 +87,10 @@ pub(crate) fn kernels() -> Option<Kernels> {
 /// lifted[4 i ..] = x, y, datum + (z - datum) * factor, z for each of the
 /// points.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn lift(
     _kernels: Kernels,
     points: &[Point3],
@@ -96,8 +99,7 @@ pub(crate) fn lift(
 ) {
     assert!(lifted.len() >= 4 * points.len());
     // SAFETY: a Kernels exists only while the processor runs the instructions
-    // of the active level, AVX2 on x86-64 and NEON on 64-bit ARM; the kernel
-    // reaches only the slices it is handed, whose lengths are asserted.
+    // of the active level, AVX2 on x86-64 and NEON on 64-bit ARM.
     unsafe { arch::lift(points, params, lifted) }
 }
 
@@ -105,14 +107,17 @@ pub(crate) fn lift(
 /// corners, negated when its z is below zero, added to the normals of its
 /// three corners in the order a, b, c. `normals` holds the sums so far.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn surface_normals(
     _kernels: Kernels,
     lifted: &[f64],
     triangles: &[[u32; 3]],
     normals: &mut [f64],
 ) {
-    // SAFETY: as lift's; every corner's four doubles are bounds-checked in
-    // the kernel before they are loaded or stored.
+    // SAFETY: as lift's.
     unsafe { arch::surface_normals(lifted, triangles, normals) }
 }
 
@@ -123,6 +128,10 @@ pub(crate) fn surface_normals(
 #[allow(
     clippy::too_many_arguments,
     reason = "The signature mirrors the C++ kernel entry, one argument a buffer."
+)]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
 )]
 pub(crate) fn surface_vertices(
     _kernels: Kernels,
@@ -151,6 +160,10 @@ pub(crate) fn surface_vertices(
     clippy::too_many_arguments,
     reason = "The signature mirrors the C++ kernel entry, one argument a buffer."
 )]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn mesh_faces(
     _kernels: Kernels,
     points: &[Point3],
@@ -165,7 +178,7 @@ pub(crate) fn mesh_faces(
 ) {
     assert!(first + count <= faces.len());
     assert!(positions.len() >= 3 * count && colours.len() >= 3 * count);
-    // SAFETY: as lift's; every corner is read through a bounds-checked index.
+    // SAFETY: as lift's.
     unsafe {
         arch::mesh_faces(
             points,
@@ -184,6 +197,10 @@ pub(crate) fn mesh_faces(
 /// out[i] = each channel of base[i] moved eighths/8 of the way to ink[i],
 /// rounded half up, for eighths in 0..8.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn fade(_kernels: Kernels, base: &[u32], ink: &[u32], eighths: i32, out: &mut [u32]) {
     assert!(base.len() >= out.len() && ink.len() >= out.len());
     // SAFETY: as lift's.
