@@ -66,7 +66,7 @@ furniture.
 | `id` | `s1`, `s2`...: stable for the sheet's life, so a match line or key plan can refer to the sheet however the sheets are reordered or renamed; never given to a new sheet while a mark still names it |
 | `name` | what the sheet shows (`PLAN TILE 3`, `ROAD CH 0.000 TO 172.500`) |
 | `paper`, `landscape` | ISO A0 to A4 |
-| `frame` | `a3_landscape` (the built-in frame, scaled to the paper) or empty for no frame |
+| `frame` | `a3_landscape` (the built-in frame, scaled to the paper), a frame the customisation in use offers ("A customisation's title frames"), or empty for no frame |
 | `frame_legend` | whether the frame's legend block is drawn |
 | `fields` | the title-block values this sheet overrides, by field name; an override always wins |
 | `viewports` | back to front |
@@ -180,7 +180,7 @@ The cells are `drawing_area`, `legend`, `scale`, `coord_system`,
 
 ### Other sizes: uniform scaling
 
-Only the A3 frame exists, so the other A sizes use it **scaled uniformly**.
+Every frame compiled in is A3, so the other A sizes use it **scaled uniformly**.
 The factor is `min(paper width / 420, paper height / 297)`, the largest that
 fits (`frame_scale_for`):
 
@@ -206,6 +206,117 @@ empty) gets the paper less 10 mm all round as its drawing area: the
 single-page plot's default margin, so the two agree. `frame_for` refuses a
 portrait sheet with `InvalidArgument` rather than hand back a frame that
 does not fit.
+
+### A customisation's title frames
+
+A customisation may **offer frames of its own** beside the default
+(`docs/customisation.md`, "The title frames of a customisation"): its
+`plotFrames` member names them, and the session's customisation decides
+which are on offer (`CustomisationState::plot_frames`). The NSW built-in
+offers one, `nsw_a3_utility_cross_section`: the owner's A3 utility
+cross-section frame, carried EXACTLY as they made it - its heading, its logo
+and the logo's text, its disclaimer - by their decision of 2026-11-19. It is
+the frame the default was measured from, with the 34 branding items present,
+so it has all 179 items of the file (85 lines, 26 of them filled, 80 texts,
+14 symbols) and no user slots: nothing is drawn over its own organisation,
+logo and notes. Katana Standard offers none, and its sheets keep the
+unbranded default.
+
+**Where a frame comes from.** A frame is data compiled into Katana beside
+the default (`COMPILED_IN_FRAMES` in `crates/katana_cad/src/plotting/frame.rs`,
+`resources/plot_frames/<name>.json`), in the same model as
+`a3_landscape.json`, read by the same parser (`parse_frame`), with two
+members the default does not need: `user_slots`, the cells a sheet fills
+with the user's own (absent: logo, organisation and notes, as the default
+always had), and a line's `fill_hex`, the colour its shape is filled with.
+`tools/title_frame_from_tbf.py` makes one from a title block file (`.tbf`):
+every line with its points (an arc drawn as pieces within 0.005 mm of it),
+colour, weight, dash and fill; every text with its position plus its offset
+and raise, size, angle, condensing, justification, face, weight, colour and
+the fields its tokens name, in the default frame's names; every symbol; the
+sheet's size and margins. What the file does not hold it takes from
+arguments, never by guessing: the cells (`--cells-from`, a frame of the same
+layout), the colour names of the program that drew it (`--palette-from`,
+`--palette`) and the user slots (`--user-slots`). The NSW frame was made so:
+
+```text
+python -I tools/title_frame_from_tbf.py <the owner's title block file>.tbf \
+    resources/plot_frames/nsw_a3_utility_cross_section.json \
+    --cells-from resources/plot_frames/a3_landscape.json \
+    --palette-from resources/plot_frames/a3_landscape.json
+```
+
+The converter was checked against the default frame, which was measured from
+the same file by hand: every one of the default's 145 items has its twin in
+the converted frame, kind, role, colour, weight, dash, text, justification
+and every coordinate within the default's rounding to the thousandth; only
+the 34 branding items are new
+(`customisation_frames::the_customisation_frame_is_the_default_frame_with_the_branding_present`
+holds it). The title block file itself is the owner's and is not committed;
+the converted frame is.
+
+**How a sheet takes one.** A sheet names its frame (`Sheet::frame`); the set
+names its frame too (`PageSetup::frame`, `a3_landscape` unless chosen), which
+a new or generated sheet takes and `frame=on` means:
+
+| Where | What |
+|---|---|
+| Sheet Set > Page Setup... | Frame (`pageSetupFrame`): the default, then the frames the customisation in use offers, by name. A frame chosen there is Save's `frame=` |
+| `SHEETS PAGESETUP frame=<name>` | the set's frame, put on every sheet that has a frame, as one step (`set_page_setup_frame`, `PAGE_SETUP`); a sheet whose frame is off keeps it off |
+| `SHEET SET n frame=<name>` / `SHEET NEW ... frame=<name>` | one sheet's frame |
+| `SHEETS FRAMES` | the frames on offer: `frames count=2 set=a3_landscape customisation="NSW"`, then `frame name=... from=default` or `from=customisation` a line, then a `problem ...` line for the set's frame when it is not on offer and for each frame the customisation names that Katana does not have |
+
+The verbs are the shared interpreter's, so the window's command line,
+`katana_cli` and `katana_mcp` (which runs session lines) all take them; the
+customisation they offer from is the session's, which `CUSTOMISE BUILTIN NSW`
+makes the NSW built-in. `frame=` takes only a frame on offer, in any letter
+case, and refuses any other (`NotFound`, listing what is on offer). A Page Setup Save for the
+colours names no frame, so it never puts the set's frame over a sheet given
+one of its own; only choosing another frame there adds `frame=`. The choice
+is kept in the set's JSON: the sheet's `frame` as it always was, and the page
+setup's `frame`, left out at the default, so a set that never chose one is
+written as it was before (an older reader skips the member, and its sheets
+name their frames themselves; no new version of the sheet set's format).
+
+**A frame not on offer is drawn as the default, and said.** A set made
+under the NSW customisation and opened under Katana Standard still names the
+NSW frame. It is not redrawn silently and not dropped: `resolve_sheet_frame`
+hands the painter the DEFAULT frame with a sentence saying why ("the frame
+nsw_a3_utility_cross_section is not one the customisation in use offers: the
+sheet plots with the default frame a3_landscape"), which the painter adds to
+its problems (`frame: ...`), `SHEETS CHECK` reports as `frame.unknown` on
+the sheet, and `SHEETS FRAMES` reports for the set. A frame name Katana has
+not compiled in at all is the same, with its own reason. The sheet keeps its
+frame's name, so the set plots in it again under a customisation that offers
+it. `drawing_area` takes the frame of the sheet's name, or the default for a
+name Katana does not have, without asking what is on offer: every frame
+compiled in has the default's drawing area, so the answer is the same.
+
+*Rejected: the frame inside the customisation file.* A frame is a hundred
+kilobytes of coordinates and descriptions a person does not edit by hand,
+the customisation is read by a strict, bounded reader whose texts stop at
+1,000 bytes, and the frame's own parser is another; carrying it inline
+would make the customisation undiffable and need a second reader of frames.
+A name the file offers and data compiled in keep each to its format. What it
+costs: a customisation of a user's own can offer only a frame Katana has
+compiled in.
+
+*Rejected: a frame chosen by the customisation alone*, with no choice on the
+set. The NSW customisation is used for drawings that are not utility cross
+sections; the frame is offered, and chosen per set and per sheet.
+
+The tests are `crates/katana_cad/tests/plotting/customisation_frames.rs`
+(the compiled frame's counts, sheet, heading, logo, disclaimer and fields;
+what is on offer; the fallback), `crates/katana_cad/tests/road_sheet_verbs/sheet_frame_verbs.rs`
+(the verbs, the step, the JSON, the fallback in `SHEETS CHECK`),
+`crates/katana_window/tests/sheets/customisation_frame_painter.rs` (ink where
+the heading and the logo are, against the default frame's; the fallback
+painted as the default and said), the Page Setup cases of
+`crates/katana_window/tests/sheet_editor/sheet_set_menu.rs`,
+`cli.a_customisations_title_frame_is_offered_and_chosen_by_verb`,
+`cli.a_title_frame_the_customisation_does_not_offer_is_refused` and
+`title_frame_from_tbf_script` (the converter on an invented A4 frame,
+`tools/test_title_frame_from_tbf.py`).
 
 ## Fields and their automatic values
 
@@ -879,11 +990,12 @@ Only plotting needs the window, because it paints.
 | `SHEETS LOAD path` | the whole set replaced from a JSON file | `LOAD_SHEETS` |
 | `SHEETS APPEND path` | another set's sheets from its JSON file put after these, renumbered (`prepare_for_append`); this set keeps its own title block, revisions and page setup; an empty set is refused ("The Sheet Set menu and Page Setup") | `APPEND_SHEETS` |
 | `SHEETS CHECK [sheets=1,3-5] [json]` | the preflight checks ("Preflight checks"): `checked 2 sheets: 1 error, 3 warnings`, then a finding a line, `severity code sheet view message="..." fix="..." subject="..."` (`check_reply_line`; `-` for the set or no view); `json` gives `findings_to_json` instead. In the window, with what the painter knows (`SheetVerbContext::check`) | |
-| `SHEETS PAGESETUP [style=colour\|grey\|mono] [lineweight=f] [dpi=n] [pattern=text] [filepersheet=on\|off]` | the set's page setup ("Plot styles and output"), printed as `pagesetup style=... lineweight=... dpi=... pattern="..." filepersheet=...`, or changed; refused whole by `validate_page_setup` | `PAGE_SETUP` |
+| `SHEETS PAGESETUP [style=colour\|grey\|mono] [lineweight=f] [dpi=n] [pattern=text] [filepersheet=on\|off] [frame=name]` | the set's page setup ("Plot styles and output"), printed as `pagesetup style=... lineweight=... dpi=... pattern="..." filepersheet=... frame=...`, or changed; refused whole by `validate_page_setup`. `frame=` is a frame on offer, put on every framed sheet in the same step ("A customisation's title frames") | `PAGE_SETUP` |
+| `SHEETS FRAMES` | the frames on offer - the default, then the customisation's - and the set's frame, with a `problem` line for a frame not on offer or not compiled in ("A customisation's title frames") | |
 | `SHEET NEW [name] [paper=A1] [portrait] [frame=off] [legendblock=off] [at=n]` | a blank sheet, at the end or at position n; no name numbers it | `ADD_SHEET` |
 | `SHEET REMOVE n` / `MOVE n to` / `COPY n` | `remove_sheet`, `move_sheet`, `duplicate_sheet` | `REMOVE_SHEET`, `MOVE_SHEET`, `DUPLICATE_SHEET` |
 | `SHEET RENAME n name` | | `RENAME_SHEET` |
-| `SHEET SET n [paper=] [orientation=] [frame=on\|off] [legendblock=on\|off] [name=]` | the sheet's paper and frame | `EDIT_SHEET` |
+| `SHEET SET n [paper=] [orientation=] [frame=on\|off\|name] [legendblock=on\|off] [name=]` | the sheet's paper and frame; `on` is the set's frame, a name a frame on offer | `EDIT_SHEET` |
 | `SHEET FIELD n field [value]` | the sheet's own value for a field its frame prints (`sheet_number`, `scale`...); `""` clears it; no value prints it, marked `automatic` when the sheet has none | `SET_SHEET_FIELD` |
 | `SHEET SUGGESTPAPER n [scale=n\|auto] [apply=on]` | the smallest paper that holds what the sheet's main plan (`main_plan_of`) shows at its drawn scale or `scale=` (`fit_paper_to_viewport`): `sheet 1 view=vp1 scale=500 paper=A0 orientation=landscape frame=a3_landscape fill=0.761`; `apply=on` puts the sheet on it (`choose_paper_for_scale`) | `CHOOSE_PAPER` with `apply=on` |
 | `VIEW ADD n kind [option=value...]` | a view placed as the editor's Add View places one, then given the options | `ADD_VIEWPORT` |
@@ -1142,7 +1254,7 @@ viewport's in the order `preflight_checks()` lists them.
 | `pagesetup.invalid` | Error | the set's page setup would be refused by a plot: a resolution or line weight scale out of range, or a file-name pattern that cannot be expanded (`validate_page_setup`) |
 | `sheet.duplicate-id` | Error | a sheet has no id, or an earlier sheet's |
 | `sheet.duplicate-name` | Warning | a sheet has an earlier sheet's name, ignoring case and spaces at the ends |
-| `frame.unknown` | Error | the sheet names a frame this build does not have |
+| `frame.unknown` | Error | the sheet names a frame this build does not have, or one the customisation in use does not offer: the default frame prints in its place, and the finding says which and why |
 | `portrait.no-frame` | Warning | a portrait sheet asks for a frame; it prints without one |
 | `sheet.empty` | Warning | a sheet has no views |
 | `viewport.duplicate-id` | Error | a viewport has no id, or one used before in the set |
@@ -2212,7 +2324,7 @@ one step:
 | Load Sheet Set... | `sheetLoadSet` | `SHEETS LOAD "path"` | `LOAD_SHEETS` |
 | Append Sheets From File... | `sheetAppendSet` | `SHEETS APPEND "path"` | `APPEND_SHEETS` |
 | Copy Sheet Set as JSON | `sheetCopySetJson` | `SHEETS JSON`, its reply put on the clipboard | |
-| Page Setup... | `sheetPageSetup` | `SHEETS PAGESETUP style= lineweight= dpi= pattern= filepersheet=` | `PAGE_SETUP` |
+| Page Setup... | `sheetPageSetup` | `SHEETS PAGESETUP style= lineweight= dpi= pattern= filepersheet=`, and `frame=` when another frame is chosen | `PAGE_SETUP` |
 
 - **Load asks first** when there are sheets to replace, and says that Undo
   brings them back ("Replace the 3 sheets there are now? Undo brings them
@@ -2237,7 +2349,8 @@ one step:
   dialog: type SHEETS SAVE "path" instead.`).
 
 **Page Setup** (`pageSetupDialog`) is the Plot dialog in its page-setup
-mode (`PlotDialogMode::PageSetup`): the plot's colours
+mode (`PlotDialogMode::PageSetup`): the set's title frame (`pageSetupFrame`,
+the frames on offer, "A customisation's title frames"), the plot's colours
 (`plotColourMode`), line weights (`plotLineWeightScale`), resolution
 (`plotDpi`), file-name pattern (`plotPattern`, with the first file's name
 under it) and "A PDF per sheet" (`pageSetupFilePerSheet`), starting from
@@ -2475,7 +2588,17 @@ The tests are `crates/katana_cad/tests/plotting/viewport_edits.rs` and
 - **Change notifications.** A sheet edit notifies the document's listeners
   like any model change, so it still rebuilds the 3D view's scene.
 - **Frames and furniture.** More frames, such as a plan-sheet frame with a
-  north-arrow zone, and a reader for title-block files.
+  north-arrow zone. A title block file is read by
+  `tools/title_frame_from_tbf.py`, a developer's tool, and its frame
+  compiled in; the program itself does not read one, so a user cannot yet
+  bring their own frame without a build.
+- **A frame's own cells.** The converter cannot know a title block's cells
+  (the scale cell, the sheet number's) from its file; the NSW frame takes
+  the default's, the same layout. A frame of another layout needs its cells
+  written by hand.
+- **Only A3 frames.** `frame_scale_for` and `drawing_area` scale every frame
+  from A3; a frame drawn for another paper would need them to use its own
+  size.
 - **Background plotting.** A large set is plotted on the GUI thread, a
   sheet at a time behind a progress dialog; the painter is reentrant, so
   moving it to a job is the next step.

@@ -2,12 +2,19 @@
 //! field slots and the text rules (docs/plotting.md;
 //! include/katana/cad/plotting/frame.hpp).
 //!
-//! The one frame Katana ships is the owner's A3 landscape cross-section frame,
+//! The DEFAULT frame is the owner's A3 landscape cross-section frame,
 //! measured item by item from their app and committed as data
 //! (resources/plot_frames/a3_landscape.json, embedded into the build). The
 //! organisation's branding was taken out before it was committed; its three
 //! cells are now slots the user fills: their own logo image, their
 //! organisation's name, and their notes.
+//!
+//! A customisation may OFFER other frames (its "plotFrames",
+//! docs/plotting.md, "A customisation's title frames"): frames compiled in
+//! beside the default (COMPILED_IN_FRAMES), converted from a title block file
+//! by tools/title_frame_from_tbf.py in the same model. A sheet names its frame;
+//! one that names a frame the session's customisation does not offer plots
+//! with the default and says so (resolve_sheet_frame), never silently.
 //!
 //! PAPER COORDINATES. Everything on a sheet - frame, cells, viewports - is in
 //! millimetres from the BOTTOM-LEFT corner of the paper, Y up: the frame's own
@@ -25,7 +32,7 @@ use std::sync::OnceLock;
 use katana_core::error::make_error;
 use katana_core::json::{Json, JsonError};
 use katana_core::{Error, ErrorCode, Result};
-use katana_entity::Color;
+use katana_entity::{Color, CustomisationPlotFrame};
 use katana_geometry::{Box2, Point2};
 use katana_math::cpp;
 
@@ -34,12 +41,36 @@ use crate::plot::{PaperSize, paper_dimensions};
 /// The id a Sheet names the built-in frame by. An empty id means no frame.
 pub const BUILT_IN_FRAME_ID: &str = "a3_landscape";
 
-// The frame's JSON, embedded by the compiler: the C++ uses #embed of the same
-// committed file, so both programs carry the same bytes.
-static EMBEDDED_FRAME: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../resources/plot_frames/a3_landscape.json"
-));
+/// The frames compiled into Katana, by the name a sheet and a customisation
+/// name each by, and the committed file's bytes (resources/plot_frames/<name>.json),
+/// embedded by the compiler. The default first. A customisation offers any of
+/// the others by its name; a frame here that no customisation offers is never
+/// drawn.
+///
+/// The second is the NSW built-in customisation's A3 utility cross-section
+/// frame, carried exactly as its owner made it (CLAUDE.md section 9, the
+/// owner's decision of 2026-11-19), converted from their title block file.
+static COMPILED_IN_FRAMES: [(&str, &[u8]); 2] = [
+    (
+        BUILT_IN_FRAME_ID,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../resources/plot_frames/a3_landscape.json"
+        )),
+    ),
+    (
+        "nsw_a3_utility_cross_section",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../resources/plot_frames/nsw_a3_utility_cross_section.json"
+        )),
+    ),
+];
+
+/// The user slots a frame has when its description does not list them: all
+/// three, which is what the default frame was measured to leave
+/// (resources/plot_frames/a3_landscape.json's "_about").
+pub const DEFAULT_USER_SLOTS: [&str; 3] = ["logo", "organisation", "notes"];
 
 // The size the measured frame was drawn for. Only its ratio to the paper is
 // used (frame_scale_for); the JSON's own sheet size is what a parse reads.
@@ -85,6 +116,11 @@ pub enum FrameRole {
 pub struct FramePolyline {
     pub points: Vec<Point2>,
     pub closed: bool,
+    /// The colour its area is filled with, inside the outline it draws; None
+    /// for a line, which is every line of the default frame. A filled line
+    /// that is not closed is filled as if it were, as the drawing program
+    /// fills an open path.
+    pub fill: Option<Color>,
     pub weight_mm: f64,
     pub colour: Color,
     /// Dash and gap in paper millimetres; both 0 for a solid line.
@@ -101,6 +137,7 @@ impl Default for FramePolyline {
         Self {
             points: Vec::new(),
             closed: false,
+            fill: None,
             weight_mm: 0.25,
             colour: Color::new(0, 0, 0, 255),
             dash_mm: 0.0,
@@ -238,6 +275,11 @@ pub struct Frame {
     pub texts: Vec<FrameText>,
     pub symbols: Vec<FrameSymbol>,
     pub cells: Vec<FrameCell>,
+    /// The cells a sheet fills with the user's own: "logo" (their image),
+    /// "organisation" and "notes" (text slots). The default frame has all
+    /// three; a frame that draws its own branding has none, and then nothing
+    /// is drawn over it.
+    pub user_slots: Vec<String>,
 }
 
 impl Default for Frame {
@@ -256,11 +298,18 @@ impl Default for Frame {
             texts: Vec::new(),
             symbols: Vec::new(),
             cells: Vec::new(),
+            user_slots: Vec::new(),
         }
     }
 }
 
 impl Frame {
+    /// Whether the user fills `slot` ("logo", "organisation", "notes") on this
+    /// frame.
+    pub fn has_user_slot(&self, slot: &str) -> bool {
+        self.user_slots.iter().any(|named| named == slot)
+    }
+
     /// None when the frame has no cell of that id.
     pub fn cell(&self, cell_id: &str) -> Option<&FrameCell> {
         self.cells.iter().find(|cell| cell.id == cell_id)
@@ -583,6 +632,9 @@ fn read_polyline(item: &Json, frame: &mut Frame) -> Parsed<()> {
     }
     line.weight_mm = item.at("weight_mm")?.get::<f64>()?;
     line.colour = colour_of(item)?;
+    if item.contains("fill_hex") {
+        line.fill = Some(Color::from_hex(&item.at("fill_hex")?.get::<String>()?)?);
+    }
     let dash = item.at("dash_mm")?;
     if dash.is_array() {
         line.dash_mm = dash.at_index(0)?.get::<f64>()?;
@@ -639,9 +691,12 @@ fn read_symbol(item: &Json, frame: &mut Frame) -> Parsed<()> {
 
 // The two slots whose text was removed with the branding, laid out where it
 // was: the organisation's name centred in its cell, and the notes from the
-// removed text's first-line anchor.
+// removed text's first-line anchor. Only on a frame that has them as user
+// slots: one that prints its own organisation and notes keeps them.
 fn add_slots(frame: &mut Frame) {
-    if let Some(centre) = frame.cell("organisation").map(|cell| cell.rect.center()) {
+    if frame.has_user_slot("organisation")
+        && let Some(centre) = frame.cell("organisation").map(|cell| cell.rect.center())
+    {
         frame.texts.push(FrameText {
             anchor: centre,
             cap_height_mm: ORGANISATION_CAP_MM,
@@ -655,7 +710,7 @@ fn add_slots(frame: &mut Frame) {
             ..FrameText::default()
         });
     }
-    if frame.cell("notes").is_some() {
+    if frame.has_user_slot("notes") && frame.cell("notes").is_some() {
         frame.texts.push(FrameText {
             anchor: NOTES_ANCHOR,
             cap_height_mm: NOTES_CAP_MM,
@@ -669,11 +724,31 @@ fn add_slots(frame: &mut Frame) {
     }
 }
 
-fn parse(root: &Json) -> Parsed<Frame> {
+fn parse(root: &Json, id: &str) -> Parsed<Frame> {
     let mut frame = Frame {
-        id: String::from(BUILT_IN_FRAME_ID),
+        id: String::from(id),
         ..Frame::default()
     };
+    // Absent: the default frame's three, so that a frame written before the
+    // member existed reads as it did.
+    if root.contains("user_slots") {
+        for slot in root.at("user_slots")?.iter() {
+            let slot = slot.get::<String>()?;
+            if !DEFAULT_USER_SLOTS.contains(&slot.as_str()) {
+                return Err(Fault::Refused(make_error(
+                    ErrorCode::ParseFailure,
+                    "a frame's user slots are logo, organisation and notes",
+                    slot,
+                )));
+            }
+            frame.user_slots.push(slot);
+        }
+    } else {
+        frame.user_slots = DEFAULT_USER_SLOTS
+            .iter()
+            .map(|slot| String::from(*slot))
+            .collect();
+    }
     let sheet = root.at("sheet")?;
     frame.width_mm = sheet.at("width_mm")?.get::<f64>()?;
     frame.height_mm = sheet.at("height_mm")?.get::<f64>()?;
@@ -726,10 +801,10 @@ fn parse(root: &Json) -> Parsed<Frame> {
     Ok(frame)
 }
 
-fn parse_bytes(json: &[u8]) -> Result<Frame> {
+fn parse_bytes(json: &[u8], id: &str) -> Result<Frame> {
     let parsed = Json::parse(json)
         .map_err(Fault::Json)
-        .and_then(|root| parse(&root));
+        .and_then(|root| parse(&root, id));
     match parsed {
         Ok(frame) => Ok(frame),
         Err(Fault::Json(error)) => Err(make_error(
@@ -745,17 +820,123 @@ fn parse_bytes(json: &[u8]) -> Result<Frame> {
 /// "_about"). Besides the measured frame's tokens, a text may name a field as
 /// a sheet names it, "REV {revision}", and it is filled like the others.
 /// ParseFailure for text that is not JSON or lacks a required member;
-/// InvalidArgument for a size or margin that makes no sheet.
+/// InvalidArgument for a size or margin that makes no sheet. The frame's id
+/// is the default frame's; a compiled-in frame has its own name.
 pub fn parse_frame(json: &str) -> Result<Frame> {
-    parse_bytes(json.as_bytes())
+    parse_bytes(json.as_bytes(), BUILT_IN_FRAME_ID)
 }
 
-/// The built-in A3 landscape frame, parsed once on first use from the copy
-/// embedded in the build. A failure here is a defect in the committed data,
-/// and is reported rather than papered over.
+/// The names of the frames compiled into Katana, the default first.
+pub fn compiled_in_frame_names() -> Vec<&'static str> {
+    COMPILED_IN_FRAMES.iter().map(|(name, _)| *name).collect()
+}
+
+/// A frame compiled into Katana, by its name, parsed once on first use from
+/// the copy embedded in the build; None for a name it does not have. A
+/// failure to parse is a defect in the committed data, and is reported rather
+/// than papered over.
+pub fn compiled_in_frame(name: &str) -> Option<&'static Result<Frame>> {
+    static FRAMES: OnceLock<Vec<Result<Frame>>> = OnceLock::new();
+    let at = COMPILED_IN_FRAMES
+        .iter()
+        .position(|(compiled, _)| *compiled == name)?;
+    let frames = FRAMES.get_or_init(|| {
+        COMPILED_IN_FRAMES
+            .iter()
+            .map(|(compiled, bytes)| parse_bytes(bytes, compiled))
+            .collect()
+    });
+    frames.get(at)
+}
+
+/// The built-in A3 landscape frame, the default: compiled_in_frame of
+/// BUILT_IN_FRAME_ID.
 pub fn built_in_frame() -> &'static Result<Frame> {
-    static FRAME: OnceLock<Result<Frame>> = OnceLock::new();
-    FRAME.get_or_init(|| parse_bytes(EMBEDDED_FRAME))
+    static MISSING: OnceLock<Result<Frame>> = OnceLock::new();
+    compiled_in_frame(BUILT_IN_FRAME_ID).unwrap_or_else(|| {
+        MISSING.get_or_init(|| {
+            Err(Error::new(
+                ErrorCode::NotFound,
+                "the default plot frame is not compiled in",
+            ))
+        })
+    })
+}
+
+/// The frames a sheet may take while `offered` are what the session's
+/// customisation offers (CustomisationState::plot_frames): the default first,
+/// then each offered frame Katana has compiled in, in the customisation's
+/// order, each once. What Page Setup lists and `frame=` accepts.
+pub fn frames_offered(offered: &[CustomisationPlotFrame]) -> Vec<String> {
+    let mut names = vec![String::from(BUILT_IN_FRAME_ID)];
+    for frame in offered {
+        if compiled_in_frame(&frame.name).is_some() && !names.contains(&frame.name) {
+            names.push(frame.name.clone());
+        }
+    }
+    names
+}
+
+/// The frames `offered` names that Katana has not compiled in: a customisation
+/// written for a newer Katana, or a typing mistake. Each is reported where the
+/// frames are listed (SHEETS FRAMES) rather than dropped silently.
+pub fn frames_not_compiled_in(offered: &[CustomisationPlotFrame]) -> Vec<String> {
+    offered
+        .iter()
+        .filter(|frame| compiled_in_frame(&frame.name).is_none())
+        .map(|frame| frame.name.clone())
+        .collect()
+}
+
+/// The frame a sheet plots with, and why it is not the one the sheet names
+/// when it is not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetFrame {
+    pub frame: Frame,
+    /// Empty when the sheet's own frame is drawn; otherwise the sentence that
+    /// says the default stands in for it, and why.
+    pub fallback: String,
+}
+
+/// The frame a sheet naming `frame_id` plots with on `paper`, given the frames
+/// the session's customisation offers - None when that is not known, and then
+/// any frame compiled in is drawn. The default frame is always drawn as
+/// itself. A frame the customisation does not offer, or one Katana does not
+/// have, is drawn as the DEFAULT frame, with `fallback` saying so: a sheet set
+/// made with another customisation still plots with a title block, and the
+/// problem is reported where the caller reports problems (the painter's
+/// problems, SHEETS CHECK's frame.unknown). InvalidArgument for a portrait
+/// sheet, which has no frame; call only with a non-empty id.
+pub fn resolve_sheet_frame(
+    frame_id: &str,
+    offered: Option<&[CustomisationPlotFrame]>,
+    paper: PaperSize,
+    landscape: bool,
+) -> Result<SheetFrame> {
+    let compiled = compiled_in_frame(frame_id).is_some();
+    let on_offer = frame_id == BUILT_IN_FRAME_ID
+        || offered.is_none_or(|frames| frames.iter().any(|frame| frame.name == frame_id));
+    if compiled && on_offer {
+        return Ok(SheetFrame {
+            frame: frame_for(frame_id, paper, landscape)?,
+            fallback: String::new(),
+        });
+    }
+    let fallback = if compiled {
+        format!(
+            "the frame {frame_id} is not one the customisation in use offers: the sheet plots with \
+             the default frame {BUILT_IN_FRAME_ID}"
+        )
+    } else {
+        format!(
+            "Katana has no plot frame {frame_id}: the sheet plots with the default frame \
+             {BUILT_IN_FRAME_ID}"
+        )
+    };
+    Ok(SheetFrame {
+        frame: frame_for(BUILT_IN_FRAME_ID, paper, landscape)?,
+        fallback,
+    })
 }
 
 /// The uniform factor the A3 frame is scaled by to sit on `paper`: the smaller
@@ -843,24 +1024,26 @@ pub fn scaled_frame(
     out
 }
 
-/// The frame a sheet of this paper plots with: the built-in frame scaled to it.
-/// NotFound for an unknown id; InvalidArgument for a portrait sheet, which has
-/// no frame. Call only with a non-empty id - an empty one means "no frame".
+/// The frame a sheet of this paper plots with: the compiled-in frame of that
+/// name scaled to it. NotFound for a name Katana has not compiled in;
+/// InvalidArgument for a portrait sheet, which has no frame. Call only with a
+/// non-empty id - an empty one means "no frame". Whether the session's
+/// customisation offers the frame is resolve_sheet_frame's to ask.
 pub fn frame_for(frame_id: &str, paper: PaperSize, landscape: bool) -> Result<Frame> {
-    if frame_id != BUILT_IN_FRAME_ID {
+    let Some(compiled) = compiled_in_frame(frame_id) else {
         return Err(make_error(
             ErrorCode::NotFound,
             "no plot frame of that name",
             frame_id,
         ));
-    }
+    };
     if !landscape {
         return Err(Error::new(
             ErrorCode::InvalidArgument,
             "a portrait sheet has no frame: the title block is laid out for landscape paper",
         ));
     }
-    let base = match built_in_frame() {
+    let base = match compiled {
         Ok(base) => base,
         Err(error) => return Err(error.clone()),
     };
@@ -868,12 +1051,13 @@ pub fn frame_for(frame_id: &str, paper: PaperSize, landscape: bool) -> Result<Fr
     if size.width_mm == base.width_mm && size.height_mm == base.height_mm {
         return Ok(base.clone());
     }
-    Ok(scaled_frame(
-        base,
-        frame_scale_for(paper, true),
-        size.width_mm,
-        size.height_mm,
-    ))
+    // frame_scale_for's rule, against this frame's own paper: every frame
+    // compiled in so far is A3 landscape, for which the two are the same.
+    let factor = cpp::min(
+        size.width_mm / base.width_mm,
+        size.height_mm / base.height_mm,
+    );
+    Ok(scaled_frame(base, factor, size.width_mm, size.height_mm))
 }
 
 /// Where an image of `image_width` x `image_height` (any unit, only the ratio

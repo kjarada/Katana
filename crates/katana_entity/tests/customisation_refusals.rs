@@ -398,20 +398,21 @@ mod customisation_refusals {
 
     #[test]
     fn a_newer_version_is_unsupported_whatever_else_the_file_holds() {
-        let newer = refusal_of(r#"{"format": "katana-customisation", "version": 2, "name": "T"}"#);
+        // Version 2 (plotFrames) is this build's own, so the first newer one is 3.
+        let newer = refusal_of(r#"{"format": "katana-customisation", "version": 3, "name": "T"}"#);
         assert_eq!(newer.code, ErrorCode::Unsupported);
         assert!(
             newer.message.contains("newer version of Katana"),
             "{}",
             newer.describe()
         );
-        assert!(newer.context.contains("version 2"), "{}", newer.describe());
+        assert!(newer.context.contains("version 3"), "{}", newer.describe());
 
         // A member this build has never heard of is what a newer file would
         // hold; it must be told the file is newer, not that the member is
         // unknown. And a version no 32-bit number holds is newer still.
         for text in [
-            r#"{"format": "katana-customisation", "version": 2, "name": "T", "layers": []}"#,
+            r#"{"format": "katana-customisation", "version": 3, "name": "T", "layers": []}"#,
             r#"{"format": "katana-customisation", "version": 7, "codes": "none"}"#,
             r#"{"format": "katana-customisation", "version": 99999999999, "name": "T"}"#,
         ] {
@@ -1799,7 +1800,7 @@ mod customisation_refusals {
         // A file that has said it is NEWER is told that, as for anything else
         // a newer file may hold.
         let newer = refusal_of(
-            r#"{"format": "katana-customisation", "version": 2, "name": "T", "limit": 1e400}"#,
+            r#"{"format": "katana-customisation", "version": 3, "name": "T", "limit": 1e400}"#,
         );
         assert_eq!(newer.code, ErrorCode::Unsupported);
         assert!(

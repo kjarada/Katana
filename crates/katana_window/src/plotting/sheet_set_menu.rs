@@ -20,6 +20,7 @@
 //! so a headless session fills it by its object names.
 
 use katana_cad::document::Document;
+use katana_cad::plotting::frame::frames_offered;
 use katana_core::path_text::generic_path_utf8;
 
 use crate::drive::action::{Action, Menu};
@@ -78,8 +79,8 @@ impl SheetEditor {
             .action(
                 Action::new("sheetPageSetup", "Page Set&up...")
                     .tip(
-                        "How the set plots - colours, line weights, resolution, file names - kept \
-                         with it without plotting (SHEETS PAGESETUP)",
+                        "How the set plots - its title frame, colours, line weights, resolution, \
+                         file names - kept with it without plotting (SHEETS PAGESETUP)",
                     )
                     // What a headless session's --dialog finds it by.
                     .opens("pageSetupDialog"),
@@ -222,16 +223,21 @@ impl SheetEditor {
 
     /// Page Setup for the editor's set, opened and not waited on: the Plot dialog in its
     /// page-setup mode, whose Save (pageSetupSave) runs PlotDialog::page_setup_line through the
-    /// editor.
+    /// editor. Its Frame lists the frames the session's customisation offers.
     pub fn open_page_setup_dialog(&mut self, host: &dyn Host) -> &mut PlotDialog {
         self.observe(host);
-        let set = host.document().sheet_set();
-        self.plot_dialog.insert(PlotDialog::new(
-            &set,
-            self.current_sheet(),
-            true,
-            "",
-            PlotDialogMode::PageSetup,
-        ))
+        let document = host.document();
+        let set = document.sheet_set();
+        let offered = frames_offered(&document.customisation_state().plot_frames);
+        self.plot_dialog.insert(
+            PlotDialog::new(
+                &set,
+                self.current_sheet(),
+                true,
+                "",
+                PlotDialogMode::PageSetup,
+            )
+            .with_frames(offered),
+        )
     }
 }

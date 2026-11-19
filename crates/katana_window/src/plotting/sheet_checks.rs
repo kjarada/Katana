@@ -129,6 +129,12 @@ pub fn preflight_options_for<'a>(
     options.logo_readable = Some(!source.logo.is_null());
     options.assets.clone_from(&source.assets);
     options.index = source.plan.index;
+    // The frames the session's customisation offers, as the painter asks them
+    // (sheet_painter's offered_frames): a sheet naming another is checked as
+    // it is drawn, with the default frame, and said so (frame.unknown).
+    options.offered_frames = source
+        .document
+        .map(|document| document.customisation_state().plot_frames.clone());
     options
 }
 

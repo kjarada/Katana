@@ -875,6 +875,7 @@ impl Document {
             colours,
             linework,
             automation,
+            plot_frames,
             library,
             map,
         } = customisation;
@@ -898,6 +899,10 @@ impl Document {
         // both.)
         session.linework = linework.unwrap_or_default();
         session.automation = automation.unwrap_or_default();
+        // The frames it offers, or none: an install takes the place of the
+        // whole session, so a customisation that offers none leaves no frame of
+        // the one before it on offer.
+        session.plot_frames = plot_frames;
         session.sources = sources;
         if session.sources.is_empty() {
             // A customisation that lists none is its own one source. Its notice
@@ -942,6 +947,7 @@ impl Document {
             colours: session.colours.clone(),
             linework: Some(session.linework.clone()),
             automation: Some(session.automation),
+            plot_frames: session.plot_frames.clone(),
             library: self.state.library.clone(),
             map: self.state.survey_map.clone(),
         }

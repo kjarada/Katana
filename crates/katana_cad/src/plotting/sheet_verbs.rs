@@ -4,7 +4,7 @@
 //! out, edit and inspect a project's sheets.
 //!
 //! ```text
-//! SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | APPEND path | CHECK | PAGESETUP
+//! SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | APPEND path | CHECK | PAGESETUP | FRAMES
 //! SHEET NEW | REMOVE | MOVE | COPY | RENAME | SET | FIELD | SUGGESTPAPER
 //! VIEW ADD | SET | REMOVE | LIST | FIT | BESTROTATE
 //! TILE n preset
@@ -57,7 +57,7 @@ use crate::plotting::arrange_commands::{
     align_viewports, auto_arrange_sheet, choose_paper_for_scale, distribute_viewports, drawn_scale,
     fit_viewport_to_content, main_plan_of, match_scale, rotate_to_best_fit,
 };
-use crate::plotting::frame::BUILT_IN_FRAME_ID;
+use crate::plotting::frame::{BUILT_IN_FRAME_ID, frames_not_compiled_in, frames_offered};
 use crate::plotting::generators::{
     CrossSectionRequest, GridRequest, LayoutRequest, SheetTemplate, StripRequest, blank_sheet,
     cross_section_sheets, grid_sheets, prepare_for_append, sheets_from_plot_frames, smart_layout,
@@ -68,8 +68,8 @@ use crate::plotting::layout::{
 };
 use crate::plotting::page_setup::{
     MAXIMUM_LINE_WEIGHT_SCALE, MAXIMUM_PLOT_DPI, MINIMUM_LINE_WEIGHT_SCALE, MINIMUM_PLOT_DPI,
-    PageSetup, parse_sheet_selection, set_page_setup, validate_file_name_pattern,
-    validate_page_setup,
+    PageSetup, parse_sheet_selection, set_page_setup, set_page_setup_frame,
+    validate_file_name_pattern, validate_page_setup,
 };
 use crate::plotting::plan_grid::grid_style_from;
 use crate::plotting::preflight::{
@@ -461,20 +461,56 @@ fn landscape_from(text: &str) -> Result<bool> {
     }
 }
 
-// on (the built-in frame), off or none (no frame), or a frame's id.
-fn frame_from(text: &str) -> Result<String> {
+// What `frame=` may name in a session: the frames on offer (frames_offered:
+// the default, then those the session's customisation offers), and the set's
+// own frame, which "on" means (PageSetup::frame).
+struct FrameWords {
+    offered: Vec<String>,
+    set_frame: String,
+}
+
+fn frame_words(document: &Document) -> FrameWords {
+    let offered = frames_offered(&document.customisation_state().plot_frames);
+    // A stored set may name a frame the session no longer offers; "on" still
+    // means it, and the sheet is drawn with the default and says so.
+    let set_frame = match document.sheet_set_status() {
+        Ok(()) => document.sheet_set().page_setup.frame.clone(),
+        Err(_) => String::from(BUILT_IN_FRAME_ID),
+    };
+    FrameWords { offered, set_frame }
+}
+
+// A frame on offer by its name, in any letter case.
+fn offered_frame_from(text: &str, words: &FrameWords) -> Result<String> {
     let word = folded(text);
-    if word == "on" || word == "yes" || word == "true" || word == folded(BUILT_IN_FRAME_ID) {
-        return Ok(String::from(BUILT_IN_FRAME_ID));
+    words
+        .offered
+        .iter()
+        .find(|name| folded(name) == word)
+        .cloned()
+        .ok_or_else(|| {
+            make_error(
+                ErrorCode::NotFound,
+                format!(
+                    "no plot frame of that name is on offer: frame= is on, off or one of {} \
+                     (SHEETS FRAMES)",
+                    words.offered.join(", ")
+                ),
+                text,
+            )
+        })
+}
+
+// on (the set's frame), off or none (no frame), or a frame on offer by name.
+fn frame_from(text: &str, words: &FrameWords) -> Result<String> {
+    let word = folded(text);
+    if word == "on" || word == "yes" || word == "true" {
+        return Ok(words.set_frame.clone());
     }
     if word == "off" || word == "none" || word == "no" || word == "false" {
         return Ok(String::new());
     }
-    Err(make_error(
-        ErrorCode::NotFound,
-        format!("no plot frame of that name: frame= is on, off or {BUILT_IN_FRAME_ID}"),
-        text,
-    ))
+    offered_frame_from(text, words)
 }
 
 // The kinds by their stored names, and the words a person reaches for.
@@ -898,13 +934,59 @@ fn revision_line(revision: &Revision) -> String {
 // The page setup as SHEETS PAGESETUP prints it, in the words it takes.
 fn page_setup_line(setup: &PageSetup) -> String {
     format!(
-        "pagesetup style={} lineweight={} dpi={} pattern={} filepersheet={}",
+        "pagesetup style={} lineweight={} dpi={} pattern={} filepersheet={} frame={}",
         setup.colour_mode.name(),
         decimal(setup.line_weight_scale),
         decimal(setup.dpi),
         reply_quoted(&setup.file_name_pattern),
-        on_off_text(setup.file_per_sheet)
+        on_off_text(setup.file_per_sheet),
+        setup.frame
     )
+}
+
+// SHEETS FRAMES: the frames a sheet may take in this session, the set's frame,
+// and what the customisation names that Katana does not have:
+//
+//   frames count=2 set=a3_landscape customisation="NSW"
+//   frame name=a3_landscape from=default
+//   frame name=nsw_a3_utility_cross_section from=customisation
+//   problem the customisation "NSW" offers the frame x, which Katana does not have
+fn frames_verb(document: &Document, args: &[String]) -> Result<String> {
+    if args.len() > 1 {
+        return Err(usage("SHEETS FRAMES"));
+    }
+    let words = frame_words(document);
+    let state = document.customisation_state();
+    let mut reply = format!(
+        "frames count={} set={} customisation={}",
+        words.offered.len(),
+        words.set_frame,
+        reply_quoted(&state.name)
+    );
+    for name in &words.offered {
+        reply.push_str(&format!(
+            "\nframe name={name} from={}",
+            if name == BUILT_IN_FRAME_ID {
+                "default"
+            } else {
+                "customisation"
+            }
+        ));
+    }
+    if !words.offered.contains(&words.set_frame) {
+        reply.push_str(&format!(
+            "\nproblem the set's frame {} is not on offer: its sheets plot with the default frame \
+             {BUILT_IN_FRAME_ID}",
+            words.set_frame
+        ));
+    }
+    for missing in frames_not_compiled_in(&state.plot_frames) {
+        reply.push_str(&format!(
+            "\nproblem the customisation {} offers the frame {missing}, which Katana does not have",
+            reply_quoted(&state.name)
+        ));
+    }
+    Ok(reply)
 }
 
 // The plot style by its stored name or a common other one
@@ -919,16 +1001,19 @@ fn style_from(text: &str) -> Result<PlotColourMode> {
     })
 }
 
-// SHEETS PAGESETUP [style=] [lineweight=] [dpi=] [pattern=] [filepersheet=]:
-// the page setup kept with the set, printed, or changed as one step.
+// SHEETS PAGESETUP [style=] [lineweight=] [dpi=] [pattern=] [filepersheet=]
+// [frame=]: the page setup kept with the set, printed, or changed as one step.
+// frame= is a frame on offer (SHEETS FRAMES), and it is put on every sheet
+// that has a frame in the same step (set_page_setup_frame).
 fn page_setup_verb(document: &mut Document, args: &[String]) -> Result<String> {
     const USAGE: &str = "SHEETS PAGESETUP [style=colour|grey|mono] [lineweight=f] [dpi=n] \
-                         [pattern=text] [filepersheet=on|off]";
+                         [pattern=text] [filepersheet=on|off] [frame=name]";
     let options = options_from(args, 1, USAGE)?;
     let mut setup = document.sheet_set().page_setup.clone();
     if options.is_empty() {
         return Ok(page_setup_line(&setup));
     }
+    let mut frame_given = false;
     for option in &options {
         match option.key.as_str() {
             "style" | "colour" | "color" | "mode" => setup.colour_mode = style_from(&option.value)?,
@@ -938,18 +1023,26 @@ fn page_setup_verb(document: &mut Document, args: &[String]) -> Result<String> {
             "dpi" => setup.dpi = number(&option.value, "dpi=")?,
             "pattern" | "names" => setup.file_name_pattern = unescaped(&option.value),
             "filepersheet" => setup.file_per_sheet = on_off(&option.value, &option.key)?,
+            "frame" => {
+                setup.frame = offered_frame_from(&option.value, &frame_words(document))?;
+                frame_given = true;
+            }
             _ => {
                 return Err(unknown_option(
                     option,
                     "a page setup",
-                    "style=, lineweight=, dpi=, pattern= and filepersheet=",
+                    "style=, lineweight=, dpi=, pattern=, filepersheet= and frame=",
                 ));
             }
         }
     }
     // Checked before the step, so a refused value says which it was.
     validate_page_setup(&setup)?;
-    set_page_setup(document, &setup)?;
+    if frame_given {
+        set_page_setup_frame(document, &setup)?;
+    } else {
+        set_page_setup(document, &setup)?;
+    }
     Ok(page_setup_line(&document.sheet_set().page_setup))
 }
 
@@ -1014,7 +1107,7 @@ fn sheets_verb(
     context: SheetVerbContextProvider<'_, '_>,
 ) -> Result<String> {
     const USAGE: &str = "SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | APPEND path | \
-                         CHECK [sheets=] [json] | PAGESETUP [option=value ...]";
+                         CHECK [sheets=] [json] | PAGESETUP [option=value ...] | FRAMES";
     let action = args
         .first()
         .map_or_else(|| String::from("LIST"), |first| uppered(first));
@@ -1053,6 +1146,7 @@ fn sheets_verb(
         }
         "CHECK" | "PREFLIGHT" => check_verb(document, args, context),
         "PAGESETUP" | "SETUP" => page_setup_verb(document, args),
+        "FRAMES" => frames_verb(document, args),
         "LOAD" => {
             if args.len() != 2 {
                 return Err(usage(USAGE));
@@ -1110,11 +1204,11 @@ fn sheets_verb(
 // ---- SHEET ---------------------------------------------------------------------------
 
 // A sheet option of SHEET NEW and SHEET SET, applied to `sheet`.
-fn set_sheet_option(sheet: &mut Sheet, option: &KeyValue) -> Status {
+fn set_sheet_option(sheet: &mut Sheet, option: &KeyValue, frames: &FrameWords) -> Status {
     match option.key.as_str() {
         "paper" => sheet.paper = paper_from(&option.value)?,
         "orientation" => sheet.landscape = landscape_from(&option.value)?,
-        "frame" => sheet.frame = frame_from(&option.value)?,
+        "frame" => sheet.frame = frame_from(&option.value, frames)?,
         "legendblock" => sheet.frame_legend = on_off(&option.value, &option.key)?,
         "name" => {
             if option.value.is_empty() {
@@ -1148,7 +1242,10 @@ fn orientation_word(word: &str) -> Option<bool> {
 
 fn new_sheet(document: &mut Document, args: &[String]) -> Result<String> {
     let set = document.sheet_set();
+    let frames = frame_words(document);
     let mut sheet = blank_sheet(&SheetTemplate::default(), String::new());
+    // A new sheet takes the set's frame (the page setup's), as "on" means.
+    sheet.frame.clone_from(&frames.set_frame);
     let mut name_words: Vec<String> = Vec::new();
     let mut at: Option<usize> = None;
     let mut named = false;
@@ -1176,7 +1273,7 @@ fn new_sheet(document: &mut Document, args: &[String]) -> Result<String> {
             at = Some(position - 1);
             continue;
         }
-        set_sheet_option(&mut sheet, &option)?;
+        set_sheet_option(&mut sheet, &option, &frames)?;
         named = named || option.key == "name";
     }
     if named && !name_words.is_empty() {
@@ -1482,9 +1579,10 @@ fn sheet_verb(
             if args.len() < 3 {
                 return Err(usage(
                     "SHEET SET n [paper=A0..A4] [orientation=landscape|portrait] \
-                     [frame=on|off] [legendblock=on|off] [name=text]",
+                     [frame=on|off|name] [legendblock=on|off] [name=text]",
                 ));
             }
+            let frames = frame_words(document);
             edit_sheet(
                 document,
                 index,
@@ -1501,7 +1599,7 @@ fn sheet_verb(
                                 word.as_str(),
                             ));
                         };
-                        set_sheet_option(edited, &option)?;
+                        set_sheet_option(edited, &option, &frames)?;
                     }
                     Ok(())
                 },
@@ -2057,9 +2155,11 @@ fn takes_key(keys: &str, key: &str) -> bool {
     !keys.is_empty() && keys.split(' ').any(|word| word == key)
 }
 
-fn generate_options(kind: &str, args: &[String]) -> Result<GenerateOptions> {
+fn generate_options(kind: &str, args: &[String], frames: &FrameWords) -> Result<GenerateOptions> {
     let keys = generate_keys(kind);
     let mut o = GenerateOptions::default();
+    // Generated sheets take the set's frame unless frame= says otherwise.
+    o.paper.frame.clone_from(&frames.set_frame);
     for word in args.iter().skip(1) {
         if let Some(landscape) = orientation_word(word)
             && takes_key(keys, "orientation")
@@ -2096,7 +2196,7 @@ fn generate_options(kind: &str, args: &[String]) -> Result<GenerateOptions> {
         match key {
             "paper" => o.paper.paper = paper_from(value)?,
             "orientation" => o.paper.landscape = landscape_from(value)?,
-            "frame" => o.paper.frame = frame_from(value)?,
+            "frame" => o.paper.frame = frame_from(value, frames)?,
             "scale" => o.scale = Some(scale_from(value)?),
             "alignment" => o.alignment = String::from(value),
             "area" => o.area = Some(box_from(value, "area=")?),
@@ -2429,7 +2529,7 @@ fn generate_verb(
             first.as_str(),
         ));
     }
-    let options = generate_options(&kind, args)?;
+    let options = generate_options(&kind, args, &frame_words(document))?;
     if kind == "register" {
         // A cover sheet, first in the set: the drawing register and the
         // revision table (tables.rs). It adds to the set; replacing every
@@ -2727,11 +2827,13 @@ SHEETS APPEND path              another set's sheets from its JSON file, after t
 SHEETS CHECK [sheets=1,3-5] [json]   the preflight checks: a summary, then a finding a line,
                                 "severity code sheet view message=... fix=..." (- for none)
 SHEETS PAGESETUP [style=colour|grey|mono] [lineweight=f] [dpi=n] [pattern=text]
-                 [filepersheet=on|off]   how the set plots; no option prints it
-SHEET NEW [name] [paper=A3] [portrait|landscape] [frame=on|off] [legendblock=on|off] [at=n]
+                 [filepersheet=on|off] [frame=name]   how the set plots; no option prints it;
+                                frame= puts that frame on every sheet that has one
+SHEETS FRAMES                   the frames on offer: the default, then the customisation's
+SHEET NEW [name] [paper=A3] [portrait|landscape] [frame=on|off|name] [legendblock=on|off] [at=n]
 SHEET REMOVE n | MOVE n to | COPY n | RENAME n name
-SHEET SET n [paper=A0..A4] [orientation=landscape|portrait] [frame=on|off] [legendblock=on|off]
-          [name=text]
+SHEET SET n [paper=A0..A4] [orientation=landscape|portrait] [frame=on|off|name]
+          [legendblock=on|off] [name=text]
 SHEET FIELD n field [value]     the sheet's own value for a field its frame prints, such as
                                 sheet_number or scale; "" clears it, no value prints it
 SHEET SUGGESTPAPER n [scale=n|auto] [apply=on]   the smallest paper for the sheet's main plan

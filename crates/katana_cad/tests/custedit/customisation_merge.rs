@@ -1178,3 +1178,73 @@ mod merge_customisation {
         assert!(merged.merged == now, "all or nothing");
     }
 }
+
+// The plot frames a customisation offers are merged by name, in both modes: a
+// frame is neither a definition nor a rule (customisation_merge.rs's header).
+// The frame names are invented; the merge does not look them up.
+mod merge_plot_frames {
+    use super::*;
+    use katana_entity::CustomisationPlotFrame;
+
+    fn offering(name: &str, frames: &[&str]) -> Customisation {
+        Customisation {
+            name: String::from(name),
+            plot_frames: frames
+                .iter()
+                .map(|frame| CustomisationPlotFrame {
+                    name: String::from(*frame),
+                })
+                .collect(),
+            ..Customisation::default()
+        }
+    }
+
+    fn names(merge: &CustomisationMerge) -> Vec<&str> {
+        merge
+            .merged
+            .plot_frames
+            .iter()
+            .map(|frame| frame.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_load_adds_the_frames_it_offers_after_the_sessions_own_each_once() {
+        let current = offering("builtin", &["frame_a"]);
+        let merged = merge_customisation(
+            &current,
+            &[
+                offering("mine", &["frame_b", "frame_a"]),
+                offering("theirs", &["frame_c", "frame_b"]),
+            ],
+            LoadMode::Merge,
+        );
+        assert!(merged.problems.is_empty(), "{:?}", merged.problems);
+        assert_eq!(names(&merged), vec!["frame_a", "frame_b", "frame_c"]);
+    }
+
+    #[test]
+    fn a_replace_keeps_the_sessions_frames_too() {
+        let current = offering("builtin", &["frame_a"]);
+        let replaced = merge_customisation(
+            &current,
+            &[offering("mine", &["frame_b"])],
+            LoadMode::Replace,
+        );
+        assert!(replaced.problems.is_empty(), "{:?}", replaced.problems);
+        assert_eq!(names(&replaced), vec!["frame_a", "frame_b"]);
+    }
+
+    #[test]
+    fn a_load_that_offers_no_frame_leaves_the_sessions() {
+        let current = offering("builtin", &["frame_a"]);
+        let merged = merge_customisation(&current, &[offering("mine", &[])], LoadMode::Merge);
+        assert_eq!(names(&merged), vec!["frame_a"]);
+        let none = merge_customisation(
+            &offering("builtin", &[]),
+            &[offering("mine", &[])],
+            LoadMode::Merge,
+        );
+        assert!(names(&none).is_empty());
+    }
+}

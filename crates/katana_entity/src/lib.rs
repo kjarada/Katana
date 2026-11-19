@@ -43,8 +43,8 @@ pub use annotation::{
 };
 pub use colour_names::{ColourTable, ColourTableEntry};
 pub use customisation::{
-    Customisation, CustomisationAutomation, CustomisationBase, CustomisationSourceNote,
-    CustomisationWriteOptions,
+    Customisation, CustomisationAutomation, CustomisationBase, CustomisationPlotFrame,
+    CustomisationSourceNote, CustomisationWriteOptions,
 };
 pub use entity::{
     AnchorPoint, AnchorRef, ArrowHead, CalloutShape, Color, DimensionGeometry, DimensionKind,

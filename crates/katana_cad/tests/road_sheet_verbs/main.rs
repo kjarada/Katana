@@ -8,6 +8,7 @@
 //! road_verbs          tests/cad/road/test_road_verbs.cpp
 //! generate_rotate     tests/cad/plotting/test_generate_rotate.cpp
 //! sheet_agent_verbs   tests/cad/plotting/test_sheet_agent_verbs.cpp
+//! sheet_frame_verbs   (Rust only) the frames a customisation offers, by verb
 //! sheet_verbs         tests/cad/plotting/test_sheet_verbs.cpp
 //! sheets_append       tests/cad/plotting/test_sheets_append.cpp
 //! ```
@@ -39,6 +40,7 @@ mod road_object_verbs;
 mod road_objects;
 mod road_verbs;
 mod sheet_agent_verbs;
+mod sheet_frame_verbs;
 mod sheet_verbs;
 mod sheets_append;
 

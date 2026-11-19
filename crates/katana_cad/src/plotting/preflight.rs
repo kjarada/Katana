@@ -29,7 +29,7 @@ use katana_core::json::{Json, JsonResult};
 use katana_core::text::{format_exact_real, format_general};
 use katana_core::{Error, ErrorCode, Result};
 use katana_entity::entity_geometry::bounding_box;
-use katana_entity::{Entity, EnumName, Geometry, Model};
+use katana_entity::{CustomisationPlotFrame, Entity, EnumName, Geometry, Model};
 use katana_geometry::alignment::solve_alignment;
 use katana_geometry::{Box2, Point2, Polyline2, SpatialIndex, Vec2};
 use katana_math::cpp;
@@ -38,7 +38,7 @@ use crate::dimension_draw::resolve_dimension_style;
 use crate::document::Document;
 use crate::hatching::resolve_hatch_pattern;
 use crate::plot::{SHEET_SCALES, paper_dimensions, sheet_scale_at_least};
-use crate::plotting::frame::{Frame, frame_for};
+use crate::plotting::frame::{Frame, SheetFrame, resolve_sheet_frame};
 use crate::plotting::key_plan::{KeyPlanOutline, fit_key_plan, key_plan_outlines, model_placer};
 use crate::plotting::layout::minimum_size;
 use crate::plotting::legend::{
@@ -181,7 +181,8 @@ static CHECKS: [CheckDescription; 34] = [
     check(
         "frame.unknown",
         Severity::Error,
-        "a frame this build does not have: no title block prints",
+        "a frame this build does not have, or that the customisation in use does not offer: the \
+         default frame prints in its place",
     ),
     check(
         "portrait.no-frame",
@@ -369,6 +370,11 @@ pub struct PreflightOptions<'a> {
     /// what must fit. None: the set checked, its stored scales. The Qt layer
     /// passes resolvedSheetSet.
     pub drawn_set: Option<&'a SheetSet>,
+    /// The plot frames the session's customisation offers
+    /// (CustomisationState::plot_frames). None: not known, and every frame
+    /// Katana has compiled in is taken as offered; check_document_sheets
+    /// gives the document's.
+    pub offered_frames: Option<Vec<CustomisationPlotFrame>>,
 }
 
 impl Default for PreflightOptions<'_> {
@@ -387,6 +393,7 @@ impl Default for PreflightOptions<'_> {
             index: None,
             skip: BTreeSet::new(),
             drawn_set: None,
+            offered_frames: None,
         }
     }
 }
@@ -869,21 +876,35 @@ fn sheets_to_check(set: &SheetSet, options: &PreflightOptions<'_>) -> Vec<usize>
     indices
 }
 
-type Frames = BTreeMap<String, Result<Frame>>;
+// The frames the sheets print with, each resolved once, and what the session's
+// customisation offers, which decides them.
+struct Frames<'o> {
+    offered: Option<&'o [CustomisationPlotFrame]>,
+    resolved: BTreeMap<String, Result<SheetFrame>>,
+}
 
-// The frame a sheet prints with, when it prints one.
-fn printed_frame<'f>(sheet: &Sheet, frames: &'f mut Frames) -> Option<&'f Frame> {
+// The frame a sheet prints with and why it is not its own when it is not
+// (resolve_sheet_frame), when it prints one.
+fn sheet_frame_of<'f>(sheet: &Sheet, frames: &'f mut Frames<'_>) -> Option<&'f SheetFrame> {
     if sheet.frame.is_empty() || !sheet.landscape {
         return None;
     }
     // Any key that tells the frame and the paper apart: the C++ writes the
     // paper's enumerator as a number.
     let key = format!("{}|{:?}", sheet.frame, sheet.paper);
+    let offered = frames.offered;
     frames
+        .resolved
         .entry(key)
-        .or_insert_with(|| frame_for(&sheet.frame, sheet.paper, true))
+        .or_insert_with(|| resolve_sheet_frame(&sheet.frame, offered, sheet.paper, true))
         .as_ref()
         .ok()
+}
+
+// The frame a sheet prints with, when it prints one: its own, or the default
+// standing in for it.
+fn printed_frame<'f>(sheet: &Sheet, frames: &'f mut Frames<'_>) -> Option<&'f Frame> {
+    sheet_frame_of(sheet, frames).map(|resolved| &resolved.frame)
 }
 
 fn emit_blank(
@@ -918,7 +939,7 @@ fn check_fields(
     set: &SheetSet,
     context: &FieldContext,
     indices: &[usize],
-    frames: &mut Frames,
+    frames: &mut Frames<'_>,
     report: &mut Report<'_>,
 ) {
     // Per field: on how many framed sheets it prints blank.
@@ -977,12 +998,14 @@ fn check_fields(
 fn check_logo(
     set: &SheetSet,
     indices: &[usize],
-    frames: &mut Frames,
+    frames: &mut Frames<'_>,
     options: &PreflightOptions<'_>,
     report: &mut Report<'_>,
 ) {
     let framed = indices.iter().any(|&index| {
-        printed_frame(&set.sheets[index], frames).is_some_and(|frame| frame.cell("logo").is_some())
+        // A frame that draws its own logo has no slot for the user's.
+        printed_frame(&set.sheets[index], frames)
+            .is_some_and(|frame| frame.has_user_slot("logo") && frame.cell("logo").is_some())
     });
     if !framed {
         return;
@@ -1015,7 +1038,12 @@ fn check_logo(
     }
 }
 
-fn check_sheet_itself(set: &SheetSet, index: usize, frames: &mut Frames, report: &mut Report<'_>) {
+fn check_sheet_itself(
+    set: &SheetSet,
+    index: usize,
+    frames: &mut Frames<'_>,
+    report: &mut Report<'_>,
+) {
     let sheet = &set.sheets[index];
     let place = Place {
         sheet_index: Some(index),
@@ -1073,19 +1101,28 @@ fn check_sheet_itself(set: &SheetSet, index: usize, frames: &mut Frames, report:
         );
     }
 
-    if !sheet.frame.is_empty() && sheet.landscape && printed_frame(sheet, frames).is_none() {
-        report.add(
-            place,
-            Severity::Error,
-            "frame.unknown",
-            sheet.frame.clone(),
-            format!(
-                "The sheet asks for the frame {}, which this build does not have: it prints \
-                 without a title block",
+    if !sheet.frame.is_empty() && sheet.landscape {
+        let why = match sheet_frame_of(sheet, frames) {
+            Some(resolved) if resolved.fallback.is_empty() => None,
+            Some(resolved) => Some(resolved.fallback.clone()),
+            None => Some(format!(
+                "Katana cannot draw the frame {}: the sheet prints without a title block",
                 sheet.frame
-            ),
-            String::from("Choose the built-in frame in the sheet's properties"),
-        );
+            )),
+        };
+        if let Some(why) = why {
+            report.add(
+                place,
+                Severity::Error,
+                "frame.unknown",
+                sheet.frame.clone(),
+                format!("The sheet asks for the frame {}: {why}", sheet.frame),
+                String::from(
+                    "Choose a frame the customisation offers on Page Setup (SHEETS PAGESETUP \
+                     frame=), or use the customisation that offers this one",
+                ),
+            );
+        }
     }
     if !sheet.frame.is_empty() && !sheet.landscape {
         report.add(
@@ -1835,7 +1872,7 @@ fn check_viewport(
     index: usize,
     position: usize,
     first_ids: &FirstIds,
-    frames: &mut Frames,
+    frames: &mut Frames<'_>,
     model: &Model,
     options: &PreflightOptions<'_>,
     report: &mut Report<'_>,
@@ -2187,7 +2224,10 @@ pub fn check_sheets(
         findings: Vec::new(),
     };
     let indices = sheets_to_check(set, options);
-    let mut frames: Frames = BTreeMap::new();
+    let mut frames = Frames {
+        offered: options.offered_frames.as_deref(),
+        resolved: BTreeMap::new(),
+    };
 
     // The set's own findings first: they are about every sheet.
     check_fields(set, context, &indices, &mut frames, &mut report);
@@ -2254,6 +2294,9 @@ pub fn check_document_sheets<'a>(
         && let Some(directory) = document.project_directory()
     {
         options.assets = directory.join("assets");
+    }
+    if options.offered_frames.is_none() {
+        options.offered_frames = Some(document.customisation_state().plot_frames.clone());
     }
     // Any date will do: the findings ask only whether a date prints.
     let context = field_context_for(document, frame_date(today_utc()));

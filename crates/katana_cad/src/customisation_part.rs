@@ -84,6 +84,9 @@ pub fn customisation_part(
     part.linework = None;
     part.automation = None;
     part.based_on = None;
+    // The frames a customisation offers are a setting of the whole, as the
+    // linework codes are: a part of its definitions or rules offers none.
+    part.plot_frames = Vec::new();
 
     // What the write will hold, chosen as the writer chooses (entity's
     // customisation_to_json): where each written definition came from, and
@@ -191,6 +194,9 @@ pub fn definitions_of_file(file: Customisation) -> DefinitionsOfFile {
     file.map = SurveyMap::default();
     file.linework = None;
     file.automation = None;
+    // Definitions and colours only: the frames a file offers are its
+    // settings, left with its rules.
+    file.plot_frames = Vec::new();
     let with_colours = !file.colours.empty();
     let sources = std::mem::take(&mut file.sources);
     let mut standing = Vec::with_capacity(sources.len());

@@ -18,7 +18,7 @@ use katana_core::{Error, ErrorCode};
 use katana_entity::customisation::{customisation_to_json, validate_customisation_name};
 use katana_entity::{
     ColourTable, Customisation, CustomisationAutomation, CustomisationBase,
-    CustomisationWriteOptions, EnumName, LineworkCodes, validate,
+    CustomisationPlotFrame, CustomisationWriteOptions, EnumName, LineworkCodes, validate,
 };
 
 use crate::customisation_record::CustomisationSource;
@@ -76,6 +76,11 @@ pub struct CustomisationState {
     pub linework: LineworkCodes,
     /// What is applied to survey data without being asked for.
     pub automation: CustomisationAutomation,
+    /// The plot frames the customisation offers beside the default one, in its
+    /// order (docs/plotting.md, "A customisation's title frames"): what Page
+    /// Setup lists and `frame=` takes. A sheet naming a frame not here plots
+    /// with the default one, and says so.
+    pub plot_frames: Vec<CustomisationPlotFrame>,
     /// The session is what the next start would give: what start-up
     /// installed, or what was last kept. False from the first change after
     /// either.

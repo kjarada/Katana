@@ -1,6 +1,6 @@
 {
   "format": "katana-customisation",
-  "version": 1,
+  "version": 2,
   "name": "NSW",
   "description": "Linestyles, symbols and survey codes of the NSW customisation.",
   "notice": [
@@ -16,6 +16,9 @@
     "sui water potable": "#007FFF",
     "sui water recycled": "#BF00FF"
   },
+  "plotFrames": [
+    {"name": "nsw_a3_utility_cross_section"}
+  ],
   "linestyles": [
     {"name": "BARR Bollard", "group": "Design/BARR", "units": "paper", "atVertices": true, "factor": 8.75, "origin": [0.25, 0.25], "strokes": [
       ["move", 0.25, 0.25],

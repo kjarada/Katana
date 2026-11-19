@@ -22,9 +22,11 @@ use std::collections::BTreeSet;
 use katana_core::error::make_error;
 use katana_core::text::{format_exact_real, format_general};
 use katana_core::{Error, ErrorCode, Result, Status};
+use katana_entity::customisation::validate_plot_frame_name;
 
 use crate::document::Document;
 use crate::plot::{PlotColourMode, PlotSettings};
+use crate::plotting::frame::BUILT_IN_FRAME_ID;
 use crate::plotting::sheet_commands::edit_sheet_set;
 use crate::plotting::sheet_set::{SheetSet, digits_prefix, format_sheet_number, sheet_index};
 
@@ -52,6 +54,12 @@ pub struct PageSetup {
     pub file_name_pattern: String,
     /// A PDF a sheet, named by the pattern, rather than one PDF of them all.
     pub file_per_sheet: bool,
+    /// The set's frame: what a new or generated sheet takes, and what
+    /// `SHEETS PAGESETUP frame=` puts on every sheet that has a frame
+    /// (set_page_setup_frame). BUILT_IN_FRAME_ID, or a frame the session's
+    /// customisation offers (docs/plotting.md, "A customisation's title
+    /// frames"). Never empty: a sheet turns its own frame off.
+    pub frame: String,
 }
 
 impl Default for PageSetup {
@@ -62,6 +70,7 @@ impl Default for PageSetup {
             dpi: 300.0,
             file_name_pattern: String::from(DEFAULT_FILE_NAME_PATTERN),
             file_per_sheet: false,
+            frame: String::from(BUILT_IN_FRAME_ID),
         }
     }
 }
@@ -217,6 +226,10 @@ pub fn validate_page_setup(setup: &PageSetup) -> Status {
             format_exact_real(setup.line_weight_scale),
         ));
     }
+    // A frame's name, as a customisation names one; whether the session
+    // offers it is the verb's to ask, and a set that names one it does not is
+    // drawn with the default frame (frame.rs, resolve_sheet_frame).
+    validate_plot_frame_name(&setup.frame)?;
     validate_file_name_pattern(&setup.file_name_pattern)
 }
 
@@ -469,6 +482,39 @@ pub fn sheet_file_names(set: &SheetSet, indices: &[usize], pattern: &str) -> Vec
 /// ("PAGE_SETUP"); no step when it is the page setup already. Refused with
 /// validate_page_setup's error, or with the document's when its sheets cannot
 /// be written (a newer version's).
+/// The page setup, as set_page_setup makes it, and its frame put on every
+/// sheet of the set that has a frame, as ONE step (PAGE_SETUP): what `SHEETS
+/// PAGESETUP frame=` and Page Setup's Frame do. A sheet whose frame is off
+/// keeps it off - it was turned off on purpose. Nothing at all when both are
+/// already so.
+pub fn set_page_setup_frame(document: &mut Document, setup: &PageSetup) -> Status {
+    validate_page_setup(setup)?;
+    if document.sheet_set_status().is_ok() {
+        let set = document.sheet_set();
+        if set.page_setup == *setup
+            && set
+                .sheets
+                .iter()
+                .all(|sheet| sheet.frame.is_empty() || sheet.frame == setup.frame)
+        {
+            return Ok(());
+        }
+    }
+    edit_sheet_set(
+        document,
+        |set| {
+            set.page_setup = setup.clone();
+            for sheet in &mut set.sheets {
+                if !sheet.frame.is_empty() {
+                    sheet.frame.clone_from(&setup.frame);
+                }
+            }
+            Ok(())
+        },
+        "PAGE_SETUP",
+    )
+}
+
 pub fn set_page_setup(document: &mut Document, setup: &PageSetup) -> Status {
     validate_page_setup(setup)?;
     if document.sheet_set_status().is_ok() && document.sheet_set().page_setup == *setup {
