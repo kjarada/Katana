@@ -3,8 +3,10 @@
 //! A survey code rule, the symbol it gives and a pen inside a linestyle
 //! definition all NAME their colour - "red", "dark grey", "sui test water" -
 //! and so does every string of an archive file. Two things turn a name into a
-//! colour: the standard names, which mean the same in every drawing, and a
-//! customisation's own table for the names only it uses.
+//! colour: the standard names, which mean the same in every drawing - the 27
+//! words below and the AutoCAD Colour Index's "acad 1" to "acad 255"
+//! (indexed_colours) - and a customisation's own table for the names only it
+//! uses.
 //!
 //! They are in the entity layer because three layers resolve a name and may not
 //! all see each other (tools/check_layering.cmake): `cad` codes a survey, the
@@ -23,6 +25,7 @@ use katana_core::error::{Error, ErrorCode, Status, make_error};
 use katana_core::text::is_ascii_space;
 
 use crate::entity::Color;
+use crate::indexed_colours::{COLOUR_BY_LAYER, indexed_colour};
 
 struct NamedColour {
     name: &'static str, // already folded
@@ -112,12 +115,45 @@ pub fn fold_colour_name(name: &str) -> String {
     key
 }
 
-/// The colour of one of the 27 standard names, compared by fold_colour_name.
-/// None for any other name: a colour outside the standard ones is defined by
-/// a customisation (ColourTable below) or by nothing Katana has, and such a
-/// name ("pen 025") leaves a colour alone rather than being guessed at.
+/// The AutoCAD Colour Index entry a folded name names: "acad " and one to
+/// three digits, 0 to 256 ("acad 001", "acad 1", "acad 040"). 0 and 256 are
+/// ByBlock and ByLayer, names of the INHERITED colour.
+fn index_of_folded(folded: &str) -> Option<i32> {
+    let digits = folded.strip_prefix("acad ")?;
+    if digits.is_empty() || digits.len() > 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let index: i32 = digits.parse().ok()?;
+    (index <= COLOUR_BY_LAYER).then_some(index)
+}
+
+/// The index of a colour name of the form "acad NNN", compared by
+/// fold_colour_name ("ACAD_005" is 5), 0 to 256; None for any other name. An
+/// archive's meshes name their colours so (the program that writes them takes
+/// a mesh's colours from AutoCAD's index). 0 and 256 (ByBlock, ByLayer) name
+/// no colour of their own: such a name is the inherited colour, said on
+/// purpose, and standard_colour gives it nothing.
+pub fn colour_index_of_name(name: &str) -> Option<i32> {
+    index_of_folded(&fold_colour_name(name))
+}
+
+/// The colour of one of the 27 standard names, or of an AutoCAD Colour Index
+/// name "acad 1" to "acad 255" (indexed_colours), compared by
+/// fold_colour_name. None for any other name: a colour outside these is
+/// defined by a customisation (ColourTable below) or by nothing Katana has,
+/// and such a name ("pen 025") leaves a colour alone rather than being
+/// guessed at.
+///
+/// The index names are standard in the same sense as "red": they mean the
+/// same in every drawing, by a published table. They are not listed by
+/// standard_colour_names, which a colour field offers; 255 numbers would bury
+/// the 27 words.
 pub fn standard_colour(name: &str) -> Option<Color> {
-    standard_entry(&fold_colour_name(name)).map(|entry| entry.colour)
+    let folded = fold_colour_name(name);
+    if let Some(entry) = standard_entry(&folded) {
+        return Some(entry.colour);
+    }
+    index_of_folded(&folded).and_then(indexed_colour)
 }
 
 /// The 27 names, lower case, in the table's order: the plain names first, then
@@ -173,10 +209,12 @@ impl ColourTable {
     /// Fails with InvalidArgument for a name that is empty or nothing but
     /// blanks and separators; for a name whose fold another entry already
     /// has ("SUI Gas" beside "sui_gas": a lookup could not say which was
-    /// meant); and for a name whose fold is a standard name. That last one
-    /// keeps a standard name stable with or without a customisation,
-    /// including a headless archive import with an empty palette. (The C++
-    /// also refused a name that is not UTF-8; a String cannot be one.)
+    /// meant); and for a name whose fold is a standard name, an AutoCAD
+    /// Colour Index name among them ("acad 040", "acad 0": see
+    /// colour_index_of_name). That last one keeps a standard name stable with
+    /// or without a customisation, including a headless archive import with
+    /// an empty palette. (The C++ also refused a name that is not UTF-8; a
+    /// String cannot be one.)
     pub fn add(&mut self, name: impl Into<String>, colour: Color) -> Status {
         let name = name.into();
         let folded = fold_colour_name(&name);
@@ -188,7 +226,9 @@ impl ColourTable {
                 "a colour name is empty",
             ));
         }
-        if standard_entry(&folded).is_some() {
+        // An index name ("acad 040") is held to the same rule, and so are
+        // "acad 0" and "acad 256": they name the inherited colour.
+        if standard_entry(&folded).is_some() || index_of_folded(&folded).is_some() {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 format!(

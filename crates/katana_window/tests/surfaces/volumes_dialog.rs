@@ -429,6 +429,24 @@ mod volumes_dialog {
             assert!(bench.host.lines().is_empty());
             assert!(bench.text("volumesStatus").contains("No surface"));
         }
+        // One surface chosen as both Base and Top: Measure still runs (it measures nothing), but
+        // the makers, whose map would be nothing and whose envelope the surface itself, are
+        // greyed - they stood lit (the sixth look audit's H) - and their lines say why.
+        {
+            let mut bench = bench(wedge_host());
+            set_method(&mut bench, VolumeMethod::Surfaces);
+            bench.fill("volumesTop", "ground");
+            bench.fill("volumesBase", "ground");
+            assert!(bench.enabled("volumesRun"));
+            assert!(!bench.enabled("volumesEnvelope"));
+            assert!(!bench.enabled("volumesCutFillMap"));
+            let error = bench.dialog.cut_fill_map_line().expect_err("one surface twice");
+            assert!(error.message.contains("one surface"), "{}", error.message);
+            assert!(bench.dialog.envelope_line().is_err());
+            bench.fill("volumesTop", "design");
+            assert!(bench.enabled("volumesEnvelope"));
+            assert!(bench.enabled("volumesCutFillMap"));
+        }
         // The verb's refusal reaches the status and the drawing is as it was: a name the drawing
         // already has.
         let mut bench = bench(wedge_host());

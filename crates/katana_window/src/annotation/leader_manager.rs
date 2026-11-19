@@ -160,6 +160,26 @@ const TEXT_HEIGHT: SpinRange = SIZE.with_special_text("Text style's");
 /// A landing: 0 is none, said in words.
 const LANDING: SpinRange = SIZE.with_special_text("None");
 const SIZE_DECIMALS: usize = 3;
+/// A number box that, greyed, says in `words` what stands in its place rather than a number it does
+/// not use: Along with the tip on nothing, At x with the topmost note setting x. They showed
+/// "0.000 %" and "0.000", zeros that read as values (the sixth look audit's H). Lit, it is the box
+/// as ever; greyed, its record says the words and a fill of it is refused as disabled, as before.
+fn spin_or_words(
+    ui: &mut Ui,
+    name: &str,
+    value: &mut f64,
+    range: SpinRange,
+    words: &'static str,
+) -> egui::Response {
+    if ui.is_enabled() {
+        controls::spin(ui, name, value, range)
+    } else {
+        // The box at its least value, which a special text says in words; the value kept.
+        let mut shown = range.minimum;
+        controls::spin(ui, name, &mut shown, range.with_special_text(words))
+    }
+}
+
 const ALONG: SpinRange = SpinRange::new(0.0, 100.0, 5.0, 3).with_suffix(" %");
 const FOR_ANGLE: SpinRange = SpinRange::new(-360.0, 360.0, 15.0, 1).with_suffix(" deg");
 const FOR_LENGTH: SpinRange = SpinRange::new(0.5, LARGEST_SIZE, 1.0, 1).with_suffix(" mm");
@@ -2844,7 +2864,13 @@ impl LeaderManagerDialog {
         dialog::form(ui, |form| {
             form.row("Along", |ui| {
                 ui.add_enabled_ui(self.along_enabled, |ui| {
-                    preview |= controls::spin(ui, "leaderAlong", &mut self.along, ALONG)
+                    preview |= spin_or_words(
+                        ui,
+                        "leaderAlong",
+                        &mut self.along,
+                        ALONG,
+                        "Tip on nothing",
+                    )
                     .on_hover_text(
                         "How far along what it is on the tip is: of the line or the arc from its \
                          start, of the polyline segment, of a turn of the circle (LEADER SET id \
@@ -3320,7 +3346,13 @@ impl LeaderManagerDialog {
                     dialog::labelled(ui, "", |ui| {
                         check(ui, "leaderAlignUseX", "At x", &mut self.align_use_x);
                         ui.add_enabled_ui(self.align_use_x, |ui| {
-                            controls::spin(ui, "leaderAlignX", &mut self.align_x, ALIGN_X);
+                            spin_or_words(
+                                ui,
+                                "leaderAlignX",
+                                &mut self.align_x,
+                                ALIGN_X,
+                                "Topmost note's",
+                            );
                         });
                     });
                     dialog::labelled(ui, "", |ui| {

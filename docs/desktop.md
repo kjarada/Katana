@@ -1156,6 +1156,61 @@ Symbol, Leaders' Along and At x, Dimension Styles' Round to), Layers'
 "(default)" and Keyboard Shortcuts' "(no menu)", the manager pattern for Dimension and
 Surface Styles, and the import wizard's line (`docs/survey.md`).
 
+**The eighth round, the dialogs and the words (the sixth audit, 2026-11-19).**
+Subsurface Utilities has one layout whatever the tab and the source: the scope
+is the column at the left, in use while the tab reads the drawing and drawn
+whole and greyed while a schedule is read, saying why under its heading ("Not
+used: the services come from the schedule file";
+`ScopeFilterWidget::keep_shape_when_unused`), and the tabs head the column beside it, every page
+the tallest's height. It had two layouts - the scope's one line over
+full-width tabs under a schedule, the scope beside the tabs on the drawing -
+so the dialog was 695 high on Draw to Check and 765 on Regrade and Schedule,
+the tab strip jumped from x 20 to x 449, Report stood over some 300 points of
+nothing, and "What is drawn: chosen by the scope and filter below" sat over a
+scope that said it was not used; it now says "at the left", where the scope
+always is. *Rejected:* the one-line unused scope beside the tabs, which left
+its column empty, and the greyed whole scope under a dialog's fields, which
+the sixth round replaced for being most of those dialogs - whole is right
+only for a scope in a column of its own. A type box says its kind in words
+("Curved polyline", `scope_filter_widget::kind_words`), its name and its TYPE=
+word as they were. A box's title in the headless status bar is said as a
+sentence's start and its error without its code ("Open failed: no Katana
+project in this directory [...]", `CommandLog::warn_user`; the log keeps "Open
+Failed: NotFound: ..."). Empty is said once: the Point Report's empty table
+says what the scope found and what to do, its line over the table withdrawn;
+the Code Manager's Issues with none says "No issues: checked 1103 rules being
+edited." as the table's words. Every confirmation's pair is Cancel then OK: the
+sheet list's Rename row had OK first. The Title Block keeps Cancel and OK, not
+Close and Apply: it is modal, and but for the logo (stored by its own button)
+changes nothing until OK applies every page as one undo step. A number's
+placeholder zero says what it means: Global Modify's symbol size "Its own
+size", Dimension Styles' Round to empty with "None" (a blank reads as 0),
+Leaders' Along greyed "Tip on nothing" and Arrange's At x greyed "Topmost
+note's" (`leader_manager::spin_or_words`). Viewshed's and Line of Sight's
+heights and reach, Surface From's Most points and the Alignment Manager's
+Start chainage are short number wells (`controls::number_line`). Volumes'
+Make Cut/Fill Map and Make Envelope grey with Base and Top one surface (their
+lines refuse it, the tooltip says why); the unlabelled Cut Fill icon by Map
+name is gone; the empty results say "Nothing measured yet: Measure lists the
+quantities, Save CSV... measures and writes them", Save CSV... running the
+line itself, so lit with nothing listed. Import Point Cloud's estimate is
+grouped as its description is, whatever the locale ("Every point (40,000).",
+`format::grouped_in_threes`). Layers' Dimension style says "Drawing default"
+for a layer of none of its own ("Default" may be a style's name). Keyboard
+Shortcuts says "No menu". New icons, at Float's size and in their discipline:
+MeshFaces, MeshFootprint and MeshHidden for View > Meshes Seen from Above
+(General; the items had View Top's square, read as a bullet, and GIS's hull in
+GIS teal), DockTop, DockLeft, DockRight and DockBottom for a toolbar's Place
+menu (the view cube's faces, ten units where Float's box is sixteen), and
+SheetCopy for the sheet list's Copy Sheet (Plotting; it had Modify > Copy's
+drafting cyan). Not done in this round: the menus naming the new mesh and dock
+icons, and the command log showing its lines through
+`command_log::shown_log` (an error's sentence capitalised, "! Unknown command;
+...", a box's failure as the status bar says it, and a `warning text="..."`
+record as "Warning: ...") - both live in
+the main window's files (its menus, and `main_window::panels::shown_log`),
+which another branch held; and a CamelCase arrow token in Leaders ("ClosedFilled").
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the
@@ -5756,6 +5811,10 @@ they are easiest to break:
   height; never a least height kept from a frame as drawn.
 - **A tool with nothing to act on is greyed**, and a primary with nothing to
   run; a form that does not read keeps its button lit, so a press says why.
+- **Say a thing once, in words**: an empty list says it is empty and what to
+  do in one place (the table's own words), a number whose 0 or unused value
+  means something says it ("Its own size", "Tip on nothing"), and a token or a
+  placeholder is never shown in brackets or a code's CamelCase.
 - **A form is `shell::dialog`'s form**, never a hand-built `egui::Grid` of
   labels and fields; a Grid is for a table (the Title Block's revision
   cells), and lines up only its own cells.

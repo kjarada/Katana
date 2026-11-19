@@ -11,8 +11,8 @@
 
 use katana_core::error::ErrorCode;
 use katana_entity::colour_names::{
-    fold_colour_name, nearest_standard_colour, resolve_colour, standard_colour,
-    standard_colour_names,
+    colour_index_of_name, fold_colour_name, nearest_standard_colour, resolve_colour,
+    standard_colour, standard_colour_names,
 };
 use katana_entity::{Color, ColourTable};
 
@@ -263,6 +263,73 @@ mod colour_names {
         }
     }
 
+    // ---- the AutoCAD Colour Index's names ---------------------------------------------
+    //
+    // An archive's meshes name colours "acad 001" to "acad 255". The RGB here
+    // are the published index's (indexed_colours' own tests check the table):
+    // 1 red, 5 blue, 10 the first hue at full brightness (red), 30 its
+    // 30-degree hue (255, 127, 0), 255 white.
+
+    #[test]
+    fn an_index_name_is_the_index_colour_in_any_case_with_or_without_padding() {
+        for (name, colour) in [
+            ("acad 001", rgba(255, 0, 0, 255)),
+            ("acad 1", rgba(255, 0, 0, 255)),
+            ("ACAD 5", rgba(0, 0, 255, 255)),
+            ("acad 005", rgba(0, 0, 255, 255)),
+            ("acad 010", rgba(255, 0, 0, 255)),
+            ("Acad_030", rgba(255, 127, 0, 255)),
+            (" acad-030 ", rgba(255, 127, 0, 255)),
+            ("acad 255", rgba(255, 255, 255, 255)),
+        ] {
+            assert_eq!(standard_colour(name), Some(colour), "\"{name}\"");
+            assert_eq!(
+                resolve_colour(&ColourTable::default(), name),
+                Some(colour),
+                "\"{name}\" with no customisation at all"
+            );
+        }
+    }
+
+    #[test]
+    fn by_block_by_layer_and_what_is_not_an_index_name_have_no_colour() {
+        // 0 and 256 are ByBlock and ByLayer: the inherited colour, named.
+        assert_eq!(colour_index_of_name("acad 000"), Some(0));
+        assert_eq!(colour_index_of_name("ACAD 256"), Some(256));
+        assert_eq!(colour_index_of_name("acad_040"), Some(40));
+        assert!(standard_colour("acad 000").is_none());
+        assert!(standard_colour("acad 0").is_none());
+        assert!(standard_colour("acad 256").is_none());
+        for name in [
+            "acad 257",
+            "acad 999",
+            "acad 0001",
+            "acad",
+            "acad ",
+            "acad1",
+            "acad  1",
+            "acad 1a",
+            "acad -1",
+            "acad +1",
+            "acad 1.0",
+            "autocad 1",
+            "vis concrete",
+            "",
+        ] {
+            assert!(standard_colour(name).is_none(), "\"{name}\"");
+            assert!(colour_index_of_name(name).is_none(), "\"{name}\"");
+        }
+    }
+
+    #[test]
+    fn the_index_names_are_not_listed_with_the_twenty_seven() {
+        assert!(
+            standard_colour_names()
+                .iter()
+                .all(|name| colour_index_of_name(name).is_none())
+        );
+    }
+
     #[test]
     fn the_nearest_standard_name_is_the_one_at_the_least_distance_in_rgb() {
         // Each name is its own nearest: no two share an RGB.
@@ -413,6 +480,20 @@ mod colour_table {
         // A name that only CONTAINS one is another name.
         assert!(table.add("off red", rgba(200, 0, 0, 255)).is_ok());
         assert!(table.add("reddish", rgba(210, 0, 0, 255)).is_ok());
+    }
+
+    #[test]
+    fn an_index_name_cannot_be_given_another_colour_nor_can_by_block_or_by_layer() {
+        let mut table = ColourTable::default();
+        for name in ["acad 040", "ACAD_1", "acad 255", "acad 0", "acad 256"] {
+            let status = table.add(name, rgba(1, 2, 3, 255));
+            assert_eq!(status.expect_err(name).code, ErrorCode::InvalidArgument);
+        }
+        assert!(table.empty());
+        // Past the index, or not of its form, it is a name like any other.
+        assert!(table.add("acad 257", rgba(1, 2, 3, 255)).is_ok());
+        assert!(table.add("vis concrete", rgba(4, 5, 6, 255)).is_ok());
+        assert_eq!(table.size(), 2);
     }
 
     #[test]

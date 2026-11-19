@@ -775,15 +775,31 @@ entity function through its argument as well as the archive's own, and two
 functions of one signature made the call ambiguous; one function found twice
 did not; the port keeps the one function).
 
+**The AutoCAD Colour Index's names** are standard too (2026-11-19): "acad 1"
+to "acad 255", with or without the zero padding ("acad 040"), are that index
+entry's colour, from the one index table
+(`katana_entity::indexed_colours`, which DXF's group 62 reads as well;
+`docs/dxf.md`, "Colours"). An archive's meshes name their colours so
+(`docs/interop.md`, "AutoCAD Colour Index names"). `standard_colour` gives
+them; `standard_colour_names` does not list them, so a colour field offers
+the 27 words and not 255 numbers. "acad 0" and "acad 256" are ByBlock and
+ByLayer, names of the inherited colour, and give none
+(`katana_entity::colour_names::colour_index_of_name` reads the number).
+
 **A customisation's own table**, `colours`: `"sui test power": "#FF7F00"`. A
 colour is `#RRGGBB`, or `#RRGGBBAA` with an opacity, in either case of digit;
 it is written in upper case. `katana_entity::ColourTable` refuses
 
 - a name that is empty, or nothing but blanks and separators, or not UTF-8;
 - two names with one fold: a lookup could not say which was meant;
-- a name whose fold is a STANDARD name. A standard name must keep its meaning
-  with or without a customisation, including a headless archive import with
-  an empty palette.
+- a name whose fold is a STANDARD name, an index name ("acad 040", "acad 0")
+  among them. A standard name must keep its meaning with or without a
+  customisation, including a headless archive import with an empty palette.
+
+A name an archive uses and does not define - one of the writing program's
+own colour file, such as "vis grass" - is what this table is for:
+`"vis grass": "#5A8A3C"` in `colours`, the file loaded, and the archive
+imported again draws it in that colour.
 
 **One fold.** A colour name is compared after `katana_entity::colour_names::fold_colour_name` and in
 no other way. In this order: ASCII letters to lower case; `_` and `-` read as

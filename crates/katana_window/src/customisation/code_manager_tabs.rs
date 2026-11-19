@@ -183,6 +183,8 @@ pub(super) struct TabState {
     issues_rows: Vec<Vec<String>>,
     issue_rules: Vec<usize>,
     issues_summary: String,
+    /// The rules being edited have no issue at all (whatever the search shows).
+    no_issues: bool,
     pub(super) issues_title: String,
     // apply codes
     apply_scope: ScopeFilterWidget,
@@ -229,6 +231,7 @@ impl TabState {
             issues_rows: Vec::new(),
             issue_rules: Vec::new(),
             issues_summary: String::new(),
+            no_issues: false,
             issues_title: String::from("Issues"),
             apply_scope: make_scope("apply"),
             apply_property: Choice::editable(""),
@@ -580,11 +583,13 @@ impl SurveyCodeManagerDialog {
             ]);
             tabs.issue_rules.push(issue.rule);
         }
-        // With none, the table's own empty state says so: "0 errors and 0 warnings" under "No
-        // issues" said it twice (the fifth look audit).
-        tabs.issues_summary = if errors == 0 && warnings == 0 {
+        // With none, the empty table says so and what was checked, once: "0 errors and 0
+        // warnings" under "No issues" said it twice (the fifth look audit), and "No issues in the
+        // rules being edited" over "Checked 1103 rules being edited." still did (the sixth).
+        tabs.no_issues = errors == 0 && warnings == 0;
+        tabs.issues_summary = if tabs.no_issues {
             format!(
-                "Checked {}.",
+                "No issues: checked {}.",
                 katana_cad::tools::everyday_support::counted(
                     self.buffer.size(),
                     "rule being edited",
@@ -1208,7 +1213,15 @@ impl SurveyCodeManagerDialog {
             self.events.push(Event::IssuesFilter);
         }
         // Alone across the page, the table spans it: its header stood 350 of the body's 1200
-        // (the look audits' T9).
+        // (the look audits' T9). With no issue at all the summary is the empty table's words, and
+        // the line under it is withdrawn - recorded for a driver - rather than said again; with
+        // issues the filter hides, the table says so and the summary counts them.
+        let no_issues = tabs.no_issues;
+        let empty = if no_issues {
+            tabs.issues_summary.clone()
+        } else {
+            String::from("No issue matches the search and the chip chosen")
+        };
         let shown = table_look(
             ui,
             "issuesTable",
@@ -1219,13 +1232,19 @@ impl SurveyCodeManagerDialog {
             None,
             TableLook {
                 fill: true,
-                empty: "No issues in the rules being edited",
+                empty: &empty,
             },
         );
         if let Some(row) = shown.double_clicked {
             self.events.push(Event::IssueActivated(row));
         }
-        controls::label(ui, "issuesSummary", &tabs.issues_summary);
+        if no_issues {
+            controls::withdrawn(ui, "issuesSummary", |ui| {
+                controls::label(ui, "issuesSummary", &tabs.issues_summary);
+            });
+        } else {
+            controls::label(ui, "issuesSummary", &tabs.issues_summary);
+        }
     }
 
     pub(super) fn apply_tab(&mut self, ui: &mut Ui, _document: &Document) {

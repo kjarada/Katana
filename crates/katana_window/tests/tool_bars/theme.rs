@@ -24,7 +24,7 @@ mod icons {
         // the list does.
         let icons = all_icons();
         // The last enumerator, which moves whenever an icon is added at the end.
-        assert_eq!(icons.len(), Icon::OnlineData as usize + 1);
+        assert_eq!(icons.len(), Icon::SheetCopy as usize + 1);
         for (index, icon) in icons.iter().enumerate() {
             assert_eq!(*icon as usize, index);
         }

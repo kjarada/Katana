@@ -52,7 +52,7 @@ use katana_core::error::make_error;
 use katana_core::text::{format_exact_real, parse_finite_double, read_reply_record};
 use katana_core::{ErrorCode, Result};
 
-use crate::annotation::dialog_support::table;
+use crate::annotation::dialog_support::{TableLook, table_look};
 use crate::canvas::{
     Brush, Canvas, HAlign, Image, Path, Pen, PenStyle, PointF, RasterCanvas, RectF, RenderHint,
     TextFlags, VAlign,
@@ -68,7 +68,6 @@ use crate::geo::terrain_dialog_parts::{
     Framed, NO_SURFACE, NO_SURFACE_HINT, WordChoice, host_views, row, show_framed,
 };
 use crate::host::{Host, VerbOutcome};
-use crate::icons::{IconMode, show_icon};
 use crate::ifc_dialogs::get_save_file_name;
 use crate::shell::{DialogFrame, dialog};
 use crate::survey::survey_dialogs::offstage;
@@ -796,9 +795,25 @@ impl VolumesDialog {
         )
     }
 
+    /// The page's two surfaces for a surface made of the two (`cut_fill_map_line`,
+    /// `envelope_line`): refused when the base and the top are one surface, whose difference is
+    /// nothing and whose envelope is itself - the makers stood lit with one surface chosen twice
+    /// (the sixth look audit's H). A volume of one surface is measured still: it says so.
+    fn two_surfaces(&self) -> Result<(String, String)> {
+        let (base, top) = self.surface_pair()?;
+        if base == top {
+            return Err(make_error(
+                ErrorCode::InvalidArgument,
+                "Base and Top are one surface: choose two to make a map or an envelope",
+                "",
+            ));
+        }
+        Ok((base, top))
+    }
+
     /// SURFACE DIFFERENCE of the page's two surfaces, with the map's name when given.
     pub fn cut_fill_map_line(&self) -> Result<String> {
-        let (base, top) = self.surface_pair()?;
+        let (base, top) = self.two_surfaces()?;
         let mut text = format!("SURFACE DIFFERENCE {base} {top}");
         let name = self.map_name.trim();
         if !name.is_empty() {
@@ -811,7 +826,7 @@ impl VolumesDialog {
     /// SURFACE ENVELOPE of the same two surfaces: the higher (MAX) or the lower (MIN) of them, as
     /// volumesEnvelopeSide says, with the name when given.
     pub fn envelope_line(&self) -> Result<String> {
-        let (base, top) = self.surface_pair()?;
+        let (base, top) = self.two_surfaces()?;
         let mut text = format!(
             "SURFACE ENVELOPE {base} {top} {}",
             self.envelope_side.word()
@@ -1452,7 +1467,22 @@ impl VolumesDialog {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.set_min_height(RESULTS_LEAST);
-                table(ui, "volumesResults", &headers, rows, None, &[], None);
+                // Empty, it says what fills it - Measure, or Save CSV..., which runs the line
+                // itself - where "Nothing to list" beside a lit Save CSV... read as a button with
+                // nothing to save (the sixth look audit's H).
+                table_look(
+                    ui,
+                    "volumesResults",
+                    &headers,
+                    rows,
+                    None,
+                    &[],
+                    None,
+                    TableLook {
+                        empty: RESULTS_EMPTY,
+                        ..TableLook::default()
+                    },
+                );
             });
     }
 
@@ -1504,12 +1534,12 @@ impl VolumesDialog {
     }
 
     fn map_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
-        let two_surfaces = self.surface_pair().is_ok();
+        let two_surfaces = self.two_surfaces();
         dialog::labelled(ui, "Map name:", |ui| {
-            // The field leaves the button and its icon their room.
-            let width = dialog::beside_a_button(ui, "Make Cut/Fill Map")
-                - 16.0
-                - ui.spacing().item_spacing.x;
+            // The field leaves the button its room. The Cut Fill icon painted between them is
+            // gone: unlabelled, it read as a toggle with no name (the sixth look audit's H), and
+            // the button says what it makes.
+            let width = dialog::beside_a_button(ui, "Make Cut/Fill Map");
             line_with(
                 ui,
                 "volumesMapName",
@@ -1521,11 +1551,9 @@ impl VolumesDialog {
                 },
             )
             .on_hover_text("The cut/fill map's name; blank for top-base");
-            // The button's icon, painted beside it: the drive's buttons carry text only.
-            let (icon, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-            show_icon(ui.painter(), icon, "CutFillMap", IconMode::Normal);
-            ui.add_enabled_ui(two_surfaces, |ui| {
+            ui.add_enabled_ui(two_surfaces.is_ok(), |ui| {
                 if button(ui, "volumesCutFillMap", "Make Cut/Fill Map")
+                    .on_disabled_hover_text(why_not(&two_surfaces))
                     .on_hover_text(
                         "The top minus the base as a new surface in the Cut Fill style: SURFACE \
                          DIFFERENCE",
@@ -1539,7 +1567,7 @@ impl VolumesDialog {
     }
 
     fn envelope_row(&mut self, ui: &mut Ui, asked: &mut Option<Asked>) {
-        let two_surfaces = self.surface_pair().is_ok();
+        let two_surfaces = self.two_surfaces();
         dialog::labelled(ui, "Envelope:", |ui| {
             ui.spacing_mut().combo_width = ENVELOPE_SIDE_WIDTH;
             self.envelope_side
@@ -1560,8 +1588,9 @@ impl VolumesDialog {
                 },
             )
             .on_hover_text("The envelope's name; blank for base-top-max or base-top-min");
-            ui.add_enabled_ui(two_surfaces, |ui| {
+            ui.add_enabled_ui(two_surfaces.is_ok(), |ui| {
                 if button(ui, "volumesEnvelope", "Make Envelope")
+                    .on_disabled_hover_text(why_not(&two_surfaces))
                     .on_hover_text(
                         "The higher or lower of the base and the top as a new surface in the \
                          drawing's default style (real levels, not a difference): SURFACE \
@@ -1575,6 +1604,18 @@ impl VolumesDialog {
         });
     }
 }
+
+/// Why a maker is greyed: its line's refusal, for its tooltip.
+fn why_not<T>(made: &Result<T>) -> String {
+    match made {
+        Ok(_) => String::new(),
+        Err(error) => error.message.clone(),
+    }
+}
+
+/// What the results table says while it lists nothing.
+const RESULTS_EMPTY: &str =
+    "Nothing measured yet: Measure lists the quantities, Save CSV... measures and writes them";
 
 /// The body's width: the Inside group's ways and its tick on one row.
 const VOLUMES_WIDTH: f32 = 600.0;

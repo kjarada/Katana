@@ -190,42 +190,59 @@ mod utility_dialog {
     }
 
     #[test]
-    fn every_tab_of_one_layout_keeps_one_size_whichever_the_source() {
+    fn every_tab_on_either_source_keeps_one_size_and_the_tabs_stay_put() {
         // The fifth look audit: 353 high on Report and 771 on Regrade, each tab as tall as its
-        // page. Every tab shown in the front's layout is now the tallest's height: all seven
-        // while the drawing is read, the scope beside the tabs; Draw to Check while a schedule
-        // is, the scope's one line over them. Regrade and Schedule read the drawing either way.
+        // page. The sixth: two layouts still, 695 high on Draw to Check under a schedule and 765
+        // on Regrade and Schedule, the tab strip jumping from x 20 to x 449 as the scope moved
+        // beside the tabs. One layout now: the scope the column at the left, greyed under a
+        // schedule, and the tabs beside it - every tab on either source one size, the strip where
+        // it was.
         let executor = Executor::new();
         let mut bench = dialog_bench(executor.context(), host(false));
-        let mut sizes = Vec::new();
+        let mut first: Option<(egui::Vec2, egui::Rect)> = None;
         for source in [UtilitySource::Drawing, UtilitySource::File] {
             bench.dialog.set_source(source);
-            let mut first = None;
             for tool in UTILITY_TOOLS {
-                let beside = source == UtilitySource::Drawing
-                    || matches!(tool, UtilityTool::Regrade | UtilityTool::Schedule);
-                if source == UtilitySource::File && beside {
-                    continue;
-                }
                 bench.dialog.show_tool(tool);
                 bench.draw();
                 let shown = shown_size(&bench);
-                let first = *first.get_or_insert(shown);
+                let tabs = bench.harness.control("utilityTabs").expect("drawn").rect;
+                let (size, strip) = *first.get_or_insert((shown, tabs));
                 assert!(
-                    (shown - first).length() <= 0.5,
-                    "{source:?} {tool:?}: {shown:?}, where the first tab was {first:?}"
+                    (shown - size).length() <= 0.5,
+                    "{source:?} {tool:?}: {shown:?}, where the first tab was {size:?}"
+                );
+                assert!(
+                    (tabs.min - strip.min).length() <= 0.5,
+                    "{source:?} {tool:?}: the tabs at {:?}, where they were at {:?}",
+                    tabs.min,
+                    strip.min
                 );
             }
-            sizes.push(first.expect("a tab was shown"));
         }
-        // One width in either layout; and Regrade, which reads the drawing beside the scope
-        // whatever the source, is the drawing layout's size under a schedule too - the size of
-        // its own layout, not one the tabs under a schedule are held to.
-        assert!((sizes[1].x - sizes[0].x).abs() <= 0.5, "one width: {sizes:?}");
+        // The scope beside them is its column whatever the source: in use on the drawing, greyed
+        // under a schedule on a tab that reads one - and in use again on Regrade, which always
+        // reads the drawing.
+        let scope = |bench: &Bench<UtilityToolsDialog>| {
+            bench.harness.control("utilityScopeDrawing").expect("drawn")
+        };
+        bench.dialog.set_source(UtilitySource::File);
+        bench.dialog.show_tool(UtilityTool::Report);
+        bench.draw();
+        let column = |bench: &Bench<UtilityToolsDialog>| {
+            bench.harness.control("utilityScope").expect("drawn").rect
+        };
+        let greyed = scope(&bench);
+        assert!(greyed.visible && !greyed.enabled, "{greyed:?}");
+        let greyed_column = column(&bench);
         bench.dialog.show_tool(UtilityTool::Regrade);
         bench.draw();
-        let regrade = shown_size(&bench);
-        assert!((regrade - sizes[0]).length() <= 0.5, "{regrade:?} {sizes:?}");
+        let live = scope(&bench);
+        assert!(live.visible && live.enabled, "{live:?}");
+        // The column starts where it did; greyed, its controls stand a line lower, under the
+        // note saying why.
+        assert!((column(&bench).min - greyed_column.min).length() <= 0.5);
+        assert!(greyed.rect.min.y > live.rect.min.y);
     }
 
     #[test]

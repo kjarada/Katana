@@ -40,6 +40,7 @@ use super::terrain_dialog_support::{
     terrain_reply_field, terrain_sources,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
+use crate::drive::controls::number_line;
 use crate::drive::{button, check, tabs};
 use crate::host::Host;
 use crate::shell::{DialogFrame, dialog};
@@ -549,15 +550,17 @@ impl ViewshedDialog {
         crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, use_scope, |ui| {
             self.scope.ui(ui);
         });
+        // The numbers are short wells, as every number kept as text is (controls::number_line):
+        // filling the row, a height read as a sentence's field (the sixth look audit's H).
         row(ui, "Eye height:", |ui| {
-            field(ui, "viewshedHeight", &mut self.height, "");
+            number_line(ui, "viewshedHeight", &mut self.height, "");
         });
         row(ui, "Target height:", |ui| {
-            field(ui, "viewshedTarget", &mut self.target, "")
+            number_line(ui, "viewshedTarget", &mut self.target, "")
                 .on_hover_text("How high above the ground a cell counts as seen.");
         });
         row(ui, "Look as far as:", |ui| {
-            field(ui, "viewshedMax", &mut self.max, "blank: the whole raster");
+            number_line(ui, "viewshedMax", &mut self.max, "blank: the whole raster");
         });
         row(ui, "Curvature:", |ui| {
             field(
@@ -646,10 +649,10 @@ impl ViewshedDialog {
             .inner
         });
         row(ui, "Eye height:", |ui| {
-            field(ui, "losHeight", &mut self.los_height, "");
+            number_line(ui, "losHeight", &mut self.los_height, "");
         });
         row(ui, "Target height:", |ui| {
-            field(ui, "losTargetHeight", &mut self.los_target_height, "");
+            number_line(ui, "losTargetHeight", &mut self.los_target_height, "");
         });
         row(ui, "Curvature:", |ui| {
             field(

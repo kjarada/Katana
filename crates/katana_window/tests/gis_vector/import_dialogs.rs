@@ -347,4 +347,29 @@ mod point_cloud_import_dialog {
             "IMPORT \"C:/data/scan.las\" budget=500000 class=2"
         );
     }
+
+    #[test]
+    fn what_the_choices_read_is_grouped_as_the_description_is_whatever_the_locale() {
+        // The sixth look audit's H: "Every point: 40000." under the description's "40,000
+        // points". Grouped in threes with a comma, as the description is (katana_interop), and
+        // the count in brackets after the words.
+        let source = |count: u64| SourceDescription {
+            path: PathBuf::from("C:/data/scan.las"),
+            kind: SourceKind::PointCloud,
+            point_cloud: Some(PointCloudDescription {
+                point_count: count,
+                ..PointCloudDescription::default()
+            }),
+            ..SourceDescription::default()
+        };
+        let small = PointCloudImportDialog::new(&source(40_000));
+        assert_eq!(small.estimate(), "Every point (40,000).");
+        // Over the default budget of 2,000,000, one point in a step: 5,000,000 in steps of 3
+        // keeps 1,666,666 (the engine's whole-number step, decimation_for_budget).
+        let large = PointCloudImportDialog::new(&source(5_000_000));
+        assert_eq!(
+            large.estimate(),
+            "One point in 3 (about 1,666,666 of 5,000,000)."
+        );
+    }
 }
