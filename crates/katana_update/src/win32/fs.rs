@@ -3,7 +3,7 @@
 //! attribute word - and leave the error for `last_error()`, which the caller reads at once, so
 //! the error codes and the `os_error=N` texts built from them are the calls' own.
 
-use std::os::windows::io::{AsRawHandle, FromRawHandle, HandleOrInvalid, OwnedHandle};
+use std::os::windows::io::{AsRawHandle, HandleOrInvalid, OwnedHandle};
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{FILETIME, HANDLE, INVALID_HANDLE_VALUE};

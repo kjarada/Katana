@@ -332,8 +332,10 @@ pub(crate) fn start_alone(
     directory: Option<&WideName>,
     flags: u32,
 ) -> Result<Started, u32> {
-    let mut startup = STARTUPINFOW::default();
-    startup.cb = length_u32(size_of::<STARTUPINFOW>());
+    let startup = STARTUPINFOW {
+        cb: length_u32(size_of::<STARTUPINFOW>()),
+        ..Default::default()
+    };
     let mut information = PROCESS_INFORMATION::default();
     // SAFETY: as in start_inheriting, with no attribute list and no handle inherited.
     let created = unsafe {
