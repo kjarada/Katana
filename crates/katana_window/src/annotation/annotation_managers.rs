@@ -142,19 +142,16 @@ const MARKERS: [LabelMarker; 4] = [
 
 // The text style form's boxes.
 // 0 is said in words, what it means, rather than as a size of nothing ("0.00 mm", the fourth look
-// audit's 3).
-const TEXT_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2)
-    .with_suffix(" mm")
-    .with_special_text("Text's own");
+// audit's 3); the unit is then the label's, since egui keeps a box's suffix after those words.
+const TEXT_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2).with_special_text("Text's own");
 const TEXT_WIDTH: SpinRange = SpinRange::new(0.05, 100.0, 0.05, 2);
 const TEXT_OBLIQUE: SpinRange = SpinRange::new(-84.9, 84.9, 1.0, 1).with_suffix(" deg");
 const TEXT_MARGIN: SpinRange = SpinRange::new(0.0, 20.0, 0.25, 2).with_suffix(" mm");
 const TEXT_SPACING: SpinRange = SpinRange::new(0.25, 4.0, 0.1, 2);
 
 // The label style form's boxes.
-const LABEL_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2)
-    .with_suffix(" mm")
-    .with_special_text("Text style's");
+const LABEL_PAPER: SpinRange =
+    SpinRange::new(0.0, 100.0, 0.5, 2).with_special_text("Text style's");
 const LABEL_OFFSET: SpinRange = SpinRange::new(0.0, 100.0, 0.25, 2).with_suffix(" mm");
 const LABEL_MARKER_SIZE: SpinRange = SpinRange::new(0.0, 50.0, 0.25, 2).with_suffix(" mm");
 const LABEL_MINIMUM_LENGTH: SpinRange = SpinRange::new(0.0, 500.0, 1.0, 1).with_suffix(" mm");
@@ -656,7 +653,7 @@ impl TextStyleManagerDialog {
                     });
                     let boxes = [
                         (
-                            "Height on paper",
+                            "Height on paper (mm)",
                             "textStylePaperHeight",
                             &mut self.paper,
                             TEXT_PAPER,
@@ -853,10 +850,6 @@ pub struct LabelStyleManagerDialog {
     /// next look - after the click's frame, as the C++ queued it past the box's own signal.
     queued_enabled: Option<(String, bool)>,
     pressed: Option<LabelPressed>,
-    /// The dialog's least height: the taller tab's as drawn (the Label Styles tab's), so it keeps
-    /// one size as its tabs are turned - it was 570 high on Label Styles and 316 on Auto-Label
-    /// Rules (the third look audit's D).
-    least_height: f32,
 }
 
 impl LabelStyleManagerDialog {
@@ -917,7 +910,6 @@ impl LabelStyleManagerDialog {
             label_counts: BTreeMap::new(),
             queued_enabled: None,
             pressed: None,
-            least_height: 0.0,
         };
         dialog.refresh(document);
         dialog
@@ -1595,13 +1587,9 @@ impl LabelStyleManagerDialog {
             &mut self.frame,
             DialogFrame::new("labelStyleManagerDialog", "Label Styles and Rules"),
         );
-        if self.least_height > 0.0 {
-            frame.set_minimum_height(self.least_height);
-        }
+        // One size on both tabs is the body's (`body`, both tabs measured), not a least height
+        // kept from the frame as drawn, which kept a frame caught taller as a tab was turned.
         let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
-        if let Some(drawn) = frame.rect() {
-            self.least_height = self.least_height.max(drawn.height());
-        }
         self.frame = frame;
         match self.pressed.take() {
             Some(LabelPressed::Close) => closed = true,
@@ -1841,7 +1829,7 @@ impl LabelStyleManagerDialog {
             // Labels of a few words on one line, the detail in the tooltip: "Height on paper (0:
             // the text style's)" wrapped to two lines in the label column (the third look audit's
             // J).
-            form.row("Paper height", |ui| {
+            form.row("Paper height (mm)", |ui| {
                 controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER)
                     .on_hover_text(
                         "The text's height on paper, drawn at the annotation scale; 0 for the \

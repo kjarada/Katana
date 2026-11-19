@@ -3979,7 +3979,7 @@ impl SheetEditor {
                 // Each tick in the field column, as a form's ticks are (shell::dialog::
                 // check_row): at the label column they stood under the labels (the fourth look
                 // audit's 5).
-                dialog::labelled(ui, "", |ui| {
+                field_tick(ui, |ui| {
                     if let Some(on) =
                         self.fields
                             .check(ui, "sheetViewportAutoCentre", "Centre on what it shows", v.auto_centre)
@@ -4209,7 +4209,7 @@ impl SheetEditor {
                 });
             }
             if plan {
-                dialog::labelled(ui, "", |ui| {
+                field_tick(ui, |ui| {
                     if let Some(on) = self
                         .fields
                         .check(ui, "sheetViewportNorthArrow", "North arrow", v.north_arrow)
@@ -4217,7 +4217,7 @@ impl SheetEditor {
                         self.edit(&id, "EDIT_VIEWPORT", move |e| e.north_arrow = on);
                     }
                 });
-                dialog::labelled(ui, "", |ui| {
+                field_tick(ui, |ui| {
                     if let Some(on) = self
                         .fields
                         .check(ui, "sheetViewportScaleBar", "Scale bar", v.scale_bar)
@@ -4316,7 +4316,7 @@ impl SheetEditor {
             {
                 self.queued.push(Queued::LegendScope(id.clone(), scope));
             }
-            dialog::labelled(ui, "", |ui| {
+            field_tick(ui, |ui| {
                 if let Some(on) = self.fields.check(
                     ui,
                     "sheetViewportLocked",
@@ -4474,7 +4474,7 @@ impl SheetEditor {
                     }
                 }
             });
-            dialog::labelled(ui, "", |ui| {
+            field_tick(ui, |ui| {
                 if let Some(on) =
                     self.fields
                         .check(ui, "sheetFrame", "Frame and title block", !sheet.frame.is_empty())
@@ -4492,7 +4492,7 @@ impl SheetEditor {
                     );
                 }
             });
-            dialog::labelled(ui, "", |ui| {
+            field_tick(ui, |ui| {
                 if let Some(on) = self
                     .fields
                     .check(ui, "sheetFrameLegend", "Utility legend block", sheet.frame_legend)
@@ -5769,6 +5769,18 @@ fn paint_arrow(ui: &Ui, rect: egui::Rect, up: bool) {
     let head = half * 0.7;
     painter.line_segment([tip, tip + egui::vec2(-head, -sign * head)], ink);
     painter.line_segment([tip, tip + egui::vec2(head, -sign * head)], ink);
+}
+
+/// A tick of the properties pane in the field column, as a form's ticks are (shell::dialog::
+/// check_row), its words wrapping in the field column's room: on one line "Frame and title block"
+/// ran past the pane, and a right pane's content wider than the pane overflows to the left - the
+/// pane's labels were cut at its left edge.
+fn field_tick<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    dialog::labelled(ui, "", |ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        ui.set_max_width(ui.available_width());
+        add(ui)
+    })
 }
 
 /// The toolbar's actions that act on a sheet: greyed while the set has none.

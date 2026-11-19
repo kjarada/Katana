@@ -150,7 +150,10 @@ const NOTE_KIND_TEXTS: [&str; 3] = [
 /// needs, so a size typed here is kept as typed; one the form cannot hold exactly is kept as it is
 /// by not being sent (form_change).
 const LARGEST_SIZE: f64 = 1000.0;
-const SIZE: SpinRange = SpinRange::new(0.0, LARGEST_SIZE, 0.5, 3).with_suffix(" mm");
+/// The unit is the rows' labels' ("Text height (mm)"), not a suffix: drawn by egui, a box's suffix
+/// stays on after the words a box says for its least value ("Text style's mm"), and the three
+/// boxes of a form say their unit one way.
+const SIZE: SpinRange = SpinRange::new(0.0, LARGEST_SIZE, 0.5, 3);
 /// A note's text height: 0 is the text style's own height, said in words - "0.000 mm" read as a
 /// note of no height (the fourth look audit's 3).
 const TEXT_HEIGHT: SpinRange = SIZE.with_special_text("Text style's");
@@ -955,10 +958,6 @@ pub struct LeaderManagerDialog {
     arrange_report: String,
 
     pressed: Option<Pressed>,
-    /// The dialog's least height: the tallest tab's as drawn (the Leader tab's), so it keeps one
-    /// size as its tabs are turned - it was 830 high on Leader and 693 on the others (the third
-    /// look audit's D).
-    least_height: f32,
     /// Set by the document when the drawing is replaced (File > New, Open): the next refresh
     /// starts the form afresh rather than applying edits meant for the old drawing to a leader of
     /// the new one.
@@ -1075,7 +1074,6 @@ impl LeaderManagerDialog {
             renumber_scoped: false,
             arrange_report: String::new(),
             pressed: None,
-            least_height: 0.0,
             replaced,
             _replaced_registration,
             watcher: DocumentWatcher::new(document),
@@ -2520,13 +2518,11 @@ impl LeaderManagerDialog {
         }
         let mut frame = std::mem::replace(&mut self.frame, DialogFrame::new(DIALOG, TITLE));
         frame.set_body_width(BODY_WIDTH);
-        if self.least_height > 0.0 {
-            frame.set_minimum_height(self.least_height);
-        }
+        // One size on every tab is the body's (`body`, every tab measured): a least height kept
+        // from the frame as drawn caught the frame a tab was turned in, taller, and kept it - the
+        // dialog grew from 806 to 844 and scrolled once For Selection was turned to (the fourth
+        // look audit's 8).
         let mut closed = show_dialog(&mut frame, ctx, self, host, Self::body, Self::footer);
-        if let Some(drawn) = frame.rect() {
-            self.least_height = self.least_height.max(drawn.height());
-        }
         self.frame = frame;
         match self.pressed.take() {
             Some(Pressed::Apply) => {
@@ -2925,13 +2921,13 @@ impl LeaderManagerDialog {
                 });
                 let boxes = [
                     (
-                        "Text height",
+                        "Text height (mm)",
                         "leaderPaperHeight",
                         &mut self.leader.paper_height,
                         TEXT_HEIGHT,
                     ),
-                    ("Arrow size", "leaderArrowSize", &mut self.arrow_size, SIZE),
-                    ("Landing", "leaderLanding", &mut self.landing, LANDING),
+                    ("Arrow size (mm)", "leaderArrowSize", &mut self.arrow_size, SIZE),
+                    ("Landing (mm)", "leaderLanding", &mut self.landing, LANDING),
                 ];
                 for (title, name, value, range) in boxes {
                     form.row(title, |ui| {
@@ -3170,18 +3166,18 @@ impl LeaderManagerDialog {
                     });
                     let boxes = [
                         (
-                            "Text height",
+                            "Text height (mm)",
                             "leaderForPaperHeight",
                             &mut self.for_note.paper_height,
                             TEXT_HEIGHT,
                         ),
                         (
-                            "Arrow size",
+                            "Arrow size (mm)",
                             "leaderForArrowSize",
                             &mut self.for_arrow_size,
                             SIZE,
                         ),
-                        ("Landing", "leaderForLanding", &mut self.for_landing, LANDING),
+                        ("Landing (mm)", "leaderForLanding", &mut self.for_landing, LANDING),
                         (
                             "Note direction",
                             "leaderForAngle",

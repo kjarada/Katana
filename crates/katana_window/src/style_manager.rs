@@ -144,9 +144,9 @@ fn table_column<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R
 // short width: " mm on paper" and " m wide (0 = its own size)" made boxes 128 and 195 wide in one
 // form (the fourth look audit's 2). 0 is a symbol's own size, said in words.
 const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 3).with_suffix(" mm");
-const SYMBOL_SIZE: SpinRange = SpinRange::new(0.0, 10000.0, 1.0, 4)
-    .with_suffix(" m")
-    .with_special_text("Its own size");
+// The symbol size's unit is its label's: egui keeps a box's suffix after its special words.
+const SYMBOL_SIZE: SpinRange =
+    SpinRange::new(0.0, 10000.0, 1.0, 4).with_special_text("Its own size");
 const PATTERN_LENGTH: SpinRange = SpinRange::new(0.0, 1.0e6, 0.1, 4).with_suffix(" m");
 const STYLE_HEADERS: [&str; 9] = [
     "Name",
@@ -2662,7 +2662,7 @@ impl StyleManagerDialog {
                             self.after_edit(host.document());
                         }
                     });
-                    form.row("Symbol size", |ui| {
+                    form.row("Symbol size (m)", |ui| {
                         ui.horizontal(|ui| {
                             if controls::spin(
                                 ui,
