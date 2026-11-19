@@ -1001,6 +1001,42 @@ Styles' Apply and Revert are its footer's. Counts are written right ("12
 points", "1 problem on 1 entity", `katana_cad::tools::everyday_support::counted`),
 where "point(s)" was; the process tests that read them follow.
 
+**The sixth round, the GIS, terrain, survey and import dialogs (the fourth
+audit).** A primary with nothing to run greys (Project Coordinate System's
+Set, Select by ID's Select); the survey tools' Compute stays lit, its
+empty-field refusal being the guidance a test pins. A number kept as text is
+a short well everywhere (`gis_tool_dialog::gis_number`,
+`survey_dialogs::number_if`), and a 0 meaning "all" is a spin box's special
+words ("Every feature", "The file's colours"). A file's description (Dataset
+Information's Summary, the import dialogs' heads) is label and value rows,
+the records kept, hidden, for drivers. A heading drawn in a child Ui (a scope
+behind `add_enabled_ui`) gets its gap through
+`terrain_dialog_parts::headed_enabled_ui`; a list as tall as its rows has no
+scroll area of its own (Statistics by Area); a dataset list is a list well
+with Add and Remove beside it; Clip's second column is headed "Boundary";
+Online Data's left column is one width (450); search fields say "Search..."
+with their examples in tooltips.
+
+**The sixth round, the Format, annotation, BIM, plotting and sheet dialogs
+(the fourth audit).** A primary or tool with nothing to act on greys: Global
+Modify's Apply with no field ticked, Leaders' Make for Selection while the
+scope takes nothing, the style managers' Apply with no style or nothing
+changed, Run Rules with no rules, the Road Template's, Corridors' and
+Attributes' item tools with no item, the sheet list's Copy, Remove, Up and
+Down; a form that does not read keeps its Apply lit, so a press says why.
+Revert is at the footer's left (it reads the drawing back), Close and the
+primary at the right. A box whose 0 means something says it in words ("Text
+style's", "Its own size", "At the labels"). Leaders and Label Styles measure
+every tab each frame (the others drawn off the stage) and keep no least
+height from the drawn frame, which caught a tab switch's taller frame: one
+size on every tab. Text and Label Styles' Delete is the list's, never the
+footer's. Drawing Summary's customisation is label and value rows. The Road
+Objects table fills its column even when empty (`Table::set_room`). The sheet
+editor's panes all have title bars, its rows give the name the whole row with
+the thumbnail under it, and its ticks wrap in the field column. Not done: the
+Symbol Library's Use rows run past its details column, so its preview ends
+short of them.
+
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
 panel). The dock tabs (Reference Data and Surfaces, a dock's views) are the

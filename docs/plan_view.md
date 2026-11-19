@@ -556,7 +556,7 @@ tests:
 
 ### Thin screen lines
 
-View > **Thin screen lines (faster)**, on by default: every plan-view line a
+View > **Thin Screen Lines (Faster)**, on by default: every plan-view line a
 cosmetic one-pixel pen. Off, the 1.5 px hairline the plan view drew before -
 one click away. A process-wide choice (`viewport_widget::set_thin_screen_lines`)
 that every plan view reads at its next paint. Plots keep their
