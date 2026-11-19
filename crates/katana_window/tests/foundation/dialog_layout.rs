@@ -13,6 +13,7 @@
 use egui::{Rect, Shape, TextStyle, Ui};
 use katana_window::customisation::ScopeFilterWidget;
 use katana_window::customisation::scope_filter_widget::WIDGET_WIDTH;
+use katana_window::dialog_layout::reply_text;
 use katana_window::drive::{self, ControlKind, LineOptions};
 use katana_window::shell::DialogFrame;
 use katana_window::shell::dialog::{
@@ -1052,5 +1053,251 @@ mod dialog_layout {
             wide.width()
         );
         assert!(dialog.rect.width() <= BODY_WIDTH + 2.0 * (PADDING + 1.0) + HALF_A_POINT);
+    }
+
+    #[test]
+    fn a_footer_of_empty_replies_is_the_standard_49_points_and_they_are_still_recorded() {
+        // The fourth look audit (4): Road Objects' footer was 57 px - two empty
+        // dialog_layout::reply_text under its buttons, each a place of no height that still took
+        // the item spacing after it - and Leaders' and Settings' 53, one each. Measured as the
+        // audit's footers.py measures a shot: from the rule over the footer (the footer's top,
+        // PADDING above its buttons) to the dialog's bottom edge. The window's footer is 49 at the
+        // theme's sizes: PADDING 12, a button CONTROL_HEIGHT 24, PADDING 12 and the frame's pixel
+        // of border.
+        let mut harness = offscreen_harness();
+        katana_window::theme::apply(harness.context());
+        let mut plain = DialogFrame::new("plainFooter", "Plain");
+        let mut replies = DialogFrame::new("repliesFooter", "Replies");
+        let mut said = (String::new(), String::new(), String::new());
+        let mut draw = |ui: &mut Ui, said: &mut (String, String, String)| {
+            let ctx = ui.ctx().clone();
+            let buttons = |ui: &mut Ui, prefix: &str| {
+                button_row(
+                    ui,
+                    |_| {},
+                    |ui| {
+                        drive::button(ui, &format!("{prefix}Close"), "Close");
+                        drive::primary(ui, &format!("{prefix}Run"), "Run");
+                    },
+                );
+            };
+            plain.place(egui::pos2(0.0, 0.0));
+            plain.show(
+                &ctx,
+                &mut (),
+                |ui, _| {
+                    drive::label(ui, "plainBody", "A body");
+                },
+                |ui, _| buttons(ui, "plain"),
+            );
+            replies.place(egui::pos2(0.0, 300.0));
+            replies.show(
+                &ctx,
+                said,
+                |ui, _| {
+                    drive::label(ui, "repliesBody", "A body");
+                },
+                |ui, (line, text, box_reply)| {
+                    buttons(ui, "replies");
+                    reply_text(ui, "replyLine", line, ControlKind::Line, false);
+                    reply_text(ui, "replyText", text, ControlKind::Text, false);
+                    reply(ui, "replyBox", box_reply, REPLY_ROWS);
+                },
+            );
+        };
+        harness
+            .show(|ui| draw(ui, &mut said))
+            .expect("the dialogs are drawn");
+        let band = |harness: &katana_window::drive::Harness, dialog: &str, run: &str| {
+            let dialog = harness.target_record(dialog).expect("a target").rect;
+            let run = harness.control(run).expect("drawn").rect;
+            dialog.bottom() - (run.top() - PADDING)
+        };
+        let border = harness
+            .context()
+            .global_style()
+            .visuals
+            .window_stroke()
+            .width;
+        let standard = 2.0 * PADDING + katana_window::theme::style::CONTROL_HEIGHT + border;
+        assert_eq!(standard, 49.0, "the premise: the window's standard footer");
+        let plain_band = band(&harness, "plainFooter", "plainRun");
+        assert!(
+            (plain_band - standard).abs() <= HALF_A_POINT,
+            "a footer of buttons is {plain_band}"
+        );
+        let replies_band = band(&harness, "repliesFooter", "repliesRun");
+        assert!(
+            (replies_band - standard).abs() <= HALF_A_POINT,
+            "a footer of buttons and three empty replies is {replies_band}"
+        );
+        // Taking no room, each is still where a driver reads it, reading "".
+        for (name, kind) in [
+            ("replyLine", ControlKind::Line),
+            ("replyText", ControlKind::Text),
+            ("replyBox", ControlKind::Text),
+        ] {
+            let control = harness.control(name).expect("an empty reply is recorded");
+            assert_eq!(control.kind, kind, "{name}");
+            assert!(control.visible, "{name}");
+            assert!(control.rect.height() <= HALF_A_POINT, "{name}");
+            assert_eq!(harness.report(name).expect("it reads"), "", "{name}");
+        }
+
+        // A reply with something to say is shown under the buttons, and the footer grows by it.
+        said.0.push_str("ROADOBJECT ADD sign ALIGNMENT Main station=50");
+        harness
+            .show(|ui| draw(ui, &mut said))
+            .expect("the dialogs are drawn again");
+        let line = harness.control("replyLine").expect("drawn").rect;
+        let run = harness.control("repliesRun").expect("drawn").rect;
+        assert!(line.top() >= run.bottom(), "the line is under the buttons");
+        assert!(band(&harness, "repliesFooter", "repliesRun") >= standard + line.height());
+        assert_eq!(
+            harness.report("replyLine").expect("it reads"),
+            "ROADOBJECT ADD sign ALIGNMENT Main station=50"
+        );
+    }
+
+    #[test]
+    fn a_footer_of_greyed_buttons_and_an_empty_refusal_is_the_standard_49_points() {
+        // The fourth look audit (4): Symbol Library's and Edit Text's footers were 50 px - their
+        // buttons drawn in `add_enabled_ui` (greyed while nothing is chosen) at either end of the
+        // row, and Edit Text's empty refusal a wrapped label beside them.
+        let mut harness = offscreen_harness();
+        katana_window::theme::apply(harness.context());
+        let mut frame = DialogFrame::new("greyedFooter", "Greyed");
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show(
+                    &ctx,
+                    &mut (),
+                    |ui, _| {
+                        drive::label(ui, "greyedBody", "A body");
+                    },
+                    |ui, _| {
+                        button_row(
+                            ui,
+                            |ui| {
+                                ui.add_enabled_ui(false, |ui| {
+                                    drive::button(ui, "greyedEdit", "Edit Definition...");
+                                });
+                                drive::label_as(
+                                    ui,
+                                    "greyedProblem",
+                                    "",
+                                    egui::Label::new("").wrap(),
+                                );
+                            },
+                            |ui| {
+                                ui.add_enabled_ui(false, |ui| {
+                                    drive::button(ui, "greyedRevert", "Revert");
+                                });
+                                drive::button(ui, "greyedClose", "Close");
+                                ui.add_enabled_ui(false, |ui| {
+                                    drive::primary(ui, "greyedApply", "Apply");
+                                });
+                            },
+                        );
+                    },
+                );
+            })
+            .expect("the dialog is drawn");
+        let dialog = harness.target_record("greyedFooter").expect("a target").rect;
+        let close = harness.control("greyedClose").expect("drawn").rect;
+        let band = dialog.bottom() - (close.top() - PADDING);
+        let border = harness
+            .context()
+            .global_style()
+            .visuals
+            .window_stroke()
+            .width;
+        let standard = 2.0 * PADDING + katana_window::theme::style::CONTROL_HEIGHT + border;
+        assert!(
+            (band - standard).abs() <= HALF_A_POINT,
+            "a footer of greyed buttons is {band}, the standard {standard}"
+        );
+        for name in ["greyedEdit", "greyedRevert", "greyedApply"] {
+            let rect = harness.control(name).expect("drawn").rect;
+            assert!(
+                (rect.top() - close.top()).abs() <= HALF_A_POINT,
+                "{name} stands at {} where Close stands at {}",
+                rect.top(),
+                close.top()
+            );
+        }
+    }
+
+    #[test]
+    fn a_managers_list_and_its_tools_stand_beside_its_form_and_end_where_it_does() {
+        // The manager pattern (dialog_layout, the fourth look audit's "For 10"): the list in a
+        // well at the left, MANAGER_LIST_WIDTH wide, its tools in one row under it, the well and
+        // the tools together as tall as the form beside them.
+        use katana_window::dialog_layout::{MANAGER_LIST_WIDTH, manager_columns, manager_list};
+        let mut harness = offscreen_harness();
+        katana_window::theme::apply(harness.context());
+        let mut frame = DialogFrame::new("managerDialog", "Manager").width(640.0);
+        let rows = vec![vec![String::from("Standard")], vec![String::from("Notes")]];
+        let mut state = (Some(0), std::array::from_fn::<String, 6, _>(|_| String::new()));
+        harness
+            .show(|ui| {
+                let ctx = ui.ctx().clone();
+                frame.show_body(&ctx, &mut state, |ui, (current, fields)| {
+                    manager_columns(
+                        ui,
+                        "manager",
+                        |ui, height| {
+                            manager_list(
+                                ui,
+                                "styleList",
+                                &rows,
+                                current,
+                                height,
+                                "No styles: New makes one",
+                                |ui| {
+                                    drive::button(ui, "styleNew", "New");
+                                    drive::button(ui, "styleDelete", "Delete");
+                                },
+                            )
+                        },
+                        |ui| {
+                            form(ui, |form| {
+                                // Taller than the well's least (three rows) and the tools.
+                                for (at, field) in fields.iter_mut().enumerate() {
+                                    form.row("Field", |ui| {
+                                        drive::line(ui, &format!("field{at}"), field)
+                                    });
+                                }
+                                form.check("check", "A box", &mut false);
+                            });
+                        },
+                    );
+                });
+            })
+            .expect("the manager is drawn");
+        let control = |name: &str| harness.control(name).expect("drawn").rect;
+        let (list, new, delete) = (control("styleList"), control("styleNew"), control("styleDelete"));
+        let (first, check) = (control("field0"), control("check"));
+        assert!(list.right() < first.left(), "the list is left of the form");
+        assert!(
+            (new.top() - delete.top()).abs() <= HALF_A_POINT,
+            "the tools are one row"
+        );
+        assert!(new.top() >= list.bottom(), "the tools are under the list");
+        assert!(new.left() < list.center().x, "in the list's column");
+        assert!(
+            (delete.bottom() - check.bottom()).abs() <= 2.0 * HALF_A_POINT + 1.0,
+            "the tools end at {}, the form at {}",
+            delete.bottom(),
+            check.bottom()
+        );
+        assert!(
+            (list.top() - first.top()).abs() <= 6.0,
+            "the well starts beside the form's first row: {} and {}",
+            list.top(),
+            first.top()
+        );
+        assert!(MANAGER_LIST_WIDTH >= list.width() - HALF_A_POINT);
     }
 }

@@ -189,10 +189,23 @@ pub fn reply_text(
         }
     }
     let response = if value.is_empty() {
-        // Nothing to say: a place in the footer, the row's width and no height.
-        let width = ui.available_width();
-        ui.allocate_exact_size(egui::vec2(width, 0.0), egui::Sense::hover())
-            .1
+        // Nothing to say: where it will be, the row's width and no height, recorded without
+        // moving the cursor (as quiet_label and shell::dialog::reply record theirs). A place of no
+        // height allocated still took the item spacing after it: two empty replies under Road
+        // Objects' buttons made its footer 57 px against the standard 49, and one made Leaders'
+        // and Settings' 53 (the fourth look audit's 4).
+        // At the foot of what is drawn above it, not after the spacing that follows: there it
+        // stood outside the footer's rectangle that a dialog's screen fit keeps in sight.
+        let foot = ui.min_rect().bottom().min(ui.cursor().min.y);
+        let at = egui::Rect::from_min_size(
+            egui::pos2(ui.cursor().min.x, foot),
+            egui::vec2(ui.available_width(), 0.0),
+        );
+        ui.interact(
+            at,
+            ui.id().with(("katanaEmptyReplyText", name)),
+            egui::Sense::hover(),
+        )
     } else {
         let label =
             egui::Label::new(RichText::new(value.as_str()).color(dialog::status_colour(is_error)));
@@ -352,6 +365,81 @@ pub fn list_well(
                 .inner
         })
         .inner
+}
+
+// ---- the manager pattern -----------------------------------------------------------------------
+//
+// THE ONE WAY A MANAGER LAYS OUT ITS LIST (the fourth look audit, "For 10": Dimension Styles a
+// table, Text Styles a well with a pill, Surface Styles a bare list, Label Styles a well; Delete in
+// the footer in two and in the body in two). A manager - a dialog that keeps a list of named things
+// (styles, templates, corridors) and edits the one chosen - is:
+//
+// * at the LEFT, the list in a well (`manager_list`, a `list_well`) MANAGER_LIST_WIDTH wide, as
+//   tall as the form beside it, saying what to do while it is empty;
+// * UNDER THE WELL, in the same column, the list's tools in ONE row, in this order: New (with the
+//   new name's field before it where the manager names a new thing there), Copy, Rename, Delete -
+//   only those the manager has. They act on the list, so they stand with it; Delete is never in
+//   the footer, which holds what acts on the dialog;
+// * at the RIGHT, the chosen thing's form (shell::dialog::form), SECTION_GAP from the list;
+// * the FOOTER (shell::dialog::button_row): Revert at the left - it reads the drawing back into the
+//   form - and Close, then Apply (the primary, greyed while nothing is edited) at the right.
+//
+// `manager_columns` lays the two columns out and lends the list the form's height; `manager_list`
+// draws the well and the tools row under it. A manager whose list is a table of several columns
+// (Dimension Styles) draws its table in the same column, with the same tools row under it.
+
+/// The width of a manager's list column (`manager_columns`): a style's or a template's name of
+/// two dozen characters at the Standard text size, with the well's border and the list's scroll
+/// bar - Text Styles' list, the first drawn so.
+pub const MANAGER_LIST_WIDTH: f32 = 220.0;
+
+/// A manager's two columns (see "the manager pattern" above): `list` in a column
+/// MANAGER_LIST_WIDTH wide, lent the height of the form beside it as the last frame drew it (0
+/// before its first), and `form` SECTION_GAP to its right. What each answered.
+pub fn manager_columns<L, F>(
+    ui: &mut Ui,
+    salt: &str,
+    list: impl FnOnce(&mut Ui, f32) -> L,
+    form: impl FnOnce(&mut Ui) -> F,
+) -> (L, F) {
+    let form_id = ui.id().with((salt, "katanaManagerFormHeight"));
+    let height = last_height(ui, form_id).unwrap_or(0.0);
+    ui.horizontal_top(|ui| {
+        let listed = ui
+            .vertical(|ui| {
+                ui.set_width(MANAGER_LIST_WIDTH);
+                list(ui, height)
+            })
+            .inner;
+        ui.add_space((SECTION_GAP - ui.spacing().item_spacing.x).max(0.0));
+        let formed = ui.vertical(form);
+        keep_height(ui, form_id, formed.response.rect.height());
+        (listed, formed.inner)
+    })
+    .inner
+}
+
+/// A manager's list (see "the manager pattern" above): `rows` in a `list_well` named `name`,
+/// `current` the row chosen, saying `empty` while it has none, and under it the list's tools in
+/// one row, drawn by `tools` (New, Copy, Rename, Delete - those the manager has, in that order).
+/// The well and the tools together are `height` high - the form's beside it - and the well three
+/// rows (`rows_height`) at least. What the well and the tools answered.
+pub fn manager_list<R>(
+    ui: &mut Ui,
+    name: &str,
+    rows: &[Vec<String>],
+    current: &mut Option<usize>,
+    height: f32,
+    empty: &str,
+    tools: impl FnOnce(&mut Ui) -> R,
+) -> (Response, R) {
+    let tools_id = ui.id().with((name, "katanaManagerTools"));
+    let tools_height = last_height(ui, tools_id).unwrap_or(0.0);
+    let well = (height - tools_height - ui.spacing().item_spacing.y).max(rows_height(ui, 3.0));
+    let list = list_well(ui, name, rows, current, well, empty);
+    let row = ui.horizontal(tools);
+    keep_height(ui, tools_id, row.response.rect.height());
+    (list, row.inner)
 }
 
 /// The height a part of a dialog was drawn at the last frame, kept under `id` - what a column

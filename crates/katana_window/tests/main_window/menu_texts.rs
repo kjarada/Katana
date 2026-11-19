@@ -209,4 +209,49 @@ mod menu_texts {
             assert!(titles.iter().any(|each| each == title), "{title} in {titles:?}");
         }
     }
+
+    #[test]
+    fn files_groups_are_each_headed_and_views_items_are_in_title_case() {
+        // The fourth look audit: File's last group (Settings, Quit) stood under a bare rule among
+        // headed sections, and View's "Thin screen lines (faster)" was the one item in sentence
+        // case among Title Case items.
+        let window = MainWindow::new();
+        let file = menu(&window, "fileMenu");
+        assert!(
+            !file
+                .items
+                .iter()
+                .any(|item| matches!(item, MenuItem::Separator)),
+            "File has no bare rule"
+        );
+        assert!(
+            matches!(file.items.first(), Some(MenuItem::Section(_))),
+            "File starts with a section"
+        );
+        let view = menu(&window, "viewMenu");
+        let thin = view
+            .actions()
+            .into_iter()
+            .find(|action| action.name == "ThinScreenLinesAction")
+            .cloned()
+            .expect("View has the thin lines item");
+        assert_eq!(thin.text.replace('&', ""), "Thin Screen Lines (Faster)");
+        // Every word of View's own items that is not a short joining word starts with a capital.
+        let small = ["a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to"];
+        let lower: Vec<String> = view
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action(action) => Some(action.text.replace('&', "")),
+                _ => None,
+            })
+            .filter(|text| {
+                text.split([' ', '(', ')'])
+                    .skip(1)
+                    .filter(|word| !word.is_empty() && !small.contains(word))
+                    .any(|word| word.chars().next().is_some_and(char::is_lowercase))
+            })
+            .collect();
+        assert!(lower.is_empty(), "View's items not in Title Case: {lower:?}");
+    }
 }

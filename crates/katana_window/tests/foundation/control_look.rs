@@ -384,6 +384,177 @@ mod control_look {
     }
 
     #[test]
+    fn a_lists_own_empty_item_shows_the_one_empty_word_muted_and_keeps_its_value() {
+        // The fourth look audit (3): empty was spelled six ways, mixed in one form - Corridors'
+        // "None" and "(none)", Symbol Library's "No style" and "(no symbol)". An item in brackets
+        // that IS the empty value shows the window's word for it, muted as an empty choice's hint;
+        // what the choice records and takes in a fill is still the item.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let styles = vec![String::from("(none)"), String::from("Standard")];
+        let symbols = vec![String::from("(no symbol)"), String::from("TREE")];
+        // DEM Tools' Resolution: its first item, "", is the verb's default, unsaid.
+        let resolutions = vec![String::new(), String::from("10")];
+        let mut style = Choice::at(0);
+        let mut symbol = Choice::at(0);
+        let mut resolution = Choice::at(0);
+        let mut draw = |ui: &mut Ui| {
+            ui.spacing_mut().combo_width = 200.0;
+            drive::choice(ui, "style", &styles, &mut style);
+            drive::choice(ui, "symbol", &symbols, &mut symbol);
+            drive::choice(ui, "resolution", &resolutions, &mut resolution);
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let muted = palette::text_muted().to_egui();
+        for (name, item, shown) in [
+            ("style", "(none)", drive::controls::NO_CHOICE),
+            ("symbol", "(no symbol)", "No symbol"),
+            ("resolution", "", drive::controls::NO_CHOICE),
+        ] {
+            let control = harness.control(name).expect("drawn");
+            assert_eq!(control.value, item, "{name} records its item");
+            let words = words_in(&shapes, control.rect);
+            assert!(
+                words.contains(&(String::from(shown), muted)),
+                "{name} shows \"{shown}\" muted: {words:?}"
+            );
+            assert!(
+                item.is_empty() || !words.iter().any(|(text, _)| text == item),
+                "{name} does not show {item}: {words:?}"
+            );
+        }
+        // The item's own text fills it as before, and so do the words it shows.
+        harness.fill("style", "Standard");
+        harness.run(&mut draw).expect("an item is chosen");
+        harness.fill("style", "(none)");
+        harness.run(&mut draw).expect("the empty item by its text");
+        assert_eq!(harness.control("style").expect("drawn").value, "(none)");
+        harness.fill("symbol", "TREE");
+        harness.run(&mut draw).expect("an item is chosen");
+        harness.fill("symbol", "No symbol");
+        harness
+            .run(&mut draw)
+            .expect("the empty item by the words it shows");
+        assert_eq!(
+            harness.control("symbol").expect("drawn").value,
+            "(no symbol)"
+        );
+    }
+
+    #[test]
+    fn a_verbs_tokens_show_in_sentence_case_and_a_fill_takes_either_case() {
+        // The fourth look audit ("For 10"): choice values in two cases, "both", "round", "auto"
+        // beside "Landscape", "Colour". A choice of a verb's tokens shows them in sentence case;
+        // it records the token, and a fill of it in either case chooses it. A choice of names (a
+        // layer, a surface) shows them as written.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let tokens = vec![
+            String::from("both"),
+            String::from("round"),
+            String::from("none"),
+        ];
+        let names = vec![String::from("ground"), String::from("design")];
+        let mut token = Choice::at(1);
+        let mut name = Choice::at(0);
+        let mut draw = |ui: &mut Ui| {
+            ui.spacing_mut().combo_width = 200.0;
+            drive::controls::token_choice(ui, "cap", &tokens, &mut token);
+            drive::choice(ui, "surface", &names, &mut name);
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        let cap = harness.control("cap").expect("drawn");
+        assert_eq!(cap.value, "round", "the token is recorded");
+        assert_eq!(cap.items, tokens, "the items are the tokens");
+        let words = words_in(&shapes, cap.rect);
+        assert!(words.iter().any(|(text, _)| text == "Round"), "{words:?}");
+        assert!(!words.iter().any(|(text, _)| text == "round"), "{words:?}");
+        let surface = harness.control("surface").expect("drawn");
+        let words = words_in(&shapes, surface.rect);
+        assert!(
+            words.iter().any(|(text, _)| text == "ground"),
+            "a name as written: {words:?}"
+        );
+
+        harness.fill("cap", "Both");
+        harness
+            .run(&mut draw)
+            .expect("the token in sentence case is taken");
+        assert_eq!(harness.control("cap").expect("drawn").value, "both");
+        harness.fill("cap", "NONE");
+        harness.run(&mut draw).expect("in any case");
+        assert_eq!(harness.control("cap").expect("drawn").value, "none");
+        harness.fill("cap", "square");
+        assert!(harness.run(&mut draw).is_err(), "a token it lacks is refused");
+        assert_eq!(drive::controls::no_value_hint("linetype"), "No linetype");
+        assert_eq!(drive::controls::SEARCH_HINT, "Search...");
+    }
+
+    #[test]
+    fn a_number_box_with_a_unit_and_special_words_shows_the_words_alone_and_the_unit_once() {
+        // egui 0.36's DragValue::suffix appends: a box of a unit and special words showed "Text
+        // style's mm" at its special value and "2.500 mm mm" elsewhere (the integration of the
+        // sixth round, agent C's Format dialogs).
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let range = SpinRange::new(0.0, 10.0, 0.5, 3)
+            .with_suffix(" mm")
+            .with_special_text("Text style's");
+        let plain = SpinRange::new(0.0, 10.0, 0.5, 3).with_suffix(" mm");
+        let (mut special, mut sized, mut unit) = (0.0, 2.5, 2.5);
+        let mut draw = |ui: &mut Ui| {
+            drive::spin(ui, "special", &mut special, range);
+            drive::spin(ui, "sized", &mut sized, range);
+            drive::spin(ui, "unit", &mut unit, plain);
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        for (name, shown) in [
+            ("special", "Text style's"),
+            ("sized", "2.500 mm"),
+            ("unit", "2.500 mm"),
+        ] {
+            let control = harness.control(name).expect("drawn");
+            let words: String = words_in(&shapes, control.rect)
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
+            assert_eq!(words, shown, "{name}");
+        }
+        // The record is the box's text without its unit, as before.
+        assert_eq!(
+            harness.control("special").expect("drawn").value,
+            "Text style's"
+        );
+        assert_eq!(harness.control("sized").expect("drawn").value, "2.500");
+    }
+
+    #[test]
+    fn a_fill_in_another_case_is_refused_where_two_items_read_it() {
+        // Which item "Plan" means only the items' own spelling can tell: neither is chosen.
+        let mut harness = Harness::new();
+        let items = vec![String::from("plan"), String::from("PLAN")];
+        let mut chosen = Choice::default();
+        let mut draw = |ui: &mut Ui| {
+            drive::choice(ui, "twins", &items, &mut chosen);
+        };
+        harness.show(&mut draw).expect("drawn");
+        harness.fill("twins", "Plan");
+        assert!(harness.run(&mut draw).is_err());
+        harness.fill("twins", "PLAN");
+        harness.run(&mut draw).expect("its own spelling is taken");
+        assert_eq!(harness.control("twins").expect("drawn").value, "PLAN");
+    }
+
+    #[test]
     fn a_colour_written_as_text_shows_its_swatch_in_a_table_a_field_and_a_value() {
         // The third look audit (H): Layers, Surface Styles and Text Styles showed a colour as six
         // digits. A table's cell (dialog_layout::table_cell, every table's), a one-line field

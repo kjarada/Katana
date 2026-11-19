@@ -941,7 +941,9 @@ mod utility_dialog {
         );
         // The window's plan view, by its id: its layers anywhere, or on screen.
         bench.press("utilityScopeView");
-        assert_eq!(bench.control("utilityView").items, ["Plan 2 (VIEW 4)"]);
+        // "(view 4)", as the window's other view lists say it (the scope widget's list read
+        // "(VIEW 4)" until the fourth look audit).
+        assert_eq!(bench.control("utilityView").items, ["Plan 2 (view 4)"]);
         assert_eq!(
             bench.text("utilityCommand"),
             "UTILITY REPORT VIEW 4 EXTENTS"
@@ -1594,7 +1596,7 @@ mod utility_workbench {
             .control("utilityView")
             .expect("the view choice is drawn");
         assert_eq!(view.items.len(), open.len());
-        assert_eq!(view.items[0], format!("Plan 1 (VIEW {})", open[0]));
+        assert_eq!(view.items[0], format!("Plan 1 (view {})", open[0]));
         let dialog = bench.window.workbench.dialog(&mut bench.host);
         dialog.set_source(UtilitySource::Drawing);
         dialog.scope_controls().set_choice(ScopeChoice::View);

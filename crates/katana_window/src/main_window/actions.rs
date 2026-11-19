@@ -783,7 +783,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             act(
                 "",
                 "RecentScripts",
-                "(none)",
+                crate::drive::controls::NO_CHOICE,
                 "No script has been run yet: File > Run Script runs one",
             )
             .enabled(false),
@@ -969,7 +969,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             act(
                 "ThinScreenLinesAction",
                 "ThinLines",
-                "&Thin screen lines (faster)",
+                "&Thin Screen Lines (Faster)",
                 "Draw plan-view lines one pixel wide, which repaints large drawings several times \
                  faster",
             )
@@ -1333,7 +1333,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(start_screen_action())
         .action(project_crs_action())
         .action(summary_action())
-        .separator()
+        // A section of its own, as every group of File is: a bare rule among headed sections read
+        // as a section that had lost its title (the fourth look audit).
+        .section("Application")
         .action(CustomisationWorkbench::settings_action())
         .action(quit_action(exec.headless));
 
