@@ -2,8 +2,10 @@
 //!
 //! The port of src/katana_geodesy and include/katana/geodesy. PROJ (libproj,
 //! with Karney's geodesic routines in it) is reached through hand-written
-//! declarations of exactly the C functions the C++ calls (`ffi`), and only
-//! `proj_internal` calls them, so no PROJ type reaches the public interface.
+//! declarations of exactly the C functions the C++ calls (`ffi`, a child of
+//! `proj_internal`), and only `proj_internal` calls them, so no PROJ type
+//! reaches the public interface. That module is the crate's only unsafe code:
+//! the others are safe Rust under the workspace's `unsafe_code = "deny"`.
 //! Each PROJ-backed object owns a PROJ context of its own, with the network
 //! off, as the C++'s do.
 
@@ -16,12 +18,14 @@ pub mod coordinate;
 pub mod coordinate_reference_system;
 pub mod coordinate_transformer;
 pub mod ellipsoid;
-mod ffi;
 pub mod geodesic;
 pub mod grid_factors;
 mod proj_internal;
 pub mod similarity_transform2d;
 pub mod units;
+
+// PROJ's constants and type aliases, read by the public modules as `crate::ffi`.
+use proj_internal::ffi;
 
 pub use coordinate::{
     BatchReport, Coordinate, GeographicCoordinate, ProjectedCoordinate, UNSPECIFIED_EPOCH,

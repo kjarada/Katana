@@ -1,9 +1,10 @@
 //! The pointcloud layer's native boundary: the C ABI of native/pdal_shim.cpp
 //! (PDAL's primitives; PDAL has only a C++ interface) and the eight GDAL calls
 //! of the PROJ search path, declared by hand from the headers of PDAL 2.10.1
-//! and GDAL 3.13.2, the toolchain's - then safe wrappers over the shim, so that
-//! point_cloud_engine is safe code that decides everything and PDAL is asked
-//! only what it says.
+//! and GDAL 3.13.2, the toolchain's - then safe wrappers over both, so that
+//! point_cloud_engine and proj_search_paths are safe code that decides
+//! everything and PDAL and GDAL are asked only what they say. This is the
+//! crate's one unsafe module (docs/rust.md, "Unsafe confined to FFI modules").
 //!
 //! No binding crate (docs/rust.md, "Third-party libraries"): pdal-c is not in
 //! either toolchain, and the GDAL calls are the eight the C++ makes. The
@@ -17,7 +18,7 @@
 
 #![allow(
     unsafe_code,
-    reason = "The declarations of the PDAL shim's and GDAL's C APIs and the wrappers over the shim's; every unsafe block states why it is sound."
+    reason = "The declarations of the PDAL shim's and GDAL's C APIs and the safe wrappers over them; every unsafe block states why it is sound."
 )]
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -29,17 +30,17 @@ use std::ptr::{NonNull, null_mut};
 
 /// `CPLErr`, a C enumeration: a c_int alias, so a value Rust does not list is
 /// no undefined behaviour.
-pub(crate) type CplErr = c_int;
+type CplErr = c_int;
 /// `CPLErrorNum`.
-pub(crate) type CplErrorNum = c_int;
+type CplErrorNum = c_int;
 /// `OGRErr`.
-pub(crate) type OgrErr = c_int;
-pub(crate) const OGRERR_NONE: OgrErr = 0;
+type OgrErr = c_int;
+const OGRERR_NONE: OgrErr = 0;
 /// `OGRSpatialReferenceH`.
-pub(crate) type OgrSpatialReferenceH = *mut c_void;
+type OgrSpatialReferenceH = *mut c_void;
 /// `CPLErrorHandler`. CPL_STDCALL is empty but under MSVC, which the port
 /// does not build with, so the convention is C's.
-pub(crate) type CplErrorHandler = Option<unsafe extern "C" fn(CplErr, CplErrorNum, *const c_char)>;
+type CplErrorHandler = Option<unsafe extern "C" fn(CplErr, CplErrorNum, *const c_char)>;
 
 const _: () = assert!(size_of::<CplErr>() == 4);
 const _: () = assert!(size_of::<CplErrorNum>() == 4);
@@ -49,14 +50,50 @@ const _: () = assert!(size_of::<CplErrorHandler>() == size_of::<*mut c_void>());
 
 #[link(name = "gdal")]
 unsafe extern "C" {
-    pub(crate) fn CPLPushErrorHandler(handler: CplErrorHandler);
-    pub(crate) fn CPLQuietErrorHandler(class: CplErr, number: CplErrorNum, message: *const c_char);
-    pub(crate) fn CPLPopErrorHandler();
-    pub(crate) fn CPLErrorReset();
-    pub(crate) fn OSRNewSpatialReference(wkt: *const c_char) -> OgrSpatialReferenceH;
-    pub(crate) fn OSRImportFromEPSG(reference: OgrSpatialReferenceH, code: c_int) -> OgrErr;
-    pub(crate) fn OSRDestroySpatialReference(reference: OgrSpatialReferenceH);
-    pub(crate) fn OSRSetPROJSearchPaths(paths: *const *const c_char);
+    fn CPLPushErrorHandler(handler: CplErrorHandler);
+    fn CPLQuietErrorHandler(class: CplErr, number: CplErrorNum, message: *const c_char);
+    fn CPLPopErrorHandler();
+    fn CPLErrorReset();
+    fn OSRNewSpatialReference(wkt: *const c_char) -> OgrSpatialReferenceH;
+    fn OSRImportFromEPSG(reference: OgrSpatialReferenceH, code: c_int) -> OgrErr;
+    fn OSRDestroySpatialReference(reference: OgrSpatialReferenceH);
+    fn OSRSetPROJSearchPaths(paths: *const *const c_char);
+}
+
+/// Whether GDAL's OSR imports the EPSG code `code`, asked quietly: GDAL's
+/// quiet handler is pushed for the probe and popped after it, and this
+/// thread's last error is reset, so what the probe said is not a later
+/// call's last error.
+pub(crate) fn gdal_imports_epsg_quietly(code: c_int) -> bool {
+    // SAFETY: CPLQuietErrorHandler is GDAL's own handler, which lives as long
+    // as the library; the handler stack is this thread's, popped below.
+    unsafe { CPLPushErrorHandler(Some(CPLQuietErrorHandler)) };
+    // SAFETY: a NULL definition makes an empty reference, which is GDAL's to
+    // allocate and is destroyed below.
+    let reference = unsafe { OSRNewSpatialReference(std::ptr::null()) };
+    // SAFETY: the reference just made (GDAL validates a NULL one itself).
+    let found = unsafe { OSRImportFromEPSG(reference, code) } == OGRERR_NONE;
+    // SAFETY: the reference made above, destroyed once (GDAL deletes NULL as
+    // nothing).
+    unsafe { OSRDestroySpatialReference(reference) };
+    // SAFETY: pops the handler pushed above, on the same thread.
+    unsafe { CPLPopErrorHandler() };
+    // SAFETY: resets this thread's last error; nothing is passed.
+    unsafe { CPLErrorReset() };
+    found
+}
+
+/// GDAL's PROJ search path set to `paths`, in order (OSRSetPROJSearchPaths);
+/// GDAL keeps a copy.
+pub(crate) fn set_gdal_proj_search_paths(paths: &[&CStr]) {
+    let list: Vec<*const c_char> = paths
+        .iter()
+        .map(|path| path.as_ptr())
+        .chain(std::iter::once(std::ptr::null()))
+        .collect();
+    // SAFETY: a NULL-terminated list of live NUL-terminated strings (`paths`
+    // borrows them for the call); GDAL copies the list and the strings.
+    unsafe { OSRSetPROJSearchPaths(list.as_ptr()) };
 }
 
 // ---- the shim (native/pdal_shim.cpp) --------------------------------------------------------
@@ -609,4 +646,18 @@ pub(crate) fn write_points(
     };
     // SAFETY: the message the call left.
     Ok(unsafe { outcome(code, message) }? == KATANA_PDAL_OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_quiet_epsg_probe_answers_true_for_a_registry_code_and_false_for_none() {
+        // GDAL's PROJ pointed at the data first, as every caller does.
+        crate::proj_search_paths::point_gdal_at_proj_data();
+        // EPSG:4326 (WGS 84) is in every EPSG registry; 0 is no code of it.
+        assert!(gdal_imports_epsg_quietly(4326));
+        assert!(!gdal_imports_epsg_quietly(0));
+    }
 }

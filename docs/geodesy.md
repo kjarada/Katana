@@ -10,8 +10,9 @@ the four-parameter site calibration that ties a local grid to a projected one.
 
 Beside geometry: it sees `core` and `math` and nothing else, and `cad` sees it
 (`docs/architecture.md`, "Layering"). PROJ is a private dependency, confined to
-the crate's FFI modules (`crates/katana_geodesy/src/ffi.rs`,
-`crates/katana_geodesy/src/proj_internal.rs`) behind Katana's own types
+the crate's FFI module (`crates/katana_geodesy/src/proj_internal.rs`, with
+PROJ's declarations in `crates/katana_geodesy/src/proj_internal/ffi.rs`;
+docs/rust.md, "Unsafe confined to FFI modules") behind Katana's own types
 (Rule 4): no PROJ type appears in the crate's public interface, and no other
 crate links PROJ for it. `entity` cannot see geodesy, which is why the unit ratios every layer
 needs live one layer down in `crates/katana_math/src/unit_ratio.rs` and `crates/katana_geodesy/src/units.rs` is

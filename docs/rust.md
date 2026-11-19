@@ -1414,6 +1414,131 @@ macOS and Windows, the error boxes, the registry and the Windows test
 oracles (Credential Manager, process token, byte-range lock, the C locale).
 Each is in Not done with what it would take.
 
+### Unsafe confined to FFI modules (2026-11-19)
+
+The owner's word again, for the unsafe that is left once the part above was
+made safe: a call into a C library or the operating system cannot be safe
+Rust, so it is confined. In each crate below one module, or one module and
+its children, holds every `unsafe` the crate has. It declares the calls, owns
+what they hand back in types that free it once, on drop, and offers safe
+functions over them; every other module of the crate lost its
+`allow(unsafe_code)` and is under the workspace's deny, so the compiler now
+says where the boundary is. Every unsafe block left states, in its SAFETY
+comment, the invariant it rests on. The replies, the error codes, the
+`os_error=N` texts and the bytes on disk are meant to be the same; not built
+when written, the integration build's suite is the evidence.
+
+- **katana_storage**: `crates/katana_storage/src/ffi.rs`. SQLite's
+  declarations, now private to it, and three owners: a connection (closed on
+  drop; Send, as before, since every connection is FULLMUTEX), a statement
+  that borrows its connection (finalized on drop, so it ends before the
+  connection closes) and an online backup that borrows both (finished by
+  `finish` or, if not, on drop). An error message is copied when it is read,
+  once. `crates/katana_storage/src/sqlite_database.rs` keeps every decision
+  (the pragmas, schema 13's `user_version` and `application_id`, the empty
+  text and empty blob rules, the backup's codes) and no unsafe. One thing is
+  stricter: a statement's text longer than a C int is handed to SQLite as at
+  most that long, where the cast made it negative, which SQLite reads as "up
+  to the NUL" a Rust string need not have; SQLite refuses it as too long
+  either way (its limit is below a C int).
+- **katana_geodesy**: `crates/katana_geodesy/src/proj_internal.rs`, with
+  PROJ's declarations moved under it as
+  `crates/katana_geodesy/src/proj_internal/ffi.rs` (the public modules still
+  read their constants as `crate::ffi`). Two soundness holes closed. Every
+  owner of a PJ, a list or a factory context now holds a counted link to its
+  context, so the context is destroyed after the last handle made in it,
+  whatever order they are dropped in; before, that rested on the order the
+  fields were declared in. And the two `unsafe impl Send` of the transformer
+  and the grid-factor calculator, each a promise about proj_internal's
+  handles made outside it, are gone: both keep their PROJ handles in
+  `ProjHandles`, the one owner that may move to another thread, whose
+  constructor checks that the PJs were made in its context and that no other
+  handle of that context exists (the link count), and which never lends the
+  context out. Both types are Send and not Sync, as before. The batch
+  transform's member offsets are checked when the function is compiled for a
+  type (aligned, inside the value). Rejected: a PJ that borrows its context
+  (the transformer would hold a struct that borrows from itself); Arc and a
+  mutex per context (a lock per transformed point, for what the one-owner
+  rule already gives).
+- **katana_pointcloud**: `crates/katana_pointcloud/src/ffi.rs`. The PDAL
+  shim's wrappers were there already; the GDAL calls of the PROJ search path
+  (the quiet EPSG:4326 probe and OSRSetPROJSearchPaths) moved there behind
+  two safe functions, so `crates/katana_pointcloud/src/proj_search_paths.rs`
+  is safe.
+- **katana_update**: `crates/katana_update/src/win32.rs` on Windows, one
+  child per area in `crates/katana_update/src/win32/` (the file system, the
+  processes, the registry, the Credential Manager), and
+  `crates/katana_update/src/posix.rs` (kill with signal 0) elsewhere. A name
+  handed to the system is a type that is NUL-terminated by construction; a
+  handle is std's `OwnedHandle` or the area's owner (a directory search, a
+  registry key, a credential the system allocated, zeroed then freed); a
+  buffer is a slice whose length is what the call is told. The modules that
+  decide - fsops_win, spawn_win, process_scan_win, registry_win,
+  credential_win, and the one Win32 call each of install.rs and state.rs -
+  are safe and keep their flags, retries, error numbers and texts; a wrapper
+  that fails leaves the error for the caller to read at once, or returns it
+  read at once, as the code did. This process's id is std's. The Credential
+  Manager's test seam now returns the error its calls fail with instead of
+  setting the thread's last error. Rejected: std::process::Command for the
+  launcher, which gives no way to name the two handles a child inherits
+  (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), to merge its standard output and
+  error into one pipe read by peeking without a thread, to name the program
+  as lpApplicationName beside command_line.rs's own quoting, or to set the
+  error mode around the call and retry without CREATE_BREAKAWAY_FROM_JOB;
+  std::fs::OpenOptions for the file system, whose path conversion is not
+  long_path.rs's (the trailing dot and space rule) and whose create-and-
+  truncate is not always CREATE_ALWAYS, so the dispositions and the error
+  numbers the swap and the journal record could differ; a private module of
+  calls inside each of the five files (five unsafe modules, where one tree
+  shows the whole boundary).
+
+Small differences, each where the old code was undefined or leaked: the SQL
+length above; a CredReadW that succeeds with no credential is an Internal
+error (Windows error 13) rather than a read through a null pointer; the
+launcher's attribute list is deleted when UpdateProcThreadAttribute fails
+(it was left); the transformer and the calculator destroy the PROJ objects
+they do not keep before they are built, not after (no output depends on it);
+and an empty BLOB bound through the wrapper's own blob call (sqlite_database
+binds an empty one as a zero-length zeroblob, as before) is handed a real
+address, not an empty slice's.
+
+What is not confined, and why: `crates/katana_update/src/signature.rs`'s
+OpenSSL hardening is an `unsafe fn` whose caller promises that no other
+thread uses the environment; it calls no foreign function, and its contract
+is part of its public signature (the section above, and Not done). The
+update crate's tests reach the Credential Manager, the command-line parser,
+a held file, the console and the error mode behind the code's back, as
+oracles independent of the wrappers they check (`apply.rs`,
+`apply_harness/mod.rs`, `credential.rs`, `journal.rs`, `plan.rs`,
+`recover.rs`, `signature.rs` and `state.rs` under
+`crates/katana_update/tests/`); each unsafe block there has its SAFETY
+comment, and they stay. Tests written for the wrappers, in the modules they
+test: storage's
+`a_connection_whose_statements_were_dropped_closes_without_being_busy`,
+`a_backup_dropped_unfinished_is_finished_so_both_connections_close`,
+`a_finished_backup_reports_done_then_ok_and_copies_the_rows`,
+`a_failed_execute_returns_sqlites_message_for_the_missing_table`,
+`a_failed_prepare_leaves_its_message_on_the_connection`,
+`an_open_that_cannot_create_its_file_returns_sqlites_message`,
+`a_text_holding_no_statement_prepares_to_one_that_steps_as_misuse_and_resets_quietly`
+and `empty_text_binds_as_empty_text_and_an_empty_blob_as_an_empty_blob`;
+geodesy's
+`a_pj_keeps_its_context_alive_after_the_context_value_is_dropped`,
+`handles_kept_together_refuse_a_pj_made_in_another_context`,
+`handles_kept_together_refuse_while_another_handle_of_the_context_lives` and
+`handles_kept_together_move_to_another_thread_and_answer_there`;
+pointcloud's
+`the_quiet_epsg_probe_answers_true_for_a_registry_code_and_false_for_none`;
+the updater's
+`opening_a_missing_file_gives_none_and_leaves_the_systems_error`,
+`a_file_closed_by_its_drop_can_then_be_deleted_and_a_search_of_its_folder_ends`,
+`ordinal_comparison_folds_case_and_counts_every_unit`,
+`a_child_writes_into_the_inherited_pipe_and_its_exit_code_is_read`,
+`this_process_is_in_a_snapshot_of_the_machine`,
+`a_wide_name_ends_in_exactly_one_nul_after_its_text`,
+`a_length_past_u32_is_told_as_the_most_u32_holds` and
+`this_process_answers_signal_nothing`.
+
 ## The toolchains
 
 ### WSL, where the port is built

@@ -22,25 +22,16 @@
 //!                makes of an Unsupported with no token.
 //! ```
 
-#![allow(
-    unsafe_code,
-    reason = "kill(2) has no safe form in the standard library; the one call is confined here"
-)]
+// kill(2) itself is in posix.rs, the crate's one POSIX call.
 
+use crate::posix::{PidT, signal_nothing};
 use crate::process::{ProcessOps, RunningProgram};
 use katana_core::error::make_error;
 use katana_core::{ErrorCode, Result};
 use std::path::Path;
 
-// pid_t is a 32-bit signed integer on Linux and on macOS (sys/types.h).
-type PidT = i32;
-
 // errno's EPERM: 1 on Linux and on macOS (asm-generic/errno-base.h, sys/errno.h).
 const EPERM: i32 = 1;
-
-unsafe extern "C" {
-    fn kill(pid: PidT, signal: i32) -> i32;
-}
 
 struct PosixProcessOps;
 
@@ -59,13 +50,11 @@ impl ProcessOps for PosixProcessOps {
         if pid == 0 {
             return false;
         }
-        // SAFETY: kill with signal 0 sends nothing; it reads its two integer arguments and
-        // touches no memory of ours.
-        if unsafe { kill(pid, 0) } == 0 {
-            return true;
-        }
         // EPERM: the process is there and is another user's. Otherwise (ESRCH) there is none.
-        std::io::Error::last_os_error().raw_os_error() == Some(EPERM)
+        match signal_nothing(pid) {
+            Ok(()) => true,
+            Err(errno) => errno == EPERM,
+        }
     }
 
     fn holders_under(&self, _root: &Path) -> Result<Vec<RunningProgram>> {

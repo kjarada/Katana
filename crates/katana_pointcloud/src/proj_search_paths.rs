@@ -11,44 +11,21 @@
 //! Hidden from the documentation: an internal header of katana_io, public
 //! only so that katana_gis can call it.
 
-#![allow(
-    unsafe_code,
-    reason = "Calls GDAL's C API through the declarations of ffi; every unsafe block states why it is sound."
-)]
-
 use std::ffi::CString;
 use std::path::Path;
-use std::ptr::null;
 use std::sync::Once;
 
 use katana_core::library_data::{bundled_proj_data_directory, proj_data_directory};
 
-use crate::ffi::{
-    CPLErrorReset, CPLPopErrorHandler, CPLPushErrorHandler, CPLQuietErrorHandler, OGRERR_NONE,
-    OSRDestroySpatialReference, OSRImportFromEPSG, OSRNewSpatialReference, OSRSetPROJSearchPaths,
-};
+use crate::ffi;
 
 /// Whether GDAL's PROJ can open proj.db as things stand: EPSG:4326 is read
 /// from the database (GDAL carries no definitions of its own), so the import
 /// fails when the database does not open - PROJ_LIB naming a folder without
-/// one, or with one of another PROJ's layout, which PROJ rejects.
+/// one, or with one of another PROJ's layout, which PROJ rejects. GDAL's
+/// errors are silenced for the probe, and its last error reset after it.
 pub fn gdal_finds_proj_database() -> bool {
-    // SAFETY: CPLQuietErrorHandler is GDAL's own handler, which lives as long
-    // as the library; the handler stack is this thread's, popped below.
-    unsafe { CPLPushErrorHandler(Some(CPLQuietErrorHandler)) };
-    // SAFETY: a NULL definition makes an empty reference, which is GDAL's to
-    // allocate and is destroyed below.
-    let reference = unsafe { OSRNewSpatialReference(null()) };
-    // SAFETY: the reference just made (GDAL validates a NULL one itself).
-    let found = unsafe { OSRImportFromEPSG(reference, 4326) } == OGRERR_NONE;
-    // SAFETY: the reference made above, destroyed once.
-    unsafe { OSRDestroySpatialReference(reference) };
-    // SAFETY: pops the handler pushed above, on the same thread.
-    unsafe { CPLPopErrorHandler() };
-    // What the probe said is not a later call's last error.
-    // SAFETY: resets this thread's last error; nothing is passed.
-    unsafe { CPLErrorReset() };
-    found
+    ffi::gdal_imports_epsg_quietly(4326)
 }
 
 /// The bytes of `path.generic_u8string()`, the text PROJ takes: UTF-8 (the
@@ -75,10 +52,7 @@ fn set_search_path(path: &Path) {
         .position(|&byte| byte == 0)
         .unwrap_or(text.len());
     let text = CString::new(&text[..end]).unwrap_or_default();
-    let paths = [text.as_ptr(), null()];
-    // SAFETY: a NULL-terminated list of one live NUL-terminated string, alive
-    // for the call; GDAL keeps a copy.
-    unsafe { OSRSetPROJSearchPaths(paths.as_ptr()) };
+    ffi::set_gdal_proj_search_paths(&[text.as_c_str()]);
 }
 
 /// Points GDAL's PROJ at the data Katana carries, once per process.

@@ -15,22 +15,20 @@
 //! read() can fail in four ways, which credential.rs lists for the callers that look a token up
 //! quietly: NotFound (none stored), InvalidState (stored, cannot be used), Unsupported (the
 //! Credential Manager cannot be used in this session) and Internal (any other system fault).
-
-#![allow(
-    unsafe_code,
-    reason = "The Credential Manager is reached through its Win32 calls, which are foreign functions."
-)]
+//!
+//! The calls themselves are win32::credential's safe wrappers (docs/rust.md, "Unsafe confined to
+//! FFI modules"), which zero and free what the system allocated.
 
 use crate::credential::{CredentialStore, secure_zero};
 use crate::credential_detail::usable_token;
+use crate::win32::WideName;
+use crate::win32::credential::{
+    Credential, NewCredential, delete_generic, read_generic, write_generic,
+};
 use katana_core::error::make_error;
 use katana_core::text::trimmed;
 use katana_core::text_encoding::{TextEncoding, decode_text_as, is_valid_utf8};
 use katana_core::{Error, ErrorCode, Result, Status};
-use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
-use windows_sys::Win32::Security::Credentials::{
-    CREDENTIALW, CredDeleteW, CredFree, CredReadW, CredWriteW,
-};
 
 // The Win32 error numbers, from Microsoft's "System Error Codes" list.
 const ERROR_ACCESS_DENIED: u32 = 5;
@@ -40,7 +38,6 @@ const ERROR_NOT_FOUND: u32 = 1168;
 const ERROR_NO_SUCH_LOGON_SESSION: u32 = 1312;
 const ERROR_NO_SUCH_DOMAIN: u32 = 1355;
 // wincred.h.
-const CRED_TYPE_GENERIC: u32 = 1;
 const CRED_PERSIST_LOCAL_MACHINE: u32 = 2;
 const CRED_MAX_GENERIC_TARGET_NAME_LENGTH: usize = 32767;
 
@@ -58,17 +55,13 @@ fn is_unavailable(code: u32) -> bool {
     )
 }
 
-fn last_error() -> u32 {
-    // SAFETY: GetLastError only reads this thread's last-error value.
-    unsafe { GetLastError() }
-}
-
 // The three system calls a store makes, so that a test can have them fail
-// (make_credential_manager_store_failing_with). Each says whether the Win32 call succeeded and
-// leaves its error for GetLastError.
-type ReadCall = Box<dyn Fn(*const u16, *mut *mut CREDENTIALW) -> bool>;
-type WriteCall = Box<dyn Fn(*const CREDENTIALW) -> bool>;
-type RemoveCall = Box<dyn Fn(*const u16) -> bool>;
+// (make_credential_manager_store_failing_with). Each returns the Win32 call's error, read at once,
+// when it fails.
+type ReadCall = Box<dyn Fn(&WideName) -> std::result::Result<Credential, u32>>;
+// The write is given the target and the blob; the rest of what is stored is the store's own.
+type WriteCall = Box<dyn Fn(&WideName, &mut [u8]) -> std::result::Result<(), u32>>;
+type RemoveCall = Box<dyn Fn(&WideName) -> std::result::Result<(), u32>>;
 
 struct SystemCalls {
     read: ReadCall,
@@ -78,72 +71,29 @@ struct SystemCalls {
 
 fn real_calls() -> SystemCalls {
     SystemCalls {
-        read: Box::new(|target: *const u16, found: *mut *mut CREDENTIALW| {
-            // SAFETY: `target` is the store's NUL-terminated wide name and `found` a place for
-            // the pointer the system allocates.
-            unsafe { CredReadW(target, CRED_TYPE_GENERIC, 0, found) != 0 }
+        read: Box::new(read_generic),
+        write: Box::new(|target: &WideName, blob: &mut [u8]| {
+            write_generic(NewCredential {
+                target,
+                comment: &WideName::from_text(
+                    "Katana: read-only access token for update downloads",
+                ),
+                user: &WideName::from_text("Katana"),
+                persist: CRED_PERSIST_LOCAL_MACHINE,
+                blob,
+            })
         }),
-        write: Box::new(|credential: *const CREDENTIALW| {
-            // SAFETY: `credential` points at a filled CREDENTIALW whose strings and blob outlive
-            // the call, which copies them.
-            unsafe { CredWriteW(credential, 0) != 0 }
-        }),
-        remove: Box::new(|target: *const u16| {
-            // SAFETY: `target` is the store's NUL-terminated wide name.
-            unsafe { CredDeleteW(target, CRED_TYPE_GENERIC, 0) != 0 }
-        }),
+        remove: Box::new(delete_generic),
     }
 }
 
 fn calls_failing_with(code: u32) -> SystemCalls {
-    let fail = move || {
-        // SAFETY: SetLastError only sets this thread's last-error value.
-        unsafe { SetLastError(code) };
-        false
-    };
     SystemCalls {
-        read: Box::new(move |_: *const u16, _: *mut *mut CREDENTIALW| fail()),
-        write: Box::new(move |_: *const CREDENTIALW| fail()),
-        remove: Box::new(move |_: *const u16| fail()),
-    }
-}
-
-// What CredReadW allocated: its blob zeroed, then freed with CredFree.
-struct Found(*mut CREDENTIALW);
-
-impl Found {
-    fn blob(&self) -> &[u8] {
-        // SAFETY: CredReadW succeeded, so the pointer is to a CREDENTIALW the system allocated,
-        // whose blob is CredentialBlobSize bytes; both live until CredFree in drop.
-        unsafe {
-            let credential = &*self.0;
-            if credential.CredentialBlob.is_null() || credential.CredentialBlobSize == 0 {
-                &[]
-            } else {
-                std::slice::from_raw_parts(
-                    credential.CredentialBlob,
-                    credential.CredentialBlobSize as usize,
-                )
-            }
-        }
-    }
-}
-
-impl Drop for Found {
-    fn drop(&mut self) {
-        // SAFETY: as in blob(); the blob is zeroed in place before the system frees it, and the
-        // pointer is not used again.
-        unsafe {
-            let credential = &mut *self.0;
-            if !credential.CredentialBlob.is_null() {
-                std::ptr::write_bytes(
-                    credential.CredentialBlob,
-                    0,
-                    credential.CredentialBlobSize as usize,
-                );
-            }
-            CredFree(self.0 as *const core::ffi::c_void);
-        }
+        read: Box::new(move |_: &WideName| -> std::result::Result<Credential, u32> { Err(code) }),
+        write: Box::new(move |_: &WideName, _: &mut [u8]| -> std::result::Result<(), u32> {
+            Err(code)
+        }),
+        remove: Box::new(move |_: &WideName| -> std::result::Result<(), u32> { Err(code) }),
     }
 }
 
@@ -197,7 +147,7 @@ struct CredentialManagerStore {
     target_utf8: String,
     // The name passed to the system (credential_target_of), and the same with its terminator.
     target: Vec<u16>,
-    target_terminated: Vec<u16>,
+    target_terminated: WideName,
 }
 
 impl CredentialManagerStore {
@@ -215,8 +165,7 @@ impl CredentialManagerStore {
         if wide.len() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH {
             panic!("{REFUSAL}");
         }
-        let mut target_terminated = wide.clone();
-        target_terminated.push(0);
+        let target_terminated = WideName::from_units(wide.clone());
         Self {
             calls,
             target_utf8: text.to_owned(),
@@ -228,19 +177,19 @@ impl CredentialManagerStore {
 
 impl CredentialStore for CredentialManagerStore {
     fn read(&self) -> Result<String> {
-        let mut found: *mut CREDENTIALW = std::ptr::null_mut();
-        if !(self.calls.read)(self.target_terminated.as_ptr(), &raw mut found) {
-            let code = last_error();
-            if code == ERROR_NOT_FOUND {
-                return Err(make_error(
-                    ErrorCode::NotFound,
-                    "no token is stored",
-                    self.target_utf8.as_str(),
-                ));
+        let credential = match (self.calls.read)(&self.target_terminated) {
+            Ok(credential) => credential,
+            Err(code) => {
+                if code == ERROR_NOT_FOUND {
+                    return Err(make_error(
+                        ErrorCode::NotFound,
+                        "no token is stored",
+                        self.target_utf8.as_str(),
+                    ));
+                }
+                return Err(credential_error(code, "read", &self.target_utf8));
             }
-            return Err(credential_error(code, "read", &self.target_utf8));
-        }
-        let credential = Found(found);
+        };
         let blob = credential.blob();
         if blob.is_empty() {
             return Err(make_error(
@@ -276,36 +225,18 @@ impl CredentialStore for CredentialManagerStore {
     fn write(&self, token: &[u8]) -> Status {
         let usable = usable_token(trimmed(token), &self.target_utf8)?;
         // CredWriteW takes mutable pointers and copies what they point at; this copy of the token
-        // is what is zeroed after.
+        // (at most MAX_TOKEN_BYTES, usable_token) is what is zeroed after.
         let mut blob: Vec<u8> = usable.as_bytes().to_vec();
-        let mut target = self.target_terminated.clone();
-        let mut comment: Vec<u16> = "Katana: read-only access token for update downloads"
-            .encode_utf16()
-            .chain([0])
-            .collect();
-        let mut user: Vec<u16> = "Katana".encode_utf16().chain([0]).collect();
-        // SAFETY: CREDENTIALW is plain data, and all zero is a credential with no field set.
-        let mut credential: CREDENTIALW = unsafe { std::mem::zeroed() };
-        credential.Type = CRED_TYPE_GENERIC;
-        credential.TargetName = target.as_mut_ptr();
-        credential.Comment = comment.as_mut_ptr();
-        // At most MAX_TOKEN_BYTES (usable_token).
-        credential.CredentialBlobSize = blob.len() as u32;
-        credential.CredentialBlob = blob.as_mut_ptr();
-        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
-        credential.UserName = user.as_mut_ptr();
-        let stored = (self.calls.write)(&raw const credential);
-        let code = if stored { 0 } else { last_error() };
+        let stored = (self.calls.write)(&self.target_terminated, blob.as_mut_slice());
         secure_zero(&mut blob);
-        if !stored {
+        if let Err(code) = stored {
             return Err(credential_error(code, "store", &self.target_utf8));
         }
         Ok(())
     }
 
     fn clear(&self) -> Status {
-        if !(self.calls.remove)(self.target_terminated.as_ptr()) {
-            let code = last_error();
+        if let Err(code) = (self.calls.remove)(&self.target_terminated) {
             if code == ERROR_NOT_FOUND {
                 return Ok(()); // nothing was stored: the state asked for
             }

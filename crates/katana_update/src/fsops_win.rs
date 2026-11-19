@@ -18,34 +18,23 @@
 //!   write through must be refused for. A OneDrive placeholder or a deduplicated file has a
 //!   reparse point too, but it is the file itself; refusing it would refuse an install in a
 //!   synchronised folder.
-
-#![allow(
-    unsafe_code,
-    reason = "The file system is reached through its Win32 calls, which are foreign functions."
-)]
+//!
+//! The Win32 calls themselves are win32::fs's safe wrappers (docs/rust.md, "Unsafe confined to
+//! FFI modules"); this module decides what to ask and what the answers mean, in safe Rust.
 
 use crate::fsops::{
     EntryInfo, EntryKind, FileLock, FsOps, RETRYABLE_OS_ERRORS, RetryPolicy, is_link_reparse_tag,
     path_text,
 };
 use crate::long_path::{absolute_normal, wide_path};
+use crate::win32::fs::{self, File};
+use crate::win32::{WideName, last_error};
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result, Status};
 use std::ffi::OsString;
-use std::mem::zeroed;
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant};
-use windows_sys::Win32::Foundation::{
-    CloseHandle, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
-};
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, CreateFileW, DeleteFileW, FindClose, FindFirstFileW, FindNextFileW,
-    FlushFileBuffers, GetDiskFreeSpaceExW, GetFileAttributesExW, GetFileAttributesW, GetFileSizeEx,
-    GetFileTime, GetFinalPathNameByHandleW, MoveFileExW, ReadFile, RemoveDirectoryW,
-    SetFileAttributesW, SetFileTime, WIN32_FILE_ATTRIBUTE_DATA, WIN32_FIND_DATAW, WriteFile,
-};
 
 // The values of the Windows SDK's headers (winerror.h, winnt.h, fileapi.h, winbase.h).
 const ERROR_FILE_NOT_FOUND: u32 = 2;
@@ -84,7 +73,6 @@ const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
 const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
 const FILE_NAME_NORMALIZED: u32 = 0x0;
 const VOLUME_NAME_DOS: u32 = 0x0;
-const GET_FILE_EX_INFO_STANDARD: i32 = 0; // GetFileExInfoStandard
 
 const SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 // Past this a file is not a record or a manifest, and read_file would hold it all in memory.
@@ -92,11 +80,6 @@ const READ_FILE_LIMIT: u64 = 256 * 1024 * 1024;
 
 const BACKSLASH: u16 = b'\\' as u16;
 const DOT: u16 = b'.' as u16;
-
-fn last_error() -> u32 {
-    // SAFETY: GetLastError only reads this thread's last-error value.
-    unsafe { GetLastError() }
-}
 
 fn os_error(code: ErrorCode, message: &str, error: u32, path: &Path) -> Error {
     make_error(
@@ -124,10 +107,8 @@ fn is_retryable(error: u32) -> bool {
 
 // The one definition of how a path is handed to the system (long_path.rs), with the terminator
 // the calls need.
-fn wide(path: &Path) -> Vec<u16> {
-    let mut text = wide_path(path);
-    text.push(0);
-    text
+fn wide(path: &Path) -> WideName {
+    WideName::from_units(wide_path(path))
 }
 
 // The parent folder, or None at the top (std::filesystem's parent_path is the path itself there).
@@ -152,107 +133,39 @@ fn next_wait(deadline: Option<Instant>, interval: Duration) -> Option<Duration> 
     }
 }
 
-// A handle that closes itself.
-struct Handle(HANDLE);
-
-impl Handle {
-    fn valid(&self) -> bool {
-        self.0 != INVALID_HANDLE_VALUE
-    }
-
-    fn get(&self) -> HANDLE {
-        self.0
-    }
-
-    fn reset(&mut self) {
-        if self.valid() {
-            // SAFETY: the handle is one this Handle owns, closed once.
-            unsafe { CloseHandle(self.0) };
-            self.0 = INVALID_HANDLE_VALUE;
-        }
-    }
-}
-
-impl Drop for Handle {
-    fn drop(&mut self) {
-        self.reset();
-    }
-}
-
-fn create_file(path: &[u16], access: u32, share: u32, disposition: u32, flags: u32) -> Handle {
-    // SAFETY: `path` is NUL-terminated; no security attributes and no template.
-    Handle(unsafe {
-        CreateFileW(
-            path.as_ptr(),
-            access,
-            share,
-            null(),
-            disposition,
-            flags,
-            null_mut(),
-        )
-    })
-}
-
-fn attributes_of(path: &[u16]) -> u32 {
-    // SAFETY: `path` is NUL-terminated.
-    unsafe { GetFileAttributesW(path.as_ptr()) }
-}
-
 #[allow(
     dead_code,
     reason = "The handle is held for its Drop: while it is open, the lock is held."
 )]
-struct WindowsLock(Handle);
+struct WindowsLock(File);
 
 impl FileLock for WindowsLock {}
 
 // Whether an entry whose attributes say it has a reparse point is a LINK. A failed lookup counts
 // as a redirecting one: the safe answer for a caller that refuses to write through it.
-fn redirects(path: &[u16]) -> bool {
-    // SAFETY: plain data, filled by the call.
-    let mut found: WIN32_FIND_DATAW = unsafe { zeroed() };
-    // SAFETY: `path` is NUL-terminated; the search handle is closed at once.
-    let search = unsafe { FindFirstFileW(path.as_ptr(), &raw mut found) };
-    if search == INVALID_HANDLE_VALUE {
-        return true;
+fn redirects(path: &WideName) -> bool {
+    match fs::find_first(path) {
+        None => true,
+        // The search is closed as soon as its first entry is read.
+        Some((_search, found)) => is_link_reparse_tag(found.dwReserved0),
     }
-    // SAFETY: as above.
-    unsafe { FindClose(search) };
-    is_link_reparse_tag(found.dwReserved0)
 }
 
-fn write_all(file: HANDLE, bytes: &[u8], path: &Path) -> Status {
+fn write_all(file: &File, bytes: &[u8], path: &Path) -> Status {
     let mut done = 0usize;
     while done < bytes.len() {
-        let chunk = (bytes.len() - done).min(1 << 20) as u32;
-        let mut written = 0u32;
-        // SAFETY: at most `chunk` bytes of `bytes` are read from.
-        let wrote = unsafe {
-            WriteFile(
-                file,
-                bytes[done..].as_ptr().cast(),
-                chunk,
-                &raw mut written,
-                null_mut(),
-            )
-        } != 0;
-        if !wrote {
+        let chunk = (bytes.len() - done).min(1 << 20);
+        let Some(written) = file.write(&bytes[done..done + chunk]) else {
             return Err(os_error(
                 ErrorCode::FileExportFailure,
                 "the file could not be written",
                 last_error(),
                 path,
             ));
-        }
+        };
         done += written as usize;
     }
     Ok(())
-}
-
-fn flush(file: &Handle) -> bool {
-    // SAFETY: the handle is open.
-    unsafe { FlushFileBuffers(file.get()) != 0 }
 }
 
 struct WindowsFsOps {
@@ -264,17 +177,7 @@ impl FsOps for WindowsFsOps {
 
     fn stat(&self, path: &Path) -> Result<EntryInfo> {
         let wide = wide(path);
-        // SAFETY: plain data, filled by the call.
-        let mut data: WIN32_FILE_ATTRIBUTE_DATA = unsafe { zeroed() };
-        // SAFETY: `wide` is NUL-terminated and `data` is the structure the level names.
-        let examined = unsafe {
-            GetFileAttributesExW(
-                wide.as_ptr(),
-                GET_FILE_EX_INFO_STANDARD,
-                (&raw mut data).cast(),
-            )
-        } != 0;
-        if !examined {
+        let Some(data) = fs::attribute_data(&wide) else {
             let error = last_error();
             if is_missing_error(error) {
                 return Ok(EntryInfo::default());
@@ -285,7 +188,7 @@ impl FsOps for WindowsFsOps {
                 error,
                 path,
             ));
-        }
+        };
         Ok(EntryInfo {
             kind: if data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
                 EntryKind::Directory
@@ -304,12 +207,7 @@ impl FsOps for WindowsFsOps {
             pattern.push(BACKSLASH);
         }
         pattern.push(u16::from(b'*'));
-        pattern.push(0);
-        // SAFETY: plain data, filled by the call.
-        let mut found: WIN32_FIND_DATAW = unsafe { zeroed() };
-        // SAFETY: `pattern` is NUL-terminated.
-        let search = unsafe { FindFirstFileW(pattern.as_ptr(), &raw mut found) };
-        if search == INVALID_HANDLE_VALUE {
+        let Some((mut search, mut found)) = fs::find_first(&WideName::from_units(pattern)) else {
             let error = last_error();
             return Err(os_error(
                 if is_missing_error(error) {
@@ -321,7 +219,7 @@ impl FsOps for WindowsFsOps {
                 error,
                 directory,
             ));
-        }
+        };
         let mut names = Vec::new();
         loop {
             let length = found
@@ -333,14 +231,13 @@ impl FsOps for WindowsFsOps {
                 [DOT] | [DOT, DOT] => {}
                 name => names.push(directory.join(OsString::from_wide(name))),
             }
-            // SAFETY: the search handle is open and `found` is its structure.
-            if unsafe { FindNextFileW(search, &raw mut found) } == 0 {
+            if !search.next(&mut found) {
                 break;
             }
         }
+        // Read before the search is closed, as the end of the listing left it.
         let last = last_error();
-        // SAFETY: the search handle is open, closed once.
-        unsafe { FindClose(search) };
+        drop(search);
         if last != ERROR_NO_MORE_FILES {
             return Err(os_error(
                 ErrorCode::FileImportFailure,
@@ -353,14 +250,13 @@ impl FsOps for WindowsFsOps {
     }
 
     fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        let file = create_file(
+        let Some(file) = fs::create_file(
             &wide(path),
             GENERIC_READ,
             SHARE_ALL,
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
-        );
-        if !file.valid() {
+        ) else {
             let error = last_error();
             return Err(os_error(
                 if is_missing_error(error) {
@@ -372,17 +268,18 @@ impl FsOps for WindowsFsOps {
                 error,
                 path,
             ));
-        }
-        let mut size = 0i64;
-        // SAFETY: the handle is open; the size is written by the call.
-        if unsafe { GetFileSizeEx(file.get(), &raw mut size) } == 0 || size < 0 {
-            return Err(os_error(
-                ErrorCode::FileImportFailure,
-                "the file cannot be sized",
-                last_error(),
-                path,
-            ));
-        }
+        };
+        let size = match file.size() {
+            Some(size) if size >= 0 => size,
+            _ => {
+                return Err(os_error(
+                    ErrorCode::FileImportFailure,
+                    "the file cannot be sized",
+                    last_error(),
+                    path,
+                ));
+            }
+        };
         if size as u64 > READ_FILE_LIMIT {
             return Err(os_error(
                 ErrorCode::FileImportFailure,
@@ -394,26 +291,15 @@ impl FsOps for WindowsFsOps {
         let mut bytes = vec![0u8; size as usize];
         let mut done = 0usize;
         while done < bytes.len() {
-            let want = (bytes.len() - done).min(1 << 20) as u32;
-            let mut got = 0u32;
-            // SAFETY: at most `want` bytes are written, which fit after `done`.
-            let read = unsafe {
-                ReadFile(
-                    file.get(),
-                    bytes[done..].as_mut_ptr().cast(),
-                    want,
-                    &raw mut got,
-                    null_mut(),
-                )
-            } != 0;
-            if !read {
+            let want = (bytes.len() - done).min(1 << 20);
+            let Some(got) = file.read(&mut bytes[done..done + want]) else {
                 return Err(os_error(
                     ErrorCode::FileImportFailure,
                     "the file cannot be read",
                     last_error(),
                     path,
                 ));
-            }
+            };
             if got == 0 {
                 break; // it shrank while it was read
             }
@@ -430,7 +316,7 @@ impl FsOps for WindowsFsOps {
         let mut existing = absolute.clone();
         let mut tail: Vec<OsString> = Vec::new();
         loop {
-            if attributes_of(&wide(&existing)) != INVALID_FILE_ATTRIBUTES {
+            if fs::attributes(&wide(&existing)) != INVALID_FILE_ATTRIBUTES {
                 break;
             }
             let error = last_error();
@@ -448,31 +334,22 @@ impl FsOps for WindowsFsOps {
             tail.push(existing.file_name().map(OsString::from).unwrap_or_default());
             existing = parent;
         }
-        let handle = create_file(
+        let Some(handle) = fs::create_file(
             &wide(&existing),
             0,
             SHARE_ALL,
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS,
-        );
-        if !handle.valid() {
+        ) else {
             return Err(os_error(
                 ErrorCode::FileImportFailure,
                 "the path cannot be resolved",
                 last_error(),
                 &existing,
             ));
-        }
+        };
         let final_name = |buffer: &mut Vec<u16>| -> u32 {
-            // SAFETY: the handle is open and the buffer holds the length given.
-            unsafe {
-                GetFinalPathNameByHandleW(
-                    handle.get(),
-                    buffer.as_mut_ptr(),
-                    buffer.len() as u32,
-                    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
-                )
-            }
+            handle.final_path_name(buffer, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS)
         };
         let mut final_path = vec![0u16; 512];
         let mut length = final_name(&mut final_path);
@@ -511,7 +388,7 @@ impl FsOps for WindowsFsOps {
         // The volume of the nearest folder that exists.
         let mut probe = absolute_normal(path);
         loop {
-            let attributes = attributes_of(&wide(&probe));
+            let attributes = fs::attributes(&wide(&probe));
             if attributes != INVALID_FILE_ATTRIBUTES {
                 if attributes & FILE_ATTRIBUTE_DIRECTORY == 0
                     && let Some(parent) = probe.parent().map(Path::to_path_buf)
@@ -525,26 +402,14 @@ impl FsOps for WindowsFsOps {
                 None => break,
             }
         }
-        let mut available = 0u64;
-        let mut total = 0u64;
-        let mut free = 0u64;
-        // SAFETY: a NUL-terminated name and three places for the answers.
-        let read = unsafe {
-            GetDiskFreeSpaceExW(
-                wide(&probe).as_ptr(),
-                &raw mut available,
-                &raw mut total,
-                &raw mut free,
-            )
-        } != 0;
-        if !read {
+        let Some(available) = fs::free_bytes_available(&wide(&probe)) else {
             return Err(os_error(
                 ErrorCode::FileImportFailure,
                 "the free space cannot be read",
                 last_error(),
                 &probe,
             ));
-        }
+        };
         Ok(available)
     }
 
@@ -554,7 +419,7 @@ impl FsOps for WindowsFsOps {
         let mut missing: Vec<PathBuf> = Vec::new();
         let mut probe = absolute_normal(directory);
         loop {
-            let attributes = attributes_of(&wide(&probe));
+            let attributes = fs::attributes(&wide(&probe));
             if attributes != INVALID_FILE_ATTRIBUTES {
                 if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
                     return Err(os_error(
@@ -583,11 +448,10 @@ impl FsOps for WindowsFsOps {
         }
         for folder in missing.iter().rev() {
             let name = wide(folder);
-            // SAFETY: a NUL-terminated name and no security attributes.
-            if unsafe { CreateDirectoryW(name.as_ptr(), null()) } == 0 {
+            if !fs::create_directory(&name) {
                 let error = last_error();
                 if error == ERROR_ALREADY_EXISTS
-                    && (attributes_of(&name) & FILE_ATTRIBUTE_DIRECTORY) != 0
+                    && (fs::attributes(&name) & FILE_ATTRIBUTE_DIRECTORY) != 0
                 {
                     continue; // made by someone else a moment ago
                 }
@@ -603,14 +467,13 @@ impl FsOps for WindowsFsOps {
     }
 
     fn copy_file(&self, from: &Path, to: &Path) -> Status {
-        let source = create_file(
+        let Some(source) = fs::create_file(
             &wide(from),
             GENERIC_READ,
             SHARE_ALL,
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
-        );
-        if !source.valid() {
+        ) else {
             let error = last_error();
             return Err(os_error(
                 if is_missing_error(error) {
@@ -622,20 +485,19 @@ impl FsOps for WindowsFsOps {
                 error,
                 from,
             ));
-        }
+        };
         // A new file with the folder's own access rules (not the source's: the stage folder is
         // writable by anyone running as the user, and a file in the install must take the
         // install's), written by hand rather than by CopyFileW, which would carry the source's
         // attributes and alternate streams along and gives no handle to flush.
         let wide_to = wide(to);
-        let mut destination = create_file(
+        let Some(destination) = fs::create_file(
             &wide_to,
             GENERIC_WRITE,
             0,
             CREATE_NEW,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
-        );
-        if !destination.valid() {
+        ) else {
             let error = last_error();
             let code = if error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS {
                 ErrorCode::AlreadyExists
@@ -645,22 +507,11 @@ impl FsOps for WindowsFsOps {
                 ErrorCode::FileExportFailure
             };
             return Err(os_error(code, "the copy cannot be created", error, to));
-        }
+        };
         let mut buffer = vec![0u8; 1 << 20];
         let mut status: Status = Ok(());
         while status.is_ok() {
-            let mut got = 0u32;
-            // SAFETY: at most the buffer's length is written into it.
-            let read = unsafe {
-                ReadFile(
-                    source.get(),
-                    buffer.as_mut_ptr().cast(),
-                    buffer.len() as u32,
-                    &raw mut got,
-                    null_mut(),
-                )
-            } != 0;
-            if !read {
+            let Some(got) = source.read(&mut buffer) else {
                 status = Err(os_error(
                     ErrorCode::FileImportFailure,
                     "the file to copy cannot be read",
@@ -668,13 +519,13 @@ impl FsOps for WindowsFsOps {
                     from,
                 ));
                 break;
-            }
+            };
             if got == 0 {
                 break;
             }
-            status = write_all(destination.get(), &buffer[..got as usize], to);
+            status = write_all(&destination, &buffer[..got as usize], to);
         }
-        if status.is_ok() && !flush(&destination) {
+        if status.is_ok() && !destination.flush() {
             status = Err(os_error(
                 ErrorCode::FileExportFailure,
                 "the copy cannot be flushed to disk",
@@ -683,21 +534,16 @@ impl FsOps for WindowsFsOps {
             ));
         }
         if status.is_ok() {
-            // SAFETY: plain data, filled by the call.
-            let mut written: FILETIME = unsafe { zeroed() };
-            // SAFETY: both handles are open; only the last-write time is asked for and set. Best
-            // effort: a copy whose time could not be carried is still the copy.
-            unsafe {
-                if GetFileTime(source.get(), null_mut(), null_mut(), &raw mut written) != 0 {
-                    SetFileTime(destination.get(), null(), null(), &raw const written);
-                }
+            // Only the last-write time is carried. Best effort: a copy whose time could not be
+            // carried is still the copy.
+            if let Some(written) = source.last_write_time() {
+                destination.set_last_write_time(&written);
             }
         }
-        destination.reset();
+        drop(destination);
         if status.is_err() {
             // Never leave half a file that looks like a copy.
-            // SAFETY: a NUL-terminated name.
-            unsafe { DeleteFileW(wide_to.as_ptr()) };
+            fs::delete_file(&wide_to);
         }
         status
     }
@@ -707,8 +553,8 @@ impl FsOps for WindowsFsOps {
         let wide_to = wide(to);
         let deadline = deadline_after(self.retry.total);
         loop {
-            // SAFETY: two NUL-terminated names; no flag.
-            if unsafe { MoveFileExW(wide_from.as_ptr(), wide_to.as_ptr(), 0) } != 0 {
+            // No flag (see the top).
+            if fs::move_file(&wide_from, &wide_to, 0) {
                 return Ok(());
             }
             let error = last_error();
@@ -745,8 +591,7 @@ impl FsOps for WindowsFsOps {
 
     fn remove_file(&self, path: &Path) -> Status {
         let wide = wide(path);
-        // SAFETY: a NUL-terminated name.
-        if unsafe { DeleteFileW(wide.as_ptr()) } != 0 {
+        if fs::delete_file(&wide) {
             return Ok(());
         }
         let mut error = last_error();
@@ -754,17 +599,13 @@ impl FsOps for WindowsFsOps {
             return Ok(());
         }
         if error == ERROR_ACCESS_DENIED {
-            let attributes = attributes_of(&wide);
+            let attributes = fs::attributes(&wide);
             if attributes != INVALID_FILE_ATTRIBUTES
                 && (attributes & FILE_ATTRIBUTE_READONLY) != 0
                 && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
             {
-                // SAFETY: a NUL-terminated name.
-                unsafe {
-                    SetFileAttributesW(wide.as_ptr(), attributes & !FILE_ATTRIBUTE_READONLY);
-                }
-                // SAFETY: as above.
-                if unsafe { DeleteFileW(wide.as_ptr()) } != 0 {
+                fs::set_attributes(&wide, attributes & !FILE_ATTRIBUTE_READONLY);
+                if fs::delete_file(&wide) {
                     return Ok(());
                 }
                 error = last_error();
@@ -779,8 +620,7 @@ impl FsOps for WindowsFsOps {
     }
 
     fn remove_empty_directory(&self, path: &Path) -> Status {
-        // SAFETY: a NUL-terminated name.
-        if unsafe { RemoveDirectoryW(wide(path).as_ptr()) } != 0 {
+        if fs::remove_directory(&wide(path)) {
             return Ok(());
         }
         let error = last_error();
@@ -806,23 +646,22 @@ impl FsOps for WindowsFsOps {
     fn append_durable(&self, path: &Path, bytes: &[u8]) -> Status {
         // FILE_APPEND_DATA without FILE_WRITE_DATA: every write goes to the end, whatever else is
         // writing, and FlushFileBuffers is still allowed.
-        let file = create_file(
+        let Some(file) = fs::create_file(
             &wide(path),
             FILE_APPEND_DATA | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
             SHARE_ALL,
             OPEN_ALWAYS,
             FILE_ATTRIBUTE_NORMAL,
-        );
-        if !file.valid() {
+        ) else {
             return Err(os_error(
                 ErrorCode::FileExportFailure,
                 "the file cannot be opened",
                 last_error(),
                 path,
             ));
-        }
-        let mut status = write_all(file.get(), bytes, path);
-        if status.is_ok() && !flush(&file) {
+        };
+        let mut status = write_all(&file, bytes, path);
+        if status.is_ok() && !file.flush() {
             status = Err(os_error(
                 ErrorCode::FileExportFailure,
                 "the file cannot be flushed to disk",
@@ -841,23 +680,22 @@ impl FsOps for WindowsFsOps {
         let temporary = PathBuf::from(temporary);
         let wide_temporary = wide(&temporary);
         {
-            let mut file = create_file(
+            let Some(file) = fs::create_file(
                 &wide_temporary,
                 GENERIC_WRITE,
                 0,
                 CREATE_ALWAYS,
                 FILE_ATTRIBUTE_NORMAL,
-            );
-            if !file.valid() {
+            ) else {
                 return Err(os_error(
                     ErrorCode::FileExportFailure,
                     "the file cannot be created",
                     last_error(),
                     &temporary,
                 ));
-            }
-            let mut status = write_all(file.get(), bytes, &temporary);
-            if status.is_ok() && !flush(&file) {
+            };
+            let mut status = write_all(&file, bytes, &temporary);
+            if status.is_ok() && !file.flush() {
                 status = Err(os_error(
                     ErrorCode::FileExportFailure,
                     "the file cannot be flushed to disk",
@@ -866,23 +704,19 @@ impl FsOps for WindowsFsOps {
                 ));
             }
             if let Err(error) = status {
-                file.reset();
-                // SAFETY: a NUL-terminated name.
-                unsafe { DeleteFileW(wide_temporary.as_ptr()) };
+                drop(file);
+                fs::delete_file(&wide_temporary);
                 return Err(error);
             }
         }
         let wide = wide(path);
         let deadline = deadline_after(self.retry.total);
         loop {
-            // SAFETY: two NUL-terminated names.
-            let moved = unsafe {
-                MoveFileExW(
-                    wide_temporary.as_ptr(),
-                    wide.as_ptr(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-                )
-            } != 0;
+            let moved = fs::move_file(
+                &wide_temporary,
+                &wide,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            );
             if moved {
                 return Ok(());
             }
@@ -890,8 +724,7 @@ impl FsOps for WindowsFsOps {
             match next_wait(deadline, self.retry.interval) {
                 Some(wait) if is_retryable(error) => std::thread::sleep(wait),
                 _ => {
-                    // SAFETY: a NUL-terminated name.
-                    unsafe { DeleteFileW(wide_temporary.as_ptr()) };
+                    fs::delete_file(&wide_temporary);
                     return Err(os_error(
                         ErrorCode::FileExportFailure,
                         "the file could not be replaced",
@@ -913,28 +746,26 @@ impl FsOps for WindowsFsOps {
         // Best effort: a directory handle can be flushed on NTFS, and some file systems refuse.
         // NTFS logs a rename's metadata change in order, so a refusal costs nothing the recovery
         // does not already tolerate (any prefix of the renames).
-        let handle = create_file(
+        if let Some(handle) = fs::create_file(
             &wide(directory),
             GENERIC_WRITE,
             SHARE_ALL,
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS,
-        );
-        if handle.valid() {
-            flush(&handle);
+        ) {
+            handle.flush();
         }
         Ok(())
     }
 
     fn try_lock(&self, path: &Path) -> Result<Box<dyn FileLock>> {
-        let handle = create_file(
+        let Some(handle) = fs::create_file(
             &wide(path),
             GENERIC_READ | GENERIC_WRITE,
             0,
             OPEN_ALWAYS,
             FILE_ATTRIBUTE_NORMAL,
-        );
-        if !handle.valid() {
+        ) else {
             let error = last_error();
             if error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION {
                 return Err(os_error(ErrorCode::InvalidState, "held", error, path));
@@ -949,7 +780,7 @@ impl FsOps for WindowsFsOps {
                 error,
                 path,
             ));
-        }
+        };
         Ok(Box::new(WindowsLock(handle)))
     }
 }

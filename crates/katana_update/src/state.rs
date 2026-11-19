@@ -800,8 +800,9 @@ pub fn process_cleanup_list(state_dir: &Path, root: &Path, fs: &dyn FsOps) -> St
 // The replacement of a record on Windows, through the call that reports the system's own error
 // number (the module's write_record). std's rename is not this call: it renames with POSIX
 // semantics where the file system has them and asks no write-through, where the record must be
-// on the disk when the call returns (MOVEFILE_WRITE_THROUGH); so MoveFileExW stays a Win32 call.
-// The error number and the attributes are std's (last_os_error, symlink_metadata).
+// on the disk when the call returns (MOVEFILE_WRITE_THROUGH); so MoveFileExW stays a Win32 call,
+// win32::fs's move_file. The error number and the attributes are std's (last_os_error,
+// symlink_metadata).
 #[cfg(windows)]
 mod windows {
     use super::Replaced;
@@ -850,30 +851,18 @@ mod windows {
 
     // MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH), the system's
     // error when it fails.
-    #[allow(
-        unsafe_code,
-        reason = "MoveFileExW with write-through has no std equivalent (std::fs::rename asks none)"
-    )]
     fn move_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
+        use crate::win32::{WideName, fs::move_file};
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{
-            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
         };
 
         // The path as the C++ hands it over (path::c_str()): the wide text as it is, terminated.
-        let wide =
-            |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain(Some(0)).collect() };
+        let wide = |path: &Path| WideName::from_units(path.as_os_str().encode_wide().collect());
         let from = wide(from);
         let to = wide(to);
-        // SAFETY: both are NUL-terminated wide paths that outlive the call.
-        let moved = unsafe {
-            MoveFileExW(
-                from.as_ptr(),
-                to.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        };
-        if moved != 0 {
+        if move_file(&from, &to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) {
             Ok(())
         } else {
             // GetLastError, read at once, before anything else can set it.

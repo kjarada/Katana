@@ -48,7 +48,7 @@ use crate::coordinate_reference_system::{
     self, CoordinateReferenceSystem, CrsKind, GeographicExtent,
 };
 use crate::ffi::{self, PJ_FWD, PJ_INV, PjDirection};
-use crate::proj_internal::{self, PjPtr, ProjContext};
+use crate::proj_internal::{self, PjPtr, ProjContext, ProjHandles};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransformerOptions {
@@ -373,10 +373,12 @@ fn collect_missing_grids(candidates: &[OperationInfo], selected: &OperationInfo)
 }
 
 pub struct CoordinateTransformer {
-    // Rust drops fields in declaration order, the reverse of C++: the PJ comes
-    // first so that it is destroyed before its context.
-    operation: PjPtr, // the selected candidate, normalised to traditional GIS order
-    context: ProjContext,
+    // The selected candidate, normalised to traditional GIS order, with the
+    // PROJ context it was made in: together they may move to another thread
+    // (ProjHandles), so the transformer is Send, and not Sync - the C++
+    // promises no more than one thread per transformer, and neither does
+    // this (every call that reaches PROJ takes `&mut self`).
+    proj: ProjHandles<1>,
 
     source: CoordinateReferenceSystem,
     target: CoordinateReferenceSystem,
@@ -389,18 +391,6 @@ pub struct CoordinateTransformer {
     source_units_per_degree: f64,
     target_units_per_degree: f64,
 }
-
-// SAFETY: PROJ lets a context, and every PJ made in it, be used from any
-// thread, one thread at a time. A transformer owns its context and its one PJ
-// together, shares them with nothing (no clone of a handle exists; `clone()`
-// builds new ones), and moving it moves both. It is not Sync: every call that
-// reaches PROJ takes `&mut self`, so a shared reference never does - but the
-// C++ promises no more than one thread per transformer, and neither does this.
-#[allow(
-    unsafe_code,
-    reason = "A transformer may move to another thread, as the C++'s one-transformer-per-thread model needs."
-)]
-unsafe impl Send for CoordinateTransformer {}
 
 impl fmt::Debug for CoordinateTransformer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -558,9 +548,12 @@ impl CoordinateTransformer {
         let source_units_per_degree = units_per_degree(source);
         let target_units_per_degree = units_per_degree(target);
         context.clear_diagnostics();
+        // Everything else made in the context goes first: the transformer
+        // keeps the context with its one PJ and nothing more of it.
+        drop((source_crs, target_crs, factory, operations, chosen));
+        let proj = ProjHandles::new(context, [operation])?;
         Ok(CoordinateTransformer {
-            operation,
-            context,
+            proj,
             source: source.clone(),
             target: target.clone(),
             options: options.clone(),
@@ -682,6 +675,12 @@ impl CoordinateTransformer {
 
     // ---- the work -------------------------------------------------------------------
 
+    // The operation every transform call applies.
+    fn pj(&self) -> &PjPtr {
+        let [operation] = self.proj.objects();
+        operation
+    }
+
     fn crs_from(&self, direction: PjDirection) -> &CoordinateReferenceSystem {
         if direction == PJ_FWD {
             &self.source
@@ -756,29 +755,29 @@ impl CoordinateTransformer {
             ));
         }
 
-        self.context.clear_diagnostics();
-        proj_internal::errno_reset(&self.operation);
+        self.proj.clear_diagnostics();
+        proj_internal::errno_reset(self.pj());
         let [x, y, z, t] = proj_internal::trans(
-            &self.operation,
+            self.pj(),
             direction,
             [coordinate.x, coordinate.y, coordinate.z, epoch],
         );
-        let proj_errno = proj_internal::errno(&self.operation);
+        let proj_errno = proj_internal::errno(self.pj());
 
         // PROJ signals failure with HUGE_VAL (infinity) coordinates and/or an
         // errno. Either one means there is no trustworthy number to hand back.
         if proj_errno != 0 || !x.is_finite() || !y.is_finite() || !z.is_finite() {
             let mut reason = if proj_errno != 0 {
-                proj_internal::describe_errno(&self.context, proj_errno)
+                self.proj.describe_errno(proj_errno)
             } else {
                 String::from("PROJ returned no coordinate")
             };
-            let log = self.context.consume_diagnostics();
+            let log = self.proj.consume_diagnostics();
             if !log.is_empty() {
                 reason = format!("{reason}; {log}");
             }
             reason = format!("{reason}; operation='{}'", self.selected.name);
-            proj_internal::errno_reset(&self.operation);
+            proj_internal::errno_reset(self.pj());
             return Err(Error::new(
                 ErrorCode::InvalidArgument,
                 "coordinate cannot be transformed (outside the domain of the operation or of its \
@@ -809,8 +808,8 @@ impl CoordinateTransformer {
             }
         }
 
-        proj_internal::errno_reset(&self.operation);
-        proj_internal::trans_generic_coordinates(&self.operation, direction, coordinates);
+        proj_internal::errno_reset(self.pj());
+        proj_internal::trans_generic_coordinates(self.pj(), direction, coordinates);
 
         for (index, coordinate) in coordinates.iter_mut().enumerate() {
             if coordinate.x.is_finite() && coordinate.y.is_finite() && coordinate.z.is_finite() {
@@ -828,8 +827,8 @@ impl CoordinateTransformer {
             }
             report.failed += 1;
         }
-        proj_internal::errno_reset(&self.operation);
-        self.context.clear_diagnostics();
+        proj_internal::errno_reset(self.pj());
+        self.proj.clear_diagnostics();
         report
     }
 
@@ -898,8 +897,8 @@ impl CoordinateTransformer {
         // A single broadcast epoch (length-1 array): without it PROJ would
         // substitute t = 0, i.e. the year 0, into time-dependent operations.
         let mut epoch = self.effective_epoch(UNSPECIFIED_EPOCH);
-        proj_internal::errno_reset(&self.operation);
-        proj_internal::trans_generic_named(&self.operation, direction, output, &mut epoch);
+        proj_internal::errno_reset(self.pj());
+        proj_internal::trans_generic_named(self.pj(), direction, output, &mut epoch);
 
         for (index, (source, out)) in input.iter().zip(output.iter_mut()).enumerate() {
             let ok = S::is_valid_input(source)
@@ -920,8 +919,8 @@ impl CoordinateTransformer {
             }
             report.failed += 1;
         }
-        proj_internal::errno_reset(&self.operation);
-        self.context.clear_diagnostics();
+        proj_internal::errno_reset(self.pj());
+        self.proj.clear_diagnostics();
         Ok(report)
     }
 }
