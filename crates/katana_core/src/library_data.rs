@@ -96,63 +96,46 @@ pub fn proj_data_directory() -> &'static Option<PathBuf> {
     })
 }
 
+// The objects the process has mapped, from the kernel's list of them
+// (/proc/self/maps, proc(5)): each mapping of a file names it, by the path the
+// kernel resolved when it was opened. The loader's own list (dl_iterate_phdr)
+// says the same of every shared object it loaded, but is reached only through
+// a C callback and raw pointers; the kernel's list is a file std reads.
 #[cfg(target_os = "linux")]
-#[allow(
-    unsafe_code,
-    reason = "Enumerate loader-owned objects through dl_iterate_phdr; no FFI types escape."
-)]
 mod native {
-    use std::ffi::{CStr, c_char, c_int, c_void};
     use std::path::PathBuf;
 
-    #[repr(C)]
-    struct DlPhdrInfo {
-        address: usize,
-        name: *const c_char,
-    }
+    // The kernel's mark on a mapping whose file has since been deleted, after
+    // its path.
+    const DELETED: &[u8] = b" (deleted)";
 
-    unsafe extern "C" {
-        fn dl_iterate_phdr(
-            callback: unsafe extern "C" fn(*mut DlPhdrInfo, usize, *mut c_void) -> c_int,
-            data: *mut c_void,
-        ) -> c_int;
-    }
-
-    struct Search<'a> {
-        prefix: &'a str,
-        found: Option<PathBuf>,
-    }
-
-    unsafe extern "C" fn visit(info: *mut DlPhdrInfo, _size: usize, data: *mut c_void) -> c_int {
-        let name = unsafe { (*info).name };
-        if name.is_null() {
-            return 0;
+    // The path of one line's mapping: what follows its five fields (address
+    // range, permissions, offset, device, inode), when that is a path. A
+    // mapping of no file, or of the kernel's own ([heap], [vdso]), has none.
+    fn mapped_path(line: &[u8]) -> Option<&[u8]> {
+        let mut rest = line;
+        for _ in 0..5 {
+            let field = rest.iter().position(|byte| *byte != b' ')?;
+            rest = &rest[field..];
+            let end = rest.iter().position(|byte| *byte == b' ')?;
+            rest = &rest[end..];
         }
-        let name = unsafe { CStr::from_ptr(name) }.to_bytes();
-        if name.is_empty() {
-            return 0;
-        }
-        let search = unsafe { &mut *data.cast::<Search<'_>>() };
-        let path = crate::path_text::path_from_utf8(name);
-        let matches = path.file_name().is_some_and(|name| {
-            use std::os::unix::ffi::OsStrExt;
-            name.as_bytes().starts_with(search.prefix.as_bytes())
-        });
-        if matches {
-            search.found = Some(path);
-            1
-        } else {
-            0
-        }
+        let path = rest.trim_ascii_start();
+        let path = path.strip_suffix(DELETED).unwrap_or(path);
+        path.starts_with(b"/").then_some(path)
     }
 
     pub fn loaded_library_path(prefix: &str) -> Option<PathBuf> {
-        let mut search = Search {
-            prefix,
-            found: None,
-        };
-        unsafe { dl_iterate_phdr(visit, (&mut search as *mut Search<'_>).cast()) };
-        search.found
+        let maps = std::fs::read("/proc/self/maps").ok()?;
+        maps.split(|byte| *byte == b'\n')
+            .filter_map(mapped_path)
+            .map(crate::path_text::path_from_utf8)
+            .find(|path| {
+                path.file_name().is_some_and(|name| {
+                    use std::os::unix::ffi::OsStrExt;
+                    name.as_bytes().starts_with(prefix.as_bytes())
+                })
+            })
     }
 }
 

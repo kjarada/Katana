@@ -20,15 +20,12 @@
 //!
 //! The cases of this file run on threads of one process, where the C++'s ran each in a process of
 //! its own: the ones that change the environment or the working folder take one lock first
-//! (environment_lock), and every scratch folder is the case's own.
-
-#![allow(
-    unsafe_code,
-    reason = "Edition 2024 marks changing the environment unsafe, and the Windows cases ask the process token directly."
-)]
+//! (environment_lock), and every scratch folder is the case's own. A variable is changed where
+//! Katana reads it (katana_core's EnvironmentOverride), never in the process's environment, which
+//! edition 2024 makes unsafe to change.
 
 use katana_core::error::make_error;
-use katana_core::path_text::{path_from_utf8, path_to_utf8};
+use katana_core::path_text::{EnvironmentOverride, path_from_utf8, path_to_utf8};
 use katana_core::text_encoding::utf8_or_windows1252;
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_update::fault_fs::{FaultFs, SimulatedCrash};
@@ -50,7 +47,6 @@ use katana_update::trust::is_newer_than;
 use katana_update::version::{self, Version, parse_version};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
-use std::ffi::OsString;
 use std::io::{ErrorKind, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Component, Path, PathBuf};
@@ -219,34 +215,18 @@ fn environment_lock() -> MutexGuard<'static, ()> {
     ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn set_variable(name: &str, value: Option<&std::ffi::OsStr>) {
-    match value {
-        // SAFETY: the environment is changed only while ENVIRONMENT is held, and the standard
-        // library's own lock orders it with every read through std::env.
-        Some(value) => unsafe { std::env::set_var(name, value) },
-        // SAFETY: as above.
-        None => unsafe { std::env::remove_var(name) },
-    }
-}
-
-// Sets an environment variable for the length of a case and puts it back. `value` None removes
-// it. The caller holds environment_lock().
+// Sets an environment variable, as the state folder's lookup reads it (environment_variable), for
+// the length of a case and puts it back. `value` None reads as not set. The caller holds
+// environment_lock().
 struct EnvGuard {
-    name: &'static str,
-    previous: Option<OsString>,
+    _override: EnvironmentOverride,
 }
 
 impl EnvGuard {
     fn new(name: &'static str, value: Option<&Path>) -> Self {
-        let previous = std::env::var_os(name);
-        set_variable(name, value.map(Path::as_os_str));
-        Self { name, previous }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        set_variable(self.name, self.previous.as_deref());
+        Self {
+            _override: EnvironmentOverride::new(name, value.map(Path::as_os_str)),
+        }
     }
 }
 
@@ -3485,6 +3465,10 @@ mod process_is_elevated {
 
     // Whether Windows calls this process's token elevated (TokenElevation).
     #[cfg(windows)]
+    #[allow(
+        unsafe_code,
+        reason = "the process token is asked directly, through Win32 calls std does not have"
+    )]
     fn token_is_elevated() -> bool {
         use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
         use windows_sys::Win32::Security::GetTokenInformation;

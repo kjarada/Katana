@@ -553,8 +553,12 @@ interpreter are ported whole, so that wave J writes tests only. Decisions:
 - **The built-in customisations are embedded by a build script**, which reads
   the default and the alternates from src/katana_cad/CMakeLists.txt as the
   update layer's reads its own; the cases that set the customisation's
-  environment variables are a test binary of their own behind one lock,
-  since `set_var` is unsafe in edition 2024 and races parallel tests.
+  environment variables are a test binary of their own behind one lock.
+  Since 2026-11-19 they set no variable in the process's environment
+  (`set_var` is unsafe in edition 2024 and races parallel tests) but
+  override it where Katana reads it
+  (`katana_core::path_text::EnvironmentOverride`; "Unsafe that calls no C
+  library, removed", below).
 
 **Wave I** ported the command interpreter with the annotation, drawing and
 volume verbs, and the thirteen tool families: lines, curves and the
@@ -1307,13 +1311,108 @@ outside its layering check.
 
 Edition 2024; `rust-version` 1.98, the older of the two compilers. `unsafe`
 is denied in the workspace's lints and allowed only where a module must be
-unsafe - an FFI adapter, an OS call, a SIMD kernel, or the one module that
-hands the task pool's tasks disjoint parts of one buffer
-(`katana_render`'s `disjoint.rs`: tiles of a framebuffer have no safe slice
-form, and every step rests on the pool's contract that each index runs once
-and no range overlaps another) - each saying why. Taking `unsafe` out
-altogether is decided and not done (Not done). Clippy runs with
+unsafe - an FFI adapter, an OS call, a SIMD kernel - each saying why. Taking
+`unsafe` out altogether is decided and under way: the part that called no C
+library is done (below), the rest is Not done. Clippy runs with
 `-D warnings`, as `-Werror` did for the C++.
+
+### Unsafe that calls no C library, removed (2026-11-19)
+
+The owner's word, "remove unsafe Rust and make it safe", taken first where
+`unsafe` stood for a guarantee the compiler could have checked, or for a call
+std already makes safely. Behaviour is the same: the tests of each module are
+unchanged, but for the helper that sets a variable (below). Not built when
+written: the before-and-after measurements the hot paths owe, in Release,
+are the integration build's.
+
+- **The task pool** (`crates/katana_core/src/task_pool.rs`) erased its
+  body's type behind a raw pointer so that workers kept warm between calls
+  could run a closure borrowed from the caller's frame. A call now starts its
+  helpers in a `thread::scope`, which borrows the body as the compiler can
+  check and joins them before the call returns. The contract is the one the
+  tests hold: the same chunking (a shared cursor, `grain` indices a chunk),
+  the first panic resumed on the caller and the others dropped there, a call
+  made while another has the helpers run inline (nested ones included), the
+  output the serial run's whatever the count. No more helpers are started
+  than there are chunks beside the caller's first. The price is a thread
+  started per helper per call, where a warm worker was woken: a HOT PATH, to
+  be measured (the rasteriser calls the pool five times a frame or more).
+  Rejected: keeping the warm workers (only `unsafe` can lend them a borrowed
+  closure); rayon (not in the lock file, and its nesting and panics are not
+  the contract, as above); crossbeam's scope (in the lock file, and it starts
+  threads per call as std's does).
+- **The rasteriser's disjoint writes** (`crates/katana_render/src/disjoint.rs`)
+  shared one raw pointer between the tasks. The buffers are now cut first,
+  with `chunks_mut` and `split_at_mut`, into exactly the parts the tasks are
+  numbered by - an item, a `grain`-sized range, a tile's piece of each of
+  its rows - and each part is put behind a mutex of its own that only its
+  task locks: uncontended, once a task, never a pixel. Cutting the
+  framebuffer into tiles is one pass over its rows each fill and sweep
+  (1,080 rows of 30 pieces at 1920 x 1080): a HOT PATH, to be measured. Rejected:
+  an API on the pool that hands each task its `&mut` chunk (one shared
+  iterator behind one lock, which every task would contend for).
+- **The GPU upload** (`crates/katana_gpu/src/plain.rs`) viewed the records'
+  memory as bytes through an `unsafe trait`. Each record now says its bytes,
+  field by field, native-endian, and the upload writes them straight into the
+  queue's staging memory (`wgpu::Queue::write_buffer_with`), so each byte is
+  still copied once. The layout is held by hand-worked bytes of one value of
+  each record (plain.rs's tests). A HOT PATH, to be measured. Rejected:
+  bytemuck (in the lock file, through wgpu, but not a dependency of
+  katana_gpu, which needs the owner's word); packing into a `Vec<u8>` (a
+  second copy of every scene).
+- **Text** (`crates/katana_core/src/text_encoding.rs`): a str made unchecked
+  after the kernel's validation is now std's `from_utf8`, whose rule is the
+  kernel's (well-formed UTF-8, the Unicode Standard's table 3-7).
+- **The environment** (`crates/katana_core/src/path_text.rs`): Windows read
+  a variable with GetEnvironmentVariableW, which is what std's `var_os` calls;
+  it is now std's, made text the same way (an unpaired surrogate becomes
+  U+FFFD). A non-ASCII NAME is now looked up as its own text, where the call
+  took each of its UTF-8 bytes for a character; Katana's names are ASCII.
+  The ANSI code page's reading of a narrow name (MultiByteToWideChar) has no
+  std twin and stays, alone in its module.
+- **The tests that set a variable** no longer touch the process's
+  environment, whose change edition 2024 makes unsafe: they override it where
+  Katana reads it, `katana_core::path_text::EnvironmentOverride`, which
+  environment_variable consults first (the session's start, the customisation
+  host, the update token and state folder). An override reaches no library
+  that reads the environment itself and no child: the one case that needs
+  GDAL to see a variable, the online one of GDAL_HTTP_USERPWD, runs itself
+  again as a child with the variable on its `Command`. Rejected: running
+  every such case as a child (their scratch folders are named by the process,
+  so the child's values are not the parent's) and threading the values
+  through the constructors under test (an API change across four crates for
+  the tests' sake). The helper of the customisation cases now checks also
+  that the process's environment is never changed
+  (`customisation_host::the_seam_is_put_back_as_it_was_when_a_test_ends`).
+- **The library beside which data is found** (`crates/katana_core/src/library_data.rs`)
+  is found on Linux from the kernel's list of the process's mappings,
+  /proc/self/maps, read by std, where the loader's list (dl_iterate_phdr)
+  needed a C callback and raw pointers. The kernel names each file by the
+  path it resolved, and lists by address, not load order: the first library
+  whose name begins with the prefix may differ only when two are loaded,
+  which none of the callers' prefixes match.
+- **Smaller ones.** katana_mcp's protocol stream is std's duplicate of
+  standard output (closed on exec, so a program it starts does not hold the
+  client's pipe open); only dup2, which std has no form of, stays. katana_cli
+  takes its standard handles from std; it still asks GetConsoleMode, not
+  `IsTerminal`, which also takes an MSYS2 terminal's pipe for a console
+  that ReadConsoleW cannot read. The update planner examines an entry with
+  std's `symlink_metadata`, whose link rule on Windows is the name-surrogate
+  bit of is_link_reparse_tag, in place of two Win32 calls; the install's
+  file identity and the record's write-through rename keep one Win32 call
+  each, the handle, the error number and the attributes coming from std.
+
+What stays, and why, in the files this covered: the C library's asinh, erf,
+erfc and lgamma (`crates/katana_math/src/libm.rs`: std computes `asinh`
+itself, in other digits, and its `erf` and `ln_gamma` are not stable; the
+declarations are already `safe fn`, but the `unsafe extern` block is what
+the lint counts); the updater's hardening of its OpenSSL variables and the
+lending of them to each launch (`crates/katana_updater/src/lib.rs`,
+`crates/katana_update/src/signature.rs`), which change the process's
+environment; the console's code page and wide reading, the module list on
+macOS and Windows, the error boxes, the registry and the Windows test
+oracles (Credential Manager, process token, byte-range lock, the C locale).
+Each is in Not done with what it would take.
 
 ## The toolchains
 
@@ -2201,7 +2300,15 @@ what it would take.
     (`LayerManagerDialog::set_object_name`,
     `StyleManagerDialog::set_object_name`); a manager made on its own keeps
     `layerManager` and `styleManager`, which its twins drive it by.
-- **Removing `unsafe` is decided but not done.** The owner asked for it on
+- **Removing `unsafe` is decided and partly done.** The code that called no
+  C library was made safe on 2026-11-19 ("Unsafe that calls no C library,
+  removed", above). Left of that part: the updater's OpenSSL hardening,
+  which takes `SpawnRequest` carrying an environment for the child (the
+  launchers then pass it, spawn_win.rs among them) and the self-test asking
+  of the children what it now asks of the process, a change to its
+  documented output; libm's four functions until std's `erf` and `ln_gamma`
+  are stable (and `asinh` would stay, std's digits differ); the Windows and
+  macOS operating-system calls with no std twin. The owner asked for it on
   2026-11-16 and settled how: GDAL's algorithm framework and PDAL keep one
   small boundary each (their shims have no safe binding); safe crates
   replace our own bindings wherever one exists (`rusqlite`, `proj`, `gdal`,

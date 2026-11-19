@@ -91,13 +91,8 @@ enum Kind {
     File,
     Directory,
     Link,
-    #[cfg_attr(
-        windows,
-        allow(
-            dead_code,
-            reason = "Windows reports every entry it finds as a file or a folder"
-        )
-    )]
+    // Windows reports every entry it finds as a file or a folder, so only a
+    // POSIX system has one of these (a socket, a device).
     Other,
 }
 
@@ -105,9 +100,15 @@ enum Kind {
 // point that is a name surrogate (junction, symbolic link, mount point; see is_link_reparse_tag)
 // is a Link. Any other reparse point (a OneDrive placeholder) is the file or folder it appears to
 // be.
-#[cfg(not(windows))]
+//
+// std's symlink_metadata is that on both systems: on Windows it opens the entry itself
+// (FILE_FLAG_OPEN_REPARSE_POINT, for no access, which no other program's sharing refuses) and
+// reads its attributes and its reparse tag, and its is_symlink is the name-surrogate bit of the
+// tag, the rule of is_link_reparse_tag. The name is the one the file system takes (openable), as
+// for the open of a file to hash it. It replaced GetFileAttributesW and FindFirstFileW, called
+// through `unsafe`, which read the same attributes and tag.
 fn look(path: &Path) -> Result<Kind> {
-    match std::fs::symlink_metadata(path) {
+    match std::fs::symlink_metadata(openable(path)) {
         Ok(metadata) => {
             let kind = metadata.file_type();
             Ok(if kind.is_symlink() {
@@ -120,27 +121,37 @@ fn look(path: &Path) -> Result<Kind> {
                 Kind::Other
             })
         }
-        // std::filesystem's symlink_status reads both as "not found": a missing name, and a name
-        // below a file.
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            Ok(Kind::Missing)
-        }
+        Err(error) if is_missing(&error) => Ok(Kind::Missing),
         Err(error) => Err(make_error(
             ErrorCode::FileImportFailure,
             "cannot examine the file",
-            format!("{error}; {}", path_text(path)),
+            format!("{}; {}", error_text(&error), path_text(path)),
         )),
     }
 }
 
-#[cfg(windows)]
-fn look(path: &Path) -> Result<Kind> {
-    windows::look(path)
+// std::filesystem's symlink_status reads both as "not found": a missing name, and a name below a
+// file. Windows says the second as ERROR_PATH_NOT_FOUND, and only those two numbers mean missing
+// there (winerror.h: ERROR_FILE_NOT_FOUND 2, ERROR_PATH_NOT_FOUND 3).
+fn is_missing(error: &std::io::Error) -> bool {
+    if cfg!(windows) {
+        matches!(error.raw_os_error(), Some(2 | 3))
+    } else {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+        )
+    }
+}
+
+// How a failure to examine is said: the system's error number on Windows, as the helper's own
+// file system says it (fsops_win.rs), and std's description elsewhere.
+fn error_text(error: &std::io::Error) -> String {
+    match error.raw_os_error() {
+        // GetLastError's DWORD, which std keeps as an i32.
+        Some(number) if cfg!(windows) => format!("os_error={}", number.cast_unsigned()),
+        _ => format!("{error}"),
+    }
 }
 
 // The names a manifest path is made of, or None when it could leave the root. This is the
@@ -338,86 +349,4 @@ pub fn plan(manifest: &Manifest, install: &Install, stop: StopToken<'_>) -> Resu
     result.required_free_bytes = (result.changed_bytes * FREE_SPACE_TENTHS).div_ceil(10);
     result.ranges = merge_ranges(to_fetch, RANGE_MERGE_GAP, RANGE_MAX_LENGTH);
     Ok(result)
-}
-
-// What is at a path on Windows, by its attributes and, for a reparse point, its tag.
-#[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "the entry and its reparse tag are read through the Win32 file API, confined to this adapter"
-)]
-mod windows {
-    use super::Kind;
-    use crate::fsops::{is_link_reparse_tag, path_text};
-    use crate::long_path::wide_path;
-    use katana_core::error::make_error;
-    use katana_core::{ErrorCode, Result};
-    use std::path::Path;
-    use windows_sys::Win32::Foundation::{GetLastError, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Storage::FileSystem::{
-        FindClose, FindFirstFileW, GetFileAttributesW, WIN32_FIND_DATAW,
-    };
-
-    // The values of the Windows SDK's headers (winerror.h, winnt.h, fileapi.h).
-    const ERROR_FILE_NOT_FOUND: u32 = 2;
-    const ERROR_PATH_NOT_FOUND: u32 = 3;
-    const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFF_FFFF;
-    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-
-    fn last_error() -> u32 {
-        // SAFETY: GetLastError only reads this thread's last-error value.
-        unsafe { GetLastError() }
-    }
-
-    fn cannot_examine(error: u32, path: &Path) -> katana_core::Error {
-        make_error(
-            ErrorCode::FileImportFailure,
-            "cannot examine the file",
-            format!("os_error={error}; {}", path_text(path)),
-        )
-    }
-
-    pub(super) fn look(path: &Path) -> Result<Kind> {
-        // Named the way the file system names it (long_path.rs): a deep install root puts a file
-        // past the 260 characters the plain calls accept, and a program without the long-path
-        // manifest would then be told "not found" - a changed file that is not, and a link at
-        // that depth that goes unseen.
-        let mut wide = wide_path(path);
-        wide.push(0);
-        // SAFETY: `wide` is a NUL-terminated wide path that outlives the call.
-        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
-        if attributes == INVALID_FILE_ATTRIBUTES {
-            let error = last_error();
-            if error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND {
-                return Ok(Kind::Missing);
-            }
-            return Err(cannot_examine(error, path));
-        }
-        if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
-            // The tag is in the directory entry: dwReserved0 of what FindFirstFileW returns. The
-            // path exists (it has attributes) and has no wildcard that FindFirstFileW would
-            // expand.
-            // SAFETY: an all-zero WIN32_FIND_DATAW is a valid value of that plain struct.
-            let mut entry: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
-            // SAFETY: `wide` is NUL-terminated and `entry` is a writable struct of the type the
-            // call fills.
-            let find = unsafe { FindFirstFileW(wide.as_ptr(), &raw mut entry) };
-            if find == INVALID_HANDLE_VALUE {
-                return Err(cannot_examine(last_error(), path));
-            }
-            // SAFETY: `find` is the search handle opened above, closed once, here.
-            unsafe { FindClose(find) };
-            if (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0
-                && is_link_reparse_tag(entry.dwReserved0)
-            {
-                return Ok(Kind::Link);
-            }
-        }
-        Ok(if (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 {
-            Kind::Directory
-        } else {
-            Kind::File
-        })
-    }
 }

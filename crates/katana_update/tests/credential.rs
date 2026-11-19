@@ -17,7 +17,7 @@
 
 #![allow(
     unsafe_code,
-    reason = "Edition 2024 marks changing the environment unsafe, and the Windows cases call the Credential Manager directly."
+    reason = "The Windows cases call the Credential Manager directly."
 )]
 
 use katana_core::Error;
@@ -124,32 +124,23 @@ fn concatenated(parts: &[&[u8]]) -> Vec<u8> {
 // ---- the environment -------------------------------------------------------------------------
 
 mod environment {
-    use katana_core::path_text::{environment_variable, path_from_utf8};
+    use katana_core::path_text::{EnvironmentOverride, path_from_utf8};
+    use std::cell::RefCell;
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
     const NAME: &str = "KATANA_UPDATE_TOKEN";
 
-    // The cases of this binary run on threads of one process, and the variable is the process's:
-    // one case at a time changes it.
+    // The cases of this binary run on threads of one process, and the variable as Katana reads it
+    // is the process's: one case at a time changes it.
     static ENVIRONMENT: Mutex<()> = Mutex::new(());
 
-    fn put(value: &[u8]) {
-        // An empty value removes the variable on both platforms.
-        if value.is_empty() {
-            // SAFETY: the variable is changed only while ENVIRONMENT is held, and the standard
-            // library's own lock orders it with every read through std::env.
-            unsafe { std::env::remove_var(NAME) };
-        } else {
-            // SAFETY: as above. On Windows the UTF-8 is made the text itself (wide), not the code
-            // page's reading of it, as the C++ test does with _wputenv_s.
-            unsafe { std::env::set_var(NAME, path_from_utf8(value).as_os_str()) };
-        }
-    }
-
-    // Sets KATANA_UPDATE_TOKEN for one case and puts back what was there (a developer's machine
-    // may have a real one) - set in this process, never in anything a case starts.
+    // Sets KATANA_UPDATE_TOKEN for one case, as the store reads it (katana_core's
+    // environment_variable), and puts back what was there (a developer's machine may have a real
+    // one) - never in the process's environment, which edition 2024 makes unsafe to change, and
+    // so never in anything a case starts.
     pub struct TokenVariable {
-        original: Vec<u8>,
+        // Declared before the lock, so the override ends before the lock is let go.
+        current: RefCell<Option<EnvironmentOverride>>,
         _lock: MutexGuard<'static, ()>,
     }
 
@@ -157,24 +148,33 @@ mod environment {
         pub fn saved() -> Self {
             let lock = ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner);
             Self {
-                original: environment_variable(Some(NAME)),
+                current: RefCell::new(None),
                 _lock: lock,
             }
         }
 
-        // The value as UTF-8 text (or bytes, where the platform keeps bytes).
+        // The value as UTF-8 text (or bytes, where the platform keeps bytes). On Windows the
+        // UTF-8 is made the text itself (wide), not the code page's reading of it, as the C++
+        // test does with _wputenv_s.
         pub fn set(&self, value: impl AsRef<[u8]>) {
-            put(value.as_ref());
+            self.put(value.as_ref());
         }
 
         pub fn unset(&self) {
-            put(b"");
+            self.put(b"");
         }
-    }
 
-    impl Drop for TokenVariable {
-        fn drop(&mut self) {
-            put(&self.original);
+        // An empty value reads as not set, as removing the variable did on both platforms.
+        fn put(&self, value: &[u8]) {
+            let mut current = self.current.borrow_mut();
+            // The case's previous value ends first, so that the new one hides only what was there
+            // before the case.
+            *current = None;
+            *current = Some(if value.is_empty() {
+                EnvironmentOverride::unset(NAME)
+            } else {
+                EnvironmentOverride::set(NAME, path_from_utf8(value).as_os_str())
+            });
         }
     }
 }

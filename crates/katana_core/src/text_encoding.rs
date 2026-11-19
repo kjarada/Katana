@@ -12,16 +12,12 @@ pub fn is_valid_utf8(text: impl AsRef<[u8]>) -> bool {
     crate::text_kernels::valid_utf8(text.as_ref())
 }
 
-#[allow(
-    unsafe_code,
-    reason = "The selected validator establishes UTF-8 validity of this immutable slice exactly once."
-)]
+// std's validation: the same rule as is_valid_utf8's (well-formed UTF-8, the
+// Unicode Standard's table 3-7: no overlong form, no surrogate, nothing past
+// U+10FFFF), so the text is the one the kernel would have let through, and it
+// is made a str without an unchecked conversion.
 fn validated_utf8(bytes: &[u8]) -> std::result::Result<&str, ()> {
-    if is_valid_utf8(bytes) {
-        Ok(unsafe { std::str::from_utf8_unchecked(bytes) })
-    } else {
-        Err(())
-    }
+    std::str::from_utf8(bytes).map_err(|_| ())
 }
 
 fn from_windows1252(bytes: &[u8]) -> String {

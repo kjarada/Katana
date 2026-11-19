@@ -106,9 +106,9 @@ impl Default for GpuPoint {
     }
 }
 
-// The records are uploaded as they lie in memory (crate::plain): every field
-// is four bytes, so #[repr(C)] leaves no padding, and these are the sizes the
-// shaders' vertex layouts read.
+// The records are uploaded field by field, as they lie in memory (crate::plain):
+// every field is four bytes, so #[repr(C)] leaves no padding, and these are the
+// sizes the shaders' vertex layouts read.
 const _: () = assert!(std::mem::size_of::<GpuVertex>() == 16);
 const _: () = assert!(std::mem::size_of::<GpuLineEnd>() == 20);
 const _: () = assert!(std::mem::size_of::<GpuLine>() == 40);

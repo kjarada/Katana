@@ -42,7 +42,7 @@ use crate::gpu_scene::{
     pack_draw_list_with_bounds, pack_draw_list_with_origin,
 };
 use crate::names::to_string;
-use crate::plain::bytes_of;
+use crate::plain::GpuRecord;
 use crate::scene_origin::{
     ClipSpace, ProjectionOptions, choose_scene_origin, relative_view_projection,
     to_float_column_major,
@@ -803,22 +803,22 @@ impl GpuRenderer {
                 resources,
                 &mut layer.vertices,
                 wgpu::BufferUsages::VERTEX,
-                bytes_of(&s.vertices),
+                &s.vertices,
             ) && upload(
                 resources,
                 &mut layer.indices,
                 wgpu::BufferUsages::INDEX,
-                bytes_of(&s.triangle_indices),
+                &s.triangle_indices,
             ) && upload(
                 resources,
                 &mut layer.lines,
                 wgpu::BufferUsages::VERTEX,
-                bytes_of(&s.lines),
+                &s.lines,
             ) && upload(
                 resources,
                 &mut layer.points,
                 wgpu::BufferUsages::VERTEX,
-                bytes_of(&s.points),
+                &s.points,
             );
             if !ok {
                 return Err(Error::new(
@@ -834,20 +834,21 @@ impl GpuRenderer {
             self.uploads += 1;
         }
         if self.cloud_dirty {
-            let bytes = bytes_of(&self.cloud_data.points);
+            let points = &self.cloud_data.points;
+            let bytes = std::mem::size_of_val(points.as_slice());
             if !upload(
                 resources,
                 &mut self.cloud,
                 wgpu::BufferUsages::VERTEX,
-                bytes,
+                points,
             ) {
                 return Err(Error::new(
                     ErrorCode::RenderingFailure,
-                    format!("the GPU refused a point cloud of {} bytes", bytes.len()),
+                    format!("the GPU refused a point cloud of {bytes} bytes"),
                 ));
             }
             self.cloud_dirty = false;
-            stats.uploaded_bytes += bytes.len();
+            stats.uploaded_bytes += bytes;
         }
 
         let scene_uniforms = uniforms_for(camera, self.origin, settings, width, height);
@@ -1072,28 +1073,31 @@ fn make_pipeline(
     })
 }
 
-// Uploads `bytes` into `buffer`, replacing it by a larger one when it has
-// outgrown it: an edited scene of the same size or smaller reuses the
-// allocation. Returns false when the GPU refused it.
-fn upload(
+// Uploads the bytes of `records` into `buffer`, replacing it by a larger one
+// when it has outgrown it: an edited scene of the same size or smaller reuses
+// the allocation. Returns false when the GPU refused it. Each record's bytes
+// (plain.rs) are written straight into the staging memory the queue copies to
+// `buffer` at the next submission, so they are copied once, as write_buffer
+// copied a byte view of them; a queue that cannot give that memory refuses
+// the upload, as a buffer it cannot make does.
+fn upload<T: GpuRecord<N>, const N: usize>(
     resources: &Resources,
     buffer: &mut Option<wgpu::Buffer>,
     usage: wgpu::BufferUsages,
-    bytes: &[u8],
+    records: &[T],
 ) -> bool {
-    if bytes.is_empty() {
+    let Some(size) = wgpu::BufferSize::new((records.len() * N) as wgpu::BufferAddress) else {
         return true; // nothing to draw; the draw call is skipped too
-    }
-    let size = bytes.len() as wgpu::BufferAddress;
+    };
     if buffer
         .as_ref()
-        .is_none_or(|existing| existing.size() < size)
+        .is_none_or(|existing| existing.size() < size.get())
     {
         *buffer = None;
         let made = guarded(&resources.device, || {
             resources.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("katana scene buffer"),
-                size,
+                size: size.get(),
                 usage: usage | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -1104,7 +1108,11 @@ fn upload(
         }
     }
     if let Some(buffer) = buffer.as_ref() {
-        resources.queue.write_buffer(buffer, 0, bytes);
+        let Some(mut staging) = resources.queue.write_buffer_with(buffer, 0, size) else {
+            return false;
+        };
+        let (slots, _) = staging.slice(..).into_chunks::<N>();
+        slots.write_iter(records.iter().map(|record| record.gpu_bytes()));
     }
     true
 }

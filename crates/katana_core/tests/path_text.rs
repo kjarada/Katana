@@ -1,5 +1,21 @@
 pub mod support;
 
+// A file made by a narrow name independently of the path converter. On a
+// POSIX system a name is its bytes, which is what the C library's fopen hands
+// open(2), so std's open of the same bytes names the same file.
+#[cfg(unix)]
+mod narrow_file {
+    use std::os::unix::ffi::OsStrExt;
+
+    pub fn write(path: &[u8]) {
+        std::fs::write(std::ffi::OsStr::from_bytes(path), b"narrow")
+            .expect("the narrow file must be created on the integration platform");
+    }
+}
+
+// On Windows the C runtime reads a narrow name through the ANSI code page,
+// which std has no way to do: its fopen is the independent reading.
+#[cfg(not(unix))]
 #[allow(
     unsafe_code,
     reason = "Use the C runtime's narrow open independently of the path converter."

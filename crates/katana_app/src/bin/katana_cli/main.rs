@@ -57,10 +57,10 @@ use katana_update::{ApplyRequest, launch_apply, utf8_arguments};
     reason = "the console's code page and wide reading are Windows calls, confined to this module"
 )]
 mod windows_console {
+    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Console::{
-        GetConsoleMode, GetConsoleOutputCP, GetStdHandle, ReadConsoleW, STD_ERROR_HANDLE,
-        STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleOutputCP,
+        GetConsoleMode, GetConsoleOutputCP, ReadConsoleW, SetConsoleOutputCP,
     };
 
     // The UTF-8 code page (CP_UTF8, WinNls.h).
@@ -70,10 +70,13 @@ mod windows_console {
     const END_OF_INPUT: u16 = 0x1A;
 
     // The handle of standard input or output when it is a console, else None:
-    // a pipe or a file is read and written as the bytes it is.
-    fn console_handle(which: STD_HANDLE) -> Option<HANDLE> {
-        // SAFETY: GetStdHandle only reads the process's standard handles.
-        let handle = unsafe { GetStdHandle(which) };
+    // a pipe or a file is read and written as the bytes it is. std hands over
+    // the process's standard handle (GetStdHandle) safely. Its IsTerminal is
+    // not this test: it also takes an MSYS2 or Cygwin terminal's pipe for a
+    // terminal, which ReadConsoleW cannot read - so the console's own mode
+    // is asked, as before.
+    fn console_handle(stream: &impl AsRawHandle) -> Option<HANDLE> {
+        let handle: HANDLE = stream.as_raw_handle();
         if handle.is_null() || handle == INVALID_HANDLE_VALUE {
             return None;
         }
@@ -88,7 +91,7 @@ mod windows_console {
 
     /// Standard input when it is a console.
     pub(super) fn input_console() -> Option<HANDLE> {
-        console_handle(STD_INPUT_HANDLE)
+        console_handle(&std::io::stdin())
     }
 
     // A console shows the bytes a program writes through its OUTPUT code
@@ -108,8 +111,8 @@ mod windows_console {
                 before: 0,
                 changed: false,
             };
-            if console_handle(STD_OUTPUT_HANDLE).is_some()
-                || console_handle(STD_ERROR_HANDLE).is_some()
+            if console_handle(&std::io::stdout()).is_some()
+                || console_handle(&std::io::stderr()).is_some()
             {
                 // SAFETY: reads this process's console output code page.
                 set.before = unsafe { GetConsoleOutputCP() };

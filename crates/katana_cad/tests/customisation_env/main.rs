@@ -9,14 +9,11 @@
 //!
 //! gtest ran each case in a process of its own; Rust runs a binary's tests on parallel threads of
 //! one, so each case here holds ENVIRONMENT for its whole length, and the seam and the working
-//! folder it sets are put back before it lets go. The other cases of those files are in the target
-//! tests/customisation.
+//! folder it sets are put back before it lets go. The seam is not set in the process's environment
+//! (std::env::set_var is unsafe, since a thread beside may be reading it) but overridden where the
+//! host reads it, through katana_core's environment_variable (EnvironmentOverride). The other cases
+//! of those files are in the target tests/customisation.
 
-#![allow(
-    unsafe_code,
-    reason = "Edition 2024 makes std::env::set_var and remove_var unsafe: they race a thread that \
-              reads the environment, which every case here rules out by holding ENVIRONMENT."
-)]
 #![allow(
     clippy::module_inception,
     reason = "Inner module names identify the C++ suites for the parity checker."
@@ -28,11 +25,12 @@ mod customisation_support;
 mod builtin_library;
 mod customisation_host;
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use katana_cad::customisation_host::BUILT_IN_CUSTOMISATION_VARIABLE;
+use katana_core::path_text::{EnvironmentOverride, environment_variable};
 
 /// What the process shares - its environment and its working folder - is changed only while this
 /// is held. A case that panics while holding it poisons it; the next takes it all the same, since
@@ -44,31 +42,23 @@ pub fn environment() -> MutexGuard<'static, ()> {
     ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-// Sets the seam to `value`, or removes it for None. The caller holds ENVIRONMENT.
-fn set_seam(value: Option<&OsStr>) {
-    match value {
-        // SAFETY: every case of this binary holds ENVIRONMENT while it reads or
-        // changes the environment, and none of them starts a thread, so no
-        // other thread reads it while it is changed.
-        Some(value) => unsafe { std::env::set_var(BUILT_IN_CUSTOMISATION_VARIABLE, value) },
-        // SAFETY: as above.
-        None => unsafe { std::env::remove_var(BUILT_IN_CUSTOMISATION_VARIABLE) },
-    }
-}
-
-/// The seam, set for one case and put back as it was - set or not - when it is dropped, so that no
-/// case depends on, or leaves a mark on, the environment it runs in. Made only by a case holding
-/// ENVIRONMENT, which it is handed as proof.
+/// The seam as the host reads it, set for one case and read as it was - set or not - when it is
+/// dropped, so that no case depends on, or leaves a mark on, the environment it runs in. Made only
+/// by a case holding ENVIRONMENT, which it is handed as proof.
 pub struct ScopedSeam {
-    before: Option<OsString>,
+    // What the host read before, as it reads it (environment_variable: empty when not set).
+    before: Vec<u8>,
+    _override: EnvironmentOverride,
 }
 
 impl ScopedSeam {
     /// None: the variable is not set at all.
     pub fn new(_held: &MutexGuard<'static, ()>, value: Option<&OsStr>) -> Self {
-        let before = std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE);
-        set_seam(value);
-        Self { before }
+        let before = environment_variable(Some(BUILT_IN_CUSTOMISATION_VARIABLE));
+        Self {
+            before,
+            _override: EnvironmentOverride::new(BUILT_IN_CUSTOMISATION_VARIABLE, value),
+        }
     }
 
     /// The seam's value as text, as a case gives it.
@@ -76,14 +66,8 @@ impl ScopedSeam {
         Self::new(held, Some(OsStr::new(value)))
     }
 
-    pub fn before(&self) -> Option<&OsStr> {
-        self.before.as_deref()
-    }
-}
-
-impl Drop for ScopedSeam {
-    fn drop(&mut self) {
-        set_seam(self.before.as_deref());
+    pub fn before(&self) -> &[u8] {
+        &self.before
     }
 }
 

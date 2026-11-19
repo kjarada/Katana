@@ -5,11 +5,16 @@
 //! Also the update tests' KATANA_UPDATE_TOKEN and KATANA_UPDATE_STATE_DIR.
 //!
 //! gtest ran each case in a process of its own; Rust runs a binary's cases on
-//! parallel threads of one, and the environment is the process's. So a case
-//! that sets a variable is in a target of its own (a `*_process` target),
-//! and holds [`process_lock`] for its whole length, taken BEFORE any variable
-//! is set: declared first, it is let go last, after every ScopedVariable has
-//! put its variable back.
+//! parallel threads of one. A variable is not set in the process's
+//! environment - std::env::set_var is unsafe, since a thread beside may be
+//! reading it - but overridden where Katana reads it
+//! (katana_core::path_text::EnvironmentOverride): the session, its
+//! customisation host and the update system all read through
+//! environment_variable. An override is the process's all the same, so a case
+//! that sets one is in a target of its own (a `*_process` target), and holds
+//! [`process_lock`] for its whole length, taken BEFORE any variable is set:
+//! declared first, it is let go last, after every ScopedVariable has put its
+//! variable back.
 //!
 //! One owner (step 6's S1); a process target includes it with
 //! `#[path = "../support/start_environment.rs"] pub mod start_environment;`.
@@ -18,18 +23,13 @@
     dead_code,
     reason = "Each test target that includes the helpers uses a part of them."
 )]
-#![allow(
-    unsafe_code,
-    reason = "Edition 2024 makes std::env::set_var and remove_var unsafe: they race a thread that \
-              reads the environment, which a case rules out by holding process_lock."
-)]
-
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use katana_cad::customisation_host::{
     BUILT_IN_CUSTOMISATION_VARIABLE, KEPT_CUSTOMISATION_VARIABLE,
 };
+use katana_core::path_text::EnvironmentOverride;
 
 static PROCESS: Mutex<()> = Mutex::new(());
 
@@ -41,32 +41,28 @@ pub fn process_lock() -> MutexGuard<'static, ()> {
     PROCESS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// An environment variable set for one test and put back as it was - set or
-/// not - when the test ends, so that no test depends on, or leaves a mark on,
-/// the environment it runs in. The value is the OS string given, exactly: on
-/// Windows its own wide text, so a folder named in any script is a value
-/// (the C++'s second constructor, for a path).
+/// An environment variable as Katana reads it, set for one test and read as
+/// it was - set or not - when the test ends, so that no test depends on, or
+/// leaves a mark on, the environment it runs in. The value is the OS string
+/// given, exactly: on Windows its own wide text, so a folder named in any
+/// script is a value (the C++'s second constructor, for a path).
 pub struct ScopedVariable {
-    name: &'static str,
-    before: Option<OsString>,
+    _override: EnvironmentOverride,
 }
 
 impl ScopedVariable {
     /// The variable set to `value`.
     pub fn set(name: &'static str, value: impl AsRef<OsStr>) -> Self {
-        let scoped = Self::remember(name);
-        // SAFETY: the caller holds process_lock, so no other thread of this
-        // process reads or writes the environment meanwhile.
-        unsafe { std::env::set_var(name, value) };
-        scoped
+        Self {
+            _override: EnvironmentOverride::set(name, value),
+        }
     }
 
     /// The variable not set at all (the C++'s nullptr).
     pub fn unset(name: &'static str) -> Self {
-        let scoped = Self::remember(name);
-        // SAFETY: as in `set`.
-        unsafe { std::env::remove_var(name) };
-        scoped
+        Self {
+            _override: EnvironmentOverride::unset(name),
+        }
     }
 
     /// `value` when there is one, else unset.
@@ -74,24 +70,6 @@ impl ScopedVariable {
         match value {
             Some(value) => Self::set(name, value),
             None => Self::unset(name),
-        }
-    }
-
-    fn remember(name: &'static str) -> Self {
-        Self {
-            name,
-            before: std::env::var_os(name),
-        }
-    }
-}
-
-impl Drop for ScopedVariable {
-    fn drop(&mut self) {
-        match &self.before {
-            // SAFETY: as in `set`: the case still holds process_lock.
-            Some(before) => unsafe { std::env::set_var(self.name, before) },
-            // SAFETY: as above.
-            None => unsafe { std::env::remove_var(self.name) },
         }
     }
 }
