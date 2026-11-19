@@ -147,6 +147,10 @@ pub(crate) const GDAL_OF_READONLY: c_uint = 0x00;
 pub(crate) const GDAL_OF_UPDATE: c_uint = 0x01;
 pub(crate) const GDAL_OF_RASTER: c_uint = 0x02;
 pub(crate) const GDAL_OF_VECTOR: c_uint = 0x04;
+/// GDALOpenEx says why it opened nothing only when asked (gdal.h: "an error message will be
+/// emitted"); the product opens quietly and words its own failure, so only a test asks.
+#[cfg(test)]
+pub(crate) const GDAL_OF_VERBOSE_ERROR: c_uint = 0x40;
 
 /// A driver's capabilities and metadata, by name.
 pub(crate) const GDAL_DCAP_OPEN: &CStr = c"DCAP_OPEN";

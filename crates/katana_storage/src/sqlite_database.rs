@@ -44,7 +44,7 @@ fn database_failure(action: &str, context: String) -> Error {
 /// The failure of `action`, with SQLite's message for the last failure on
 /// `connection`.
 fn sqlite_error(connection: &ffi::Connection, action: &str) -> Error {
-    database_failure(action, utf8_or_windows1252(&connection.error_message()))
+    database_failure(action, utf8_or_windows1252(connection.error_message()))
 }
 
 // ---- SqliteStatement ---------------------------------------------------------------

@@ -1095,7 +1095,7 @@ pub(crate) fn trans_generic_named<T: NamedCoordinate>(
     const {
         let size = size_of::<T>();
         let align = align_of::<f64>();
-        assert!(align_of::<T>() >= align && size % align == 0);
+        assert!(align_of::<T>() >= align && size.is_multiple_of(align));
         assert!(T::X_OFFSET % align == 0 && T::X_OFFSET + size_of::<f64>() <= size);
         assert!(T::Y_OFFSET % align == 0 && T::Y_OFFSET + size_of::<f64>() <= size);
         assert!(T::HEIGHT_OFFSET % align == 0 && T::HEIGHT_OFFSET + size_of::<f64>() <= size);

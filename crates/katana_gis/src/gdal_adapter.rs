@@ -2036,6 +2036,10 @@ impl GdalDataset {
                 abandon(dataset, made, error)
             };
 
+        // The loop breaks out with its failure, and the dataset is abandoned after it: a feature
+        // borrows its layer, which borrows the dataset, so the dataset cannot be moved while one
+        // is in scope.
+        let failure = 'write: {
         for (table, out) in tables.tables.iter().zip(&written) {
             for source in &table.features {
                 let Some(geometry) = feature_geometry(source, table.kind) else {
@@ -2047,15 +2051,10 @@ impl GdalDataset {
                 // Destroyed below, once the layer has copied it.
                 let created = out.layer.definition().and_then(OgrFeature::create);
                 let Some(mut feature) = created else {
-                    return Err(abandon_features(
-                        dataset,
-                        in_transaction,
-                        &made,
-                        make_error(
-                            ErrorCode::FileExportFailure,
-                            "GDAL could not write a feature",
-                            last_gdal_error(),
-                        ),
+                    break 'write Some(make_error(
+                        ErrorCode::FileExportFailure,
+                        "GDAL could not write a feature",
+                        last_gdal_error(),
                     ));
                 };
                 // The geometry is the feature's from here.
@@ -2099,19 +2098,19 @@ impl GdalDataset {
                 // the failure of the write.
                 let failure = errors.first_failure(before);
                 if status != ogr::OGRERR_NONE || failure.is_some() {
-                    return Err(abandon_features(
-                        dataset,
-                        in_transaction,
-                        &made,
-                        make_error(
-                            ErrorCode::FileExportFailure,
-                            "GDAL could not write a feature",
-                            failure.map_or_else(last_gdal_error, |message| message.text),
-                        ),
+                    break 'write Some(make_error(
+                        ErrorCode::FileExportFailure,
+                        "GDAL could not write a feature",
+                        failure.map_or_else(last_gdal_error, |message| message.text),
                     ));
                 }
                 report.features_written += 1;
             }
+        }
+        None
+        };
+        if let Some(error) = failure {
+            return Err(abandon_features(dataset, in_transaction, &made, error));
         }
         // Where the features reach the file: a full disk shows here.
         if in_transaction && dataset.commit_transaction() != ogr::OGRERR_NONE {

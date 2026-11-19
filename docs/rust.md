@@ -1335,7 +1335,8 @@ are the integration build's.
   between calls run a closure borrowed from the caller's frame, which only
   `unsafe` can say. The safe form written - each call's helpers started in a
   `thread::scope` and joined before it returns, every contract test passing
-  - was measured and refused for its speed (CLAUDE.md section 5).
+  - was measured and refused for its speed (an optimisation's speed is
+  measured before and after, and a loss is a decision, not a side effect).
   Measured on 2026-11-20 by `crates/katana_render/benches/rasterise.rs`
   (a 1600 x 1000 frame of 115,200 triangles, 4,000 lines and 2,000 points;
   WSL, 24 threads, Release), base and changed builds alternated six rounds
@@ -1351,7 +1352,7 @@ are the integration build's.
   index runs once. The safe form written - the buffers cut first with
   `chunks_mut` and `split_at_mut` into exactly the tasks' parts, each behind
   a mutex only its task locks - passed every test and was measured and
-  refused (CLAUDE.md section 5); cutting the framebuffer into its tiles'
+  refused, as the pool's was; cutting the framebuffer into its tiles'
   pieces of every row is a pass of allocations each fill and sweep.
   Measured on 2026-11-20 by `crates/katana_render/benches/rasterise.rs`
   (a 1600 x 1000 frame of 115,200 triangles, 4,000 lines and 2,000 points;

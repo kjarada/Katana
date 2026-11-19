@@ -132,7 +132,10 @@ fn a_failed_open_leaves_gdals_message_as_the_last_error_and_in_the_collector() {
     reset_last_error();
     assert_eq!(last_error_message(), "", "a reset leaves no message");
     let collector = CollectingHandler::push();
-    let opened = Dataset::open(&missing, gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER, &CStringList::new());
+    // GDALOpenEx is silent about a failure unless asked to say it (GDAL_OF_VERBOSE_ERROR,
+    // gdal.h); asked, it emits CPLE_OpenFailed, which is what this is about.
+    let flags = gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER | gdal::GDAL_OF_VERBOSE_ERROR;
+    let opened = Dataset::open(&missing, flags, &CStringList::new());
     assert!(opened.is_none());
     let message = last_error_message();
     assert!(!message.is_empty(), "GDAL says why it opened nothing");
