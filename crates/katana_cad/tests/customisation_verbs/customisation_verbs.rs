@@ -2178,7 +2178,7 @@ mod customisation_verbs {
             ("empty", ""),
             (
                 "newer",
-                r#"{"format": "katana-customisation", "version": 2, "name": "Later"}"#,
+                r#"{"format": "katana-customisation", "version": 3, "name": "Later"}"#,
             ),
         ];
         for (name, bytes) in cases {

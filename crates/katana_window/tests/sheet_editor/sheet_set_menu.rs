@@ -15,7 +15,8 @@ mod sheet_set_menu {
     use katana_cad::plotting::sheet_json::sheet_set_to_json;
     use katana_cad::plotting::sheet_set::SheetSet;
     use katana_cad::plotting::sheet_verbs::{read_sheet_set_file, write_sheet_set_file};
-    use katana_cad::{CommandInterpreter, Document};
+    use katana_cad::{CommandInterpreter, CustomisationOrigin, Document};
+    use katana_entity::{Customisation, CustomisationPlotFrame};
     use katana_window::host::Clipboard;
     use katana_window::sheet_editor::{FileAsk, QuestionAsk};
 
@@ -287,6 +288,74 @@ mod sheet_set_menu {
              filepersheet=on"
         );
         assert!(messages[1].starts_with("pagesetup style=greyscale"));
+    }
+
+    // A customisation's title frames (docs/plotting.md, "A customisation's title frames"): Page
+    // Setup's Frame lists the default and the frames the customisation in use offers, and a frame
+    // chosen there is the SHEETS PAGESETUP line's frame=, which puts it on every framed sheet in
+    // one step. The customisation is invented; the frame it offers is the one compiled in.
+    #[test]
+    fn page_setup_lists_the_frames_on_offer_and_runs_the_one_chosen_as_its_line() {
+        const FRAME: &str = "nsw_a3_utility_cross_section";
+        let mut document = Document::new(None);
+        document
+            .install_customisation(
+                Customisation {
+                    name: String::from("Probe"),
+                    plot_frames: vec![CustomisationPlotFrame {
+                        name: String::from(FRAME),
+                    }],
+                    ..Customisation::default()
+                },
+                CustomisationOrigin::Loaded,
+                false,
+            )
+            .unwrap_or_else(|error| panic!("{}", error.describe()));
+        type_lines(&mut document, &["SHEET NEW PLAN", "SHEET NEW BARE frame=off"]);
+        let mut shown = shown(document);
+        shown.trigger("sheetPageSetup");
+        shown.draw();
+        let frame = shown.control("pageSetupFrame").expect("the Frame choice");
+        assert!(frame.visible);
+        assert_eq!(frame.items, vec![String::from("a3_landscape"), String::from(FRAME)]);
+        assert_eq!(frame.value, "a3_landscape");
+        // Nothing else chosen: Save names no frame, so no sheet's frame is touched by it.
+        let unchanged = shown.editor.plot_dialog().expect("the dialog").page_setup_line();
+        assert!(!unchanged.contains("frame="), "{unchanged}");
+
+        shown.fill_in("pageSetupDialog", "pageSetupFrame", FRAME);
+        let line = shown.editor.plot_dialog().expect("the dialog").page_setup_line();
+        assert_eq!(
+            line,
+            format!(
+                "SHEETS PAGESETUP style=colour lineweight=1 dpi=300 pattern=\"{{set}}{{n:02}} \
+                 {{name}}\" filepersheet=off frame={FRAME}"
+            )
+        );
+        let steps = shown.steps();
+        shown.press_in("pageSetupDialog", "pageSetupSave");
+        assert_eq!(shown.steps(), steps + 1);
+        assert_eq!(shown.document().history().undo_name(), "PAGE_SETUP");
+        let set = shown.document().sheet_set();
+        assert_eq!(set.page_setup.frame, FRAME);
+        assert_eq!(set.sheets[0].frame, FRAME);
+        // The sheet whose frame was off keeps it off.
+        assert!(set.sheets[1].frame.is_empty());
+        let messages = shown.messages();
+        assert_eq!(messages[0], format!("> {line}"));
+        assert!(messages[1].ends_with(&format!(" frame={FRAME}")), "{}", messages[1]);
+    }
+
+    #[test]
+    fn page_setup_lists_the_default_frame_alone_when_the_customisation_offers_none() {
+        let mut document = Document::new(None);
+        type_lines(&mut document, &["SHEET NEW PLAN"]);
+        let mut shown = shown(document);
+        shown.trigger("sheetPageSetup");
+        shown.draw();
+        let frame = shown.control("pageSetupFrame").expect("the Frame choice");
+        assert_eq!(frame.items, vec![String::from("a3_landscape")]);
+        assert_eq!(frame.value, "a3_landscape");
     }
 
     #[test]

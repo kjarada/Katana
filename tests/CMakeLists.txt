@@ -246,6 +246,12 @@ if(Python3_Interpreter_FOUND)
     # (test_pictures.py), on one-pixel pictures it writes itself in a scratch folder.
     add_test(NAME katana_standard_pictures_script COMMAND "${KATANA_PYTHON}" "${_ks_tools}/test_pictures.py")
 
+    # tools/title_frame_from_tbf.py converts a title block file (.tbf) into Katana's plot-frame JSON
+    # (docs/plotting.md, "A customisation's title frames"): its test converts an invented A4 frame
+    # written in the test, every expectation worked out by hand from the format's rules.
+    add_test(NAME title_frame_from_tbf_script
+        COMMAND "${KATANA_PYTHON}" -I -B "${PROJECT_SOURCE_DIR}/tools/test_title_frame_from_tbf.py")
+
     # `rust_layering`: each crate of crates/ is a layer's, and depends only on what tools/check_layering.cmake
     # (the layer table) allows that layer, and re-exports no third-party crate. It is shown, on a fixture that breaks
     # each rule, to see the breach: a check that cannot see a violation passes as quietly as one that finds none.

@@ -59,8 +59,16 @@ use katana_core::json::{self, JsonError, Sax, sax_parse};
 
 /// The value of a file's "format" member.
 pub const CUSTOMISATION_FORMAT: &str = "katana-customisation";
-/// The newest "version" this build reads, and the one it writes.
-pub const CUSTOMISATION_VERSION: i32 = 1;
+/// The newest "version" this build reads. It writes the OLDEST version that
+/// holds what it writes (written_version), so a file without title frames is
+/// still version 1 and an older build still reads it.
+pub const CUSTOMISATION_VERSION: i32 = 2;
+/// The version that added "plotFrames" (docs/customisation.md, "The title
+/// frames of a customisation").
+pub const CUSTOMISATION_PLOT_FRAMES_VERSION: i32 = 2;
+/// The longest name a plot frame is offered by, in bytes: a name is a word a
+/// verb line and a sheet set carry, and a sheet's line is read by a person.
+pub const CUSTOMISATION_MOST_FRAME_NAME_BYTES: usize = 64;
 
 // The bounds a file is held to by the reader (and the writer, so that what is
 // written reads back). Each is far above anything a drawing needs and far
@@ -132,6 +140,43 @@ pub fn validate_customisation_name(name: &str) -> Status {
     Ok(())
 }
 
+/// A plot frame's name as a customisation offers it: 1 to 64 bytes of lower
+/// case ASCII letters, digits and '_', beginning with a letter
+/// ("nsw_a3_utility_cross_section"). InvalidArgument otherwise.
+///
+/// The name is the one the frame is compiled into Katana under
+/// (resources/plot_frames/<name>.json, katana_cad's plotting::frame), the
+/// word a sheet set stores and a verb takes (`frame=<name>`), so it is held to
+/// what is a word on a command line and a file name on every system - and to
+/// one case, so that a name typed in another case is the same name.
+pub fn validate_plot_frame_name(name: &str) -> Status {
+    let first_is_letter = name
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_lowercase());
+    let word = name
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+    if !first_is_letter || !word || name.len() > CUSTOMISATION_MOST_FRAME_NAME_BYTES {
+        return Err(make_error(
+            ErrorCode::InvalidArgument,
+            "a plot frame's name is 1 to 64 lower-case letters, digits and '_', beginning with a letter",
+            in_quotes(name),
+        ));
+    }
+    Ok(())
+}
+
+/// A plot frame a customisation offers: a sheet plotted while it is the
+/// session's customisation may take this frame instead of the default one
+/// (docs/plotting.md, "A customisation's title frames"). It names a frame
+/// compiled into Katana; the frame itself is data of its own
+/// (resources/plot_frames), not part of the file.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CustomisationPlotFrame {
+    pub name: String,
+}
+
 /// One customisation that went into this one, as the session's load record
 /// holds it: a customisation merged from two keeps both names, what each
 /// brought and each one's own notice.
@@ -185,6 +230,9 @@ pub struct Customisation {
     /// their control codes.
     pub linework: Option<LineworkCodes>,
     pub automation: Option<CustomisationAutomation>,
+    /// The plot frames it offers, in its order; none for most. The file's
+    /// "plotFrames", version 2 of the format.
+    pub plot_frames: Vec<CustomisationPlotFrame>,
     /// Each definition's `symbol` says which of the file's two arrays holds
     /// it, and its `source` the customisation it came from.
     pub library: StyleLibrary,
@@ -204,6 +252,7 @@ impl PartialEq for Customisation {
             && self.colours == other.colours
             && self.linework == other.linework
             && self.automation == other.automation
+            && self.plot_frames == other.plot_frames
             && same_definitions(&self.library, &other.library)
             && self.map == other.map
     }
@@ -783,7 +832,7 @@ fn entry_label(array: &str, index: usize, entry: Json<'_>, name_member: &str) ->
 fn name_member_of(array: &str) -> &'static str {
     match array {
         "codes" => "key",
-        "linestyles" | "symbols" | "sources" => "name",
+        "linestyles" | "symbols" | "sources" | "plotFrames" => "name",
         _ => "",
     }
 }
@@ -845,7 +894,41 @@ fn check_header(customisation: &Customisation) -> Status {
             error.context,
         ));
     }
+    for (i, frame) in customisation.plot_frames.iter().enumerate() {
+        let place = labelled("plotFrames", i, &frame.name);
+        if let Err(error) = validate_plot_frame_name(&frame.name) {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                &place,
+                &format!("\"name\": {}", error.message),
+                error.context,
+            ));
+        }
+        // A sheet names its frame by this name alone, so two of one name
+        // would be one frame chosen and another drawn.
+        if let Some(other) = customisation.plot_frames[..i]
+            .iter()
+            .position(|earlier| earlier.name == frame.name)
+        {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                &place,
+                &format!("the file names this frame twice; the other is plotFrames[{other}]"),
+                "",
+            ));
+        }
+    }
     Ok(())
+}
+
+/// The version a file of `customisation` is written as: the oldest that holds
+/// all of it, so that a file an older build can read stays one it can read.
+fn written_version(customisation: &Customisation) -> i32 {
+    if customisation.plot_frames.is_empty() {
+        1
+    } else {
+        CUSTOMISATION_PLOT_FRAMES_VERSION
+    }
 }
 
 /// A definition's source is a customisation's name, or empty for one made in
@@ -1586,7 +1669,7 @@ fn written(customisation: &Customisation, options: &CustomisationWriteOptions) -
     member(&mut out, &mut first, "format");
     out.text(CUSTOMISATION_FORMAT)?;
     member(&mut out, &mut first, "version");
-    out.whole(i64::from(CUSTOMISATION_VERSION));
+    out.whole(i64::from(written_version(customisation)));
     member(&mut out, &mut first, "name");
     out.text(&customisation.name)?;
     if !customisation.description.is_empty() {
@@ -1667,6 +1750,20 @@ fn written(customisation: &Customisation, options: &CustomisationWriteOptions) -
         object.key(&mut out, "lineworkOnSurveyImport");
         out.flag(automation.linework_on_survey_import);
         object.close(&mut out);
+    }
+    if !customisation.plot_frames.is_empty() {
+        member(&mut out, &mut first, "plotFrames");
+        out.raw("[");
+        for (i, frame) in customisation.plot_frames.iter().enumerate() {
+            out.entry = labelled("plotFrames", i, &frame.name);
+            entry(&mut out, i);
+            let mut object = Object::open(&mut out);
+            object.key(&mut out, "name");
+            out.text(&frame.name)?;
+            object.close(&mut out);
+        }
+        out.raw("\n  ]");
+        out.entry = String::from(TOP_LEVEL);
     }
     write_definitions(
         &mut out,
@@ -3340,6 +3437,9 @@ fn read_customisation(tree: &Tree, strokes: &mut [StrokesRead]) -> Result<Custom
             linework_on_survey_import,
         });
     }
+    if let Some(frames) = members.find("plotFrames") {
+        customisation.plot_frames = read_plot_frames(root, frames)?;
+    }
     let linestyles = members.find("linestyles");
     let symbols = members.find("symbols");
     let codes = members.find("codes");
@@ -3416,6 +3516,37 @@ fn read_customisation(tree: &Tree, strokes: &mut [StrokesRead]) -> Result<Custom
         }
     }
     Ok(customisation)
+}
+
+/// The file's "plotFrames": a list of `{"name": ...}`, each name checked by
+/// check_header with the rest of the header. A member of version 2: a file
+/// that says it is version 1 and holds it is refused, as a version 1 build
+/// refuses it, so that this build and an older one agree on what a version 1
+/// file may hold.
+fn read_plot_frames(root: Json<'_>, frames: Json<'_>) -> Result<Vec<CustomisationPlotFrame>> {
+    let version = root.find("version").map_or(0, |version| version.as_u64());
+    if version < CUSTOMISATION_PLOT_FRAMES_VERSION as u64 {
+        return Err(refuse(
+            ErrorCode::ParseFailure,
+            TOP_LEVEL,
+            &format!(
+                "\"plotFrames\" is a member of version {CUSTOMISATION_PLOT_FRAMES_VERSION} of the \
+                 format, and the file says it is version {version}"
+            ),
+            "",
+        ));
+    }
+    let mut out = Vec::new();
+    for (index, item) in list_of(frames, TOP_LEVEL, "plotFrames")?
+        .elements()
+        .enumerate()
+    {
+        let mut part = Members::new(item, entry_label("plotFrames", index, item, "name"))?;
+        let name = part.required_text("name")?;
+        part.finish()?;
+        out.push(CustomisationPlotFrame { name });
+    }
+    Ok(out)
 }
 
 fn same_definitions(a: &StyleLibrary, b: &StyleLibrary) -> bool {

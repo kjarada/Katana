@@ -39,6 +39,9 @@
 //!               loaded name takes the place of the session's, in both modes.
 //!   linework,   taken only when the loaded customisation SAYS them. A file of
 //!   automation  symbols for a colleague must not reset their control codes.
+//!   plot frames by name: the session's, then each a load offers that the
+//!               session does not, in the order loaded - in both modes, as a
+//!               frame is neither a definition nor a rule.
 //!   sources     recorded (customisation_record.rs): each loaded customisation
 //!               is a source, by name, with what it brought and its notice.
 //!               One that LISTS its sources - every customisation a session
@@ -420,6 +423,22 @@ impl<'a> Merger<'a> {
         let loaded = self.loaded;
         self.out.merged.linework = current.linework.clone();
         self.out.merged.automation = current.automation;
+        // A frame is offered by its name alone, so the same name loaded again
+        // is the same frame, and stays where it was.
+        self.out.merged.plot_frames = current.plot_frames.clone();
+        for load in loaded {
+            for frame in &load.plot_frames {
+                if !self
+                    .out
+                    .merged
+                    .plot_frames
+                    .iter()
+                    .any(|offered| offered.name == frame.name)
+                {
+                    self.out.merged.plot_frames.push(frame.clone());
+                }
+            }
+        }
         for (index, load) in loaded.iter().enumerate() {
             // Only what a customisation SAYS: one that is silent about the
             // control codes leaves the session's as they are.

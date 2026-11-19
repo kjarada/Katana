@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! frame               tests/cad/plotting/test_frame.cpp
+//! customisation_frames  (Rust only) the frames a customisation offers
 //! sheet_fields        tests/cad/plotting/test_sheet_fields.cpp
 //! layout              tests/cad/plotting/test_layout.cpp
 //! page_setup          tests/cad/plotting/test_page_setup.cpp
@@ -29,6 +30,7 @@
 
 use katana_geometry::{Box2, Point2};
 
+mod customisation_frames;
 mod frame;
 mod generators;
 mod layout;

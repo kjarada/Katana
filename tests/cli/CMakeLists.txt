@@ -620,6 +620,34 @@ if(KATANA_TEST_CLI)
             PROPERTIES FIXTURES_REQUIRED cli_built_in_project_1
             PASS_REGULAR_EXPRESSION "used name=NSW default=no definitions=792 codes=632 rules=1624 kept=no${_eol}.*customisation name=NSW origin=builtIn kept=no definitions=792 codes=632 rules=1624 colours=7${_eol}source name=NSW "
             FAIL_REGULAR_EXPRESSION "error|missing name=")
+        # A customisation's title frames (docs/plotting.md, "A customisation's
+        # title frames"): under Katana Standard only the default frame is on
+        # offer; CUSTOMISE BUILTIN NSW offers the NSW built-in's frame beside
+        # it, SHEETS PAGESETUP frame= puts it on the set's framed sheet in one
+        # step, and SHEETS lists the sheet in it. Without NSW the same line is
+        # refused, saying what is on offer, and the script stops.
+        add_test(NAME cli.a_customisations_title_frame_is_offered_and_chosen_by_verb
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    ${KATANA_PROGRAM_katana_cli} -c "SHEET NEW PLAN" -c "SHEETS FRAMES"
+                    -c "CUSTOMISE BUILTIN nsw" -c "SHEETS FRAMES"
+                    -c "SHEETS PAGESETUP frame=nsw_a3_utility_cross_section" -c "SHEETS")
+        set_tests_properties(cli.a_customisations_title_frame_is_offered_and_chosen_by_verb
+            PROPERTIES
+            PASS_REGULAR_EXPRESSION "frames count=1 set=a3_landscape customisation=\"Katana Standard\"${_eol}frame name=a3_landscape from=default${_eol}used name=NSW [^\r\n]*${_eol}frames count=2 set=a3_landscape customisation=\"NSW\"${_eol}frame name=a3_landscape from=default${_eol}frame name=nsw_a3_utility_cross_section from=customisation${_eol}pagesetup style=colour lineweight=1 dpi=300 pattern=\"[^\"]*\" filepersheet=off frame=nsw_a3_utility_cross_section${_eol}1 sheet${_eol}sheet 1 id=s1 name=\"PLAN\" paper=A3 orientation=landscape frame=nsw_a3_utility_cross_section legendblock=on views=0"
+            FAIL_REGULAR_EXPRESSION "error")
+        add_test(NAME cli.a_title_frame_the_customisation_does_not_offer_is_refused
+            COMMAND ${CMAKE_COMMAND} -E env --unset=KATANA_CUSTOMISATION
+                    "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    "KATANA_BUILTIN_CUSTOMISATION=Katana Standard"
+                    ${KATANA_PROGRAM_katana_cli} -c "SHEET NEW PLAN"
+                    -c "SHEETS PAGESETUP frame=nsw_a3_utility_cross_section"
+                    -c "SHEET NEW NEVER REACHED")
+        set_tests_properties(cli.a_title_frame_the_customisation_does_not_offer_is_refused
+            PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: NotFound: no plot frame of that name is on offer: frame= is on, off or one of a3_landscape \\(SHEETS FRAMES\\)"
+            FAIL_REGULAR_EXPRESSION "NEVER REACHED")
     endif()
     # INFO with an entity's id describes the entity, as the interpreter's
     # INFO does, in a build with the GIS module too: there every INFO was

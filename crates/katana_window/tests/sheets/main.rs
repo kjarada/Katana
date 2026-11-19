@@ -32,6 +32,7 @@ pub mod window_support;
 
 mod support;
 
+mod customisation_frame_painter;
 mod legend_painter;
 mod legend_properties;
 mod plan_grid_painter;

@@ -216,6 +216,10 @@ fn page_setup_json(setup: &PageSetup) -> Json {
         setup.file_per_sheet,
         d.file_per_sheet,
     );
+    // Left out at the default frame, as every member is, so a set that never
+    // chose a frame is written as it was before the member existed; an older
+    // reader skips it, and its sheets name their frames themselves.
+    put_text(&mut json, "frame", &setup.frame, &d.frame);
     json
 }
 
@@ -231,6 +235,7 @@ fn page_setup_from(json: &Json) -> Read<PageSetup> {
         dpi: json.value("dpi", d.dpi)?,
         file_name_pattern: json.value("file_name_pattern", d.file_name_pattern.clone())?,
         file_per_sheet: json.value("file_per_sheet", d.file_per_sheet)?,
+        frame: json.value("frame", d.frame.clone())?,
     })
 }
 

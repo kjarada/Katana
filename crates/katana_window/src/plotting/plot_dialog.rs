@@ -107,7 +107,8 @@ pub enum PlotAnswer {
 /// plotKeepSetup, plotProblem, and the buttons plotRun and plotCancel.
 ///
 /// In its page-setup mode it is pageSetupDialog, "Page Setup": only what the set's page setup
-/// keeps - plotColourMode, plotLineWeightScale, plotDpi, plotPattern with plotPatternPreview, and
+/// keeps - pageSetupFrame (the frames on offer: the default, then the customisation's, by name),
+/// plotColourMode, plotLineWeightScale, plotDpi, plotPattern with plotPatternPreview, and
 /// pageSetupFilePerSheet ("A PDF per sheet") - with plotProblem, and the buttons pageSetupSave
 /// and plotCancel. Nothing is plotted: Save's line is page_setup_line.
 pub struct PlotDialog {
@@ -129,6 +130,10 @@ pub struct PlotDialog {
     pub printer: Choice,
     pub open_after: bool,
     pub keep_setup: bool,
+    /// The frames Page Setup offers (with_frames), by name; the set's own frame at least.
+    frames: Vec<String>,
+    /// Page Setup's Frame (pageSetupFrame).
+    pub plot_frame: Choice,
 }
 
 impl PlotDialog {
@@ -224,7 +229,41 @@ impl PlotDialog {
             printer,
             open_after: false,
             keep_setup: true,
+            frames: vec![setup.frame.clone()],
+            plot_frame: Choice::at(0),
         }
+    }
+
+    /// The frames Page Setup's Frame lists: `offered`, the session's (cad's frames_offered - the
+    /// default, then those its customisation offers). The set's own frame is chosen to start
+    /// with, and is listed even when the customisation no longer offers it, so the dialog shows
+    /// what the set has; it is only sent back when another is chosen.
+    pub fn with_frames(mut self, offered: Vec<String>) -> Self {
+        let current = self.set.page_setup.frame.clone();
+        self.frames = offered;
+        if !self.frames.contains(&current) {
+            self.frames.push(current.clone());
+        }
+        self.plot_frame = self
+            .frames
+            .iter()
+            .position(|name| *name == current)
+            .map_or_else(Choice::default, Choice::at);
+        self
+    }
+
+    /// The frames Page Setup's Frame lists.
+    pub fn frames(&self) -> &[String] {
+        &self.frames
+    }
+
+    /// The frame chosen, by name: the set's own while nothing else is.
+    pub fn frame_name(&self) -> String {
+        self.plot_frame
+            .index
+            .and_then(|index| self.frames.get(index))
+            .cloned()
+            .unwrap_or_else(|| self.set.page_setup.frame.clone())
     }
 
     pub fn name(&self) -> &str {
@@ -268,6 +307,9 @@ impl PlotDialog {
         } else {
             self.format_data() == "pdfs"
         };
+        if self.mode == PlotDialogMode::PageSetup {
+            setup.frame = self.frame_name();
+        }
         setup
     }
 
@@ -285,8 +327,18 @@ impl PlotDialog {
         // A typed "\\" is read back as one backslash, and any other as itself: doubled, every
         // backslash comes back as it was.
         let pattern = self.pattern.replace('\\', "\\\\");
+        // frame= only when another frame is chosen: it puts the frame on every sheet that has one
+        // (cad's set_page_setup_frame), which a Save for the colours must not do behind the
+        // person's back to sheets given a frame of their own.
+        let frame = self.frame_name();
+        let frame = if self.mode == PlotDialogMode::PageSetup && frame != self.set.page_setup.frame
+        {
+            format!(" frame={frame}")
+        } else {
+            String::new()
+        };
         format!(
-            "SHEETS PAGESETUP style={} lineweight={weight} dpi={} pattern=\"{pattern}\" filepersheet={}",
+            "SHEETS PAGESETUP style={} lineweight={weight} dpi={} pattern=\"{pattern}\" filepersheet={}{frame}",
             self.colour_data(),
             self.dpi,
             if self.page_setup().file_per_sheet {
@@ -579,6 +631,14 @@ impl PlotDialog {
                 .collect();
             form_row(ui, !page_setup, "Output", "plotRowOutput", &mut |ui| {
                 controls::choice(ui, "plotFormat", &formats, &mut self.format);
+            });
+            // The title frame the set's sheets plot in: a setting of the set, not of one plot.
+            let frames = self.frames.clone();
+            form_row(ui, page_setup, "Frame", "pageSetupRowFrame", &mut |ui| {
+                controls::choice(ui, "pageSetupFrame", &frames, &mut self.plot_frame).on_hover_text(
+                    "The title frame every sheet with a frame plots in: the default, or one the \
+                     customisation in use offers",
+                );
             });
             dialog::labelled(ui, "Colours", |ui| {
                 let colours: Vec<String> = COLOUR_MODES

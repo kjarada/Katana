@@ -229,7 +229,7 @@ mod sheet_agent_verbs {
         assert_eq!(
             s.ok("SHEETS PAGESETUP"),
             "pagesetup style=colour lineweight=1 dpi=300 pattern=\"{set}{n:02} {name}\" \
-             filepersheet=off"
+             filepersheet=off frame=a3_landscape"
         );
         let steps = s.steps();
         assert_eq!(
@@ -238,7 +238,7 @@ mod sheet_agent_verbs {
                  filepersheet=on"
             ),
             "pagesetup style=monochrome lineweight=0.7 dpi=150 pattern=\"{n} {name}\" \
-             filepersheet=on"
+             filepersheet=on frame=a3_landscape"
         );
         assert_eq!(s.steps(), steps + 1);
         assert_eq!(s.set().page_setup.colour_mode, PlotColourMode::Monochrome);

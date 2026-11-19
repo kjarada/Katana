@@ -28,7 +28,9 @@ use katana_geometry::{Box2, Point2};
 
 use crate::layer_overrides::LayerOverrides;
 use crate::plot::{PaperSize, paper_dimensions};
-use crate::plotting::frame::{BUILT_IN_FRAME_ID, built_in_frame, frame_scale_for};
+use crate::plotting::frame::{
+    BUILT_IN_FRAME_ID, built_in_frame, compiled_in_frame, frame_scale_for,
+};
 use crate::plotting::layout::tiling_rank;
 use crate::plotting::page_setup::PageSetup;
 
@@ -274,7 +276,8 @@ pub struct Sheet {
     pub name: String,
     pub paper: PaperSize,
     pub landscape: bool,
-    /// Empty: no frame.
+    /// The frame's name: BUILT_IN_FRAME_ID, or a frame the session's
+    /// customisation offers (frame.rs, frames_offered). Empty: no frame.
     pub frame: String,
     /// The frame's utility legend block.
     pub frame_legend: bool,
@@ -747,12 +750,16 @@ pub fn resolve_fields(
 }
 
 /// Where a sheet's viewports go: the frame's drawing area, or the paper less
-/// 10 mm all round when the sheet has no frame (or cannot have one).
+/// 10 mm all round when the sheet has no frame (or cannot have one). The frame
+/// is the compiled-in frame the sheet names, or the default one for a name
+/// Katana does not have - the frame the painter falls back to
+/// (resolve_sheet_frame). Whether the session's customisation offers the
+/// frame is not asked: every frame compiled in has the default's drawing
+/// area, so the answer is the same.
 pub fn drawing_area(sheet: &Sheet) -> Box2 {
     if !sheet.frame.is_empty()
         && sheet.landscape
-        && sheet.frame == BUILT_IN_FRAME_ID
-        && let Ok(frame) = built_in_frame()
+        && let Ok(frame) = compiled_in_frame(&sheet.frame).unwrap_or_else(built_in_frame)
     {
         let factor = frame_scale_for(sheet.paper, true);
         let area = &frame.drawing_area;

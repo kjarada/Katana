@@ -54,7 +54,8 @@ use katana_cad::plot::{
     PlotSettings, millimetres_to_pixels, paper_dimensions, sheet_scale_at_least,
 };
 use katana_cad::plotting::frame::{
-    Frame, FrameCell, FrameRole, HorizontalJustify, VerticalJustify, fit_image, frame_for,
+    Frame, FrameCell, FrameRole, HorizontalJustify, SheetFrame, VerticalJustify, fit_image,
+    frame_for, resolve_sheet_frame,
 };
 use katana_cad::plotting::key_plan::{KeyPlanOutline, fit_key_plan, key_plan_outlines};
 use katana_cad::plotting::legend::{LegendMetrics, layout_legend};
@@ -77,6 +78,7 @@ use katana_core::path_text::generic_path_utf8;
 use katana_core::text::{format_fixed, format_general};
 use katana_core::{ErrorCode, Result, Status};
 use katana_entity::Color as EntityColor;
+use katana_entity::CustomisationPlotFrame;
 use katana_geometry::alignment::solve_alignment;
 use katana_geometry::profile::solve_profile;
 use katana_geometry::{Box2, Point2, Polyline2};
@@ -221,7 +223,7 @@ pub struct SheetPaintCache {
     sections: Sections,
     snapshots: BTreeMap<String, CachedImage>,
     images: BTreeMap<String, Image>,
-    frames: BTreeMap<String, Arc<Result<Frame>>>,
+    frames: BTreeMap<String, Arc<Result<SheetFrame>>>,
 }
 
 impl SheetPaintCache {
@@ -705,6 +707,15 @@ fn paint_frame(
         } else {
             paper_pen(paper, colour, line.weight_mm)
         });
+        // A filled shape (a logo drawn as lines, as a title block file draws one) is filled
+        // first, by the nonzero rule its file's program fills by, and then outlined.
+        if let Some(fill) = line.fill {
+            canvas.save();
+            canvas.set_pen(Pen::none());
+            canvas.set_brush(paper_fill(paper, canvas_colour(fill)));
+            canvas.draw_polygon(&polygon, FillRule::Winding);
+            canvas.restore();
+        }
         canvas.set_brush(Brush::none());
         if line.closed {
             canvas.draw_polygon(&polygon, FillRule::OddEven);
@@ -732,8 +743,11 @@ fn paint_frame(
         }
     }
 
-    // The logo, in the slot the original organisation's logo was taken out of.
-    if let Some(cell) = frame.cell("logo") {
+    // The logo, in the slot the original organisation's logo was taken out of - on a frame that
+    // has the slot: one that draws its own logo has none.
+    if frame.has_user_slot("logo")
+        && let Some(cell) = frame.cell("logo")
+    {
         if !source.logo.is_null() {
             let at = fit_image(
                 &cell.rect,
@@ -2301,18 +2315,47 @@ impl SheetPainter<'_, '_> {
         }
 
         if !sheet.frame.is_empty() {
-            let key = format!("{}|{}|{}", sheet.frame, sheet.paper as i32, sheet.landscape);
+            // The frames the session's customisation offers decide whether the sheet's own frame
+            // is drawn or the default stands in for it, so they are part of the key: a frame
+            // resolved under one customisation is not reused under another.
+            let offered = offered_frames(self.source);
+            let key = format!(
+                "{}|{}|{}|{}",
+                sheet.frame,
+                sheet.paper as i32,
+                sheet.landscape,
+                offered.as_ref().map_or_else(
+                    || String::from("*"),
+                    |frames| frames
+                        .iter()
+                        .map(|frame| frame.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            );
             let found = Arc::clone(self.cache.frames.entry(key).or_insert_with(|| {
-                Arc::new(frame_for(&sheet.frame, sheet.paper, sheet.landscape))
+                Arc::new(resolve_sheet_frame(
+                    &sheet.frame,
+                    offered.as_deref(),
+                    sheet.paper,
+                    sheet.landscape,
+                ))
             }));
             match &*found {
-                Ok(frame) => {
+                Ok(resolved) => {
+                    // Never silently: the default standing in for the sheet's frame is said where
+                    // the painter's problems are said (the editor's status, a plot's report).
+                    if !resolved.fallback.is_empty() {
+                        self.stats
+                            .problems
+                            .push(format!("frame: {}", resolved.fallback));
+                    }
                     let fields = resolve_fields(&drawn_set, self.index, &self.source.fields);
                     paint_frame(
                         &mut *self.canvas,
                         &paper,
                         &text,
-                        frame,
+                        &resolved.frame,
                         sheet,
                         &fields,
                         self.source,
@@ -2376,8 +2419,17 @@ pub fn device_to_paper(
     )
 }
 
+/// The frames the session's customisation offers, from the source's document; None for a source
+/// with no document, and then every frame Katana has compiled in is drawn as itself.
+pub fn offered_frames(source: &SheetSource<'_>) -> Option<Vec<CustomisationPlotFrame>> {
+    source
+        .document
+        .map(|document| document.customisation_state().plot_frames.clone())
+}
+
 /// The frame sheet `sheet` is drawn in, or nothing for a sheet without one (an empty frame id, or
-/// a portrait sheet).
+/// a portrait sheet). The compiled-in frame of its name, whatever the customisation offers: what
+/// the painter draws is resolve_sheet_frame's, with the source's document.
 pub fn sheet_frame(sheet: &Sheet) -> Option<Frame> {
     if sheet.frame.is_empty() || !sheet.landscape {
         return None;

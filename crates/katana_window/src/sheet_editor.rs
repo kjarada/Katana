@@ -70,7 +70,6 @@ use std::time::Instant;
 use egui::{Key, KeyboardShortcut, Modifiers, Ui};
 use katana_cad::document::Document;
 use katana_cad::plot::{PaperSize, SHEET_SCALES, paper_dimensions};
-use katana_cad::plotting::frame::BUILT_IN_FRAME_ID;
 use katana_cad::plotting::generators::{SheetTemplate, blank_sheet};
 use katana_cad::plotting::layout::{
     TILING_GUTTER_MM, TILING_PRESET_COUNT, TilingPreset, preset_name, tile_viewports, tiling_area,
@@ -4483,15 +4482,13 @@ impl SheetEditor {
                     self.fields
                         .check(ui, "sheetFrame", "Frame and title block", !sheet.frame.is_empty())
                 {
+                    // On is the set's frame (Page Setup's Frame), as SHEET SET frame=on is.
+                    let set_frame = set.page_setup.frame.clone();
                     edit(
                         &mut self.queued,
                         "EDIT_SHEET",
                         Box::new(move |s: &mut Sheet| {
-                            s.frame = if on {
-                                String::from(BUILT_IN_FRAME_ID)
-                            } else {
-                                String::new()
-                            };
+                            s.frame = if on { set_frame } else { String::new() };
                         }),
                     );
                 }

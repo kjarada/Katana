@@ -141,7 +141,7 @@ written: case is not folded.
 | Member | Value | Left out | Holds |
 |---|---|---|---|
 | `format` | the text `katana-customisation` | **required** | what the file is |
-| `version` | a whole number, `1` | **required** | the version of this format |
+| `version` | a whole number, `1` or `2` | **required** | the version of this format: `2` when the file has `plotFrames`, else `1` ("The title frames of a customisation") |
 | `name` | text | **required** | the customisation's name (see "The name") |
 | `description` | text | empty | a line or two for whoever picks it from a list |
 | `notice` | a list of lines of text | none | the author's notice - a licence, a disclaimer - carried with the data and shown to whoever uses it |
@@ -150,6 +150,7 @@ written: case is not folded.
 | `colours` | an object, name to colour | none | the colour names of its own (see "Colour names") |
 | `linework` | an object of seven spellings | **absent: says nothing** | the linework control codes |
 | `automation` | an object of two switches | **absent: says nothing** | what is applied to survey data unasked |
+| `plotFrames` | a list of `{"name": ...}`, version 2 | none | the plot frames it offers beside the default ("The title frames of a customisation") |
 | `linestyles` | a list of definitions | none | the definitions not listed as symbols |
 | `symbols` | a list of definitions | none | the definitions listed as symbols |
 | `codes` | a list of rules, IN ORDER | none | the survey code rules |
@@ -373,6 +374,69 @@ the chips `filterMap`, `filterTinable` and `filterVertexmode`, which keep the
 name their first label gave them while showing the new one
 (`FilterBar::set_chip_label`).
 
+### The title frames of a customisation
+
+`plotFrames`, a member of **version 2**, names the plot frames a
+customisation offers beside the default one (`docs/plotting.md`, "A
+customisation's title frames"): a list of `{"name": ...}`, each the name of a
+frame compiled into Katana (`resources/plot_frames/<name>.json`). While it is
+the session's customisation, Page Setup lists them and `frame=` takes them; a
+sheet set naming a frame the session's customisation does not offer plots
+with the default frame and says so.
+
+```text
+  "plotFrames": [
+    {"name": "nsw_a3_utility_cross_section"}
+  ],
+```
+
+- **A name** is 1 to 64 lower-case ASCII letters, digits and `_`, beginning
+  with a letter (`katana_entity::customisation::validate_plot_frame_name`): a
+  word a verb line and a sheet set carry, and a file name on every system,
+  in one case so a name typed in another is the same name. A name given twice
+  is refused, naming the other place: a sheet names its frame by the name
+  alone. The reader and the writer both refuse a bad name, naming the entry
+  (`plotFrames[0] "Probe Frame": "name": ...`).
+- **A name Katana has not compiled in** is read, and kept: the format cannot
+  know which frames a build has. It is not offered, and `SHEETS FRAMES` says
+  so (`problem the customisation "X" offers the frame y, which Katana does
+  not have`).
+- **The version.** The member is new, so it is version 2 ("What may never
+  change without a new version"). The writer writes the OLDEST version that
+  holds the value: a customisation offering no frame is still written as
+  version 1, so an older build reads every file it could read before, and one
+  offering a frame is version 2, which an older build refuses as newer rather
+  than read without its frames. A file that says version 1 and holds
+  `plotFrames` is refused (`ParseFailure`), as a version 1 build refuses it,
+  so the two builds agree on what a version 1 file may hold.
+- **In a session** the frames are the customisation's
+  (`CustomisationState::plot_frames`): an install takes them with the rest
+  (none when it offers none), the session as one customisation carries them
+  (what `KEEP` and an export of the whole write), a merge adds a load's
+  frames by name after the session's, in both modes, as a frame is neither a
+  definition nor a rule, and a part of a customisation (`EXPORT` with kind
+  words, `DEFINITIONS`) carries none, as it carries no linework codes.
+
+**The NSW built-in carries the owner's exact frame.** By the owner's decision
+of 2026-11-19, recorded with the rule on names in the instructions for
+contributors ("i want the exact title frame to be available within the NSW
+customisation"), the NSW built-in offers `nsw_a3_utility_cross_section`: the
+A3 utility cross-section title frame the owner made in their cross-section
+app, with its Transport for NSW heading, logo text and disclaimer exactly as
+they are there, converted from their title block file. It is the one place
+outside the subsurface utility tools where that organisation is named, and
+it is named in the frame's own data only; Katana Standard offers no frame, so
+its sheets keep the unbranded default. The NSW file is version 2 for it, and
+68 bytes longer (1,540,698).
+
+*Rejected: the frame inline in the file.* A frame is a hundred kilobytes of
+coordinates a person does not edit, past this format's 1,000-byte bound on a
+text and in another format with its own parser; inline, it would make the
+customisation undiffable and need a second reader of frames inside a strict
+one. *Rejected: a `file` member beside the name.* The name IS the frame's
+file's stem, and a second word for the same thing is a second place for them
+to disagree.
+
 ### The reader is strict
 
 `customisation_from_json` refuses, and says which entry and which member:
@@ -578,10 +642,10 @@ people as text, and one stroke a line is the unit a diff shows.
 2. Two blanks a level. The first line is `{` and the last `}`.
 3. Each top-level member starts a line, in this order: `format`, `version`,
    `name`, `description`, `notice`, `sources`, `basedOn`, `colours`,
-   `linework`, `automation`, `linestyles`, `symbols`, `codes`.
-4. The entries of `notice`, `sources`, `colours`, `linestyles`, `symbols` and
-   `codes` are one a line, four blanks in, with the closing bracket on a line
-   of its own two blanks in. `basedOn`, `linework` and `automation` are one
+   `linework`, `automation`, `plotFrames`, `linestyles`, `symbols`, `codes`.
+4. The entries of `notice`, `sources`, `colours`, `plotFrames`, `linestyles`,
+   `symbols` and `codes` are one a line, four blanks in, with the closing
+   bracket on a line of its own two blanks in. `basedOn`, `linework` and `automation` are one
    line each.
 5. A definition is one line holding its members, in the order of the table
    above, up to `"strokes": [`; then its strokes one a line, six blanks in;
@@ -909,6 +973,9 @@ these changes while `version` stays 1:
   files that exist, and a wider one would let this build write, as version 1,
   what an older build refuses;
 - what makes two rules the same rule in a merge: `sets` and `key` together.
+
+Version 2 added `plotFrames` and nothing else; everything above holds for
+it as for version 1.
 
 A build reads its own version and every older one, and refuses a newer file
 (`Unsupported`) rather than read it wrongly and write it back without what it
@@ -2102,8 +2169,10 @@ from them that is tracked. The converter copies the two libraries' notice into
 the file's `notice` member, 16 lines, and that notice says the library files may
 not be copied or used without authorisation. The owner removed that text from
 the committed file by hand, on the same day, so two rows of dashes are all its
-`notice` holds and the file is 1,540,630 bytes, not the 1,541,462 the converter
-writes (definitions, rules and colours are the same). Converting again gives
+`notice` holds and the file was 1,540,630 bytes, not the 1,541,462 the converter
+writes (definitions, rules and colours are the same). It is 1,540,698 bytes
+since 2026-11-19, when the owner's title frame was offered in it, which made
+it version 2 ("The title frames of a customisation"). Converting again gives
 the longer file; the committed one is the owner's edit of it and no program
 writes it. The decision to commit the file and to remove the notice is the
 owner's. The owner states that the information in the file is public and has
