@@ -183,7 +183,11 @@ impl GisTool for GisClipDialog {
     }
 
     fn fields_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        dialog::labelled(ui, "Clip to:", |ui| {
+        // The boundary's own heading, level with the scope's "Apply to" across the dialog: under
+        // a "Clip to" row its scope's "Apply to" read as a second scope of what is cut (the
+        // fourth look audit's 7).
+        dialog::section(ui, "Boundary");
+        dialog::labelled(ui, "From:", |ui| {
             if radio(
                 ui,
                 "gisClipBySourceDrawing",
@@ -199,7 +203,7 @@ impl GisTool for GisClipDialog {
             }
         });
         let file = self.from_file;
-        ui.add_enabled_ui(!file, |ui| {
+        crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, !file, |ui| {
             self.by.ui(ui);
         });
         let mut browse = false;

@@ -24,7 +24,7 @@ use katana_core::{ErrorCode, Result};
 use super::buffer_dialog::Words;
 use super::geometry_check_dialog::gis_problems_summary;
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_number,
     gis_number_option, gis_scope, gis_summary, gis_word,
 };
 use crate::host::Host;
@@ -162,21 +162,22 @@ impl GisTool for GisCoverageDialog {
         );
         // The mode chooses which fields apply.
         let clean = self.mode.text() == "clean";
-        gis_field(
+        gis_number(
             ui,
             "gisCoverageGap",
             "Gap width (m):",
             &mut self.gap,
-            "none - no gaps looked for",
-            "gap=: find (check) or close (clean) the enclosed gaps narrower than this",
+            "No gaps",
+            "gap=: find (check) or close (clean) the enclosed gaps narrower than this; left \
+             blank, no gaps are looked for",
         );
         ui.add_enabled_ui(clean, |ui| {
-            gis_field(
+            gis_number(
                 ui,
                 "gisCoverageSnap",
                 "Snap within (m):",
                 &mut self.snap,
-                "none",
+                "No snapping",
                 "snap=: clean only - vertices this close together become one",
             );
             self.merge.ui(
@@ -203,7 +204,7 @@ impl GisTool for GisCoverageDialog {
                 "gisCoverageMarkers",
                 "Markers on layer:",
                 &mut self.markers,
-                "none - report only",
+                "No markers - report only",
                 "markers=<layer>: check only - each bad edge drawn on this layer, replacing the \
                  last check's",
             );

@@ -85,6 +85,10 @@ const DEFAULT_TIMEOUT_SECONDS: i64 = 600;
 /// The body's width: the C++ dialog's 980 less its frame.
 const BODY_WIDTH: f32 = 950.0;
 
+/// The left column's width - the search, the provider tree and Add Custom Service - the rest of
+/// the body the details' and the import's.
+const LEFT_COLUMN_WIDTH: f32 = 450.0;
+
 /// What the dialog asks of whoever shows it; the workbench supplies these, a test supplies its
 /// own.
 pub trait OnlineDialogContext {
@@ -435,8 +439,10 @@ impl OnlineDataDialog {
     /// Shows the project's coordinate system as it is now.
     pub fn refresh_project_crs(&mut self, context: &dyn OnlineDialogContext) {
         let crs = context.project_crs();
+        // None is the one empty word, drawn muted (the row's Set Project CRS... and Use CRS under
+        // it say what to do); "none set - Set Project CRS..., or give one below" was cut short.
         self.project_crs = if crs.is_empty() {
-            String::from("none set - Set Project CRS..., or give one below")
+            String::from(crate::drive::controls::NO_CHOICE)
         } else {
             crs
         };
@@ -565,7 +571,7 @@ impl OnlineDataDialog {
             "Provider",
             format!("{} ({})", layer.provider_title, layer.provider_id),
         );
-        row("Id", format!("{} {}", layer.provider_id, layer.id));
+        row("ID", format!("{} {}", layer.provider_id, layer.id));
         row("Kind", String::from(kind_text(layer.kind)));
         row(
             "Service",
@@ -998,7 +1004,9 @@ impl OnlineDataDialog {
         ui.set_max_width(BODY_WIDTH);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_max_width(450.0);
+                // Exactly the column's width, so the search, the tree and the URL row all end at
+                // its one right edge (the fourth look audit: 463, 528 and 381).
+                ui.set_width(LEFT_COLUMN_WIDTH);
                 self.left(ui, context);
             });
             ui.vertical(|ui| {
@@ -1007,18 +1015,19 @@ impl OnlineDataDialog {
         });
     }
 
-    /// The search, the tree, and Add Custom Service.
+    /// The search, the tree, and Add Custom Service, each to the column's right edge.
     fn left(&mut self, ui: &mut Ui, context: &mut dyn OnlineDialogContext) {
         let searched = line_with(
             ui,
             "onlineSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search providers and layers",
+                placeholder: "Search...",
                 width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
         )
+        .on_hover_text("Providers and layers whose names hold these words")
         .changed();
         if searched {
             let text = self.search.clone();
@@ -1027,6 +1036,9 @@ impl OnlineDataDialog {
         self.tree_ui(ui);
         let add = ui
             .horizontal(|ui| {
+                // The field fills the row less its button, so the row ends at the column's edge
+                // as the search and the tree do (it stopped at egui's default field width).
+                let width = crate::shell::dialog::beside_a_button(ui, "Add Custom Service...");
                 line_with(
                     ui,
                     "onlineCustomUrl",
@@ -1034,6 +1046,7 @@ impl OnlineDataDialog {
                     LineOptions {
                         placeholder: "https://... a WMS, WMTS, WFS, WCS, ArcGIS REST, OGC API, \
                                       STAC or COG address",
+                        width: Some(width),
                         ..LineOptions::default()
                     },
                 );
@@ -1138,7 +1151,13 @@ impl OnlineDataDialog {
             .id_salt(name)
             .max_height(420.0)
             .auto_shrink([false, false])
-            .show(ui, |ui| draw(ui, tree, 0, current, &mut rows))
+            .show(ui, |ui| {
+                // A long title is cut short in the column, not let widen the tree: a vertical
+                // scroll area is as wide as its widest row, and a provider's long layer names,
+                // laid out though scrolled out of sight, held its bar 65 points past the search.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                draw(ui, tree, 0, current, &mut rows);
+            })
             .inner_rect;
         let response = ui.interact(area, ui.id().with(name), egui::Sense::hover());
         if let Some(taken) = &taken
@@ -1323,11 +1342,19 @@ impl OnlineDataDialog {
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     ui.set_min_width(room);
+                    // Said muted while there is none, as an empty choice says None.
+                    let none = self.project_crs == crate::drive::controls::NO_CHOICE;
+                    let shown = if none {
+                        RichText::new(self.project_crs.as_str())
+                            .color(crate::theme::palette::text_muted().to_egui())
+                    } else {
+                        RichText::new(self.project_crs.as_str())
+                    };
                     label_as(
                         ui,
                         "onlineProjectCrs",
                         &self.project_crs,
-                        egui::Label::new(self.project_crs.as_str()).truncate(),
+                        egui::Label::new(shown).truncate(),
                     );
                 },
             );

@@ -415,7 +415,8 @@ impl Body {
             };
             let profile = match &alignment.vertical {
                 Some(vertical) => format!("{} PVIs", vertical.pvis.len()),
-                None => String::from("none"),
+                // The one empty word (drive::controls::NO_CHOICE), where it read "none".
+                None => String::from(crate::drive::controls::NO_CHOICE),
             };
             let row = list.push_row(vec![
                 cell(alignment.name.as_str()),

@@ -244,7 +244,14 @@ mod surface_edit_lines {
             name: String::from("merged"),
             ..SurfaceCombineForm::default()
         };
-        assert!(error(surface_combine_line(&form)).contains("Surfaces"));
+        // The merge's refusal is one sentence saying what to do, no field's name before it (the
+        // fourth look audit: "Surfaces: tick at least two to merge" began with the field's name,
+        // which a status never does - docs/desktop.md's fifth round): it names the surfaces in
+        // its words, and the count it wants.
+        assert_eq!(
+            error(surface_combine_line(&form)),
+            "Tick at least two surfaces to merge"
+        );
         form.merge = strings(&["ground", "pad"]);
         form.name.clear();
         assert!(error(surface_combine_line(&form)).contains("New surface"));

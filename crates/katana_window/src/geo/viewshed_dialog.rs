@@ -546,7 +546,7 @@ impl ViewshedDialog {
             )
         });
         let use_scope = self.use_scope;
-        ui.add_enabled_ui(use_scope, |ui| {
+        crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, use_scope, |ui| {
             self.scope.ui(ui);
         });
         row(ui, "Eye height:", |ui| {

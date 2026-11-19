@@ -23,7 +23,7 @@ use katana_core::text::parse_finite_double;
 use katana_core::{Error, ErrorCode, Result};
 
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target, gis_number,
     gis_scope, gis_word,
 };
 use crate::drive::{Choice, choice};
@@ -229,23 +229,26 @@ impl GisTool for GisBufferDialog {
     }
 
     fn fields_ui(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        gis_field(
+        gis_number(
             ui,
             "gisBufferDistance",
             "Distance (m):",
             &mut self.distance,
-            "e.g. 5; negative shrinks an area",
+            "e.g. 5",
             "distance=: how far out from each entity - an easement's half width, a clearance; a \
-             negative distance sets an area in (a setback)",
+             negative distance shrinks an area (a setback)",
         );
+        // Short words on one line (the fourth look audit's two-line label, "Or distance from
+        // property"); the "or" is the tooltip's.
         gis_field(
             ui,
             "gisBufferDistanceProperty",
-            "Or distance from property:",
+            "Distance property:",
             &mut self.property,
-            "none - the distance above for every entity",
-            "distance=prop:<key>: each entity buffered by the number its own property holds (a \
-             clearance by voltage); one without it is skipped and counted",
+            "No property - the distance above",
+            "distance=prop:<key>: or each entity buffered by the number its own property holds \
+             (a clearance by voltage), instead of the distance above; one without it is skipped \
+             and counted",
         );
         self.side.ui(
             ui,
@@ -278,7 +281,7 @@ impl GisTool for GisBufferDialog {
             "gisBufferDissolveBy",
             "Merge by properties:",
             &mut self.dissolve_by,
-            "none - merge everything",
+            "No properties - merge everything",
             "dissolve=a,b: merge only results whose properties agree",
         );
         gis_field(

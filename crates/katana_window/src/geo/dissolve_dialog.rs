@@ -107,7 +107,7 @@ impl GisTool for GisDissolveDialog {
             "gisDissolveBy",
             "Merge by properties:",
             &mut self.by,
-            "none - merge every area",
+            "No properties - merge every area",
             "by=a,b: areas merge only with those whose properties agree - superlots by owner, \
              stages by stage",
         );

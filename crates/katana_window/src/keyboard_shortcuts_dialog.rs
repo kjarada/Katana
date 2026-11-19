@@ -170,10 +170,11 @@ impl ShortcutsState {
             "keyboardShortcutsSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search: a key (Ctrl+L), a command or a menu",
+                placeholder: "Search...",
                 ..LineOptions::default()
             },
-        );
+        )
+        .on_hover_text("A key (Ctrl+L), a command or a menu");
         self.filter();
         let order = self.order();
         let error = palette::error().to_egui();

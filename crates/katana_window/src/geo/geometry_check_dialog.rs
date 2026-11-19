@@ -158,7 +158,7 @@ impl GisTool for GisCheckDialog {
             "gisCheckMarkers",
             "Markers on layer:",
             &mut self.markers,
-            "none - report only",
+            "No markers - report only",
             "markers=<layer>: a point at each problem on this layer, replacing the points the \
              last check drew there",
         );

@@ -48,8 +48,8 @@ use katana_core::{Error, ErrorCode, Result, Status};
 use katana_entity::{EntityId, Geometry};
 
 use super::survey_dialogs::{
-    SurveyToolFrame, ToolButton, coloured_label, field, form_row, frame_views, offstage,
-    save_file_dialog,
+    SurveyToolFrame, ToolButton, coloured_label, field, form_row, frame_views, number_if,
+    offstage, save_file_dialog,
 };
 use crate::drive::{self, LineOptions, TextOptions};
 use crate::format::qt_fixed;
@@ -241,9 +241,11 @@ impl SurveyParcelDialog {
                 "The id of a closed polyline, as INFO and LIST give it",
             )
         });
+        // A short well, as a number box is (the fourth look audit's 2).
         form_row(ui, "Label height:", |ui| {
-            field(
+            number_if(
                 ui,
+                true,
                 "labelHeight",
                 &mut form.label_height,
                 "2.5",

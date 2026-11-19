@@ -1020,12 +1020,13 @@ impl GdalToolboxDialog {
                         "gdalToolboxSearch",
                         &mut self.search,
                         LineOptions {
-                            placeholder: "search: a name, an alias or a word of the description",
+                            placeholder: "Search...",
                             // As wide as the tree under it, whose header spans the column.
                             width: Some(f32::INFINITY),
                             ..LineOptions::default()
                         },
                     )
+                    .on_hover_text("An algorithm's name, an alias or a word of its description")
                     .changed();
                     clicked = self.tree_ui(ui);
                 });
