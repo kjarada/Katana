@@ -751,6 +751,45 @@ mod torn_off_menus {
         );
     }
 
+    // The owner, 2026-11-19: "still minimise float dont work properly for menus and views". A
+    // view's title bar, clicked with the pointer as a person clicks it, as the menus' are above.
+    #[test]
+    fn a_click_on_a_views_float_floats_it_and_its_dock_button_docks_it_again() {
+        let mut window = MainWindow::new();
+        let mut headless = settled(&mut window);
+        let id = window.exec.workspace.view_ids()[0];
+        let dock = katana_window::view_workspace::dock_name(id);
+        assert!(!window.exec.workspace.is_floating(id));
+        click_bar_button(&mut window, &mut headless, &dock, "DockFloatButton");
+        assert!(window.exec.workspace.is_floating(id), "Float floats the view");
+        let button = headless
+            .snapshot()
+            .control(&dock, "DockFloatButton")
+            .expect("the floating view's Float button")
+            .clone();
+        assert_eq!(button.text, "Dock");
+        click_bar_button(&mut window, &mut headless, &dock, "DockFloatButton");
+        assert!(!window.exec.workspace.is_floating(id), "Dock docks it again");
+    }
+
+    #[test]
+    fn a_click_on_a_views_minimise_hides_it_to_the_tray_and_its_button_there_puts_it_back() {
+        let mut window = MainWindow::new();
+        let mut headless = settled(&mut window);
+        let id = window.exec.workspace.view_ids()[0];
+        let dock = katana_window::view_workspace::dock_name(id);
+        click_bar_button(&mut window, &mut headless, &dock, "DockMinimiseButton");
+        assert!(window.exec.workspace.is_minimised(id), "Minimise hides the view");
+        let restore = format!("Restore{dock}");
+        assert!(
+            headless.snapshot().control("MinimisedToolBar", &restore).is_some(),
+            "and the tray has its button"
+        );
+        click_bar_button(&mut window, &mut headless, "MinimisedToolBar", &restore);
+        assert!(!window.exec.workspace.is_minimised(id), "the tray's button puts it back");
+        assert!(headless.snapshot().target(&dock).is_some(), "drawn again");
+    }
+
     #[test]
     fn a_floating_torn_off_menu_dragged_by_any_edge_or_corner_is_sized_by_it() {
         // The owner, 2026-11-19: "i cannot resize these menus when i go the edge". Each edge and
