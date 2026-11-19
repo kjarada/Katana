@@ -556,7 +556,11 @@ mod leader_manager_lines {
         // The notes of the selected leaders, at the topmost's x.
         assert!(bench.dialog.align_selection(&mut bench.host));
         assert_eq!(last_line(&bench), "LEADER ALIGN SELECTION");
+        // Unticked, x is the topmost note's, said so in words where "0.000" read as a value (the
+        // sixth look audit's H); ticked, the box holds its number.
+        assert_eq!(bench.value("leaderAlignX"), "Topmost note's");
         bench.fill("leaderAlignUseX", "on");
+        assert_eq!(bench.value("leaderAlignX"), "0.000");
         bench.fill("leaderAlignX", "22.5");
         bench.fill("leaderAlignUseSpacing", "on");
         bench.fill("leaderAlignSpacing", "8");

@@ -516,4 +516,17 @@ mod keyboard_shortcuts_dialog {
         );
         assert_eq!(keys(&harness)[0], "F7");
     }
+
+    #[test]
+    fn a_key_no_menu_shows_says_so_in_words() {
+        // The sixth look audit's H: the Menu column read "(no menu)", a bracketed placeholder.
+        let mut dialog = KeyboardShortcutsDialog::new(
+            vec![row("F8", "Hand Tool", "(no menu)", "Pan the view")],
+            &[],
+        );
+        let harness = shortcuts_shown(&mut dialog);
+        let table = harness.control("keyboardShortcutsTable").expect("the table");
+        let cells: Vec<&str> = table.items[0].split(" | ").collect();
+        assert_eq!(cells[2], "No menu", "{cells:?}");
+    }
 }

@@ -792,6 +792,8 @@ mod leader_manager {
             !bench.enabled("leaderAlong"),
             "a plain leader is along nothing"
         );
+        // Said in words, not "0.000 %" (the sixth look audit's H).
+        assert_eq!(bench.value("leaderAlong"), "Tip on nothing");
         bench.run(&format!("SELECT {dim} {id} {line}"));
         bench.draw();
         assert_eq!(bench.dialog.current_leader(), id);

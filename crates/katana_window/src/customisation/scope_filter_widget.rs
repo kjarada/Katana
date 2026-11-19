@@ -183,6 +183,12 @@ pub struct ScopeFilterWidget {
     unused_note: String,
     /// The scope's group's heading (`set_heading`); empty for SCOPE_HEADING.
     heading: String,
+    /// Drawn whole and greyed while it does not apply, its note under its heading, rather than
+    /// as its one line (`keep_shape_when_unused`).
+    keeps_shape: bool,
+    /// Whether it is in use, said by `measure` for its sizing pass: a pass's Ui is invisible,
+    /// and an invisible Ui is disabled too, so the Ui cannot say it. None outside a pass.
+    measuring: Option<bool>,
 }
 
 /// QString::trimmed, then the text: what a field says.
@@ -190,9 +196,20 @@ fn text_of(value: &str) -> String {
     String::from(value.trim())
 }
 
-/// A type box's label: the kind as TYPE= and the variant name it.
+/// A type box's object name part: the kind as TYPE= and the variant name it.
 fn kind_name(kind: EntityType) -> String {
     String::from(to_string(kind))
+}
+
+/// A type box's label: the kind in words, a sentence's - "Curved polyline", where the variant's
+/// name, "CurvePolyline", showed a code's spelling among words (the sixth look audit's H). The
+/// name is still what the box is called and what TYPE= reads (`kind_name`).
+pub fn kind_words(kind: EntityType) -> String {
+    match kind {
+        EntityType::CurvePolyline => String::from("Curved polyline"),
+        // Every other kind is one word already.
+        other => kind_name(other),
+    }
 }
 
 fn no_area_on_screen(view: &ScopeFilterView) -> Error {
@@ -224,7 +241,7 @@ impl ScopeFilterWidget {
                 .map(|&kind| TypeBox {
                     kind,
                     ticked: false,
-                    label: kind_name(kind),
+                    label: kind_words(kind),
                 })
                 .collect(),
             filter_layer: String::new(),
@@ -238,6 +255,8 @@ impl ScopeFilterWidget {
             greyed: BTreeMap::new(),
             unused_note: String::new(),
             heading: String::new(),
+            keeps_shape: false,
+            measuring: None,
         }
     }
 
@@ -642,14 +661,14 @@ impl ScopeFilterWidget {
                 .iter()
                 .find(|(kind, _)| *kind == type_box.kind)
                 .map_or(0, |(_, count)| *count);
-            type_box.label = format!("{} ({count})", kind_name(type_box.kind));
+            type_box.label = format!("{} ({count})", kind_words(type_box.kind));
         }
     }
 
     /// Takes the numbers off again: the plain kind names.
     pub fn hide_type_counts(&mut self) {
         for type_box in &mut self.types {
-            type_box.label = kind_name(type_box.kind);
+            type_box.label = kind_words(type_box.kind);
         }
     }
 
@@ -658,6 +677,17 @@ impl ScopeFilterWidget {
     /// the whole drawing" - or, until a dialog says, UNUSED_NOTE. Not an edit.
     pub fn set_unused_note(&mut self, note: &str) {
         self.unused_note = String::from(note);
+    }
+
+    /// Has the widget keep its shape while it does not apply: every control drawn, greyed, with
+    /// the unused note (`set_unused_note`) under its heading, where by default it is its heading
+    /// and that one line. For a scope standing in a column of its own beside a dialog's pages
+    /// (Subsurface Utilities): there its one line left the column empty under it, and a layout
+    /// that followed whether the scope applied moved the pages beside it (the sixth look audit's
+    /// G). Under a dialog's fields the one line stays the rule - drawn whole there it was most of
+    /// the dialog. Not an edit.
+    pub fn keep_shape_when_unused(&mut self, keep: bool) {
+        self.keeps_shape = keep;
     }
 
     /// Names the scope's group `heading` in place of "Apply to": for a dialog whose scope picks
@@ -701,16 +731,16 @@ impl ScopeFilterWidget {
         });
     }
 
-    /// How tall the widget is drawn in use, its controls whole, as `ui` draws it in `column` - a
-    /// column of a row `width` wide (true), or a body's own column (false) - measured in a sizing
-    /// pass (shell::dialog::measured_height) and drawing nothing. With `measure_unused`, what a
-    /// dialog whose layout follows whether its scope applies (Subsurface Utilities) sizes the
-    /// layout it is not showing by. Nothing done since the last frame is lost: an edit is still
-    /// reported by the next `ui`.
-    pub fn measure_in_use(&mut self, ui: &mut Ui, width: f32, column: bool) -> f32 {
+    /// How tall the widget is drawn, as `ui` draws it in `column` - a column of a row `width` wide
+    /// (true), or a body's own column (false) - in use (`in_use`) or not, measured in a sizing pass
+    /// (shell::dialog::measured_height) and drawing nothing: what a dialog that sizes its pages by
+    /// the scope beside them (Subsurface Utilities) reads. Nothing done since the last frame is
+    /// lost: an edit is still reported by the next `ui`.
+    pub fn measure(&mut self, ui: &mut Ui, width: f32, column: bool, in_use: bool) -> f32 {
         let pending = self.pending;
-        let salt = self.object_name();
-        let height = dialog::measured_height(ui, ("katanaScopeInUse", salt), width, |ui| {
+        let salt = (self.object_name(), in_use);
+        self.measuring = Some(in_use);
+        let height = dialog::measured_height(ui, ("katanaScopeMeasured", salt), width, |ui| {
             if column {
                 // In a row, as the widget reads its width (dialog::in_a_column).
                 ui.horizontal_top(|ui| {
@@ -723,17 +753,9 @@ impl ScopeFilterWidget {
                 self.ui(ui);
             }
         });
+        self.measuring = None;
         self.pending = pending;
         height
-    }
-
-    /// How tall the widget is drawn while it does not apply (its heading and one line) `width`
-    /// wide, with no field above it (see `measure_in_use`).
-    pub fn measure_unused(&self, ui: &mut Ui, width: f32) -> f32 {
-        let salt = self.object_name();
-        dialog::measured_height(ui, ("katanaScopeUnused", salt), width, |ui| {
-            self.unused_lines(ui);
-        })
     }
 
     /// Draws the controls; true when any was edited this frame - by a person or a driver - or by a
@@ -745,7 +767,8 @@ impl ScopeFilterWidget {
     /// of Contours, Volumes, Raise/Lower, Viewshed, Road Objects and Import Vector (the fourth
     /// look audit, "For 10"). Every control is still recorded under its name and with its value,
     /// drawn hidden and disabled (drive::controls::withdrawn), so a driver reads it as before and a
-    /// fill or a press of it is refused as disabled, as when it was drawn greyed.
+    /// fill or a press of it is refused as disabled, as when it was drawn greyed. One that keeps
+    /// its shape (`keep_shape_when_unused`) is drawn whole and greyed, its note under its heading.
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = std::mem::take(&mut self.pending);
         // Under what a dialog drew above it, a group's gap before its "Apply to" heading, as
@@ -757,7 +780,10 @@ impl ScopeFilterWidget {
         }
         // A Ui that is not drawn at all (hidden by its owner) is drawn as before: nothing is seen
         // either way, and its controls record themselves hidden as any control does.
-        let unused = !ui.is_enabled() && ui.is_visible();
+        let unused = match self.measuring {
+            Some(in_use) => !in_use,
+            None => !ui.is_enabled() && ui.is_visible(),
+        };
         let outer = ui.vertical(|ui| {
             // Under a dialog's fields it fills the body's column, so its fields end at the edge
             // theirs do: at WIDGET_WIDTH there they stopped 120 short of the dialog's (Drape,
@@ -771,17 +797,23 @@ impl ScopeFilterWidget {
                 ui.available_width()
             };
             ui.set_width(width.max(0.0));
-            if unused {
+            if unused && self.keeps_shape {
+                // Whole and greyed, saying why under its heading.
+                let note = self.unused_note().to_owned();
+                if self.controls_ui(ui, Some(&note)) {
+                    changed = true;
+                }
+            } else if unused {
                 self.unused_lines(ui);
                 let salt = self.object_name();
                 crate::drive::controls::withdrawn(ui, &salt, |ui| {
                     // Laid out as it would be, and not drawn: its records and its answers to a
                     // driver are the controls' own.
-                    if self.controls_ui(ui) {
+                    if self.controls_ui(ui, None) {
                         changed = true;
                     }
                 });
-            } else if self.controls_ui(ui) {
+            } else if self.controls_ui(ui, None) {
                 changed = true;
             }
         });
@@ -794,14 +826,21 @@ impl ScopeFilterWidget {
         changed
     }
 
-    /// The groups of controls, "Apply to" and "Only those that match", in `ui` (`ui` draws them):
-    /// true when any was edited this frame.
-    fn controls_ui(&mut self, ui: &mut Ui) -> bool {
+    /// The groups of controls, "Apply to" and "Only those that match", in `ui` (`ui` draws them),
+    /// `note` - why it does not apply - under the heading: true when any was edited this frame.
+    fn controls_ui(&mut self, ui: &mut Ui, note: Option<&str>) -> bool {
         let mut changed = false;
         // ---- Apply to ----
         let scope_group = ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
             dialog::section(ui, &self.heading_text());
+            if let Some(note) = note {
+                // Muted but whole, as `unused_lines` draws it: faded twice it could not be read.
+                ui.scope(|ui| {
+                    ui.set_opacity(1.0);
+                    dialog::note(ui, note);
+                });
+            }
             let choices = [
                 (
                     "ScopeSelection",

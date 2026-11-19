@@ -423,7 +423,13 @@ impl DimensionStyleManagerDialog {
         };
         self.scale = exact_number(style.unit_scale);
         self.decimals = i64::from(style.decimals).clamp(0, MOST_DECIMALS);
-        self.round = exact_number(style.round_to);
+        // No rounding is an empty field saying "None": a "0" read as rounding to nothing (the
+        // sixth look audit's H). A blank reads back as 0 (`apply`).
+        self.round = if style.round_to == 0.0 {
+            String::new()
+        } else {
+            exact_number(style.round_to)
+        };
         self.trim = style.suppress_trailing_zeros;
         self.paper = style.paper_sized;
         self.show_preview();
@@ -510,7 +516,11 @@ impl DimensionStyleManagerDialog {
         style.extension_beyond = number_in(&self.ext_beyond, "the extension beyond")?;
         style.arrow_size = number_in(&self.arrow, "the arrow size")?;
         style.unit_scale = number_in(&self.scale, "the unit scale")?;
-        style.round_to = number_in(&self.round, "the rounding")?;
+        style.round_to = if self.round.trim().is_empty() {
+            0.0
+        } else {
+            number_in(&self.round, "the rounding")?
+        };
         style.prefix.clone_from(&self.prefix);
         style.suffix.clone_from(&self.suffix);
         if let Some(&(head, _)) = self.head.index.and_then(|at| HEADS.get(at))
@@ -880,8 +890,8 @@ impl DimensionStyleManagerDialog {
                         .on_hover_text("Places after the decimal point");
                 });
                 short_row(form, "Round to", |ui| {
-                    edit(ui, "dimStyleRound", &mut self.round, "").on_hover_text(
-                        "Rounds the measurement to a multiple of this; 0 for none",
+                    edit(ui, "dimStyleRound", &mut self.round, "None").on_hover_text(
+                        "Rounds the measurement to a multiple of this; blank or 0 for none",
                     );
                 });
                 form.check("dimStyleTrim", "Drop trailing zeros", &mut self.trim);

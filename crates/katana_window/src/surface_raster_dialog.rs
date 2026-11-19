@@ -347,7 +347,14 @@ impl Framed for SurfaceFromDialog {
         });
         row(ui, "Most points:", |ui| {
             ui.add_enabled_ui(kind != SurfaceFromKind::Drawing, |ui| {
-                field(ui, "surfaceFromMax", &mut self.max_points, "400000");
+                // A short well, as every number kept as text is: filling the row, it read as a
+                // sentence's field (the sixth look audit's H).
+                crate::drive::controls::number_line(
+                    ui,
+                    "surfaceFromMax",
+                    &mut self.max_points,
+                    "400000",
+                );
             });
         });
         row(ui, "Window:", |ui| {

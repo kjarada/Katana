@@ -1047,15 +1047,15 @@ impl Body {
             });
         });
         dialog::labelled(ui, "Start chainage:", |ui| {
-            // The field leaves its button the room beside it, inside the column.
-            ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Set Start Chainage");
-            field(
+            // A short well, its button beside it, as every number kept as text is: the field ran
+            // to the button across the column (the sixth look audit's H).
+            crate::drive::controls::number_line(
                 ui,
                 "alignmentStartStation",
                 &mut self.start_station,
                 "0",
-                "The chainage the alignment starts at",
-            );
+            )
+            .on_hover_text("The chainage the alignment starts at");
             ui.add_enabled_ui(enabled, |ui| {
                 if button(
                     ui,

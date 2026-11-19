@@ -378,6 +378,8 @@ mod global_modify_dialog {
         let mut bench = fixture.dialog();
         select(&mut bench, &[p1, p2, road]);
         bench.fill("globalModifySetSymbol", "on");
+        // The symbol's size at 0 is its own, said in words (the sixth look audit's H: "0.000").
+        assert_eq!(bench.value("globalModifySymbolSize"), "Its own size");
         bench.fill("globalModifySymbol", "tree");
         assert!(
             bench.dialog.apply(&mut bench.host),

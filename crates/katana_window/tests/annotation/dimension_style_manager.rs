@@ -51,6 +51,9 @@ mod dimension_style_manager {
         let mut bench = manager();
         assert_eq!(bench.dialog.name(), "dimensionStyleManagerDialog");
         assert_eq!(bench.dialog.current(), "Standard");
+        // Standard rounds to nothing: an empty field saying "None", not "0" (the sixth look
+        // audit's H).
+        assert_eq!(bench.value("dimStyleRound"), "");
 
         bench.fill("dimStyleText", "3.5");
         bench.fill("dimStyleGap", "0.8");

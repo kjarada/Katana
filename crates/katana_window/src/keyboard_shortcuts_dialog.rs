@@ -280,7 +280,11 @@ impl KeyboardShortcutsDialog {
                 if *clash {
                     key.push_str(" (clash)");
                 }
-                [key, row.command.clone(), row.menu.clone(), row.tip.clone()]
+                // A key no menu shows says so in words, "No menu", where the row read "(no
+                // menu)", a list's bracketed placeholder (the sixth look audit's H).
+                let menu = crate::drive::controls::empty_item_words(&row.menu)
+                    .unwrap_or_else(|| row.menu.clone());
+                [key, row.command.clone(), menu, row.tip.clone()]
             })
             .collect();
         let clash_text = if clashes.is_empty() {
