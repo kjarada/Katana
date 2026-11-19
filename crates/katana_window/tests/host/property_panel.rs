@@ -136,7 +136,9 @@ mod property_panel {
 
         assert_eq!(
             p.rows(&p.row("General", &[])),
-            "Id | 1 ; Type | Polyline ; Layer | 0 ; Colour | ByLayer"
+            // "ID" where the C++ wrote "Id": the abbreviation as the window writes it elsewhere
+            // (Edit > Select by ID), the fourth look audit.
+            "ID | 1 ; Type | Polyline ; Layer | 0 ; Colour | ByLayer"
         );
         // The count is the Vertices group's; 10 + sqrt(125) + 10 + sqrt(125).
         assert_eq!(

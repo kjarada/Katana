@@ -442,9 +442,12 @@ pub fn editable_choice_frame<R>(
     // The field draws no frame of its own; its text stands FIELD_INSET in, as a field's does, and
     // the pixel of border the frame below draws round it is counted in that.
     let inset = FIELD_INSET as i8 - 1;
+    // A placeholder that names the empty value in brackets ("(no symbol)", the name picker's) is
+    // shown in the window's one spelling of it, as a choice's empty item is (`empty_item_words`).
+    let placeholder = empty_item_words(placeholder).unwrap_or_else(|| String::from(placeholder));
     let mut edit = egui::TextEdit::singleline(text)
         .id_salt(salt)
-        .hint_text(String::from(placeholder))
+        .hint_text(placeholder)
         .frame(egui::Frame::new().inner_margin(egui::Margin {
             left: inset,
             right: 2,
@@ -933,14 +936,129 @@ impl Choice {
     }
 }
 
-/// What an empty choice says (`choice`): nothing is chosen.
+/// What an empty choice says (`choice`): nothing is chosen. The window's ONE word for empty (the
+/// fourth look audit's 3: None, none, (none), (no symbol), (no linetype) and No style were six
+/// spellings of it, mixed in one form). A hint that names what is missing is `no_value_hint`'s.
 pub const NO_CHOICE: &str = "None";
+
+/// What an empty search field says, in every dialog that filters a list by words typed: one
+/// spelling where there were "search: ...", "Search: ..." and "Search ..." (the fourth look
+/// audit). What the search reads goes in the field's tooltip, not its placeholder.
+pub const SEARCH_HINT: &str = "Search...";
+
+/// A hint that names what is missing: "No symbol", "No linetype", "No surface" for `thing`
+/// "symbol", "linetype", "surface" - for `choice_with_hint` and a field's placeholder, so an empty
+/// value is said one way, in sentence case, never "(no symbol)" or "none".
+pub fn no_value_hint(thing: &str) -> String {
+    format!("No {}", thing.trim())
+}
+
+/// `text` with its first letter a capital, the rest as it is: the sentence case a choice's shown
+/// value takes (`ChoiceOptions::sentence_case`) and a status starts with.
+pub fn sentence_start(text: &str) -> String {
+    let mut letters = text.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+/// The words an item that IS the empty value shows - "(none)" is NO_CHOICE, "(no symbol)" is "No
+/// symbol" (`no_value_hint`) - or None for an item that is a value. Only the bracketed forms: an
+/// item in brackets is a list's own placeholder for nothing, never a name the drawing holds,
+/// where a bare "none" may be a verb's token for a real setting (an arrowhead of none), which
+/// sentence case shows as "None" all the same.
+pub fn empty_item_words(item: &str) -> Option<String> {
+    let inner = item.trim().strip_prefix('(')?.strip_suffix(')')?;
+    if inner.eq_ignore_ascii_case("none") {
+        return Some(String::from(NO_CHOICE));
+    }
+    let thing = inner.strip_prefix("no ")?;
+    let words = !thing.trim().is_empty()
+        && thing
+            .chars()
+            .all(|letter| letter.is_alphabetic() || letter == ' ');
+    words.then(|| no_value_hint(thing))
+}
+
+/// How a choice shows `item`: an item that is the empty value (`empty_item_words`) in its words,
+/// muted as a hint is; otherwise the item, its first letter a capital when `sentence_case`. What
+/// is shown only: a choice records and is filled by the item itself.
+pub fn shown_item(item: &str, sentence_case: bool) -> egui::WidgetText {
+    // An item of no words (a verb's default, unsaid) is the empty value as a list row too.
+    let words = if item.trim().is_empty() {
+        Some(String::from(NO_CHOICE))
+    } else {
+        empty_item_words(item)
+    };
+    if let Some(words) = words {
+        return egui::RichText::new(words)
+            .color(crate::theme::palette::text_muted().to_egui())
+            .into();
+    }
+    if sentence_case {
+        sentence_start(item).into()
+    } else {
+        item.into()
+    }
+}
+
+/// The item a fill of a choice that cannot be typed into chooses: the item that is `text`; else
+/// the one item that reads `text` ignoring case, or shows it (`empty_item_words`) - a choice shows
+/// its tokens in sentence case, and a driver or a person may write either. None where none does,
+/// or where two do, which only the item's own spelling can tell apart.
+fn item_filled(items: &[String], text: &str) -> Option<usize> {
+    if let Some(at) = items.iter().position(|item| item == text) {
+        return Some(at);
+    }
+    let same = |item: &String| {
+        crate::command_log::same_ignoring_case(item, text)
+            || empty_item_words(item)
+                .is_some_and(|words| crate::command_log::same_ignoring_case(&words, text))
+    };
+    let mut found = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| same(item))
+        .map(|(at, _)| at);
+    match (found.next(), found.next()) {
+        (Some(at), None) => Some(at),
+        _ => None,
+    }
+}
+
+/// How a choice is drawn (`choice_with`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChoiceOptions<'a> {
+    /// What it says, muted, while nothing is chosen and it shows no text (`choice_with_hint`).
+    pub hint: &'a str,
+    /// Its items are a verb's tokens ("both", "round", "auto"), shown in sentence case ("Both",
+    /// "Round", "Auto") as every other choice's values are; the item - the token - is still what it
+    /// records and what a fill names (in either case). Not for a list of names the drawing holds
+    /// (layers, surfaces, styles): a name is shown as it was written.
+    pub sentence_case: bool,
+}
 
 /// QComboBox over `items`: a fill chooses the item whose text is the text given; an editable one
 /// takes a text it does not list, as typing does; any other is refused (fillField). While nothing
 /// is chosen and it shows no text it says NO_CHOICE, muted (`choice_with_hint`).
 pub fn choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) -> Response {
     choice_with_hint(ui, name, items, chosen, NO_CHOICE)
+}
+
+/// `choice` over a verb's tokens, shown in sentence case (`ChoiceOptions::sentence_case`), saying
+/// NO_CHOICE while nothing is chosen.
+pub fn token_choice(ui: &mut Ui, name: &str, items: &[String], chosen: &mut Choice) -> Response {
+    choice_with(
+        ui,
+        name,
+        items,
+        chosen,
+        ChoiceOptions {
+            hint: NO_CHOICE,
+            sentence_case: true,
+        },
+    )
 }
 
 /// `choice`, saying `hint` - muted, in the control - while nothing is chosen and it shows no text:
@@ -959,13 +1077,48 @@ pub fn choice_with_hint(
     chosen: &mut Choice,
     hint: &str,
 ) -> Response {
+    choice_with(
+        ui,
+        name,
+        items,
+        chosen,
+        ChoiceOptions {
+            hint,
+            sentence_case: false,
+        },
+    )
+}
+
+/// `choice` drawn as `options` say: its hint, and whether its items are shown in sentence case.
+///
+/// What every choice shows, whatever its options: an item that IS the empty value - "(none)",
+/// "(no symbol)" - in the window's one empty word, muted (`empty_item_words`), so a list's own
+/// placeholder reads as the hint of an empty choice does. A fill of a choice that cannot be typed
+/// into takes the item's own text, or the one item reading it in another case or showing it
+/// (`item_filled`); its record keeps the items and the chosen item as they are.
+pub fn choice_with(
+    ui: &mut Ui,
+    name: &str,
+    items: &[String],
+    chosen: &mut Choice,
+    options: ChoiceOptions<'_>,
+) -> Response {
+    let hint = options.hint;
+    let sentence_case = options.sentence_case;
     let taken = take(ui, name);
     let mut changed = false;
     if let Some(taken) = &taken {
         match &taken.posted.act {
             Act::Fill(text) => {
                 if accept_fill(ui, taken) {
-                    if let Some(index) = items.iter().position(|item| item == text) {
+                    // An editable choice takes a text in another case as a name typed, as typing
+                    // it does; one that cannot be typed into reads it as its item.
+                    let found = if chosen.editable {
+                        items.iter().position(|item| item == text)
+                    } else {
+                        item_filled(items, text)
+                    };
+                    if let Some(index) = found {
                         let before = chosen.clone();
                         chosen.choose(index, items);
                         changed = *chosen != before;
@@ -990,7 +1143,10 @@ pub fn choice_with_hint(
         // The field's own hint is drawn while it is empty: the editable choice's empty state.
         editable_choice_frame(ui, name, &mut chosen.text, hint, None, |ui| {
             for (at, item) in items.iter().enumerate() {
-                if ui.selectable_label(index == Some(at), item).clicked() {
+                if ui
+                    .selectable_label(index == Some(at), shown_item(item, sentence_case))
+                    .clicked()
+                {
                     picked = Some(at);
                 }
             }
@@ -999,15 +1155,15 @@ pub fn choice_with_hint(
     } else {
         let current = chosen.current_text(items);
         let index = chosen.index;
-        // Nothing chosen - no index, or one past the list's end - and nothing to show: the hint.
-        // An item chosen whose text is "" is a choice, and shows as it is.
-        let nothing = chosen.index.is_none_or(|at| at >= items.len());
-        let shown: egui::WidgetText = if nothing && current.is_empty() && !hint.is_empty() {
-            egui::RichText::new(hint)
+        // Nothing to show - nothing chosen, or an item chosen whose text is "" (DEM Tools'
+        // Resolution, Strategy and Resampling, whose first item is the verb's default, unsaid):
+        // the hint. A blank well read as a control that failed to fill, chosen or not.
+        let shown: egui::WidgetText = if current.is_empty() && !hint.is_empty() {
+            egui::RichText::new(empty_item_words(hint).unwrap_or_else(|| String::from(hint)))
                 .color(crate::theme::palette::text_muted().to_egui())
                 .into()
         } else {
-            current.into()
+            shown_item(&current, sentence_case)
         };
         egui::ComboBox::from_id_salt(name)
             .selected_text(shown)
@@ -1023,7 +1179,10 @@ pub fn choice_with_hint(
             })
             .show_ui(ui, |ui| {
                 for (at, item) in items.iter().enumerate() {
-                    if ui.selectable_label(index == Some(at), item).clicked() {
+                    if ui
+                        .selectable_label(index == Some(at), shown_item(item, sentence_case))
+                        .clicked()
+                    {
                         picked = Some(at);
                     }
                 }

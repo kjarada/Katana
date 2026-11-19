@@ -570,7 +570,9 @@ fn entity_rows(document: &Document, entity: &Entity) -> Vec<PropertyRow> {
     let mut general = heading("General", "general", "");
     general.open = true;
     let mut general_rows = vec![
-        leaf("Id", &format!("{}", entity.id)),
+        // "ID", as the window writes the abbreviation everywhere else (Select by ID, the
+        // Command Reference); "Id" read as a word (the fourth look audit).
+        leaf("ID", &format!("{}", entity.id)),
         leaf("Type", to_string(entity.r#type())),
         leaf("Layer", &entity.layer),
         leaf(

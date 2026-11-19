@@ -118,6 +118,70 @@ mod vertex_panel_widget {
             .expect("Delete is pressed");
         assert_eq!(panel.row_count(), 3);
     }
+
+    #[test]
+    fn the_table_shows_whole_columns_at_a_panels_width_and_scrolls_the_rest_in() {
+        // The fourth look audit (S\main_vertices.png): in the panel's 225 points the table's view
+        // ended in the middle of the Height column's fields. It shows as many whole columns as
+        // fit and the rest scroll in: no column is cut at the view's edge.
+        let mut document = Document::new(None);
+        let id = add_traverse(&mut document);
+        document.selection_mut().add(id);
+        document.notify_selection_changed();
+        let mut panel = VertexPanel::new(&document);
+        let mut harness = Harness::new();
+        katana_window::theme::apply(harness.context());
+        let mut draw = |ui: &mut egui::Ui| {
+            ui.allocate_ui(egui::vec2(225.0, 400.0), |ui| {
+                panel.ui(ui, &mut document);
+            });
+        };
+        harness.show(&mut draw).expect("the panel is drawn");
+        let output = harness.frame(&mut draw);
+        let headers = [
+            "#", "Easting", "Northing", "Height", "Bulge", "Bearing", "Distance",
+        ];
+        let mut seen = Vec::new();
+        for clipped in &output.shapes {
+            let egui::Shape::Text(text) = &clipped.shape else {
+                continue;
+            };
+            let words = text.galley.text();
+            if !headers.contains(&words) {
+                continue;
+            }
+            let ink = text.visual_bounding_rect();
+            if clipped.clip_rect.contains_rect(ink) {
+                seen.push(String::from(words));
+            } else {
+                assert!(
+                    !clipped.clip_rect.intersects(ink.shrink(0.5)),
+                    "{words} is cut at the table's edge: {ink:?} in {:?}",
+                    clipped.clip_rect
+                );
+            }
+        }
+        output.drop_without_applying_deltas();
+        assert!(seen.len() >= 3, "the index and the coordinates: {seen:?}");
+        assert!(seen.len() < headers.len(), "the premise: the rest scroll in");
+        assert_eq!(seen, headers[..seen.len()], "the leading columns, whole");
+        // A header out of the view is not painted at all (egui skips what it cannot see), or
+        // painted wholly outside it - never cut.
+        let table = harness.control("vertexTable").expect("drawn").rect;
+        assert!(table.width() > 225.0, "the premise: the table is wider than its panel");
+    }
+
+    #[test]
+    fn whole_columns_are_the_leading_ones_that_fit_and_the_first_always() {
+        use katana_window::drawing::vertex_panel::whole_columns_width;
+        let widths = [24.0, 58.0, 68.0, 56.0, 50.0];
+        // 24 + 4 + 58 + 4 + 68 = 158; with the next, 218.
+        assert_eq!(whole_columns_width(&widths, 4.0, 217.0), 158.0);
+        assert_eq!(whole_columns_width(&widths, 4.0, 218.0), 218.0);
+        assert_eq!(whole_columns_width(&widths, 4.0, 10_000.0), 272.0);
+        assert_eq!(whole_columns_width(&widths, 4.0, 0.0), 24.0);
+        assert_eq!(whole_columns_width(&[], 4.0, 100.0), 0.0);
+    }
 }
 
 mod drawing_ui_install {

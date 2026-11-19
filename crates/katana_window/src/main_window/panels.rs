@@ -2353,9 +2353,7 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
         let at_end = shown.state.offset.y + 1.0
             >= shown.content_size.y - shown.inner_rect.height();
         if at_end
-            && let Some(top) =
-                first_whole_line_top(galley, *galley_pos, shown.inner_rect.top())
-            && top > shown.inner_rect.top() + 0.5
+            && let Some(top) = log_cover_bottom(galley, *galley_pos, shown.inner_rect.top())
         {
             let cover = Rect::from_min_max(
                 shown.inner_rect.min,
@@ -2435,13 +2433,10 @@ pub fn scroll_bar_seen(ui: &mut Ui) {
     ui.spacing_mut().scroll.foreground_color = true;
 }
 
-/// `text` with its first letter a capital, the rest as it is.
+/// `text` with its first letter a capital, the rest as it is (drive::controls::sentence_start,
+/// the one implementation, which a choice's shown values take too).
 pub fn sentence_start(text: &str) -> String {
-    let mut letters = text.chars();
-    match letters.next() {
-        Some(first) => first.to_uppercase().chain(letters).collect(),
-        None => String::new(),
-    }
+    controls::sentence_start(text)
 }
 
 /// The command log's box: what `controls::text_with` draws for a read-only, fixed-pitch text box
@@ -2469,6 +2464,11 @@ fn command_log_box(ui: &mut Ui, log: &mut String) -> (std::sync::Arc<egui::Galle
             Act::ScrollTo => {}
         }
     }
+    // What a person reads: each error's sentence, its code (InvalidState:, NotFound:) left in
+    // the log's record - what --report, the drivers and the tests read - and in what a line hands
+    // back, as the status bar shows it (command_log::without_error_code). The log printed the
+    // enum's names, "ParseFailure: ..." (the fourth look audit).
+    let mut shown = shown_log(log);
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
         let mut job = egui::text::LayoutJob::default();
@@ -2487,7 +2487,7 @@ fn command_log_box(ui: &mut Ui, log: &mut String) -> (std::sync::Arc<egui::Galle
         job.wrap.max_width = wrap_width;
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
-    let output = egui::TextEdit::multiline(log)
+    let output = egui::TextEdit::multiline(&mut shown)
         .id_salt(NAME)
         .desired_rows(3)
         .desired_width(f32::INFINITY)
@@ -2511,6 +2511,47 @@ fn command_log_box(ui: &mut Ui, log: &mut String) -> (std::sync::Arc<egui::Galle
     kept.value = log.clone();
     record(ui, &response, kept);
     (output.galley, output.galley_pos)
+}
+
+/// How far down from the log's top (`view_top`) its own ground is painted over what is drawn
+/// there, the log's galley drawn at `at`: to the top of the INK of its first whole line
+/// (`first_whole_line_top`), on a whole pixel above it - None when there is nothing to cover.
+///
+/// To the ink, not the row's top: a glyph's descender may reach below its row, and at Extra Large
+/// the row above the first whole one - wholly above the view but for its descenders - showed a
+/// pixel of them over the first line, whose row started within half a point of the top and so was
+/// not covered at all (the fourth look audit, S\crops\main_text_xl_284_722.png). The space
+/// between a row's top and its ink is the font's own, so covering it hides nothing of the line.
+pub fn log_cover_bottom(galley: &egui::Galley, at: Pos2, view_top: f32) -> Option<f32> {
+    let row = galley
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index == 0 || galley.rows[index - 1].ends_with_newline)
+        .map(|(_, row)| row)
+        .find(|row| at.y + row.pos.y >= view_top - 0.5)?;
+    let top = at.y + row.pos.y;
+    let ink = row.visuals.mesh_bounds;
+    // A row of no glyphs (a blank line) has no ink: its top is the line's.
+    let ink_top = if ink.is_positive() {
+        (top + ink.min.y).max(top)
+    } else {
+        top
+    };
+    let bottom = ink_top.floor();
+    (bottom > view_top + 0.5).then_some(bottom)
+}
+
+/// The command log's text as the log panel shows it: each error line ("! ...") without the code
+/// its description starts with (command_log::without_error_code), every other line as it is.
+pub fn shown_log(log: &str) -> String {
+    log.split('\n')
+        .map(|line| match line.strip_prefix("! ") {
+            Some(error) => format!("! {}", crate::command_log::without_error_code(error)),
+            None => String::from(line),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The top on the screen of the first row of `galley`, drawn at `at`, that starts a logical line
