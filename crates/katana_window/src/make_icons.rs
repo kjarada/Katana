@@ -7,9 +7,10 @@
 //! katana.ico        the application icon, 16 to 256 px, for the Windows resource in katana.rc
 //!                   and for an installer
 //! katana.png        the 256 px icon, for a README or a store listing
-//! icon_sheet.png    every icon on the theme's own ground, large enough to judge, then at 20 px
-//!                   at rest and active and at 16 px - the way to review the set without
-//!                   launching the application
+//! icon_sheet.png    every icon on the theme's own ground in its discipline's colours, large
+//!                   enough to judge, then at 20 px and 16 px at rest, active and disabled, and
+//!                   the disciplines' hues named - the way to review the set without launching
+//!                   the application
 //! ```
 //!
 //! The .ico is COMMITTED (resources/katana.ico) rather than generated during the build.
@@ -25,10 +26,10 @@ use katana_core::error::make_error;
 use katana_core::path_text::path_to_utf8;
 use katana_core::{ErrorCode, Status};
 
-use crate::canvas::{Brush, Canvas, PointF, RectF, encode_png, write_png};
+use crate::canvas::{Brush, Canvas, Path as Outline, Pen, PointF, RectF, encode_png, write_png};
 use crate::icons::{
-    IconMode, Rasteriser, all_icons, application_icon_image, default_rasteriser, icon_colours,
-    paint_icon,
+    DISCIPLINES, IconMode, Rasteriser, all_icons, application_icon_image, default_rasteriser,
+    paint_named_icon,
 };
 use crate::theme::palette;
 
@@ -89,22 +90,30 @@ pub fn write_ico(path: &Path, sizes: &[u32], raster: &dyn Rasteriser) -> Status 
     })
 }
 
-/// Every icon at 96 px, eight to a row, on the window colour; then all of them at the sizes they
-/// ship at - 20 px at rest, 20 px active (a running tool, a toggle on) and a menu's 16 px - each
-/// wrapped in rows the sheet's width; then the application icon. Large, because the point is to
-/// look at them; the small rows because what reads at 96 does not always read at 20 or 16.
+/// Every icon at 96 px, eight to a row, on the window colour, in its discipline's colours; then
+/// all of them at the sizes they ship at - a toolbar's 20 px and a menu's 16 px, each at rest,
+/// active (a running tool, a toggle on: on the raised ground inside the accent frame a checked
+/// button has) and disabled - each wrapped in rows the sheet's width; then the disciplines, each
+/// hue's swatch and name; then the application icon. Large, because the point is to look at them;
+/// the small rows because what reads at 96 does not always read at 20 or 16.
 pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
     const CELL: i32 = 120;
     const ICON: i32 = 96;
     const COLUMNS: i32 = 8;
     const WIDTH: i32 = COLUMNS * CELL;
     // The small rows: each size, its pitch, its mode.
-    const SMALL: [(i32, i32, IconMode); 3] = [
+    const SMALL: [(i32, i32, IconMode); 6] = [
         (20, 30, IconMode::Normal),
         (20, 30, IconMode::Active),
+        (20, 30, IconMode::Disabled),
         (16, 24, IconMode::Normal),
+        (16, 24, IconMode::Active),
+        (16, 24, IconMode::Disabled),
     ];
     const MARGIN: i32 = 16;
+    // The legend: one swatch and name a discipline, five to a row.
+    const LEGEND_ROW: i32 = 32;
+    const LEGEND_COLUMNS: i32 = 5;
     let icons = all_icons();
     let large_rows = icons.len().div_ceil(COLUMNS as usize) as i32;
     let small_height = |pitch: i32| {
@@ -112,7 +121,9 @@ pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
         icons.len().div_ceil(across as usize) as i32 * pitch + MARGIN
     };
     let smalls: i32 = SMALL.iter().map(|&(_, pitch, _)| small_height(pitch)).sum();
-    let height = large_rows * CELL + smalls + 2 * CELL;
+    let legend_height =
+        DISCIPLINES.len().div_ceil(LEGEND_COLUMNS as usize) as i32 * LEGEND_ROW + MARGIN;
+    let height = large_rows * CELL + smalls + legend_height + 2 * CELL;
     let application: Vec<(u32, crate::canvas::Image)> = [192_u32, 96, 48, 32, 24, 16]
         .into_iter()
         .map(|size| (size, application_icon_image(raster, size)))
@@ -126,7 +137,6 @@ pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
                 RectF::new(0.0, 0.0, f64::from(WIDTH), f64::from(height)),
                 &Brush::solid(palette::window()),
             );
-            let (quiet, bright) = icon_colours(IconMode::Normal);
             for (index, &icon) in (0_i32..).zip(icons) {
                 let column = index % COLUMNS;
                 let row = index / COLUMNS;
@@ -136,12 +146,11 @@ pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
                     f64::from(ICON),
                     f64::from(ICON),
                 );
-                paint_icon(canvas, icon, cell, quiet, bright);
+                paint_named_icon(canvas, icon.name(), cell, IconMode::Normal);
             }
             let mut top = large_rows * CELL + MARGIN / 2;
             for (size, pitch, mode) in SMALL {
                 let across = (WIDTH - 2 * MARGIN) / pitch;
-                let (quiet, bright) = icon_colours(mode);
                 for (index, &icon) in (0_i32..).zip(icons) {
                     let cell = RectF::new(
                         f64::from(MARGIN + (index % across) * pitch),
@@ -149,9 +158,26 @@ pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
                         f64::from(size),
                         f64::from(size),
                     );
-                    paint_icon(canvas, icon, cell, quiet, bright);
+                    if mode == IconMode::Active {
+                        checked_ground(canvas, cell, f64::from(pitch - size) / 2.0 - 1.0);
+                    }
+                    paint_named_icon(canvas, icon.name(), cell, mode);
                 }
                 top += small_height(pitch);
+            }
+            // The disciplines: each hue's swatch (General's, the text colour it has instead) and
+            // its name.
+            let column_width = (WIDTH - 2 * MARGIN) / LEGEND_COLUMNS;
+            for (index, discipline) in (0_i32..).zip(DISCIPLINES) {
+                let x = f64::from(MARGIN + (index % LEGEND_COLUMNS) * column_width);
+                let y = f64::from(top + (index / LEGEND_COLUMNS) * LEGEND_ROW);
+                let hue = discipline.hue().unwrap_or(palette::text());
+                canvas.fill_rect(RectF::new(x, y + 6.0, 20.0, 20.0), &Brush::solid(hue));
+                canvas.set_pen(Pen::new(palette::text()));
+                canvas.draw_text(
+                    PointF::new(x + 28.0, y + 21.0),
+                    &format!("{}  {}", discipline.name(), hue.name()),
+                );
             }
             // The application icon, large and at the sizes a taskbar and a title bar use.
             let app_row = height - 2 * CELL;
@@ -170,6 +196,19 @@ pub fn write_sheet(path: &Path, raster: &dyn Rasteriser) -> Status {
         },
     );
     write_png(&sheet, path)
+}
+
+/// What a checked tool button draws under its icon (tools::flyout_button): the raised ground and
+/// a one-pixel accent frame, `margin` pixels round the icon's square, so the sheet's active rows
+/// are judged as a running tool is seen.
+fn checked_ground(canvas: &mut dyn Canvas, icon: RectF, margin: f64) {
+    let outer = icon.adjusted(-margin, -margin, margin, margin);
+    let mut face = Outline::new();
+    face.add_rounded_rect(outer, 3.0, 3.0);
+    canvas.fill_path(&face, &Brush::solid(palette::raised()));
+    let mut frame = Outline::new();
+    frame.add_rounded_rect(outer.adjusted(0.5, 0.5, -0.5, -0.5), 2.5, 2.5);
+    canvas.stroke_path(&frame, &Pen::new(palette::accent()));
 }
 
 /// The three files into `directory`.

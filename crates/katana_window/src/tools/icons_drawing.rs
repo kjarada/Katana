@@ -24,9 +24,9 @@ fn base_polyline(ink: &mut ToolInk<'_>, nodes: bool) {
     }
 }
 
+/// The vertex added: the create mark (ToolInk::plus).
 fn plus(ink: &mut ToolInk<'_>, x: f64, y: f64) {
-    ink.line(x - 2.5, y, x + 2.5, y, true, STROKE);
-    ink.line(x, y - 2.5, x, y + 2.5, true, STROKE);
+    ink.plus(x, y, 2.5);
 }
 
 /// An open arrowhead in the accent at `tip`, on a line coming from `from`: the end of a line that
@@ -51,9 +51,9 @@ fn open_head(ink: &mut ToolInk<'_>, from: crate::canvas::PointF, tip: crate::can
     );
 }
 
+/// The vertex deleted: the remove mark (ToolInk::cross).
 fn cross(ink: &mut ToolInk<'_>, x: f64, y: f64) {
-    ink.line(x - 2.2, y - 2.2, x + 2.2, y + 2.2, true, STROKE);
-    ink.line(x - 2.2, y + 2.2, x + 2.2, y - 2.2, true, STROKE);
+    ink.cross(x, y, 2.2, STROKE);
 }
 
 pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
@@ -394,6 +394,9 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
             true,
             STROKE,
         );
+        // Where the pointer went down, quiet: an icon all in the bright tone looked the same
+        // running as at rest.
+        ink.dot(3.0, 16.0, 1.5, false);
         return true;
     }
     if tool_id == "draw.revcloud" {
@@ -418,6 +421,9 @@ pub fn paint_drawing_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
             path.quad_to(mid - out, to);
         }
         ink.stroke(&path, true, STROKE);
+        // The change the cloud marks, quiet inside it: an icon all in the bright tone looked
+        // the same running as at rest.
+        ink.line(9.0, 13.5, 16.0, 10.5, false, FINE);
         return true;
     }
     if tool_id == "draw.circle.ttt" {
