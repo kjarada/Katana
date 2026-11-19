@@ -149,7 +149,8 @@ JSON in the per-user configuration folder, under the key names the C++ used,
 finds the same names; the C++'s settings were the Windows registry's binary
 form, which is not read, so nothing the C++ saved is carried over), and in it
 the layout - which panels and toolbars are
-shown, and the toolbars' rows - the text size, the toolbar icon size and
+shown, where each toolbar is docked or floats, and the menus torn off
+("Toolbars that dock and float, menus that tear off") - the text size, the toolbar icon size and
 whether the toolbars show their names, written when the window closes and
 read before its first frame (`katana_window::main_window::layout::restore_session`).
 A layout from another version (`LAYOUT_VERSION`, raised when a change to the
@@ -665,7 +666,9 @@ and each button's size hint); every row still fits, and the test passes
   is no narrower than the second row kept - 1,290 - and Survey, Terrain and GIS
   there is what every saved layout of the older builds already has);
   shrinking Surface Edit's buttons, which would not match its neighbours.
-* **A saved layout.** `LAYOUT_VERSION` is 2 and `restore_layout` is the one door
+* **A saved layout.** `LAYOUT_VERSION` was 2 here (it is 3 since the toolbars
+  could be moved, which carries a layout of version 2 over: "Toolbars that dock
+  and float, menus that tear off") and `restore_layout` is the one door
   `restore_session` takes (`crates/katana_window/src/main_window/layout.rs`).
   A layout of version 2 is restored as it is, a hidden toolbar staying hidden.
   A layout of version 1 - every one saved before this change, from builds with
@@ -702,7 +705,17 @@ need 1,247, 1,249 and 1,274 px at 100 %, so a 1280-px laptop shows every
 action. The check had added a name's width to a bar but laid the bar out
 without it, and so reported "0 of 9 actions are behind" for a bar that did
 not fit. Rejected: moving toolbars between rows (the three need 3,847 px
-together against 3 x 1,280) and narrower buttons. Not done: larger icons or
+together against 3 x 1,280) and narrower buttons.
+
+Since 2026-11-19 a person can move every toolbar ("Toolbars that dock and
+float, menus that tear off"). The check measures the window as built and the
+layouts restored, as before: a row a person crowds is theirs to arrange, and
+its overflow arrow still reaches what it hides, while View > Toolbars > Place
+> Dock Top puts a bar on the first row it fits in whole, and Reset Toolbars
+gives back the arrangement that fits. A bar's grip is drawn in the padding
+every bar already has, so being movable costs no row any width: a grip of its
+own would have cost each bar 8 points, the first row 40 of the 33 a 1280
+laptop leaves it. Not done: larger icons or
 text widen every toolbar (a button is 41 px at Large Icons
 against 33); no setting chooses a density from the screen; a floating dock is
 not fitted; the native window opens at 1360 x 860 points whatever the screen,
@@ -773,7 +786,13 @@ the Drafting bar 30 and the status bar 24 (the bottom 54, was 73), panels
 toolbars stay in three rows: two would not fit at 1366 without buttons of
 28 px, which would undo the icons' 20 px design size (rejected). Each row is
 one band with a rule under it and its toolbars' names centred in small
-muted text. The Drafting bar's toggles are words (their actions have no
+muted text. Since the toolbars can be moved (2026-11-19) each docked bar
+starts with a grip, six dots of the muted token in its leading padding, and
+the short rule that parted two toolbars of a row is gone: the grip says where
+a bar begins. A drag's drop target is outlined in the accent, the one accent
+that marks a place being chosen rather than a thing chosen; a floating
+toolbar is the window's ground with a border and a title strip of its grip
+and its name, and a menu's tear-off line is a dashed rule in the muted token. The Drafting bar's toggles are words (their actions have no
 icons, and they drew as ten blank squares); the Layers and Reference Data
 panels' buttons are 24 px icon tools under the same names; the layer tree
 has eye and padlock switches in place of two unnamed check boxes.
@@ -1670,8 +1689,9 @@ reviewed, and the same run can drive the menus and dialogs step by step:
 `docs/headless.md`.
 
 **Not done.** There is no light theme. No semibold face: a heading is the
-body face drawn strong (the face is the owner's decision). The side columns
-and toolbar rows do not grow with Large toolbar icons. The views inside the workspace are not kept between
+body face drawn strong (the face is the owner's decision). The toolbar rows
+do not grow with Large toolbar icons (a side column is as broad as its
+broadest bar since 2026-11-19, so it does). The views inside the workspace are not kept between
 sessions (above, "How the window starts"); the dock chrome's hooks
 (`minimised_names`, `minimise_named`) are ready for it. The Text Size is the
 window's; a dialog that set a font of its own other than the fixed-pitch one
@@ -1900,6 +1920,138 @@ to the shared tokenizer); the popup keeping a direct path for the names no line 
 second way, which is what this removed). Not carried by any line: a layer whose
 name holds a double quote or a line break, which the tokenizer has no escape
 for - the popup then logs why and leaves the box as it was.
+
+### Toolbars that dock and float, menus that tear off
+
+The owner's ask of 2026-11-19: "make toolbars and menus resizable and
+dockable". Until then the toolbars were fixed: three rows along the top,
+Draw and Annotate down the left, Modify down the right, and the menus
+closed as soon as an item was chosen.
+
+**A toolbar docks along any side, or floats.** Every toolbar but the
+Drafting bar has a place (`main_window::docking`, `BarPlace`): a LINE of
+one of the four sides - a row along the top or the bottom, a column down the
+left or the right, numbered from the window's edge inwards - or floating at
+a point of the window with a width. The window's list of places, in order,
+is the order of the bars along each line; the geometry gives each side as
+many lines as its shown bars use (`layout::BarLines`), so a side with no bar
+takes no room, a fourth top row moves the views down a row, and a column is
+as broad as its broadest bar (the Properties bar's style box docked down a
+side widens its column to 220). A bar's orientation follows its side.
+
+* **By the mouse.** Every docked bar has a grip, six dots in the muted
+  token in the padding before its first item, and is dragged by it or by its
+  name (the handle, a named control `<Bar>Grip`). While it is dragged, where
+  it would go is outlined in the accent: the row or column under the pointer,
+  with the bar it would go before; the strip beside a side's bars, which
+  opens a new line there; or, anywhere else, the floating bar's own
+  rectangle. It moves when it is let go. A right-click on the grip offers the
+  bar's Place items, its toggle and Reset Toolbars.
+* **By the menus.** View > Toolbars > Place has a submenu per toolbar
+  (`viewToolBarPlace<Bar>`) with Dock Top, Dock Left, Dock Right, Dock
+  Bottom and Float, the one it is at ticked, each side with its own icon - an
+  arrow into a box from that side - so the four are told apart without
+  reading them (`viewToolBarDock<Bar><Side>`,
+  `<Side>` Top, Left, Right, Bottom or Float; `<Bar>` the toolbar's title
+  without spaces, as its toggle `viewToolBar<Bar>` is named). Dock Top puts
+  the bar on the first top row it fits in whole at the window's width, else a
+  row of its own; a side or the bottom, at the end of the side's first line.
+  View > Toolbars > Reset Toolbars (`viewToolBarsReset`) puts every bar back
+  where a new window has it and shows it; Reset Window Layout does that too
+  and closes the torn-off menus.
+* **Floating.** A floating bar is an egui Area over the views, the window's
+  ground with a border: a title strip (its grip and its name) over its
+  buttons, wrapped in rows of its width (`flyout_button::wrap_strip`,
+  `tool_bar_wrapped`) - every button shown, none behind an arrow, a
+  separator that would begin or end a row left out. Its right edge
+  (`<Bar>Resize`) sets the width, between its widest item and the width that
+  holds every button in one row; the height follows. A double click on its
+  title docks it where it was last docked (as built for one never docked).
+  It is kept on the window: its title strip stays within reach.
+* **One door.** A drag, a menu item, a right-click, a `*` step and a test
+  all end in `MainWindow::drop_bar` on the window's list (`apply_drop`),
+  which is normalised after every move, so a line a move empties closes up.
+  A precise place is an action too, for a script and the headless runner:
+  `viewToolBarPlace:<bar>:<side>:<line>[:<index>]` and
+  `viewToolBarPlace:<bar>:float:<x>,<y>,<width>`.
+
+**A menu tears off into a panel.** Every menu of the menu bar, and every
+submenu, starts with a tear-off line - a dashed rule in the muted token
+(`tearOff<Menu>`, drawn by `drive::action::tear_off_line`) - as Qt's
+tear-off menus did. Clicked, the menu is torn off where its line was: a
+panel of the window's own chrome named `<menu>TornOff`, the menu's title and
+icon on its title bar, holding the menu's items drawn by the one menu drawer
+(`menu_items_ui`) with their icons, ticks, shortcuts and submenus. A click on
+an item runs its action as the menu's does, and the panel stays open; its
+ticks follow the window, since the items are made again each frame.
+
+* **Docked or floating.** A torn-off menu floats as an Area of its own,
+  sized by its right and bottom edges and its corner; its title bar dragged
+  to a side of the views (within 48 points of it) docks it there, in a band
+  between the views and that side's panels, which every panel docked to that
+  side shares; dragged from a band into the views, it floats. A band's seam
+  with the views (`menuBandSeam<Side>`) sets its breadth (96 to 640; 240
+  at the sides and 168 along the top and bottom to begin with). The title
+  bar's Float floats it or docks it again where it was; Minimise and Close
+  close it.
+* **The actions.** `viewMenuTearOff<Menu>` (the menu's object name with its
+  first letter upper case: `viewMenuTearOffViewMenu`,
+  `viewMenuTearOffViewToolBars`), `viewMenuPanelDock<Menu><Side>`,
+  `viewMenuPanelClose<Menu>`, `viewMenuPanelPlace:<menu>:<side>` or
+  `:float:<x>,<y>,<width>,<height>`, and `viewMenuBand:<side>:<breadth>`.
+  They are not menu items: the tear-off line is the mouse's way, and a
+  menu's own panel is placed by its title bar.
+
+**Kept between sessions.** `LAYOUT_VERSION` is 3: the layout records every
+toolbar's place in its order (`"bars": ["FileToolBar=top:0", ...,
+"GISToolBar=float:500,320,160"]`), the torn-off menus (`"menuPanels":
+["viewMenu=left", "drawMenu=float:700,200,240,300"]`) and the bands'
+breadths (`"menuBands"`), and still the top rows (`"rows"`). A version 2
+layout - every one saved from 2026-10-15 until this change, which recorded
+the top rows alone - is carried over: its rows are the top bars' places and
+every other bar is where the window builds it. Version 1 is carried over as
+before ("Fitting the screen"); a later version is refused and leaves the
+window as it was.
+
+**What a headless run reads.** `?toolBarLayout` reports every toolbar's
+place in order and every torn-off menu's (`FileToolBar=top:0 ...
+viewMenuTornOff=left`); `?<Bar>` a toolbar's (`place=right:0 at=1 shown=yes
+drawn=1321,143,39,45`, its place, its index along its line, whether it is
+shown and where it was drawn); `?<menu>TornOff` a torn-off menu's
+(`place=float:... items=31 drawn=...`).
+
+**Decided, and rejected.**
+
+* *A grip of its own before every bar* (a widget 6 points long): it cost
+  every bar 8 points with the strip's spacing, the first row's five bars 40
+  of the 33 a 1280 laptop leaves it, and the left column a Draw tool. The
+  dots are drawn in the padding every bar has.
+* *Moving a docked bar with the pointer while it is dragged*, as Qt does:
+  the row reflows under the pointer at every frame and the person chases the
+  place they aimed at. The bar moves once, when it is let go, and the outline
+  shows where.
+* *An egui Window for a floating bar*: its title bar, frame and resize grip
+  are egui's, not the window's chrome; and a bar sized by its height as well
+  as its width is two ways to choose one shape.
+* *The torn-off menus as tabs of the workspace's egui_dock area*, as the
+  ask suggested: that area's tree is the views' - Window > Layout's
+  arrangements rebuild it from the views, a view's dock is found by its
+  id, and a menu among the views could be maximised or linked - and the
+  main window's own panels are not egui_dock either ("The workspace", above,
+  and `layout.rs`'s module comment). A torn-off menu is a panel of the
+  window's chrome, like Layers and Properties, in a band of its own.
+* *Docking the Drafting bar*: its toggles are words, which a 39 point column
+  cannot hold, and it is the drawing's state, not a set of commands.
+* *The menu bar itself movable*: not asked, and it is the one fixed place a
+  person finds every command from.
+
+**Not done.** A floating toolbar or torn-off menu stays inside the main
+window (as a floating view does: "The dock chrome"). A torn-off menu's panel
+has no right-click menu of its own: its title bar's drag and Float button
+place it. The panel's Float button shows the same icon floating or docked.
+Two bars cannot share one floating frame. A torn-off submenu of a menu that
+is rebuilt with a new name (a workbench's) is dropped when no menu has its
+name.
 
 ### Linked views: a design view and an as-built view that move together
 

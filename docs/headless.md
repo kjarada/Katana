@@ -450,6 +450,25 @@ reply (`MainWindow::run_ifc_command`), so a test reads which line a press ran.
 A headless run echoes its command log to stderr, which is where a test reads
 what a command REPORTED.
 
+**Toolbars and torn-off menus.** Every move a person makes with a toolbar's
+grip or a menu's tear-off line is an action a `*` step triggers
+(`docs/desktop.md`, "Toolbars that dock and float, menus that tear off"):
+`*viewToolBarDockDrawRight`, `*viewToolBarDockGISFloat`,
+`*viewToolBarsReset`, a precise place
+`*viewToolBarPlace:SurveyToolBar:bottom:0` or
+`*viewToolBarPlace:GISToolBar:float:500,320,160`; a menu torn off
+`*viewMenuTearOffViewMenu` (or `%viewMenu|!tearOffViewMenu`, the line
+pressed as a click does), its panel docked `*viewMenuPanelDockViewMenuLeft`,
+placed `*viewMenuPanelPlace:viewMenu:float:600,200,260,400`, closed
+`*viewMenuPanelCloseViewMenu`, and a band's breadth
+`*viewMenuBand:left:300`. A torn-off menu's panel is a dock, `%viewMenuTornOff`
+makes it the target, and its items are pressed by their action names
+(`!viewGrid`). `?toolBarLayout` prints every toolbar's place in order and
+every torn-off menu's; `?DrawToolBar` one toolbar's
+(`place=right:0 at=1 shown=yes drawn=1321,143,39,45`); `?viewMenuTornOff` a
+torn-off menu's (`place=left items=31 drawn=...`). A layout a headless run
+makes is not saved: it neither reads nor writes the settings file.
+
 **The pointer.** A headless run has no mouse, and a tool's preview and its
 picks follow one: before the pointer steps a run could start Insert Vertex
 but never show where a vertex would go, and a pick step (a vertex, a

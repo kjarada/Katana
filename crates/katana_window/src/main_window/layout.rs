@@ -17,16 +17,19 @@
 //! line its height at every size, as Qt's resizeDocks left them, and the views take what is left;
 //! a panel hidden gives its room to the views. Rejected: egui_dock for the four panels, whose
 //! split shares would not hold these numbers as the window is sized, and whose tabs would draw a
-//! strip over every panel.
+//! strip over every panel. Those are the numbers of the toolbars as built: since the toolbars can
+//! be moved (main_window::docking), each side has as many lines as its shown bars use
+//! (`BarLines`), and the torn-off menus' bands are taken from the views' sides.
 //!
 //! THE SETTINGS FILE (decided here; the plan's section 4.11): the person's settings are the
 //! window's own JSON file (host::UserSettings), under the keys the C++ gave QSettings -
 //! `window/layout`, `window/minimised`, `appearance/textSize`, `appearance/toolBarIcons`,
 //! `appearance/toolBarNames`, `start/showAtStart`, `start/coordinateSystem`, `scripts/recent`,
 //! `files/projectFolder` - so a reader of either finds the same names. The layout is the window's
-//! own form, a JSON object of its own (`LAYOUT_VERSION`): which panels and toolbars are shown and
-//! the toolbars' rows, with a version as saveState had one. A headless run reads and writes none
-//! of it.
+//! own form, a JSON object of its own (`LAYOUT_VERSION`): which panels and toolbars are shown, the
+//! top toolbars' rows, and from version 3 every toolbar's place in its order and the torn-off menus
+//! (`layout_json`), with a version as saveState had one. A version 2 layout, the rows alone, is
+//! carried over with every other toolbar as built. A headless run reads and writes none of it.
 //!
 //! THE OLDER BUILD'S LAYOUT (decided here, for --check-session-restore and --check-toolbar-fit):
 //! a version 1 layout in the Rust's own form - every toolbar of the second row, Surface Edit and
@@ -39,6 +42,10 @@ use egui::{Pos2, Rect};
 use katana_app::console::Console;
 
 use super::actions::{BarPlace, Composed};
+use super::docking::{
+    MenuPanels, PANEL_SIZE, PanelPlace, Places, Side, normalise, panel_place_from_text,
+    panel_place_text,
+};
 use super::window::MainWindow;
 use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, shortcut_text};
 use crate::drive::program::MenuSigns;
@@ -60,9 +67,13 @@ pub const TOOL_BAR_NAMES_KEY: &str = "appearance/toolBarNames";
 pub const START_SHOW_KEY: &str = "start/showAtStart";
 pub const START_CRS_KEY: &str = "start/coordinateSystem";
 
-/// The layout's version this window saves, and the one before the third toolbar row
-/// (MainWindow::kLayoutVersion, kLayoutVersionBeforeThirdRow).
-pub const LAYOUT_VERSION: i64 = 2;
+/// The layout's version this window saves, the first that records where every toolbar is docked
+/// or floats and the torn-off menus (main_window::docking), and the one before the third toolbar
+/// row (MainWindow::kLayoutVersion, kLayoutVersionBeforeThirdRow). Version 2 recorded the top
+/// toolbars' rows alone; it is restored with every other toolbar where the window builds it.
+pub const LAYOUT_VERSION: i64 = 3;
+pub const LAYOUT_VERSION_WITH_DOCKING: i64 = 3;
+pub const LAYOUT_VERSION_BEFORE_DOCKING: i64 = 2;
 pub const LAYOUT_VERSION_BEFORE_THIRD_ROW: i64 = 1;
 
 // ---- the geometry ----------------------------------------------------------------------------
@@ -150,14 +161,15 @@ impl Docks {
 
 /// The toolbars' settings: which are hidden, the icons' size, and whether a toolbar along the
 /// top shows its name.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BarSettings {
     pub hidden: BTreeSet<String>,
     pub icon_size: i32,
     pub names_shown: bool,
-    /// The rows a restored layout put the top toolbars on, by name; None: as built. A toolbar the
-    /// layout does not place stays where the window built it.
-    pub rows: Option<BTreeMap<String, usize>>,
+    /// Where each toolbar is and its order along its line (main_window::docking), as a restored
+    /// layout or a move left them; None: as built. A toolbar the list does not hold stays where
+    /// the window built it.
+    pub places: Option<Places>,
     /// Each toolbar name's width as the window last drew it, by its title, in the text size of
     /// that frame (`measure_names`): what its label takes on its row.
     pub name_widths: BTreeMap<String, i32>,
@@ -169,7 +181,7 @@ impl Default for BarSettings {
             hidden: BTreeSet::new(),
             icon_size: 20,
             names_shown: true,
-            rows: None,
+            places: None,
             name_widths: BTreeMap::new(),
         }
     }
@@ -187,51 +199,123 @@ impl BarSettings {
     }
 }
 
+/// How many lines of toolbars each side has, and how broad each column down a side is: what the
+/// toolbars docked there take of the window (main_window::docking). A side's lines are counted
+/// from the window's edge inwards. The window as built has three rows along the top, a column at
+/// each side and no row along the bottom (`Default`), the geometry of the module comment.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarLines {
+    pub top: usize,
+    /// Each column's breadth down the left, from the window's edge inwards.
+    pub left: Vec<f32>,
+    /// Each column's breadth down the right, from the window's edge inwards.
+    pub right: Vec<f32>,
+    pub bottom: usize,
+}
+
+impl Default for BarLines {
+    fn default() -> Self {
+        Self {
+            top: 3,
+            left: vec![SIDE],
+            right: vec![SIDE],
+            bottom: 0,
+        }
+    }
+}
+
 /// Where everything goes in a window of `screen`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Geometry {
     pub menu_bar: Rect,
-    /// The three rows of toolbars along the top.
-    pub rows: [Rect; 3],
-    pub left_bars: Rect,
-    pub right_bars: Rect,
+    /// The rows of toolbars along the top, from the menu bar down.
+    pub rows: Vec<Rect>,
+    /// The columns of toolbars down the left, from the window's edge inwards.
+    pub left_columns: Vec<Rect>,
+    /// The columns of toolbars down the right, from the window's edge inwards.
+    pub right_columns: Vec<Rect>,
+    /// The rows of toolbars along the bottom, from the Drafting bar up.
+    pub bottom_rows: Vec<Rect>,
+    /// The Drafting bar.
     pub bottom_bar: Rect,
     pub status_bar: Rect,
     pub layers: Option<Rect>,
     pub lower_left: Option<Rect>,
     pub properties: Option<Rect>,
     pub command_line: Option<Rect>,
+    /// The torn-off menus' bands beside the views, by `Side::index`.
+    pub menu_bands: [Option<Rect>; 4],
+    /// The views with the torn-off menus' bands: what a torn-off menu docks to a side of.
+    pub views_and_bands: Rect,
     pub views: Rect,
+    /// What lies between the four sides' toolbars: the strips beside it open a new line of bars.
+    pub middle: Rect,
 }
 
-/// The window's parts in `screen`, the panels `docks` shows.
-pub fn geometry(screen: Rect, docks: &Docks, right_extra: bool) -> Geometry {
+/// The window's parts in `screen`: the panels `docks` shows, the toolbars' `lines`, and the
+/// torn-off menus' bands of `bands` breadth (by `Side::index`, None for a side with none).
+pub fn geometry(
+    screen: Rect,
+    docks: &Docks,
+    right_extra: bool,
+    lines: &BarLines,
+    bands: [Option<f32>; 4],
+) -> Geometry {
     let left = screen.min.x;
     let top = screen.min.y;
     let right = screen.max.x;
     let bottom = screen.max.y;
     let menu_bar = Rect::from_min_max(Pos2::new(left, top), Pos2::new(right, top + MENU_BAR));
-    let row = |at: usize| {
-        let y = top + MENU_BAR + TOOL_BAR_ROW * at as f32;
-        Rect::from_min_max(Pos2::new(left, y), Pos2::new(right, y + TOOL_BAR_ROW))
-    };
-    let middle_top = top + TOP;
-    let middle_bottom = (bottom - BOTTOM).max(middle_top);
-    let left_bars = Rect::from_min_max(
-        Pos2::new(left, middle_top),
-        Pos2::new(left + SIDE, middle_bottom),
-    );
-    let right_bars = Rect::from_min_max(
-        Pos2::new(right - SIDE, middle_top),
-        Pos2::new(right, middle_bottom),
-    );
+    let rows: Vec<Rect> = (0..lines.top)
+        .map(|at| {
+            let y = top + MENU_BAR + TOOL_BAR_ROW * at as f32;
+            Rect::from_min_max(Pos2::new(left, y), Pos2::new(right, y + TOOL_BAR_ROW))
+        })
+        .collect();
+    let middle_top = top + MENU_BAR + TOOL_BAR_ROW * lines.top as f32;
+    let bottom_rows_height = TOOL_BAR_ROW * lines.bottom as f32;
+    let middle_bottom = (bottom - BOTTOM - bottom_rows_height).max(middle_top);
+    let mut left_end = left;
+    let left_columns: Vec<Rect> = lines
+        .left
+        .iter()
+        .map(|breadth| {
+            let column = Rect::from_min_max(
+                Pos2::new(left_end, middle_top),
+                Pos2::new(left_end + breadth, middle_bottom),
+            );
+            left_end += breadth;
+            column
+        })
+        .collect();
+    let mut right_start = right;
+    let right_columns: Vec<Rect> = lines
+        .right
+        .iter()
+        .map(|breadth| {
+            let column = Rect::from_min_max(
+                Pos2::new(right_start - breadth, middle_top),
+                Pos2::new(right_start, middle_bottom),
+            );
+            right_start -= breadth;
+            column
+        })
+        .collect();
+    // Row 0 of the bottom is the one over the Drafting bar: the rows are counted from the edge.
+    let drafting_top = middle_bottom + bottom_rows_height;
+    let bottom_rows: Vec<Rect> = (0..lines.bottom)
+        .map(|at| {
+            let y = drafting_top - TOOL_BAR_ROW * (at + 1) as f32;
+            Rect::from_min_max(Pos2::new(left, y), Pos2::new(right, y + TOOL_BAR_ROW))
+        })
+        .collect();
     let bottom_bar = Rect::from_min_max(
-        Pos2::new(left, middle_bottom),
-        Pos2::new(right, middle_bottom + DRAFTING_BAR),
+        Pos2::new(left, drafting_top),
+        Pos2::new(right, drafting_top + DRAFTING_BAR),
     );
     let status_bar = Rect::from_min_max(Pos2::new(left, bottom - STATUS_BAR), Pos2::new(right, bottom));
-    let mut inner_left = left + SIDE;
-    let mut inner_right = right - SIDE;
+    let mut inner_left = left_end;
+    let mut inner_right = right_start;
     let height = middle_bottom - middle_top;
     // The left column: Layers over the lower tab group, or one of them alone.
     let lower = docks.lower_left().is_some();
@@ -280,20 +364,50 @@ pub fn geometry(screen: Rect, docks: &Docks, right_extra: bool) -> Geometry {
     } else {
         None
     };
+    let views_and_bands = Rect::from_min_max(
+        Pos2::new(inner_left, middle_top),
+        Pos2::new(inner_right.max(inner_left), views_bottom.max(middle_top)),
+    );
+    // The torn-off menus' bands, carved from the views' side: the left and right first, the whole
+    // height, then the top and bottom across what is left between them.
+    let mut views = views_and_bands;
+    let mut menu_bands = [None; 4];
+    for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
+        let Some(breadth) = bands[side.index()] else {
+            continue;
+        };
+        let band = match side {
+            Side::Left => Rect::from_min_max(views.min, Pos2::new(views.min.x + breadth, views.max.y)),
+            Side::Right => Rect::from_min_max(Pos2::new(views.max.x - breadth, views.min.y), views.max),
+            Side::Top => Rect::from_min_max(views.min, Pos2::new(views.max.x, views.min.y + breadth)),
+            Side::Bottom => Rect::from_min_max(Pos2::new(views.min.x, views.max.y - breadth), views.max),
+        };
+        match side {
+            Side::Left => views.min.x = (band.max.x + SEPARATOR).min(views.max.x),
+            Side::Right => views.max.x = (band.min.x - SEPARATOR).max(views.min.x),
+            Side::Top => views.min.y = (band.max.y + SEPARATOR).min(views.max.y),
+            Side::Bottom => views.max.y = (band.min.y - SEPARATOR).max(views.min.y),
+        }
+        menu_bands[side.index()] = Some(band);
+    }
     Geometry {
         menu_bar,
-        rows: [row(0), row(1), row(2)],
-        left_bars,
-        right_bars,
+        rows,
+        left_columns,
+        right_columns,
+        bottom_rows,
         bottom_bar,
         status_bar,
         layers,
         lower_left,
         properties,
         command_line,
-        views: Rect::from_min_max(
-            Pos2::new(inner_left, middle_top),
-            Pos2::new(inner_right, views_bottom),
+        menu_bands,
+        views_and_bands,
+        views,
+        middle: Rect::from_min_max(
+            Pos2::new(left_end, middle_top),
+            Pos2::new(right_start.max(left_end), middle_bottom),
         ),
     }
 }
@@ -369,32 +483,69 @@ pub fn bar_breadth(icon_size: i32) -> f32 {
 // ---- the window between sessions -----------------------------------------------------------------
 
 /// The layout in the Rust's own form (see the module comment): which panels and toolbars are
-/// shown, and the toolbars' rows by name, with its version.
+/// shown and the toolbars' rows by name, with its version; from version 3 also every toolbar's
+/// place in its order ("bars", main_window::docking's `BarPlace::text`), the torn-off menus
+/// ("menuPanels") and their bands' breadths ("menuBands"). The rows are written in every version,
+/// so a build that knows only them still finds the top rows.
 fn layout_json(window: &MainWindow, version: i64, rows: &BTreeMap<String, usize>) -> String {
     let docks = &window.ui.docks;
-    let hidden: Vec<String> = window
-        .ui
-        .bars
-        .hidden
-        .iter()
-        .map(|name| format!("\"{name}\""))
-        .collect();
+    let quoted = |items: Vec<String>| -> String {
+        items
+            .iter()
+            .map(|item| format!("\"{item}\""))
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+    let hidden = quoted(window.ui.bars.hidden.iter().cloned().collect());
     // Each toolbar's row as "name=row": the object names hold no '='.
-    let placed: Vec<String> = rows
-        .iter()
-        .map(|(name, row)| format!("\"{name}={row}\""))
-        .collect();
-    format!(
+    let placed = quoted(
+        rows.iter()
+            .map(|(name, row)| format!("{name}={row}"))
+            .collect(),
+    );
+    let mut text = format!(
         "{{\"version\":{version},\"layers\":{},\"properties\":{},\"commandLine\":{},\
-         \"reference\":{},\"surfaces\":{},\"hidden\":[{}],\"rows\":[{}]}}",
-        docks.layers,
-        docks.properties,
-        docks.command_line,
-        docks.reference,
-        docks.surfaces,
-        hidden.join(","),
-        placed.join(",")
-    )
+         \"reference\":{},\"surfaces\":{},\"hidden\":[{hidden}],\"rows\":[{placed}]",
+        docks.layers, docks.properties, docks.command_line, docks.reference, docks.surfaces,
+    );
+    if version >= LAYOUT_VERSION_WITH_DOCKING {
+        let bars = quoted(
+            current_places(window)
+                .iter()
+                .map(|(name, place)| format!("{name}={}", place.text()))
+                .collect(),
+        );
+        let panels = &window.ui.docking.panels;
+        let menus = quoted(
+            panels
+                .open
+                .iter()
+                .map(|panel| format!("{}={}", panel.menu, panel_place_text(&panel.place)))
+                .collect(),
+        );
+        let bands = quoted(
+            Side::ALL
+                .iter()
+                .map(|side| {
+                    format!(
+                        "{}={}",
+                        side.word(),
+                        panels.bands[side.index()].round() as i32
+                    )
+                })
+                .collect(),
+        );
+        text.push_str(&format!(
+            ",\"bars\":[{bars}],\"menuPanels\":[{menus}],\"menuBands\":[{bands}]"
+        ));
+    }
+    text.push('}');
+    text
+}
+
+/// The window's layout now as this version saves it: what a restore reads back (`restore_layout`).
+pub fn layout_text(window: &MainWindow) -> String {
+    layout_json(window, LAYOUT_VERSION, &current_rows(window))
 }
 
 /// The toolbars' rows this window has, by name.
@@ -410,6 +561,34 @@ pub fn current_rows(window: &MainWindow) -> BTreeMap<String, usize> {
         .collect()
 }
 
+/// Every toolbar's place this window has, in its order along its line: the Drafting bar, which
+/// stays where it is, left out.
+pub fn current_places(window: &MainWindow) -> Places {
+    places_of(&window.composed())
+}
+
+/// The places of `composed`'s toolbars, the Drafting bar left out.
+pub fn places_of(composed: &Composed) -> Places {
+    composed
+        .bars
+        .iter()
+        .filter(|(_, place)| *place != BarPlace::Drafting)
+        .map(|(bar, place)| (bar.name.clone(), *place))
+        .collect()
+}
+
+/// The places of a layout that recorded only the top rows (versions 1 and 2): each toolbar `rows`
+/// names on its row, every other where the window builds it, in the built order.
+pub fn places_from_rows(window: &MainWindow, rows: &BTreeMap<String, usize>) -> Places {
+    let mut places = places_of(&window.composed_as_built());
+    for (name, place) in &mut places {
+        if let Some(row) = rows.get(name.as_str()) {
+            *place = BarPlace::Top(*row);
+        }
+    }
+    places
+}
+
 /// What a saved layout said, read: None for a layout of another version, or none.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SavedLayout {
@@ -417,6 +596,12 @@ pub struct SavedLayout {
     pub docks: Docks,
     pub hidden: BTreeSet<String>,
     pub rows: BTreeMap<String, usize>,
+    /// Every toolbar's place, in order (version 3); empty for an older layout.
+    pub bars: Places,
+    /// The torn-off menus and where each is (version 3).
+    pub menu_panels: Vec<(String, PanelPlace)>,
+    /// The bands' breadths (version 3), by side.
+    pub menu_bands: Vec<(Side, f32)>,
 }
 
 /// Reads a layout `layout_json` wrote.
@@ -449,6 +634,16 @@ pub fn read_layout(text: &str) -> Option<SavedLayout> {
             })
             .unwrap_or_default()
     };
+    // "name=value" pairs: the names hold no '='.
+    let pairs = |key: &str| -> Vec<(String, String)> {
+        strings(key)
+            .into_iter()
+            .filter_map(|pair| {
+                let (name, rest) = pair.split_once('=')?;
+                Some((String::from(name), String::from(rest)))
+            })
+            .collect()
+    };
     let docks = Docks {
         layers: flag("layers", true),
         properties: flag("properties", true),
@@ -458,11 +653,22 @@ pub fn read_layout(text: &str) -> Option<SavedLayout> {
         surfaces_in_front: false,
     };
     let hidden: BTreeSet<String> = strings("hidden").into_iter().collect();
-    let rows: BTreeMap<String, usize> = strings("rows")
+    let rows: BTreeMap<String, usize> = pairs("rows")
         .into_iter()
-        .filter_map(|placed| {
-            let (name, row) = placed.split_once('=')?;
-            Some((String::from(name), row.parse().ok()?))
+        .filter_map(|(name, row)| Some((name, row.parse().ok()?)))
+        .collect();
+    let bars: Places = pairs("bars")
+        .into_iter()
+        .filter_map(|(name, place)| Some((name, BarPlace::from_text(&place)?)))
+        .collect();
+    let menu_panels = pairs("menuPanels")
+        .into_iter()
+        .filter_map(|(menu, place)| Some((menu, panel_place_from_text(&place)?)))
+        .collect();
+    let menu_bands = pairs("menuBands")
+        .into_iter()
+        .filter_map(|(side, breadth)| {
+            Some((Side::from_word(&side)?, breadth.parse::<i32>().ok()? as f32))
         })
         .collect();
     Some(SavedLayout {
@@ -470,29 +676,46 @@ pub fn read_layout(text: &str) -> Option<SavedLayout> {
         docks,
         hidden,
         rows,
+        bars,
+        menu_panels,
+        menu_bands,
     })
 }
 
 /// MainWindow::restoreLayout: the panels and toolbars where `text` had them, when this window can
-/// read it - a layout saved by this version, or by the one before the third toolbar row, which is
-/// carried over (Surface Edit and BIM seated on the third row). False, the window as it was, for
-/// any other.
+/// read it - a layout saved by this version, or by one of the two before it, which are carried
+/// over: version 2's rows are the top toolbars' places, every other toolbar where the window
+/// builds it; version 1's Surface Edit and BIM are seated on the third row as built. False, the
+/// window as it was, for any other.
 pub fn restore_layout(window: &mut MainWindow, text: &str) -> bool {
     let Some(saved) = read_layout(text) else {
         return false;
     };
-    if saved.version != LAYOUT_VERSION && saved.version != LAYOUT_VERSION_BEFORE_THIRD_ROW {
+    if !(LAYOUT_VERSION_BEFORE_THIRD_ROW..=LAYOUT_VERSION).contains(&saved.version) {
         return false;
     }
     window.ui.docks = saved.docks;
     window.ui.bars.hidden = saved.hidden;
-    // Version 1's Surface Edit and BIM were not on a row of their own: carried over, they are
-    // seated on the third row, as the window builds them. A layout of this version keeps its rows.
-    window.ui.bars.rows = if saved.version == LAYOUT_VERSION {
-        Some(saved.rows)
-    } else {
+    window.ui.bars.places = if saved.version == LAYOUT_VERSION_BEFORE_THIRD_ROW {
+        // Version 1's Surface Edit and BIM were not on a row of their own: carried over, they are
+        // seated on the third row, as the window builds them.
         None
+    } else if saved.version >= LAYOUT_VERSION_WITH_DOCKING && !saved.bars.is_empty() {
+        let mut places = saved.bars;
+        normalise(&mut places);
+        Some(places)
+    } else {
+        Some(places_from_rows(window, &saved.rows))
     };
+    let panels = &mut window.ui.docking.panels;
+    *panels = MenuPanels::default();
+    for (side, breadth) in saved.menu_bands {
+        panels.set_band(side, breadth);
+    }
+    for (menu, place) in saved.menu_panels {
+        panels.tear_off(&menu, Rect::from_min_size(Pos2::ZERO, PANEL_SIZE));
+        panels.place(&menu, place);
+    }
     true
 }
 
@@ -730,7 +953,7 @@ pub fn menu_sign_clashes(window: &mut MainWindow) -> MenuSigns {
         let strip = Strip {
             name: bar.name.clone(),
             title: bar.title.clone(),
-            vertical: matches!(place, BarPlace::Left | BarPlace::Right),
+            vertical: place.vertical(),
             icon_size,
             items,
         };
@@ -815,11 +1038,11 @@ pub fn tool_bar_fit(window: &MainWindow, width: f32) -> (Vec<String>, usize, usi
         if !window.ui.bars.shown(&bar.name) {
             continue;
         }
-        // The strip as the row draws it, its name included (panels' tool_bars_ui), so that its
-        // natural width and what its room hides are worked out on the same items. The name was
-        // added to the natural width but not to the strip laid out in the room, and a bar short
-        // of its name's width was reported with "0 of 9 actions" behind its arrow.
-        let named = with_name(bar, window.ui.bars.names_shown);
+        // The strip as the row draws it, its name or its grip included (panels' tool_bars_ui), so
+        // that its natural width and what its room hides are worked out on the same items. The
+        // name was added to the natural width but not to the strip laid out in the room, and a
+        // bar short of its name's width was reported with "0 of 9 actions" behind its arrow.
+        let named = docked_bar(bar, window.ui.bars.names_shown, false);
         let bars = &window.ui.bars;
         let items = window
             .ui
@@ -942,6 +1165,18 @@ pub fn top_widget_size(bars: &BarSettings, name: &str, icon_size: i32) -> Option
     widget_size(name, icon_size)
 }
 
+/// `bar` as a docked line draws it: along the top or the bottom its name first when names are
+/// shown (`with_name`); down a side as it is. Its grip is drawn in the padding before its first
+/// item (main_window::docking_ui), so a bar is no longer for being movable: a grip of its own
+/// would have cost every bar 8 points (its 6 and the strip's spacing), the first row's five bars
+/// 40 of the 33 a 1280 laptop leaves it, and the left column a Draw tool.
+pub fn docked_bar(bar: &ToolBar, names_shown: bool, vertical: bool) -> ToolBar {
+    if !vertical && names_shown {
+        return with_name(bar, true);
+    }
+    bar.clone()
+}
+
 
 /// The rows as built, Surface Edit and BIM moved to the second row before GIS: the layout of the
 /// build that put them beside GIS (main.cpp's `crowd`).
@@ -1013,9 +1248,16 @@ fn restore_and_report(
     report_fit(window, width, what, expected, err).0
 }
 
+/// The top rows `rows` gives as the toolbars' places, every other toolbar as built: what a layout
+/// of version 2 restores to.
+fn set_rows(window: &mut MainWindow, rows: &BTreeMap<String, usize>) {
+    window.ui.bars.places = Some(places_from_rows(window, rows));
+}
+
 /// The layout of the build that put Surface Edit and BIM beside GIS, both shown.
 fn crowd(window: &mut MainWindow) {
-    window.ui.bars.rows = Some(crowded_rows(window));
+    let rows = crowded_rows(window);
+    set_rows(window, &rows);
     window.ui.bars.hidden.remove("SurfaceEditToolBar");
     window.ui.bars.hidden.remove("BIMToolBar");
 }
@@ -1070,7 +1312,7 @@ pub fn check_tool_bar_fit(
     let mut rows = current_rows(window);
     rows.remove("SurfaceEditToolBar");
     rows.remove("BIMToolBar");
-    window.ui.bars.rows = Some(rows);
+    set_rows(window, &rows);
     let state = save_state(window, LAYOUT_VERSION_BEFORE_THIRD_ROW);
     ok &= restore_and_report(
         window,

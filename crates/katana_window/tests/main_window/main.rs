@@ -36,3 +36,4 @@ mod menu_texts;
 mod screen_fit_dialogs;
 mod surfaces_panel;
 mod tool_bar_columns;
+mod tool_bar_docking;

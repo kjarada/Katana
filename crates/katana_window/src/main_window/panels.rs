@@ -24,7 +24,9 @@ use katana_core::{ErrorCode, Status};
 use katana_entity::{EnumName, Layer};
 
 use super::actions::{BarPlace, Composed};
-use super::layout::{self, Geometry, bar_breadth, natural_width, row_rooms};
+use super::docking::{DropZones, Side};
+use super::docking_ui::arrange;
+use super::layout::{self, Geometry, natural_width, row_rooms};
 use super::window::{ImportOptions, MainWindow};
 use crate::dock_chrome::{ChromeIcons, ChromeRequest, DockChrome, DockRole, DockTab};
 use crate::drive::action::{Action, Menu, ToolBar, ToolBarItem};
@@ -34,10 +36,18 @@ use crate::host::Host;
 use crate::import_placement::DialogResult;
 use crate::shell::{DialogFrame, Workbench};
 use crate::theme::palette;
-use crate::tools::flyout_button::{Strip, tool_bar_strip};
+use crate::tools::flyout_button::{Strip, TOOL_BAR_PADDING_ALONG, tool_bar_strip};
 use crate::view_workspace::Scenery;
 
 // ---- the panels' state ----------------------------------------------------------------------
+
+/// How a toolbar's strip is laid out (`MainWindow::strip_drawn`): along a docked line at `at`,
+/// `room` long, or wrapped in rows of a floating bar's `width`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum StripShape {
+    Along { at: Rect, room: f32 },
+    Wrapped { width: f32 },
+}
 
 /// A panel of the window's chrome, by its dock's object name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -379,13 +389,30 @@ impl MainWindow {
             .rect_filled(screen, 0.0, crate::theme::palette::window().to_egui());
         let composed = self.composed();
         let right_extra = self.ui.drawing.vertices_shown() || self.ui.survey.point_manager_shown();
-        let geometry = layout::geometry(screen, &self.ui.docks, right_extra);
+        // The toolbars' lines first: what they take of each side is the room the rest is laid
+        // out in (main_window::docking).
+        let shown = |name: &str| self.ui.bars.shown(name);
+        let lines = self.bar_lines(&arrange(&composed.bars, &shown));
+        let geometry = layout::geometry(
+            screen,
+            &self.ui.docks,
+            right_extra,
+            &lines,
+            self.ui.docking.panels.band_breadths(),
+        );
+        self.ui.docking.screen = screen;
+        self.ui.docking.views = geometry.views_and_bands;
+        self.ui.docking.drawing = geometry.views;
+        self.ui.docking.drawn.clear();
         self.menu_bar_ui(ui, &geometry, &composed);
         self.tool_bars_ui(ui, &geometry, &composed);
         self.panels_ui(ui, &geometry);
         self.views_ui(ui, &geometry);
+        self.menu_panels_ui(ui, &geometry, &composed);
+        self.floating_bars_ui(ui, &composed);
         self.status_bar_ui(ui, &geometry);
         self.step_menu_ui(ui, &composed);
+        self.drags_ui(ui, &geometry);
         end_target(ui, screen);
 
         // 4: the dialogs, each in its frame.
@@ -413,9 +440,11 @@ impl MainWindow {
         }
     }
 
-    /// The menu bar: each menu a button that opens its items, as a person clicks it.
+    /// The menu bar: each menu a button that opens its items, as a person clicks it, with a
+    /// tear-off line at the top of every menu and submenu (main_window::docking_ui).
     fn menu_bar_ui(&mut self, ui: &mut Ui, geometry: &Geometry, composed: &Composed) {
         let triggered = &mut self.ui.triggered;
+        let mut torn: Option<(String, Pos2)> = None;
         ui.scope_builder(
             UiBuilder::new()
                 .max_rect(geometry.menu_bar)
@@ -423,116 +452,55 @@ impl MainWindow {
             |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     for menu in &composed.menus {
-                        menu_ui(ui, menu, triggered);
+                        menu_ui(ui, menu, triggered, &mut torn);
                     }
                 });
             },
         );
+        if let Some((menu, at)) = torn
+            && let Err(error) = self.tear_off_menu(&menu, Some(at))
+        {
+            self.exec.log_message(&error.describe(), true);
+        }
     }
 
-    /// The toolbars along the top in their rows, Draw and Annotate down the left, Modify down the
-    /// right, the Drafting bar along the bottom.
+    /// The toolbars docked along the window's four sides, each side's lines from its edge inwards
+    /// (main_window::docking): along the top and the bottom in rows that show their names, down
+    /// the left and the right in columns; then the Drafting bar over the status bar. Every docked
+    /// bar's grip is its handle, and the lines drawn are where a drag drops a bar.
     fn tool_bars_ui(&mut self, ui: &mut Ui, geometry: &Geometry, composed: &Composed) {
         let icon_size = self.ui.bars.icon_size;
         let names_shown = self.ui.bars.names_shown;
-        let mut rows: [Vec<&ToolBar>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-        let mut left: Vec<&ToolBar> = Vec::new();
-        let mut right: Vec<&ToolBar> = Vec::new();
-        let mut bottom: Vec<&ToolBar> = Vec::new();
-        for (bar, place) in &composed.bars {
-            if !self.ui.bars.shown(&bar.name) {
-                continue;
-            }
-            match place {
-                BarPlace::Top(row) => rows[(*row).min(2)].push(bar),
-                BarPlace::Left => left.push(bar),
-                BarPlace::Right => right.push(bar),
-                BarPlace::Bottom => bottom.push(bar),
-                BarPlace::Nowhere => {}
-            }
-        }
+        let shown = |name: &str| self.ui.bars.shown(name);
+        let arranged = arrange(&composed.bars, &shown);
         // The names' widths in this frame's text, before any strip is laid out with them.
         if names_shown {
-            let titles: Vec<String> = rows
+            let titles: Vec<String> = [Side::Top, Side::Bottom]
                 .iter()
-                .flatten()
-                .map(|bar| bar.title.clone())
+                .flat_map(|side| arranged.lines[side.index()].iter())
+                .flat_map(|(_, bars)| bars.iter().map(|bar| bar.title.clone()))
                 .collect();
             layout::measure_names(&mut self.ui.bars, ui, titles.iter().map(String::as_str));
         }
-        for (at, row) in rows.iter().enumerate() {
-            let rect = geometry.rows[at];
-            let strips: Vec<Strip> = row
-                .iter()
-                .map(|bar| self.strip_of(&layout::with_name(bar, names_shown), false, icon_size))
-                .collect();
-            let naturals: Vec<i32> = strips
-                .iter()
-                .map(|strip| natural_width(&strip.items, icon_size))
-                .collect();
-            let rooms = row_rooms(&naturals, rect.width());
-            // The row is one band: the frame's colour to its end and the rule under it the whole
-            // width, so a short row has no stretch where the toolbars' own ground stops.
-            ui.painter().rect_filled(rect, 0.0, palette::window().to_egui());
-            let mut x = rect.min.x;
-            let mut seams = Vec::new();
-            for (at_bar, (strip, room)) in strips.iter().zip(rooms).enumerate() {
-                if room <= 0.0 {
-                    continue;
-                }
-                if at_bar > 0 {
-                    seams.push(x);
-                }
-                let at = Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(room, rect.height()));
-                self.strip_ui(ui, strip, at, room, &[]);
-                x += room;
-            }
-            // The rule under the row, and between two toolbars of a row a rule a little shorter
-            // than the buttons: where one task's group ends and the next begins. Both drawn after
-            // the bars, whose ground covers the row: painted first, the rule under the row was
-            // hidden by every toolbar and showed only as a stub after the last.
-            ui.painter().hline(
-                rect.x_range(),
-                ui.painter().round_to_pixel_center(rect.max.y - 0.5),
-                egui::Stroke::new(1.0, palette::border().to_egui()),
-            );
-            let inset = 9.0;
-            for seam in seams {
-                ui.painter().vline(
-                    ui.painter().round_to_pixel_center(seam),
-                    (rect.min.y + inset)..=(rect.max.y - inset),
-                    egui::Stroke::new(1.0, palette::border().to_egui()),
-                );
+        let mut zones = DropZones::default();
+        for side in Side::ALL {
+            let rects = match side {
+                Side::Top => &geometry.rows,
+                Side::Left => &geometry.left_columns,
+                Side::Right => &geometry.right_columns,
+                Side::Bottom => &geometry.bottom_rows,
+            };
+            for ((line, bars), rect) in arranged.lines[side.index()].iter().zip(rects) {
+                zones.lines.push((side, *line, *rect));
+                self.bar_line_ui(ui, side, *line, *rect, bars, &mut zones);
             }
         }
-        for (column, rect) in [(left, geometry.left_bars), (right, geometry.right_bars)] {
-            let mut y = rect.min.y;
-            let strips: Vec<Strip> = column
-                .iter()
-                .map(|bar| self.strip_of(bar, true, icon_size))
-                .collect();
-            let naturals: Vec<i32> = strips
-                .iter()
-                .map(|strip| natural_width(&strip.items, icon_size))
-                .collect();
-            let rooms =
-                layout::column_rooms(&naturals, rect.height(), layout::collapsed_bar(icon_size));
-            for (strip, room) in strips.iter().zip(rooms) {
-                if room <= 0.0 {
-                    continue;
-                }
-                let at = Rect::from_min_size(
-                    Pos2::new(rect.min.x, y),
-                    Vec2::new(bar_breadth(icon_size), room),
-                );
-                self.strip_ui(ui, strip, at, room, &[]);
-                y += room;
-            }
-        }
+        self.new_line_zones(geometry, &mut zones);
+        self.ui.docking.zones = zones;
         ui.painter()
             .rect_filled(geometry.bottom_bar, 0.0, palette::window().to_egui());
         let mut x = geometry.bottom_bar.min.x;
-        for bar in bottom {
+        for bar in &arranged.drafting {
             // The Drafting bar's toggles have no icons - Ortho, Polar, the snap modes are words -
             // and an icon-only button with no icon is a blank square: each is drawn as a word
             // that is lit while it is on, as QToolBar showed a text-only action's text.
@@ -550,8 +518,94 @@ impl MainWindow {
         }
     }
 
-    /// A toolbar's strip as it is drawn this frame.
-    fn strip_of(&self, bar: &ToolBar, vertical: bool, icon_size: i32) -> Strip {
+    /// One line of docked toolbars at `rect`: a row shares its length as Qt's toolbar layout did
+    /// (`row_rooms`), a column as `column_rooms` does; each bar is drawn with its grip and its
+    /// handle, and recorded where a drop lands.
+    fn bar_line_ui(
+        &mut self,
+        ui: &mut Ui,
+        side: Side,
+        line: usize,
+        rect: Rect,
+        bars: &[&ToolBar],
+        zones: &mut DropZones,
+    ) {
+        let icon_size = self.ui.bars.icon_size;
+        let names_shown = self.ui.bars.names_shown;
+        let vertical = side.vertical();
+        let strips: Vec<(Strip, bool)> = bars
+            .iter()
+            .map(|bar| {
+                let docked = layout::docked_bar(bar, names_shown, vertical);
+                let named = matches!(
+                    docked.items.first(),
+                    Some(ToolBarItem::Widget(name)) if name.starts_with("toolBarName:")
+                );
+                (self.strip_of(&docked, vertical, icon_size), named)
+            })
+            .collect();
+        let naturals: Vec<i32> = strips
+            .iter()
+            .map(|(strip, _)| natural_width(&strip.items, icon_size))
+            .collect();
+        let rooms = if vertical {
+            layout::column_rooms(&naturals, rect.height(), layout::collapsed_bar(icon_size))
+        } else {
+            // The row is one band: the frame's colour to its end and the rule beside it the whole
+            // width, so a short row has no stretch where the toolbars' own ground stops.
+            ui.painter().rect_filled(rect, 0.0, palette::window().to_egui());
+            row_rooms(&naturals, rect.width())
+        };
+        let mut along = if vertical { rect.min.y } else { rect.min.x };
+        for (((strip, named), room), bar) in strips.iter().zip(rooms).zip(bars) {
+            if room <= 0.0 {
+                continue;
+            }
+            let at = if vertical {
+                Rect::from_min_size(Pos2::new(rect.min.x, along), Vec2::new(rect.width(), room))
+            } else {
+                Rect::from_min_size(Pos2::new(along, rect.min.y), Vec2::new(room, rect.height()))
+            };
+            self.strip_ui(ui, strip, at, room, &[]);
+            zones.bars.push((bar.name.clone(), side, line, at));
+            self.ui.docking.drawn.push((bar.name.clone(), at));
+            // The handle: the bar's padding, where its grip is drawn, and its name when it shows
+            // one. A bar short of its room shows its name still, unless it is one button (all
+            // its tools behind it, `column_rooms`), whose handle is its padding alone.
+            let padding = TOOL_BAR_PADDING_ALONG as f32;
+            let lead = match strip.items.first() {
+                Some(name) if *named && room >= padding * 2.0 + name.size(icon_size).0 as f32 => {
+                    padding + name.size(icon_size).0 as f32
+                }
+                _ => padding,
+            };
+            let handle = if vertical {
+                Rect::from_min_size(at.min, Vec2::new(at.width(), lead.min(room)))
+            } else {
+                Rect::from_min_size(at.min, Vec2::new(lead.min(room), at.height()))
+            };
+            self.grip_ui(ui, bar, BarPlace::on(side, line), at, handle);
+            along += room;
+        }
+        if !vertical {
+            // The rule between the row and the views, drawn after the bars, whose ground covers
+            // the row. Between two bars of a row there is no rule: each bar's grip says where it
+            // begins (it was a rule a little shorter than the buttons until the bars could be
+            // moved).
+            let y = match side {
+                Side::Bottom => rect.min.y + 0.5,
+                _ => rect.max.y - 0.5,
+            };
+            ui.painter().hline(
+                rect.x_range(),
+                ui.painter().round_to_pixel_center(y),
+                egui::Stroke::new(1.0, palette::border().to_egui()),
+            );
+        }
+    }
+
+    /// A toolbar's strip as it is drawn this frame, down a side when `vertical`.
+    pub(crate) fn strip_of(&self, bar: &ToolBar, vertical: bool, icon_size: i32) -> Strip {
         let bars = &self.ui.bars;
         let items = self.ui.tools.strip_items(bar, &|name| {
             if let Some(width) = name
@@ -572,9 +626,22 @@ impl MainWindow {
         }
     }
 
-    /// One toolbar drawn at `at`, its clicks kept to be triggered after the frame; `texts` are the
-    /// actions a worded bar (`worded`) draws as words.
+    /// One toolbar drawn at `at`, `room` along it, its clicks kept to be triggered after the
+    /// frame; `texts` are the actions a worded bar (`worded`) draws as words.
     fn strip_ui(&mut self, ui: &mut Ui, strip: &Strip, at: Rect, room: f32, texts: &[Action]) {
+        self.strip_drawn(ui, strip, texts, StripShape::Along { at, room });
+    }
+
+    /// A toolbar drawn in `shape` - along a line (`tool_bar_strip`) or wrapped in a floating bar's
+    /// width (`tool_bar_wrapped`) - the controls its owner draws itself drawn here, and its clicks
+    /// kept to be triggered after the frame.
+    pub(crate) fn strip_drawn(
+        &mut self,
+        ui: &mut Ui,
+        strip: &Strip,
+        texts: &[Action],
+        shape: StripShape,
+    ) {
         let exec = &mut self.exec;
         let ui_state = &mut self.ui;
         let mut status: Option<String> = None;
@@ -680,11 +747,17 @@ impl MainWindow {
                 _ => false,
             }
         };
-        let response = ui
-            .scope_builder(UiBuilder::new().max_rect(at), |ui| {
-                tool_bar_strip(ui, strip, room, &mut widget)
-            })
-            .inner;
+        let response = match shape {
+            StripShape::Along { at, room } => {
+                ui.scope_builder(UiBuilder::new().max_rect(at), |ui| {
+                    tool_bar_strip(ui, strip, room, &mut widget)
+                })
+                .inner
+            }
+            StripShape::Wrapped { width } => {
+                crate::tools::flyout_button::tool_bar_wrapped(ui, strip, width, &mut widget)
+            }
+        };
         for name in response.triggered {
             match name.as_str() {
                 "editUndoButton" => self.ui.triggered.push(String::from("editUndo")),
@@ -783,7 +856,7 @@ impl MainWindow {
     }
 
     /// Dock `name` drawn at `rect` with its chrome's title bar, `content` under it.
-    fn dock_at(
+    pub(crate) fn dock_at(
         &mut self,
         ui: &mut Ui,
         rect: Rect,
@@ -987,6 +1060,7 @@ impl MainWindow {
         };
         let menu = menu.clone();
         let mut chosen: Option<String> = None;
+        let mut torn: Option<(String, Pos2)> = None;
         let area = egui::Area::new(egui::Id::new(("katanaStepMenu", name.as_str())))
             .order(egui::Order::Foreground)
             .fixed_pos(ui.max_rect().min)
@@ -998,7 +1072,9 @@ impl MainWindow {
                     begin_target(ui, TargetSpec::new(&menu.name, TargetKind::Menu, &menu.title.replace('&', "")));
                     let shown = ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
                         crate::shell::dialog::menu_column(ui, |ui| {
-                            crate::drive::action::menu_items_ui(ui, &menu, &mut chosen);
+                            crate::drive::action::menu_items_tearable_ui(
+                                ui, &menu, &mut chosen, &mut torn,
+                            );
                         });
                     });
                     end_target(ui, shown.response.rect);
@@ -1008,6 +1084,12 @@ impl MainWindow {
         if let Some(chosen) = chosen {
             self.ui.open_menu = None;
             self.ui.triggered.push(chosen);
+        }
+        if let Some((menu, at)) = torn {
+            self.ui.open_menu = None;
+            if let Err(error) = self.tear_off_menu(&menu, Some(at)) {
+                self.exec.log_message(&error.describe(), true);
+            }
         }
     }
 
@@ -1307,6 +1389,9 @@ impl MainWindow {
 
     /// A panel's title bar asked: Minimise and Close hide it (View > Panels brings it back).
     fn panel_request(&mut self, request: ChromeRequest) {
+        if self.menu_panel_request(&request) {
+            return;
+        }
         let name = match &request {
             ChromeRequest::Minimise(name) | ChromeRequest::Close(name) => name.clone(),
             _ => return,
@@ -1352,14 +1437,22 @@ fn is_timing(readout: &str) -> bool {
 /// (drive::action::menu_items_ui: a tick and icon gutter, sections, inset separators, submenus) in
 /// a column that scrolls when the menu is taller than the room under the bar (the Annotate menu);
 /// a click on an action is the action chosen.
-fn menu_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Vec<String>) {
+fn menu_ui(
+    ui: &mut Ui,
+    menu: &Menu,
+    chosen: &mut Vec<String>,
+    torn: &mut Option<(String, Pos2)>,
+) {
     ui.menu_button(menu.title.replace('&', ""), |ui| {
         let mut one = None;
         crate::shell::dialog::menu_column(ui, |ui| {
-            crate::drive::action::menu_items_ui(ui, menu, &mut one);
+            crate::drive::action::menu_items_tearable_ui(ui, menu, &mut one, torn);
         });
         if let Some(name) = one {
             chosen.push(name);
+            ui.close();
+        }
+        if torn.is_some() {
             ui.close();
         }
     });
@@ -2571,6 +2664,10 @@ pub fn first_whole_line_top(galley: &egui::Galley, at: Pos2, view_top: f32) -> O
 /// main.cpp's reportWidget for a view of the window (PlanView<id>, RenderView<id>), painted afresh
 /// first: what it drew, by the keys its record uses. None when `name` is no view.
 pub fn report_view(window: &mut MainWindow, name: &str) -> Option<String> {
+    // A toolbar's place, a torn-off menu's or every toolbar's (main_window::docking_ui).
+    if let Some(report) = window.docking_report(name) {
+        return Some(report);
+    }
     let real = katana_core::text::format_exact_real;
     if let Some(id) = name.strip_prefix("PlanView").and_then(|id| id.parse::<u32>().ok()) {
         let id = id as katana_cad::view_set::ViewId;

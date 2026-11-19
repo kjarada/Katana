@@ -194,6 +194,9 @@ pub struct WindowUi {
     pub terrain_edit_items: Vec<MenuItem>,
     pub docks: Docks,
     pub bars: BarSettings,
+    /// The torn-off menus, and what the last frame drew of the toolbars and a drag in progress
+    /// (main_window::docking).
+    pub docking: super::docking::DockingState,
     pub panels: super::panels::Panels,
     pub surfaces: SurfacesPanel,
     pub properties: PropertyTreePanel,
@@ -431,6 +434,7 @@ impl MainWindow {
                 terrain_edit_items: terrain_items.items,
                 docks: Docks::default(),
                 bars: BarSettings::default(),
+                docking: super::docking::DockingState::default(),
                 panels: super::panels::Panels::default(),
                 surfaces,
                 properties: PropertyTreePanel::new(),
@@ -498,6 +502,13 @@ impl MainWindow {
             let verb = if name.starts_with("undo") { "UNDO" } else { "REDO" };
             let _ = self.exec.run_verb_line(&format!("{verb} {k}"));
             return Ok(());
+        }
+        // A toolbar docked or floated, a menu torn off and its panel placed (main_window::
+        // docking): one door, whatever asked - a menu item, a toolbar's right-click menu, a step.
+        if let Some(action) = super::docking::parse_action(name) {
+            let status = self.docking_action(action);
+            self.after_call();
+            return status;
         }
         let composed = self.composed();
         let Some(action) = composed.action(name) else {
@@ -714,6 +725,9 @@ impl MainWindow {
             "viewResetLayout" => {
                 ui.docks = Docks::default();
                 ui.bars.hidden.clear();
+                ui.bars.places = None;
+                ui.docking.panels = super::docking::MenuPanels::default();
+                ui.docking.docked_before.clear();
                 exec.log_message(
                     "The panels and toolbars are back where a new window has them.",
                     false,

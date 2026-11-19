@@ -413,10 +413,38 @@ pub fn action_item(ui: &mut Ui, action: &Action) -> Response {
 /// The caller puts the menu's own items in a `menu_column` too, where its popup does not already
 /// (shell::popup_menu does).
 pub fn menu_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
+    items_ui(ui, menu, chosen, None);
+}
+
+/// `menu_items_ui` for a menu of the menu bar (and a step's `--panel` of one): a tear-off line
+/// at the top of the menu and of each of its submenus (`tear_off_line`), and the menu whose line
+/// was clicked put in `torn` with where its line was - the window tears it off into a panel of
+/// its own there (main_window::docking_ui).
+pub fn menu_items_tearable_ui(
+    ui: &mut Ui,
+    menu: &Menu,
+    chosen: &mut Option<String>,
+    torn: &mut Option<(String, egui::Pos2)>,
+) {
+    items_ui(ui, menu, chosen, Some(torn));
+}
+
+fn items_ui(
+    ui: &mut Ui,
+    menu: &Menu,
+    chosen: &mut Option<String>,
+    mut torn: Option<&mut Option<(String, egui::Pos2)>>,
+) {
     // egui's menu look - items unframed, the pointer's item shaded - also where the popup is the
     // window's own rather than egui's (shell::popup_menu, a step's menu), which gave every item a
     // button's border.
     egui::containers::menu::menu_style(ui.style_mut());
+    if let Some(torn) = torn.as_deref_mut() {
+        let line = tear_off_line(ui, menu);
+        if line.clicked() {
+            *torn = Some((menu.name.clone(), line.rect.min));
+        }
+    }
     for item in &menu.items {
         match item {
             MenuItem::Action(action) => {
@@ -433,12 +461,99 @@ pub fn menu_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
             MenuItem::Menu(submenu) => {
                 submenu_item(ui, submenu, |ui| {
                     crate::shell::dialog::menu_column(ui, |ui| {
-                        menu_items_ui(ui, submenu, chosen);
+                        items_ui(ui, submenu, chosen, torn.as_deref_mut());
                     });
                 });
             }
         }
     }
+}
+
+/// The tear-off line's height: a dashed rule and a few points over and under it to click.
+pub const TEAR_OFF_HEIGHT: f32 = 9.0;
+
+/// The object name of `menu`'s tear-off line: `tearOff` and the menu's object name with its first
+/// letter upper case ("tearOffViewMenu"), as the action that tears it off is named after it
+/// (`viewMenuTearOffViewMenu`, main_window::docking).
+pub fn tear_off_name(menu: &str) -> String {
+    let mut characters = menu.chars();
+    match characters.next() {
+        Some(first) => format!(
+            "tearOff{}{}",
+            first.to_uppercase(),
+            characters.as_str()
+        ),
+        None => String::from("tearOff"),
+    }
+}
+
+/// The tear-off line at the top of a menu (QMenu::setTearOffEnabled's): a dashed rule in the muted
+/// token, the text's colour under the pointer, a person clicks to keep the menu open as a panel.
+/// A named control (`tear_off_name`), so a step presses it as a click does.
+pub fn tear_off_line(ui: &mut Ui, menu: &Menu) -> Response {
+    let name = tear_off_name(&menu.name);
+    let taken = take(ui, &name);
+    let width = ui.available_width().max(48.0);
+    let (rect, mut response) =
+        ui.allocate_exact_size(egui::vec2(width, TEAR_OFF_HEIGHT), egui::Sense::click());
+    let hovered = response.hovered();
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if hovered {
+            painter.rect_filled(
+                rect,
+                egui::CornerRadius::same(2),
+                crate::theme::palette::hover().to_egui(),
+            );
+        }
+        let colour = if hovered {
+            crate::theme::palette::text()
+        } else {
+            crate::theme::palette::text_muted()
+        }
+        .to_egui();
+        let y = painter.round_to_pixel_center(rect.center().y);
+        painter.add(egui::Shape::dashed_line(
+            &[
+                egui::pos2(rect.left() + 6.0, y),
+                egui::pos2(rect.right() - 6.0, y),
+            ],
+            egui::Stroke::new(1.0, colour),
+            3.0,
+            2.0,
+        ));
+    }
+    let title = menu.title.replace('&', "");
+    response = response.on_hover_text(format!(
+        "Tear off: keep the {title} menu open as a panel, docked or floating"
+    ));
+    if let Some(taken) = &taken {
+        match &taken.posted.act {
+            Act::Press => {
+                if super::controls::accept_press(ui, taken) {
+                    response
+                        .flags
+                        .insert(egui::response::Flags::FAKE_PRIMARY_CLICKED);
+                    super::registry::settle(ui, taken, Ok(()));
+                }
+            }
+            Act::Fill(text) => {
+                if super::controls::accept_fill(ui, taken) {
+                    super::registry::settle(ui, taken, Err(super::mailbox::no_field(&name, text)));
+                }
+            }
+            Act::ScrollTo => {
+                response.scroll_to_me(None);
+                super::registry::settle(ui, taken, Ok(()));
+            }
+        }
+    }
+    let mut record = ControlRecord::new(&name, ControlKind::Button);
+    record.text = format!("Tear off {title}");
+    record.enabled = ui.is_enabled();
+    record.visible = ui.is_visible();
+    super::registry::record(ui, &response, record);
+    response
 }
 
 /// The item that opens `submenu` (egui's SubMenuButton in a menu, a MenuButton elsewhere, as
