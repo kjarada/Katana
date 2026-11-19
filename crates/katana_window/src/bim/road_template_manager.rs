@@ -966,6 +966,11 @@ impl Body {
         if self.list.ui(ui).selection_changed {
             self.list_selection_changed(host.document());
         }
+        // What acts on a template, a component or a course greys while none is chosen: lit, it
+        // invited a press that could only say "choose one first" (the fourth look audit's 1).
+        let has_template = !self.current_template().is_empty();
+        let has_component = !self.chosen_component().is_empty();
+        let has_course = has_component && self.courses.current_row().is_some();
         ui.horizontal(|ui| {
             field(
                 ui,
@@ -984,36 +989,38 @@ impl Body {
             {
                 self.press_new(host);
             }
-            if button(
-                ui,
-                "roadTemplateCopy",
-                "Copy",
-                "ROADTEMPLATE NEW ... FROM: a copy of the chosen template",
-            )
-            .clicked()
-            {
-                self.press_copy(host);
-            }
-            if button(
-                ui,
-                "roadTemplateRename",
-                "Rename",
-                "ROADTEMPLATE RENAME: the chosen template, and the corridors that use it",
-            )
-            .clicked()
-            {
-                self.press_rename(host);
-            }
-            if button(
-                ui,
-                "roadTemplateDelete",
-                "Delete",
-                "ROADTEMPLATE DELETE: refused while a corridor uses it",
-            )
-            .clicked()
-            {
-                self.press_delete(host);
-            }
+            ui.add_enabled_ui(has_template, |ui| {
+                if button(
+                    ui,
+                    "roadTemplateCopy",
+                    "Copy",
+                    "ROADTEMPLATE NEW ... FROM: a copy of the chosen template",
+                )
+                .clicked()
+                {
+                    self.press_copy(host);
+                }
+                if button(
+                    ui,
+                    "roadTemplateRename",
+                    "Rename",
+                    "ROADTEMPLATE RENAME: the chosen template, and the corridors that use it",
+                )
+                .clicked()
+                {
+                    self.press_rename(host);
+                }
+                if button(
+                    ui,
+                    "roadTemplateDelete",
+                    "Delete",
+                    "ROADTEMPLATE DELETE: refused while a corridor uses it",
+                )
+                .clicked()
+                {
+                    self.press_delete(host);
+                }
+            });
             if button(
                 ui,
                 "roadTemplateDefaults",
@@ -1045,16 +1052,18 @@ impl Body {
             {
                 self.press_browse(host);
             }
-            if button(
-                ui,
-                "roadTemplateExport",
-                "Export",
-                "ROADTEMPLATE EXPORT: the chosen template, as JSON",
-            )
-            .clicked()
-            {
-                self.press_export(host);
-            }
+            ui.add_enabled_ui(has_template, |ui| {
+                if button(
+                    ui,
+                    "roadTemplateExport",
+                    "Export",
+                    "ROADTEMPLATE EXPORT: the chosen template, as JSON",
+                )
+                .clicked()
+                {
+                    self.press_export(host);
+                }
+            });
             if button(
                 ui,
                 "roadTemplateExportAll",
@@ -1105,52 +1114,63 @@ impl Body {
         // The grids' Apply and Revert are the footer's (footer_ui): what changes the drawing from
         // a dialog's edits is in its footer, as every dialog's primary is.
         ui.horizontal(|ui| {
-            self.add_side.ui(ui, "roadTemplateAddSide");
-            self.add_kind.ui(ui, "roadTemplateAddKind");
-            if button(
-                ui,
-                "roadTemplateAdd",
-                "Add",
-                "ROADTEMPLATE ADD: a component of this kind on this side, before the batter",
-            )
-            .clicked()
-            {
-                self.press_add(host);
-            }
-            if button(
-                ui,
-                "roadTemplateRemove",
-                "Remove",
-                "ROADTEMPLATE REMOVE: the chosen component",
-            )
-            .clicked()
-            {
-                self.press_remove(host);
-            }
+            ui.add_enabled_ui(has_template, |ui| {
+                self.add_side.ui(ui, "roadTemplateAddSide");
+                self.add_kind.ui(ui, "roadTemplateAddKind");
+                if button(
+                    ui,
+                    "roadTemplateAdd",
+                    "Add",
+                    "ROADTEMPLATE ADD: a component of this kind on this side, before the batter",
+                )
+                .clicked()
+                {
+                    self.press_add(host);
+                }
+            });
+            ui.add_enabled_ui(has_component, |ui| {
+                if button(
+                    ui,
+                    "roadTemplateRemove",
+                    "Remove",
+                    "ROADTEMPLATE REMOVE: the chosen component",
+                )
+                .clicked()
+                {
+                    self.press_remove(host);
+                }
+            });
         });
-        ui.horizontal(|ui| {
-            // The field leaves Set its room, so the row ends where the grids do.
-            ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Set");
-            field(
-                ui,
-                "roadTemplateComponentKeys",
-                &mut self.keys,
-                "shape=kerbgutter height=0.15  |  cut=2 fill=4 benchheight=",
-                "key=value for the chosen component: a kerb's shape faces (inward, or outward for \
-                 a median's kerb) height depth gutter gutterfall material, a drain's depth, a \
-                 batter's cut fill maxwidth benchheight benchwidth, colour=, \
-                 superelevated=on|off, name=",
-            );
-            if button(
-                ui,
-                "roadTemplateSetKeys",
-                "Set",
-                "ROADTEMPLATE SET with these keys",
-            )
-            .clicked()
-            {
-                self.press_set_keys(host);
-            }
+        // The chosen component's other keys, typed: a labelled row whose placeholder says what
+        // goes in it, the keys a component takes in the tooltip. A placeholder of two records
+        // ("shape=kerbgutter height=0.15 | cut=2 ...") read as a raw record shown in a well (the
+        // fourth look audit's 6).
+        dialog::labelled(ui, "Other keys", |ui| {
+            ui.add_enabled_ui(has_component, |ui| {
+                // The field leaves Set its room, so the row ends where the grids do.
+                ui.spacing_mut().text_edit_width = dialog::beside_a_button(ui, "Set");
+                field(
+                    ui,
+                    "roadTemplateComponentKeys",
+                    &mut self.keys,
+                    "key=value ...",
+                    "key=value for the chosen component, e.g. shape=kerbgutter height=0.15, or \
+                     cut=2 fill=4 for a batter: a kerb's shape faces (inward, or outward for a \
+                     median's kerb) height depth gutter gutterfall material, a drain's depth, a \
+                     batter's cut fill maxwidth benchheight benchwidth, colour=, \
+                     superelevated=on|off, name=",
+                );
+                if button(
+                    ui,
+                    "roadTemplateSetKeys",
+                    "Set",
+                    "ROADTEMPLATE SET with these keys",
+                )
+                .clicked()
+                {
+                    self.press_set_keys(host);
+                }
+            });
         });
         dialog::section(ui, "Courses");
         note(
@@ -1161,6 +1181,9 @@ impl Body {
         let events = self.courses.ui(ui);
         self.courses_events(events);
         ui.horizontal(|ui| {
+            if !has_component {
+                ui.disable();
+            }
             field(
                 ui,
                 "roadTemplateCourseName",
@@ -1192,16 +1215,18 @@ impl Body {
             {
                 self.press_course_add(host);
             }
-            if button(
-                ui,
-                "roadTemplateCourseRemove",
-                "Remove Course",
-                "ROADTEMPLATE COURSE ... REMOVE: the chosen course",
-            )
-            .clicked()
-            {
-                self.press_course_remove(host);
-            }
+            ui.add_enabled_ui(has_course, |ui| {
+                if button(
+                    ui,
+                    "roadTemplateCourseRemove",
+                    "Remove Course",
+                    "ROADTEMPLATE COURSE ... REMOVE: the chosen course",
+                )
+                .clicked()
+                {
+                    self.press_course_remove(host);
+                }
+            });
         });
 
         // A drawing of a typical section reads at this height; the grids above it are the
@@ -1230,43 +1255,62 @@ impl Body {
         );
     }
 
-    /// The one footer (shell::dialog::button_row): what the last line replied at the left; at the
-    /// right the grids' edits put back (Revert) or applied - the courses', then Close, then the
-    /// components', the primary, last. Each Apply is its grid's one line, so one undo step. Under
-    /// each grid, beside its Add and Remove, the Apply read as one more button of the row (the
-    /// third look audit's A: actions still in the body).
+    /// The one footer (shell::dialog::button_row): Revert at the left, as it reads the components
+    /// back from the drawing (where Surface Styles keeps it; it stood beside Close, the fourth
+    /// look audit's 4), and what the last line replied; at the right the courses' edits applied,
+    /// then Close, then the components', the primary, last - each greyed with no template or no
+    /// component to apply to. Each Apply is its grid's one line, so one undo step. Under each
+    /// grid, beside its Add and Remove, the Apply read as one more button of the row (the third
+    /// look audit's A: actions still in the body).
     fn footer_ui(&mut self, ui: &mut Ui, host: &mut dyn Host) {
+        let has_template = !self.current_template().is_empty();
+        let has_component = !self.chosen_component().is_empty();
         let status = &self.status;
-        let (_, (revert, courses, close, components)) = dialog::button_row(
+        let (revert, (courses, close, components)) = dialog::button_row(
             ui,
-            |ui| status.ui(ui, "roadTemplateStatus"),
             |ui| {
-                let revert = button(
-                    ui,
-                    "roadTemplateRevertComponents",
-                    "Revert",
-                    "The components' grid as the drawing holds it again",
-                )
-                .clicked();
-                let courses = button(
-                    ui,
-                    "roadTemplateApplyCourses",
-                    "Apply Courses",
-                    "ROADTEMPLATE COURSE ... SET for each edited row of the courses",
-                )
-                .clicked();
+                let revert = ui
+                    .add_enabled_ui(has_template, |ui| {
+                        button(
+                            ui,
+                            "roadTemplateRevertComponents",
+                            "Revert",
+                            "The components' grid as the drawing holds it again",
+                        )
+                        .clicked()
+                    })
+                    .inner;
+                status.ui(ui, "roadTemplateStatus");
+                revert
+            },
+            |ui| {
+                let courses = ui
+                    .add_enabled_ui(has_component, |ui| {
+                        button(
+                            ui,
+                            "roadTemplateApplyCourses",
+                            "Apply Courses",
+                            "ROADTEMPLATE COURSE ... SET for each edited row of the courses",
+                        )
+                        .clicked()
+                    })
+                    .inner;
                 let close = button(ui, "roadTemplateClose", "Close", "Close the manager").clicked();
-                let components = crate::drive::controls::primary(
-                    ui,
-                    "roadTemplateApplyComponents",
-                    "Apply Components",
-                )
-                .on_hover_text(
-                    "ROADTEMPLATE SET for each edited row of the components: its width, \
-                     crossfall and layer",
-                )
-                .clicked();
-                (revert, courses, close, components)
+                let components = ui
+                    .add_enabled_ui(has_template, |ui| {
+                        crate::drive::controls::primary(
+                            ui,
+                            "roadTemplateApplyComponents",
+                            "Apply Components",
+                        )
+                        .on_hover_text(
+                            "ROADTEMPLATE SET for each edited row of the components: its width, \
+                             crossfall and layer",
+                        )
+                        .clicked()
+                    })
+                    .inner;
+                (courses, close, components)
             },
         );
         if revert {

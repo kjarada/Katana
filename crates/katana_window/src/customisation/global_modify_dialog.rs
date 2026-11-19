@@ -812,6 +812,12 @@ impl GlobalModifyDialog {
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let summary = self.summary.clone();
         let summary_is_error = self.summary_is_error;
+        // Apply greys while no field is ticked: it would change nothing (the fourth look audit's
+        // 1). A field ticked that does not read keeps it lit, so a press says what is wrong.
+        let can_apply = match self.modification() {
+            Ok(change) => !change.empty(),
+            Err(_) => true,
+        };
         // The one footer (shell::dialog::button_row): Preview and Select Matches read the drawing,
         // at the left, and what the preview found beside them, muted unless it is a refusal (on a
         // line of its own over the buttons it made a footer 68 high against the others' 49, the
@@ -831,8 +837,13 @@ impl GlobalModifyDialog {
             },
             |ui| {
                 let closed = controls::button(ui, "globalModifyClose", "Close").clicked();
-                let applied = controls::primary(ui, "globalModifyApply", "Apply")
-                    .on_hover_text("Make the change: one Undo puts everything back")
+                let applied = ui
+                    .add_enabled_ui(can_apply, |ui| {
+                        controls::primary(ui, "globalModifyApply", "Apply")
+                            .on_hover_text("Make the change: one Undo puts everything back")
+                            .on_disabled_hover_text("Tick a field to change it")
+                    })
+                    .inner
                     .clicked();
                 (closed, applied)
             },

@@ -25,7 +25,7 @@
 //! corridorName            the name New and Rename use
 //! corridorAlignment       the alignments with a design profile
 //! corridorTemplate        the road templates
-//! corridorSurface         (none) and the drawing's surfaces
+//! corridorSurface         None and the drawing's surfaces
 //! corridorInterval, corridorFrom, corridorTo   metres; From and To may be empty
 //! corridorCurveTolerance  the relative error of a course's area and volume on a curve (0.001;
 //!                         0 adds no sections inside curves)
@@ -63,11 +63,14 @@ use super::road_dialog_support::{
 use crate::command_word::exact_number;
 use crate::customisation::document_watcher::DocumentWatcher;
 use crate::dialog_layout as layout;
+use crate::drive::controls;
 use crate::host::Host;
 use crate::shell::dialog::{self, DialogFrame};
 
-/// What the surface choice shows for no target surface.
-pub const NO_SURFACE: &str = "(none)";
+/// What the surface choice shows for no target surface: "None", the word every empty choice says
+/// (drive::controls::NO_CHOICE) - "(none)" here beside the template's "None" spelled one thing two
+/// ways in one form (the fourth look audit's 3).
+pub const NO_SURFACE: &str = crate::drive::controls::NO_CHOICE;
 
 fn station_text(station: Option<f64>) -> String {
     station.map(exact_number).unwrap_or_default()
@@ -593,9 +596,17 @@ impl Body {
             self.fill_chosen(host.document(), true);
         }
 
+        // What acts on a corridor greys while none is chosen, and Remove while no row is: lit,
+        // each invited a press that could only say "choose one first" (the fourth look audit's 1).
+        let has_corridor = !self.current_corridor().is_empty();
+        let has_region = has_corridor && self.regions.current_row().is_some();
+        let has_super = has_corridor && self.superelevation.current_row().is_some();
+
         // ---- the definition ----
+        // The heading in the body's own column, so it has its gap over the table: first in a
+        // column of its own it stood 6 points under it (the fourth look audit's 7).
+        dialog::section(ui, "Corridor");
         ui.vertical(|ui| {
-            dialog::section(ui, "Corridor");
             // Two columns of labelled rows side by side, as the definition was laid out before: each
             // column's fields start at one edge, its own (shell::dialog's THE LABEL COLUMN).
             ui.columns(2, |columns| {
@@ -615,21 +626,21 @@ impl Body {
                     form.row("Template", |ui| {
                         self.road_template.ui(ui, "corridorTemplate");
                     });
+                    // Numbers kept as text (an empty one is the verb's default): a number's short
+                    // well, where they filled the column as the name does (the fourth look
+                    // audit's 2).
                     form.row("Interval (m)", |ui| {
-                        field(
-                            ui,
-                            "corridorInterval",
-                            &mut self.interval,
-                            "10",
-                            "Metres between sections",
-                        );
+                        controls::number_line(ui, "corridorInterval", &mut self.interval, "10")
+                            .on_hover_text("Metres between sections");
                     });
                     form.row("Curve tolerance", |ui| {
-                        field(
+                        controls::number_line(
                             ui,
                             "corridorCurveTolerance",
                             &mut self.curve_tolerance,
                             "0.001",
+                        )
+                        .on_hover_text(
                             "The most a course's area and volume on a curve may be out, as a \
                              fraction (0.001 is 0.1 %): sections are added inside a curve until \
                              the chords are that close. 0 adds none",
@@ -675,40 +686,43 @@ impl Body {
                 {
                     self.press_new(host);
                 }
-                if button(
-                    ui,
-                    "corridorApply",
-                    "Apply",
-                    "CORRIDOR SET: the chosen corridor as the fields say",
-                )
-                .clicked()
-                {
-                    self.press_apply(host);
-                }
-                if button(
-                    ui,
-                    "corridorRename",
-                    "Rename",
-                    "CORRIDOR RENAME: the chosen corridor",
-                )
-                .clicked()
-                {
-                    self.press_rename(host);
-                }
-                if button(
-                    ui,
-                    "corridorDelete",
-                    "Delete",
-                    "CORRIDOR DELETE: the chosen corridor",
-                )
-                .clicked()
-                {
-                    self.press_named(host, "CORRIDOR DELETE");
-                }
+                ui.add_enabled_ui(has_corridor, |ui| {
+                    if button(
+                        ui,
+                        "corridorApply",
+                        "Apply",
+                        "CORRIDOR SET: the chosen corridor as the fields say",
+                    )
+                    .clicked()
+                    {
+                        self.press_apply(host);
+                    }
+                    if button(
+                        ui,
+                        "corridorRename",
+                        "Rename",
+                        "CORRIDOR RENAME: the chosen corridor",
+                    )
+                    .clicked()
+                    {
+                        self.press_rename(host);
+                    }
+                    if button(
+                        ui,
+                        "corridorDelete",
+                        "Delete",
+                        "CORRIDOR DELETE: the chosen corridor",
+                    )
+                    .clicked()
+                    {
+                        self.press_named(host, "CORRIDOR DELETE");
+                    }
+                });
             });
         });
 
         // ---- regions and superelevation, side by side ----
+        // Their headings are first in their columns, so the gap over them is the row's.
         ui.add_space(layout::SECTION_GAP);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().text_edit_width = dialog::SHORT_FIELD_WIDTH / 2.0;
@@ -722,9 +736,15 @@ impl Body {
             ui.vertical(|ui| {
                 ui.set_width(column);
                 ui.vertical(|ui| {
-                    ui.strong("Regions: another template between two stations");
+                    // A heading as "Corridor" and "Build" are, what it is in a note under it:
+                    // a bold line of body text beside the headings was a third style.
+                    dialog::section(ui, "Regions");
+                    dialog::note(ui, "Another template between two stations.");
                     self.regions.ui(ui);
                     ui.horizontal(|ui| {
+                        if !has_corridor {
+                            ui.disable();
+                        }
                         field(
                             ui,
                             "corridorRegionFrom",
@@ -745,16 +765,18 @@ impl Body {
                         {
                             self.press_region_add(host);
                         }
-                        if button(
-                            ui,
-                            "corridorRegionRemove",
-                            "Remove",
-                            "CORRIDOR REGION ... REMOVE: the chosen region",
-                        )
-                        .clicked()
-                        {
-                            self.press_region_remove(host);
-                        }
+                        ui.add_enabled_ui(has_region, |ui| {
+                            if button(
+                                ui,
+                                "corridorRegionRemove",
+                                "Remove",
+                                "CORRIDOR REGION ... REMOVE: the chosen region",
+                            )
+                            .clicked()
+                            {
+                                self.press_region_remove(host);
+                            }
+                        });
                     });
                 });
             });
@@ -762,9 +784,13 @@ impl Body {
             ui.vertical(|ui| {
                 ui.set_width(column);
                 ui.vertical(|ui| {
-                    ui.strong("Superelevation: crossfall each side, percent outward");
+                    dialog::section(ui, "Superelevation");
+                    dialog::note(ui, "The crossfall each side, percent outward.");
                     self.superelevation.ui(ui);
                     ui.horizontal(|ui| {
+                        if !has_corridor {
+                            ui.disable();
+                        }
                         field(
                             ui,
                             "corridorSuperStation",
@@ -796,16 +822,18 @@ impl Body {
                         {
                             self.press_super_add(host);
                         }
-                        if button(
-                            ui,
-                            "corridorSuperRemove",
-                            "Remove",
-                            "CORRIDOR SUPERELEVATION ... REMOVE: the chosen entry",
-                        )
-                        .clicked()
-                        {
-                            self.press_super_remove(host);
-                        }
+                        ui.add_enabled_ui(has_super, |ui| {
+                            if button(
+                                ui,
+                                "corridorSuperRemove",
+                                "Remove",
+                                "CORRIDOR SUPERELEVATION ... REMOVE: the chosen entry",
+                            )
+                            .clicked()
+                            {
+                                self.press_super_remove(host);
+                            }
+                        });
                     });
                 });
             });
@@ -814,6 +842,9 @@ impl Body {
         // ---- what it builds ----
         dialog::section(ui, "Build");
         ui.horizontal(|ui| {
+            if !has_corridor {
+                ui.disable();
+            }
             if button(
                 ui,
                 "corridorBuild",

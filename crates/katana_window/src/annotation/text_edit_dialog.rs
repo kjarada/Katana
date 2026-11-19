@@ -16,7 +16,7 @@
 //! textEditDialog      the dialog
 //! textEditStatus      which text it edits, or what to select
 //! textEditText        the words, a line a line
-//! textEditStyle       the text style, "(none)" for the plain face
+//! textEditStyle       the text style, "None" for the plain face
 //! textEditPaper       height on paper in mm; 0 for a model height
 //! textEditHeight      model height (a paper-sized text's is worked out)
 //! textEditJustify     TL TC TR ML MC MR BL BC BR
@@ -26,7 +26,7 @@
 //! textEditProblem     the last refusal
 //! ```
 
-use egui::{Context, RichText, Ui};
+use egui::{Context, Ui};
 use katana_cad::annotation::command_words::{annotation_text_word, command_word};
 use katana_cad::{Document, DocumentChange};
 use katana_core::text::{format_general, parse_finite_double};
@@ -37,17 +37,21 @@ use katana_math::numerics::RAD_TO_DEG;
 
 use super::dialog_support::{Followed, show_dialog};
 use super::form_widgets::describe;
+use crate::dialog_layout as layout;
 use crate::drive::controls::{self, Choice, TextOptions};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
+use crate::survey::survey_dialogs::hidden;
 use crate::theme::palette;
 
 const DIALOG: &str = "textEditDialog";
 const TITLE: &str = "Edit Text";
 
-/// The style box's first item: the plain face.
-const NO_STYLE: &str = "(none)";
+/// The style box's first item: the plain face - "None", the word every empty choice says
+/// (drive::controls::NO_CHOICE); "(none)" here beside the justification's "None" spelled one
+/// thing two ways in one form (the fourth look audit's 3).
+const NO_STYLE: &str = controls::NO_CHOICE;
 
 /// The nine, in reading order, by the names the verb takes.
 const JUSTIFICATIONS: [TextJustify; 9] = [
@@ -409,7 +413,8 @@ impl TextEditDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        controls::label(ui, "textEditStatus", &self.status);
+        // Which text it edits, or what to select, is the footer's status (`footer`), as Edit
+        // Label's is: over the form in the body it was the one hint of the two not in the footer.
         ui.add_enabled_ui(self.editable, |ui| {
             dialog::form(ui, |form| {
                 form.row("Text", |ui| {
@@ -426,7 +431,7 @@ impl TextEditDialog {
                 });
                 form.row("Style", |ui| {
                     controls::choice(ui, "textEditStyle", &self.styles, &mut self.style)
-                        .on_hover_text("The text style it is set in; (none) for the plain face");
+                        .on_hover_text("The text style it is set in; None for the plain face");
                 });
                 let lines = [
                     (
@@ -444,9 +449,11 @@ impl TextEditDialog {
                          annotation scale",
                     ),
                 ];
+                // Numbers kept as text (a stored value is shown whole, and only a changed one is
+                // sent): a number's short well, not a field across the form.
                 for (title, name, value, tip) in lines {
                     form.row(title, |ui| {
-                        controls::line(ui, name, value).on_hover_text(tip);
+                        controls::number_line(ui, name, value, "").on_hover_text(tip);
                     });
                 }
                 form.row("Justification", |ui| {
@@ -461,48 +468,29 @@ impl TextEditDialog {
                          baseline), then L, C or R for left, centre or right",
                     );
                 });
-                let lines = [
-                    (
-                        "Rotation (degrees)",
-                        "textEditRotation",
-                        &mut self.rotation,
-                        "Degrees counter-clockwise from east",
-                    ),
-                    (
-                        "Position (E,N)",
-                        "textEditPosition",
-                        &mut self.position,
-                        "The justification point, as E,N",
-                    ),
-                ];
-                for (title, name, value, tip) in lines {
-                    form.row(title, |ui| {
-                        controls::line(ui, name, value).on_hover_text(tip);
-                    });
-                }
+                form.row("Rotation (degrees)", |ui| {
+                    controls::number_line(ui, "textEditRotation", &mut self.rotation, "")
+                        .on_hover_text("Degrees counter-clockwise from east");
+                });
+                form.row("Position (E,N)", |ui| {
+                    controls::line(ui, "textEditPosition", &mut self.position)
+                        .on_hover_text("The justification point, as E,N");
+                });
             });
         });
     }
 
     fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
-        // The one footer (shell::dialog::button_row): the last refusal at the left; Revert, Close,
-        // then Apply, the primary, last at the right. Close is the footer's own: the dialog had
-        // only its title bar's cross to dismiss it.
+        // The one footer (shell::dialog::button_row): Revert at the left, as it reads the text
+        // back from the drawing (where Surface Styles keeps it; it stood beside Close, the fourth
+        // look audit's 4), then the status - the last refusal, in the error token, or which text
+        // it edits, muted; Close, then Apply, the primary, last at the right. Close is the
+        // footer's own: the dialog had only its title bar's cross to dismiss it.
         let editable = self.editable;
         let problem = self.problem.clone();
-        let (_, (closed, reverted, applied)) = dialog::button_row(
+        let status = self.status.clone();
+        let (reverted, (closed, applied)) = dialog::button_row(
             ui,
-            |ui| {
-                controls::label_as(
-                    ui,
-                    "textEditProblem",
-                    &problem,
-                    egui::Label::new(
-                        RichText::new(problem.as_str()).color(palette::error().to_egui()),
-                    )
-                    .wrap(),
-                );
-            },
             |ui| {
                 let reverted = ui
                     .add_enabled_ui(editable, |ui| {
@@ -511,6 +499,21 @@ impl TextEditDialog {
                             .clicked()
                     })
                     .inner;
+                // One line: the refusal while there is one, the status otherwise. The status
+                // stays recorded under its name while a refusal stands in its place (hidden,
+                // taking no room), and the refusal while there is none (an empty quiet label).
+                if problem.is_empty() {
+                    layout::quiet_label(ui, "textEditProblem", "", palette::error().to_egui());
+                    dialog::status(ui, "textEditStatus", &status, false);
+                } else {
+                    dialog::status(ui, "textEditProblem", &problem, true);
+                    hidden(ui, "textEditStatus", |ui| {
+                        dialog::status(ui, "textEditStatus", &status, false);
+                    });
+                }
+                reverted
+            },
+            |ui| {
                 let closed = controls::button(ui, "textEditClose", "Close")
                     .on_hover_text("Close the dialog; edits not applied are dropped")
                     .clicked();
@@ -523,7 +526,7 @@ impl TextEditDialog {
                             .clicked()
                     })
                     .inner;
-                (closed, reverted, applied)
+                (closed, applied)
             },
         );
         if closed {

@@ -427,6 +427,8 @@ pub struct Table {
     max_height: Option<f32>,
     /// A height it keeps whatever it holds (setMinimumHeight with room for rows).
     fixed_height: Option<f32>,
+    /// The room it fills even while empty, its note then in the middle of it (`set_room`).
+    room: Option<f32>,
     /// Spans the width of what holds it (dialog_layout::table_header), so the tables of one column
     /// are one width.
     fill: bool,
@@ -447,6 +449,7 @@ impl Table {
             editing: false,
             max_height: None,
             fixed_height: None,
+            room: None,
             fill: false,
             empty: String::from(EMPTY_TABLE),
         }
@@ -486,6 +489,15 @@ impl Table {
     /// Keeps `height` points of room, however few rows it holds - once it holds one.
     pub fn set_fixed_height(&mut self, height: f32) {
         self.fixed_height = Some(height);
+    }
+
+    /// Fills `height` points whatever it holds - empty too, its note then in the middle of that
+    /// room, as an empty list well says it: for a table that is its column's one list beside a
+    /// taller column (the Road Objects manager's), where a short empty table stood over a void
+    /// some 500 points high (the fourth look audit's "For 10"). A table among others keeps its
+    /// empty height (`set_fixed_height`).
+    pub fn set_room(&mut self, height: f32) {
+        self.room = Some(height);
     }
 
     pub fn name(&self) -> &str {
@@ -658,7 +670,9 @@ impl Table {
         // An empty table is as tall as its header and its note: the room kept for rows stood as a
         // void of 120 points under "Choose a template to see its components" (the look audits'
         // T9). It keeps that room once it has a row, so the grid does not jump as rows come.
-        let fixed = self.fixed_height.filter(|_| !self.rows.is_empty());
+        let fixed = self
+            .room
+            .or_else(|| self.fixed_height.filter(|_| !self.rows.is_empty()));
         area = match (fixed, self.max_height) {
             (Some(height), _) => area
                 .min_scrolled_height(height)
@@ -669,6 +683,7 @@ impl Table {
         };
         let editing = self.editing;
         let fill = self.fill;
+        let room = self.room;
         let empty = self.empty.as_str();
         let headers = &self.headers;
         let rows = &mut self.rows;
@@ -715,7 +730,20 @@ impl Table {
                     }
                 });
             if rows.is_empty() {
-                empty_table(ui, empty);
+                match room {
+                    // In the middle of the room left under the header.
+                    Some(height) => {
+                        let left = (height - ui.min_rect().height()).max(0.0);
+                        let width = ui.available_width();
+                        ui.allocate_ui(egui::vec2(width, left), |ui| {
+                            ui.set_min_size(egui::vec2(width, left));
+                            ui.centered_and_justified(|ui| empty_table(ui, empty));
+                        });
+                    }
+                    None => {
+                        empty_table(ui, empty);
+                    }
+                }
             }
         });
         if let Some(row) = clicked

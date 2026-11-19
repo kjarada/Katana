@@ -69,6 +69,7 @@ use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::host::Host;
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
+use crate::survey::survey_dialogs::offstage;
 use crate::theme::palette;
 
 /// The rule table's columns.
@@ -140,19 +141,25 @@ const MARKERS: [LabelMarker; 4] = [
 ];
 
 // The text style form's boxes.
-const TEXT_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2).with_suffix(" mm");
+// 0 is said in words, what it means, rather than as a size of nothing ("0.00 mm", the fourth look
+// audit's 3).
+const TEXT_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2)
+    .with_suffix(" mm")
+    .with_special_text("Text's own");
 const TEXT_WIDTH: SpinRange = SpinRange::new(0.05, 100.0, 0.05, 2);
 const TEXT_OBLIQUE: SpinRange = SpinRange::new(-84.9, 84.9, 1.0, 1).with_suffix(" deg");
 const TEXT_MARGIN: SpinRange = SpinRange::new(0.0, 20.0, 0.25, 2).with_suffix(" mm");
 const TEXT_SPACING: SpinRange = SpinRange::new(0.25, 4.0, 0.1, 2);
 
 // The label style form's boxes.
-const LABEL_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2).with_suffix(" mm");
+const LABEL_PAPER: SpinRange = SpinRange::new(0.0, 100.0, 0.5, 2)
+    .with_suffix(" mm")
+    .with_special_text("Text style's");
 const LABEL_OFFSET: SpinRange = SpinRange::new(0.0, 100.0, 0.25, 2).with_suffix(" mm");
 const LABEL_MARKER_SIZE: SpinRange = SpinRange::new(0.0, 50.0, 0.25, 2).with_suffix(" mm");
 const LABEL_MINIMUM_LENGTH: SpinRange = SpinRange::new(0.0, 500.0, 1.0, 1).with_suffix(" mm");
 const LABEL_INTERVAL: SpinRange = SpinRange::new(0.001, 1.0e6, 10.0, 3);
-const LABEL_TICK: SpinRange = SpinRange::new(0.0, 1.0e6, 5.0, 3);
+const LABEL_TICK: SpinRange = SpinRange::new(0.0, 1.0e6, 5.0, 3).with_special_text("At the labels");
 const LABEL_TICK_LENGTH: SpinRange = SpinRange::new(0.0, 50.0, 0.25, 2).with_suffix(" mm");
 /// QSpinBox's range for a label's priority.
 const PRIORITY_LOWEST: i64 = -1000;
@@ -197,6 +204,17 @@ fn push_named(options: &mut Vec<String>, key: &str, before: &str, after: &str) {
 }
 
 /// The rows of a list of names, one cell each.
+/// Whether a manager's Apply has something to store: a line that changes the style, or a form
+/// that does not read (lit, so a press says why). With no style chosen, or a form that changes
+/// nothing, it greys: an accent Apply that stores nothing invites the click (the fourth look
+/// audit's 1).
+fn something_to_apply(line: Result<String>, has_style: bool) -> bool {
+    match line {
+        Ok(line) => !line.is_empty(),
+        Err(_) => has_style,
+    }
+}
+
 fn name_rows(names: &[String]) -> Vec<Vec<String>> {
     names.iter().map(|name| vec![name.clone()]).collect()
 }
@@ -595,9 +613,13 @@ impl TextStyleManagerDialog {
                         self.show_style(&style);
                     }
                 }
-                let new_row = ui.horizontal(|ui| {
-                    // The name takes what New leaves of the column.
-                    dialog::fixed_fields(ui, dialog::beside_a_button(ui, "New"));
+                // The list's tools under it (the managers' one list: a well, the new name, then a
+                // row of New and Delete), Delete with them rather than in the footer, where it
+                // stood beside Apply in two managers and under the list in two (the fourth look
+                // audit's "For 10").
+                let has_style = self.current.is_some();
+                let new_row = ui.vertical(|ui| {
+                    dialog::fill_fields(ui);
                     edit(
                         ui,
                         "textStyleNewName",
@@ -605,12 +627,24 @@ impl TextStyleManagerDialog {
                         &self.new_name_placeholder,
                     )
                     .on_hover_text("The name New gives; blank for the one shown");
-                    if button(ui, "textStyleNew", "New")
-                        .on_hover_text("A new text style of the name beside it (TEXTSTYLE NEW)")
-                        .clicked()
-                    {
-                        self.pressed = Some(TextPressed::New);
-                    }
+                    ui.horizontal(|ui| {
+                        if button(ui, "textStyleNew", "New")
+                            .on_hover_text(
+                                "A new text style of the name over it (TEXTSTYLE NEW)",
+                            )
+                            .clicked()
+                        {
+                            self.pressed = Some(TextPressed::New);
+                        }
+                        ui.add_enabled_ui(has_style, |ui| {
+                            if button(ui, "textStyleDelete", "Delete")
+                                .on_hover_text("Delete the style chosen (TEXTSTYLE DELETE)")
+                                .clicked()
+                            {
+                                self.pressed = Some(TextPressed::Delete);
+                            }
+                        });
+                    });
                 });
                 layout::keep_height(ui, new_id, new_row.response.rect.height());
             });
@@ -700,31 +734,32 @@ impl TextStyleManagerDialog {
         });
     }
 
-    fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let problem = self.problem.clone();
-        // The one footer (shell::dialog::button_row): Delete and the last refusal at the left, away
-        // from Apply; Close, then Apply, the primary, last at the right. Close is the footer's
-        // own: the dialog had only its title bar's cross to dismiss it.
-        let (deleted, (closed, applied)) = dialog::button_row(
+        let can_apply = something_to_apply(self.apply_line(host.document()), self.current.is_some());
+        // The one footer (shell::dialog::button_row): the last refusal at the left; Close, then
+        // Apply, the primary, last at the right - greyed while there is no style or the form
+        // changes nothing. Close is the footer's own: the dialog had only its title bar's cross to
+        // dismiss it. Delete is the list's (`body`).
+        let (_, (closed, applied)) = dialog::button_row(
             ui,
             |ui| {
-                let deleted = button(ui, "textStyleDelete", "Delete").clicked();
                 problem_line(ui, "textStyleProblem", &problem);
-                deleted
             },
             |ui| {
                 let closed = controls::button(ui, "textStyleClose", "Close")
                     .on_hover_text("Close the dialog; edits not applied are dropped")
                     .clicked();
-                let applied = controls::primary(ui, "textStyleApply", "Apply").clicked();
+                let applied = ui
+                    .add_enabled_ui(can_apply, |ui| {
+                        controls::primary(ui, "textStyleApply", "Apply").clicked()
+                    })
+                    .inner;
                 (closed, applied)
             },
         );
         if closed {
             self.pressed = Some(TextPressed::Close);
-        }
-        if deleted {
-            self.pressed = Some(TextPressed::Delete);
         }
         if applied {
             self.pressed = Some(TextPressed::Apply);
@@ -1615,11 +1650,38 @@ impl LabelStyleManagerDialog {
             &mut self.tab,
         );
         // The strip's own rule parts it from the page (a separator under it drew a second).
-        if self.tab == 0 {
-            self.styles_tab(ui, host);
-        } else {
-            self.rules_tab(ui, host);
-        }
+        // The pages as tall as the taller tab, whichever is in front: both are drawn each frame,
+        // the other off the stage (as Settings' pages are), so the dialog is one size whichever
+        // tab it opens on - it was 558 high opened on one and 578 on the other (the fourth look
+        // audit's 8).
+        let tallest_id = ui.id().with("labelStyleTallestTab");
+        let tallest = layout::last_height(ui, tallest_id).unwrap_or(0.0);
+        let mut measured: f32 = 0.0;
+        let front = self.tab.min(1);
+        ui.vertical(|ui| {
+            ui.set_min_height(tallest);
+            for (at, salt) in ["labelStyleStylesTab", "labelStyleRulesTab"]
+                .into_iter()
+                .enumerate()
+            {
+                let mut draw = |ui: &mut Ui| {
+                    let page = ui.vertical(|ui| {
+                        if at == 0 {
+                            self.styles_tab(ui, &mut *host);
+                        } else {
+                            self.rules_tab(ui, &mut *host);
+                        }
+                    });
+                    measured = measured.max(page.response.rect.height());
+                };
+                if at == front {
+                    draw(ui);
+                } else {
+                    offstage(ui, salt, draw);
+                }
+            }
+        });
+        layout::keep_height(ui, tallest_id, measured);
     }
 
     fn styles_tab(&mut self, ui: &mut Ui, host: &mut dyn Host) {
@@ -1650,6 +1712,9 @@ impl LabelStyleManagerDialog {
                         self.show_style(&style);
                     }
                 }
+                // The list's tools under it, as Text Styles' are: the new name and kind, then a
+                // row of New and Delete - Delete stood in the footer beside Apply.
+                let has_style = self.current.is_some();
                 let new_rows = ui.vertical(|ui| {
                     dialog::fill_fields(ui);
                     edit(
@@ -1659,30 +1724,41 @@ impl LabelStyleManagerDialog {
                         &self.new_name_placeholder,
                     )
                     .on_hover_text("The name New gives; blank for the one shown");
+                    combo(ui, "labelStyleNewKind", &KINDS, &mut self.new_kind)
+                        .on_hover_text("What the new style labels; fixed once it is made");
                     ui.horizontal(|ui| {
-                        // The kind takes what New leaves of the row.
-                        dialog::fixed_fields(ui, dialog::beside_a_button(ui, "New"));
-                        combo(ui, "labelStyleNewKind", &KINDS, &mut self.new_kind)
-                            .on_hover_text("What the new style labels; fixed once it is made");
                         if button(ui, "labelStyleNew", "New")
                             .on_hover_text(
-                                "A new label style of the name and kind beside it (LABELSTYLE NEW)",
+                                "A new label style of the name and kind over it (LABELSTYLE NEW)",
                             )
                             .clicked()
                         {
                             self.pressed = Some(LabelPressed::New);
                         }
+                        ui.add_enabled_ui(has_style, |ui| {
+                            if button(ui, "labelStyleDelete", "Delete")
+                                .on_hover_text("Delete the style chosen (LABELSTYLE DELETE)")
+                                .clicked()
+                            {
+                                self.pressed = Some(LabelPressed::Delete);
+                            }
+                        });
                     });
                 });
                 layout::keep_height(ui, new_id, new_rows.response.rect.height());
             });
             ui.add_space(layout::GAP);
-            let form = ui.vertical(|ui| self.style_form(ui));
+            // Greyed, its template empty, while no style is chosen: a filled template and a lit
+            // form beside "No label styles" read as a style to edit (the fourth look audit's 1).
+            let has_style = self.current.is_some();
+            let form = ui.vertical(|ui| {
+                ui.add_enabled_ui(has_style, |ui| self.style_form(ui, has_style));
+            });
             layout::keep_height(ui, form_id, form.response.rect.height());
         });
     }
 
-    fn style_form(&mut self, ui: &mut Ui) {
+    fn style_form(&mut self, ui: &mut Ui, has_style: bool) {
         let mut inserted: Option<String> = None;
         dialog::form(ui, |form| {
             form.row("Kind", |ui| {
@@ -1700,7 +1776,12 @@ impl LabelStyleManagerDialog {
                     "labelStyleTemplate",
                     &mut self.template,
                     LineOptions {
-                        placeholder: "{bearing:dms} {distance:.3f}",
+                        // An example only beside a style: greyed with none, it read as one.
+                        placeholder: if has_style {
+                            "{bearing:dms} {distance:.3f}"
+                        } else {
+                            ""
+                        },
                         width: Some(width),
                         ..LineOptions::default()
                     },
@@ -1927,19 +2008,23 @@ impl LabelStyleManagerDialog {
             );
             check(ui, "labelRuleEnabled", "Enabled", &mut self.rule_enabled);
         });
+        let any_rule = !self.rule_rows.is_empty();
         ui.horizontal(|ui| {
             if button(ui, "labelRuleAdd", "Add Rule").clicked() {
                 self.pressed = Some(LabelPressed::RuleAdd);
             }
-            if button(ui, "labelRuleUpdate", "Update Rule")
-                .on_hover_text("Store the form over the rule of its name (AUTOLABEL RULE SET)")
-                .clicked()
-            {
-                self.pressed = Some(LabelPressed::RuleUpdate);
-            }
-            if button(ui, "labelRuleDelete", "Delete Rule").clicked() {
-                self.pressed = Some(LabelPressed::RuleDelete);
-            }
+            // Greyed with no rule to update or delete.
+            ui.add_enabled_ui(any_rule, |ui| {
+                if button(ui, "labelRuleUpdate", "Update Rule")
+                    .on_hover_text("Store the form over the rule of its name (AUTOLABEL RULE SET)")
+                    .clicked()
+                {
+                    self.pressed = Some(LabelPressed::RuleUpdate);
+                }
+                if button(ui, "labelRuleDelete", "Delete Rule").clicked() {
+                    self.pressed = Some(LabelPressed::RuleDelete);
+                }
+            });
         });
         // What the last run or preview did, no room while it says nothing. Remove Rule Labels,
         // Preview and Run Rules, which act on the drawing, are the footer's (`footer`): in the
@@ -1953,24 +2038,22 @@ impl LabelStyleManagerDialog {
         );
     }
 
-    fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let problem = self.problem.clone();
-        // The one footer (shell::dialog::button_row), the front tab's. On Label Styles, Delete and
-        // Add Standard Set at the left beside the last refusal, away from Apply (as Text Styles
-        // keeps Delete), then Close and Apply, the primary: the three stood under the form with
-        // Apply in the accent in the body (the look audits' T5). On Auto-Label Rules, Preview,
-        // which reads the drawing, and Remove Rule Labels at the left, then Close and Run Rules,
-        // the primary: the three stood in the body under the rule's own buttons (the third look
-        // audit's A).
+        // The one footer (shell::dialog::button_row), the front tab's. On Label Styles, Add
+        // Standard Set at the left beside the last refusal, then Close and Apply, the primary -
+        // greyed with no style or nothing changed; Delete is the list's (`styles_tab`). On
+        // Auto-Label Rules, Preview, which reads the drawing, and Remove Rule Labels at the left,
+        // then Close and Run Rules, the primary - the three greyed while there are no rules: the
+        // three stood in the body under the rule's own buttons (the third look audit's A).
         let styles = self.tab == 0;
+        let can_apply = something_to_apply(self.apply_line(host.document()), self.current.is_some());
+        let any_rule = !self.rule_rows.is_empty();
         let (left, (closed, primary)) = dialog::button_row(
             ui,
             |ui| {
                 let mut pressed = None;
                 if styles {
-                    if button(ui, "labelStyleDelete", "Delete").clicked() {
-                        pressed = Some(LabelPressed::Delete);
-                    }
                     if button(ui, "labelStyleDefaults", "Add Standard Set")
                         .on_hover_text("Add the standard label styles the drawing lacks")
                         .clicked()
@@ -1978,24 +2061,26 @@ impl LabelStyleManagerDialog {
                         pressed = Some(LabelPressed::Defaults);
                     }
                 } else {
-                    if button(ui, "labelRulePreview", "Preview")
-                        .on_hover_text(
-                            "What running the chosen rules would do, changing nothing \
-                             (AUTOLABEL PREVIEW)",
-                        )
-                        .clicked()
-                    {
-                        pressed = Some(LabelPressed::Preview);
-                    }
-                    if button(ui, "labelRuleClear", "Remove Rule Labels")
-                        .on_hover_text(
-                            "Remove the labels the chosen rules made - every rule's when none is \
-                             chosen (AUTOLABEL CLEAR)",
-                        )
-                        .clicked()
-                    {
-                        pressed = Some(LabelPressed::Clear);
-                    }
+                    ui.add_enabled_ui(any_rule, |ui| {
+                        if button(ui, "labelRulePreview", "Preview")
+                            .on_hover_text(
+                                "What running the chosen rules would do, changing nothing \
+                                 (AUTOLABEL PREVIEW)",
+                            )
+                            .clicked()
+                        {
+                            pressed = Some(LabelPressed::Preview);
+                        }
+                        if button(ui, "labelRuleClear", "Remove Rule Labels")
+                            .on_hover_text(
+                                "Remove the labels the chosen rules made - every rule's when none \
+                                 is chosen (AUTOLABEL CLEAR)",
+                            )
+                            .clicked()
+                        {
+                            pressed = Some(LabelPressed::Clear);
+                        }
+                    });
                 }
                 problem_line(ui, "labelStyleProblem", &problem);
                 pressed
@@ -2005,18 +2090,24 @@ impl LabelStyleManagerDialog {
                     .on_hover_text("Close the dialog; edits not applied are dropped")
                     .clicked();
                 let primary = if styles {
-                    controls::primary(ui, "labelStyleApply", "Apply")
-                        .on_hover_text("Store the form over the style shown, as one undo step")
-                        .clicked()
-                        .then_some(LabelPressed::Apply)
+                    ui.add_enabled_ui(can_apply, |ui| {
+                        controls::primary(ui, "labelStyleApply", "Apply")
+                            .on_hover_text("Store the form over the style shown, as one undo step")
+                            .clicked()
+                    })
+                    .inner
+                    .then_some(LabelPressed::Apply)
                 } else {
-                    controls::primary(ui, "labelRuleRun", "Run Rules")
-                        .on_hover_text(
-                            "Label what the chosen rules match - every enabled rule when none is \
-                             chosen - as one step (AUTOLABEL RUN)",
-                        )
-                        .clicked()
-                        .then_some(LabelPressed::Run)
+                    ui.add_enabled_ui(any_rule, |ui| {
+                        controls::primary(ui, "labelRuleRun", "Run Rules")
+                            .on_hover_text(
+                                "Label what the chosen rules match - every enabled rule when none \
+                                 is chosen - as one step (AUTOLABEL RUN)",
+                            )
+                            .clicked()
+                    })
+                    .inner
+                    .then_some(LabelPressed::Run)
                 };
                 (closed, primary)
             },

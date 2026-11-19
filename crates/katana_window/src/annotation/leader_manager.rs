@@ -119,6 +119,7 @@ use crate::format::qt_fixed;
 use crate::host::{Host, VerbOutcome};
 use crate::shell::DialogFrame;
 use crate::shell::dialog;
+use crate::survey::survey_dialogs::{hidden, offstage};
 use crate::theme::palette;
 
 const DIALOG: &str = "leaderManagerDialog";
@@ -150,6 +151,11 @@ const NOTE_KIND_TEXTS: [&str; 3] = [
 /// by not being sent (form_change).
 const LARGEST_SIZE: f64 = 1000.0;
 const SIZE: SpinRange = SpinRange::new(0.0, LARGEST_SIZE, 0.5, 3).with_suffix(" mm");
+/// A note's text height: 0 is the text style's own height, said in words - "0.000 mm" read as a
+/// note of no height (the fourth look audit's 3).
+const TEXT_HEIGHT: SpinRange = SIZE.with_special_text("Text style's");
+/// A landing: 0 is none, said in words.
+const LANDING: SpinRange = SIZE.with_special_text("None");
 const SIZE_DECIMALS: usize = 3;
 const ALONG: SpinRange = SpinRange::new(0.0, 100.0, 5.0, 3).with_suffix(" %");
 const FOR_ANGLE: SpinRange = SpinRange::new(-360.0, 360.0, 15.0, 1).with_suffix(" deg");
@@ -461,7 +467,8 @@ impl NoteForm {
     /// typed - then each by its title, its word (preset=) as its data.
     fn new() -> Self {
         let mut form = Self::default();
-        form.preset.add("(none: the note as typed)", "");
+        // "None", as every empty choice reads (drive::controls::NO_CHOICE), never "(none)".
+        form.preset.add("None: the note as typed", "");
         for info in leader_presets() {
             form.preset.add(info.title, info.word);
         }
@@ -845,6 +852,13 @@ enum Pressed {
 /// tab ran 46 past it and the dialog was 926 wide on one tab and 972 on another.
 const BODY_WIDTH: f32 = 950.0;
 
+/// The values tables' header: a value's name, which a double-click puts in the note, and what it
+/// reads at the tip. "Value | Here" named neither column.
+const VALUE_HEADERS: [&str; 2] = ["Name", "Value here"];
+
+/// What each tab drawn off the stage is kept apart by (`body`), in the tabs' order.
+const TAB_SALTS: [&str; 3] = ["leaderTabLeader", "leaderTabFor", "leaderTabArrange"];
+
 /// The width of the Leader tab's list of leaders: its rows span it, and the form has the rest of
 /// the body - a leader's line ("#12 IL 10.50") and the scope toggle's words with room to spare.
 const LIST_WIDTH: f32 = 240.0;
@@ -879,6 +893,9 @@ pub struct LeaderManagerDialog {
     scope_text: String,
     scope_visible: bool,
     target: String,
+    /// The target says what to do rather than what the tip is on (no leader, a plain leader):
+    /// drawn muted, as a hint is.
+    target_is_hint: bool,
     along: f64,
     along_enabled: bool,
     leader: NoteForm,
@@ -914,6 +931,8 @@ pub struct LeaderManagerDialog {
     for_scope: ScopeFilterWidget,
     for_scope_report: String,
     for_selection: String,
+    /// Whether the scope takes anything, so Make for Selection has something to make for.
+    for_takes_any: bool,
     for_note: NoteForm,
     for_arrow: Option<ArrowHead>,
     for_callout: Option<CalloutShape>,
@@ -994,6 +1013,7 @@ impl LeaderManagerDialog {
             scope_text: String::new(),
             scope_visible: false,
             target: String::new(),
+            target_is_hint: true,
             along: 0.0,
             along_enabled: false,
             leader: NoteForm::new(),
@@ -1033,6 +1053,7 @@ impl LeaderManagerDialog {
             for_scope: scope("leaderFor"),
             for_scope_report: String::new(),
             for_selection: String::new(),
+            for_takes_any: false,
             for_note: NoteForm::new(),
             for_arrow: None,
             for_callout: None,
@@ -1356,6 +1377,7 @@ impl LeaderManagerDialog {
             },
         );
         self.shown_kind = note.kind;
+        self.target_is_hint = !any || !shape.tip_ref.associated();
         self.target = if !any {
             String::from(
                 "No leader: draw one with the Leader tool, or make them on the For Selection tab.",
@@ -2253,6 +2275,8 @@ impl LeaderManagerDialog {
         let filter = match self.for_scope.scope().and_then(|_| self.for_scope.filter()) {
             Ok(filter) => filter,
             Err(error) => {
+                // Lit, so a press says in the verb's words what does not read.
+                self.for_takes_any = true;
                 self.for_selection = String::from("Apply to cannot be read.");
                 self.for_check_problem(describe(&Err(error)));
                 return;
@@ -2263,6 +2287,7 @@ impl LeaderManagerDialog {
         let taken = self.for_targets(document);
         let plain_selection = self.for_scope.choice() == ScopeChoice::Selection && filter.empty();
         let count = taken.len();
+        self.for_takes_any = count > 0;
         self.for_selection = if plain_selection {
             match count {
                 0 => String::from("Nothing is selected: select the entities to put leaders on."),
@@ -2278,14 +2303,17 @@ impl LeaderManagerDialog {
         };
         let Some(target) = self.for_target(document).cloned() else {
             self.for_note.check_error = false;
-            self.for_note.check = String::from(if !taken.is_empty() {
-                "Nothing taken offers a place for a leader (a dimension, a label or a leader does \
-                 not)."
-            } else if plain_selection {
-                "Select the entities to put leaders on."
+            // With nothing taken the line over the form says so (for_selection): said again
+            // under the note, "Nothing is selected" stood twice in one form (the fourth look
+            // audit's "For 10").
+            self.for_note.check = if taken.is_empty() {
+                String::new()
             } else {
-                "Apply to takes no entity."
-            });
+                String::from(
+                    "Nothing taken offers a place for a leader (a dimension, a label or a leader \
+                     does not).",
+                )
+            };
             self.for_note.preview.clear();
             return;
         };
@@ -2552,11 +2580,34 @@ impl LeaderManagerDialog {
         }
         // The strip's own rule parts it from the page (a separator under it drew a second).
         let document = host.document();
-        match self.tab {
-            0 => self.leader_tab(ui, document),
-            1 => self.for_tab(ui, document),
-            _ => self.arrange_tab(ui),
-        }
+        // The pages as tall as the tallest tab, whichever is in front: every tab is drawn each
+        // frame, those not in front off the stage (as Settings' pages are), so the tallest is
+        // measured whichever the dialog opens on. Kept from the tab drawn alone, it was 806 high
+        // opened on Leader, 695 opened on Arrange and 844 once For Selection was turned to (the
+        // fourth look audit's 8).
+        let tallest_id = ui.id().with("leaderTallestTab");
+        let tallest = layout::last_height(ui, tallest_id).unwrap_or(0.0);
+        let mut measured: f32 = 0.0;
+        let front = self.tab.min(2);
+        ui.vertical(|ui| {
+            ui.set_min_height(tallest);
+            for (at, salt) in TAB_SALTS.iter().enumerate() {
+                let mut draw = |ui: &mut Ui| {
+                    let page = ui.vertical(|ui| match at {
+                        0 => self.leader_tab(ui, document),
+                        1 => self.for_tab(ui, document),
+                        _ => self.arrange_tab(ui),
+                    });
+                    measured = measured.max(page.response.rect.height());
+                };
+                if at == front {
+                    draw(ui);
+                } else {
+                    offstage(ui, salt, draw);
+                }
+            }
+        });
+        layout::keep_height(ui, tallest_id, measured);
     }
 
     /// A note's check, a row of `form` under its field - none while it says nothing: an empty
@@ -2718,18 +2769,26 @@ impl LeaderManagerDialog {
         if self.scope_visible {
             scope_label(ui);
         } else {
-            crate::survey::survey_dialogs::hidden(ui, "leaderScope", scope_label);
+            hidden(ui, "leaderScope", scope_label);
         }
         dialog::labelled(ui, "On", |ui| {
             // What it is on wraps in what Attach to Selected leaves of the row.
             let width = dialog::beside_a_button(ui, "Attach to Selected");
             ui.scope(|ui| {
                 ui.set_max_width(width);
+                // Muted while it says what to do (no leader, a plain leader), as a hint is: in the
+                // text colour it read as a value (the fourth look audit's "For 10").
+                let colour = if self.target_is_hint {
+                    palette::text_muted()
+                } else {
+                    palette::text()
+                };
                 controls::label_as(
                     ui,
                     "leaderTarget",
                     &self.target,
-                    egui::Label::new(self.target.as_str()).wrap(),
+                    egui::Label::new(RichText::new(self.target.as_str()).color(colour.to_egui()))
+                        .wrap(),
                 );
             });
             // At the row's right end, where the fields end: after the words, wherever they
@@ -2822,7 +2881,7 @@ impl LeaderManagerDialog {
                     let shown = table_look(
                         ui,
                         "leaderValues",
-                        &["Value", "Here"],
+                        &VALUE_HEADERS,
                         &self.leader.values,
                         self.leader.values_current,
                         &[],
@@ -2869,14 +2928,15 @@ impl LeaderManagerDialog {
                         "Text height",
                         "leaderPaperHeight",
                         &mut self.leader.paper_height,
+                        TEXT_HEIGHT,
                     ),
-                    ("Arrow size", "leaderArrowSize", &mut self.arrow_size),
-                    ("Landing", "leaderLanding", &mut self.landing),
+                    ("Arrow size", "leaderArrowSize", &mut self.arrow_size, SIZE),
+                    ("Landing", "leaderLanding", &mut self.landing, LANDING),
                 ];
-                for (title, name, value) in boxes {
+                for (title, name, value, range) in boxes {
                     form.row(title, |ui| {
                         fields(ui);
-                        preview |= controls::spin(ui, name, value, SIZE).changed();
+                        preview |= controls::spin(ui, name, value, range).changed();
                     });
                 }
                 named_row(
@@ -3004,7 +3064,17 @@ impl LeaderManagerDialog {
                 // that its fields, which fill their rows, stop short of the scope.
                 let gap = ui.spacing().item_spacing.x;
                 ui.set_width(BODY_WIDTH - WIDGET_WIDTH - gap);
-                controls::label(ui, "leaderForSelection", &self.for_selection);
+                // What the scope takes, muted: a note over the form, not one of its values.
+                controls::label_as(
+                    ui,
+                    "leaderForSelection",
+                    &self.for_selection,
+                    egui::Label::new(
+                        RichText::new(self.for_selection.as_str())
+                            .color(palette::text_muted().to_egui()),
+                    )
+                    .wrap(),
+                );
                 dialog::form(ui, |form| {
                     form.row("Note is", |ui| {
                         kind_chosen =
@@ -3057,7 +3127,7 @@ impl LeaderManagerDialog {
                         let shown = table_look(
                             ui,
                             "leaderForValues",
-                            &["Value", "Here"],
+                            &VALUE_HEADERS,
                             &self.for_note.values,
                             self.for_note.values_current,
                             &[],
@@ -3103,7 +3173,7 @@ impl LeaderManagerDialog {
                             "Text height",
                             "leaderForPaperHeight",
                             &mut self.for_note.paper_height,
-                            SIZE,
+                            TEXT_HEIGHT,
                         ),
                         (
                             "Arrow size",
@@ -3111,7 +3181,7 @@ impl LeaderManagerDialog {
                             &mut self.for_arrow_size,
                             SIZE,
                         ),
-                        ("Landing", "leaderForLanding", &mut self.for_landing, SIZE),
+                        ("Landing", "leaderForLanding", &mut self.for_landing, LANDING),
                         (
                             "Note direction",
                             "leaderForAngle",
@@ -3207,17 +3277,22 @@ impl LeaderManagerDialog {
                 let gap = ui.spacing().item_spacing.x;
                 ui.set_width(BODY_WIDTH - WIDGET_WIDTH - gap);
                 // Sections under headings, as the other tabs' are; their two actions, which do
-                // not go together, are the footer's (`footer`), as every tab's actions are.
-                ui.vertical(|ui| {
+                // not go together, are the footer's (`footer`), as every tab's actions are. One
+                // column: a heading first in a column of its own has no gap above it, and
+                // "Number the balloons again" stood 4 points under Stacked (the fourth look
+                // audit's 7).
+                {
                     dialog::section(ui, "Line the notes up");
                     dialog::note(ui, "The topmost note sets x.");
-                    ui.horizontal(|ui| {
+                    // Each tick in the field column, as a form's ticks are, its box beside it:
+                    // drawn alone they stood at the labels' edge (the fourth look audit's checks).
+                    dialog::labelled(ui, "", |ui| {
                         check(ui, "leaderAlignUseX", "At x", &mut self.align_use_x);
                         ui.add_enabled_ui(self.align_use_x, |ui| {
                             controls::spin(ui, "leaderAlignX", &mut self.align_x, ALIGN_X);
                         });
                     });
-                    ui.horizontal(|ui| {
+                    dialog::labelled(ui, "", |ui| {
                         check(
                             ui,
                             "leaderAlignUseSpacing",
@@ -3233,8 +3308,8 @@ impl LeaderManagerDialog {
                             );
                         });
                     });
-                });
-                ui.vertical(|ui| {
+                }
+                {
                     dialog::section(ui, "Number the balloons again");
                     dialog::labelled(ui, "From", |ui| {
                         controls::whole(
@@ -3274,7 +3349,7 @@ impl LeaderManagerDialog {
                              match controls take - and the others keep their numbers",
                         );
                     });
-                });
+                }
                 layout::quiet_label(
                     ui,
                     "leaderArrangeReport",
@@ -3300,6 +3375,7 @@ impl LeaderManagerDialog {
         let tab = self.tab;
         let (freeze, detach) = (self.freeze_enabled, self.detach_enabled);
         let apply = self.apply_enabled;
+        let make = self.for_takes_any;
         let (freeze_tip, detach_tip) = (self.freeze_tip.clone(), self.detach_tip.clone());
         let (left, (closed, primary)) = dialog::button_row(
             ui,
@@ -3358,12 +3434,18 @@ impl LeaderManagerDialog {
                         })
                         .inner
                         .then_some(Pressed::Apply),
-                    1 => controls::primary(ui, "leaderForMake", "Make for Selection")
-                        .on_hover_text(
-                            "A leader, or a balloon, to each entity the Apply to controls take \
-                             (LEADER FOR, BALLOON FOR)",
-                        )
-                        .clicked()
+                    // Greyed while the scope takes nothing: lit under "Nothing is selected" it
+                    // invited a press that makes nothing (the fourth look audit's 1).
+                    1 => ui
+                        .add_enabled_ui(make, |ui| {
+                            controls::primary(ui, "leaderForMake", "Make for Selection")
+                                .on_hover_text(
+                                    "A leader, or a balloon, to each entity the Apply to \
+                                     controls take (LEADER FOR, BALLOON FOR)",
+                                )
+                                .clicked()
+                        })
+                        .inner
                         .then_some(Pressed::Make),
                     _ => None,
                 };
