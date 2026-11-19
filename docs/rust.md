@@ -1313,10 +1313,12 @@ Edition 2024; `rust-version` 1.98, the older of the two compilers. `unsafe`
 is denied in the workspace's lints and allowed only where a module must be
 unsafe - an FFI adapter, an OS call, a SIMD kernel's entry, the task pool's
 warm workers and the rasteriser's disjoint writes (both measured, below) -
-each saying why. Taking `unsafe` out altogether is decided and under way: the part that
-called no C library is done (below), the SIMD kernels are safe functions
-behind one entry each (`docs/performance.md`, "Safe kernels"), the rest is
-Not done. Clippy runs with
+each saying why. Taking `unsafe` out was done as far as it goes on
+2026-11-19 and 20 (below): the code that called no C library is safe, the
+SIMD kernels are safe functions behind one entry each (`docs/performance.md`,
+"Safe kernels"), and every call into GDAL, PROJ, SQLite, PDAL and the
+operating system sits in one FFI module per crate, which no other module
+of the crate opts out for. Clippy runs with
 `-D warnings`, as `-Werror` did for the C++.
 
 ### Unsafe that calls no C library, removed (2026-11-19)
@@ -1547,6 +1549,142 @@ the updater's
 `a_wide_name_ends_in_exactly_one_nul_after_its_text`,
 `a_length_past_u32_is_told_as_the_most_u32_holds` and
 `this_process_answers_signal_nothing`.
+
+### GDAL's unsafe confined to katana_gis's FFI modules (2026-11-20)
+
+The owner's word, "remove unsafe Rust and make it safe", taken next in
+katana_gis, the crate that held most of it. A call into a C library can
+never be safe Rust; what can be done, and was, is to confine every such call
+to one place. All of the crate's `unsafe` is now in its FFI modules
+(`crates/katana_gis/src/ffi/`): the hand-written declarations, as before, and
+beside them safe owners and views whose every method is one C call, with the
+pointer's validity, its lifetime, the text's NUL and who frees what stated
+once, in a `// SAFETY:` comment at the call. Every other module of the crate
+- the adapter, the formats' registry, the sampler, reprojection, the zip
+container, web access, the error collector, the registry, the algorithm
+bridge and its policy table - lost its `#![allow(unsafe_code)]` and is held
+by the workspace's `unsafe_code = "deny"`. Counted in the crate's code,
+comments and strings aside: 472 uses of the keyword in 20 files before, 341
+in 15 after, every one under ffi/. Not built when written: the integration
+build's clippy and suite are the evidence.
+
+The owners and views, where each lives and what frees it:
+
+```text
+ffi/error.rs           CollectingHandler, QuietHandler: an error handler
+                       pushed when made, popped on drop, on its thread
+                       (CPLPushErrorHandlerEx, CPLPopErrorHandler); this
+                       thread's last error read and reset
+ffi/cpl.rs             VsiFile: VSIFCloseL by close(), or on drop; a list GDAL
+                       allocates (VSIReadDirRecursive's) copied and freed with
+                       CSLDestroy inside the call that asked, a text GDAL
+                       allocates with CPLFree; configuration options
+ffi/dataset.rs         Driver: process-long (the driver manager is never
+                       destroyed), never freed. Dataset: GDALClose, by close()
+                       - which says how the flush went - or on drop; Send, not
+                       Sync. DatasetRef: one reference, GDALReleaseDataset.
+                       Band, ColorTable, Layer, FeatureDefn, FieldDefnRef:
+                       borrowed from the dataset, never freed. ResultSet:
+                       GDALDatasetReleaseResultSet. Feature: OGR_F_Destroy,
+                       and may not outlive its dataset. FieldDefn:
+                       OGR_Fld_Destroy. TranslateOptions, WarpAppOptions,
+                       VectorTranslateOptions, BuildVrtOptions: their Free.
+ffi/geometry.rs        OgrGeometry: OGR_G_DestroyGeometry, unless handed to
+                       GDAL (a collection, a feature), which then owns it.
+                       GeometryView: a feature's or a member's, borrowed
+ffi/srs.rs             SpatialReference: OSRDestroySpatialReference, as the
+                       C++'s stack object (every hand-over to GDAL copies).
+                       SpatialReferenceRef: a layer's, a dataset's, a match's,
+                       borrowed. SrsMatches: OSRFreeSRSArray and CPLFree.
+                       CoordinateTransformation: its destroy
+ffi/gdal_algorithm.rs  Algorithm: GDALAlgorithmRelease. Arg: borrowed from it,
+                       its handle GDALAlgorithmArgRelease. DatasetItem: a name
+                       or a borrowed dataset
+ffi/transfer.rs        HttpResult: CPLHTTPDestroyResult. CurlEasy:
+                       curl_easy_cleanup. CurlSlist: curl_slist_free_all
+ffi/xml.rs             XmlDocument: CPLDestroyXMLNode. XmlNode: borrowed
+```
+
+The decisions, and why:
+
+- **A view borrows its owner.** A layer, a band, a field's definition, a
+  feature read from a layer and a spatial reference a layer holds carry the
+  lifetime of the borrow of their dataset, so a view kept past a close does
+  not compile where it was a dangling pointer. `DatasetHandle::delete_layer`
+  takes `&mut`, so no borrowed layer outlives the one it deletes. The
+  exports that close a dataset on a failure take it by value
+  (`GdalDataset::write_tables`'s `abandon`), so nothing can use it after.
+- **The callbacks are trampolines in the FFI modules.** GDAL's progress, its
+  error handler, the HTTP client's body and progress and libcurl's header,
+  body and progress are `extern "C"` functions in ffi/ that turn the pointer
+  they are handed back into a Rust closure (`dataset::Progress`) or a sink
+  (`transfer::FetchSink`, `transfer::ExchangeSink`), and catch every panic
+  that would unwind into C. What each caller did with its own state - a
+  panic of the person's closure kept and raised again once GDAL has returned,
+  a refused progress marking the run cancelled - stays where it was, in safe
+  code.
+- **A handle is never a value outside ffi/.** The bridge's in-memory inputs
+  were raw dataset handles; an input is now its place in the run's own
+  references (`bridge.rs`'s `Held::Object`), borrowed when the list is
+  set. The sampler kept a band pointer beside the dataset that owns it; it
+  keeps the band's number and asks the dataset for it per sample.
+- **Behaviour is the same call for call**, the same functions with the same
+  arguments in the same order, but for these, none of which a caller can
+  see: the warp's progress is put on its options inside the warp and taken
+  off after (the options are freed at once after anyway); the exchange's
+  header list, error buffer and callbacks are taken off the handle when the
+  transfer returns, before the status is read and the handle cleaned up
+  (they were left on until the cleanup); write_raster reads the driver's
+  metadata list once per capability instead of once for both; the sampler
+  asks for its band per sample (GDALGetRasterBand, an index into the
+  dataset's list: a HOT PATH of LOS and DRAPE, to be measured in Release); a
+  RasterIO buffer too small for its window is refused with CE_Failure
+  without asking GDAL, and a negative field index is answered "not set"
+  (OGR would read before its array) - no caller makes either; and the
+  bridge's in-memory feature set refuses a feature OGR could not make at
+  once, with the same "GDAL refused a feature", where it was refused at
+  CreateFeature after GDAL's own complaints about a NULL handle. The error
+  collector's message lost a field nothing read.
+- **Threads are as they were.** One `unsafe impl Send`, on `Dataset`,
+  replaces GdalDataset's and RasterSampler's; both stay Send and not Sync.
+  The error handlers' guards, the algorithm and its references stay neither.
+
+What could not be confined is the calls themselves: each C function is
+`unsafe` to call, and so is every read of a pointer a callback is handed,
+the variadic `curl_easy_setopt`, and the layout of `VSIStatBufL`. All are in
+ffi/, under its `#![allow(unsafe_code)]`. Outside the crate's code, the
+integration test `crates/katana_gis/tests/gdal_core/gdal_pdal_adapters.rs`
+keeps its own declarations of `CPLGetConfigOption` and, on Windows, the
+module calls it checks libcurl's location with (7 uses): a test sees only
+the public interface, and its oracle is better not the code under test.
+
+Rejected: the `gdal` and `curl` crates, which the owner named on 2026-11-16
+as where this goes next - a crate is added with the owner's knowledge, this
+change added none, and neither covers what the shims do (the algorithm
+framework's C++-only calls, CPLHTTPSetOptions), while curl-sys builds a
+libcurl of its own when it does not find one, and the exchange's handle
+must be the libcurl GDAL loads (ffi/curl.rs); declaring the raw functions
+`pub(super)` so that only ffi/ could name them - the lint already refuses a
+call outside it, and the handle types and constants are shared; one generic
+owner parameterised by its free function - each owner names its own, which
+is what a reader checks a SAFETY comment against; and owner types for a
+string list or a text GDAL allocates - no caller keeps one, so each is
+copied and freed inside the call that asked for it.
+
+The tests, in `crates/katana_gis/src/ffi/tests.rs`, headless and without
+the network (GDAL's MEM driver and /vsimem): a list GDAL allocates comes
+back as its strings and is freed, and a folder that is not there is no list
+at all; a file written and closed reads back byte for byte, and one dropped
+unclosed is closed; a GeoTIFF dataset dropped is closed, so what it wrote
+reads back when it is reopened; a buffer too small for its window is
+refused without GDAL; a failed open leaves GDAL's message as the last error
+and in the thread's collector; a feature made for a layer is written and
+read back through its views; a progress callback that panics stops GDAL
+rather than unwinding into it; a thread-local option set and put back
+leaves the thread as it was, and another thread never sees it; an XML tree
+is read through its views and freed once; a list Rust hands GDAL replaces a
+key in place. The crate's own suites (`gdal_core`, `processing`) hold the
+behaviour, unchanged.
 
 ## The toolchains
 
@@ -2436,29 +2574,23 @@ what it would take.
     (`LayerManagerDialog::set_object_name`,
     `StyleManagerDialog::set_object_name`); a manager made on its own keeps
     `layerManager` and `styleManager`, which its twins drive it by.
-- **Removing `unsafe` is decided and partly done.** The code that called no
-  C library was made safe on 2026-11-19 ("Unsafe that calls no C library,
-  removed", above). Left of that part: the updater's OpenSSL hardening,
-  which takes `SpawnRequest` carrying an environment for the child (the
-  launchers then pass it, spawn_win.rs among them) and the self-test asking
-  of the children what it now asks of the process, a change to its
-  documented output; libm's four functions until std's `erf` and `ln_gamma`
-  are stable (and `asinh` would stay, std's digits differ); the Windows and
-  macOS operating-system calls with no std twin. The owner asked for it on
-  2026-11-16 and settled how: GDAL's algorithm framework and PDAL keep one
-  small boundary each (their shims have no safe binding); safe crates
-  replace our own bindings wherever one exists (`rusqlite`, `proj`, `gdal`,
-  `curl`, and `winreg`, `keyring` or `sysinfo` for the updater's operating
-  system calls); the hand-written SIMD kernels go and their scalar versions,
-  which give identical results, stay, with the speed measured before and
-  after. (The kernels part was superseded on 2026-11-20: they stay, as safe
-  functions, one unsafe call at each kernel's entry, which keeps their speed;
-  `docs/performance.md`, "Safe kernels". Their speed before and after is
-  still to be measured.) Then every other crate carries
-  `#![forbid(unsafe_code)]`. It was
-  stopped at the owner's word as too big for then: about 1,050 uses, most
-  in katana_gis (about 480), katana_update (about 175), katana_core (about
-  95) and katana_geodesy (about 70).
+- **What is left of removing `unsafe`** (the owner's ask of 2026-11-16, taken
+  on 2026-11-19 and 20: "Unsafe that calls no C library, removed", "Unsafe
+  confined to FFI modules" and "GDAL's unsafe confined to katana_gis's FFI
+  modules", above). Kept on purpose, measured: the task pool's warm workers
+  and the rasteriser's disjoint writes, whose safe forms cost a frame some
+  two-thirds and a tenth. Left: the updater's OpenSSL hardening
+  (`harden_open_ssl_environment`, still an `unsafe fn`), which takes
+  `SpawnRequest` carrying an environment for the child and the self-test
+  asking of the children what it now asks of the process; libm's four
+  functions until std's `erf` and `ln_gamma` are stable (`asinh` would stay,
+  std's digits differ); the FFI modules themselves, which no Rust can make
+  safe - only a safe crate in place of our own bindings (`rusqlite`, `proj`,
+  `gdal`, `curl`), each a new dependency for the owner to agree, and none
+  covering GDAL's algorithm framework or PDAL, whose shims stay; then
+  `#![forbid(unsafe_code)]` in every crate with no FFI module. Not measured:
+  the text kernels, the GPU packing and the raster sampler's per-sample band
+  lookup, for want of a benchmark.
 - **The toolbars' natural widths along the top are 2 to 22 points off the
   C++'s** (`--check-toolbar-fit`; the test passes, its rows still fit), the
   last difference the window gate showed. Matching them is laying out as Qt

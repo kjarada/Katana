@@ -41,6 +41,18 @@ through a C++ shim with a C ABI (`crates/katana_pointcloud/native/pdal_shim.cpp`
 that catches every exception PDAL throws and hands it back as an error, so
 nothing unwinds across the interface.
 
+Inside `katana_gis`, every call into GDAL, OGR, OSR, CPL, the algorithm
+framework's shim and libcurl is a safe method of an owner or a view in its
+FFI modules (`crates/katana_gis/src/ffi/`), which hold all of the crate's
+`unsafe`; the adapter, the formats' registry, reprojection, web access and
+the algorithm bridge are safe code under the workspace's
+`unsafe_code = "deny"`. An owner frees what it owns once, with the function
+that frees it (`Dataset::close` or its drop is GDALClose, a feature's drop
+OGR_F_Destroy), and a view borrows its owner, so a layer kept past its
+dataset does not compile. `docs/rust.md`, "GDAL's unsafe confined to
+katana_gis's FFI modules (2026-11-20)", lists them, what stays `unsafe` and
+why, and the alternatives rejected.
+
 GDAL's algorithm framework - the `gdal raster ...` / `gdal vector ...`
 algorithms - is reached the same way, through `katana_gis::processing`
 (`crates/katana_gis/src/processing`, in `crates/katana_gis/src/processing/`). Drawing

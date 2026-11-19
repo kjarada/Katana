@@ -45,21 +45,17 @@
 //! the overloads    the C++'s toString(ArgType), toString(Policy) and
 //!                  toString(const Scalar&) are `to_string`, over the trait
 //!                  `Words`
+//! GDAL's calls     safe methods of the FFI modules' owners and views
+//!                  (ffi/dataset.rs, ffi/gdal_algorithm.rs, ffi/error.rs),
+//!                  so this module is safe code
 //! ```
 
-#![allow(
-    unsafe_code,
-    reason = "Builds GDAL datasets in memory, reads them back and drives GDAL's algorithm framework through its C API; every call states why it is sound."
-)]
-
 use std::any::Any;
-use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CString, c_int};
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
-use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Instant;
@@ -76,13 +72,17 @@ use super::types::{
     Policy, RasterGrid, RunOutputs, RunRequest, Scalar, Versions,
 };
 use crate::ffi::algorithm as alg;
-use crate::ffi::{cpl, gdal, ogr, osr};
+use crate::ffi::dataset::{
+    self, Band, Dataset, DatasetHandle, Driver, Feature as OgrFeature, FieldDefn, FieldDefnRef,
+};
+use crate::ffi::error::{CollectingHandler, ErrorRecord};
+use crate::ffi::srs::{self, SpatialReferenceRef};
+use crate::ffi::{cpl, gdal, geometry, ogr};
 use crate::formats_detail::remove_path;
-use crate::gdal_adapter::{GeometryKind, RasterInfo, driver_by_name, metadata_item};
+use crate::gdal_adapter::{GeometryKind, RasterInfo};
 use crate::gdal_registry::ensure_registered;
 use crate::ogr_detail::{
-    GeometryView, OgrGeometry, SpatialReference, flatten_ogr_geometry, flattened,
-    make_ogr_geometry, parse_crs,
+    OgrGeometry, SpatialReference, flatten_ogr_geometry, flattened, make_ogr_geometry, parse_crs,
 };
 
 // ---- words ---------------------------------------------------------------------------------
@@ -115,80 +115,47 @@ fn is_plain_file(name: &str) -> bool {
 /// the viewshed's - skip it and reach the process-wide CPLQuietErrorHandler
 /// the registry installs; the failure they cause still reaches Run().
 ///
-/// A guard, as cpl_error_collector.rs's is, keeping GDAL's error number too:
-/// the handler is pushed with the address of the boxed list, popped on drop;
-/// neither Send nor Sync, since a handler is popped on the thread that pushed
-/// it.
+/// A guard over ffi::error's collecting handler, as cpl_error_collector.rs's
+/// is, keeping GDAL's error number too: the handler is pushed when it is
+/// made and popped on drop; neither Send nor Sync, since a handler is popped
+/// on the thread that pushed it.
 struct ErrorCollector {
-    items: Box<RefCell<Vec<Diagnostic>>>,
-    _thread: PhantomData<*const ()>,
+    handler: CollectingHandler,
+}
+
+/// A record as the bridge reports it.
+fn diagnostic_of(record: &ErrorRecord) -> Diagnostic {
+    Diagnostic {
+        failure: record.is_failure(),
+        code: record.number,
+        message: record.message.clone(),
+    }
 }
 
 impl ErrorCollector {
     fn new() -> Self {
-        let collector = Self {
-            items: Box::new(RefCell::new(Vec::new())),
-            _thread: PhantomData,
-        };
-        let data: *const RefCell<Vec<Diagnostic>> = &*collector.items;
-        // SAFETY: the user data is the boxed list, which lives as long as the
-        // collector, whose Drop pops this handler on this thread before the
-        // box is freed.
-        unsafe { cpl::CPLPushErrorHandlerEx(Some(collect), data.cast_mut().cast::<c_void>()) };
-        collector
+        Self {
+            handler: CollectingHandler::push(),
+        }
     }
 
     fn size(&self) -> usize {
-        self.items.borrow().len()
+        self.handler.records().len()
     }
 
     fn items(&self) -> Vec<Diagnostic> {
-        self.items.borrow().clone()
+        self.handler.records().iter().map(diagnostic_of).collect()
     }
 
     /// The first failure raised since `from`.
     fn first_failure(&self, from: usize) -> Option<Diagnostic> {
-        self.items
-            .borrow()
+        self.handler
+            .records()
             .iter()
             .skip(from)
-            .find(|item| item.failure)
-            .cloned()
+            .find(|record| record.is_failure())
+            .map(diagnostic_of)
     }
-}
-
-impl Drop for ErrorCollector {
-    fn drop(&mut self) {
-        // SAFETY: pops the handler `new` pushed on this thread; handlers
-        // pushed after it were popped by their own guards, dropped first.
-        unsafe { cpl::CPLPopErrorHandler() };
-    }
-}
-
-extern "C" fn collect(kind: cpl::CplErr, number: cpl::CplErrorNum, message: *const c_char) {
-    if kind == cpl::CE_DEBUG || kind == cpl::CE_NONE {
-        return;
-    }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: GDAL calls this handler only while it is the top of this
-        // thread's stack, whose user data is a collector's boxed list.
-        let data = unsafe { cpl::CPLGetErrorHandlerUserData() };
-        if data.is_null() {
-            return;
-        }
-        // SAFETY: the user data is a live RefCell<Vec<Diagnostic>> (above).
-        let items = unsafe { &*data.cast::<RefCell<Vec<Diagnostic>>>() };
-        // SAFETY: GDAL passes NULL or a NUL-terminated message, valid for the
-        // call.
-        let message = unsafe { cpl::decoded(message) };
-        if let Ok(mut items) = items.try_borrow_mut() {
-            items.push(Diagnostic {
-                failure: kind >= cpl::CE_FAILURE,
-                code: number,
-                message,
-            });
-        }
-    }));
 }
 
 /// The refusal for a failure GDAL raised, in `code`, carrying its own message,
@@ -233,14 +200,9 @@ impl ThreadConfig {
             }
             let key = cpl::c_string(key);
             let value = cpl::c_string(value);
-            // SAFETY: a NUL-terminated key and a NULL default; the value
-            // returned is this thread's, copied before it is replaced.
-            let before = unsafe { cpl::CPLGetThreadLocalConfigOption(key.as_ptr(), ptr::null()) };
-            // SAFETY: NULL or a live NUL-terminated string (above).
-            let before =
-                (!before.is_null()).then(|| CString::from(unsafe { CStr::from_ptr(before) }));
-            // SAFETY: NUL-terminated key and value; GDAL copies both.
-            unsafe { cpl::CPLSetThreadLocalConfigOption(key.as_ptr(), value.as_ptr()) };
+            // This thread's value, copied before it is replaced.
+            let before = cpl::thread_local_config_option(&key);
+            cpl::set_thread_local_config_option(&key, Some(value.as_c_str()));
             self.previous.push((key, before));
         }
         Ok(())
@@ -249,11 +211,9 @@ impl ThreadConfig {
 
 impl Drop for ThreadConfig {
     fn drop(&mut self) {
+        // On the thread that set the options (the guard is not Send).
         for (key, value) in self.previous.iter().rev() {
-            let value = value.as_ref().map_or(ptr::null(), |value| value.as_ptr());
-            // SAFETY: a NUL-terminated key and NULL or a NUL-terminated value,
-            // on the thread that set the option.
-            unsafe { cpl::CPLSetThreadLocalConfigOption(key.as_ptr(), value) };
+            cpl::set_thread_local_config_option(key, value.as_deref());
         }
     }
 }
@@ -337,13 +297,12 @@ struct Staging {
 }
 
 impl Staging {
-    fn stage(&mut self, dataset: gdal::GdalDatasetH, raster: bool) -> Result<String> {
+    fn stage(&mut self, dataset: &DatasetHandle, raster: bool) -> Result<String> {
         if self.folder.is_empty() {
             let run = STAGED_RUNS.fetch_add(1, Ordering::Relaxed) + 1;
             self.folder = format!("{STAGING_ROOT}/{run}");
             let folder = cpl::c_string(&self.folder);
-            // SAFETY: a NUL-terminated /vsimem path.
-            unsafe { alg::VSIMkdirRecursive(folder.as_ptr(), 0o755) };
+            cpl::mkdir_recursive(&folder, 0o755);
         }
         self.count += 1;
         let name = format!(
@@ -353,38 +312,24 @@ impl Staging {
             if raster { ".tif" } else { ".gpkg" }
         );
         let driver_name = if raster { "GTiff" } else { "GPKG" };
-        let driver = driver_by_name(driver_name);
-        if driver.is_null() {
+        let Some(driver) = Driver::by_name(driver_name) else {
             return Err(make_error(
                 ErrorCode::Internal,
                 "GDAL has no driver to stage a dataset with",
                 driver_name,
             ));
-        }
-        let target = cpl::c_string(&name);
-        // SAFETY: a registered driver, a NUL-terminated name, a live source
-        // dataset, no options and no progress; the copy returned is closed
-        // below.
-        let copy = unsafe {
-            gdal::GDALCreateCopy(
-                driver,
-                target.as_ptr(),
-                dataset,
-                cpl::FALSE,
-                ptr::null(),
-                None,
-                ptr::null_mut(),
-            )
         };
-        if copy.is_null() {
+        let target = cpl::c_string(&name);
+        // No options and no progress; the copy is closed at once.
+        let copy = driver.create_copy(&target, dataset, false, &cpl::CStringList::new());
+        let Some(copy) = copy else {
             return Err(make_error(
                 ErrorCode::Internal,
                 "could not stage an input for GDAL",
                 name,
             ));
-        }
-        // SAFETY: the copy made above, closed once.
-        unsafe { gdal::GDALClose(copy) };
+        };
+        drop(copy);
         Ok(name)
     }
 }
@@ -393,8 +338,7 @@ impl Drop for Staging {
     fn drop(&mut self) {
         if !self.folder.is_empty() {
             let folder = cpl::c_string(&self.folder);
-            // SAFETY: a NUL-terminated /vsimem path.
-            unsafe { alg::VSIRmdirRecursive(folder.as_ptr()) };
+            cpl::rmdir_recursive(&folder);
         }
     }
 }
@@ -773,8 +717,8 @@ fn read_tail(
 
 // ---- datasets in memory ----------------------------------------------------------------------
 
-fn mem_driver() -> gdal::GdalDriverH {
-    driver_by_name("MEM")
+fn mem_driver() -> Option<Driver> {
+    Driver::by_name("MEM")
 }
 
 fn mem_raster(grid: &RasterGrid) -> Result<DatasetRef> {
@@ -794,8 +738,7 @@ fn mem_raster(grid: &RasterGrid) -> Result<DatasetRef> {
         ));
     }
     let type_name = cpl::c_string(&grid.data_type);
-    // SAFETY: a NUL-terminated name.
-    let data_type = unsafe { alg::GDALGetDataTypeByName(type_name.as_ptr()) };
+    let data_type = dataset::data_type_by_name(&type_name);
     if data_type == gdal::GDT_UNKNOWN {
         return Err(make_error(
             ErrorCode::InvalidArgument,
@@ -803,59 +746,47 @@ fn mem_raster(grid: &RasterGrid) -> Result<DatasetRef> {
             grid.data_type.clone(),
         ));
     }
-    // SAFETY: the MEM driver (or NULL, which GDAL refuses), an empty name and
-    // no options; the dataset returned is the DatasetRef's.
-    let made = unsafe {
-        gdal::GDALCreate(
-            mem_driver(),
-            c"".as_ptr(),
-            info.width,
-            info.height,
-            bands,
-            data_type,
-            ptr::null(),
-        )
-    };
-    let Some(dataset) = DatasetRef::from_raw(made) else {
+    // The MEM driver (or none, which GDAL refuses), an empty name and no
+    // options; the dataset made is held as the DatasetRef's reference.
+    let made = dataset::create(
+        mem_driver(),
+        c"",
+        info.width,
+        info.height,
+        bands,
+        data_type,
+        &cpl::CStringList::new(),
+    );
+    let Some(dataset) = made.map(Dataset::into_reference) else {
         return Err(Error::new(
             ErrorCode::Internal,
             "GDAL could not make a grid in memory",
         ));
     };
     let transform = info.geotransform;
-    // SAFETY: a live dataset and six doubles.
-    unsafe { gdal::GDALSetGeoTransform(dataset.raw(), transform.as_ptr()) };
+    dataset.set_geo_transform(&transform);
     if !info.projection_wkt.is_empty() {
         let mut crs = SpatialReference::new();
         if parse_crs(&info.projection_wkt, &mut crs) {
-            // SAFETY: a live dataset and a live reference, which GDAL copies.
-            unsafe { gdal::GDALSetSpatialRef(dataset.raw(), crs.raw()) };
+            // GDAL copies the reference.
+            dataset.set_spatial_ref(&crs);
         }
     }
     for (b, values) in (0..bands).zip(&grid.bands) {
-        // SAFETY: a live dataset and one of its bands.
-        let band = unsafe { gdal::GDALGetRasterBand(dataset.raw(), b + 1) };
-        // RasterIO takes one non-const buffer for reading and writing alike;
-        // GF_Write only reads it, and copying a band to satisfy the type
-        // would double the memory of the largest thing a run holds.
-        // SAFETY: a live band and width x height doubles, which GF_Write
-        // reads and never writes.
-        let status = unsafe {
-            gdal::GDALRasterIO(
-                band,
-                gdal::GF_WRITE,
+        let band = dataset.band(b + 1);
+        // Written straight from the grid's own values: copying a band would
+        // double the memory of the largest thing a run holds.
+        let status = band.map_or(cpl::CE_FAILURE, |band| {
+            band.write_f64(
                 0,
                 0,
                 info.width,
                 info.height,
-                values.as_ptr().cast_mut().cast(),
+                values,
                 info.width,
                 info.height,
-                gdal::GDT_FLOAT64,
-                0,
-                0,
             )
-        };
+        });
         if status != cpl::CE_NONE {
             return Err(Error::new(
                 ErrorCode::Internal,
@@ -870,9 +801,10 @@ fn mem_raster(grid: &RasterGrid) -> Result<DatasetRef> {
         } else {
             None
         };
-        if let Some(value) = no_data {
-            // SAFETY: a live band.
-            unsafe { gdal::GDALSetRasterNoDataValue(band, value) };
+        if let Some(value) = no_data
+            && let Some(band) = band
+        {
+            band.set_no_data_value(value);
         }
     }
     Ok(dataset)
@@ -916,8 +848,7 @@ fn layer_type(table: &FeatureTable) -> ogr::OgrWkbGeometryType {
         GeometryKind::Unknown => return ogr::WKB_UNKNOWN,
     };
     if table.has_z {
-        // SAFETY: a pure function of an integer (wkbSetZ).
-        unsafe { ogr::OGR_GT_SetZ(geometry_type) }
+        geometry::with_z(geometry_type)
     } else {
         geometry_type
     }
@@ -945,20 +876,18 @@ fn feature_geometry(feature: &Feature, kind: GeometryKind) -> Option<OgrGeometry
 }
 
 fn mem_vector(set: &FeatureSet) -> Result<DatasetRef> {
-    // SAFETY: the MEM driver (or NULL, which GDAL refuses), an empty name and
-    // no options; the dataset returned is the DatasetRef's.
-    let made = unsafe {
-        gdal::GDALCreate(
-            mem_driver(),
-            c"".as_ptr(),
-            0,
-            0,
-            0,
-            gdal::GDT_UNKNOWN,
-            ptr::null(),
-        )
-    };
-    let Some(dataset) = DatasetRef::from_raw(made) else {
+    // The MEM driver (or none, which GDAL refuses), an empty name and no
+    // options; the dataset made is held as the DatasetRef's reference.
+    let made = dataset::create(
+        mem_driver(),
+        c"",
+        0,
+        0,
+        0,
+        gdal::GDT_UNKNOWN,
+        &cpl::CStringList::new(),
+    );
+    let Some(dataset) = made.map(Dataset::into_reference) else {
         return Err(Error::new(
             ErrorCode::Internal,
             "GDAL could not make a feature set in memory",
@@ -975,37 +904,28 @@ fn mem_vector(set: &FeatureSet) -> Result<DatasetRef> {
             table.name.clone()
         };
         let layer_name = cpl::c_string(&name);
-        // SAFETY: a live dataset, a NUL-terminated name, NULL or a live
-        // reference (copied by the layer) and no options; the layer is the
-        // dataset's.
-        let layer = unsafe {
-            gdal::GDALDatasetCreateLayer(
-                dataset.raw(),
-                layer_name.as_ptr(),
-                if has_crs { crs.raw() } else { ptr::null_mut() },
-                layer_type(table),
-                ptr::null(),
-            )
-        };
-        if layer.is_null() {
+        // The reference is copied by the layer; the layer is the dataset's.
+        let created = dataset.create_layer(
+            &layer_name,
+            has_crs.then_some(&crs),
+            layer_type(table),
+            &cpl::CStringList::new(),
+        );
+        let Some(layer) = created else {
             return Err(make_error(
                 ErrorCode::Internal,
                 "GDAL could not make a layer in memory",
                 name,
             ));
-        }
+        };
         for field in &table.fields {
             let (field_type, sub_type) = ogr_field_type(field.r#type);
             let field_name = cpl::c_string(&field.name);
-            // SAFETY: a field definition made, handed to the live layer
-            // (which copies it) and destroyed here.
-            let created = unsafe {
-                let definition = ogr::OGR_Fld_Create(field_name.as_ptr(), field_type);
-                ogr::OGR_Fld_SetSubType(definition, sub_type);
-                let created = ogr::OGR_L_CreateField(layer, definition, cpl::TRUE);
-                ogr::OGR_Fld_Destroy(definition);
-                created
-            };
+            // Made, handed to the layer (which copies it) and destroyed here.
+            let mut definition = FieldDefn::new(&field_name, field_type);
+            definition.set_sub_type(sub_type);
+            let created = layer.create_field(&definition, true);
+            drop(definition);
             if created != ogr::OGRERR_NONE {
                 return Err(make_error(
                     ErrorCode::InvalidArgument,
@@ -1015,53 +935,44 @@ fn mem_vector(set: &FeatureSet) -> Result<DatasetRef> {
             }
         }
         for feature in &table.features {
-            // SAFETY: the live layer's definition; the feature is destroyed
-            // below.
-            let ogr_feature = unsafe { ogr::OGR_F_Create(ogr::OGR_L_GetLayerDefn(layer)) };
+            // Of the layer's definition; destroyed below.
+            let made = layer.definition().and_then(OgrFeature::create);
+            let Some(mut ogr_feature) = made else {
+                return Err(make_error(
+                    ErrorCode::InvalidArgument,
+                    "GDAL refused a feature",
+                    name,
+                ));
+            };
             for (index, value) in (0..).zip(feature.values.iter().take(table.fields.len())) {
-                // SAFETY: a live feature and one of its fields; text is
-                // NUL-terminated and copied.
-                unsafe {
-                    match value {
-                        FieldValue::Null => ogr::OGR_F_SetFieldNull(ogr_feature, index),
-                        FieldValue::Boolean(held) => {
-                            ogr::OGR_F_SetFieldInteger(ogr_feature, index, c_int::from(*held));
-                        }
-                        FieldValue::Integer64(held) => {
-                            ogr::OGR_F_SetFieldInteger64(ogr_feature, index, *held);
-                        }
-                        FieldValue::Real(held) => {
-                            ogr::OGR_F_SetFieldDouble(ogr_feature, index, *held);
-                        }
-                        FieldValue::Text(held) => {
-                            let held = cpl::c_string(held);
-                            ogr::OGR_F_SetFieldString(ogr_feature, index, held.as_ptr());
-                        }
+                // Text is copied.
+                match value {
+                    FieldValue::Null => ogr_feature.set_field_null(index),
+                    FieldValue::Boolean(held) => {
+                        ogr_feature.set_field_integer(index, c_int::from(*held));
+                    }
+                    FieldValue::Integer64(held) => {
+                        ogr_feature.set_field_integer64(index, *held);
+                    }
+                    FieldValue::Real(held) => {
+                        ogr_feature.set_field_double(index, *held);
+                    }
+                    FieldValue::Text(held) => {
+                        ogr_feature.set_field_string(index, &cpl::c_string(held));
                     }
                 }
             }
             if let Some(geometry) = feature_geometry(feature, table.kind) {
-                if has_crs {
-                    // SAFETY: a live geometry and the live layer's reference,
-                    // which the geometry references.
-                    unsafe {
-                        alg::OGR_G_AssignSpatialReference(
-                            geometry.raw(),
-                            ogr::OGR_L_GetSpatialRef(layer),
-                        );
-                    }
+                // The geometry references the layer's reference.
+                if has_crs && let Some(reference) = layer.spatial_ref() {
+                    geometry.assign_spatial_reference(reference);
                 }
-                // SAFETY: a live feature; the geometry is the feature's from
-                // here.
-                unsafe { ogr::OGR_F_SetGeometryDirectly(ogr_feature, geometry.into_raw()) };
+                // The geometry is the feature's from here.
+                ogr_feature.set_geometry_directly(geometry);
             }
-            // SAFETY: the live layer and feature (which the layer copies);
-            // the feature is destroyed once.
-            let created = unsafe {
-                let created = ogr::OGR_L_CreateFeature(layer, ogr_feature);
-                ogr::OGR_F_Destroy(ogr_feature);
-                created
-            };
+            // The layer copies the feature, which is destroyed once.
+            let created = layer.create_feature(&ogr_feature);
+            drop(ogr_feature);
             if created != ogr::OGRERR_NONE {
                 return Err(make_error(
                     ErrorCode::InvalidArgument,
@@ -1078,36 +989,20 @@ fn mem_vector(set: &FeatureSet) -> Result<DatasetRef> {
 
 /// A reference's WKT2 (2019), or empty for none and for a reference GDAL
 /// cannot write.
-fn wkt_of(reference: osr::OgrSpatialReferenceH) -> String {
-    if reference.is_null() {
-        return String::new();
-    }
-    let options = [c"FORMAT=WKT2_2019".as_ptr(), ptr::null()];
-    let mut text: *mut c_char = ptr::null_mut();
-    // SAFETY: a live reference, a NULL-terminated option list and an out
-    // pointer GDAL fills with text the caller frees.
-    let status = unsafe { osr::OSRExportToWktEx(reference, &raw mut text, options.as_ptr()) };
-    // SAFETY: NULL or the text GDAL just wrote, read before it is freed.
-    let wkt = if status == ogr::OGRERR_NONE {
-        unsafe { cpl::decoded(text) }
-    } else {
-        String::new()
-    };
-    // SAFETY: GDAL's allocation (or NULL), freed once.
-    unsafe { cpl::VSIFree(text.cast()) };
-    wkt
+fn wkt_of(reference: Option<SpatialReferenceRef<'_>>) -> String {
+    reference
+        .and_then(|reference| reference.export_to_wkt_with(&[c"FORMAT=WKT2_2019"]))
+        .unwrap_or_default()
 }
 
-fn read_grid(dataset: gdal::GdalDatasetH) -> Result<RasterGrid> {
-    // SAFETY: a live dataset; its spatial reference is its own.
-    let (width, height, band_count, reference) = unsafe {
-        (
-            gdal::GDALGetRasterXSize(dataset),
-            gdal::GDALGetRasterYSize(dataset),
-            gdal::GDALGetRasterCount(dataset),
-            gdal::GDALGetSpatialRef(dataset),
-        )
-    };
+fn read_grid(dataset: &DatasetHandle) -> Result<RasterGrid> {
+    // The spatial reference is the dataset's own.
+    let (width, height, band_count, reference) = (
+        dataset.raster_x_size(),
+        dataset.raster_y_size(),
+        dataset.raster_count(),
+        dataset.spatial_ref(),
+    );
     let mut info = RasterInfo {
         width,
         height,
@@ -1116,8 +1011,7 @@ fn read_grid(dataset: gdal::GdalDatasetH) -> Result<RasterGrid> {
         ..RasterInfo::default()
     };
     let mut transform = [0.0; 6];
-    // SAFETY: a live dataset and six doubles.
-    if unsafe { gdal::GDALGetGeoTransform(dataset, transform.as_mut_ptr()) } == cpl::CE_NONE {
+    if dataset.geo_transform(&mut transform) == cpl::CE_NONE {
         info.geotransform = transform;
         info.has_geotransform = true;
     }
@@ -1126,32 +1020,16 @@ fn read_grid(dataset: gdal::GdalDatasetH) -> Result<RasterGrid> {
     let mut bands = Vec::new();
     let mut no_data = Vec::new();
     for b in 1..=band_count {
-        // SAFETY: a live dataset and one of its bands.
-        let band = unsafe { gdal::GDALGetRasterBand(dataset, b) };
+        let band = dataset.band(b);
         if b == 1 {
-            // SAFETY: a live band; the name is a static text GDAL keeps.
-            data_type = unsafe {
-                cpl::decoded(gdal::GDALGetDataTypeName(gdal::GDALGetRasterDataType(band)))
-            };
+            data_type = band
+                .map(|band| dataset::data_type_name(band.data_type()))
+                .unwrap_or_default();
         }
         let mut values = vec![0.0; cells];
-        // SAFETY: a live band and a buffer of width x height doubles.
-        let status = unsafe {
-            gdal::GDALRasterIO(
-                band,
-                gdal::GF_READ,
-                0,
-                0,
-                width,
-                height,
-                values.as_mut_ptr().cast(),
-                width,
-                height,
-                gdal::GDT_FLOAT64,
-                0,
-                0,
-            )
-        };
+        let status = band.map_or(cpl::CE_FAILURE, |band| {
+            band.read_f64(0, 0, width, height, &mut values, width, height)
+        });
         if status != cpl::CE_NONE {
             return Err(Error::new(
                 ErrorCode::Internal,
@@ -1159,10 +1037,7 @@ fn read_grid(dataset: gdal::GdalDatasetH) -> Result<RasterGrid> {
             ));
         }
         bands.push(values);
-        let mut has: c_int = 0;
-        // SAFETY: a live band and an out flag.
-        let value = unsafe { gdal::GDALGetRasterNoDataValue(band, &raw mut has) };
-        no_data.push((has != 0).then_some(value));
+        no_data.push(band.and_then(Band::no_data_value));
     }
     info.no_data_value = no_data.first().copied().flatten();
     Ok(RasterGrid {
@@ -1173,10 +1048,8 @@ fn read_grid(dataset: gdal::GdalDatasetH) -> Result<RasterGrid> {
     })
 }
 
-fn field_type_of(field: ogr::OgrFieldDefnH) -> FieldType {
-    // SAFETY: a live field definition of a live layer.
-    let (field_type, sub_type) =
-        unsafe { (ogr::OGR_Fld_GetType(field), ogr::OGR_Fld_GetSubType(field)) };
+fn field_type_of(field: FieldDefnRef<'_>) -> FieldType {
+    let (field_type, sub_type) = (field.field_type(), field.sub_type());
     match field_type {
         ogr::OFT_INTEGER => {
             if sub_type == ogr::OFST_BOOLEAN {
@@ -1202,32 +1075,23 @@ fn kind_of(geometry_type: ogr::OgrWkbGeometryType) -> GeometryKind {
     }
 }
 
-fn field_as_string(feature: ogr::OgrFeatureH, index: c_int) -> String {
-    // SAFETY: a live feature and one of its fields; the text is copied at once.
-    unsafe { cpl::decoded(ogr::OGR_F_GetFieldAsString(feature, index)) }
+fn field_as_string(feature: &OgrFeature<'_>, index: c_int) -> String {
+    feature.field_as_string(index)
 }
 
 /// An ISO 8601 date or date-time, as FieldType::Date and DateTime carry them.
-fn iso_date(feature: ogr::OgrFeatureH, index: c_int, with_time: bool) -> String {
-    let (mut year, mut month, mut day, mut hour, mut minute, mut zone) = (0, 0, 0, 0, 0, 0);
-    let mut second: f32 = 0.0;
-    // SAFETY: a live feature, one of its fields, and seven out values.
-    let read = unsafe {
-        ogr::OGR_F_GetFieldAsDateTimeEx(
-            feature,
-            index,
-            &raw mut year,
-            &raw mut month,
-            &raw mut day,
-            &raw mut hour,
-            &raw mut minute,
-            &raw mut second,
-            &raw mut zone,
-        )
-    };
-    if read == cpl::FALSE {
+fn iso_date(feature: &OgrFeature<'_>, index: c_int, with_time: bool) -> String {
+    let Some(dataset::FieldDateTime {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+    }) = feature.field_as_date_time(index)
+    else {
         return field_as_string(feature, index);
-    }
+    };
     // Whole numbers only: printf's %f would follow the C locale's decimal point.
     let two = |value: c_int| format!("{}{value}", if value < 10 { "0" } else { "" });
     let mut text = format!("{year}-{}-{}", two(month), two(day));
@@ -1249,61 +1113,42 @@ fn iso_date(feature: ogr::OgrFeatureH, index: c_int, with_time: bool) -> String 
     text
 }
 
-fn read_features(dataset: gdal::GdalDatasetH, diagnostics: &mut Vec<Diagnostic>) -> FeatureSet {
+fn read_features(dataset: &DatasetHandle, diagnostics: &mut Vec<Diagnostic>) -> FeatureSet {
     let mut set = FeatureSet::default();
     let mut warnings = Vec::new();
-    // SAFETY: a live dataset.
-    let layer_count = unsafe { gdal::GDALDatasetGetLayerCount(dataset) };
+    let layer_count = dataset.layer_count();
     for l in 0..layer_count {
-        // SAFETY: a live dataset and one of its layers.
-        let layer = unsafe { gdal::GDALDatasetGetLayer(dataset, l) };
-        if layer.is_null() {
+        let Some(layer) = dataset.layer(l) else {
             continue;
-        }
-        // SAFETY: a live layer; its name, type, reference and definition are
-        // its own.
-        let (name, geometry_type, reference, definition) = unsafe {
-            (
-                cpl::decoded(ogr::OGR_L_GetName(layer)),
-                ogr::OGR_L_GetGeomType(layer),
-                ogr::OGR_L_GetSpatialRef(layer),
-                ogr::OGR_L_GetLayerDefn(layer),
-            )
         };
+        // The layer's name, type, reference and definition are its own.
+        let (name, geometry_type, reference, definition) = (
+            layer.name(),
+            layer.geometry_type(),
+            layer.spatial_ref(),
+            layer.definition(),
+        );
         let mut table = FeatureTable {
             name,
             kind: kind_of(geometry_type),
-            // SAFETY: a pure function of an integer (wkbHasZ).
-            has_z: unsafe { ogr::OGR_GT_HasZ(geometry_type) } != 0,
+            has_z: geometry::has_z(geometry_type),
             crs_wkt: wkt_of(reference),
             ..FeatureTable::default()
         };
-        // SAFETY: a live definition.
-        let field_count = unsafe { ogr::OGR_FD_GetFieldCount(definition) };
+        let field_count = definition.map_or(0, |definition| definition.field_count());
         for f in 0..field_count {
-            // SAFETY: a live definition and one of its fields.
-            let field = unsafe { ogr::OGR_FD_GetFieldDefn(definition, f) };
+            let field = definition.and_then(|definition| definition.field(f));
             table.fields.push(FieldDef {
-                // SAFETY: a live field definition's own name, copied at once.
-                name: unsafe { cpl::decoded(ogr::OGR_Fld_GetNameRef(field)) },
-                r#type: field_type_of(field),
+                name: field.map(|field| field.name()).unwrap_or_default(),
+                r#type: field.map_or(FieldType::String, field_type_of),
             });
         }
-        // SAFETY: a live layer.
-        unsafe { ogr::OGR_L_ResetReading(layer) };
-        loop {
-            // SAFETY: a live layer; the feature returned is the caller's to
-            // destroy.
-            let ogr_feature = unsafe { ogr::OGR_L_GetNextFeature(layer) };
-            if ogr_feature.is_null() {
-                break;
-            }
+        layer.reset_reading();
+        // The feature GetNextFeature hands over is destroyed at the end of
+        // each pass, after the last use of its geometry's view.
+        while let Some(ogr_feature) = layer.next_feature() {
             let mut feature = Feature::default();
-            // SAFETY: the feature's geometry, owned by the live feature, which
-            // is destroyed only after the last use of the view.
-            let geometry =
-                unsafe { GeometryView::from_raw(ogr::OGR_F_GetGeometryRef(ogr_feature)) };
-            flatten_ogr_geometry(geometry, &mut feature.parts, &mut warnings);
+            flatten_ogr_geometry(ogr_feature.geometry(), &mut feature.parts, &mut warnings);
             if table.kind == GeometryKind::Unknown
                 && let Some(first) = feature.parts.first()
             {
@@ -1313,32 +1158,22 @@ fn read_features(dataset: gdal::GdalDatasetH, diagnostics: &mut Vec<Diagnostic>)
                 table.has_z = table.has_z || part.has_z;
             }
             for (f, field) in (0..field_count).zip(&table.fields) {
-                // SAFETY: a live feature and one of its fields.
-                if unsafe { ogr::OGR_F_IsFieldSetAndNotNull(ogr_feature, f) } == 0 {
+                if !ogr_feature.is_field_set_and_not_null(f) {
                     feature.values.push(FieldValue::Null);
                     continue;
                 }
                 let value = match field.r#type {
-                    // SAFETY (the three reads): a live feature and one of its
-                    // fields.
-                    FieldType::Boolean => FieldValue::Boolean(
-                        unsafe { ogr::OGR_F_GetFieldAsInteger(ogr_feature, f) } != 0,
-                    ),
-                    FieldType::Integer64 => FieldValue::Integer64(unsafe {
-                        ogr::OGR_F_GetFieldAsInteger64(ogr_feature, f)
-                    }),
-                    FieldType::Real => {
-                        FieldValue::Real(unsafe { ogr::OGR_F_GetFieldAsDouble(ogr_feature, f) })
-                    }
-                    FieldType::Date => FieldValue::Text(iso_date(ogr_feature, f, false)),
-                    FieldType::DateTime => FieldValue::Text(iso_date(ogr_feature, f, true)),
-                    FieldType::String => FieldValue::Text(field_as_string(ogr_feature, f)),
+                    FieldType::Boolean => FieldValue::Boolean(ogr_feature.field_as_integer(f) != 0),
+                    FieldType::Integer64 => FieldValue::Integer64(ogr_feature.field_as_integer64(f)),
+                    FieldType::Real => FieldValue::Real(ogr_feature.field_as_double(f)),
+                    FieldType::Date => FieldValue::Text(iso_date(&ogr_feature, f, false)),
+                    FieldType::DateTime => FieldValue::Text(iso_date(&ogr_feature, f, true)),
+                    FieldType::String => FieldValue::Text(field_as_string(&ogr_feature, f)),
                 };
                 feature.values.push(value);
             }
             table.features.push(feature);
-            // SAFETY: the feature GetNextFeature handed over, destroyed once.
-            unsafe { ogr::OGR_F_Destroy(ogr_feature) };
+            drop(ogr_feature);
         }
         set.tables.push(table);
     }
@@ -1361,12 +1196,11 @@ fn read_features(dataset: gdal::GdalDatasetH, diagnostics: &mut Vec<Diagnostic>)
 /// infrared - and every cell the map made clear is drawn opaque. Its bands
 /// are, by the algorithm's definition, red, green, blue and, with
 /// --add-alpha, alpha.
-fn stamp_colour_map_bands(path: &[String], dataset: gdal::GdalDatasetH) {
+fn stamp_colour_map_bands(path: &[String], dataset: &DatasetHandle) {
     if path != ["raster", "color-map"] {
         return;
     }
-    // SAFETY: a live dataset.
-    let count = unsafe { gdal::GDALGetRasterCount(dataset) };
+    let count = dataset.raster_count();
     if count != 3 && count != 4 {
         return;
     }
@@ -1377,17 +1211,17 @@ fn stamp_colour_map_bands(path: &[String], dataset: gdal::GdalDatasetH) {
         gdal::GCI_ALPHA_BAND,
     ];
     for i in 1..=count {
-        // SAFETY: a live dataset and one of its bands.
-        let interpretation =
-            unsafe { gdal::GDALGetRasterColorInterpretation(gdal::GDALGetRasterBand(dataset, i)) };
+        // A band GDAL does not give is Undefined, as GDAL answers for one.
+        let interpretation = dataset
+            .band(i)
+            .map_or(alg::GCI_UNDEFINED, |band| band.color_interpretation());
         if interpretation != alg::GCI_UNDEFINED {
             return; // said already: a later GDAL that sets them is taken at its word
         }
     }
     for (i, role) in (1..=count).zip(ROLES) {
-        // SAFETY: a live dataset and one of its bands.
-        unsafe {
-            alg::GDALSetRasterColorInterpretation(gdal::GDALGetRasterBand(dataset, i), role);
+        if let Some(band) = dataset.band(i) {
+            band.set_color_interpretation(role);
         }
     }
 }
@@ -1398,7 +1232,7 @@ static SPILLED: AtomicU64 = AtomicU64::new(0);
 /// A raster too big for memory, as the tiled GeoTIFF a derived reference
 /// raster is kept in: DEFLATE, with the floating-point predictor for
 /// floating-point data (docs/geoprocessing.md, "Outputs").
-fn spill(dataset: gdal::GdalDatasetH, directory: &str) -> Result<String> {
+fn spill(dataset: &DatasetHandle, directory: &str) -> Result<String> {
     // std::filesystem::temp_directory_path() where the C++ has it; Rust's
     // reads TMPDIR alone on POSIX, where the C++ library reads TMPDIR, TMP,
     // TEMP and TEMPDIR (docs/rust.md, "Where Rust differs").
@@ -1409,13 +1243,14 @@ fn spill(dataset: gdal::GdalDatasetH, directory: &str) -> Result<String> {
     };
     let _ = std::fs::create_dir_all(&folder);
     let number = SPILLED.fetch_add(1, Ordering::Relaxed) + 1;
-    // SAFETY: no argument; the calling thread's id, whatever the name says.
-    let process = unsafe { alg::CPLGetPID() };
+    // The calling thread's id, whatever the name says.
+    let process = cpl::thread_id();
     let file = folder.join(format!("katana-{process}-{number}.tif"));
-    // SAFETY: a live dataset and its first band.
-    let data_type = unsafe { gdal::GDALGetRasterDataType(gdal::GDALGetRasterBand(dataset, 1)) };
-    // SAFETY: a pure function of a data type.
-    let floating = unsafe { alg::GDALDataTypeIsFloating(data_type) } != 0;
+    // A band GDAL does not give has GDT_Unknown, as GDAL answers for one.
+    let data_type = dataset
+        .band(1)
+        .map_or(gdal::GDT_UNKNOWN, |band| band.data_type());
+    let floating = dataset::data_type_is_floating(data_type);
     let mut options = cpl::CStringList::new();
     options.set_name_value(b"TILED", b"YES");
     options.set_name_value(b"COMPRESS", b"DEFLATE");
@@ -1423,32 +1258,20 @@ fn spill(dataset: gdal::GdalDatasetH, directory: &str) -> Result<String> {
         options.set_name_value(b"PREDICTOR", b"3");
     }
     options.set_name_value(b"BIGTIFF", b"IF_SAFER");
-    let gtiff = driver_by_name("GTiff");
+    let gtiff = Driver::by_name("GTiff");
     let name = String::from_utf8_lossy(&cpl::generic_path(&file)).into_owned();
     let target = cpl::c_string(&name);
-    // SAFETY: the GTiff driver (or NULL, which GDAL refuses), a NUL-terminated
-    // name, a live source, a NULL-terminated option list and no progress; the
-    // copy returned is closed below.
-    let copy = unsafe {
-        gdal::GDALCreateCopy(
-            gtiff,
-            target.as_ptr(),
-            dataset,
-            cpl::FALSE,
-            options.as_ptr(),
-            None,
-            ptr::null_mut(),
-        )
-    };
-    if copy.is_null() {
+    // The GTiff driver (or none, which GDAL refuses), no progress; the copy
+    // is closed at once.
+    let copy = dataset::create_copy(gtiff, &target, dataset, false, &options);
+    let Some(copy) = copy else {
         return Err(make_error(
             ErrorCode::FileExportFailure,
             "could not write the raster to a file",
             name,
         ));
-    }
-    // SAFETY: the copy made above, closed once.
-    unsafe { gdal::GDALClose(copy) };
+    };
+    drop(copy);
     Ok(name)
 }
 
@@ -1490,17 +1313,18 @@ fn suggestion(algorithm: &Algorithm, name: &str) -> String {
     }
 }
 
-/// A dataset as an argument takes it: by name, or an open dataset.
+/// A dataset as an argument takes it: by name, or an open dataset - one of
+/// our references to the inputs in memory, by its place in `owned`.
 enum Held {
     Name(String),
-    Object(gdal::GdalDatasetH),
+    Object(usize),
 }
 
 impl Held {
-    fn item(&self) -> DatasetItem<'_> {
+    fn item<'a>(&'a self, owned: &'a [DatasetRef]) -> DatasetItem<'a> {
         match self {
             Held::Name(name) => DatasetItem::Name(name.as_str()),
-            Held::Object(dataset) => DatasetItem::Object(*dataset),
+            Held::Object(index) => DatasetItem::Object(&owned[*index]),
         }
     }
 }
@@ -1517,11 +1341,10 @@ fn dataset_value(
         DatasetValue::Features(set) => (mem_vector(set)?, false),
     };
     if arg.dataset_input_flags() & alg::GADV_OBJECT != 0 {
-        let handle = dataset.raw();
         owned.push(dataset);
-        return Ok(Held::Object(handle));
+        return Ok(Held::Object(owned.len() - 1));
     }
-    Ok(Held::Name(staging.stage(dataset.raw(), raster)?))
+    Ok(Held::Name(staging.stage(&dataset, raster)?))
 }
 
 /// The argument that names the layer of the dataset `dataset` gives: GDAL's
@@ -1679,7 +1502,7 @@ fn bind_value(
             ));
         }
         let set = match dataset_value(&arg, values[0], owned, staging)? {
-            Held::Object(dataset) => arg.set_dataset(dataset),
+            Held::Object(index) => arg.set_dataset(&owned[index]),
             Held::Name(name) => arg.set_dataset_name(&name),
         };
         return if set { Ok(()) } else { refused() };
@@ -1688,7 +1511,8 @@ fn bind_value(
     for each in &values {
         held.push(dataset_value(&arg, each, owned, staging)?);
     }
-    let items: Vec<DatasetItem<'_>> = held.iter().map(Held::item).collect();
+    let owned: &[DatasetRef] = owned;
+    let items: Vec<DatasetItem<'_>> = held.iter().map(|each| each.item(owned)).collect();
     // Set with a moved list (the shim's): writing into the argument's own
     // list does not mark it set.
     if arg.set_dataset_list(&items) {
@@ -2015,13 +1839,9 @@ const _: fn() = || {
     shared::<ProgressState<'static>>();
 };
 
-extern "C" fn progress_adapter(complete: f64, _message: *const c_char, data: *mut c_void) -> c_int {
-    if data.is_null() {
-        return cpl::TRUE;
-    }
-    // SAFETY: the state run() handed GDAL, alive until Run() returns, and
-    // safe to share between threads (above).
-    let state = unsafe { &*data.cast::<ProgressState<'_>>() };
+/// What GDAL's progress is answered (ffi's trampoline calls it, from GDAL's
+/// threads too): TRUE to go on, FALSE to stop.
+fn progress_adapter(state: &ProgressState<'_>, complete: f64) -> c_int {
     let reported = catch_unwind(AssertUnwindSafe(|| {
         if let Some(progress) = state.progress {
             // std::clamp(complete, 0.0, 1.0): neither bound is NaN.
@@ -2344,14 +2164,10 @@ pub fn run(
         panic: Mutex::new(None),
     };
     mark = errors.size();
-    // SAFETY: the adapter catches every panic and reads only the state,
-    // which outlives the run and is safe to share with GDAL's threads.
-    let ran = unsafe {
-        bound.algorithm().run(
-            Some(progress_adapter),
-            ptr::from_ref(&state).cast_mut().cast(),
-        )
-    };
+    // The adapter catches every panic and reads only the state, which
+    // outlives the run and is safe to share with GDAL's threads.
+    let adapter = |complete: f64| progress_adapter(&state, complete);
+    let ran = bound.algorithm().run(&adapter);
     let panicked = state
         .panic
         .lock()
@@ -2396,16 +2212,13 @@ pub fn run(
     let mut outputs = RunOutputs::default();
     match output.as_ref().filter(|_| bound.memory_output) {
         Some(dataset) => {
-            let dataset = dataset.raw();
+            let dataset: &DatasetHandle = dataset;
             stamp_colour_map_bands(&request.path, dataset);
-            // SAFETY: a live dataset.
-            let (count, width, height) = unsafe {
-                (
-                    gdal::GDALGetRasterCount(dataset),
-                    gdal::GDALGetRasterXSize(dataset),
-                    gdal::GDALGetRasterYSize(dataset),
-                )
-            };
+            let (count, width, height) = (
+                dataset.raster_count(),
+                dataset.raster_x_size(),
+                dataset.raster_y_size(),
+            );
             if count > 0 {
                 let cells = width as u64 * height as u64 * count as u64;
                 if cells > request.max_memory_cells {
@@ -2414,8 +2227,7 @@ pub fn run(
                     outputs.raster = Some(read_grid(dataset)?);
                 }
             }
-            // SAFETY: a live dataset.
-            if unsafe { gdal::GDALDatasetGetLayerCount(dataset) } > 0 {
+            if dataset.layer_count() > 0 {
                 outputs.features = Some(read_features(dataset, &mut outputs.diagnostics));
             }
         }
@@ -2454,13 +2266,10 @@ pub fn run(
 /// and vector drivers and leaf algorithms GDAL has.
 pub fn versions() -> Versions {
     ensure_registered();
-    // SAFETY: static texts GDAL keeps, copied at once.
-    let (gdal_release, full) = unsafe {
-        (
-            cpl::decoded(gdal::GDALVersionInfo(c"RELEASE_NAME".as_ptr())),
-            cpl::decoded(gdal::GDALVersionInfo(c"--version".as_ptr())),
-        )
-    };
+    let (gdal_release, full) = (
+        dataset::version_info(c"RELEASE_NAME").unwrap_or_default(),
+        dataset::version_info(c"--version").unwrap_or_default(),
+    );
     // "GDAL 3.13.2 "Iowa City", released 2026/..": the name between quotes.
     let mut release = String::new();
     if let Some(open) = full.find('"')
@@ -2468,25 +2277,21 @@ pub fn versions() -> Versions {
     {
         release = String::from(&full[open + 1..open + 1 + close]);
     }
-    let (mut major, mut minor, mut patch): (c_int, c_int, c_int) = (0, 0, 0);
-    // SAFETY: three out values.
-    unsafe { alg::OSRGetPROJVersion(&raw mut major, &raw mut minor, &raw mut patch) };
+    let (major, minor, patch) = srs::proj_version();
     let proj = format!("{major}.{minor}.{patch}");
     let mut geos = String::new();
-    // SAFETY: three out values.
-    if unsafe { alg::OGRGetGEOSVersion(&raw mut major, &raw mut minor, &raw mut patch) } {
+    if let Some((major, minor, patch)) = geometry::geos_version() {
         geos = format!("{major}.{minor}.{patch}");
     }
     let mut raster_drivers = 0;
     let mut vector_drivers = 0;
-    // SAFETY: no argument.
-    let driver_count = unsafe { gdal::GDALGetDriverCount() };
-    for i in 0..driver_count {
-        // SAFETY: one of the registered drivers, which live as long as the
-        // process.
-        let driver = unsafe { gdal::GDALGetDriver(i) };
-        raster_drivers += i32::from(metadata_item(driver.cast(), gdal::GDAL_DCAP_RASTER).is_some());
-        vector_drivers += i32::from(metadata_item(driver.cast(), gdal::GDAL_DCAP_VECTOR).is_some());
+    for i in 0..Driver::count() {
+        // A driver lives as long as the process.
+        let Some(driver) = Driver::at(i) else {
+            continue;
+        };
+        raster_drivers += i32::from(driver.metadata_item(gdal::GDAL_DCAP_RASTER).is_some());
+        vector_drivers += i32::from(driver.metadata_item(gdal::GDAL_DCAP_VECTOR).is_some());
     }
     let algorithms = catalogue().iter().filter(|info| !info.container).count() as i32;
     Versions {
@@ -2506,8 +2311,7 @@ pub fn versions() -> Versions {
 pub fn staged_dataset_count() -> usize {
     ensure_registered();
     let root = cpl::c_string(STAGING_ROOT);
-    // SAFETY: a NUL-terminated path; the list returned is the caller's.
-    let entries = unsafe { cpl::take_string_list(cpl::VSIReadDirRecursive(root.as_ptr())) };
+    let entries = cpl::read_dir_recursive(&root);
     entries
         .unwrap_or_default()
         .iter()

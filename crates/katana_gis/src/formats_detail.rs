@@ -7,11 +7,6 @@
 //! separator has no file name (Rust's `file_name` takes the last component),
 //! and `remove` takes a file or an empty folder.
 
-#![allow(
-    unsafe_code,
-    reason = "Lists an archive's members through GDAL's virtual file system; every call states why it is sound."
-)]
-
 use std::path::Path;
 
 use crate::cpl_error_collector::quiet_errors;
@@ -109,10 +104,7 @@ pub(crate) fn open_names(path: &Path) -> OpenNames {
     // between: the person names one.
     let _quiet = quiet_errors();
     let root_c = cpl::c_string(&root);
-    // SAFETY: a NUL-terminated name; the list GDAL returns is copied and
-    // freed by take_string_list.
-    let members = unsafe { cpl::take_string_list(cpl::VSIReadDirRecursive(root_c.as_ptr())) }
-        .unwrap_or_default();
+    let members = cpl::read_dir_recursive(&root_c).unwrap_or_default();
     let mut datasets: Vec<Vec<u8>> = Vec::new();
     for member in members {
         if member.is_empty() || member.ends_with(b"/") {

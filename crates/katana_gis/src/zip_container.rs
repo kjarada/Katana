@@ -14,18 +14,14 @@
 //! A member's bytes are `Vec<u8>`, where the C++ has a `std::string` of them:
 //! text is bytes up to the decoder.
 
-#![allow(
-    unsafe_code,
-    reason = "Reads and writes archives through GDAL's virtual file system; every call states why it is sound."
-)]
-
 use std::path::{Path, PathBuf};
 
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result, Status};
 
 use crate::cpl_error_collector::quiet_errors;
-use crate::ffi::cpl;
+use crate::ffi::cpl::{self, VsiFile};
+use crate::ffi::error::last_error_message;
 use crate::formats_detail::remove_path;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -61,13 +57,8 @@ fn member_path(root: &[u8], member: &[u8]) -> Vec<u8> {
     path
 }
 
-fn last_error() -> String {
-    // SAFETY: this thread's last error message, copied at once.
-    unsafe { cpl::decoded(cpl::CPLGetLastErrorMsg()) }
-}
-
 fn with_reason(context: &str) -> String {
-    let reason = last_error();
+    let reason = last_error_message();
     if reason.is_empty() {
         String::from(context)
     } else {
@@ -89,10 +80,7 @@ pub fn list_zip(archive: &Path) -> Result<Vec<ZipMember>> {
     let _quiet = quiet_errors();
     let root = vsi_root(archive);
     let root_c = cpl::c_string(&root);
-    // SAFETY: a NUL-terminated name; the list GDAL returns is copied and
-    // freed by take_string_list.
-    let Some(names) = (unsafe { cpl::take_string_list(cpl::VSIReadDirRecursive(root_c.as_ptr())) })
-    else {
+    let Some(names) = cpl::read_dir_recursive(&root_c) else {
         return Err(make_error(
             ErrorCode::FileImportFailure,
             "the file is not a ZIP archive",
@@ -105,12 +93,9 @@ pub fn list_zip(archive: &Path) -> Result<Vec<ZipMember>> {
             continue; // a directory
         }
         let path = cpl::c_string(member_path(&root, &entry));
-        let mut status = cpl::VsiStatBufL::zeroed();
-        // SAFETY: a NUL-terminated name and a status buffer of the
-        // platform's VSIStatBufL size.
-        if unsafe { cpl::VSIStatL(path.as_ptr(), &raw mut status) } != 0 || status.is_dir() {
+        let Some(status) = cpl::stat(&path).filter(|status| !status.is_dir()) else {
             continue;
-        }
+        };
         members.push(ZipMember {
             name: String::from_utf8_lossy(&entry).into_owned(),
             size: status.size() as u64,
@@ -141,24 +126,16 @@ pub fn read_zip_member(archive: &Path, member: &str, max_bytes: u64) -> Result<V
 
     let _quiet = quiet_errors();
     let path = cpl::c_string(member_path(&vsi_root(archive), member.as_bytes()));
-    // SAFETY: NUL-terminated name and mode; the file is closed below.
-    let file = unsafe { cpl::VSIFOpenL(path.as_ptr(), c"rb".as_ptr()) };
-    if file.is_null() {
+    let Some(mut file) = VsiFile::open(&path, c"rb") else {
         return Err(make_error(
             ErrorCode::FileImportFailure,
             "the member could not be opened",
             with_reason(member),
         ));
-    }
-    let mut bytes = vec![0u8; found.size as usize];
-    let read = if bytes.is_empty() {
-        0
-    } else {
-        // SAFETY: an open file and a buffer of bytes.len() bytes.
-        unsafe { cpl::VSIFReadL(bytes.as_mut_ptr().cast(), 1, bytes.len(), file) }
     };
-    // SAFETY: the file opened above, closed once.
-    unsafe { cpl::VSIFCloseL(file) };
+    let mut bytes = vec![0u8; found.size as usize];
+    let read = file.read(&mut bytes);
+    file.close();
     if read != bytes.len() {
         // The directory promised more than the stream held: a truncated or
         // corrupt archive, which must not be parsed as if it were whole.
@@ -222,9 +199,7 @@ pub fn write_zip_members(archive: &Path, members: &[ZipContent<'_>]) -> Status {
     for member in members {
         let _quiet = quiet_errors();
         let path = cpl::c_string(member_path(&vsi_root(&temporary), member.name.as_bytes()));
-        // SAFETY: NUL-terminated name and mode; the file is closed below.
-        let file = unsafe { cpl::VSIFOpenL(path.as_ptr(), c"wb".as_ptr()) };
-        if file.is_null() {
+        let Some(mut file) = VsiFile::open(&path, c"wb") else {
             let reason = with_reason(&cpl::path_text(archive));
             remove_path(&temporary);
             return Err(make_error(
@@ -232,18 +207,12 @@ pub fn write_zip_members(archive: &Path, members: &[ZipContent<'_>]) -> Status {
                 "the archive could not be created",
                 reason,
             ));
-        }
-        let bytes = member.bytes;
-        let written = if bytes.is_empty() {
-            0
-        } else {
-            // SAFETY: an open file and bytes.len() bytes to write.
-            unsafe { cpl::VSIFWriteL(bytes.as_ptr().cast(), 1, bytes.len(), file) }
         };
+        let bytes = member.bytes;
+        let written = file.write(bytes);
         // The central directory is written on close, so a failed close is a
         // failed archive however many bytes went in.
-        // SAFETY: the file opened above, closed once.
-        let closed = unsafe { cpl::VSIFCloseL(file) };
+        let closed = file.close();
         if written != bytes.len() || closed != 0 {
             let reason = with_reason(&cpl::path_text(archive));
             remove_path(&temporary);

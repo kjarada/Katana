@@ -36,19 +36,17 @@
 //! GDAL or libcurl calls catches every panic: the transfer is ended there and
 //! the panic raised again once the call has returned (a panic of a progress
 //! closure, which the C++ would let unwind through C).
-
-#![allow(
-    unsafe_code,
-    reason = "Fetches through GDAL's HTTP client and one libcurl handle, and reads GDAL's XML tree; every call states why it is sound."
-)]
+//!
+//! The callbacks themselves, the libcurl handle and GDAL's result and XML
+//! tree are the FFI modules' (ffi/transfer.rs, ffi/xml.rs): a transfer's
+//! state is a sink their trampolines call, so this module is safe code.
 
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::ffi::{c_char, c_int, c_long, c_void};
+use std::ffi::c_int;
 use std::io::Read;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::PathBuf;
-use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -58,7 +56,9 @@ use katana_core::{Error, ErrorCode, Result};
 
 use crate::cpl_error_collector::quiet_errors;
 use crate::ffi::curl::{self, CurlOffT};
-use crate::ffi::{cpl, http, minixml};
+use crate::ffi::transfer::{CurlEasy, CurlSlist, ExchangeSink, FetchSink, fetch};
+use crate::ffi::xml::{XmlDocument, XmlNode};
+use crate::ffi::{cpl, error, minixml};
 use crate::gdal_registry::ensure_registered;
 
 const MAX_XML_BYTES: u64 = 64 * 1024 * 1024;
@@ -182,20 +182,11 @@ trait CallbackState {
     fn panicked(&mut self) -> &mut Option<Box<dyn Any + Send>>;
 }
 
-/// A callback's `work` on the state GDAL or libcurl hands back, every panic
-/// caught: it is kept on the state, and the callback answers `failed`, which
-/// ends the transfer. Nothing unwinds into C.
-///
-/// # Safety
-///
-/// `state` is a live `S` that nothing else touches during the call.
-unsafe fn guarded<S: CallbackState, R>(
-    state: *mut c_void,
-    failed: R,
-    work: impl FnOnce(&mut S) -> R,
-) -> R {
-    // SAFETY: the caller's contract.
-    let state = unsafe { &mut *state.cast::<S>() };
+/// A callback's `work` on the state GDAL or libcurl hands back (through the
+/// FFI module's trampoline), every panic caught: it is kept on the state, and
+/// the callback answers `failed`, which ends the transfer. Nothing unwinds
+/// into C.
+fn guarded<S: CallbackState, R>(state: &mut S, failed: R, work: impl FnOnce(&mut S) -> R) -> R {
     match catch_unwind(AssertUnwindSafe(|| work(&mut *state))) {
         Ok(answer) => answer,
         Err(payload) => {
@@ -205,25 +196,10 @@ unsafe fn guarded<S: CallbackState, R>(
     }
 }
 
-/// The `count` bytes at `data`; none when there are none, whatever `data` is.
-///
-/// # Safety
-///
-/// `data` points at `count` readable bytes, which outlive the slice, when
-/// `count` is not 0.
-unsafe fn bytes_at<'a>(data: *const u8, count: usize) -> &'a [u8] {
-    if count == 0 {
-        &[]
-    } else {
-        // SAFETY: the caller's contract.
-        unsafe { std::slice::from_raw_parts(data, count) }
-    }
-}
-
 fn last_error_message() -> String {
-    // SAFETY: GDAL's last message on this thread, copied before anything else
-    // calls GDAL.
-    unsafe { cpl::decoded(cpl::CPLGetLastErrorMsg()) }
+    // GDAL's last message on this thread, copied before anything else calls
+    // GDAL.
+    error::last_error_message()
 }
 
 // What a transfer's callbacks share with the thread that started it.
@@ -242,53 +218,48 @@ impl CallbackState for TransferState<'_> {
     }
 }
 
-// libcurl's write callback, through GDAL: the body is collected here rather
-// than in GDAL's own buffer, whose size is an int, so the limit is ours and is
-// enforced as the bytes arrive. Returning less than was offered aborts the
-// transfer.
-extern "C" fn collect(buffer: *mut c_void, size: usize, count: usize, state: *mut c_void) -> usize {
-    let bytes = size.wrapping_mul(count);
-    let work = |transfer: &mut TransferState<'_>| {
-        if transfer.body.len() as u64 + bytes as u64 > transfer.max_bytes {
-            transfer.too_large = true;
-            return 0;
-        }
-        if stop_requested(transfer.stop) {
-            return 0;
-        }
-        // SAFETY: GDAL hands `bytes` readable bytes at `buffer`.
-        transfer
-            .body
-            .extend_from_slice(unsafe { bytes_at(buffer.cast::<u8>(), bytes) });
-        bytes
-    };
-    // SAFETY: `state` is the TransferState http_fetch handed GDAL for this
-    // transfer, alive until CPLHTTPFetchEx returns; GDAL calls this callback
-    // and report_transfer one at a time, on the fetching thread.
-    unsafe { guarded(state, 0, work) }
-}
+// GDAL calls the two one at a time, on the fetching thread.
+impl FetchSink for TransferState<'_> {
+    // libcurl's write callback, through GDAL: the body is collected here
+    // rather than in GDAL's own buffer, whose size is an int, so the limit is
+    // ours and is enforced as the bytes arrive. Returning less than was
+    // offered aborts the transfer.
+    fn write(&mut self, bytes: &[u8]) -> usize {
+        let count = bytes.len();
+        guarded(self, 0, |transfer| {
+            if transfer.body.len() as u64 + count as u64 > transfer.max_bytes {
+                transfer.too_large = true;
+                return 0;
+            }
+            if stop_requested(transfer.stop) {
+                return 0;
+            }
+            transfer.body.extend_from_slice(bytes);
+            count
+        })
+    }
 
-// GDAL's progress callback; returning FALSE is how a transfer is cancelled
-// between packets, so a stopped job does not wait out a slow download.
-extern "C" fn report_transfer(fraction: f64, _message: *const c_char, state: *mut c_void) -> c_int {
-    let work = |transfer: &mut TransferState<'_>| {
-        if let Some(progress) = transfer.progress {
-            let received = transfer.body.len() as u64;
-            let total = if fraction > 0.0 {
-                (received as f64 / fraction) as u64
+    // GDAL's progress callback; returning FALSE is how a transfer is
+    // cancelled between packets, so a stopped job does not wait out a slow
+    // download.
+    fn progress(&mut self, fraction: f64) -> c_int {
+        guarded(self, cpl::FALSE, |transfer| {
+            if let Some(progress) = transfer.progress {
+                let received = transfer.body.len() as u64;
+                let total = if fraction > 0.0 {
+                    (received as f64 / fraction) as u64
+                } else {
+                    0
+                };
+                progress(received, total);
+            }
+            if stop_requested(transfer.stop) {
+                cpl::FALSE
             } else {
-                0
-            };
-            progress(received, total);
-        }
-        if stop_requested(transfer.stop) {
-            cpl::FALSE
-        } else {
-            cpl::TRUE
-        }
-    };
-    // SAFETY: as collect's.
-    unsafe { guarded(state, cpl::FALSE, work) }
+                cpl::TRUE
+            }
+        })
+    }
 }
 
 // GDAL reports an HTTP failure in its error text ("HTTP error code : 404"),
@@ -667,48 +638,26 @@ pub fn http_fetch(
             too_large: false,
             panic: None,
         };
-        let state: *mut c_void = (&raw mut transfer).cast();
 
         let quiet = quiet_errors();
-        // SAFETY: a NUL-terminated URL and option list, alive for the call;
-        // the callbacks are this module's, each given the transfer's state,
-        // which outlives the call and is not touched until it returns.
-        let result = unsafe {
-            http::CPLHTTPFetchEx(
-                url.as_ptr(),
-                options.as_ptr(),
-                Some(report_transfer),
-                state,
-                Some(collect),
-                state,
-            )
-        };
+        // The transfer's state is the sink of the two callbacks, and is not
+        // touched until the fetch returns.
+        let result = fetch(&url, &options, &mut transfer);
         drop(quiet);
         if let Some(payload) = transfer.panic.take() {
-            if !result.is_null() {
-                // SAFETY: the result GDAL made, freed once.
-                unsafe { http::CPLHTTPDestroyResult(result) };
-            }
+            drop(result); // freed once
             resume_unwind(payload);
         }
-        // SAFETY: NULL or the result GDAL made, alive until it is destroyed.
-        let Some(answer) = (unsafe { result.as_ref() }) else {
+        let Some(answer) = result else {
             return Err(make_error(
                 ErrorCode::FileImportFailure,
                 "the request could not be made",
                 format!("{shown}: {}", last_error_message()),
             ));
         };
-        let curl_code = answer.n_status;
-        // SAFETY: NULL or NUL-terminated texts of the live result.
-        let (error, content_type) = unsafe {
-            (
-                cpl::decoded(answer.psz_err_buf),
-                cpl::decoded(answer.psz_content_type),
-            )
-        };
-        // SAFETY: the result GDAL made, freed once and not read after.
-        unsafe { http::CPLHTTPDestroyResult(result) };
+        let curl_code = answer.status();
+        let (error, content_type) = (answer.error_text(), answer.content_type());
+        drop(answer); // freed once and not read after
 
         if stop_requested(stop) {
             return Err(cancelled(&shown));
@@ -844,89 +793,67 @@ fn read_header_line(state: &mut ExchangeState<'_>, mut line: &[u8]) {
     }
 }
 
-extern "C" fn on_exchange_header(
-    buffer: *mut c_char,
-    size: usize,
-    count: usize,
-    user: *mut c_void,
-) -> usize {
-    let bytes = size.wrapping_mul(count);
-    let work = |state: &mut ExchangeState<'_>| {
-        // SAFETY: libcurl hands `bytes` readable bytes at `buffer`.
-        read_header_line(state, unsafe { bytes_at(buffer.cast::<u8>(), bytes) });
-        bytes
-    };
-    // SAFETY: `user` is the ExchangeState perform_exchange handed libcurl,
-    // alive until curl_easy_perform returns; libcurl calls the callbacks one
-    // at a time, on the performing thread.
-    unsafe { guarded(user, 0, work) }
-}
+// libcurl calls the three one at a time, on the performing thread.
+impl ExchangeSink for ExchangeState<'_> {
+    fn header(&mut self, line: &[u8]) -> usize {
+        guarded(self, 0, |state| {
+            read_header_line(state, line);
+            line.len()
+        })
+    }
 
-extern "C" fn on_exchange_body(
-    data: *mut c_char,
-    size: usize,
-    count: usize,
-    user: *mut c_void,
-) -> usize {
-    let bytes = size.wrapping_mul(count);
-    let work = |state: &mut ExchangeState<'_>| {
-        if stop_requested(state.stop) {
-            return 0;
-        }
-        // SAFETY: libcurl hands `bytes` readable bytes at `data`.
-        let offered = unsafe { bytes_at(data.cast::<u8>(), bytes) };
-        // A 200 or a 206 is the file that was asked for, bounded by the
-        // request. Any other status carries a page about itself, of which the
-        // beginning is all anybody reads.
-        let file = state.status == 200 || state.status == 206;
-        let bound = if file {
-            state.max_bytes
-        } else {
-            ERROR_BODY_BYTES
-        };
-        if state.body.len() as u64 + bytes as u64 > bound {
-            // Longer than is read, and the rest is not waited for: a server
-            // that never stops sending would otherwise hold the request until
-            // its timeout, once for every retry. A file that was cut is no
-            // file, so none of it is kept; of a page, its beginning is. (What
-            // is kept never passes the bound; the C++'s unsigned
-            // `bound - size` would wrap if it did.)
-            if file {
-                state.body.clear();
-            } else {
-                let room = bound.saturating_sub(state.body.len() as u64) as usize;
-                state.body.extend_from_slice(&offered[..room]);
+    fn body(&mut self, offered: &[u8]) -> usize {
+        let bytes = offered.len();
+        guarded(self, 0, |state| exchange_body(state, offered, bytes))
+    }
+
+    fn progress(&mut self, total: CurlOffT, received: CurlOffT) -> c_int {
+        guarded(self, 1, |state| {
+            if let Some(progress) = state.progress
+                && received >= 0
+            {
+                progress(received as u64, if total > 0 { total as u64 } else { 0 });
             }
-            state.truncated = true;
-            // Fewer bytes than were offered (there was at least one): the
-            // transfer ends.
-            return 0;
-        }
-        state.body.extend_from_slice(offered);
-        bytes
-    };
-    // SAFETY: as on_exchange_header's.
-    unsafe { guarded(user, 0, work) }
+            // Non-zero aborts.
+            c_int::from(stop_requested(state.stop))
+        })
+    }
 }
 
-extern "C" fn on_exchange_progress(
-    user: *mut c_void,
-    total: CurlOffT,
-    received: CurlOffT,
-    _upload_total: CurlOffT,
-    _uploaded: CurlOffT,
-) -> c_int {
-    let work = |state: &mut ExchangeState<'_>| {
-        if let Some(progress) = state.progress
-            && received >= 0
-        {
-            progress(received as u64, if total > 0 { total as u64 } else { 0 });
-        }
-        // Non-zero aborts.
-        c_int::from(stop_requested(state.stop))
+/// The body's next `bytes` bytes, `offered`: how many were taken.
+fn exchange_body(state: &mut ExchangeState<'_>, offered: &[u8], bytes: usize) -> usize {
+    if stop_requested(state.stop) {
+        return 0;
+    }
+    // A 200 or a 206 is the file that was asked for, bounded by the
+    // request. Any other status carries a page about itself, of which the
+    // beginning is all anybody reads.
+    let file = state.status == 200 || state.status == 206;
+    let bound = if file {
+        state.max_bytes
+    } else {
+        ERROR_BODY_BYTES
     };
-    // SAFETY: as on_exchange_header's.
-    unsafe { guarded(user, 1, work) }
+    if state.body.len() as u64 + bytes as u64 > bound {
+        // Longer than is read, and the rest is not waited for: a server
+        // that never stops sending would otherwise hold the request until
+        // its timeout, once for every retry. A file that was cut is no
+        // file, so none of it is kept; of a page, its beginning is. (What
+        // is kept never passes the bound; the C++'s unsigned
+        // `bound - size` would wrap if it did.)
+        if file {
+            state.body.clear();
+        } else {
+            let room = bound.saturating_sub(state.body.len() as u64) as usize;
+            state.body.extend_from_slice(&offered[..room]);
+        }
+        state.truncated = true;
+        // Fewer bytes than were offered (there was at least one): the
+        // transfer ends.
+        return 0;
+    }
+    state.body.extend_from_slice(offered);
+    bytes
 }
 
 /// An exchange sends what its request says and nothing else. CPLHTTPSetOptions
@@ -948,33 +875,24 @@ extern "C" fn on_exchange_progress(
 /// The list is GDAL's (port/cpl_http.cpp, CPLHTTPSetOptions; read against
 /// libgdal 3.13's option names). An upgrade of GDAL that teaches it another
 /// way to send a credential needs a line here.
-///
-/// # Safety
-///
-/// `handle` is a live easy handle.
-unsafe fn send_nothing_ambient(handle: *mut curl::Curl) {
-    let none: *const c_void = ptr::null();
-    // SAFETY: a live handle (the caller's contract), and NULL or a long for
-    // each option, which is what each is read as.
-    unsafe {
-        curl::set_long(handle, curl::CURLOPT_VERBOSE, 0);
-        curl::set_long(handle, curl::CURLOPT_NETRC, curl::CURL_NETRC_IGNORED);
-        curl::set_pointer(handle, curl::CURLOPT_NETRC_FILE, none);
-        curl::set_pointer(handle, curl::CURLOPT_USERPWD, none);
-        curl::set_pointer(handle, curl::CURLOPT_XOAUTH2_BEARER, none);
-        // No authentication scheme of libcurl's own: an Authorization the
-        // request names is a header like any other and is sent all the same.
-        curl::set_long(handle, curl::CURLOPT_HTTPAUTH, curl::CURLAUTH_NONE);
-        curl::set_pointer(handle, curl::CURLOPT_COOKIE, none);
-        // In this order: naming a jar - even none - starts libcurl's cookie
-        // engine, and a null list of cookie files is what stops it and forgets
-        // what it read.
-        curl::set_pointer(handle, curl::CURLOPT_COOKIEJAR, none);
-        curl::set_pointer(handle, curl::CURLOPT_COOKIEFILE, none);
-        curl::set_pointer(handle, curl::CURLOPT_SSLCERT, none);
-        curl::set_pointer(handle, curl::CURLOPT_SSLKEY, none);
-        curl::set_pointer(handle, curl::CURLOPT_KEYPASSWD, none);
-    }
+fn send_nothing_ambient(handle: &mut CurlEasy) {
+    handle.set_long(curl::CURLOPT_VERBOSE, 0);
+    handle.set_long(curl::CURLOPT_NETRC, curl::CURL_NETRC_IGNORED);
+    handle.clear(curl::CURLOPT_NETRC_FILE);
+    handle.clear(curl::CURLOPT_USERPWD);
+    handle.clear(curl::CURLOPT_XOAUTH2_BEARER);
+    // No authentication scheme of libcurl's own: an Authorization the
+    // request names is a header like any other and is sent all the same.
+    handle.set_long(curl::CURLOPT_HTTPAUTH, curl::CURLAUTH_NONE);
+    handle.clear(curl::CURLOPT_COOKIE);
+    // In this order: naming a jar - even none - starts libcurl's cookie
+    // engine, and a null list of cookie files is what stops it and forgets
+    // what it read.
+    handle.clear(curl::CURLOPT_COOKIEJAR);
+    handle.clear(curl::CURLOPT_COOKIEFILE);
+    handle.clear(curl::CURLOPT_SSLCERT);
+    handle.clear(curl::CURLOPT_SSLKEY);
+    handle.clear(curl::CURLOPT_KEYPASSWD);
 }
 
 /// One request on a fresh libcurl handle, configured by GDAL's own option
@@ -986,12 +904,11 @@ fn perform_exchange(
     state: &mut ExchangeState<'_>,
     message: &mut String,
 ) -> curl::CurlCode {
-    // SAFETY: no argument; NULL or a handle this function frees.
-    let handle = unsafe { curl::curl_easy_init() };
-    if handle.is_null() {
+    // Cleaned up when this function returns.
+    let Some(mut handle) = CurlEasy::new() else {
         *message = String::from("libcurl could not be started");
         return curl::CURLE_FAILED_INIT;
-    }
+    };
     let mut options = cpl::CStringList::new();
     options.set_name_value(
         b"TIMEOUT",
@@ -1010,121 +927,71 @@ fn perform_exchange(
     }
     let url = cpl::c_string(&request.url);
     let quiet = quiet_errors();
-    let mut gdal_headers: *mut c_void = ptr::null_mut();
-    // SAFETY: a live handle of the libcurl GDAL loads, a NUL-terminated URL
-    // and option list alive for the call, and the place for GDAL's list.
-    let thrown = unsafe {
-        http::katana_http_set_options(
-            handle.cast(),
-            url.as_ptr(),
-            options.as_ptr(),
-            &raw mut gdal_headers,
-        )
-    };
     // GDAL returns the header list it built - from GDAL_HTTP_HEADERS and
     // GDAL_HTTP_HEADER_FILE, since no HEADERS option is passed - for the
     // caller to attach and free. It is not attached: a header a person set for
-    // a map service is not this request's to send.
-    // SAFETY: NULL or the curl_slist GDAL allocated, freed once.
-    unsafe { curl::curl_slist_free_all(gdal_headers.cast()) };
+    // a map service is not this request's to send. apply_gdal_options frees it.
+    let thrown = handle.apply_gdal_options(&url, &options);
     drop(quiet);
-    if thrown != 0 {
-        // SAFETY: the handle made above, not used after.
-        unsafe { curl::curl_easy_cleanup(handle) };
+    if thrown {
+        drop(handle); // cleaned up, not used after
         // The C++ lets CPLHTTPSetOptions' exception out of httpExchange.
         panic!("CPLHTTPSetOptions threw an exception");
     }
-    // SAFETY: a live handle.
-    unsafe { send_nothing_ambient(handle) };
+    send_nothing_ambient(&mut handle);
 
-    let mut headers: *mut curl::CurlSlist = ptr::null_mut();
+    // Freed when this function returns, after perform has detached it.
+    let mut headers = CurlSlist::new();
     for header in &request.headers {
         let text = cpl::c_string(header);
-        // SAFETY: the list so far (or NULL) and a NUL-terminated string,
-        // which libcurl copies.
-        let longer = unsafe { curl::curl_slist_append(headers, text.as_ptr()) };
-        if longer.is_null() {
+        // libcurl copies the string.
+        if !headers.append(&text) {
             // Never a request with some of its headers: one without its Range
-            // would be answered with the whole file.
-            // SAFETY: the list so far and the handle, neither used after.
-            unsafe {
-                curl::curl_slist_free_all(headers);
-                curl::curl_easy_cleanup(handle);
-            }
+            // would be answered with the whole file. The list so far and the
+            // handle are freed, neither used after.
+            drop(headers);
+            drop(handle);
             *message = String::from("out of memory");
             return curl::CURLE_OUT_OF_MEMORY;
         }
-        headers = longer;
     }
 
-    let mut error_buffer: [c_char; curl::CURL_ERROR_SIZE] = [0; curl::CURL_ERROR_SIZE];
-    let user: *const c_void = ptr::from_mut(state).cast_const().cast();
-    // SAFETY: a live handle, and every pointer set is alive until
-    // curl_easy_cleanup below: the URL (which libcurl copies), the header
-    // list, the error buffer and the state, which is not touched until
-    // curl_easy_perform returns; each callback is this module's, for that
-    // state.
-    unsafe {
-        curl::set_pointer(handle, curl::CURLOPT_URL, url.as_ptr().cast());
-        curl::set_long(handle, curl::CURLOPT_HTTPGET, 1);
-        curl::set_pointer(
-            handle,
-            curl::CURLOPT_HTTPHEADER,
-            headers.cast_const().cast(),
-        );
-        // The point of this function. CPLHTTPSetOptions turns following on;
-        // it is turned off after.
-        curl::set_long(handle, curl::CURLOPT_FOLLOWLOCATION, 0);
-        // The body is the bytes the server holds, never a compressed form of
-        // them unpacked here: a caller that asks for a range by offset, and
-        // counts what arrives, means those bytes. NULL is libcurl's "send no
-        // Accept-Encoding and decode nothing".
-        curl::set_pointer(handle, curl::CURLOPT_ACCEPT_ENCODING, ptr::null());
-        // Credentials go only to a server whose certificate was checked,
-        // whatever GDAL_HTTP_UNSAFESSL says (CPLHTTPSetOptions obeys it): that
-        // setting is a person's answer to a map server with a bad
-        // certificate, not leave to hand a token to whoever answers in its
-        // place. A request without credentials keeps the person's setting.
-        if carries_credentials(&request.headers) {
-            curl::set_long(handle, curl::CURLOPT_SSL_VERIFYPEER, 1);
-            curl::set_long(handle, curl::CURLOPT_SSL_VERIFYHOST, 2);
-        }
-        // Called from worker threads (the update's download job): no
-        // signal-based timeouts.
-        curl::set_long(handle, curl::CURLOPT_NOSIGNAL, 1);
-        curl::set_pointer(
-            handle,
-            curl::CURLOPT_ERRORBUFFER,
-            error_buffer.as_mut_ptr().cast_const().cast(),
-        );
-        curl::set_write_function(handle, curl::CURLOPT_HEADERFUNCTION, on_exchange_header);
-        curl::set_pointer(handle, curl::CURLOPT_HEADERDATA, user);
-        curl::set_write_function(handle, curl::CURLOPT_WRITEFUNCTION, on_exchange_body);
-        curl::set_pointer(handle, curl::CURLOPT_WRITEDATA, user);
-        curl::set_long(handle, curl::CURLOPT_NOPROGRESS, 0);
-        curl::set_xferinfo_function(handle, on_exchange_progress);
-        curl::set_pointer(handle, curl::CURLOPT_XFERINFODATA, user);
+    // libcurl copies the URL.
+    handle.set_url(&url);
+    handle.set_long(curl::CURLOPT_HTTPGET, 1);
+    // The point of this function. CPLHTTPSetOptions turns following on; it is
+    // turned off after.
+    handle.set_long(curl::CURLOPT_FOLLOWLOCATION, 0);
+    // The body is the bytes the server holds, never a compressed form of them
+    // unpacked here: a caller that asks for a range by offset, and counts what
+    // arrives, means those bytes. NULL is libcurl's "send no Accept-Encoding
+    // and decode nothing".
+    handle.clear(curl::CURLOPT_ACCEPT_ENCODING);
+    // Credentials go only to a server whose certificate was checked, whatever
+    // GDAL_HTTP_UNSAFESSL says (CPLHTTPSetOptions obeys it): that setting is a
+    // person's answer to a map server with a bad certificate, not leave to
+    // hand a token to whoever answers in its place. A request without
+    // credentials keeps the person's setting.
+    if carries_credentials(&request.headers) {
+        handle.set_long(curl::CURLOPT_SSL_VERIFYPEER, 1);
+        handle.set_long(curl::CURLOPT_SSL_VERIFYHOST, 2);
     }
+    // Called from worker threads (the update's download job): no signal-based
+    // timeouts.
+    handle.set_long(curl::CURLOPT_NOSIGNAL, 1);
+    handle.set_long(curl::CURLOPT_NOPROGRESS, 0);
 
-    // SAFETY: the handle configured above.
-    let code = unsafe { curl::curl_easy_perform(handle) };
-    // libcurl ends its message with a NUL; the last byte makes sure of it.
-    error_buffer[curl::CURL_ERROR_SIZE - 1] = 0;
-    *message = if error_buffer[0] != 0 {
-        // SAFETY: a NUL-terminated buffer.
-        unsafe { cpl::decoded(error_buffer.as_ptr()) }
-    } else {
-        // SAFETY: libcurl's own text for the code, static.
-        unsafe { cpl::decoded(curl::curl_easy_strerror(code)) }
-    };
+    // The header list, an error buffer and the state's three callbacks are
+    // set for the transfer and taken off again; the state is not touched
+    // until it returns.
+    let (code, text) = handle.perform(&headers, state);
+    *message = text;
     // libcurl's own record of the last response, when it has one: the status
     // lines are read above because the body callback needs the status while
     // the body arrives, and this is the same number without this module's
     // reading of a line.
-    let mut answered: c_long = 0;
-    // SAFETY: the handle, and the long the status is written to.
     if code == curl::CURLE_OK
-        && unsafe { curl::response_code(handle, &mut answered) } == curl::CURLE_OK
+        && let Some(answered) = handle.response_code()
         && answered > 0
     {
         #[allow(
@@ -1133,13 +1000,6 @@ fn perform_exchange(
         )]
         let answered = answered as i32;
         state.status = answered;
-    }
-    // SAFETY: the handle, its header list detached first, then the list;
-    // neither used after.
-    unsafe {
-        curl::set_pointer(handle, curl::CURLOPT_HTTPHEADER, ptr::null());
-        curl::curl_easy_cleanup(handle);
-        curl::curl_slist_free_all(headers);
     }
     code
 }
@@ -1454,47 +1314,28 @@ impl XmlElement {
     }
 }
 
-/// The tree CPLParseXMLString made, destroyed when it goes.
-struct ParsedXml(*mut minixml::CplXmlNode);
-
-impl Drop for ParsedXml {
-    fn drop(&mut self) {
-        // SAFETY: the tree GDAL made, destroyed once, after its last read.
-        unsafe { minixml::CPLDestroyXMLNode(self.0) };
-    }
-}
-
-fn convert(node: &minixml::CplXmlNode) -> XmlElement {
-    // SAFETY: NULL or a NUL-terminated name in the live tree.
+fn convert(node: XmlNode<'_>) -> XmlElement {
     let mut element = XmlElement {
-        name: unsafe { cpl::decoded(node.psz_value) },
+        name: node.text(),
         ..XmlElement::default()
     };
     let mut text = Vec::new();
-    let mut child = node.ps_child;
-    // SAFETY: each child is NULL or a node of the live tree.
-    while let Some(nested) = unsafe { child.as_ref() } {
-        match nested.e_type {
+    for nested in node.children() {
+        match nested.node_type() {
             minixml::CXT_ATTRIBUTE => {
-                // SAFETY: the attribute's name, and NULL or its value node,
-                // NUL-terminated strings of the live tree.
-                let (name, value) = unsafe {
-                    let value = match nested.ps_child.as_ref() {
-                        Some(value) if !value.psz_value.is_null() => cpl::decoded(value.psz_value),
-                        _ => String::new(),
-                    };
-                    (cpl::decoded(nested.psz_value), value)
-                };
-                element.attributes.insert(name, value);
+                // The attribute's name, and its value node's text ("" for
+                // none).
+                let value = nested.child().map(XmlNode::text).unwrap_or_default();
+                element.attributes.insert(nested.text(), value);
             }
             minixml::CXT_TEXT => {
-                // SAFETY: NULL or a NUL-terminated text of the live tree.
-                text.extend_from_slice(&unsafe { cpl::bytes_of(nested.psz_value) });
+                if let Some(value) = nested.value() {
+                    text.extend_from_slice(value.to_bytes());
+                }
             }
             minixml::CXT_ELEMENT => element.children.push(convert(nested)),
             _ => {}
         }
-        child = nested.ps_next;
     }
     element.text = String::from_utf8_lossy(trimmed(&text)).into_owned();
     element
@@ -1518,31 +1359,25 @@ pub fn parse_xml(text: impl AsRef<[u8]>) -> Result<XmlElement> {
     }
     let owned = cpl::c_string(text);
     let quiet = quiet_errors();
-    // SAFETY: a NUL-terminated document; GDAL returns a tree it allocated, or
-    // NULL.
-    let root = unsafe { minixml::CPLParseXMLString(owned.as_ptr()) };
+    // A tree GDAL allocated, destroyed when it goes.
+    let parsed = XmlDocument::parse(&owned);
     drop(quiet);
-    if root.is_null() {
+    let Some(tree) = parsed else {
         return Err(make_error(
             ErrorCode::ParseFailure,
             "the document is not XML",
             last_error_message(),
         ));
-    }
-    let tree = ParsedXml(root);
+    };
     // The document element: the first element sibling, after any <?xml?>
     // declaration and comments.
-    let mut element = tree.0;
-    // SAFETY: each sibling is NULL or a node of the live tree, and its name
-    // NULL or NUL-terminated.
-    while let Some(node) = unsafe { element.as_ref() }
-        && (node.e_type != minixml::CXT_ELEMENT
-            || (!node.psz_value.is_null() && unsafe { *node.psz_value.cast::<u8>() } == b'?'))
-    {
-        element = node.ps_next;
-    }
-    // SAFETY: NULL or a node of the live tree.
-    let Some(node) = (unsafe { element.as_ref() }) else {
+    let element = tree.first().and_siblings().find(|node| {
+        node.node_type() == minixml::CXT_ELEMENT
+            && node
+                .value()
+                .is_none_or(|name| name.to_bytes().first() != Some(&b'?'))
+    });
+    let Some(node) = element else {
         return Err(Error::new(
             ErrorCode::ParseFailure,
             "the XML document has no element",

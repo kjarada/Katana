@@ -16,18 +16,13 @@
 //! GDAL_HTTP_USE_CAPI_STORE) is GDAL's global configuration, set once; every
 //! other option the crate sets is thread-local and put back.
 
-#![allow(
-    unsafe_code,
-    reason = "Registers GDAL's drivers and sets its global configuration; every call states why it is sound."
-)]
-
 use std::ffi::CStr;
 use std::path::Path;
 use std::sync::Once;
 
 use katana_core::library_data::data_beside_library;
 
-use crate::ffi::{cpl, gdal};
+use crate::ffi::{cpl, dataset, error};
 
 pub(crate) fn ensure_registered() {
     static ONCE: Once = Once::new();
@@ -38,26 +33,20 @@ pub(crate) fn ensure_registered() {
         // where the C++ calls pointGdalAtProjData; the helper is
         // pointcloud's, which gis may see, so there is one once-flag for it.
         katana_pointcloud::proj_search_paths::point_gdal_at_proj_data();
-        // SAFETY: registers every driver; GDAL guards its driver manager.
-        unsafe { gdal::GDALAllRegister() };
+        dataset::all_register();
         // Keep GDAL's chatter off stderr; failures are reported through
         // Result with CPLGetLastErrorMsg() as context instead.
-        // SAFETY: installs GDAL's own quiet handler as the global one.
-        unsafe { cpl::CPLSetErrorHandler(Some(cpl::CPLQuietErrorHandler)) };
+        error::install_quiet_global_handler();
     });
 }
 
 /// Whether GDAL's configuration has `key`, from the environment or set.
 fn configured(key: &CStr) -> bool {
-    // SAFETY: a NUL-terminated key and a NULL default; the answer is only
-    // tested, never read.
-    !unsafe { cpl::CPLGetConfigOption(key.as_ptr(), std::ptr::null()) }.is_null()
+    cpl::has_config_option(key)
 }
 
 fn set_configuration(key: &CStr, value: &[u8]) {
-    let value = cpl::c_string(value);
-    // SAFETY: NUL-terminated key and value; GDAL copies both.
-    unsafe { cpl::CPLSetConfigOption(key.as_ptr(), value.as_ptr()) };
+    cpl::set_config_option(key, &cpl::c_string(value));
 }
 
 /// Tells GDAL where its support files are, when nothing else has.

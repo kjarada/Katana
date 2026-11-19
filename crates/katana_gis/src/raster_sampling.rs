@@ -13,20 +13,19 @@
 //! A sampler holds its own open dataset and is used on one thread: the job's
 //! worker opens it and drops it (never a dataset shared between runs,
 //! docs/geoprocessing.md "Risks"). As GdalDataset is, it is Send and not
-//! Sync, and `open` returns it by value.
-
-#![allow(
-    unsafe_code,
-    reason = "Owns a GDAL dataset and samples its band through GDAL's C API; every call states why it is sound."
-)]
+//! Sync, and `open` returns it by value. The band is found again by its
+//! number for each sample (GDALGetRasterBand, an index into the dataset's
+//! own list), rather than kept as a pointer into the dataset the sampler
+//! also owns.
 
 use std::path::Path;
-use std::ptr::{self, NonNull};
 
 use katana_core::error::make_error;
 use katana_core::path_text::path_exists;
 use katana_core::{ErrorCode, Result};
 
+use crate::ffi::dataset::{self, Dataset};
+use crate::ffi::error::{last_error_message, reset_last_error};
 use crate::ffi::{cpl, gdal};
 use crate::formats::is_virtual_path;
 use crate::gdal_adapter::RasterInfo;
@@ -76,32 +75,14 @@ pub fn to_string(resampling: Resampling) -> &'static str {
 
 #[derive(Debug)]
 pub struct RasterSampler {
-    dataset: NonNull<gdal::GdalDatasetHs>,
-    band: gdal::GdalRasterBandH,
+    /// Send and not Sync, as the sampler is: GDAL lets a dataset and its
+    /// bands be used from any one thread at a time.
+    dataset: Dataset,
+    /// 1-based, checked against the dataset's bands when it was opened.
+    band: i32,
     info: RasterInfo,
     /// The inverse of info.geotransform: ground to pixel and line.
     inverse: [f64; 6],
-}
-
-// SAFETY: GDAL lets a dataset and its bands be used from any one thread at a
-// time; the value is not Sync, so it is never used by two threads at once.
-unsafe impl Send for RasterSampler {}
-
-impl Drop for RasterSampler {
-    fn drop(&mut self) {
-        // SAFETY: the dataset is owned by this value alone, closed once.
-        unsafe { gdal::GDALClose(self.dataset.as_ptr()) };
-    }
-}
-
-/// A dataset opened by `open`, closed on drop until the sampler takes it.
-struct Opened(NonNull<gdal::GdalDatasetHs>);
-
-impl Drop for Opened {
-    fn drop(&mut self) {
-        // SAFETY: the dataset is owned by this value alone, closed once.
-        unsafe { gdal::GDALClose(self.0.as_ptr()) };
-    }
 }
 
 impl RasterSampler {
@@ -117,29 +98,19 @@ impl RasterSampler {
             return Err(make_error(ErrorCode::NotFound, "file does not exist", utf8));
         }
         let name = cpl::c_string(cpl::generic_path(path));
-        // SAFETY: clears this thread's last error; then a NUL-terminated name
-        // and no lists; the dataset is owned by the Opened made below.
-        let dataset = unsafe {
-            cpl::CPLErrorReset();
-            gdal::GDALOpenEx(
-                name.as_ptr(),
-                gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER,
-                ptr::null(),
-                ptr::null(),
-                ptr::null(),
-            )
-        };
-        let Some(dataset) = NonNull::new(dataset).map(Opened) else {
+        reset_last_error();
+        let Some(dataset) = Dataset::open(
+            &name,
+            gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER,
+            &cpl::CStringList::new(),
+        ) else {
             return Err(make_error(
                 ErrorCode::FileImportFailure,
                 format!("GDAL could not open '{utf8}' as a raster"),
-                // SAFETY: this thread's last error message, copied at once.
-                unsafe { cpl::decoded(cpl::CPLGetLastErrorMsg()) },
+                last_error_message(),
             ));
         };
-        let handle = dataset.0.as_ptr();
-        // SAFETY: a live dataset.
-        let count = unsafe { gdal::GDALGetRasterCount(handle) };
+        let count = dataset.raster_count();
         if band < 1 || band > count {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
@@ -148,26 +119,15 @@ impl RasterSampler {
             ));
         }
         let mut info = RasterInfo::default();
-        let mut has_no_data: std::ffi::c_int = 0;
-        // SAFETY: a live dataset and one of its bands; the projection is the
-        // dataset's own text, copied at once; the geotransform is six doubles.
-        let raster_band = unsafe {
-            let raster_band = gdal::GDALGetRasterBand(handle, band);
-            info.width = gdal::GDALGetRasterXSize(handle);
-            info.height = gdal::GDALGetRasterYSize(handle);
-            info.band_count = count;
-            let wkt = gdal::GDALGetProjectionRef(handle);
-            if !wkt.is_null() {
-                info.projection_wkt = cpl::decoded(wkt);
-            }
-            info.has_geotransform =
-                gdal::GDALGetGeoTransform(handle, info.geotransform.as_mut_ptr()) == cpl::CE_NONE;
-            let no_data = gdal::GDALGetRasterNoDataValue(raster_band, &raw mut has_no_data);
-            if has_no_data != 0 {
-                info.no_data_value = Some(no_data);
-            }
-            raster_band
-        };
+        let raster_band = dataset.band(band);
+        info.width = dataset.raster_x_size();
+        info.height = dataset.raster_y_size();
+        info.band_count = count;
+        if let Some(wkt) = dataset.projection_ref() {
+            info.projection_wkt = wkt;
+        }
+        info.has_geotransform = dataset.geo_transform(&mut info.geotransform) == cpl::CE_NONE;
+        info.no_data_value = raster_band.and_then(|raster_band| raster_band.no_data_value());
         // A raster without a geotransform is placed by GDAL's default at the
         // origin, a unit per pixel: sampled so, a height would come from a
         // place on the ground the raster never described.
@@ -179,20 +139,16 @@ impl RasterSampler {
             ));
         }
         let mut inverse = [0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
-        // SAFETY: six doubles in, six out.
-        if unsafe { gdal::GDALInvGeoTransform(info.geotransform.as_ptr(), inverse.as_mut_ptr()) }
-            == 0
-        {
+        if !dataset::invert_geo_transform(&info.geotransform, &mut inverse) {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 "the raster's geotransform cannot be inverted",
                 utf8,
             ));
         }
-        let dataset = std::mem::ManuallyDrop::new(dataset).0;
         Ok(RasterSampler {
             dataset,
-            band: raster_band,
+            band,
             info,
             inverse,
         })
@@ -221,19 +177,9 @@ impl RasterSampler {
         {
             return None;
         }
-        let mut real = 0.0;
-        let mut imaginary = 0.0;
-        // SAFETY: the sampler's live band and two out values.
-        let status = unsafe {
-            gdal::GDALRasterInterpolateAtPoint(
-                self.band,
-                pixel,
-                line,
-                gdal_resampling(resampling),
-                &raw mut real,
-                &raw mut imaginary,
-            )
-        };
+        let raster_band = self.dataset.band(self.band)?;
+        let (status, real) =
+            raster_band.interpolate_at_point(pixel, line, gdal_resampling(resampling));
         if status != cpl::CE_NONE {
             return None;
         }
