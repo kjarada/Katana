@@ -78,6 +78,83 @@ mod command_line {
     }
 
     #[test]
+    fn a_warning_line_is_drawn_in_the_warning_colour_as_an_error_line_is_in_the_error_colour() {
+        // The seventh look audit: a far import's advice, a warning record, was the text colour
+        // and read as one more reply; errors had their colour since the third audit's H.
+        use katana_window::command_log::{LogTone, log_line_colour, log_line_tone};
+        use katana_window::theme::palette;
+        let log = "> IMPORT far.geojson\nwarning text=\"the imported data sits far away\"\n\
+                   ! NotFound: no file\nimported features=3";
+        let shown = panels::shown_log(log);
+        let lines: Vec<&str> = shown.split('\n').collect();
+        assert_eq!(lines[1], "Warning: The imported data sits far away");
+        let tones: Vec<LogTone> = lines.iter().map(|line| log_line_tone(line)).collect();
+        assert_eq!(
+            tones,
+            [LogTone::Plain, LogTone::Warning, LogTone::Error, LogTone::Plain]
+        );
+        // A line end left on, as the panel's layouter cuts the text, changes nothing.
+        assert_eq!(log_line_tone("Warning: x\n"), LogTone::Warning);
+        assert!(log_line_colour(lines[1]) == palette::warning());
+        assert!(log_line_colour(lines[2]) == palette::error());
+        assert!(log_line_colour(lines[3]) == palette::text());
+        // The three are told apart.
+        assert!(palette::warning() != palette::error() && palette::warning() != palette::text());
+    }
+
+    #[test]
+    fn a_wrapped_lines_last_row_at_the_logs_top_is_shown_not_covered() {
+        // The seventh look audit (main_125pct_selection, mesh_only): scrolled to its end, the
+        // log's top row was blank. It was the last row of a line wrapped over the log's top
+        // ("rules, built in." of the customisation line), covered because it does not start a
+        // line. A whole row shows; only a row cut through by the log's top is covered.
+        let mut harness = katana_window::drive::Harness::new();
+        katana_window::theme::apply(harness.context());
+        let mut laid_out = None;
+        harness
+            .frame(|ui| {
+                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                let job = egui::text::LayoutJob::simple(
+                    String::from(
+                        "Customisation: Katana Standard, 221 definitions and 1103 survey code \
+                         rules, built in.\nOpened /root/project (20 entities).\n20 selected",
+                    ),
+                    font,
+                    egui::Color32::WHITE,
+                    300.0,
+                );
+                laid_out = Some(ui.fonts_mut(|fonts| fonts.layout_job(job)));
+            })
+            .drop_without_applying_deltas();
+        let galley = laid_out.expect("laid out");
+        assert!(
+            !galley.rows[0].ends_with_newline,
+            "the premise: the first line wraps"
+        );
+        let tail = galley
+            .rows
+            .iter()
+            .position(|row| row.ends_with_newline)
+            .expect("the first line ends");
+        assert!(tail >= 1, "the premise: its last row is a row of its own");
+        let at = egui::pos2(0.0, 0.0);
+        // The log's top on the wrapped line's last row: nothing of its ink is covered (at most
+        // the font's own space over it).
+        let row = &galley.rows[tail];
+        let view_top = row.pos.y;
+        if let Some(cover) = panels::log_cover_bottom(&galley, at, view_top) {
+            let ink_top = row.pos.y + row.visuals.mesh_bounds.min.y;
+            assert!(cover <= ink_top, "the cover {cover} stops above the row's ink at {ink_top}");
+        }
+        // Its top a point into that row, the row cut through is covered down to the next row's
+        // ink, wherever that row starts.
+        let cover = panels::log_cover_bottom(&galley, at, view_top + 1.0).expect("a cover");
+        let next = &galley.rows[tail + 1];
+        assert!(cover <= next.pos.y + next.visuals.mesh_bounds.min.y);
+        assert!(cover > view_top + 1.5);
+    }
+
+    #[test]
     fn the_log_is_covered_down_to_its_first_whole_lines_ink() {
         // The fourth look audit (S\crops\main_text_xl_284_722.png): at Extra Large a pixel of the
         // descenders of the row above the log's first whole line showed over it. That row ended

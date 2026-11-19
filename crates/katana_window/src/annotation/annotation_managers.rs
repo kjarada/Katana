@@ -1748,12 +1748,24 @@ impl LabelStyleManagerDialog {
 
     fn style_form(&mut self, ui: &mut Ui, has_style: bool) {
         let mut inserted: Option<String> = None;
+        // With no style chosen every value control shows none - greyed, a box still showed its
+        // number and a choice its first item, "0.00 mm", "0", "Auto", "Standard", read as a
+        // style's values (the seventh look audit) - but keeps its name for a driver.
+        let hint = controls::no_value_hint("style");
+        let empty = |ui: &mut Ui, name: &str, kind: ControlKind, wide: bool| {
+            let width = wide.then(|| ui.available_width());
+            controls::no_value(ui, name, kind, &hint, width)
+        };
         dialog::form(ui, |form| {
             form.row("Kind", |ui| {
-                ui.add_enabled_ui(false, |ui| {
-                    // Fixed once made; New asks for it.
-                    combo(ui, "labelStyleKind", &KINDS, &mut self.kind);
-                });
+                if has_style {
+                    ui.add_enabled_ui(false, |ui| {
+                        // Fixed once made; New asks for it.
+                        combo(ui, "labelStyleKind", &KINDS, &mut self.kind);
+                    });
+                } else {
+                    empty(ui, "labelStyleKind", ControlKind::Choice, true);
+                }
             });
 
             form.row("Template", |ui| {
@@ -1764,11 +1776,12 @@ impl LabelStyleManagerDialog {
                     "labelStyleTemplate",
                     &mut self.template,
                     LineOptions {
-                        // An example only beside a style: greyed with none, it read as one.
+                        // An example only beside a style: greyed with none, it read as one; with
+                        // none, the one word every empty control of the form says.
                         placeholder: if has_style {
                             "{bearing:dms} {distance:.3f}"
                         } else {
-                            ""
+                            hint.as_str()
                         },
                         width: Some(width),
                         ..LineOptions::default()
@@ -1818,63 +1831,88 @@ impl LabelStyleManagerDialog {
             }
 
             form.row("Text style", |ui| {
-                controls::choice(
-                    ui,
-                    "labelStyleTextStyle",
-                    &self.text_styles,
-                    &mut self.text_style,
-                );
+                if has_style {
+                    controls::choice(
+                        ui,
+                        "labelStyleTextStyle",
+                        &self.text_styles,
+                        &mut self.text_style,
+                    );
+                } else {
+                    empty(ui, "labelStyleTextStyle", ControlKind::Choice, true);
+                }
             });
 
             // Labels of a few words on one line, the detail in the tooltip: "Height on paper (0:
             // the text style's)" wrapped to two lines in the label column (the third look audit's
             // J).
             form.row("Paper height (mm)", |ui| {
-                controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER)
-                    .on_hover_text(
-                        "The text's height on paper, drawn at the annotation scale; 0 for the \
-                         text style's",
-                    );
+                if has_style {
+                    controls::spin(ui, "labelStylePaperHeight", &mut self.paper, LABEL_PAPER)
+                        .on_hover_text(
+                            "The text's height on paper, drawn at the annotation scale; 0 for \
+                             the text style's",
+                        );
+                } else {
+                    empty(ui, "labelStylePaperHeight", ControlKind::Spin, false);
+                }
             });
             form.row("Placement", |ui| {
-                combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
+                if has_style {
+                    combo(ui, "labelStylePlacement", &PLACEMENTS, &mut self.placement);
+                } else {
+                    empty(ui, "labelStylePlacement", ControlKind::Choice, true);
+                }
             });
             form.row("Orientation", |ui| {
-                combo(
-                    ui,
-                    "labelStyleOrientation",
-                    &ORIENTATIONS,
-                    &mut self.orientation,
-                );
+                if has_style {
+                    combo(
+                        ui,
+                        "labelStyleOrientation",
+                        &ORIENTATIONS,
+                        &mut self.orientation,
+                    );
+                } else {
+                    empty(ui, "labelStyleOrientation", ControlKind::Choice, true);
+                }
             });
             form.row("Offset", |ui| {
-                controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
+                if has_style {
+                    controls::spin(ui, "labelStyleOffset", &mut self.offset, LABEL_OFFSET);
+                } else {
+                    empty(ui, "labelStyleOffset", ControlKind::Spin, false);
+                }
             });
-            // The two boxes under the fields, as a check box under a form's fields is.
+            // The two boxes under the fields, as a check box under a form's fields is; clear with
+            // no style, whatever the last style shown had.
             form.under(|ui| {
-                check(
-                    ui,
-                    "labelStyleLeader",
-                    "Leader when displaced",
-                    &mut self.leader,
-                );
-                check(
-                    ui,
-                    "labelStyleDisplace",
-                    "May move to make room",
-                    &mut self.displace,
-                );
+                let (mut leader, mut displace) = (false, false);
+                let (leader, displace) = if has_style {
+                    (&mut self.leader, &mut self.displace)
+                } else {
+                    (&mut leader, &mut displace)
+                };
+                check(ui, "labelStyleLeader", "Leader when displaced", leader);
+                check(ui, "labelStyleDisplace", "May move to make room", displace);
             });
             form.row("Priority", |ui| {
-                controls::whole(
-                    ui,
-                    "labelStylePriority",
-                    &mut self.priority,
-                    PRIORITY_LOWEST..=PRIORITY_HIGHEST,
-                );
+                if has_style {
+                    controls::whole(
+                        ui,
+                        "labelStylePriority",
+                        &mut self.priority,
+                        PRIORITY_LOWEST..=PRIORITY_HIGHEST,
+                    );
+                } else {
+                    empty(ui, "labelStylePriority", ControlKind::Whole, false);
+                }
             });
             form.row("Marker", |ui| {
-                combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
+                if has_style {
+                    combo(ui, "labelStyleMarker", &MARKERS, &mut self.marker);
+                } else {
+                    empty(ui, "labelStyleMarker", ControlKind::Choice, true);
+                }
             });
             let boxes = [
                 (
@@ -1915,7 +1953,11 @@ impl LabelStyleManagerDialog {
             ];
             for (title, name, value, range, tip) in boxes {
                 form.row(title, |ui| {
-                    controls::spin(ui, name, value, range).on_hover_text(tip);
+                    if has_style {
+                        controls::spin(ui, name, value, range).on_hover_text(tip);
+                    } else {
+                        empty(ui, name, ControlKind::Spin, false);
+                    }
                 });
             }
         });

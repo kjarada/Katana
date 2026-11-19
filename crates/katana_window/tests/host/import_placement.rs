@@ -84,6 +84,13 @@ mod import_placement_box {
             placement.said()
         );
         assert!(!harness.control("importOffsetE").expect("east").enabled);
+        // Until Move by is chosen the boxes hold no number, only what each is: greyed, they read
+        // "0.000 east 0.000 north", a move by nothing (the seventh look audit).
+        for (name, word) in [("importOffsetE", "east"), ("importOffsetN", "north")] {
+            let control = harness.control(name).expect("the box");
+            assert_eq!(control.value, "", "{name} shows no number");
+            assert_eq!(control.text, word, "{name} says what it is");
+        }
 
         harness
             .press("importPlacementLocal")

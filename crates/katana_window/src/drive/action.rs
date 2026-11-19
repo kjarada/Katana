@@ -349,6 +349,22 @@ fn item_button<'a>(text: impl Into<egui::WidgetText>) -> egui::Button<'a> {
     .frame_when_inactive(false)
 }
 
+/// `item_button` for a row with no shortcut or arrow: its gutter, `text` and then `trail`
+/// (`right_trail`), so the row's text ends as far in from the menu's right edge as its icon starts
+/// from the left.
+fn plain_item_button<'a>(
+    text: impl Into<egui::WidgetText>,
+    trail: egui::Atom<'static>,
+) -> egui::Button<'a> {
+    use crate::theme::style::{MENU_GUTTER_WIDTH, MENU_ICON_SIZE};
+    egui::Button::new((
+        egui::Atom::custom(gutter_id(), egui::vec2(MENU_GUTTER_WIDTH, MENU_ICON_SIZE)),
+        text.into(),
+        trail,
+    ))
+    .frame_when_inactive(false)
+}
+
 /// An action drawn as a menu item, named by its object name: its icon and its text, its shortcut
 /// beside it, a tick before the icon while it is checked (theme::style::paint_menu_gutter), and
 /// greyed when it is disabled. A click - a person's or a press - is `clicked()`; the caller
@@ -357,10 +373,21 @@ pub fn action_item(ui: &mut Ui, action: &Action) -> Response {
     let taken = take(ui, &action.name);
     ui.add_enabled_ui(action.enabled, |ui| {
         let text = action.display_text();
-        let mut button = item_button(text.clone());
-        if let Some(shortcut) = &action.shortcut {
-            button = button.shortcut_text((shortcut_text(shortcut), right_trail(ui)));
-        }
+        let button = match &action.shortcut {
+            Some(shortcut) => item_button(text.clone())
+                .shortcut_text((shortcut_text(shortcut), right_trail(ui))),
+            // In a menu, a row with nothing on its right keeps the same space after its text: a
+            // menu is as wide as its widest row, and when that was a plain one ("Sheets and
+            // Plotting Commands...") its text ran to the button's 2 points from the popup's edge
+            // against the icons' 14 on the left (the seventh look audit). The trail follows the
+            // text with no space grown before it, so the text stays where it was. A toolbar's
+            // button (the sheet editor's, the minimised panels' bar) and a torn-off menu's
+            // columns, which are not in a popup, keep their text's own width.
+            None if egui::containers::menu::is_in_menu(ui) => {
+                plain_item_button(text.clone(), right_trail(ui))
+            }
+            None => item_button(text.clone()),
+        };
         let shown = button.atom_ui(ui);
         if let Some(gutter) = shown.rect(gutter_id()) {
             crate::theme::style::paint_menu_gutter(

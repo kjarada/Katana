@@ -353,6 +353,40 @@ pub fn shown_log_line(line: &str) -> String {
     String::from(line)
 }
 
+/// What a line of the log is to a person reading it, by its shown words (`shown_log_line`): an
+/// error ("! ..."), a warning ("Warning: ..."), or anything else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogTone {
+    Plain,
+    Warning,
+    Error,
+}
+
+/// The tone of `shown`, a line of the log as `shown_log_line` shows it (its line end, if any,
+/// kept or not).
+pub fn log_line_tone(shown: &str) -> LogTone {
+    if shown.starts_with("! ") {
+        LogTone::Error
+    } else if shown.starts_with("Warning: ") {
+        LogTone::Warning
+    } else {
+        LogTone::Plain
+    }
+}
+
+/// The colour the log panel draws `shown` in: an error in the error token, a warning in the
+/// warning token, every other line in the text colour. The warnings were the text colour, and a
+/// far import's advice read as one more reply (the seventh look audit), as a refusal did before
+/// errors took their colour (the third's H).
+pub fn log_line_colour(shown: &str) -> crate::canvas::Color {
+    use crate::theme::palette;
+    match log_line_tone(shown) {
+        LogTone::Error => palette::error(),
+        LogTone::Warning => palette::warning(),
+        LogTone::Plain => palette::text(),
+    }
+}
+
 impl Console for CommandLog {
     /// A reply, its line end the log's own.
     fn out(&mut self, text: &str) {

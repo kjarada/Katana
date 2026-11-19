@@ -106,6 +106,16 @@ pub const fn error() -> Color {
     Color::rgb(0xff, 0x6b, 0x6b)
 }
 
+/// A warning: what was done, with something to look at - the command log's "Warning: ..." lines,
+/// where an error's line is `error`. An amber (#ffb84d; OKLCH 0.83 0.145 74; 8.8 : 1 on `panel`
+/// by WCAG 2.1's relative luminance, past 1.4.3's 4.5 : 1 for text), 0.19 from the error red in
+/// OKLab and 0.16 from the text colour, so the three tones of a log line are told apart; it is
+/// text, not an icon's discipline, and the nearest discipline hue, Utilities' yellow, is 0.07
+/// from it. Worked out from the sRGB values with Ottosson's OKLab matrices.
+pub const fn warning() -> Color {
+    Color::rgb(0xff, 0xb8, 0x4d)
+}
+
 // ---- the icons' disciplines ------------------------------------------------------------------------
 //
 // The owner's ask of 2026-11-19: "make the icons colorful based on their discipline and function".

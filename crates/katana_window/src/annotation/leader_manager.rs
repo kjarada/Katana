@@ -1405,9 +1405,9 @@ impl LeaderManagerDialog {
         self.shown_kind = note.kind;
         self.target_is_hint = !any || !shape.tip_ref.associated();
         self.target = if !any {
-            String::from(
-                "No leader: draw one with the Leader tool, or make them on the For Selection tab.",
-            )
+            // The window's one empty word: what to do is the list's empty state, beside it - both
+            // said it, the tab read "No leaders: ..." twice (the seventh look audit).
+            String::from(crate::drive::controls::NO_CHOICE)
         } else if !shape.tip_ref.associated() {
             String::from(
                 "Nothing - a plain leader. Select it and an entity, then Attach to Selected.",
@@ -2724,7 +2724,8 @@ impl LeaderManagerDialog {
                     None,
                     TableLook {
                         fill: true,
-                        empty: "No leaders: draw one with the Leader tool",
+                        empty: "No leaders: draw one with the Leader tool, or make them on \
+                                the For Selection tab",
                     },
                 );
                 if let Some(at) = shown.chosen

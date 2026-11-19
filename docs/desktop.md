@@ -1857,6 +1857,52 @@ flows into columns. A drop target is filled faintly in the accent under its
 outline, as VS Code and Blender show one, where the outline alone was lost
 over a busy plan.
 
+**The ninth round (the seventh audit, 8.7, 2026-11-20).** A menu's widest
+row ran to 3 pixels from the popup's right edge when it had no shortcut or
+arrow ("Sheets and Plotting Commands...", "Project Coordinate System..."): a
+popup is as wide as its widest row, and a plain row ended at its text. In a
+menu every plain row now ends with the same trail a shortcut has
+(`drive::action::right_trail`, after the text with no space grown before
+it), so its text ends as far in from the right as the icons start from the
+left; a toolbar's button and a torn-off menu's columns, not in a popup, keep
+their text's width. Docked bars: the Properties bar no longer docks down a
+side ("Toolbars that dock and float", below); a column's bar rules the side
+that faces the middle of the window, so the rule between two columns runs
+the outer column's length on both sides - down the left the inner column's
+ground covered it but below the inner bar, down the right it was on the
+window's edge - and a row's bar draws no rule of its own, the line it is in
+ruling the whole row: under a row docked along the bottom its own showed,
+at 125 %, as a stray rule the bar's length over the Drafting bar. Surface From shows only its source's rows: a
+cloud's Source, Classes and Most points, a raster's Source, Most points and
+Window, the drawing's scope; the others are withdrawn
+(`drive::controls::withdrawn`: kept under their names, read hidden and off),
+so From = Drawing no longer scrolls and cuts its Command row, and a cloud's
+Window says "the whole cloud". Label Styles with no style shows no values:
+each box and choice is a greyed well saying "No style"
+(`drive::controls::no_value`, the hint `no_value_hint` makes; the boxes had
+read 0.00 mm, 0, 0.001 and the choices Auto, Standard), its check boxes
+clear; Import Placement's Move by holds no number until it is chosen ("east",
+"north", where it read "0.000 east 0.000 north"). An empty list well says so
+at its top left, a field's inset in, as an empty table and the scope's layer
+well do; it was centred in the well (the fifth round's choice, reversed: in
+Label Styles' 330 point well it stood apart from every other manager). The
+command log: a far import's warning is a whole sentence ("... puts that
+corner on the drawing's lower-left corner."); a warning line is drawn in the
+palette's new warning amber (`palette::warning`, #ffb84d,
+`command_log::log_line_colour`) as an error's is in the error red; and,
+scrolled to its end, the log no longer blanks a top row that is the last row
+of a line wrapped over its top ("rules, built in." of the customisation
+line): only a row the log's top cuts through is covered
+(`panels::log_cover_bottom`). Words: the Leaders tab says what to do once,
+in its list ("No leaders: draw one with the Leader tool, or make them on the
+For Selection tab"), its On row the one empty word; Road Objects' empty table
+says what places one; Styles with no styles says "No styles: New makes one"
+and "No style matches the filter" only when a filter emptied it; Volumes'
+empty results end with a full stop. *Not done:* Import Point Cloud's Points
+to keep is not grouped ("2000000"): a whole-number box has no grouped look,
+and one that shows "2,000,000" must also read it back when typed, which the
+shared box does not.
+
 ### The icons' colours: discipline and function (2026-11-19)
 
 The owner, on 2026-11-19: "make the icons colorful based on their discipline
@@ -2097,9 +2143,22 @@ many lines as its shown bars use (`layout::BarLines`), so a side with no bar
 takes no room, a fourth top row moves the views down a row, and a column is
 as broad as its broadest bar. Each bar of a column is drawn at its own
 breadth against the window's edge, so a narrow bar never claims the void
-beside it (the Properties bar's style box docked down a side makes its
-column 220 broad, and Dock Left gives it a column of its own). A bar's
-orientation follows its side.
+beside it (the Surface Edit bar's surface box docked down a side makes its
+column some 160 broad, and Dock Left gives it a column of its own). A bar's
+orientation follows its side. The Properties bar, one style box 214 points
+broad, docks along the top or the bottom or floats, never down a side
+(`docking::ROW_ONLY_BARS`): down the left it was a 218 x 625 point column
+for one control a row high. Its Dock Left and Dock Right are greyed with the
+reason as their tip, the actions and a precise place to a side are refused
+with it ("this toolbar docks along the top or the bottom, or floats; not down
+the left: its box is broader than a column [PropertiesToolBar]",
+`docking::side_refused`, checked in `MainWindow::trigger` before the move), a
+drag onto a side floats it there (`docking::drop_spot`), and a saved layout
+that had it down a side leaves it where the window builds it. A column's
+bar rules its inner side - its right down the left, its left down the right -
+on its last whole device pixel inside the bar (`flyout_button::column_rule`);
+a row's bar draws no rule of its own, the line it is docked in ruling the
+whole row.
 
 * **By the mouse.** Every docked bar has a grip, six dots in the padding
   before its first item (`docking_ui::grip_dots`): two columns of three
@@ -2260,6 +2319,11 @@ shown and where it was drawn); `?<menu>TornOff` a torn-off menu's
   window's chrome, like Layers and Properties, in a band of its own.
 * *Docking the Drafting bar*: its toggles are words, which a 39 point column
   cannot hold, and it is the drawing's state, not a set of commands.
+* *The Properties bar down a side as a short row across its column's top*
+  (the seventh look audit's other way): a fourth shape of docked bar for one
+  bar, and still a column as broad as its box under it. It is refused down a
+  side instead. The Surface Edit bar has a choice box too, but a column of
+  tools under it that a side shows, so it still docks there.
 * *The menu bar itself movable*: not asked, and it is the one fixed place a
   person finds every command from.
 

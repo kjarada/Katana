@@ -467,28 +467,126 @@ mod tool_bar_docking {
 
     #[test]
     fn a_broad_bar_docked_down_a_side_takes_a_column_of_its_own_and_narrows_none() {
-        // The Properties bar's style box is 214 points; down the left beside Draw it made the
-        // column 220 broad, Draw's buttons in its first 39 points and a void beside them.
+        // The Surface Edit bar's surface box is 150 points (layout::widget_size); down the left
+        // beside Draw a broad bar made the column as broad as itself, Draw's buttons in its first
+        // 39 points and a void beside them. This case was the Properties bar's until the seventh
+        // look audit, after which that bar no longer docks down a side
+        // (`the_properties_bar_is_refused_down_a_side_and_its_side_items_are_greyed`); Surface
+        // Edit is the broad bar that still does.
         let mut window = MainWindow::new();
-        window.trigger("viewToolBarDockPropertiesLeft").expect("docked left");
+        window.trigger("viewToolBarDockSurfaceEditLeft").expect("docked left");
         assert_eq!(place_of(&window, "DrawToolBar"), BarPlace::Left(0));
-        assert_eq!(place_of(&window, "PropertiesToolBar"), BarPlace::Left(1));
+        assert_eq!(place_of(&window, "SurfaceEditToolBar"), BarPlace::Left(1));
         let headless = settled(&mut window);
         let draw = drawn(&headless, "DrawToolBar");
-        let properties = drawn(&headless, "PropertiesToolBar");
+        let surface = drawn(&headless, "SurfaceEditToolBar");
         assert!(draw.width() <= layout::SIDE + 0.5, "Draw's column stays narrow: {draw:?}");
-        assert!(properties.min.x >= draw.max.x - 0.5, "{properties:?} beside {draw:?}");
+        assert!(surface.min.x >= draw.max.x - 0.5, "{surface:?} beside {draw:?}");
         // Placed on Draw's column all the same, by a precise place, each bar is drawn at its own
         // breadth against the window's edge: Draw claims no void beside its buttons.
         window
-            .trigger("viewToolBarPlace:PropertiesToolBar:left:0")
+            .trigger("viewToolBarPlace:SurfaceEditToolBar:left:0")
             .expect("placed");
         let headless = settled(&mut window);
         let draw = drawn(&headless, "DrawToolBar");
-        let properties = drawn(&headless, "PropertiesToolBar");
+        let surface = drawn(&headless, "SurfaceEditToolBar");
         assert!(draw.width() <= layout::SIDE + 0.5, "{draw:?}");
-        assert!(properties.width() > 200.0, "{properties:?}");
-        assert_eq!(draw.min.x, properties.min.x, "both against the window's edge");
+        assert!(surface.width() > 150.0, "{surface:?}");
+        assert_eq!(draw.min.x, surface.min.x, "both against the window's edge");
+    }
+
+    #[test]
+    fn the_properties_bar_is_refused_down_a_side_and_its_side_items_are_greyed() {
+        // The seventh look audit: the Properties bar docked left was its 214 point style box over
+        // an empty column 218 x 625 points beside the panels. It docks along the top or the
+        // bottom, or floats; a side is refused by every door with the reason.
+        let mut window = MainWindow::new();
+        let before = place_of(&window, "PropertiesToolBar");
+        for side in ["Left", "Right"] {
+            let error = window
+                .trigger(&format!("viewToolBarDockProperties{side}"))
+                .expect_err("refused down a side");
+            assert!(
+                error.describe().contains("docks along the top or the bottom"),
+                "{}",
+                error.describe()
+            );
+            assert!(error.describe().contains("PropertiesToolBar"), "{}", error.describe());
+        }
+        for place in [
+            "viewToolBarPlace:PropertiesToolBar:left:0",
+            "viewToolBarPlace:PropertiesToolBar:right:1:0",
+        ] {
+            assert!(window.trigger(place).is_err(), "{place} refused");
+        }
+        assert_eq!(place_of(&window, "PropertiesToolBar"), before, "and left where it was");
+        // View > Toolbars > Place > Properties keeps the four sides, its Left and Right greyed
+        // with the reason as their tip; Top, Bottom and Float stay live and still move it.
+        let composed = window.composed();
+        for side in ["Left", "Right"] {
+            let item = composed
+                .action(&format!("viewToolBarDockProperties{side}"))
+                .expect("the item is still listed");
+            assert!(!item.enabled, "{side} greyed");
+            assert!(item.tip.contains("docks along the top or the bottom"), "{}", item.tip);
+        }
+        for side in ["Top", "Bottom", "Float"] {
+            let item = composed
+                .action(&format!("viewToolBarDockProperties{side}"))
+                .expect("the item is listed");
+            assert!(item.enabled, "{side} live");
+        }
+        window.trigger("viewToolBarDockPropertiesBottom").expect("docked along the bottom");
+        assert_eq!(
+            place_of(&window, "PropertiesToolBar").docked().map(|(side, _)| side),
+            Some(Side::Bottom)
+        );
+        // Every other bar still docks down a side.
+        let composed = window.composed();
+        let item = composed
+            .action("viewToolBarDockSurveyLeft")
+            .expect("Survey's Dock Left");
+        assert!(item.enabled);
+    }
+
+    #[test]
+    fn the_properties_bar_dragged_onto_a_side_floats_there_instead() {
+        // A drag is the one way to a side that is not an action: over a column, or the strip that
+        // opens a new one, the Properties bar floats under the pointer; any other bar docks.
+        let left = Rect::from_min_max(Pos2::new(0.0, 143.0), Pos2::new(39.0, 806.0));
+        let zones = DropZones {
+            lines: vec![(Side::Left, 0, left)],
+            bars: Vec::new(),
+            new_lines: vec![(
+                Side::Left,
+                1,
+                Rect::from_min_max(Pos2::new(39.0, 143.0), Pos2::new(49.0, 806.0)),
+            )],
+        };
+        for pointer in [Pos2::new(20.0, 400.0), Pos2::new(44.0, 400.0)] {
+            let spot = drop_spot(&zones, "PropertiesToolBar", pointer, egui::Vec2::ZERO, 220.0);
+            assert!(matches!(spot, DropSpot::Float(_)), "{pointer:?}: {spot:?}");
+            let spot = drop_spot(&zones, "SurveyToolBar", pointer, egui::Vec2::ZERO, 220.0);
+            assert!(!matches!(spot, DropSpot::Float(_)), "{pointer:?}: {spot:?}");
+        }
+    }
+
+    #[test]
+    fn a_saved_layout_with_the_properties_bar_down_a_side_restores_it_where_the_window_builds_it() {
+        let mut window = MainWindow::new();
+        let built = place_of(&window, "PropertiesToolBar");
+        window.trigger("viewToolBarDockSurveyLeft").expect("docked left");
+        let saved = layout::layout_text(&window)
+            .replace("\"PropertiesToolBar=top:0\"", "\"PropertiesToolBar=left:0\"");
+        assert!(saved.contains("PropertiesToolBar=left:0"), "the premise: {saved}");
+        let mut restored = MainWindow::new();
+        assert!(layout::restore_layout(&mut restored, &saved));
+        assert_eq!(place_of(&restored, "PropertiesToolBar"), built);
+        assert_eq!(
+            place_of(&restored, "SurveyToolBar").docked().map(|(side, _)| side),
+            Some(Side::Left),
+            "the rest of the layout restored"
+        );
     }
 
     #[test]

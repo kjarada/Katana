@@ -221,8 +221,18 @@ impl ImportPlacementBox {
                 }
                 let offset = self.mode == ImportPlacementMode::Offset;
                 ui.add_enabled_ui(offset, |ui| {
-                    spin(ui, "importOffsetE", &mut self.east, offset_range(" east"));
-                    spin(ui, "importOffsetN", &mut self.north, offset_range(" north"));
+                    if offset {
+                        spin(ui, "importOffsetE", &mut self.east, offset_range(" east"));
+                        spin(ui, "importOffsetN", &mut self.north, offset_range(" north"));
+                    } else {
+                        // Greyed, the boxes showed "0.000 east 0.000 north", a move by nothing
+                        // that read as chosen (the seventh look audit): until Move by is chosen
+                        // they hold no number, only what each is.
+                        use crate::drive::controls::no_value;
+                        use crate::drive::registry::ControlKind;
+                        no_value(ui, "importOffsetE", ControlKind::Spin, "east", None);
+                        no_value(ui, "importOffsetN", ControlKind::Spin, "north", None);
+                    }
                 });
             });
             let said = self.said();

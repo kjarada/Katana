@@ -43,8 +43,8 @@ use katana_app::console::Console;
 
 use super::actions::{BarPlace, Composed};
 use super::docking::{
-    MenuPanels, PANEL_SIZE, PanelPlace, Places, Side, normalise, panel_place_from_text,
-    panel_place_text,
+    MenuPanels, PANEL_SIZE, PanelPlace, Places, Side, docks_down_a_side, normalise,
+    panel_place_from_text, panel_place_text,
 };
 use super::window::MainWindow;
 use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, shortcut_text};
@@ -708,6 +708,9 @@ pub fn restore_layout(window: &mut MainWindow, text: &str) -> bool {
         None
     } else if saved.version >= LAYOUT_VERSION_WITH_DOCKING && !saved.bars.is_empty() {
         let mut places = saved.bars;
+        // A bar that no longer docks down a side (docking::ROW_ONLY_BARS) is left out where a
+        // layout had it there, and so stays where the window builds it.
+        places.retain(|(bar, place)| !place.vertical() || docks_down_a_side(bar));
         normalise(&mut places);
         Some(places)
     } else {

@@ -1942,6 +1942,25 @@ pub struct StripResponse {
     pub rects: Vec<(String, Rect)>,
 }
 
+/// The rule down a column's inner side - its right down the left, its left down the right, the
+/// side that faces the middle of `screen`: the next column, the panels - on the last device pixel
+/// wholly inside the bar, so it is one crisp pixel at any scale and the next column's ground,
+/// drawn after it, never covers it.
+///
+/// It was on the bar's right edge whatever its side, centred on the edge itself: down the left
+/// the next column's ground covered it wherever that column had a bar, so the rule between two
+/// columns showed only below the inner bar, and down the right it ran along the window's edge and
+/// none showed between Modify's column and the next (the seventh look audit).
+pub fn column_rule(painter: &egui::Painter, bar: Rect, screen: Rect) -> [Pos2; 2] {
+    let pixels = painter.pixels_per_point();
+    let x = if bar.center().x > screen.center().x {
+        ((bar.left() * pixels).ceil() + 0.5) / pixels
+    } else {
+        ((bar.right() * pixels).floor() - 0.5) / pixels
+    };
+    [Pos2::new(x, bar.top()), Pos2::new(x, bar.bottom())]
+}
+
 /// Draws `strip` in `room` points along it from where `ui` is, as a ToolBar target: its items in a
 /// row, those that do not fit hidden behind the overflow arrow (recorded, not visible, so a press
 /// of one is refused "is hidden" as Qt's), the arrow lit while one of them shows a tool running,
@@ -2002,12 +2021,15 @@ pub fn tool_bar_strip(
     );
     let painter = ui.painter();
     painter.rect_filled(bar, 0.0, palette::window().to_egui());
-    let edge = if vertical {
-        [bar.right_top(), bar.right_bottom()]
-    } else {
-        [bar.left_bottom(), bar.right_bottom()]
-    };
-    painter.line_segment(edge, egui::Stroke::new(1.0, palette::border().to_egui()));
+    // A column rules its inner side (`column_rule`). A row draws no rule of its own: the line it
+    // is docked in rules the whole row (main_window::panels, under a top row and over a bottom
+    // one), and the Drafting bar's foot is the status bar's rule. Its own, on its bottom edge, was
+    // under a top row's and, under a row docked along the bottom, a stray rule the bar's length
+    // over the Drafting bar, half a pixel of it showing at 125 % (the seventh look audit).
+    if vertical {
+        let edge = column_rule(painter, bar, ctx.content_rect());
+        painter.line_segment(edge, egui::Stroke::new(1.0, palette::border().to_egui()));
+    }
 
     let place = |offset: i32, (width, height): (i32, i32)| -> Rect {
         let (x, y) = if vertical {

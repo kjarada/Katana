@@ -725,18 +725,26 @@ pub fn tool_bar_place_menu(bar: &ToolBar, place: &BarPlace, icon: &'static str) 
             Side::Bottom => ("Dock &Bottom", "DockBottom"),
         };
         let along = if side.vertical() { "down" } else { "along" };
-        menu.items.push(MenuItem::Action(
-            act(
-                &dock_action_name(&key, Some(side)),
-                icon,
-                text,
-                &format!(
-                    "Dock the {} toolbar {along} the {} of the window",
-                    bar.title,
-                    side.word()
-                ),
+        // A bar that never docks down a side (docking::ROW_ONLY_BARS) keeps its Dock Left and
+        // Dock Right, greyed, their tip saying why, so the four sides stay where a person looks.
+        let refused = side.vertical() && !super::docking::docks_down_a_side(&bar.name);
+        let tip = if refused {
+            format!(
+                "The {} toolbar docks along the top or the bottom, or floats: its box is broader \
+                 than a column down a side",
+                bar.title
             )
-            .checkable(at == Some(side)),
+        } else {
+            format!(
+                "Dock the {} toolbar {along} the {} of the window",
+                bar.title,
+                side.word()
+            )
+        };
+        menu.items.push(MenuItem::Action(
+            act(&dock_action_name(&key, Some(side)), icon, text, &tip)
+                .checkable(at == Some(side))
+                .enabled(!refused),
         ));
     }
     menu.items.push(MenuItem::Action(
