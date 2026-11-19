@@ -715,13 +715,14 @@ pub fn tool_bar_place_menu(bar: &ToolBar, place: &BarPlace, icon: &'static str) 
             bar.title
         ));
     for side in Side::ALL {
-        // Each side its own icon, an arrow into a box from that side, so the four are told apart
-        // without reading them (the third look audit's G).
+        // Each side its own icon, a bar against that side of a window, so the four are told
+        // apart without reading them (the third look audit's G), drawn at Float's size: the
+        // standard views' arrows they borrowed were smaller (the sixth look audit).
         let (text, icon) = match side {
-            Side::Top => ("Dock &Top", "ViewBack"),
-            Side::Left => ("Dock &Left", "ViewLeft"),
-            Side::Right => ("Dock &Right", "ViewRight"),
-            Side::Bottom => ("Dock &Bottom", "ViewFront"),
+            Side::Top => ("Dock &Top", "DockTop"),
+            Side::Left => ("Dock &Left", "DockLeft"),
+            Side::Right => ("Dock &Right", "DockRight"),
+            Side::Bottom => ("Dock &Bottom", "DockBottom"),
         };
         let along = if side.vertical() { "down" } else { "along" };
         menu.items.push(MenuItem::Action(
@@ -1015,7 +1016,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     signs.insert(
         String::from("viewMeshesMenu"),
         (
-            "ViewTop",
+            "MeshFaces",
             String::from(
                 "How plan views, plots and sheets draw imported meshes: their faces, their \
                  footprints, or not at all",
@@ -1026,20 +1027,20 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     for (display, icon, text, tip) in [
         (
             katana_cad::scene::MeshPlanDisplay::Faces,
-            "ViewTop",
+            "MeshFaces",
             "&Faces",
             "Each face seen from above, filled in its colour and shaded by its slope (VIEWS \
              MESHES FACES)",
         ),
         (
             katana_cad::scene::MeshPlanDisplay::Footprint,
-            "GisHull",
+            "MeshFootprint",
             "F&ootprints",
             "Each mesh as the dashed outline of its hull (VIEWS MESHES FOOTPRINT)",
         ),
         (
             katana_cad::scene::MeshPlanDisplay::Hidden,
-            "LayerVisible",
+            "MeshHidden",
             "&Hidden",
             "Meshes drawn in the 3D views only (VIEWS MESHES HIDDEN)",
         ),

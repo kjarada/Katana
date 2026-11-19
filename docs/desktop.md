@@ -1147,8 +1147,7 @@ Quantities writes m² and m³. Leaders' text style says its default as Settings
 does, "Standard (default)". A footer starts on a whole pixel, so it is 49
 whatever fraction of a pixel its body ends on: four footers (Leaders,
 Settings, Symbol Library, Edit Text) measured 50. Survey > Export Survey Points hands its `SURVEY EXPORT` line to the
-executor (`docs/survey.md`, "Point files on the command line"). Not done: an
-arrow's CamelCase token ("ClosedFilled") is shown as written, Grid's height
+executor (`docs/survey.md`, "Point files on the command line"). Not done: Grid's height
 source (its items are property names after "geometry"), the
 numbers still kept as text (Viewshed's heights, Surface From's Most points,
 Alignment Manager's Start chainage), the zero placeholders (Global Modify's
@@ -1203,13 +1202,16 @@ MeshFaces, MeshFootprint and MeshHidden for View > Meshes Seen from Above
 GIS teal), DockTop, DockLeft, DockRight and DockBottom for a toolbar's Place
 menu (the view cube's faces, ten units where Float's box is sixteen), and
 SheetCopy for the sheet list's Copy Sheet (Plotting; it had Modify > Copy's
-drafting cyan). Not done in this round: the menus naming the new mesh and dock
-icons, and the command log showing its lines through
-`command_log::shown_log` (an error's sentence capitalised, "! Unknown command;
-...", a box's failure as the status bar says it, and a `warning text="..."`
-record as "Warning: ...") - both live in
-the main window's files (its menus, and `main_window::panels::shown_log`),
-which another branch held; and a CamelCase arrow token in Leaders ("ClosedFilled").
+drafting cyan). The menus name the new mesh and dock icons (View > Meshes
+Seen from Above: MeshFaces, MeshFootprint, MeshHidden; a toolbar's Place:
+DockTop, DockLeft, DockRight, DockBottom), and the command log shows its lines
+through `command_log::shown_log` (an error's sentence capitalised, "! Unknown
+command; ...", a box's failure as the status bar says it, and a `warning
+text="..."` record as "Warning: ..."), the panel's `shown_log` being that one.
+A choice in sentence case shows a CamelCase token in words
+(`drive::controls::token_words`: Leaders' arrow "ClosedFilled" is "Closed
+filled"; ByLayer and ByBlock, and capitals throughout, as written), and a fill
+may name either.
 
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its

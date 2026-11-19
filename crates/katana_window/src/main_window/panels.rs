@@ -2647,16 +2647,11 @@ pub fn log_cover_bottom(galley: &egui::Galley, at: Pos2, view_top: f32) -> Optio
     (bottom > view_top + 0.5).then_some(bottom)
 }
 
-/// The command log's text as the log panel shows it: each error line ("! ...") without the code
-/// its description starts with (command_log::without_error_code), every other line as it is.
+/// The command log's text as the log panel shows it: each line in the words a person reads
+/// (command_log::shown_log - an error as a sentence without its code, a warning record as the
+/// sentence it carries), the log's own record kept as it was logged.
 pub fn shown_log(log: &str) -> String {
-    log.split('\n')
-        .map(|line| match line.strip_prefix("! ") {
-            Some(error) => format!("! {}", crate::command_log::without_error_code(error)),
-            None => String::from(line),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    crate::command_log::shown_log(log)
 }
 
 /// The top on the screen of the first row of `galley`, drawn at `at`, that starts a logical line

@@ -981,9 +981,39 @@ pub fn empty_item_words(item: &str) -> Option<String> {
     words.then(|| no_value_hint(thing))
 }
 
+/// A verb's token as words: a CamelCase token ("ClosedFilled") split where a small letter meets a
+/// capital, every word after the first in small letters ("Closed filled"); anything else - words
+/// already, capitals throughout ("SQL"), digits or marks, and the CAD terms ByLayer and ByBlock,
+/// which are written so everywhere - as it is. A choice in sentence case showed Leaders' arrow
+/// as "ClosedFilled" (the sixth look audit).
+pub fn token_words(token: &str) -> String {
+    let camel = token.chars().all(char::is_alphabetic)
+        && !token.starts_with("By")
+        && token
+            .chars()
+            .zip(token.chars().skip(1))
+            .any(|(this, next)| this.is_lowercase() && next.is_uppercase());
+    if !camel {
+        return String::from(token);
+    }
+    let mut words = String::with_capacity(token.len() + 4);
+    let mut before: Option<char> = None;
+    for letter in token.chars() {
+        if before.is_some_and(char::is_lowercase) && letter.is_uppercase() {
+            words.push(' ');
+            words.extend(letter.to_lowercase());
+        } else {
+            words.push(letter);
+        }
+        before = Some(letter);
+    }
+    words
+}
+
 /// How a choice shows `item`: an item that is the empty value (`empty_item_words`) in its words,
-/// muted as a hint is; otherwise the item, its first letter a capital when `sentence_case`. What
-/// is shown only: a choice records and is filled by the item itself.
+/// muted as a hint is; otherwise the item, in sentence case when `sentence_case` - its first
+/// letter a capital and a CamelCase token in words (`token_words`). What is shown only: a choice
+/// records and is filled by the item itself (or by the words it shows, `item_filled`).
 pub fn shown_item(item: &str, sentence_case: bool) -> egui::WidgetText {
     // An item of no words (a verb's default, unsaid) is the empty value as a list row too.
     let words = if item.trim().is_empty() {
@@ -997,7 +1027,7 @@ pub fn shown_item(item: &str, sentence_case: bool) -> egui::WidgetText {
             .into();
     }
     if sentence_case {
-        sentence_start(item).into()
+        sentence_start(&token_words(item)).into()
     } else {
         item.into()
     }
@@ -1013,6 +1043,7 @@ fn item_filled(items: &[String], text: &str) -> Option<usize> {
     }
     let same = |item: &String| {
         crate::command_log::same_ignoring_case(item, text)
+            || crate::command_log::same_ignoring_case(&token_words(item), text)
             || empty_item_words(item)
                 .is_some_and(|words| crate::command_log::same_ignoring_case(&words, text))
     };
@@ -1653,7 +1684,20 @@ pub fn custom(ui: &Ui, response: &Response, mut record: ControlRecord) {
 
 #[cfg(test)]
 mod tests {
-    use super::SpinRange;
+    use super::{SpinRange, item_filled, token_words};
+
+    #[test]
+    fn a_camel_case_token_is_shown_in_words_and_still_filled_by_them() {
+        assert_eq!(token_words("ClosedFilled"), "Closed filled");
+        assert_eq!(token_words("openArrow"), "open arrow");
+        // Words, capitals, digits and the CAD terms stay as they are.
+        for kept in ["Closed filled", "SQL", "DEM2", "ByLayer", "ByBlock", "none", ""] {
+            assert_eq!(token_words(kept), kept);
+        }
+        let items = [String::from("Open"), String::from("ClosedFilled")];
+        assert_eq!(item_filled(&items, "Closed filled"), Some(1));
+        assert_eq!(item_filled(&items, "ClosedFilled"), Some(1));
+    }
 
     // A box of two decimals rounds 0.705 as it shows it: Qt's fixed text of the double nearest
     // 0.705 (0.70499999999999996) is "0.70".
