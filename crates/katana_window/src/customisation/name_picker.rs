@@ -240,12 +240,14 @@ impl NamePicker {
         self.role
     }
 
-    /// What the empty field says for a list of `role`, until a form says otherwise.
+    /// What the empty field says for a list of `role`, until a form says otherwise: "No <thing>",
+    /// muted, as an empty choice says it (drive::controls::choice_with_hint) - "(no symbol)"
+    /// beside "No style" spelled one thing two ways in one form (the fourth look audit's 3).
     pub fn default_placeholder(role: NameRole) -> &'static str {
         if role == NameRole::Symbol {
-            "(no symbol)"
+            "No symbol"
         } else {
-            "(no linetype)"
+            "No linetype"
         }
     }
 

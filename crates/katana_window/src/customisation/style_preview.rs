@@ -755,6 +755,15 @@ impl StylePreview {
             if self.shows_nothing() && !self.placeholder.is_empty() {
                 crate::dialog_layout::preview_placeholder(ui, rect, &self.placeholder);
             }
+            // In the border every preview wears (the road dialogs', Dimension Styles' sample, the
+            // hatch swatch): drawn without it, the Styles and Symbol Library previews were the one
+            // borderless pair (the fourth look audit's "For 10").
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(1.0, crate::theme::border().to_egui()),
+                egui::StrokeKind::Inside,
+            );
         }
         let mut record = ControlRecord::new(name, ControlKind::Other);
         record.text.clone_from(&self.notice);

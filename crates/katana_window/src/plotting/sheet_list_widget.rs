@@ -170,15 +170,14 @@ impl SheetListWidget {
 
 /// Draws `row` (`current`, the current sheet's), answering where it is. The row is the list's
 /// width: lit whole when it is the current sheet, as a table's chosen row is - its words alone
-/// were a pill (the third look audit's E) - and under the pointer otherwise. The picture at its
-/// left; beside it the number and name in the text colour on one line, cut short only where they
-/// do not fit, and the paper under them, muted. The two lines were one button's text of which one
-/// line showed, cut short with an ellipsis whatever its length ("PLAN ...").
+/// were a pill (the third look audit's E) - and under the pointer otherwise. The number and name
+/// first, in the text colour across the whole row, cut short only where a name is longer than
+/// the row; under them the picture, and beside it the paper, muted. Beside a picture 110 wide the
+/// name had some 80 points ("2 PLAN TI...", "A3 landsca...", the fourth look audit's 5).
 fn row_ui(ui: &mut Ui, current: bool, row: &SheetListRow) -> Rect {
     let line = ui.text_style_height(&egui::TextStyle::Body);
-    let words = 2.0 * line + LINE_GAP;
     let picture = row.picture.map_or(egui::Vec2::ZERO, |picture| picture.size);
-    let height = picture.y.max(words) + 2.0 * ROW_PADDING;
+    let height = line + LINE_GAP + picture.y.max(line) + 2.0 * ROW_PADDING;
     let (rect, hover) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
     if !ui.is_rect_visible(rect) {
@@ -194,25 +193,29 @@ fn row_ui(ui: &mut Ui, current: bool, row: &SheetListRow) -> Rect {
     if let Some(fill) = fill {
         ui.painter().rect_filled(rect, 0.0, fill);
     }
-    let mut left = rect.left() + ROW_PADDING;
-    if let Some(texture) = row.picture {
-        let at = Rect::from_min_size(
-            egui::pos2(left, rect.center().y - picture.y / 2.0),
-            picture,
-        );
-        egui::Image::from_texture(texture).paint_at(ui, at);
-        left = at.right() + ui.spacing().item_spacing.x;
-    }
     let (name, paper) = row.text.split_once('\n').unwrap_or((row.text.as_str(), ""));
-    let top = rect.center().y - words / 2.0;
-    let first = Rect::from_min_max(egui::pos2(left, top), egui::pos2(rect.right(), top + line));
-    let second = first.translate(egui::vec2(0.0, line + LINE_GAP));
+    let left = rect.left() + ROW_PADDING;
     let right = rect.right() - ROW_PADDING + dialog_layout::TABLE_COLUMN_GAP / 2.0;
+    let top = rect.top() + ROW_PADDING;
+    let first = Rect::from_min_max(egui::pos2(left, top), egui::pos2(rect.right(), top + line));
     dialog_layout::cell_text(ui, first, left, right, RichText::new(name));
+    let below = top + line + LINE_GAP;
+    let mut paper_left = left;
+    if let Some(texture) = row.picture {
+        let at = Rect::from_min_size(egui::pos2(left, below), picture);
+        egui::Image::from_texture(texture).paint_at(ui, at);
+        paper_left = at.right() + ui.spacing().item_spacing.x;
+    }
+    // The paper beside the picture, at its middle.
+    let middle = below + picture.y.max(line) / 2.0;
+    let second = Rect::from_min_max(
+        egui::pos2(paper_left, middle - line / 2.0),
+        egui::pos2(rect.right(), middle + line / 2.0),
+    );
     dialog_layout::cell_text(
         ui,
         second,
-        left,
+        paper_left,
         right,
         RichText::new(paper).color(crate::theme::text_muted().to_egui()),
     );
@@ -225,5 +228,5 @@ const ROW_GAP: f32 = 2.0;
 /// Round a row's picture and words, inside its lit ground.
 const ROW_PADDING: f32 = 4.0;
 
-/// Between a row's two lines of words.
+/// Between a row's name and the picture and paper under it.
 const LINE_GAP: f32 = 2.0;

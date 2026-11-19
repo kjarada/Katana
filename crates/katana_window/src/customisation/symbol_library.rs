@@ -198,8 +198,11 @@ const CHIP_NAMES: [&str; 5] = [
     "Vertex mode",
 ];
 
-/// The symbol's width on the ground: 0 is not a size, it is "the definition's own".
-const SIZE: SpinRange = SpinRange::new(0.0, 10000.0, 0.5, 3).with_suffix(" m");
+/// The symbol's width on the ground: 0 is not a size, it is "the definition's own" - said in
+/// those words, where "0.000 m" read as a symbol of no size (the fourth look audit's 3).
+const SIZE: SpinRange = SpinRange::new(0.0, 10000.0, 0.5, 3)
+    .with_suffix(" m")
+    .with_special_text("Its own size");
 
 const FILE_FILTERS: [(&str, &[&str]); 2] = [
     ("Katana customisation", &["customisation.json", "json"]),
@@ -1960,7 +1963,14 @@ impl SymbolLibraryDialog {
                 ui.spacing_mut().text_edit_width = DETAILS_WIDTH / 2.0;
                 ui.spacing_mut().combo_width = DETAILS_WIDTH / 2.0;
                 self.preview
-                    .ui(ui, "symbolPreview", drawing, egui::vec2(DETAILS_WIDTH, 160.0));
+                    // As wide as the details column, so it ends where its fields do: at
+                    // DETAILS_WIDTH it ended 73 short of them (the fourth look audit's 8).
+                    .ui(
+                        ui,
+                        "symbolPreview",
+                        drawing,
+                        egui::vec2(ui.available_width(), 160.0),
+                    );
                 ui.horizontal(|ui| {
                     ui.label("Plot scale");
                     let scales: Vec<String> = StylePreview::PLOT_SCALES

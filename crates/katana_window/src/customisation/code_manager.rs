@@ -2165,6 +2165,10 @@ impl SurveyCodeManagerDialog {
             }
         });
 
+        // A section's gap between the files' row and the tab strip: right on it, the row read as
+        // a second line of the strip, a two-line tool row over the tabs (the fourth look audit's
+        // "For 10").
+        ui.add_space(crate::shell::dialog::SECTION_GAP);
         let issues_title = self.tabs.issues_title.clone();
         let titles = [
             "Code Table",

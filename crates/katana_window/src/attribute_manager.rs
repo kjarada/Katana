@@ -395,30 +395,38 @@ impl AttributeManagerDialog {
                     });
                 });
                 ui.add_space(layout::INNER);
+                // Add needs entities to add to, and the others an attribute chosen in the tree:
+                // lit with nothing selected, each invited a press that did nothing (the fourth
+                // look audit's 1).
+                let chosen_key = selected > 0 && !state.selected_key.is_empty();
                 ui.horizontal(|ui| {
-                    if button(ui, "attributeAdd", "Add")
-                        .on_hover_text(
-                            "Add an attribute to every selected entity; use / to nest it in a \
-                             group",
-                        )
-                        .clicked()
-                    {
-                        state.pressed = Some("add");
-                    }
-                    if button(ui, "attributeSave", "Save Value").clicked() {
-                        state.pressed = Some("save");
-                    }
-                    if button(ui, "attributeRename", "Rename")
-                        .on_hover_text(
-                            "Rename it on every selected entity, keeping its value and type",
-                        )
-                        .clicked()
-                    {
-                        state.pressed = Some("rename");
-                    }
-                    if button(ui, "attributeRemove", "Remove").clicked() {
-                        state.pressed = Some("remove");
-                    }
+                    ui.add_enabled_ui(selected > 0, |ui| {
+                        if button(ui, "attributeAdd", "Add")
+                            .on_hover_text(
+                                "Add an attribute to every selected entity; use / to nest it in \
+                                 a group",
+                            )
+                            .clicked()
+                        {
+                            state.pressed = Some("add");
+                        }
+                    });
+                    ui.add_enabled_ui(chosen_key, |ui| {
+                        if button(ui, "attributeSave", "Save Value").clicked() {
+                            state.pressed = Some("save");
+                        }
+                        if button(ui, "attributeRename", "Rename")
+                            .on_hover_text(
+                                "Rename it on every selected entity, keeping its value and type",
+                            )
+                            .clicked()
+                        {
+                            state.pressed = Some("rename");
+                        }
+                        if button(ui, "attributeRemove", "Remove").clicked() {
+                            state.pressed = Some("remove");
+                        }
+                    });
                 });
             },
             |ui, parts| {

@@ -138,6 +138,12 @@ impl FilterBar {
     pub fn ui(&mut self, ui: &mut Ui) -> FilterBarChanges {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
+            // A chip's height whether there are chips or not, the field centred in it: a bar of a
+            // field alone (Hatch Patterns') stood its field 4 points higher than a bar with chips
+            // (the Styles and Linetypes pages; the fourth look audit's 8).
+            let chip = ui.text_style_height(&egui::TextStyle::Button)
+                + 2.0 * ui.spacing().button_padding.y;
+            ui.set_min_height(chip.max(ui.spacing().interact_size.y));
             let field = line_with(
                 ui,
                 "filterText",

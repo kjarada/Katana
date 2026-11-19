@@ -140,9 +140,13 @@ fn table_column<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R
     })
     .inner
 }
-const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 3).with_suffix(" mm on paper");
-const SYMBOL_SIZE: SpinRange =
-    SpinRange::new(0.0, 10000.0, 1.0, 4).with_suffix(" m wide (0 = its own size)");
+// The units alone after a number, what they are of in the tooltip, so the form's boxes are one
+// short width: " mm on paper" and " m wide (0 = its own size)" made boxes 128 and 195 wide in one
+// form (the fourth look audit's 2). 0 is a symbol's own size, said in words.
+const WEIGHT: SpinRange = SpinRange::new(0.0, 10.0, 0.05, 3).with_suffix(" mm");
+const SYMBOL_SIZE: SpinRange = SpinRange::new(0.0, 10000.0, 1.0, 4)
+    .with_suffix(" m")
+    .with_special_text("Its own size");
 const PATTERN_LENGTH: SpinRange = SpinRange::new(0.0, 1.0e6, 0.1, 4).with_suffix(" m");
 const STYLE_HEADERS: [&str; 9] = [
     "Name",
@@ -1385,7 +1389,7 @@ impl StyleManagerDialog {
             (
                 "Group",
                 if row.group.is_empty() {
-                    String::from("(none)")
+                    String::from(controls::NO_CHOICE)
                 } else {
                     row.group.clone()
                 },
@@ -2569,7 +2573,14 @@ impl StyleManagerDialog {
                 // headed sections of every other dialog.
                 dialog::section_with(ui, "Preview", |ui| {
                     self.style_preview
-                        .ui(ui, "stylePreview", host.document(), STYLE_PREVIEW);
+                        // As wide as the column, so it ends where the fields over it do: at
+                        // its own 360 it ended 13 short of them (the fourth look audit's 8).
+                        .ui(
+                            ui,
+                            "stylePreview",
+                            host.document(),
+                            egui::vec2(ui.available_width(), STYLE_PREVIEW.y),
+                        );
                     ui.horizontal(|ui| {
                         if Self::preview_controls(
                             ui,
@@ -2619,7 +2630,9 @@ impl StyleManagerDialog {
                     });
                     form.row("Line weight", |ui| {
                         ui.horizontal(|ui| {
-                            if controls::spin(ui, "styleWeight", &mut self.weight, WEIGHT).changed()
+                            if controls::spin(ui, "styleWeight", &mut self.weight, WEIGHT)
+                                .on_hover_text("The line's width, millimetres on paper")
+                                .changed()
                                 && self.live()
                             {
                                 self.weight_varies = false;
@@ -2656,6 +2669,10 @@ impl StyleManagerDialog {
                                 "styleSymbolSize",
                                 &mut self.symbol_size,
                                 SYMBOL_SIZE,
+                            )
+                            .on_hover_text(
+                                "The symbol's width on the ground, metres; 0 draws it at its own \
+                                 size",
                             )
                             .changed()
                                 && self.live()
@@ -2958,7 +2975,8 @@ impl StyleManagerDialog {
                         ui,
                         "linetypePreview",
                         host.document(),
-                        egui::vec2(STYLE_PREVIEW.x, 120.0),
+                        // The column's width, as the Styles page's preview is.
+                        egui::vec2(ui.available_width(), 120.0),
                     );
                     ui.horizontal(|ui| {
                         if Self::preview_controls(
