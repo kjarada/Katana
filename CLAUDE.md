@@ -190,6 +190,23 @@ watches (below, "Show the build"); never type them into Claude's shell.
   - Not covered by this: the owner asking you to build, run a test or drive the
     program, and the hand-off build (section 7).
   - Everything else in this section says how to build when it is time to.
+- **Subagents only write code - the owner's standing instruction (2026-11-19):
+  "when developing i dont want the subagents to build the app only to code".**
+  A subagent (an Agent the session starts, a workflow agent, a worktree
+  agent) NEVER builds, tests or runs the program:
+  - no `tools/build_visible.sh` in any form (no `wsl`, `cargo`, `test`), no
+    `cargo`, `ctest`, `cmake`, and no `katana`, `katana_cli` or `katana_mcp`
+    run, headless or not - and so no screenshots of its own;
+  - it reads, writes and reviews code, tests and docs, checks by reading
+    what can be checked so, and reports "not built" with the tests it wrote
+    and what each should show;
+  - the main session - the integrator - merges the agents' work and does
+    the one build, the whole suite, the screenshots and the fixes the
+    first compile needs (section 7's hand-off);
+  - this holds for every task, the look rounds' screenshot audits included:
+    an audit agent reads the integrator's screenshots, it does not make them;
+  - a brief for a subagent says this in so many words, and never tells it to
+    build, test or run anything.
 - **Show the build, in its own window, every time - the owner's standing
   instruction (2026-11-03): "show the build process everytime on cmd line so
   i can see it including the test phase".** Claude's shell moves a command
@@ -385,15 +402,16 @@ in.
   exact, small edit: a crate's `lib.rs` (each agent adds its modules in a
   commented block of its own, merged with `git merge-file --union`), the main
   window's modules, `Cargo.toml` files (only the integrator adds a crate).
-- **Cap the parallelism** when several agents build at once
-  (`KATANA_BUILD_JOBS=4 bash tools/build_visible.sh ...`). Each worktree's run
-  opens its own window, titled with the worktree's folder.
+- **Agents do not build** (section 3, "Subagents only write code"): only the
+  integrator builds a worktree, with `KATANA_BUILD_JOBS` capped when it runs
+  more than one at once. Each worktree's run opens its own window, titled
+  with the worktree's folder.
 - **Agents read egui's and egui_dock's API from the fetched sources**
   (`\\wsl.localhost\Ubuntu-24.04\root\.cargo\registry\src\...`), never from
   memory: they change at every release.
-- **Ask agents for evidence**: what changed, which tests ran, the output.
-  Then verify centrally, by building the merged result and running the WHOLE
-  suite yourself.
+- **Ask agents for evidence**: what changed, the tests written and what each
+  should show, what they could not check by reading. Then verify centrally,
+  by building the merged result and running the WHOLE suite yourself.
 - **Workflow agents inherit `/effort` live**; there is no need to relaunch
   them.
 
