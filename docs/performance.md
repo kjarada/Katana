@@ -384,7 +384,10 @@ the fixed cost it repays is the same.
   so no claim about the Rust's speed can be made yet, and the first change
   made for speed must first add the benchmark it is judged by, with the A/A
   method of `docs/testing.md`, "Benchmarks". The tables above say what each
-  should find.
+  should find. The one Rust benchmark so far is new work, not a twin: the
+  meshes' faces in plan (`crates/katana_window/benches/mesh_plan.rs`, a plain
+  program with no benchmark library; figures in `docs/plan_view.md`, "Meshes
+  in plan").
 - **The hand-written SIMD kernels are to be removed.** On 2026-11-16 the
   owner decided that `unsafe` goes wherever it can, the kernels with it,
   their scalar references staying and the speed measured before and after

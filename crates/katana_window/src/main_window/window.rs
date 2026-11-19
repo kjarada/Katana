@@ -663,6 +663,16 @@ impl MainWindow {
                 );
                 exec.workspace.scenery_changed();
             }
+            // meshplan: View > Meshes Seen from Above, through the verb a typed line runs.
+            "viewMeshesFaces" => {
+                let _ = exec.run_verb_line("VIEWS MESHES FACES");
+            }
+            "viewMeshesFootprint" => {
+                let _ = exec.run_verb_line("VIEWS MESHES FOOTPRINT");
+            }
+            "viewMeshesHidden" => {
+                let _ = exec.run_verb_line("VIEWS MESHES HIDDEN");
+            }
             "viewLinkActive" => {
                 let active = exec.workspace.state(exec.workspace.active_id());
                 match active {

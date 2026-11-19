@@ -1888,7 +1888,7 @@ The mapping is documented in full at the head of
   describe as "kept and written back".
 - **Trimeshes become meshes in the session.** A `primitive_3d` is a
   `katana_geometry::mesh::TriangleMesh` held beside the surfaces, drawn in 3D and as its
-  footprint in plan (docs/cad.md, "A mesh is not a surface"). Per-face
+  faces seen from above in plan (docs/cad.md, "A mesh is not a surface"). Per-face
   colours survive both ways: the one-based `face_flags` into `face_infos` on
   the way in, one info per DISTINCT colour on the way out, because an info
   is a colour and not a face. A face that repeats a vertex or uses one with
@@ -2007,7 +2007,7 @@ handling column is asserted by `crates/katana_archive12d/tests/coverage.rs`.
 | `tin` | 1.4.7.2 | import and export | a surface (terrain::TinSurface) |
 | `full_tin` | 1.4.7.1 | import | a surface of its visible, non-construction triangles; written back as a tin |
 | `super_tin` | 1.4.8 | read | BUILT as a combined surface, with its member tins imported as surfaces of their own (see "Super tins are built"; this row said "reported" after that was no longer true) |
-| `primitive_3d` | 1.4.9 | import and export | a mesh in the session (geometry::TriangleMesh), drawn in 3D and as its footprint in plan; per-face colours kept and written back |
+| `primitive_3d` | 1.4.9 | import and export | a mesh in the session (geometry::TriangleMesh), drawn in 3D and as its faces in plan; per-face colours kept and written back |
 | `string arc` | 1.5.1 | import | an Arc; exported arcs are written as two-vertex super strings |
 | `string circle` | 1.5.2 | import and export | a Circle |
 | `string drainage` | 1.5.3 | import | the line as a Polyline carrying its pipes, each pit and house connection as a Point |

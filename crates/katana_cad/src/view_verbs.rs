@@ -38,7 +38,11 @@
 //!                                       view hides of its own
 //! VIEWS SET <id> ghosts=on|off          whether that view shows the selection
 //!                                       faintly where it hides the layer
-//! VIEWS SCALE <id> [AUTO|N|1:N]         query or set its paper-style scale,
+//! VIEWS MESHES [FACES|FOOTPRINT|HIDDEN] query or set how every plan view, plot
+//!                                       and sheet of the window draws the
+//!                                       meshes (scene.rs, MeshPlanDisplay):
+//!                                       meshes=faces
+//! VIEWS SCALE <id> [AUTO|N|1:N]      query or set its paper-style scale,
 //!                                       one persisted, undoable edit
 //! VIEWS SCALE LIST                      plan views and their paper-style scales;
 //!                                       headless: the saved assignments only
@@ -159,6 +163,7 @@ use katana_math::{RAD_TO_DEG, cpp};
 use katana_render::Projection;
 
 use crate::document::Document;
+use crate::scene::MeshPlanDisplay;
 use crate::scope_verbs::{
     ScopeMatch, ScopeViewProvider, is_scope_word, match_scope, parse_scope_words, record_value,
     scope_record,
@@ -175,7 +180,7 @@ const VIEWS_USAGE: &str = "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIV
      id[,id...] [TO id] | UNLINK id[,id...]|ALL | HIDE id \
      layer[,layer...]|LAYER name...|REFERENCE ref[,ref...] | SHOW id \
      layer[,layer...]|LAYER name...|REFERENCE ref[,ref...]|ALL | ISOLATE id layer|LAYER name | SET \
-     id ghosts=on|off | SCALE id [AUTO|N|1:N] | SCALE LIST";
+     id ghosts=on|off | MESHES [FACES|FOOTPRINT|HIDDEN] | SCALE id [AUTO|N|1:N] | SCALE LIST";
 const ZOOM_USAGE: &str = "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 | CENTRE \
      x,y [SCALE s] | SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b \
      [ONLY] [WHERE k=v ...]] [view=id]";
@@ -319,6 +324,23 @@ pub trait ViewVerbHost {
     fn has_reference(&self, _id: u64) -> bool {
         false
     }
+    /// How the window's plan views, plots and sheets draw the meshes (VIEWS MESHES). None: a
+    /// host that draws no meshes in plan, where the word is refused - the default.
+    fn mesh_plan_display(&self) -> Option<MeshPlanDisplay> {
+        None
+    }
+    /// Sets it for every plan view, plot and sheet the window draws from now on. A host that
+    /// draws no meshes refuses it - the default.
+    fn set_mesh_plan_display(&self, _display: MeshPlanDisplay) -> Status {
+        Err(no_meshes_in_plan())
+    }
+}
+
+fn no_meshes_in_plan() -> Error {
+    Error::new(
+        ErrorCode::Unsupported,
+        "VIEWS MESHES needs the window's plan views, which draw the meshes it holds",
+    )
 }
 
 /// The host lent for one VIEWS or ZOOM line; None is no window (the C++
@@ -1026,6 +1048,30 @@ fn views_verb(document: &Document, host: &dyn ViewVerbHost, args: &[String]) -> 
         }
         host.settings_changed(id);
         return record_of(host, id);
+    }
+    if action == "MESHES" {
+        // The window's one switch, not a view's: a plot and a sheet follow it too.
+        if args.len() > 2 {
+            return Err(make_error(
+                ErrorCode::ParseFailure,
+                "VIEWS MESHES takes at most one word: VIEWS MESHES [FACES|FOOTPRINT|HIDDEN]",
+                args[2].as_str(),
+            ));
+        }
+        if let Some(word) = args.get(1) {
+            let Some(display) = MeshPlanDisplay::from_word(word) else {
+                return Err(make_error(
+                    ErrorCode::ParseFailure,
+                    format!("VIEWS MESHES takes faces, footprint or hidden, not '{word}'"),
+                    word.as_str(),
+                ));
+            };
+            host.set_mesh_plan_display(display)?;
+        }
+        let Some(display) = host.mesh_plan_display() else {
+            return Err(no_meshes_in_plan());
+        };
+        return Ok(format!("meshes={}", display.word()));
     }
     Err(refuse_views_word(&args[0]))
 }

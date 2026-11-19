@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use katana_cad::layer_overrides::LayerOverrides;
 use katana_cad::plot::{PaperSize, PlotSettings};
-use katana_cad::scene::SceneMesh;
+use katana_cad::scene::{MeshPlanDisplay, SceneMesh};
 use katana_cad::selection::SelectionSet;
 use katana_cad::terrain::surface_plan::SurfaceProblem;
 use katana_cad::terrain::surface_style::{SurfaceDisplayStyle, built_in_surface_styles};
@@ -1322,8 +1322,11 @@ mod plan_painter {
             flat_color: katana_render::rgba(0, 0, 0),
             ..SceneMesh::default()
         }];
+        // The footprint, which the plan draws for View > Meshes Seen from Above > Footprint; the
+        // faces are mesh_faces.rs's.
         let source = PlanSource {
             meshes: Some(&meshes),
+            mesh_display: MeshPlanDisplay::Footprint,
             ..PlanSource::default()
         };
         let settings = PlotSettings::default();

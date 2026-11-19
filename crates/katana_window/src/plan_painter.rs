@@ -1,7 +1,7 @@
 //! The plan drawing, painted: one painter for the screen, the plot and every sheet viewport (the
 //! port of plan_painter).
 //!
-//! What the plan view shows - imagery, point clouds, mesh footprints, every entity through its
+//! What the plan view shows - imagery, point clouds, meshes, every entity through its
 //! layer and style, library linestyles and symbols, hatches, dimensions, text and the alignment
 //! overlay - used to be painted by the viewport widget's own members, and a plot borrowed the live
 //! widget to get at them: it swapped the view's transform for the sheet's, painted, and put it
@@ -51,7 +51,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use katana_cad::annotation::drawing::Drawing;
@@ -76,7 +76,7 @@ use katana_cad::plot::{
     paper_fill_colour, sheet_for,
 };
 use katana_cad::plotting::arrange::draws_in;
-use katana_cad::scene::SceneMesh;
+use katana_cad::scene::{MeshPlanDisplay, SceneMesh};
 use katana_cad::selection::{
     SelectionSet, drawn_extent as model_drawn_extent, is_ghost, touches_box,
 };
@@ -133,6 +133,7 @@ use crate::canvas::{
 };
 use crate::customisation::style_painter::{RasterBackend, StylePaintTarget, paint_style_drawing};
 use crate::drawing::feedback_painter::overlay;
+use crate::mesh_plan_painter::{MeshInk, MeshPaintOptions, MeshPlanCache, paint_meshes_in_plan};
 use crate::plotting::plot_style::plot_image;
 use crate::terrain::surface_plan_painter::{
     LegendStack, PaintedLegend, SurfacePaintOptions, paint_surface_legend_stack,
@@ -161,6 +162,9 @@ pub struct PlanSource<'a> {
     pub selection: Option<&'a SelectionSet>,
     pub reference: Option<&'a ReferenceData>,
     pub meshes: Option<&'a [SceneMesh<'a>]>,
+    /// How the meshes are drawn: their faces (the default), their footprints, or not at all
+    /// (cad's MeshPlanDisplay). Hidden meshes are not framed by Zoom Extents either.
+    pub mesh_display: MeshPlanDisplay,
     /// What a leader's note reads beyond the entity its tip is on - the drawing's surfaces and
     /// alignments (cad's leader_context). None reads none: such a line of a note is dropped.
     pub leaders: Option<Arc<LeaderContext>>,
@@ -188,9 +192,29 @@ pub fn road_model_shown() -> bool {
     ROAD_MODEL_ON.load(Ordering::Relaxed)
 }
 
-/// The document's drawing, library, index, selection and what its leaders read, and its road
-/// model while it is shown (set_road_model_shown). The reference data and meshes belong to the
-/// window and are the caller's to add.
+/// How plan_source_of has the plan views, plots and sheets draw the meshes: View > Meshes Seen
+/// from Above and VIEWS MESHES, for the whole session and kept in the person's settings - the
+/// window's one switch, as Show Road Model is. Faces until it is changed.
+static MESH_DISPLAY: AtomicU8 = AtomicU8::new(0);
+
+pub fn set_mesh_plan_display(display: MeshPlanDisplay) {
+    let index = MeshPlanDisplay::ALL
+        .iter()
+        .position(|&each| each == display)
+        .unwrap_or(0);
+    MESH_DISPLAY.store(index as u8, Ordering::Relaxed);
+}
+
+pub fn mesh_plan_display() -> MeshPlanDisplay {
+    MeshPlanDisplay::ALL
+        .get(usize::from(MESH_DISPLAY.load(Ordering::Relaxed)))
+        .copied()
+        .unwrap_or_default()
+}
+
+/// The document's drawing, library, index, selection and what its leaders read, its road model
+/// while it is shown (set_road_model_shown), and how meshes are drawn (mesh_plan_display). The
+/// reference data and meshes belong to the window and are the caller's to add.
 pub fn plan_source_of(document: &Document) -> PlanSource<'_> {
     PlanSource {
         model: Some(document.model()),
@@ -201,6 +225,7 @@ pub fn plan_source_of(document: &Document) -> PlanSource<'_> {
         selection: Some(document.selection()),
         reference: None,
         meshes: None,
+        mesh_display: mesh_plan_display(),
         leaders: Some(Arc::new(leader_context(document))),
         road_model: if road_model_shown() {
             Some(bim_model(document))
@@ -255,12 +280,13 @@ pub struct PlanPaintOptions<'a> {
     /// on screen.
     pub plot: Option<&'a PlotSettings>,
     /// What is drawn besides the entities. The grid is screen furniture; the rest is drawn on both
-    /// media, beneath the linework: rasters, then point clouds, then mesh footprints. On paper a
-    /// footprint's outline is MESH_OUTLINE_PAPER_MILLIMETRES wide, dashed in paper millimetres.
+    /// media, beneath the linework: rasters, then point clouds, then meshes - as the source's
+    /// mesh_display says, their faces (mesh_plan_painter) or their footprints, whose outline on
+    /// paper is MESH_OUTLINE_PAPER_MILLIMETRES wide, dashed in paper millimetres.
     pub grid: bool,
     pub rasters: bool,
     pub point_clouds: bool,
-    pub mesh_footprints: bool,
+    pub meshes: bool,
     pub alignments: bool,
     /// Paper only. The finest imagery is embedded at, in dots per inch of paper, and the most
     /// pixels one image may have. Imagery at the plot's own resolution would be enormous and no
@@ -337,7 +363,7 @@ impl Default for PlanPaintOptions<'_> {
             grid: false,
             rasters: true,
             point_clouds: true,
-            mesh_footprints: true,
+            meshes: true,
             alignments: true,
             raster_dpi_cap: 200.0,
             raster_pixel_cap: 16_000_000,
@@ -392,6 +418,14 @@ pub struct PlanPaintStats {
     pub raster_crops_made: usize,
     /// On paper, the pixels of the images the point clouds were splatted into.
     pub cloud_pixels_embedded: usize,
+    /// Meshes drawn as their faces (mesh_plan_painter): the meshes with a face in view, their
+    /// faces in view, the pixels of the faces' image and how many a face lit, and whether the
+    /// image was made this paint (1) or the kept one laid down again (0). Footprints count none.
+    pub meshes_drawn: usize,
+    pub mesh_triangles_in_view: usize,
+    pub mesh_image_pixels: usize,
+    pub mesh_pixels_covered: usize,
+    pub mesh_images_made: usize,
     /// Surface display (docs/surface_display.md): the surfaces drawn (visible, with something in
     /// view), their triangles in view, the edges stroked and the triangles too dense to stroke
     /// (tinted), the contour runs and labels, the pixels of their faces' images and how many they
@@ -528,6 +562,9 @@ pub struct PlanPaintCache {
     /// breaklines, and traced contours, kept while the drawing has the surface (cad's
     /// SurfacePlanCache).
     surfaces: SurfacePlanCache,
+    /// The meshes drawn as their faces: each one's box, shades and rim, and the image last made
+    /// of them with what it was made from (mesh_plan_painter).
+    meshes: MeshPlanCache,
     sprites: BTreeMap<SpriteKey, Sprite>,
     sprite_scale: f64,
     sprite_paper_scale: f64,
@@ -547,11 +584,13 @@ impl PlanPaintCache {
 
     /// Drops the imagery, its paper crops and the point-cloud colours, which are keyed on a
     /// layer's id and not its contents: call after a reference layer is added, removed, or has
-    /// its display settings changed.
+    /// its display settings changed. The meshes' faces go too: they are keyed on each mesh's
+    /// address and size, which a mesh made where a dropped one was could share.
     pub fn invalidate_references(&mut self) {
         self.rasters.clear();
         self.raster_crops.clear();
         self.clouds.clear();
+        self.meshes.clear();
     }
 
     pub fn clear(&mut self) {
@@ -563,6 +602,7 @@ impl PlanPaintCache {
         self.clouds.clear();
         self.sprites.clear();
         self.surfaces.clear();
+        self.meshes.clear();
         self.sprite_scale = 0.0;
         self.sprite_paper_scale = 0.0;
         self.sprite_device_ratio = 0.0;
@@ -582,6 +622,12 @@ impl PlanPaintCache {
 
     pub fn sprite_count(&self) -> usize {
         self.sprites.len()
+    }
+
+    /// What is kept of the meshes drawn as their faces: how many images were made and how many
+    /// meshes worked out, so a caller can see a kept image laid down again.
+    pub fn mesh_cache(&self) -> &MeshPlanCache {
+        &self.meshes
     }
 
     /// What is kept of the surfaces drawn (docs/surface_display.md).
@@ -653,8 +699,8 @@ fn pen(colour: Color, width: f64) -> Pen {
     )
 }
 
-/// Whether a mesh is drawn at all - in plan as its footprint, and so counted in what Zoom
-/// Extents frames. The 3D scene applies the same rule to it.
+/// Whether a mesh is drawn at all - in plan as its faces or its footprint, and so counted in
+/// what Zoom Extents frames. The 3D scene applies the same rule to it.
 fn is_shown(item: &SceneMesh) -> bool {
     item.visible
         && item.mesh.is_some_and(|mesh| !mesh.empty())
@@ -1235,11 +1281,15 @@ impl<'p> PlanPainter<'p> {
         self.canvas.set_render_hint(RenderHint::Antialiasing, true);
         // Beneath the drawing, like a surface: a mesh is context for what is drawn over it, not a
         // thing to be picked in plan.
-        if self.options.mesh_footprints {
-            self.draw_mesh_footprints();
+        if self.options.meshes {
+            match self.source.mesh_display {
+                MeshPlanDisplay::Faces => self.draw_mesh_faces(),
+                MeshPlanDisplay::Footprint => self.draw_mesh_footprints(),
+                MeshPlanDisplay::Hidden => {}
+            }
         }
         // Surface display (docs/surface_display.md): beneath the entities, over the imagery and
-        // the mesh footprints, as context for what is drawn.
+        // the meshes, as context for what is drawn.
         if self.options.surfaces {
             self.draw_surfaces();
         }
@@ -1805,9 +1855,43 @@ impl<'p> PlanPainter<'p> {
             .draw_line(PointF::new(0.0, origin.y), PointF::new(width, origin.y));
     }
 
-    /// A mesh in plan is its FOOTPRINT - the hull of its vertices - and not its triangles: 1 453
-    /// meshes of 90 656 triangles arrive from one real archive, and drawing those in plan would
-    /// bury the drawing they are context for. The 3D view is where a mesh is looked at.
+    /// The meshes as their faces seen from above (mesh_plan_painter): one image of every shown
+    /// mesh's faces, kept in the cache until the view or the meshes change.
+    fn draw_mesh_faces(&mut self) {
+        let Some(meshes) = self.source.meshes else {
+            return;
+        };
+        let shown: Vec<&SceneMesh> = meshes.iter().filter(|item| is_shown(item)).collect();
+        let ink = match self.options.plot {
+            Some(plot) if self.paper() => MeshInk::paper(plot),
+            _ => MeshInk::SCREEN,
+        };
+        let options = MeshPaintOptions {
+            paper: self.paper(),
+            device_ratio: self.device_ratio,
+            imagery_share: self.imagery_share(),
+            image_pixel_cap: self.options.raster_pixel_cap,
+            ink,
+        };
+        let drawn = paint_meshes_in_plan(
+            &mut *self.canvas,
+            &shown,
+            &self.view,
+            &self.visible,
+            &options,
+            &mut self.cache.meshes,
+        );
+        self.stats.meshes_drawn += drawn.meshes_drawn;
+        self.stats.mesh_triangles_in_view += drawn.triangles_in_view;
+        self.stats.mesh_image_pixels += drawn.image_pixels;
+        self.stats.mesh_pixels_covered += drawn.pixels_covered;
+        self.stats.mesh_images_made += usize::from(drawn.image_made);
+    }
+
+    /// A mesh as its FOOTPRINT - the hull of its vertices - and not its triangles: the plan's only
+    /// way until 2026-11-19, kept as View > Meshes Seen from Above > Footprint for a drawing the
+    /// meshes are context for (1 453 meshes of 90 656 triangles arrived from one real archive,
+    /// which drawn whole could bury the drawing over them).
     fn draw_mesh_footprints(&mut self) {
         let Some(meshes) = self.source.meshes else {
             return;
@@ -3425,6 +3509,16 @@ pub fn visible_box(frame: &PlanFrame<'_>) -> Box2 {
     bounds
 }
 
+/// The meshes the plan draws in some form: none while the switch hides them (is_shown says which
+/// of these are).
+fn meshes_drawn<'s>(source: &PlanSource<'s>) -> &'s [SceneMesh<'s>] {
+    if source.mesh_display == MeshPlanDisplay::Hidden {
+        &[]
+    } else {
+        source.meshes.unwrap_or(&[])
+    }
+}
+
 /// Everything a view with these hidden layers and reference layers draws: the entities its layers
 /// let through, the visible reference layers it does not hide, the shown meshes and the
 /// alignments. What Zoom Extents frames and what a plot's Fit fits.
@@ -3460,9 +3554,9 @@ pub fn plan_drawn_bounds(
     if let Some(road_model) = &source.road_model {
         bounds.expand_box(bim_view::plan_bounds(road_model, model, layers));
     }
-    // A mesh is drawn in plan as its footprint, so it is seen and counts. A drawing that is
-    // nothing but meshes framed an empty box before.
-    for item in source.meshes.unwrap_or(&[]) {
+    // A shown mesh is drawn in plan, as its faces or its footprint, so it is seen and counts. A
+    // drawing that is nothing but meshes framed an empty box before.
+    for item in meshes_drawn(source) {
         if let Some(mesh) = item.mesh
             && is_shown(item)
         {
@@ -3577,7 +3671,7 @@ pub fn plan_draws_in(
             }
         }
     }
-    for item in source.meshes.unwrap_or(&[]) {
+    for item in meshes_drawn(source) {
         if let Some(mesh) = item.mesh
             && is_shown(item)
         {

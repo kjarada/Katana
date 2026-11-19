@@ -66,6 +66,9 @@ pub const TOOL_BAR_ICONS_KEY: &str = "appearance/toolBarIcons";
 pub const TOOL_BAR_NAMES_KEY: &str = "appearance/toolBarNames";
 pub const START_SHOW_KEY: &str = "start/showAtStart";
 pub const START_CRS_KEY: &str = "start/coordinateSystem";
+/// View > Meshes Seen from Above (cad's MeshPlanDisplay word): Katana's own key, the C++ had
+/// no such switch.
+pub const MESHES_IN_PLAN_KEY: &str = "view/meshesInPlan";
 
 /// The layout's version this window saves, the first that records where every toolbar is docked
 /// or floats and the torn-off menus (main_window::docking), and the one before the third toolbar
@@ -737,6 +740,13 @@ pub fn restore_session(window: &mut MainWindow) {
     if let Some(names) = settings.flag(TOOL_BAR_NAMES_KEY) {
         window.ui.bars.names_shown = names;
     }
+    // meshplan: View > Meshes Seen from Above, as it was left; a word this build does not know is
+    // Faces.
+    if let Some(word) = settings.text(MESHES_IN_PLAN_KEY) {
+        crate::plan_painter::set_mesh_plan_display(
+            katana_cad::scene::MeshPlanDisplay::from_word(word).unwrap_or_default(),
+        );
+    }
     let layout = settings.text(LAYOUT_KEY).map(String::from);
     if let Some(layout) = layout {
         let _ = restore_layout(window, &layout);
@@ -750,6 +760,10 @@ pub fn save_session(window: &mut MainWindow) {
     let settings = &mut window.exec.settings;
     settings.set_text(LAYOUT_KEY, &layout);
     settings.set(MINIMISED_KEY, SettingValue::List(Vec::new()));
+    settings.set_text(
+        MESHES_IN_PLAN_KEY,
+        crate::plan_painter::mesh_plan_display().word(),
+    );
     let _ = settings.save();
 }
 

@@ -146,9 +146,10 @@ pub struct SceneMesh<'a> {
     /// takes flat_color, so a partly coloured mesh is still wholly drawn.
     pub face_colors: Vec<Rgba>,
     pub visible: bool,
-    /// Whether the plan view draws its hull as its footprint. Off for the
-    /// road model's objects, whose plan outline the plan view draws instead -
-    /// a curved course's hull would cover the inside of the curve - and which
+    /// Whether the plan view draws it (its faces or its footprint, as
+    /// MeshPlanDisplay says). Off for the road model's objects, whose plan
+    /// outline the plan view draws instead - a curved course's hull would
+    /// cover the inside of the curve - and which
     /// the window puts in the 3D views' list with the imported meshes
     /// (docs/road_design.md, "In the views").
     pub plan_footprint: bool,
@@ -172,6 +173,41 @@ impl Default for SceneMesh<'_> {
             plan_footprint: true,
             layer: String::new(),
         }
+    }
+}
+
+/// How the plan views, plots and sheets draw the meshes (docs/cad.md, "A mesh is not a
+/// surface"): their faces seen from above, shaded by slope; each one's footprint, the dashed
+/// hull of its vertices; or not at all. The window's one switch - View > Meshes Seen from
+/// Above, and VIEWS MESHES on its command line - kept in the person's settings. The 3D views
+/// draw the meshes whatever it says.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MeshPlanDisplay {
+    /// A design model that is nothing but meshes - kerbs, pavements, batters - read as a plan.
+    #[default]
+    Faces,
+    /// What the plan drew until 2026-11-19: context that never buries the drawing.
+    Footprint,
+    Hidden,
+}
+
+impl MeshPlanDisplay {
+    pub const ALL: [Self; 3] = [Self::Faces, Self::Footprint, Self::Hidden];
+
+    /// The word VIEWS MESHES takes and replies with, and the settings file keeps.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Faces => "faces",
+            Self::Footprint => "footprint",
+            Self::Hidden => "hidden",
+        }
+    }
+
+    /// The word in any case; None for any other.
+    pub fn from_word(word: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|display| display.word().eq_ignore_ascii_case(word))
     }
 }
 
@@ -589,6 +625,13 @@ fn light_of(options: &SceneOptions<'_>) -> Light {
         ground: cpp::clamp(options.ground_ambient, 0.0, 1.0),
         sun: cpp::clamp(options.sun_strength, 0.0, 1.0),
     }
+}
+
+/// The scene's hillshade of a UNIT normal under `options`' light, 0 to 1: what a 3D view shades
+/// a mesh's face by, so the plan view's faces (the window's mesh_plan_painter) are lit from the
+/// same sun and read the same way round.
+pub fn hillshade(options: &SceneOptions<'_>, normal: Vec3) -> f64 {
+    light_of(options).intensity(normal)
 }
 
 /// The surface of an item that can be drawn: visible, present, with

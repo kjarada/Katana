@@ -1,6 +1,6 @@
 # The plan view: one painter for the screen, the plot and every sheet
 
-The plan drawing - imagery, point clouds, mesh footprints, the drawing's
+The plan drawing - imagery, point clouds, meshes, the drawing's
 surfaces in their display styles, every entity through its layer and style,
 library linestyles and symbols, hatches, dimensions, text and the alignment
 overlay - is painted by ONE function,
@@ -36,7 +36,7 @@ The `Canvas` is the window's painter over a raster image or a PDF page
 |---|---|
 | `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the drawing's surfaces and their display styles, the window's reference data and meshes. `plan_source_of(document)` fills the document's part. Every part but the model is optional; each one absent leaves out only what it provides. |
 | `PlanFrame` | How it is looked at: the `ViewTransform` sized to the viewport, a `rotation` (counter-clockwise, radians, about the viewport's centre), the viewport's `origin` on the device, whether to `clip` to it, and the view's hidden layers (`LayerOverrides`) and hidden reference layers. |
-| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; the screen's optional paper-style denominator (`paper_style_scale`); what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`raster_dpi_cap`, `raster_pixel_cap`); and the screen-only speed switches (`thin_lines`, `symbol_sprites`, `clip_lines`). |
+| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; the screen's optional paper-style denominator (`paper_style_scale`); what is drawn besides the entities (grid, rasters, point clouds, meshes, alignments); the resolution imagery is embedded at on paper (`raster_dpi_cap`, `raster_pixel_cap`); and the screen-only speed switches (`thin_lines`, `symbol_sprites`, `clip_lines`). |
 | `PlanPaintCache` | What is kept between paints, owned by the CALLER (below). |
 
 It returns `PlanPaintStats`: entities drawn, symbol stamps and how many came
@@ -277,7 +277,7 @@ number of document notifications (every command, undo, selection, library
 and current-layer change), the model revision, the library generation, a
 fingerprint of the selection's ids (a caller that changes the selection and
 only repaints still sees it), fingerprints of the reference layers' and
-meshes' visibility and style (the panels change those without a
+meshes' visibility, style and face colours and the Meshes Seen from Above switch (the panels change those without a
 notification), the view's hidden layers and references, the grid, the
 line option and the view's ghost switch (below). A mouse move, a snap marker
 or a rubber band then costs the furniture, not the drawing.
@@ -285,13 +285,130 @@ or a rubber band then costs the furniture, not the drawing.
 ### Surfaces
 
 Every visible surface of the drawing is drawn in its display style beneath
-the entities, over the imagery, the point clouds and the mesh footprints:
+the entities, over the imagery, the point clouds and the meshes:
 its faces as an image, its triangles to a level of detail, its contours and
 their labels, breaklines, boundary and points; on screen with a legend in
 the view's corner. What is drawn is decided in `katana_cad` and only drawn
 here; the record, the level of detail and the measurements are
 `docs/surface_display.md`. A visible surface counts in `plan_drawn_bounds`, so
 Zoom Extents and a plot's Fit take it in.
+
+### Meshes in plan
+
+A mesh (`docs/cad.md`, "A mesh is not a surface") is drawn in plan as its
+FACES, seen from above, by `crates/katana_window/src/mesh_plan_painter.rs`:
+beneath the surfaces and the drawing, over the imagery and the point clouds.
+
+**Why.** Until 2026-11-19 the plan drew a mesh only as its footprint, the
+dashed outline of its hull, so that 1 453 meshes of 90 656 triangles from one
+archive would not bury the drawing they were context for. Then an archive
+arrived that was nothing BUT meshes - a civil and pavement design model,
+646 meshes of 877 368 triangles: kerbs, pavements, batters - and its plan was
+an empty page of dashed boxes while the 3D view showed the model. A design
+model must be readable in plan, so the faces are the default and the
+footprint is a choice.
+
+**The switch.** View > **Meshes Seen from Above** > Faces | Footprints | Hidden, the
+window's one switch for every plan view, plot and sheet (cad's
+`MeshPlanDisplay`; `plan_painter::set_mesh_plan_display`, read by
+`plan_source_of` into `PlanSource::mesh_display`). The menu runs
+`VIEWS MESHES FACES|FOOTPRINT|HIDDEN` (`docs/cad.md`, "The window's views"),
+so a typed line, a script and `katana --command` reach it by the same path;
+`VIEWS MESHES` alone replies `meshes=faces`. It is kept in the person's
+settings under `view/meshesInPlan`. Hidden meshes are drawn in the 3D views
+only and are not framed by Zoom Extents or a plot's Fit. katana_cli and
+katana_mcp hold no meshes (an archive's meshes are the window's, `held=no`),
+so there the word is refused with the rest of VIEWS, by name.
+
+**What is drawn.**
+
+* Each face is filled in its colour - the face's own where the file gives
+  one, else the mesh's - at a share of it: a level face at
+  `MESH_LEVEL_SHADE` (0.65), any other at 0.65 x hillshade(n) /
+  hillshade(up), where hillshade is the 3D views' own (cad's
+  `scene::hillshade`: a sun 45 degrees up in the north-west), held between
+  `MESH_SHADE_FLOOR` (0.25) and 1. So a level face is 0.65 of its colour, a
+  face turned to the sun at most 0.75 and one turned away darker: kerbs,
+  batters and crowns read, and the drawing's lines stay the brightest thing.
+  A face is seen from above whichever way it winds.
+* Where faces overlap, the highest is seen (a depth test on the height in the
+  face's plane at the pixel): a plan looks down, so a closed kerb shows its
+  top, not its underside or its far wall drawn after it. Ties go to the face
+  later in the list, so the order decides, never the threads.
+* The rim of an open mesh - the edges one face uses
+  (`TriangleMesh::boundary_edges`) - is traced a shade darker
+  (`MESH_RIM_SHADE`, 0.45), where that mesh is the one seen, round a mesh at
+  least `MESH_RIM_MINIMUM_PIXELS` (24) image pixels across. A closed mesh has
+  no rim.
+* A pixel is lit when its centre is inside a face; a face too thin to hold
+  the centre of any pixel in a row it crosses lights the pixel nearest its
+  middle there, and one smaller than a pixel the pixel under its middle. So a
+  kerb narrower than a pixel at a site's extents is still a line, never a
+  gap, at the cost of at most a pixel of ink past a face's edge.
+* On paper the faces print at `MESH_FACE_PAPER_OPACITY` (50 %) so the drawing
+  printed over them reads, white prints black (`PlotSettings::white_to_black`,
+  as the footprint did), and a greyscale or monochrome plot prints each face
+  the grey of its luminance - an image's rule, not a fill's, which in
+  monochrome would print the model as a black slab.
+
+**How, and what it costs.** Every face of every shown mesh in view is
+scan-converted into one image laid out as a surface's faces' image is (cad's
+`plan_image_grid`: a pixel per device pixel on screen, the imagery's capped
+resolution on paper, only the part of the view the meshes cover). The faces
+are binned into bands of 32 rows and the bands rasterised on the task pool,
+each band taking its faces in the meshes' order, so the image is identical at
+any thread count. What does not depend on the view - each mesh's plan box,
+its faces' shades and its rim - is worked out once, when the mesh is first
+drawn, keyed on the mesh's address and size, and dropped with the reference
+data (`PlanPaintCache::invalidate_references`). The image itself is KEPT in
+the `PlanPaintCache` with what it was made from - the grid (the part of the
+model it covers, at what size of pixel), the meshes (address, size, colours)
+and the ink - and laid down again by a paint that changed none of them: a
+selection, a command that touches no mesh, and a pan by whole pixels that
+keeps every mesh wholly in view, where the grid is the same piece of the
+model and the image is only laid down further over. A zoom, or a pan that
+brings more or less of the meshes into view, makes it again.
+
+Rejected: stroking or filling the faces through the canvas (a path a face,
+seconds a frame at this size); faces in file order with no depth test (a
+closed mesh's underside covered its top); the hull filled (a horseshoe's hull
+covers the ground inside it); dropping faces below a pixel as a level of
+detail (a kerb's faces are all below a pixel at the extents, and the kerb
+vanished).
+
+**Measured** in Release on 2026-11-19, in WSL on the owner's machine (24
+hardware threads seen; other builds idle), by
+`crates/katana_window/benches/mesh_plan.rs`: a whole `paint_plan` at
+1600 x 1000 of a generated model of 640 meshes and 1 024 000 faces (kerb and
+pavement strips over 2 km by 1 km), 7 rounds alternated, 3 samples a cell a
+round, minimum / median in ms:
+
+| Cell | min | median |
+|---|---|---|
+| footprints (the plan before) | 31.65 | 40.18 |
+| footprints again (A/A control) | 30.72 | 36.74 |
+| faces, image made (view moved a third of a pixel) | 20.60 | 35.24 |
+| faces, kept image laid down | 8.96 | 11.62 |
+| faces, eight times closer, image made | 14.49 | 18.33 |
+| the faces' image alone, one thread | 81.34 | 91.64 |
+| the faces' image alone, the task pool | 20.16 | 22.69 |
+
+The A/A spread is 3 % on the minimum and 9 % on the median. Drawing the faces
+costs no more than the footprints did - each footprint is a convex hull of
+all its mesh's vertices, worked out at every paint - and laying the kept
+image down costs a quarter of it; the pool makes the image 4.0 times faster
+than one thread. The first paint after the meshes arrive also works out each
+mesh's shades and rim: 127 ms for this model, once.
+
+On the archive that showed the need (646 meshes, 877 368 faces), the window
+run headless (`katana <project> <archive> --report FrameStatsLabel`, the plan
+view's own drawing time, 395 x 522 px): the first frame 42 ms (with the
+meshes worked out), each of five pans of 22 px at 1.1 px a metre 7 to 10 ms,
+and the extents 8 to 23 ms; the build before drew the same views as
+footprints in 20 to 27 ms each.
+
+**Picking.** A mesh is not an entity: it is not picked, snapped to or given
+grips in plan, and a plan view's selection never holds one - as before.
 
 ## Screen and paper
 
@@ -313,6 +430,7 @@ place, the painter:
 | Grid | drawn | not drawn |
 | Rasters | the whole image, through one transform | cropped to the viewport and averaged down to at most 200 dpi and 16 megapixels, through the same transform (below) |
 | Point clouds | splatted into an image the size of the view | splatted into an image of the part of the viewport the cloud covers, at the same capped resolution and no finer than 0.25 mm a pixel |
+| Meshes as faces | an image of the faces, a pixel per device pixel, opaque | an image of the part of the viewport they cover at the imagery's capped resolution, at 50 % opacity; white prints black, greyscale and monochrome print grey |
 | Mesh footprints | a 1 px dashed pen | 0.13 mm, dashed 2 mm on and 1 mm off; white prints black |
 | Clipping lines to the view, symbol sprites | on | never: a plot stays vector |
 
@@ -698,6 +816,19 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
   the same image at two resolutions, and the pixel cap; a mesh outline's
   ink at two resolutions; and File > Plot to PDF embedding the image, and
   not a hidden one.
+* `crates/katana_window/tests/plan_painting/mesh_faces.rs` - meshes in plan: a
+  horseshoe inked where its faces are and not between its arms (which its
+  footprint covered); the faces under a line; the shades of a level face and
+  of faces turned to and from the sun, worked by hand; the highest of two
+  overlapping faces seen in either order; a kerb narrower than a pixel still
+  a line; Footprint as before and Hidden as nothing, and Zoom Extents with
+  each; the kept image laid down until the view pans or zooms or the meshes
+  are recoloured; the same image on one thread and on eight; faces on paper;
+  nothing drawn of an empty mesh or one with non-finite corners.
+* `crates/katana_window/tests/main_window/meshes_in_plan.rs` - View > Meshes Seen
+  from Above, its three items and which is checked, each setting the switch
+  through `VIEWS MESHES`; `crates/katana_cad/tests/top_verbs/view_verbs.rs` the
+  verb itself, its refusals, and its refusal without a window.
 * `crates/katana_window/tests/sheets/sheet_painter.rs` - a photo filling a plan
   viewport and nowhere else, hidden and not; a turned photo with
   transparent pixels in a turned viewport, where its geotransform puts it;
@@ -725,6 +856,13 @@ a pan at 43 steps a second in two views is still smooth, and the kept drawing
   output, plotting on a worker thread with its own cache.
 * A GPU linework layer under the painted overlay, for drawings where even
   the thin pen is too slow.
+* Meshes in plan: a sheet's preflight (`crates/katana_window/src/plotting/sheet_checks.rs`) and its
+  arrangement (`crates/katana_window/src/plotting/sheet_arrange.rs`) count a shown mesh by their own
+  copy of the rule, and still count the meshes when View > Meshes Seen from Above
+  hides them; both should ask the painter's rule. A mesh is not picked or
+  snapped to in plan. The faces' image is made again on a pan that brings
+  more or less of the meshes into view; copying the kept part and making
+  only the strip uncovered is not done.
 
 ## Grips and the drafting aids
 

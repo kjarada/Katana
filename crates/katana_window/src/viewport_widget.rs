@@ -90,8 +90,8 @@ use crate::format::qt_fixed;
 use crate::host::Host;
 use crate::plan_painter::{
     PdfPageWriter, PlanFrame, PlanMedium, PlanPaintCache, PlanPaintOptions, PlanPaintStats,
-    PlanSource, paint_plan, paint_plan_geometry, plan_drawn_bounds, plan_source_of,
-    plot_plan_to_pdf,
+    PlanSource, mesh_plan_display, paint_plan, paint_plan_geometry, plan_drawn_bounds,
+    plan_source_of, plot_plan_to_pdf,
 };
 use crate::theme::palette;
 use crate::theme::style::{overlay_font, ui_font};
@@ -2522,6 +2522,8 @@ impl PlanView {
             }
         }
         let mut meshes = Fingerprint::new();
+        // View > Meshes Seen from Above, the window's switch (plan_source_of reads it).
+        meshes.add(mesh_plan_display() as u64);
         let listed = cx.meshes();
         if !listed.is_empty() {
             // The window's list, which grows and restyles in place.
@@ -2534,6 +2536,9 @@ impl PlanView {
                 meshes.add(u64::from(mesh.visible));
                 meshes.add(mesh.style as u64);
                 meshes.add(u64::from(mesh.flat_color));
+                // How many face colours, not where: the window lends a fresh copy of its list
+                // every frame, and a mesh's face colours are its file's, never restyled.
+                meshes.add(mesh.face_colors.len() as u64);
             }
         }
         DrawingKey {

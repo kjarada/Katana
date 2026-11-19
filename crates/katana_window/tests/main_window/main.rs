@@ -33,6 +33,7 @@ pub mod window_support;
 mod command_line;
 mod geo_menus;
 mod menu_texts;
+mod meshes_in_plan;
 mod screen_fit_dialogs;
 mod surfaces_panel;
 mod tool_bar_columns;

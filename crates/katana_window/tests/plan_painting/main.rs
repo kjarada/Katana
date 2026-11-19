@@ -28,6 +28,7 @@ mod raster;
 mod annotation_ui;
 mod feedback_painter;
 mod leader_preview;
+mod mesh_faces;
 mod plan_cloud;
 mod plan_painter;
 mod surface_plan_painter;

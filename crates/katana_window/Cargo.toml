@@ -23,6 +23,12 @@ path = "src/bin/katana_make_icons/main.rs"
 name = "katana_tool_icon_sheet"
 path = "src/bin/katana_tool_icon_sheet/main.rs"
 
+# The meshes' faces in plan, measured (docs/plan_view.md, "Meshes in plan"): a plain program, no
+# benchmark library, so no crate is added for it.
+[[bench]]
+name = "mesh_plan"
+harness = false
+
 [dependencies]
 katana_app.workspace = true
 katana_archive12d.workspace = true

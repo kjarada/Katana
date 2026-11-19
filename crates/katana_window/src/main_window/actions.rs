@@ -1005,6 +1005,46 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             .items
             .push(MenuItem::Action(snap_mode_action(mode, document.drafting().snap_modes)));
     }
+    // ---- meshplan: View > Meshes Seen from Above (VIEWS MESHES), the window's one switch ----
+    let mut mesh_menu = Menu::new("viewMeshesMenu", "Meshes Seen &from Above");
+    signs.insert(
+        String::from("viewMeshesMenu"),
+        (
+            "ViewTop",
+            String::from(
+                "How plan views, plots and sheets draw imported meshes: their faces, their \
+                 footprints, or not at all",
+            ),
+        ),
+    );
+    let meshes_now = crate::plan_painter::mesh_plan_display();
+    for (display, icon, text, tip) in [
+        (
+            katana_cad::scene::MeshPlanDisplay::Faces,
+            "ViewTop",
+            "&Faces",
+            "Each face seen from above, filled in its colour and shaded by its slope (VIEWS \
+             MESHES FACES)",
+        ),
+        (
+            katana_cad::scene::MeshPlanDisplay::Footprint,
+            "GisHull",
+            "F&ootprints",
+            "Each mesh as the dashed outline of its hull (VIEWS MESHES FOOTPRINT)",
+        ),
+        (
+            katana_cad::scene::MeshPlanDisplay::Hidden,
+            "LayerVisible",
+            "&Hidden",
+            "Meshes drawn in the 3D views only (VIEWS MESHES HIDDEN)",
+        ),
+    ] {
+        mesh_menu.items.push(MenuItem::Action(
+            act(&format!("viewMeshes{display:?}"), icon, text, tip)
+                .checkable(meshes_now == display),
+        ));
+    }
+    // ---- end meshplan ----
     let mut view = Menu::new("viewMenu", "&View")
         .section("Display")
         .action(extents.clone())
@@ -1067,6 +1107,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             )
             .checkable(crate::viewport_widget::thin_screen_lines()),
         )
+        .submenu(mesh_menu) // meshplan
         .section("Viewports");
     let mut layout_menu = Menu::new("viewLayoutMenu", "Viewport &Layout");
     signs.insert(

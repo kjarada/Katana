@@ -3634,6 +3634,9 @@ Views     the desktop window's views, except SCALE also edits saved plan views h
           that view hides of its own, by the id the Reference Data panel gives them
           VIEWS SET id ghosts=on|off   whether that view shows the selection faintly where it
           hides the layer (on when a view opens)
+          VIEWS MESHES [FACES|FOOTPRINT|HIDDEN]   how every plan view, plot and sheet of the
+          window draws the meshes: their faces shaded by slope (the default), each one's
+          dashed footprint, or not at all
           VIEWS SCALE id AUTO|1:N   paper linestyles and symbols at a reference scale,
           independent of zoom and ANNOSCALE; AUTO keeps their screen size. Saved plan-view
           ids are available to katana_cli and katana_mcp; other view operations need the window

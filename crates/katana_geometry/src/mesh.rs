@@ -44,6 +44,54 @@ impl TriangleMesh {
                 .collect(),
         )
     }
+    /// The edges exactly one face uses: the rim of an open mesh, and nothing of a closed one.
+    /// Edges are matched by their two vertex indices whichever way round the faces wind them, so
+    /// a mesh whose faces disagree on their winding still finds its rim. Each comes once, lower
+    /// index first, with the face that uses it, in ascending order of (lower, higher). A face
+    /// naming a vertex that does not exist makes no edge, and neither does the side of a face
+    /// that repeats a vertex. Topology only: two faces that meet at one POSITION through
+    /// different vertex indices are not joined, as a file that repeats its vertices per face
+    /// does not join them.
+    pub fn boundary_edges(&self) -> Vec<MeshEdge> {
+        let count = self.vertices.len();
+        let mut edges: Vec<MeshEdge> = Vec::with_capacity(self.faces.len() * 3);
+        for (face, corners) in self.faces.iter().enumerate() {
+            if corners.iter().any(|&corner| corner as usize >= count) {
+                continue;
+            }
+            let [p, q, r] = *corners;
+            for (a, b) in [(p, q), (q, r), (r, p)] {
+                if a != b {
+                    edges.push(MeshEdge {
+                        a: a.min(b),
+                        b: a.max(b),
+                        face: face as u32,
+                    });
+                }
+            }
+        }
+        edges.sort_unstable_by_key(|edge| (edge.a, edge.b, edge.face));
+        let mut rim = Vec::new();
+        let mut at = 0;
+        while at < edges.len() {
+            let mut end = at + 1;
+            while end < edges.len() && edges[end].a == edges[at].a && edges[end].b == edges[at].b {
+                end += 1;
+            }
+            if end - at == 1 {
+                rim.push(edges[at]);
+            }
+            at = end;
+        }
+        rim
+    }
+}
+/// An edge of a mesh: its two vertex indices, lower first, and a face that uses it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct MeshEdge {
+    pub a: u32,
+    pub b: u32,
+    pub face: u32,
 }
 pub fn validate(mesh: &TriangleMesh) -> Status {
     for (index, vertex) in mesh.vertices.iter().enumerate() {

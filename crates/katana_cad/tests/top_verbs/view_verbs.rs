@@ -10,6 +10,7 @@ use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use katana_cad::scene::MeshPlanDisplay;
 use katana_cad::scope_verbs::scope_view_of;
 use katana_cad::selection::extent_of;
 use katana_cad::view_set::set_view_paper_scales;
@@ -43,6 +44,8 @@ struct RecordingHost {
     setting_changes: RefCell<Vec<ViewId>>,
     // The reference layers the window has, by id (VIEWS HIDE ... REFERENCE).
     references: RefCell<BTreeSet<u64>>,
+    // How the window draws its meshes in plan (VIEWS MESHES); None: a host that draws none.
+    meshes: RefCell<Option<MeshPlanDisplay>>,
 }
 
 impl ViewVerbHost for RecordingHost {
@@ -96,6 +99,19 @@ impl ViewVerbHost for RecordingHost {
 
     fn has_reference(&self, id: u64) -> bool {
         self.references.borrow().contains(&id)
+    }
+
+    fn mesh_plan_display(&self) -> Option<MeshPlanDisplay> {
+        *self.meshes.borrow()
+    }
+
+    fn set_mesh_plan_display(&self, display: MeshPlanDisplay) -> Status {
+        let mut meshes = self.meshes.borrow_mut();
+        if meshes.is_none() {
+            return Err(Error::new(ErrorCode::Unsupported, "no meshes here"));
+        }
+        *meshes = Some(display);
+        Ok(())
     }
 }
 
@@ -731,12 +747,64 @@ mod view_verbs_test {
     }
 
     #[test]
+    fn views_meshes_reads_and_sets_how_the_window_draws_its_meshes_in_plan() {
+        let mut t = ViewVerbsTest::new();
+        *t.host.meshes.borrow_mut() = Some(MeshPlanDisplay::Faces);
+        assert_eq!(t.ok("VIEWS MESHES"), "meshes=faces");
+        assert_eq!(t.ok("VIEWS MESHES FOOTPRINT"), "meshes=footprint");
+        assert_eq!(*t.host.meshes.borrow(), Some(MeshPlanDisplay::Footprint));
+        // The words as a person types them.
+        assert_eq!(t.ok("views meshes Hidden"), "meshes=hidden");
+        assert_eq!(*t.host.meshes.borrow(), Some(MeshPlanDisplay::Hidden));
+        assert_eq!(t.ok("VIEWS MESHES faces"), "meshes=faces");
+        // No view is named: the switch is the window's, and no one view is told of it.
+        assert!(t.setting_changes().is_empty());
+    }
+
+    #[test]
+    fn views_meshes_refuses_what_it_does_not_take_and_changes_nothing() {
+        let mut t = ViewVerbsTest::new();
+        *t.host.meshes.borrow_mut() = Some(MeshPlanDisplay::Footprint);
+        let word = t.refused("VIEWS MESHES walls");
+        assert_eq!(word.code, ErrorCode::ParseFailure);
+        assert_eq!(
+            word.message,
+            "VIEWS MESHES takes faces, footprint or hidden, not 'walls'"
+        );
+        let extra = t.refused("VIEWS MESHES faces hidden");
+        assert_eq!(extra.code, ErrorCode::ParseFailure);
+        assert_eq!(*t.host.meshes.borrow(), Some(MeshPlanDisplay::Footprint));
+        // A host that draws no meshes in plan refuses the word, asked or set.
+        *t.host.meshes.borrow_mut() = None;
+        assert_eq!(t.refused("VIEWS MESHES").code, ErrorCode::Unsupported);
+        assert_eq!(
+            t.refused("VIEWS MESHES faces").code,
+            ErrorCode::Unsupported
+        );
+    }
+
+    #[test]
+    fn the_mesh_display_words_go_both_ways_and_nothing_else_reads_as_one() {
+        for display in MeshPlanDisplay::ALL {
+            assert_eq!(MeshPlanDisplay::from_word(display.word()), Some(display));
+            assert_eq!(
+                MeshPlanDisplay::from_word(&display.word().to_ascii_uppercase()),
+                Some(display)
+            );
+        }
+        assert_eq!(MeshPlanDisplay::default(), MeshPlanDisplay::Faces);
+        assert_eq!(MeshPlanDisplay::from_word(""), None);
+        assert_eq!(MeshPlanDisplay::from_word("face"), None);
+    }
+
+    #[test]
     fn views_and_zoom_are_refused_by_name_without_a_window() {
         // What katana_cli and katana_mcp have: an interpreter and no views.
         let mut headless = Session::default();
         for (line, verb) in [
             ("VIEWS", "VIEWS"),
             ("VIEWS LINK 1,2", "VIEWS"),
+            ("VIEWS MESHES footprint", "VIEWS"),
             ("ZOOM", "ZOOM"),
             ("Z", "ZOOM"),
             ("ZOOM IN view=1", "ZOOM"),
