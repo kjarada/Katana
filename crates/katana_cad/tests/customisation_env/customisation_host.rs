@@ -6,6 +6,7 @@ use katana_cad::customisation_host::{
     BUILT_IN_CUSTOMISATION_VARIABLE, built_in_customisation, compiled_in_customisation,
 };
 use katana_cad::customisation_record::builtin_renames_default;
+use katana_core::path_text::environment_variable;
 
 use crate::customisation_support::{SMALL, Scratch, fnv1a, same};
 use crate::{ScopedSeam, environment};
@@ -87,19 +88,44 @@ mod customisation_host {
 
     #[test]
     fn the_seam_is_put_back_as_it_was_when_a_test_ends() {
-        // The helper these tests lean on, checked: whatever the variable was when
-        // the test began - set or not - it is that again afterwards.
+        // The helper these tests lean on, checked: whatever the variable read as when
+        // the test began - set or not - it reads as that again afterwards; and the
+        // process's environment itself is never changed, before, during or after.
         let held = environment();
-        let before = std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE);
+        let before = environment_variable(Some(BUILT_IN_CUSTOMISATION_VARIABLE));
+        let process_before = std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE);
         {
             let seam = ScopedSeam::text(&held, "none");
             assert_eq!(
-                std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE).as_deref(),
-                Some(std::ffi::OsStr::new("none"))
+                environment_variable(Some(BUILT_IN_CUSTOMISATION_VARIABLE)),
+                b"none"
             );
-            assert_eq!(seam.before(), before.as_deref());
+            assert_eq!(seam.before(), before.as_slice());
+            assert_eq!(
+                std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE),
+                process_before
+            );
+            {
+                let _unset = ScopedSeam::new(&held, None);
+                assert_eq!(
+                    environment_variable(Some(BUILT_IN_CUSTOMISATION_VARIABLE)),
+                    b""
+                );
+            }
+            assert_eq!(
+                environment_variable(Some(BUILT_IN_CUSTOMISATION_VARIABLE)),
+                b"none",
+                "a seam made inside another is read as the outer one again when it ends"
+            );
         }
-        assert_eq!(std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE), before);
+        assert_eq!(
+            environment_variable(Some(BUILT_IN_CUSTOMISATION_VARIABLE)),
+            before
+        );
+        assert_eq!(
+            std::env::var_os(BUILT_IN_CUSTOMISATION_VARIABLE),
+            process_before
+        );
     }
 
     #[test]

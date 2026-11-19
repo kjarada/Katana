@@ -35,8 +35,9 @@ pub enum EntryKind {
 /// (0xA000000C), junctions and mount points (0xA0000003), WSL symlinks (0xA000001D) are; OneDrive
 /// and other cloud placeholders (0x9000001A, 0x9000701A, ...), the de-duplication and compression
 /// filters (0x80000013, 0x80000017), app execution aliases (0x8000001B) and ProjFS (0x9000001C)
-/// are not. The ONE definition of the rule: the planner and the apply's FsOps::stat both use it,
-/// and the helper's own check must. Pure, so it is tested on every platform.
+/// are not. The ONE definition of the rule: the apply's FsOps::stat uses it, and the helper's own
+/// check must; the planner takes std's symlink_metadata, whose is_symlink is this same bit
+/// (plan.rs, look). Pure, so it is tested on every platform.
 pub const fn is_link_reparse_tag(tag: u32) -> bool {
     (tag & 0x2000_0000) != 0
 }

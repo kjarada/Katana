@@ -39,41 +39,45 @@ use katana_update::version::program_version_text;
 /// then pointed at stderr: whatever else writes to "stdout" lands in the log,
 /// Rust's own standard output (and so the Terminal console) among it.
 #[cfg(not(windows))]
-#[allow(
-    unsafe_code,
-    reason = "the protocol's stream is made with the C library's dup and dup2, which std does not \
-              have; confined to this module"
-)]
 mod protocol {
-    use std::ffi::c_int;
     use std::fs::File;
     use std::io::Write;
-    use std::os::fd::FromRawFd;
-
-    // unistd.h
-    unsafe extern "C" {
-        fn dup(fd: c_int) -> c_int;
-        fn dup2(old: c_int, new: c_int) -> c_int;
-    }
-
-    // The standard descriptors, STDOUT_FILENO and STDERR_FILENO.
-    const OUTPUT: c_int = 1;
-    const ERROR: c_int = 2;
+    use std::os::fd::AsFd;
 
     /// The protocol's stream; None when the descriptors could not be made.
     pub(super) fn take() -> Option<File> {
         let _ = std::io::stdout().flush();
-        // SAFETY: dup reads this process's descriptor table and makes a new
-        // descriptor for its standard output; nothing is borrowed.
-        let protocol = unsafe { dup(OUTPUT) };
-        // SAFETY: points this process's descriptor 1 at the file of its
-        // descriptor 2; both are the process's own standard streams.
-        if protocol < 0 || unsafe { dup2(ERROR, OUTPUT) } < 0 {
-            return None;
+        // std's duplicate (fcntl F_DUPFD_CLOEXEC) is the C library's dup but
+        // closed on exec: a program the server starts does not hold the
+        // client's pipe open after the server has gone.
+        let protocol = std::io::stdout().as_fd().try_clone_to_owned().ok()?;
+        point_output_at_error()?;
+        Some(File::from(protocol))
+    }
+
+    // Descriptor 1 made the file of descriptor 2 (dup2): std can duplicate a
+    // descriptor but never put the copy at a number of its choosing, so this
+    // one call stays the C library's.
+    #[allow(
+        unsafe_code,
+        reason = "dup2, which std does not have, points descriptor 1 at the file of descriptor 2"
+    )]
+    fn point_output_at_error() -> Option<()> {
+        use std::ffi::c_int;
+
+        // unistd.h
+        unsafe extern "C" {
+            fn dup2(old: c_int, new: c_int) -> c_int;
         }
-        // SAFETY: `protocol` is a descriptor dup has just made, open, and
-        // owned by nothing else: the File is its only owner from here.
-        Some(unsafe { File::from_raw_fd(protocol) })
+
+        // The standard descriptors, STDOUT_FILENO and STDERR_FILENO.
+        const OUTPUT: c_int = 1;
+        const ERROR: c_int = 2;
+
+        // SAFETY: points this process's descriptor 1 at the file of its
+        // descriptor 2; both are the process's own standard streams, and no
+        // Rust object owns descriptor 1 (std's Stdout writes to the number).
+        (unsafe { dup2(ERROR, OUTPUT) } >= 0).then_some(())
     }
 }
 

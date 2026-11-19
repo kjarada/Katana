@@ -507,49 +507,47 @@ fn running_executable() -> Result<PathBuf> {
 
 // std::filesystem::equivalent on Windows: the volume and the file index of each, read from a
 // handle that may be a folder's (FILE_FLAG_BACKUP_SEMANTICS) and that lets every other process on.
+// std opens the handle and closes it; it has no stable way to read the index (MetadataExt's
+// volume_serial_number and file_index are unstable), so that one call stays a Win32 one.
 #[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "the file identity is read through the Win32 handle API, confined to this adapter"
-)]
 mod windows {
-    use std::os::windows::ffi::OsStrExt;
+    use std::fs::{File, OpenOptions};
+    use std::os::windows::fs::OpenOptionsExt;
     use std::path::Path;
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     pub(super) fn file_identity(path: &Path) -> Option<(u32, u32, u32)> {
-        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call; no security
-        // attributes and no template are passed.
-        let handle = unsafe {
-            CreateFileW(
-                wide.as_ptr(),
-                0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                std::ptr::null(),
-                OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS,
-                std::ptr::null_mut(),
-            )
-        };
-        if handle == INVALID_HANDLE_VALUE {
-            return None;
-        }
-        // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value of that plain struct.
-        let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-        // SAFETY: `handle` is the open handle above and `information` a writable struct of the
-        // type the call fills.
-        let read = unsafe { GetFileInformationByHandle(handle, &raw mut information) } != 0;
-        // SAFETY: `handle` is open and is closed once, here.
-        unsafe { CloseHandle(handle) };
-        read.then_some((
+        // No access asked for (the attributes are readable whatever is granted), every other
+        // opener let on, and an existing entry only.
+        let file = OpenOptions::new()
+            .access_mode(0)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .ok()?;
+        let information = information_of(&file)?;
+        Some((
             information.dwVolumeSerialNumber,
             information.nFileIndexHigh,
             information.nFileIndexLow,
         ))
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "GetFileInformationByHandle, the file's volume and index, has no stable std equivalent"
+    )]
+    fn information_of(file: &File) -> Option<BY_HANDLE_FILE_INFORMATION> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
+
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the handle is `file`'s, open for the length of the call, and `information` is a
+        // writable struct of the type the call fills.
+        let read = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) };
+        (read != 0).then_some(information)
     }
 }

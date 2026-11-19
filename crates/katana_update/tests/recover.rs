@@ -4918,53 +4918,34 @@ mod recover_empty_root {
 // ---- recover(), the system seams, on Windows -----------------------------------------------------
 
 #[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "Edition 2024 marks changing the environment unsafe: the cases that change it hold \
-              ENVIRONMENT"
-)]
 mod recover_on_windows {
     use super::*;
-    use katana_core::path_text::environment_variable;
+    use katana_core::path_text::{EnvironmentOverride, environment_variable};
     use katana_update::fsops::{RetryPolicy, make_system_fs_ops};
     use katana_update::process::process_is_elevated;
     use katana_update::recover::recover;
-    use std::ffi::OsString;
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
-    // The environment is the process's, and the cases of this program run on threads of one
-    // process, where the C++'s ran each in its own: every case here, which reads it through
-    // recover(), takes this lock first.
+    // The state folder is read through recover() as Katana reads the environment, which is the
+    // process's, and the cases of this program run on threads of one process, where the C++'s ran
+    // each in its own: every case here takes this lock first.
     static ENVIRONMENT: Mutex<()> = Mutex::new(());
 
     fn environment_lock() -> MutexGuard<'static, ()> {
         ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    // Sets the environment variable for the life of the object (the state folder of state.rs). The
-    // caller holds environment_lock().
+    // The environment variable as recover() reads it (environment_variable), for the life of the
+    // object (the state folder of state.rs), without a change to the process's environment, which
+    // is unsafe since edition 2024. The caller holds environment_lock().
     struct EnvironmentVariable {
-        name: &'static str,
-        previous: Option<OsString>,
+        _override: EnvironmentOverride,
     }
 
     impl EnvironmentVariable {
         fn new(name: &'static str, value: &Path) -> Self {
-            let previous = std::env::var_os(name);
-            // SAFETY: the environment is changed only while ENVIRONMENT is held, and the standard
-            // library's own lock orders it with every read through std::env.
-            unsafe { std::env::set_var(name, value) };
-            Self { name, previous }
-        }
-    }
-
-    impl Drop for EnvironmentVariable {
-        fn drop(&mut self) {
-            match &self.previous {
-                // SAFETY: as in new: the lock is still held (the guard is dropped after this one).
-                Some(value) => unsafe { std::env::set_var(self.name, value) },
-                // SAFETY: as above.
-                None => unsafe { std::env::remove_var(self.name) },
+            Self {
+                _override: EnvironmentOverride::set(name, value),
             }
         }
     }

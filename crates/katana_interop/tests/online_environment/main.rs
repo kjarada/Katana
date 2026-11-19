@@ -3,17 +3,16 @@
 //! OnlineLive.AnExchangeSendsNoCredentialAPersonConfiguredForGdal, which sets
 //! GDAL_HTTP_USERPWD in the environment.
 //!
-//! gtest ran each case in a process of its own; Rust runs a binary's cases on
-//! parallel threads of one, and GDAL reads its options from the environment.
-//! So the case is in a binary of its own, holds ENVIRONMENT for its whole
-//! length, and puts the variable back before it lets go. It reaches the
-//! network, and runs only with KATANA_ONLINE_TESTS=1, as the C++ one does.
+//! GDAL reads its options from the environment itself, so the variable must
+//! be in the process's real environment, where Katana cannot override it. It
+//! is never set in a running process (std::env::set_var is unsafe, since
+//! another thread - GDAL's among them - may be reading the environment at that
+//! moment): the case runs itself again as a child, the variable given to the
+//! child when it is started (Command::env), and the child makes the exchange.
+//! It is a binary of its own all the same, as the C++ case was a process of
+//! its own. It reaches the network, and runs only with KATANA_ONLINE_TESTS=1,
+//! as the C++ one does.
 
-#![allow(
-    unsafe_code,
-    reason = "Edition 2024 makes std::env::set_var and remove_var unsafe: they race a thread that \
-              reads the environment, which the case here rules out by holding ENVIRONMENT."
-)]
 #![allow(
     clippy::module_inception,
     reason = "Inner module names identify the C++ suites for the parity checker."
@@ -22,56 +21,6 @@
 #[path = "../support/online_support.rs"]
 mod online_support;
 
-use std::ffi::{OsStr, OsString};
-use std::sync::{Mutex, MutexGuard, PoisonError};
-
-/// What the process shares - its environment - is changed only while this is
-/// held. A case that panics while holding it poisons it; the next takes it all
-/// the same, since what the panicking case set was put back as it unwound.
-static ENVIRONMENT: Mutex<()> = Mutex::new(());
-
-/// ENVIRONMENT, held until the returned guard is dropped: at the start of
-/// every case here.
-fn environment() -> MutexGuard<'static, ()> {
-    ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Sets `name` to `value`, or removes it for None. The caller holds
-/// ENVIRONMENT.
-fn set_variable(name: &str, value: Option<&OsStr>) {
-    match value {
-        // SAFETY: every case of this binary holds ENVIRONMENT while it reads or
-        // changes the environment, and none starts a thread of its own while it
-        // does, so no other thread of the binary reads it while it changes.
-        Some(value) => unsafe { std::env::set_var(name, value) },
-        // SAFETY: as above.
-        None => unsafe { std::env::remove_var(name) },
-    }
-}
-
-/// One variable of this process's environment, for a scope: GDAL reads its
-/// options from the environment when nothing else set them. Put back as it
-/// was, set or not, when it is dropped. Made only by a case holding
-/// ENVIRONMENT, which it is handed as proof.
-pub struct ScopedEnvironmentVariable {
-    name: &'static str,
-    before: Option<OsString>,
-}
-
-impl ScopedEnvironmentVariable {
-    pub fn new(_held: &MutexGuard<'static, ()>, name: &'static str, value: &str) -> Self {
-        let before = std::env::var_os(name);
-        set_variable(name, Some(OsStr::new(value)));
-        Self { name, before }
-    }
-}
-
-impl Drop for ScopedEnvironmentVariable {
-    fn drop(&mut self) {
-        set_variable(self.name, self.before.as_deref());
-    }
-}
-
 mod online_fetch {
     mod online_live {
         use katana_gis::web_access::{HttpRequest, http_exchange};
@@ -79,15 +28,47 @@ mod online_fetch {
         use crate::online_support::{
             LIVE_SKIP, default_user_agent, holds, live_tests_enabled, must,
         };
-        use crate::{ScopedEnvironmentVariable, environment};
+
+        // Set in the child's environment by the parent: make the exchange,
+        // not the child.
+        const CHILD: &str = "KATANA_ONLINE_ENVIRONMENT_CHILD";
+        const VARIABLE: &str = "GDAL_HTTP_USERPWD";
+        const CREDENTIALS: &str = "katana-test-user:not-a-password";
 
         #[test]
         fn an_exchange_sends_no_credential_a_person_configured_for_gdal() {
-            let held = environment();
             if !live_tests_enabled() {
                 eprintln!("{LIVE_SKIP}");
                 return;
             }
+            if std::env::var_os(CHILD).is_none() {
+                // This case's name as libtest knows it: its module path less
+                // the crate's (the target's) name.
+                let path = module_path!().split_once("::").map_or("", |(_, rest)| rest);
+                let name = format!(
+                    "{path}::an_exchange_sends_no_credential_a_person_configured_for_gdal"
+                );
+                let child = std::process::Command::new(
+                    std::env::current_exe().expect("this program"),
+                )
+                .args([name.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+                .env(CHILD, "1")
+                .env(VARIABLE, CREDENTIALS)
+                .output()
+                .expect("the child runs");
+                assert!(
+                    child.status.success(),
+                    "--- stdout ---\n{}\n--- stderr ---\n{}",
+                    String::from_utf8_lossy(&child.stdout),
+                    String::from_utf8_lossy(&child.stderr)
+                );
+                return;
+            }
+            // The child: the person's setting is in the environment GDAL reads.
+            assert_eq!(
+                std::env::var_os(VARIABLE).as_deref(),
+                Some(std::ffi::OsStr::new(CREDENTIALS))
+            );
             // GDAL_HTTP_USERPWD is a person's setting for a map service. GDAL
             // puts it on every libcurl handle it configures, and libcurl then
             // sends it to whichever host is asked, as `Authorization: Basic`.
@@ -99,11 +80,6 @@ mod online_fetch {
             // the same request with none is answered. A rate limit (403) is
             // neither, so the test asks only that the answer is not the one
             // credentials get.
-            let _configured = ScopedEnvironmentVariable::new(
-                &held,
-                "GDAL_HTTP_USERPWD",
-                "katana-test-user:not-a-password",
-            );
             let request = HttpRequest {
                 url: String::from("https://api.github.com/zen"),
                 user_agent: default_user_agent(),

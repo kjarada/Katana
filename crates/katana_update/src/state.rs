@@ -798,35 +798,71 @@ pub fn process_cleanup_list(state_dir: &Path, root: &Path, fs: &dyn FsOps) -> St
 }
 
 // The replacement of a record on Windows, through the call that reports the system's own error
-// number (the module's write_record).
+// number (the module's write_record). std's rename is not this call: it renames with POSIX
+// semantics where the file system has them and asks no write-through, where the record must be
+// on the disk when the call returns (MOVEFILE_WRITE_THROUGH); so MoveFileExW stays a Win32 call.
+// The error number and the attributes are std's (last_os_error, symlink_metadata).
 #[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "the record is renamed over its old self through the Win32 file API, confined to this adapter"
-)]
 mod windows {
     use super::Replaced;
-    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
     use std::path::Path;
-    use windows_sys::Win32::Foundation::GetLastError;
-    use windows_sys::Win32::Storage::FileSystem::{GetFileAttributesW, MoveFileExW};
 
-    // The values of the Windows SDK's headers (winerror.h, winnt.h, winbase.h).
+    // The values of the Windows SDK's headers (winerror.h, winnt.h).
     const ERROR_ACCESS_DENIED: u32 = 5;
     const ERROR_SHARING_VIOLATION: u32 = 32;
     const ERROR_LOCK_VIOLATION: u32 = 33;
-    const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFF_FFFF;
     const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
     const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
-    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
-    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
-
-    // The path as the C++ hands it over (path::c_str()): the wide text as it is, terminated.
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain(Some(0)).collect()
-    }
 
     pub(super) fn replace_file(from: &Path, to: &Path) -> Replaced {
+        if let Err(error) = move_replacing(from, to) {
+            // GetLastError's DWORD, which std keeps as an i32.
+            let error = error.raw_os_error().unwrap_or(0).cast_unsigned();
+            // 32 sharing violation and 33 lock violation: somebody has the record open. 5 access
+            // denied: the same when a scanner holds it, but also what a read-only record or a
+            // folder in its place gives, which no wait cures. The attributes are the entry's own,
+            // not those of what a link points at (GetFileAttributesW's).
+            let mut worth_retrying =
+                error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
+            if error == ERROR_ACCESS_DENIED {
+                worth_retrying = match std::fs::symlink_metadata(to) {
+                    Ok(entry) => {
+                        (entry.file_attributes()
+                            & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY))
+                            == 0
+                    }
+                    Err(_) => true,
+                };
+            }
+            return Replaced {
+                done: false,
+                worth_retrying,
+                why: format!("os_error={error}"),
+            };
+        }
+        Replaced {
+            done: true,
+            worth_retrying: false,
+            why: String::new(),
+        }
+    }
+
+    // MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH), the system's
+    // error when it fails.
+    #[allow(
+        unsafe_code,
+        reason = "MoveFileExW with write-through has no std equivalent (std::fs::rename asks none)"
+    )]
+    fn move_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+
+        // The path as the C++ hands it over (path::c_str()): the wide text as it is, terminated.
+        let wide =
+            |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain(Some(0)).collect() };
         let from = wide(from);
         let to = wide(to);
         // SAFETY: both are NUL-terminated wide paths that outlive the call.
@@ -836,30 +872,12 @@ mod windows {
                 to.as_ptr(),
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
             )
-        } != 0;
-        if moved {
-            return Replaced {
-                done: true,
-                worth_retrying: false,
-                why: String::new(),
-            };
-        }
-        // SAFETY: GetLastError only reads this thread's last-error value.
-        let error = unsafe { GetLastError() };
-        // 32 sharing violation and 33 lock violation: somebody has the record open. 5 access
-        // denied: the same when a scanner holds it, but also what a read-only record or a folder
-        // in its place gives, which no wait cures.
-        let mut worth_retrying = error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
-        if error == ERROR_ACCESS_DENIED {
-            // SAFETY: `to` is a NUL-terminated wide path that outlives the call.
-            let attributes = unsafe { GetFileAttributesW(to.as_ptr()) };
-            worth_retrying = attributes == INVALID_FILE_ATTRIBUTES
-                || (attributes & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY)) == 0;
-        }
-        Replaced {
-            done: false,
-            worth_retrying,
-            why: format!("os_error={error}"),
+        };
+        if moved != 0 {
+            Ok(())
+        } else {
+            // GetLastError, read at once, before anything else can set it.
+            Err(std::io::Error::last_os_error())
         }
     }
 }
