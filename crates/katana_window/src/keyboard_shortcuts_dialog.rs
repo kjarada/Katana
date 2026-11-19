@@ -170,7 +170,7 @@ impl ShortcutsState {
             "keyboardShortcutsSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search...",
+                placeholder: crate::drive::controls::SEARCH_HINT,
                 ..LineOptions::default()
             },
         )

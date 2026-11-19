@@ -516,7 +516,7 @@ impl ReferenceState {
             "commandReferenceSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search...",
+                placeholder: crate::drive::controls::SEARCH_HINT,
                 // Across the table it searches.
                 width: Some(f32::INFINITY),
                 ..LineOptions::default()

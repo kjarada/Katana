@@ -1020,7 +1020,7 @@ impl GdalToolboxDialog {
                         "gdalToolboxSearch",
                         &mut self.search,
                         LineOptions {
-                            placeholder: "Search...",
+                            placeholder: crate::drive::controls::SEARCH_HINT,
                             // As wide as the tree under it, whose header spans the column.
                             width: Some(f32::INFINITY),
                             ..LineOptions::default()

@@ -1573,7 +1573,7 @@ if(KATANA_TEST_WINDOW)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityReport|!utilitySourceDrawing|?utilityCommand|!utilityRun|?utilityOutput|!utilityScopeView|utilityView=Plan 1 (VIEW 1)|utilityOnScreen=on|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityReport|!utilitySourceDrawing|?utilityCommand|!utilityRun|?utilityOutput|!utilityScopeView|utilityView=Plan 1 (view 1)|utilityOnScreen=on|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput"
             "-DEXPECT=utilityCommand: UTILITY REPORT DRAWING[\r\n]+.*utilityOutput: scope=drawing matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*utilityCommand: UTILITY REPORT VIEW 1[\r\n]+.*utilityStatus: Done\\. The report is below.*utilityOutput: scope=view view=[0-9]+ area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices"
             "-DFORBID=there is none here"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_drawing_headless.png"

@@ -106,6 +106,9 @@ pub struct GisClipDialog {
 impl GisClipDialog {
     pub fn new(context: GisDialogContext, host: &dyn Host) -> Self {
         let mut by = ScopeFilterWidget::new("gisClipBy");
+        // Its heading names what it picks - the boundary's areas - where a second "Apply to"
+        // beside the cut's own read as a second scope of what is cut (the fourth look audit).
+        by.set_heading("Boundary areas");
         by.views = context.views_fn();
         by.set_choice(ScopeChoice::Layers);
         let mut frame = GisToolFrame::new("gisClip", "Clip to Boundary", context, host, true);

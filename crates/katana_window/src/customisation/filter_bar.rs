@@ -56,7 +56,7 @@ impl FilterBar {
     pub fn new(chips: &[&str]) -> Self {
         Self {
             text: String::new(),
-            placeholder: String::from("Search"),
+            placeholder: String::from(crate::drive::controls::SEARCH_HINT),
             chips: chips
                 .iter()
                 .map(|label| Chip {

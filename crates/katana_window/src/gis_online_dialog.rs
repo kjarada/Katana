@@ -1022,7 +1022,7 @@ impl OnlineDataDialog {
             "onlineSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search...",
+                placeholder: crate::drive::controls::SEARCH_HINT,
                 width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
