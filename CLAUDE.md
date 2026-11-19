@@ -433,6 +433,15 @@ These are kept on purpose:
 - the public **TfNSW Utility Schema**, which may be named in the subsurface
   utility tools (`docs/subsurface_utilities.md`, `samples/utilities/`, the
   `UTILITY CHECK` tests, `tools/utility_schema_domains.py`).
+- the **NSW customisation's A3 utility cross-section title frame**, carried
+  exactly as the owner made it - its "Transport for New South Wales" heading,
+  its "Transport / For NSW" logo text and its disclaimer naming TfNSW - on the
+  owner's decision of 2026-11-19 ("i want the exact title frame to be
+  available within the NSW customisation"). It belongs to the NSW built-in
+  only: it is offered when the NSW customisation is the active one, and
+  Katana Standard's frames stay unbranded. The rule above holds everywhere
+  else - no other frame, style, text or doc takes those names, and the frame's
+  code and tests use general words ("the customisation's title frame").
 
 The original third-party reference files live gitignored on the owner's
 machine and are never installed or committed. The one file derived from them
