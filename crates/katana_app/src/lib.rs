@@ -12,6 +12,7 @@ pub mod import_records; // wave 0
 pub mod dxf_verbs; // F1
 pub mod ifc_verbs; // F1
 pub mod session; // S1 (its update part: session/update_part.rs)
+pub mod survey_export_verb; // SURVEY EXPORT (2026-11-19)
 pub mod survey_verbs; // F1
 pub mod update_transport; // S1
 pub mod update_verbs; // S1

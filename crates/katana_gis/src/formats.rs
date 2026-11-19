@@ -300,6 +300,37 @@ fn flag(driver: gdal::GdalDriverH, key: &CStr) -> bool {
     }
 }
 
+/// For a name a raster driver identified: the vector driver that identifies
+/// it too, when the raster cannot be opened - identify_content's guard
+/// against a raster driver's sniff (it says why). None where no vector driver
+/// claims the name, or where the raster opens, which is then the reading.
+fn vector_reading_where_raster_fails(name: &CStr) -> Option<String> {
+    // SAFETY: a NUL-terminated name and no lists; the driver returned lives
+    // as long as the process.
+    let vector_driver = unsafe {
+        gdal::GDALIdentifyDriverEx(name.as_ptr(), gdal::GDAL_OF_VECTOR, ptr::null(), ptr::null())
+    };
+    if vector_driver.is_null() || !flag(vector_driver, gdal::GDAL_DCAP_VECTOR) {
+        return None;
+    }
+    // SAFETY: a NUL-terminated name and no lists; the dataset returned is
+    // closed at once.
+    unsafe {
+        let raster = gdal::GDALOpenEx(
+            name.as_ptr(),
+            gdal::GDAL_OF_READONLY | gdal::GDAL_OF_RASTER,
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+        );
+        if !raster.is_null() {
+            gdal::GDALClose(raster);
+            return None;
+        }
+    }
+    Some(description_of(vector_driver.cast()))
+}
+
 /// The extension of a name, compound ones whole where a format claims them:
 /// "lots.shp.zip" is "shp.zip" to a registry that lists it, "zip" otherwise.
 pub(crate) fn extension_of_name(name: &[u8]) -> String {
@@ -830,6 +861,21 @@ pub fn identify_content(path: &Path) -> Result<Content> {
         };
         let raster = flag(identified, gdal::GDAL_DCAP_RASTER);
         let vector = flag(identified, gdal::GDAL_DCAP_VECTOR);
+        // A raster driver's identification is a sniff, and the XYZ driver's
+        // takes any text of numeric rows: a CSV of two survey points, Point,
+        // Easting, Northing ... under its header, is identified as XYZ, which
+        // then cannot open it ("Couldn't determine X spacing"), while the CSV
+        // driver reads it as the vector layer it is. So where a vector driver
+        // identifies the file too, the raster is asked to open; a raster that
+        // does not is vector data. Measured with GDAL 3.13.2 (2026-11-19).
+        if raster
+            && !vector
+            && let Some(vector_driver) = vector_reading_where_raster_fails(&name_c)
+        {
+            content.driver = vector_driver;
+            content.vector = true;
+            return Ok(content);
+        }
         if raster != vector {
             // A driver of one kind: its word is enough, and a large file is
             // not read twice (GeoJSON reads a whole file to open it).

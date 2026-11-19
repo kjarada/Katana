@@ -5,6 +5,7 @@ mod point_cloud_engine {
     use std::path::Path;
 
     use katana_core::ErrorCode;
+    use katana_core::text::format_fixed;
     use katana_pointcloud::{PointCloud, PointCloudEngine, PointCloudPoint, PointCloudReadOptions};
 
     use crate::{Scratch, near, ok};
@@ -441,6 +442,84 @@ mod point_cloud_engine {
         ok(engine.write(&file, &source));
         let loaded = read_all(&engine, &file);
         expect_millimetres(&source, &loaded);
+    }
+
+    // Coordinates quoted to the millimetre, as a surveyor quotes them, whose
+    // bounds' middle is NOT on the millimetre grid on any axis: x from
+    // ...0.123 to ...4.124 (middle ...2.1235), y the same, z from 20.111 to
+    // 25.444 (middle 22.7775). PDAL's automatic offset is that middle, which
+    // stored every one of these half a millimetre from what it was.
+    fn millimetre_cloud() -> PointCloud {
+        cloud_of(vec![
+            point(334000.123, 6250000.456, 20.111, 100.0, 2, [0, 0, 0], false),
+            point(334001.123, 6250001.456, 20.222, 110.0, 2, [0, 0, 0], false),
+            point(334002.123, 6250002.456, 20.333, 120.0, 1, [0, 0, 0], false),
+            point(334003.123, 6250003.456, 25.444, 130.0, 5, [0, 0, 0], false),
+            point(334004.124, 6250004.457, 20.555, 140.0, 2, [0, 0, 0], false),
+        ])
+    }
+
+    // ASPRS LAS 1.4 R15 stores round((value - offset) / scale). With a 0.001
+    // scale and an offset on the millimetre grid, a millimetre value is a
+    // whole number of steps from the offset and is stored exactly; reading it
+    // back as int * scale + offset in doubles adds only rounding, a half-ulp
+    // at 6.25 x 10^6 being 4.7e-10. So 1e-9, not MILLIMETRE_ROUND_TRIP's half
+    // a millimetre.
+    const EXACT_MILLIMETRES: f64 = 1e-9;
+
+    fn expect_the_same_millimetres(source: &PointCloud, loaded: &PointCloud) {
+        assert_eq!(loaded.points.len(), source.points.len());
+        for expected in &source.points {
+            let found = loaded
+                .points
+                .iter()
+                .find(|p| (p.x - expected.x).abs() < 0.1 && (p.y - expected.y).abs() < 0.1)
+                .unwrap_or_else(|| panic!("no point near x = {}", expected.x));
+            near(found.x, expected.x, EXACT_MILLIMETRES);
+            near(found.y, expected.y, EXACT_MILLIMETRES);
+            near(found.z, expected.z, EXACT_MILLIMETRES);
+        }
+    }
+
+    #[test]
+    fn millimetre_coordinates_are_written_exactly_not_moved_by_the_offset() {
+        let scratch = Scratch::new("millimetre_coordinates_are_written_exactly");
+        let engine = PointCloudEngine;
+        let source = millimetre_cloud();
+        for name in ["survey.las", "survey.laz"] {
+            let file = scratch.file(name);
+            ok(engine.write(&file, &source));
+            let loaded = read_all(&engine, &file);
+            expect_the_same_millimetres(&source, &loaded);
+        }
+    }
+
+    #[test]
+    fn a_cloud_with_no_las_header_converted_to_copc_keeps_its_millimetres_exactly() {
+        // A PLY has no scale or offset to forward, so the COPC writer is given
+        // the millimetre and an offset from the source's bounds. The PLY is
+        // written here as the format's text (PLY 1.0, ASCII, double
+        // properties): PDAL's own PLY writer prints six significant digits by
+        // default (334000.123 as 334000, measured with PDAL 2.10.2), which
+        // would lose the millimetres before the conversion was tried.
+        let scratch = Scratch::new("no_las_header_converted_to_copc");
+        let ply = scratch.file("survey.ply");
+        let copc = scratch.file("survey.copc.laz");
+        let engine = PointCloudEngine;
+        let source = millimetre_cloud();
+        let mut text = format!(
+            "ply\nformat ascii 1.0\nelement vertex {}\nproperty double x\nproperty double y\n\
+             property double z\nend_header\n",
+            source.points.len()
+        );
+        for point in &source.points {
+            let [x, y, z] = [point.x, point.y, point.z].map(|value| format_fixed(value, 3));
+            text.push_str(&format!("{x} {y} {z}\n"));
+        }
+        std::fs::write(&ply, text).expect("the PLY is written");
+        ok(engine.convert_to_copc(&ply, &copc));
+        let loaded = read_all(&engine, &copc);
+        expect_the_same_millimetres(&source, &loaded);
     }
 
     #[test]

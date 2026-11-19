@@ -536,4 +536,29 @@ mod formats {
         );
         assert_eq!(nothing.code, ErrorCode::FileImportFailure);
     }
+
+    #[test]
+    fn a_csv_of_points_the_xyz_raster_driver_sniffs_but_cannot_open_is_vector_data() {
+        // What SURVEY EXPORT writes for two points: numeric rows, which GDAL's
+        // XYZ driver identifies as a grid and then cannot open ("Couldn't
+        // determine X spacing", gdalinfo), and which its CSV driver reads as
+        // a layer of two features (ogrinfo). IMPORT took it for a raster and
+        // refused it: "file holds no raster bands".
+        let dir = temp_dir("points-csv");
+        write_file(
+            &dir.file("points.csv"),
+            "Point,Easting,Northing,Elevation,Code,Description\n\
+             101,334000.000,6250000.000,20.125,,\n\
+             102,334010.500,6250010.250,,,\n",
+        );
+        let content = must(identify_content(&dir.file("points.csv")));
+        assert!(content.vector && !content.raster, "{content:?}");
+        assert_eq!(content.driver, "CSV");
+        assert_eq!(kind_for_path(&dir.file("points.csv")), SourceKind::Vector);
+
+        // A CSV the XYZ driver does open - a regular grid - stays the raster
+        // GDAL reads it as.
+        write_file(&dir.file("grid.csv"), "X,Y,Z\n0,0,1\n1,0,2\n0,1,3\n1,1,4\n");
+        assert_eq!(kind_for_path(&dir.file("grid.csv")), SourceKind::Raster);
+    }
 }

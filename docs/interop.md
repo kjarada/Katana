@@ -340,7 +340,14 @@ and not the arc (no web service sends arcs). A KML's own fields (`Name`,
 always have. A GPX export writes points as waypoints and lines, closed
 ones included, as routes; `.gpx` and `.kmz` are now written by their names
 ("Formats", below). `origin_shift` is still not
-undone on export (QT-07, above). The bridge (`crates/katana_gis/src/processing/bridge.rs`)
+undone on export (QT-07, above). A file Katana wrote, imported again, brings
+its `katana_id` and `layer` fields back as properties as well (the `layer`
+field also names each entity's layer), so a second export leaves them out
+with a warning ("6 property values named like the fields katana_id or layer
+were left out of katana", seen on 2026-11-19 exporting a GeoPackage imported
+from Katana's own); `katana_id` read back is what the round-trip tests find
+entities by (`interop_core`'s `by_katana_id`), so taking it out of the
+properties wants those tests rewritten to match by position first. The bridge (`crates/katana_gis/src/processing/bridge.rs`)
 keeps its own copy of the error collector and of the typed field reading;
 both could move onto the adapter's.
 
@@ -405,6 +412,25 @@ path that cannot be looked at - a file not written yet, or a URL, whose
 look would cost a round trip - is routed by its name: an extension only
 raster readers claim is a raster, one both claim is vector data, except the
 formats that are chiefly imagery (`mbtiles`, `pdf`, `jp2` ...).
+
+**A raster driver's sniff is checked where a vector driver claims the file
+too (2026-11-19).** `GDALIdentifyDriverEx` answers with the first driver whose
+identification passes, and the XYZ driver's passes for any text of numeric
+rows: the CSV `SURVEY EXPORT` writes for two points (Point, Easting, Northing
+... under a header) was identified as XYZ, which then cannot open it
+("Couldn't determine X spacing", `gdalinfo`), so `IMPORT points.csv` was
+routed to the raster import and refused "file holds no raster bands" - while
+GDAL's CSV driver reads it as a layer of two points (`ogrinfo`). Where a
+raster-only driver identifies a file, a vector driver identifies it as well
+and the raster does not open, the file is vector data; a CSV the XYZ driver
+does open, a regular grid, stays the raster GDAL reads it as. The cost - one
+raster open - falls only on a file both kinds of driver claim
+(`formats::a_csv_of_points_the_xyz_raster_driver_sniffs_but_cannot_open_is_vector_data`,
+which fails without it). Found when
+`cli.survey_export_writes_the_drawings_survey_points_and_another_reader_reads_them`
+imported the file it had written. Rejected: routing `.csv` by its name to
+the vector import - a gridded XYZ `.csv` is a DEM, and the name cannot say
+which.
 
 **Archives and paths.**
 
@@ -577,6 +603,28 @@ the properties of level of detail rather than the counts one PDAL version
 happens to produce: coarser is never more, a 5 m query is under a quarter of
 the file, and it still spans the whole extent - which is the difference
 between a level of detail and the `max_points` truncation it replaces.
+
+**A LAS or LAZ written keeps a millimetre value exactly (2026-11-19).** The
+writer gives PDAL a 0.001 scale (audit IO-17) and, since this date, an offset
+of its own: per axis, the whole metre at or below the middle of the points
+(`las_offset` in `crates/katana_pointcloud/src/point_cloud_engine.rs`). It
+used to pass `offset=auto`, whose comment said PDAL takes the points'
+minimum; measured with PDAL 2.10.2 it takes the exact MIDDLE of the bounds -
+points from Z 20.111 to 25.444 were written with `offset_z` 22.7775 - and a
+value stored as round((value - 22.7775) / 0.001) is half a millimetre off.
+`EXPORT cloud.las` of a five-point MGA cloud surveyed to the millimetre wrote
+every height 0.5 mm away from what it was (20.111 as 20.1115, read by `pdal
+info` and by `pdal translate` to text); the old test's coordinates had four
+decimals and a half-millimetre tolerance, so it could not see it. An offset
+on the millimetre grid stores every millimetre value as an exact integer; the
+middle rather than the minimum keeps the int32's reach either side. A COPC
+made from a source with no LAS header to forward (a PLY, a PCD) takes the
+offset from the source header's bounds, and `auto` stays only where those are
+not known. Tests:
+`point_cloud_engine::millimetre_coordinates_are_written_exactly_not_moved_by_the_offset`
+and
+`point_cloud_engine::a_cloud_with_no_las_header_converted_to_copc_keeps_its_millimetres_exactly`,
+to 1e-9.
 
 **Asked by a person since 2026-09-23.** GIS > Convert Point Cloud to COPC
 (and `COPC` on either command line) converts a file, and GIS > Import Point Cloud offers a
