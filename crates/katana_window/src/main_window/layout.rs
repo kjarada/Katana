@@ -519,10 +519,13 @@ fn layout_json(window: &MainWindow, version: i64, rows: &BTreeMap<String, usize>
                 .collect(),
         );
         let panels = &window.ui.docking.panels;
+        // A minimised panel is saved at its place, and comes back open: the tray is a session's,
+        // and a layout's version 3 has no word for it.
         let menus = quoted(
             panels
                 .open
                 .iter()
+                .chain(&panels.minimised)
                 .map(|panel| format!("{}={}", panel.menu, panel_place_text(&panel.place)))
                 .collect(),
         );

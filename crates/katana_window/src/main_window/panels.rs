@@ -1042,6 +1042,8 @@ impl MainWindow {
             .rect;
         let mut left = inside;
         left.max.x = (readouts.min.x - crate::theme::style::GROUP_GAP).max(left.min.x);
+        let tray = self.tray_items();
+        let mut restored = None;
         ui.scope_builder(
             UiBuilder::new()
                 .max_rect(left)
@@ -1049,11 +1051,80 @@ impl MainWindow {
             |ui| {
                 ui.set_clip_rect(left.intersect(ui.clip_rect()));
                 ui.spacing_mut().interact_size.y = bar.height() - 4.0;
+                // The tray first, where the eye starts along the bar: what Minimise hid stays one
+                // click from coming back.
+                if !tray.is_empty() {
+                    let shown = ui.horizontal(|ui| {
+                        begin_target(
+                            ui,
+                            TargetSpec::new("MinimisedToolBar", TargetKind::ToolBar, "Minimised"),
+                        );
+                        let _ = controls::label_as(ui, "MinimisedLabel", "Minimised:", quiet("Minimised:"));
+                        for (dock, title) in &tray {
+                            let pressed = controls::button_as(
+                                ui,
+                                &format!("Restore{dock}"),
+                                title,
+                                egui::Button::new(RichText::new(title.as_str()).small()),
+                            )
+                            .on_hover_text(format!("{title}: put it back where it was"))
+                            .clicked();
+                            if pressed {
+                                restored = Some(dock.clone());
+                            }
+                        }
+                    });
+                    end_target(ui, shown.response.rect);
+                    ui.add_space(crate::theme::style::GROUP_GAP);
+                }
                 ui.add(egui::Label::new(RichText::new(message.as_str()).small()).truncate());
             },
         );
+        if let Some(dock) = restored {
+            self.restore_from_tray(&dock);
+        }
         if crs_clicked {
             self.show_project_crs(None);
+        }
+    }
+
+    /// The tray's buttons, as (dock, title): the torn-off menus minimised, in the order they went,
+    /// then the views (`ViewWorkspace::tray_actions`). The main window's own panels hide on
+    /// Minimise, View > Panels bringing them back, so they have none.
+    fn tray_items(&self) -> Vec<(String, String)> {
+        let mut items: Vec<(String, String)> = self
+            .ui
+            .docking
+            .panels
+            .minimised
+            .iter()
+            .map(|panel| {
+                let dock = super::docking::panel_dock_name(&panel.menu);
+                let title = self
+                    .ui
+                    .panels
+                    .chrome
+                    .title_bar(&dock)
+                    .map_or_else(|| panel.menu.clone(), |bar| String::from(bar.title()));
+                (dock, title)
+            })
+            .collect();
+        items.extend(self.exec.workspace.tray_actions().into_iter().filter_map(|action| {
+            let dock = action.name.strip_prefix("Restore").map(String::from)?;
+            Some((dock, action.display_text()))
+        }));
+        items
+    }
+
+    /// A tray button pressed: its torn-off menu or view put back where it was.
+    pub(crate) fn restore_from_tray(&mut self, dock: &str) {
+        let restored = match super::docking::panel_menu(dock) {
+            Some(menu) => self.ui.docking.panels.restore(menu),
+            None => self.exec.workspace.restore_named(dock),
+        };
+        if !restored {
+            self.exec
+                .log_message(&format!("{dock} is not minimised; nothing to put back"), true);
         }
     }
 

@@ -691,6 +691,148 @@ mod torn_off_menus {
             Some(PanelPlace::Docked(Side::Right))
         );
     }
+
+    /// The pointer clicked on `panel`'s title-bar button `button` as a person clicks it: moved
+    /// there, pressed and let go a frame later, with no move between. The harness's own press
+    /// (`Posted::press`) marks the button clicked without the pointer, so it passed while a real
+    /// click on Float or Minimise did nothing (the owner, 2026-11-19).
+    fn click_bar_button(window: &mut MainWindow, headless: &mut Headless, panel: &str, button: &str) {
+        let at = headless
+            .snapshot()
+            .control(panel, button)
+            .unwrap_or_else(|| panic!("{panel} has its {button}"))
+            .rect
+            .center();
+        headless.push_event(Event::PointerMoved(at));
+        let _ = headless.frame(window);
+        for pressed in [true, false] {
+            headless.push_event(Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            let _ = headless.frame(window);
+        }
+        headless
+            .settle(window)
+            .unwrap_or_else(|problem| panic!("{problem}"));
+    }
+
+    #[test]
+    fn a_click_on_a_floating_torn_off_menus_dock_button_docks_it_and_float_floats_it_again() {
+        let mut window = MainWindow::new();
+        window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+        let mut headless = settled(&mut window);
+        let place = |window: &MainWindow| {
+            window.ui.docking.panels.find("drawMenu").map(|panel| panel.place)
+        };
+        assert!(matches!(place(&window), Some(PanelPlace::Floating(_))));
+        // A floating panel's button docks it, and says so.
+        let button = headless
+            .snapshot()
+            .control("drawMenuTornOff", "DockFloatButton")
+            .expect("the panel's Float button")
+            .clone();
+        assert_eq!(button.text, "Dock", "a floating panel's button docks it");
+        click_bar_button(&mut window, &mut headless, "drawMenuTornOff", "DockFloatButton");
+        assert_eq!(place(&window), Some(PanelPlace::Docked(Side::Right)));
+        let button = headless
+            .snapshot()
+            .control("drawMenuTornOff", "DockFloatButton")
+            .expect("the docked panel's Float button")
+            .clone();
+        assert_eq!(button.text, "Float");
+        click_bar_button(&mut window, &mut headless, "drawMenuTornOff", "DockFloatButton");
+        assert!(
+            matches!(place(&window), Some(PanelPlace::Floating(_))),
+            "{:?}",
+            place(&window)
+        );
+    }
+
+    #[test]
+    fn a_floating_torn_off_menu_dragged_by_any_edge_or_corner_is_sized_by_it() {
+        // The owner, 2026-11-19: "i cannot resize these menus when i go the edge". Each edge and
+        // corner, the pointer pressed a point inside the panel's border and moved 40 points out.
+        let out = 40.0;
+        /// An edge's name, where on the panel it is pressed, and how far it is dragged.
+        type Edge = (&'static str, fn(Rect) -> Pos2, egui::Vec2);
+        let edges: [Edge; 5] = [
+            ("top", |r: Rect| Pos2::new(r.center().x - 40.0, r.min.y + 1.0), egui::vec2(0.0, -out)),
+            ("right", |r: Rect| Pos2::new(r.max.x - 1.0, r.center().y), egui::vec2(out, 0.0)),
+            ("bottom", |r: Rect| Pos2::new(r.center().x, r.max.y - 1.0), egui::vec2(0.0, out)),
+            ("left", |r: Rect| Pos2::new(r.min.x + 1.0, r.center().y), egui::vec2(-out, 0.0)),
+            ("corner", |r: Rect| r.max - egui::vec2(1.0, 1.0), egui::vec2(out, out)),
+        ];
+        for (edge, grab, by) in edges {
+            let mut window = MainWindow::new();
+            window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+            let mut headless = settled(&mut window);
+            let before = drawn(&headless, "drawMenuTornOff");
+            let from = grab(before);
+            drag(&mut window, &mut headless, from, from + by);
+            let after = drawn(&headless, "drawMenuTornOff");
+            let grew = after.size() - before.size();
+            // The drag's 40 points, less the half point the pixel snap may take at each end.
+            assert!(
+                (grew.x - by.x.abs()).abs() <= 1.0 && (grew.y - by.y.abs()).abs() <= 1.0,
+                "{edge}: {before:?} -> {after:?}"
+            );
+            if edge == "left" {
+                assert!((after.max.x - before.max.x).abs() <= 1.0, "left keeps its right edge");
+            }
+            if edge == "top" {
+                // Sized from its top, it is not moved as a press on its title bar moves it.
+                assert!((after.max.y - before.max.y).abs() <= 1.0, "top keeps its bottom edge");
+            }
+        }
+    }
+
+    #[test]
+    fn a_docked_torn_off_menus_band_is_sized_by_a_drag_just_beside_its_seam() {
+        let mut window = MainWindow::new();
+        window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+        window.trigger("viewMenuPanelDockDrawMenuLeft").expect("docked");
+        let mut headless = settled(&mut window);
+        let before = drawn(&headless, "drawMenuTornOff");
+        let seam = headless
+            .snapshot()
+            .control_anywhere("menuBandSeamLeft")
+            .expect("the band's seam")
+            .rect;
+        // Four points from the middle of the 4 point seam, two past its edge over the views':
+        // within the reach that makes it findable.
+        let from = Pos2::new(seam.center().x + 4.0, seam.center().y);
+        drag(&mut window, &mut headless, from, from + egui::vec2(60.0, 0.0));
+        let after = drawn(&headless, "drawMenuTornOff");
+        assert!(
+            (after.width() - before.width() - 60.0).abs() <= 1.0,
+            "{before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_torn_off_menus_minimise_hides_it_to_the_tray_and_its_button_there_puts_it_back() {
+        let mut window = MainWindow::new();
+        window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+        let mut headless = settled(&mut window);
+        let before = window.ui.docking.panels.find("drawMenu").map(|panel| panel.place);
+        click_bar_button(&mut window, &mut headless, "drawMenuTornOff", "DockMinimiseButton");
+        let frame = headless.snapshot();
+        assert!(frame.target("drawMenuTornOff").is_none(), "the panel is hidden");
+        assert!(
+            frame.control("MinimisedToolBar", "RestoredrawMenuTornOff").is_some(),
+            "and has its button in the tray"
+        );
+        click_bar_button(&mut window, &mut headless, "MinimisedToolBar", "RestoredrawMenuTornOff");
+        assert!(headless.snapshot().target("drawMenuTornOff").is_some(), "back");
+        assert_eq!(
+            window.ui.docking.panels.find("drawMenu").map(|panel| panel.place),
+            before,
+            "where it was"
+        );
+    }
 }
 
 mod torn_off_flow {

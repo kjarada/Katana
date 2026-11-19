@@ -2187,6 +2187,11 @@ impl ViewWorkspace {
         restored
     }
 
+    /// `restore_view` by the view's dock name, as the window's tray holds it (`Restore<dock>`).
+    pub fn restore_named(&self, dock: &str) -> bool {
+        dock_id(dock).is_some_and(|id| self.restore_view(id))
+    }
+
     /// Maximise or Restore, as the view's own button does; pressing it activates the view first.
     pub fn toggle_maximised(&self, id: ViewId) {
         let mut inner = self.inner();

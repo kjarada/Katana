@@ -400,6 +400,10 @@ pub const PANEL_EDGE_ZONE: f32 = 48.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenuPanels {
     pub open: Vec<MenuPanel>,
+    /// The panels their Minimise hid to the tray, in the order they went, each keeping its place
+    /// for when its tray button puts it back. Kept apart from `open`, so that nothing drawing,
+    /// docking or sizing the bands has to remember to pass over them.
+    pub minimised: Vec<MenuPanel>,
     /// Each side's band breadth, by `Side::index`.
     pub bands: [f32; 4],
 }
@@ -408,6 +412,7 @@ impl Default for MenuPanels {
     fn default() -> Self {
         Self {
             open: Vec::new(),
+            minimised: Vec::new(),
             bands: DEFAULT_BANDS,
         }
     }
@@ -443,6 +448,10 @@ impl MenuPanels {
 
     /// `menu` torn off floating at `rect`; a menu already torn off is left where it is.
     pub fn tear_off(&mut self, menu: &str, rect: Rect) {
+        // Torn off again while minimised, it comes back where it was rather than twice.
+        if self.restore(menu) {
+            return;
+        }
         if self.find(menu).is_none() {
             self.open.push(MenuPanel {
                 menu: String::from(menu),
@@ -466,9 +475,30 @@ impl MenuPanels {
 
     /// `menu`'s panel closed. False for a menu not torn off.
     pub fn close(&mut self, menu: &str) -> bool {
-        let before = self.open.len();
+        let before = self.open.len() + self.minimised.len();
         self.open.retain(|panel| panel.menu != menu);
-        self.open.len() != before
+        self.minimised.retain(|panel| panel.menu != menu);
+        self.open.len() + self.minimised.len() != before
+    }
+
+    /// `menu`'s panel hidden to the tray, keeping its place. False for a menu not open.
+    pub fn minimise(&mut self, menu: &str) -> bool {
+        let Some(at) = self.open.iter().position(|panel| panel.menu == menu) else {
+            return false;
+        };
+        let panel = self.open.remove(at);
+        self.minimised.push(panel);
+        true
+    }
+
+    /// `menu`'s minimised panel put back where it was. False for a menu not minimised.
+    pub fn restore(&mut self, menu: &str) -> bool {
+        let Some(at) = self.minimised.iter().position(|panel| panel.menu == menu) else {
+            return false;
+        };
+        let panel = self.minimised.remove(at);
+        self.open.push(panel);
+        true
     }
 
     /// `side`'s band dragged to `breadth`, kept between LEAST_BAND and MOST_BAND.

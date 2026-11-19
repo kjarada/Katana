@@ -2175,14 +2175,30 @@ an item runs its action as the menu's does, and the panel stays open; its
 ticks follow the window, since the items are made again each frame.
 
 * **Docked or floating.** A torn-off menu floats as an Area of its own,
-  sized by its right and bottom edges and its corner; its title bar dragged
+  sized by any of its four edges and four corners (`<menu>TornOffResize<Part>`,
+  a strip 6 points in, as Windows' own sizing border is some 8 pixels; a
+  press there sizes it and does not also move it); its title bar dragged
   to a side of the views (within 48 points of it) docks it there, in a band
   between the views and that side's panels, which every panel docked to that
   side shares; dragged from a band into the views, it floats. A band's seam
-  with the views (`menuBandSeam<Side>`) sets its breadth (96 to 640; 240
-  at the sides and 168 along the top and bottom to begin with). The title
-  bar's Float floats it or docks it again where it was; Minimise and Close
-  close it.
+  with the views (`menuBandSeam<Side>`, pressed up to 3 points either side
+  of its 4) sets its breadth (96 to 640; 240 at the sides and 168 along the
+  top and bottom to begin with). The title bar's Float floats it, and reads
+  Dock while it floats, docking it again where it was; Minimise hides it to
+  the tray at the left of the status bar (`MinimisedToolBar`, its button
+  `Restore<menu>TornOff`), which puts it back where it was; Close closes it.
+  A minimised menu is saved at its place and comes back open.
+* **Why the click did nothing (2026-11-19).** The owner found Float and
+  Minimise did nothing and the edges would not size. Float read Float on a
+  panel already floating - the chrome's floating facts came from egui_dock,
+  which does not hold these panels - so a click docked it; Minimise was a
+  second Close; and only the right and bottom edges sized it, 4 points in.
+  The harness's press (`Posted::press`) marks a button clicked without the
+  pointer, so the tests passed: the tests now click and drag with pointer
+  events (`tool_bar_docking.rs`, `torn_off_menus`). Rejected: a tray of its
+  own for the menus beside one for the views - the window had none drawn at
+  all, so a minimised view was also lost until this; one tray in the status
+  bar holds both (the main window's own panels hide on Minimise, as before).
 * **The actions.** `viewMenuTearOff<Menu>` (the menu's object name with its
   first letter upper case: `viewMenuTearOffViewMenu`,
   `viewMenuTearOffViewToolBars`), `viewMenuPanelDock<Menu><Side>`,
@@ -2768,8 +2784,10 @@ control name.
 **Minimise is a tray, and why.** A floating dock is a window inside the main
 window, with the window's shortcuts and no taskbar button of its own, and a
 docked panel is not a window at all. So Minimise HIDES the dock and puts a
-button for it on `MinimisedToolBar` at the bottom of the main window (its
-buttons `Restore<dock>`), and the button puts it back exactly where it was:
+button for it on `MinimisedToolBar` at the left of the main window's status
+bar (its buttons `Restore<dock>`; drawn there since 2026-11-19 - before
+that the Rust window drew no tray, and a minimised view had no way back),
+and the button puts it back exactly where it was:
 in its place and tab when docked, at its rectangle when floating. Docked,
 the place is egui_dock's tree: the layout as it was when the dock went -
 every split and its share - is kept with it and given back whole when the

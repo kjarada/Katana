@@ -27,8 +27,9 @@
 //! shortcuts, each item a click that runs its action as the menu's does, and kept open. Docked,
 //! it is in a band between the views and a side - down a side in one column that scrolls, along
 //! the top or the bottom flowed into columns side by side (`flowed_items_ui`); floating, an Area
-//! of its own sized by its edges. Its title bar is dragged to a side of the views to dock it
-//! there, or into the views to float it.
+//! of its own sized by any edge or corner (`RESIZE_HANDLES`). Its title bar is dragged to a side
+//! of the views to dock it there, or into the views to float it; its Minimise hides it to the
+//! status bar's tray (`MainWindow::tray_items`), whose button puts it back where it was.
 
 use std::collections::BTreeMap;
 
@@ -56,6 +57,80 @@ use crate::tools::flyout_button::{
 /// How near two bars' breadths are for them to share a column (`MainWindow::line_for`): the
 /// breadths are whole points, so equal within rounding.
 const BREADTH_TOLERANCE: f32 = 1.0;
+
+/// How far in from a floating torn-off menu's edge a press sizes it: Windows' own sizing border
+/// is 8 pixels at 100% (GetSystemMetrics SM_CXSIZEFRAME plus SM_CXPADDEDBORDER), and 6 points
+/// keeps clear of an item's icon, 15 points in.
+const RESIZE_EDGE: f32 = 6.0;
+
+/// One edge or corner of a floating torn-off menu that sizes it, and which of the rectangle's
+/// sides it moves: `moves` is (left, top, right, bottom).
+struct ResizeHandle {
+    part: &'static str,
+    cursor: CursorIcon,
+    moves: (bool, bool, bool, bool),
+}
+
+/// The edges first and the corners after, so a corner, drawn later, is over the two edges it
+/// joins.
+const RESIZE_HANDLES: [ResizeHandle; 8] = [
+    ResizeHandle { part: "Left", cursor: CursorIcon::ResizeWest, moves: (true, false, false, false) },
+    ResizeHandle { part: "Top", cursor: CursorIcon::ResizeNorth, moves: (false, true, false, false) },
+    ResizeHandle { part: "Right", cursor: CursorIcon::ResizeEast, moves: (false, false, true, false) },
+    ResizeHandle { part: "Bottom", cursor: CursorIcon::ResizeSouth, moves: (false, false, false, true) },
+    ResizeHandle { part: "TopLeft", cursor: CursorIcon::ResizeNorthWest, moves: (true, true, false, false) },
+    ResizeHandle { part: "TopRight", cursor: CursorIcon::ResizeNorthEast, moves: (false, true, true, false) },
+    ResizeHandle { part: "BottomLeft", cursor: CursorIcon::ResizeSouthWest, moves: (true, false, false, true) },
+    ResizeHandle { part: "BottomRight", cursor: CursorIcon::ResizeSouthEast, moves: (false, false, true, true) },
+];
+
+impl ResizeHandle {
+    /// Where on `panel` it is pressed: a strip RESIZE_EDGE in along each side it moves, a corner
+    /// twice that square.
+    fn area(&self, panel: Rect) -> Rect {
+        let (left, top, right, bottom) = self.moves;
+        let reach = if (left || right) && (top || bottom) {
+            RESIZE_EDGE * 2.0
+        } else {
+            RESIZE_EDGE
+        };
+        let x = if left {
+            panel.min.x..=panel.min.x + reach
+        } else if right {
+            panel.max.x - reach..=panel.max.x
+        } else {
+            panel.min.x..=panel.max.x
+        };
+        let y = if top {
+            panel.min.y..=panel.min.y + reach
+        } else if bottom {
+            panel.max.y - reach..=panel.max.y
+        } else {
+            panel.min.y..=panel.max.y
+        };
+        Rect::from_x_y_ranges(x, y)
+    }
+
+    /// `panel` dragged by it `delta`: the sides it moves follow the pointer, the others stay, and
+    /// it is never less than LEAST_PANEL, the side being moved stopping there.
+    fn resized(&self, panel: Rect, delta: Vec2) -> Rect {
+        let (left, top, right, bottom) = self.moves;
+        let mut sized = panel;
+        if left {
+            sized.min.x = (panel.min.x + delta.x).min(panel.max.x - LEAST_PANEL.x);
+        }
+        if right {
+            sized.max.x = (panel.max.x + delta.x).max(panel.min.x + LEAST_PANEL.x);
+        }
+        if top {
+            sized.min.y = (panel.min.y + delta.y).min(panel.max.y - LEAST_PANEL.y);
+        }
+        if bottom {
+            sized.max.y = (panel.max.y + delta.y).max(panel.min.y + LEAST_PANEL.y);
+        }
+        sized
+    }
+}
 
 /// The opacity of the accent filling a drop target under its outline (`drags_ui`): enough to
 /// read as a place over a plan's lines, faint enough that what is under it still shows.
@@ -866,11 +941,16 @@ impl MainWindow {
                 continue;
             };
             let icon = if found.icon.is_empty() { "Panels" } else { found.icon };
-            self.ui
-                .panels
-                .chrome
-                .install(&panel_dock_name(menu), icon, DockRole::Panel)
+            let dock = panel_dock_name(menu);
+            let chrome = &mut self.ui.panels.chrome;
+            chrome
+                .install(&dock, icon, DockRole::Panel)
                 .set_title(&found.title.replace('&', ""));
+            let floating = matches!(
+                self.ui.docking.panels.find(menu).map(|panel| panel.place),
+                Some(PanelPlace::Floating(_))
+            );
+            chrome.set_floating(&dock, floating);
         }
         for side in Side::ALL {
             let Some(band) = geometry.menu_bands[side.index()] else {
@@ -921,9 +1001,17 @@ impl MainWindow {
                     Vec2::new(band.width(), separator),
                 ),
             };
+            // Pressed up to half a floating panel's sizing edge (RESIZE_EDGE) either side of the
+            // 4 point seam, 10 points in all: the seam alone was a target too thin to find.
+            let reach = RESIZE_EDGE / 2.0;
+            let grab = if side.vertical() {
+                seam.expand2(Vec2::new(reach, 0.0))
+            } else {
+                seam.expand2(Vec2::new(0.0, reach))
+            };
             let response = ui
                 .interact(
-                    seam,
+                    grab,
                     egui::Id::new(("katanaMenuBandSeam", side.word())),
                     Sense::drag(),
                 )
@@ -977,49 +1065,29 @@ impl MainWindow {
                 .constrain(false)
                 .show(&ctx, |ui| {
                     self.menu_panel_at(ui, rect, &menu, composed, false);
-                    // The right and bottom edges and the corner between them size it.
-                    let edge = 4.0;
-                    for (part, area, cursor) in [
-                        (
-                            "Right",
-                            Rect::from_min_max(
-                                Pos2::new(rect.max.x - edge, rect.min.y + 24.0),
-                                Pos2::new(rect.max.x, rect.max.y - edge),
-                            ),
-                            CursorIcon::ResizeHorizontal,
-                        ),
-                        (
-                            "Bottom",
-                            Rect::from_min_max(
-                                Pos2::new(rect.min.x, rect.max.y - edge),
-                                Pos2::new(rect.max.x - edge, rect.max.y),
-                            ),
-                            CursorIcon::ResizeVertical,
-                        ),
-                        (
-                            "Corner",
-                            Rect::from_min_max(rect.max - Vec2::splat(edge * 2.0), rect.max),
-                            CursorIcon::ResizeSouthEast,
-                        ),
-                    ] {
+                    // Every edge and corner sizes it, as a window's do. They were the right and
+                    // bottom edges only, 4 points in, and a person going for the left edge, or
+                    // missing a strip that thin, found it would not size (the owner, 2026-11-19).
+                    // The handles are inside the panel's rectangle, where the Area's layer takes
+                    // the pointer, and drawn after its contents, so they are over the title bar
+                    // and the scroll bar at the edges.
+                    for handle in RESIZE_HANDLES {
                         let response = ui
                             .interact(
-                                area,
-                                egui::Id::new(("katanaTornOffResize", menu.as_str(), part)),
+                                handle.area(rect),
+                                egui::Id::new(("katanaTornOffResize", menu.as_str(), handle.part)),
                                 Sense::drag(),
                             )
-                            .on_hover_cursor(cursor);
+                            .on_hover_cursor(handle.cursor);
+                        let mut control = ControlRecord::new(
+                            &format!("{}Resize{}", panel_dock_name(&menu), handle.part),
+                            ControlKind::Other,
+                        );
+                        control.enabled = true;
+                        control.visible = true;
+                        record(ui, &response, control);
                         if response.dragged() {
-                            let delta = response.drag_delta();
-                            let grow = match part {
-                                "Right" => Vec2::new(delta.x, 0.0),
-                                "Bottom" => Vec2::new(0.0, delta.y),
-                                _ => delta,
-                            };
-                            resized = Some(Rect::from_min_size(
-                                rect.min,
-                                (rect.size() + grow).max(LEAST_PANEL),
-                            ));
+                            resized = Some(handle.resized(rect, response.drag_delta()));
                         }
                     }
                 });
@@ -1084,7 +1152,12 @@ impl MainWindow {
             return false;
         };
         match request {
-            ChromeRequest::Minimise(_) | ChromeRequest::Close(_) => {
+            // Minimise hides it to the tray in the status bar, whose button puts it back where it
+            // was; it was a second Close, and the panel was gone (the owner, 2026-11-19).
+            ChromeRequest::Minimise(_) => {
+                self.ui.docking.panels.minimise(&menu);
+            }
+            ChromeRequest::Close(_) => {
                 self.ui.docking.panels.close(&menu);
             }
             ChromeRequest::Float(_) => {
@@ -1102,6 +1175,16 @@ impl MainWindow {
                     .center();
                 let pointer = self.ui.docking.pointer.unwrap_or(from);
                 let rect = self.ui.docking.drawn_rect(dock).unwrap_or(Rect::NOTHING);
+                // A press on a floating panel's sizing edge, which runs along its title bar too,
+                // sizes it and does not also move it.
+                let floating = matches!(panel.place, PanelPlace::Floating(_));
+                if floating
+                    && RESIZE_HANDLES
+                        .iter()
+                        .any(|handle| handle.area(rect).contains(pointer))
+                {
+                    return true;
+                }
                 self.ui.docking.panel_drag = Some(PanelDrag {
                     menu,
                     from: pointer,

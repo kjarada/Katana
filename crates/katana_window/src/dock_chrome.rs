@@ -1216,6 +1216,19 @@ impl<Tab: DockTab> DockChrome<Tab> {
         }
     }
 
+    /// Records whether dock `name`, placed by its owner rather than by egui_dock (a torn-off menu's
+    /// panel), is floating, so its bar's Float button says Dock while it floats: it read Float on
+    /// a floating panel and docked it, which a person took for a Float that did nothing right (the
+    /// owner, 2026-11-19). `refresh` would recompute the set from a DockState, so this is for a
+    /// chrome that is never refreshed - the main window's panels'.
+    pub fn set_floating(&mut self, name: &str, floating: bool) {
+        if floating {
+            self.floating.insert(String::from(name));
+        } else {
+            self.floating.remove(name);
+        }
+    }
+
     /// The bar's facts for dock `name`.
     pub fn facts(&self, name: &str) -> BarFacts {
         BarFacts {
