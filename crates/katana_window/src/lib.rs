@@ -516,6 +516,9 @@ pub mod main_window {
     pub mod layout;
     pub mod panels;
     pub mod window;
+    // Toolbars docked and floating, menus torn off (2026-11-19).
+    pub mod docking;
+    pub mod docking_ui;
 
     pub use executor::{Executor, LineSource, SceneStore, WindowRequest};
     pub use window::MainWindow;

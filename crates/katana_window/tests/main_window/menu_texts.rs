@@ -103,12 +103,29 @@ mod menu_texts {
         );
     }
 
-    /// The icons of `menu`'s own items (not its submenus'), with their names.
+    /// The icons of `menu`'s own items (not its submenus'), with their names. It read every
+    /// submenu's items too (`Menu::actions`) until View > Toolbars had a Place submenu a toolbar
+    /// (2026-11-19), whose thirteen are the same five choices for thirteen bars; each submenu is
+    /// held to the rule on its own (`menus_within`), as a person reads one list at a time.
     fn item_icons(menu: &Menu) -> Vec<(String, &'static str)> {
-        menu.actions()
-            .into_iter()
-            .map(|action| (action.name.clone(), action.icon))
+        menu.items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action(action) => Some((action.name.clone(), action.icon)),
+                _ => None,
+            })
             .collect()
+    }
+
+    /// `menu` and every submenu under it, depth first.
+    fn menus_within(menu: &Menu) -> Vec<Menu> {
+        let mut found = vec![menu.clone()];
+        for item in &menu.items {
+            if let MenuItem::Menu(sub) = item {
+                found.extend(menus_within(sub));
+            }
+        }
+        found
     }
 
     #[test]
@@ -125,21 +142,29 @@ mod menu_texts {
             "viewTextSize",
             "terrainEditMenu",
         ] {
-            let icons = item_icons(&menu(&window, name));
-            assert!(icons.len() >= 2, "the premise: {name} has its items ({icons:?})");
-            let mut shared = Vec::new();
-            for (at, (item, icon)) in icons.iter().enumerate() {
-                assert!(
-                    katana_window::icons::is_named_icon(icon),
-                    "{name} > {item} has no icon of the set ({icon:?})"
-                );
-                for (other, theirs) in &icons[at + 1..] {
-                    if icon == theirs {
-                        shared.push(format!("{item} and {other}: {icon}"));
+            let whole = menu(&window, name);
+            let all: Vec<(String, &'static str)> = menus_within(&whole)
+                .iter()
+                .flat_map(item_icons)
+                .collect();
+            assert!(all.len() >= 2, "the premise: {name} has its items ({all:?})");
+            for each in menus_within(&whole) {
+                let name = each.name.as_str();
+                let icons = item_icons(&each);
+                let mut shared = Vec::new();
+                for (at, (item, icon)) in icons.iter().enumerate() {
+                    assert!(
+                        katana_window::icons::is_named_icon(icon),
+                        "{name} > {item} has no icon of the set ({icon:?})"
+                    );
+                    for (other, theirs) in &icons[at + 1..] {
+                        if icon == theirs {
+                            shared.push(format!("{item} and {other}: {icon}"));
+                        }
                     }
                 }
+                assert!(shared.is_empty(), "{name}'s items sharing an icon: {shared:?}");
             }
-            assert!(shared.is_empty(), "{name}'s items sharing an icon: {shared:?}");
         }
     }
 

@@ -2179,6 +2179,129 @@ pub fn tool_bar_strip(
     out
 }
 
+/// Where a floating toolbar's items go when they wrap in a width (main_window::docking_ui): each
+/// item's offset from the bar's corner, which are shown - a separator that would begin or end a
+/// row parts nothing and is not - how many rows there are, and the bar's size.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WrappedLayout {
+    pub shown: Vec<bool>,
+    pub offsets: Vec<(i32, i32)>,
+    pub rows: usize,
+    pub size: (i32, i32),
+}
+
+/// Lays items of `sizes` out in rows of `width`, as many to a row as fit inside the bar's padding
+/// with the strip's spacing between them, each row as high as the highest item, and the rest on
+/// the rows under; an item wider than the room is a row of its own. Nothing is hidden behind an
+/// arrow: a floating bar is as tall as its rows need.
+pub fn wrap_strip(sizes: &[(i32, i32)], separators: &[bool], width: i32) -> WrappedLayout {
+    let count = sizes.len();
+    let breadth = sizes.iter().map(|size| size.1).max().unwrap_or(0);
+    let mut layout = WrappedLayout {
+        shown: vec![true; count],
+        offsets: vec![(0, 0); count],
+        rows: 0,
+        size: (width, 2 * TOOL_BAR_PADDING_ACROSS),
+    };
+    if count == 0 {
+        return layout;
+    }
+    let right = width - TOOL_BAR_PADDING_ALONG;
+    let mut x = TOOL_BAR_PADDING_ALONG;
+    let mut row = 0;
+    let mut last_in_row: Option<usize> = None;
+    for (index, &(item_width, _)) in sizes.iter().enumerate() {
+        let separator = separators.get(index).copied().unwrap_or(false);
+        if last_in_row.is_some() && x + item_width > right {
+            // The row ends: a separator last in it parts nothing.
+            if let Some(last) = last_in_row
+                && separators.get(last).copied().unwrap_or(false)
+            {
+                layout.shown[last] = false;
+            }
+            row += 1;
+            x = TOOL_BAR_PADDING_ALONG;
+            last_in_row = None;
+        }
+        if separator && last_in_row.is_none() {
+            // Nor does one that would begin a row.
+            layout.shown[index] = false;
+            continue;
+        }
+        layout.offsets[index] = (
+            x,
+            TOOL_BAR_PADDING_ACROSS + row as i32 * (breadth + TOOL_BAR_SPACING),
+        );
+        x += item_width + TOOL_BAR_SPACING;
+        last_in_row = Some(index);
+    }
+    if let Some(last) = last_in_row
+        && separators.get(last).copied().unwrap_or(false)
+    {
+        layout.shown[last] = false;
+    }
+    layout.rows = row + 1;
+    layout.size = (
+        width,
+        layout.rows as i32 * breadth
+            + row as i32 * TOOL_BAR_SPACING
+            + 2 * TOOL_BAR_PADDING_ACROSS,
+    );
+    layout
+}
+
+/// Draws `strip` wrapped in rows of `width` points (`wrap_strip`) from where `ui` is, as a ToolBar
+/// target, every item shown: a floating toolbar's buttons. `widget` draws a Widget item at its
+/// rectangle and answers whether it was clicked. The strip is drawn across, whatever its
+/// `vertical`.
+pub fn tool_bar_wrapped(
+    ui: &mut Ui,
+    strip: &Strip,
+    width: f32,
+    widget: &mut dyn FnMut(&mut Ui, Rect, &str) -> bool,
+) -> StripResponse {
+    let across = Strip {
+        vertical: false,
+        ..strip.clone()
+    };
+    let sizes: Vec<(i32, i32)> = across
+        .items
+        .iter()
+        .map(|item| item.size(across.icon_size))
+        .collect();
+    let separators: Vec<bool> = across
+        .items
+        .iter()
+        .map(|item| *item == StripItem::Separator)
+        .collect();
+    let breadth = sizes.iter().map(|size| size.1).max().unwrap_or(0);
+    let layout = wrap_strip(&sizes, &separators, width.floor() as i32);
+    let (bar, _) = ui.allocate_exact_size(
+        Vec2::new(width, layout.size.1 as f32),
+        Sense::hover(),
+    );
+    let mut out = StripResponse::default();
+    begin_target(
+        ui,
+        TargetSpec::new(&across.name, TargetKind::ToolBar, &across.title),
+    );
+    for (index, item) in across.items.iter().enumerate() {
+        if !layout.shown[index] {
+            continue;
+        }
+        let (x, y) = layout.offsets[index];
+        let (item_width, item_height) = sizes[index];
+        let rect = Rect::from_min_size(
+            bar.min + Vec2::new(x as f32, (y + (breadth - item_height) / 2) as f32),
+            Vec2::new(item_width as f32, item_height as f32),
+        );
+        draw_strip_item(ui, rect, item, &across, widget, &mut out);
+        out.rects.push((String::from(item.name()), rect));
+    }
+    end_target(ui, bar);
+    out
+}
+
 /// The icon a bar with every item hidden is drawn as (`tool_bar_strip`): its first tool's, when
 /// the bar has `room` for a tool button and its padding; None leaves it the overflow arrow.
 fn collapsed_sign(strip: &Strip, layout: &StripLayout, room: i32) -> Option<&'static str> {

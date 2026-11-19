@@ -34,13 +34,20 @@ use crate::terrain::main_window_surface_display::surface_styles_action;
 use crate::terrain::surface_edit_ui::SurfaceEditUi;
 use crate::theme::palette::{TEXT_SIZES, TextSize, text_size_steps};
 
-/// Where a toolbar is: a row along the top, down the left or right side, or along the bottom.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Where a toolbar is (main_window::docking): a line of one of the window's sides - a row along
+/// the top or the bottom, a column down the left or the right, each numbered from the window's
+/// edge inwards - or floating; the Drafting bar has its own row over the status bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BarPlace {
     Top(usize),
-    Left,
-    Right,
-    Bottom,
+    Left(usize),
+    Right(usize),
+    /// A row along the bottom, over the Drafting bar.
+    Bottom(usize),
+    /// Floating over the views, its buttons wrapped in its width.
+    Floating(super::docking::FloatAt),
+    /// The Drafting bar's own row, which is not docked elsewhere (main_window::docking).
+    Drafting,
     /// In no toolbar area: a layout left it out.
     Nowhere,
 }
@@ -691,6 +698,91 @@ pub fn tool_bar_icon(bar: &ToolBar, widget_icon: &dyn Fn(&str) -> Option<&'stati
             _ => None,
         })
         .unwrap_or("Toolbars")
+}
+
+/// A toolbar's own Place submenu (View > Toolbars > Place, and its right-click menu): Dock Top,
+/// Left, Right and Bottom and Float, the one it is at checked - its dock actions,
+/// `viewToolBarDock<Bar><Side>` (main_window::docking), named by the key its toggle is named by.
+pub fn tool_bar_place_menu(bar: &ToolBar, place: &BarPlace, icon: &'static str) -> Menu {
+    use super::docking::{Side, dock_action_name};
+    let key = bar.title.replace(' ', "");
+    let at = place.docked().map(|(side, _)| side);
+    let mut menu = Menu::new(&format!("viewToolBarPlace{key}"), &bar.title)
+        .icon(icon)
+        .tip(&format!(
+            "Where the {} toolbar is: docked along a side of the window, or floating over the \
+             views",
+            bar.title
+        ));
+    for side in Side::ALL {
+        // Each side its own icon, an arrow into a box from that side, so the four are told apart
+        // without reading them (the third look audit's G).
+        let (text, icon) = match side {
+            Side::Top => ("Dock &Top", "ViewBack"),
+            Side::Left => ("Dock &Left", "ViewLeft"),
+            Side::Right => ("Dock &Right", "ViewRight"),
+            Side::Bottom => ("Dock &Bottom", "ViewFront"),
+        };
+        let along = if side.vertical() { "down" } else { "along" };
+        menu.items.push(MenuItem::Action(
+            act(
+                &dock_action_name(&key, Some(side)),
+                icon,
+                text,
+                &format!(
+                    "Dock the {} toolbar {along} the {} of the window",
+                    bar.title,
+                    side.word()
+                ),
+            )
+            .checkable(at == Some(side)),
+        ));
+    }
+    menu.items.push(MenuItem::Action(
+        act(
+            &dock_action_name(&key, None),
+            "Float",
+            "&Float",
+            &format!(
+                "Float the {} toolbar over the views, its buttons wrapped in rows a person widens \
+                 by its edge",
+                bar.title
+            ),
+        )
+        .checkable(matches!(place, BarPlace::Floating(_))),
+    ));
+    menu
+}
+
+/// View > Toolbars > Reset Toolbars: every toolbar back where a new window has it, and shown.
+pub fn reset_tool_bars_action() -> Action {
+    act(
+        super::docking::RESET_ACTION,
+        "ResetLayout",
+        "&Reset Toolbars",
+        "Put every toolbar back where a new window has it, docked and shown",
+    )
+}
+
+/// The toolbars at the places `places` gives them (main_window::docking), in its order: a bar it
+/// does not hold keeps its built place, after those it does.
+pub fn apply_places(bars: &mut Vec<(ToolBar, BarPlace)>, places: &[(String, BarPlace)]) {
+    let order = |name: &str| places.iter().position(|(bar, _)| bar == name);
+    for (bar, place) in bars.iter_mut() {
+        if let Some(at) = order(&bar.name) {
+            *place = places[at].1;
+        }
+    }
+    let mut keyed: Vec<(usize, (ToolBar, BarPlace))> = std::mem::take(bars)
+        .into_iter()
+        .enumerate()
+        .map(|(built, entry)| {
+            let key = order(&entry.0.name).unwrap_or(places.len() + built);
+            (key, entry)
+        })
+        .collect();
+    keyed.sort_by_key(|(key, _)| *key);
+    bars.extend(keyed.into_iter().map(|(_, entry)| entry));
 }
 
 /// The window's menus and toolbars, composed from its own rows and every workbench's, in the
@@ -1400,9 +1492,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     ui.tools.refresh_tool_bar(&mut annotate_bar);
     let mut modify_bar = ui.tool_rows.modify_bar.clone();
     ui.tools.refresh_tool_bar(&mut modify_bar);
-    bars.push((draw_bar, BarPlace::Left));
-    bars.push((annotate_bar, BarPlace::Left));
-    bars.push((modify_bar, BarPlace::Right));
+    bars.push((draw_bar, BarPlace::Left(0)));
+    bars.push((annotate_bar, BarPlace::Left(0)));
+    bars.push((modify_bar, BarPlace::Right(0)));
     let mut format_bar = ToolBar::new("FormatToolBar", "Format");
     format_bar.items.push(ToolBarItem::Action(layers_action()));
     format_bar
@@ -1469,6 +1561,12 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     // seatThirdToolBarRow: Surface Edit and BIM on a row of their own.
     bars.push((surface_edit_bar, BarPlace::Top(2)));
     bars.push((bim_bar, BarPlace::Top(2)));
+    // The places a restored layout or a move gave the toolbars, in their order along their lines;
+    // one the places do not hold (a toolbar added by a later build) stays as built, after them.
+    // Before View > Toolbars is made, whose Place items are checked by them.
+    if restored && let Some(places) = &ui.bars.places {
+        apply_places(&mut bars, places);
+    }
     let drafting = ui.drawing.drafting_bar(document);
 
     // ---- View > Toolbars, Text Size, Reset Window Layout (buildWindowMenu) -------------------
@@ -1518,6 +1616,17 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             )));
         }
     }
+    // Where each toolbar is: docked along a side, or floating (main_window::docking). A submenu a
+    // toolbar, in the order of the toggles above, each of its items one of its dock actions.
+    toolbars.items.push(MenuItem::Section(String::from("Place")));
+    for name in MADE {
+        if let Some((bar, place)) = bars.iter().find(|(bar, _)| bar.name == name) {
+            let icon = tool_bar_icon(bar, &family_icon);
+            let menu = tool_bar_place_menu(bar, place, icon);
+            signs.insert(menu.name.clone(), (icon, menu.tip.clone()));
+            toolbars.items.push(MenuItem::Menu(menu));
+        }
+    }
     toolbars.items.push(MenuItem::Section(String::from("Buttons")));
     toolbars.items.push(MenuItem::Action(
         act(
@@ -1540,6 +1649,8 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             .checkable(pixels == ui.bars.icon_size),
         ));
     }
+    toolbars.items.push(MenuItem::Section(String::from("Layout")));
+    toolbars.items.push(MenuItem::Action(reset_tool_bars_action()));
     let mut text_size = Menu::new("viewTextSize", "Te&xt Size");
     signs.insert(
         String::from("viewTextSize"),
@@ -1581,17 +1692,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             "Put the panels and toolbars back where a new window has them",
         )));
     }
-    // The rows a restored layout gave the top toolbars; one it does not place stays as built.
-    if restored && let Some(rows) = &ui.bars.rows {
-        for (bar, place) in &mut bars {
-            if let BarPlace::Top(_) = place
-                && let Some(row) = rows.get(&bar.name)
-            {
-                *place = BarPlace::Top(*row);
-            }
-        }
-    }
-    bars.push((drafting, BarPlace::Bottom));
+    bars.push((drafting, BarPlace::Drafting));
     // What fill_by_name could not find: logged by the window once its log exists.
     let _ = problems;
     // Each submenu's status tip on its row too, where a parent menu's report reads it, as Qt's
