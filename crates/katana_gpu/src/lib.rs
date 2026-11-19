@@ -44,16 +44,8 @@ mod simd {
     pub(crate) mod pack_kernels;
 
     #[cfg(target_arch = "x86_64")]
-    #[allow(
-        unsafe_code,
-        reason = "The AVX2 kernel is a target-feature function of unaligned loads and stores, as the C++ kernel is; pack_kernels calls it only on a CPU that has AVX2."
-    )]
     mod pack_avx2;
     #[cfg(target_arch = "aarch64")]
-    #[allow(
-        unsafe_code,
-        reason = "The NEON kernel is a target-feature function of loads and stores, as the C++ kernel is; pack_kernels calls it only on a CPU that has NEON."
-    )]
     mod pack_neon;
 }
 

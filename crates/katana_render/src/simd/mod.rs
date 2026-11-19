@@ -7,11 +7,10 @@
 //! comparisons, and nothing is fused. The rasteriser promises the same frame
 //! on every thread count (Rule 7), and the SIMD level must not be a second way
 //! to break that.
-
-#![allow(
-    unsafe_code,
-    reason = "Runtime-selected SIMD instructions are confined to the kernels, entered only with proof that the processor runs them."
-)]
+//!
+//! The kernels are safe functions of slices (avx2.rs, neon.rs); the one
+//! unsafe step, entering a target-feature function from code without the
+//! feature, is in the two entries below, each resting on a Kernels.
 
 use crate::disjoint::TilePixels;
 use crate::framebuffer::Rgba;
@@ -71,6 +70,10 @@ pub(crate) fn kernels() -> Option<Kernels> {
     clippy::too_many_arguments,
     reason = "The signature mirrors the C++ kernel entry, one argument a buffer."
 )]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn transform_vertices(
     _kernels: Kernels,
     mvp: &[f64; 16],
@@ -118,6 +121,10 @@ pub(crate) fn transform_vertices(
 #[allow(
     clippy::too_many_arguments,
     reason = "The signature mirrors the C++ kernel entry."
+)]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
 )]
 pub(crate) fn shade_rows(
     _kernels: Kernels,

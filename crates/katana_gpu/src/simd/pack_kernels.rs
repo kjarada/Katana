@@ -5,11 +5,10 @@
 //! offset is the scalar's double subtraction, rounded to float by CVTPD2PS
 //! (FCVTN on ARM), which rounds as `as f32` does - to nearest, under the
 //! default MXCSR (FPCR) - and nothing is fused.
-
-#![allow(
-    unsafe_code,
-    reason = "Runtime-selected SIMD instructions are confined to the kernels, entered only with proof that the processor runs them."
-)]
+//!
+//! The kernels are safe functions of slices; the one unsafe step, entering a
+//! target-feature function from code without the feature, is in
+//! pack_vertices below, resting on a Kernels.
 
 use crate::gpu_scene::GpuVertex;
 use katana_geometry::Point3;
@@ -52,6 +51,10 @@ pub(crate) fn kernels() -> Option<Kernels> {
 /// float(z - origin[2]), colors[i]. `positions` and `colors` hold at least
 /// out.len() entries.
 #[cfg(target_arch = "x86_64")]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn pack_vertices(
     _kernels: Kernels,
     positions: &[Point3],
@@ -64,6 +67,10 @@ pub(crate) fn pack_vertices(
 }
 
 #[cfg(target_arch = "aarch64")]
+#[allow(
+    unsafe_code,
+    reason = "Entering the active level's target-feature kernel, which a Kernels proves the processor runs."
+)]
 pub(crate) fn pack_vertices(
     _kernels: Kernels,
     positions: &[Point3],

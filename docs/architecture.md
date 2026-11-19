@@ -239,11 +239,14 @@ table, in the same commit.
 `unsafe_code = "deny"`) and allowed, module by module and each with its
 reason, only where a module must be unsafe: the FFI adapters to GDAL, PDAL,
 PROJ, SQLite and libcurl, the operating-system calls of the update layer,
-the SIMD kernels, and the one module that hands the task pool's tasks
+the entries into the SIMD kernels (the kernels themselves are safe
+functions since 2026-11-20, `docs/performance.md`, "Safe kernels"), and the
+one module that hands the task pool's tasks
 disjoint parts of one buffer (`docs/rust.md`, "The workspace"). On
 2026-11-16 the owner decided that it is to go everywhere it can: safe crates
 in place of the bindings of our own, the hand-written SIMD kernels removed
-in favour of their scalar twins, and `#![forbid(unsafe_code)]` in every
+in favour of their scalar twins (superseded on 2026-11-20: the kernels
+stay, made safe, for their speed), and `#![forbid(unsafe_code)]` in every
 crate but the two shim boundaries of GDAL's algorithm framework and PDAL.
 That work has not started (`docs/rust.md`, "Not done").
 

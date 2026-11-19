@@ -3,20 +3,26 @@
 //!
 //! Four vertices a step, as pack_avx2 takes them. The C++'s LD3 splits two
 //! vertices' six doubles into x, y and z registers; Rust does not promise
-//! Vec3's field order, so the same pairs are loaded from the fields by name.
+//! Vec3's field order, so the same pairs are built from the fields by name.
 //! Each lane is the scalar loop's own subtraction of the origin, rounded to
 //! float by FCVTN, which rounds to nearest (the FPCR default) as `as f32`
-//! does. ST4 then interleaves x, y, z and the colour words - stored as the
-//! bits they are, never converted - into four whole GpuVertex records.
+//! does. The C++'s ST4 then interleaved x, y, z and the colour words into four
+//! whole GpuVertex records through a pointer; here each record is built from
+//! the registers' lanes (katana_core's neon_lanes) and its colour word, which
+//! is copied as the bits it is, never converted - the same sixteen words.
+//!
+//! A safe function, entered from pack_kernels.rs with the proof that the
+//! processor runs NEON.
 
 use crate::gpu_scene::GpuVertex;
+use katana_core::simd::neon_lanes::{f32x4_lanes, f64x2};
 use katana_geometry::Point3;
 use katana_render::Rgba;
 use std::arch::aarch64::*;
 
 /// The contract is pack_kernels::pack_vertices'.
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn pack_vertices(
+pub(super) fn pack_vertices(
     positions: &[Point3],
     colors: &[Rgba],
     origin: [f64; 3],
@@ -25,40 +31,42 @@ pub(super) unsafe fn pack_vertices(
     let count = out.len();
     assert!(positions.len() >= count && colors.len() >= count);
     let whole = count / 4 * 4;
-    // SAFETY: the caller has proved the processor runs NEON (Kernels). The
-    // pair loads read local arrays; each colour load reads colors[i .. i + 4]
-    // with i + 4 <= count, and each ST4 writes out[i .. i + 4]: four whole
-    // #[repr(C)] GpuVertex records of four 4-byte words, sixteen floats.
-    unsafe {
-        let words = out.as_mut_ptr().cast::<f32>();
-        let ox = vdupq_n_f64(origin[0]);
-        let oy = vdupq_n_f64(origin[1]);
-        let oz = vdupq_n_f64(origin[2]);
-        for (step, p) in positions[..whole].as_chunks::<4>().0.iter().enumerate() {
-            let i = 4 * step;
-            // Vertices i, i + 1, then i + 2, i + 3: x, y and z apart.
-            let ax = vld1q_f64([p[0].x, p[1].x].as_ptr());
-            let ay = vld1q_f64([p[0].y, p[1].y].as_ptr());
-            let az = vld1q_f64([p[0].z, p[1].z].as_ptr());
-            let bx = vld1q_f64([p[2].x, p[3].x].as_ptr());
-            let by = vld1q_f64([p[2].y, p[3].y].as_ptr());
-            let bz = vld1q_f64([p[2].z, p[3].z].as_ptr());
-            let vertex = float32x4x4_t(
-                vcombine_f32(
-                    vcvt_f32_f64(vsubq_f64(ax, ox)),
-                    vcvt_f32_f64(vsubq_f64(bx, ox)),
-                ),
-                vcombine_f32(
-                    vcvt_f32_f64(vsubq_f64(ay, oy)),
-                    vcvt_f32_f64(vsubq_f64(by, oy)),
-                ),
-                vcombine_f32(
-                    vcvt_f32_f64(vsubq_f64(az, oz)),
-                    vcvt_f32_f64(vsubq_f64(bz, oz)),
-                ),
-                vreinterpretq_f32_u32(vld1q_u32(colors.as_ptr().add(i))),
-            );
-            vst4q_f32(words.add(4 * i), vertex);
+    let ox = vdupq_n_f64(origin[0]);
+    let oy = vdupq_n_f64(origin[1]);
+    let oz = vdupq_n_f64(origin[2]);
+    let steps = positions[..whole]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(colors[..whole].as_chunks::<4>().0)
+        .zip(out[..whole].as_chunks_mut::<4>().0);
+    for ((p, inks), vertices) in steps {
+        // Vertices i, i + 1, then i + 2, i + 3: x, y and z apart.
+        let ax = f64x2(&[p[0].x, p[1].x]);
+        let ay = f64x2(&[p[0].y, p[1].y]);
+        let az = f64x2(&[p[0].z, p[1].z]);
+        let bx = f64x2(&[p[2].x, p[3].x]);
+        let by = f64x2(&[p[2].y, p[3].y]);
+        let bz = f64x2(&[p[2].z, p[3].z]);
+        let xs = f32x4_lanes(vcombine_f32(
+            vcvt_f32_f64(vsubq_f64(ax, ox)),
+            vcvt_f32_f64(vsubq_f64(bx, ox)),
+        ));
+        let ys = f32x4_lanes(vcombine_f32(
+            vcvt_f32_f64(vsubq_f64(ay, oy)),
+            vcvt_f32_f64(vsubq_f64(by, oy)),
+        ));
+        let zs = f32x4_lanes(vcombine_f32(
+            vcvt_f32_f64(vsubq_f64(az, oz)),
+            vcvt_f32_f64(vsubq_f64(bz, oz)),
+        ));
+        for (k, vertex) in vertices.iter_mut().enumerate() {
+            *vertex = GpuVertex {
+                x: xs[k],
+                y: ys[k],
+                z: zs[k],
+                color: inks[k],
+            };
         }
     }
     // The last one to three, one at a time.

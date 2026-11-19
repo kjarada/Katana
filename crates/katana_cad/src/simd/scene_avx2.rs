@@ -12,21 +12,17 @@
 //! Where the C++ loads a point's three doubles through a pointer, these read
 //! the Point3's fields, whose layout Rust does not fix: a copy of a value is
 //! the value, so the bits are the same.
-
-#![allow(
-    unsafe_code,
-    reason = "Runtime-selected SIMD instructions are confined to the kernels, entered only with proof that the processor runs them."
-)]
-#![allow(
-    unused_unsafe,
-    reason = "Whether an intrinsic that takes no pointer is a safe call inside an AVX2 function depends on the toolchain's stdarch; every kernel body is one unsafe block either way."
-)]
+//!
+//! Safe functions, entered from scene_kernels.rs with the proof that the
+//! processor runs AVX2: no intrinsic here takes a pointer, and registers come
+//! from and go back to the slices through katana_core's x86_lanes.
 
 use super::scene_kernels::{
     KernelParams, PARAM_GROUND, PARAM_LIFT_DATUM, PARAM_LIFT_FACTOR, PARAM_LIGHT_ON,
     PARAM_RAMP_LOW, PARAM_RAMP_SPAN, PARAM_RAMP_TABLE, PARAM_SKY_MINUS_GROUND, PARAM_SUN,
     PARAM_SUN_X, PARAM_SUN_Y, PARAM_SUN_Z, RAMP_SEGMENTS,
 };
+use katana_core::simd::x86_lanes::{f64x4, f64x4_lanes, u32x4, u32x4_lanes, u32x8, u32x8_lanes};
 use katana_geometry::Point3;
 use std::arch::x86_64::*;
 
@@ -242,15 +238,14 @@ macro_rules! ramp {
             twice,
             _mm256_slli_epi64::<32>(_mm256_add_epi64(twice, _mm256_set1_epi64x(1))),
         );
-        let table = &params[PARAM_RAMP_TABLE..PARAM_RAMP_TABLE + 6 * RAMP_SEGMENTS];
+        // Six rows: red stops, red steps, green stops, ...
+        let table = params[PARAM_RAMP_TABLE..PARAM_RAMP_TABLE + 6 * RAMP_SEGMENTS]
+            .as_chunks::<RAMP_SEGMENTS>()
+            .0;
         let mut channels = [_mm_setzero_si128(); 3];
         for (channel, value) in channels.iter_mut().enumerate() {
-            let stops = _mm256_castpd_si256(_mm256_loadu_pd(
-                table[2 * channel * RAMP_SEGMENTS..].as_ptr(),
-            ));
-            let steps = _mm256_castpd_si256(_mm256_loadu_pd(
-                table[(2 * channel + 1) * RAMP_SEGMENTS..].as_ptr(),
-            ));
+            let stops = _mm256_castpd_si256(f64x4(&table[2 * channel]));
+            let steps = _mm256_castpd_si256(f64x4(&table[2 * channel + 1]));
             let a = _mm256_castsi256_pd(_mm256_permutevar8x32_epi32(stops, pick));
             let step = _mm256_castsi256_pd(_mm256_permutevar8x32_epi32(steps, pick));
             *value = _mm256_cvttpd_epi32(_mm256_add_pd(
@@ -264,50 +259,39 @@ macro_rules! ramp {
 
 /// lifted[4 i ..] = x, y, datum + (z - datum) * factor, z of each point.
 #[target_feature(enable = "avx2")]
-pub(super) unsafe fn lift(points: &[Point3], params: &KernelParams, lifted: &mut [f64]) {
+pub(super) fn lift(points: &[Point3], params: &KernelParams, lifted: &mut [f64]) {
     assert!(lifted.len() >= 4 * points.len());
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); each
-    // store writes the four doubles of a vertex, inside `lifted` as asserted.
-    unsafe {
-        let factor = _mm256_set1_pd(params[PARAM_LIFT_FACTOR]);
-        let datum = _mm256_set1_pd(params[PARAM_LIFT_DATUM]);
-        for (i, p) in points.iter().enumerate() {
-            // (x, y, z, z), then the third lifted.
-            let point = _mm256_setr_pd(p.x, p.y, p.z, p.z);
-            _mm256_storeu_pd(
-                lifted[4 * i..4 * i + 4].as_mut_ptr(),
-                lift_point!(point, factor, datum),
-            );
-        }
+    let factor = _mm256_set1_pd(params[PARAM_LIFT_FACTOR]);
+    let datum = _mm256_set1_pd(params[PARAM_LIFT_DATUM]);
+    for (vertex, p) in lifted.as_chunks_mut::<4>().0.iter_mut().zip(points) {
+        // (x, y, z, z), then the third lifted.
+        let point = _mm256_setr_pd(p.x, p.y, p.z, p.z);
+        *vertex = f64x4_lanes(lift_point!(point, factor, datum));
     }
 }
 
 /// For each triangle in order, the normal of its lifted corners, turned up,
 /// added to its corners' sums in the order a, b, c.
 #[target_feature(enable = "avx2")]
-pub(super) unsafe fn surface_normals(lifted: &[f64], triangles: &[[u32; 3]], normals: &mut [f64]) {
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); every
-    // load and store goes through a four-double slice, bounds-checked.
-    unsafe {
-        let zero = _mm256_setzero_pd();
-        let minus_one = _mm256_set1_pd(-1.0);
-        for corner in triangles {
-            let at = corner.map(|vertex| 4 * vertex as usize);
-            let a = _mm256_loadu_pd(lifted[at[0]..at[0] + 4].as_ptr());
-            let b = _mm256_loadu_pd(lifted[at[1]..at[1] + 4].as_ptr());
-            let c = _mm256_loadu_pd(lifted[at[2]..at[2] + 4].as_ptr());
-            let mut n = cross!(_mm256_sub_pd(b, a), _mm256_sub_pd(c, a));
-            // if (n.z < 0.0) n = n * -1.0;
-            let down = _mm256_cmp_pd::<_CMP_LT_OQ>(_mm256_permute4x64_pd::<ZZZZ>(n), zero);
-            n = _mm256_blendv_pd(n, _mm256_mul_pd(n, minus_one), down);
-            // One corner at a time, in order: a repeated corner adds twice.
-            for &offset in &at {
-                let sum = &mut normals[offset..offset + 4];
-                _mm256_storeu_pd(
-                    sum.as_mut_ptr(),
-                    _mm256_add_pd(_mm256_loadu_pd(sum.as_ptr()), n),
-                );
-            }
+pub(super) fn surface_normals(lifted: &[f64], triangles: &[[u32; 3]], normals: &mut [f64]) {
+    // Four doubles a vertex, each found (and bounds-checked) by its number.
+    let vertices = lifted.as_chunks::<4>().0;
+    let sums = normals.as_chunks_mut::<4>().0;
+    let zero = _mm256_setzero_pd();
+    let minus_one = _mm256_set1_pd(-1.0);
+    for corner in triangles {
+        let at = corner.map(|vertex| vertex as usize);
+        let a = f64x4(&vertices[at[0]]);
+        let b = f64x4(&vertices[at[1]]);
+        let c = f64x4(&vertices[at[2]]);
+        let mut n = cross!(_mm256_sub_pd(b, a), _mm256_sub_pd(c, a));
+        // if (n.z < 0.0) n = n * -1.0;
+        let down = _mm256_cmp_pd::<_CMP_LT_OQ>(_mm256_permute4x64_pd::<ZZZZ>(n), zero);
+        n = _mm256_blendv_pd(n, _mm256_mul_pd(n, minus_one), down);
+        // One corner at a time, in order: a repeated corner adds twice.
+        for &vertex in &at {
+            let sum = &mut sums[vertex];
+            *sum = f64x4_lanes(_mm256_add_pd(f64x4(sum), n));
         }
     }
 }
@@ -319,7 +303,7 @@ pub(super) unsafe fn surface_normals(lifted: &[f64], triangles: &[[u32; 3]], nor
     clippy::too_many_arguments,
     reason = "The C++ helper's arguments, one a buffer."
 )]
-unsafe fn surface_vertices_four(
+fn surface_vertices_four(
     lifted: &[f64],
     normals: Option<&[f64]>,
     params: &KernelParams,
@@ -330,38 +314,34 @@ unsafe fn surface_vertices_four(
     colours: &mut [u32],
 ) {
     assert!(lifted.len() >= 16 && positions.len() >= 4 && colours.len() >= 4);
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); the
-    // one store writes four colours, inside `colours` as asserted.
-    unsafe {
-        for (j, position) in positions.iter_mut().take(4).enumerate() {
-            *position = Point3::new(lifted[4 * j], lifted[4 * j + 1], lifted[4 * j + 2]);
-        }
-        let mut colour = if use_ramp {
-            ramp!(
-                _mm256_setr_pd(lifted[3], lifted[7], lifted[11], lifted[15]),
-                params
-            )
-        } else {
-            _mm_set1_epi32(flat as i32)
-        };
-        if let Some(n) = normals {
-            assert!(n.len() >= 16);
-            let x = _mm256_setr_pd(n[0], n[4], n[8], n[12]);
-            let y = _mm256_setr_pd(n[1], n[5], n[9], n[13]);
-            let z = _mm256_setr_pd(n[2], n[6], n[10], n[14]);
-            let length = hypot3!(x, y, z);
-            let lit = _mm256_cmp_pd::<_CMP_GT_OQ>(length, _mm256_setzero_pd());
-            colour = shade!(colour, intensity!(light, x, y, z, length), lit);
-        }
-        _mm_storeu_si128(colours.as_mut_ptr().cast::<__m128i>(), colour);
+    for (j, position) in positions.iter_mut().take(4).enumerate() {
+        *position = Point3::new(lifted[4 * j], lifted[4 * j + 1], lifted[4 * j + 2]);
     }
+    let mut colour = if use_ramp {
+        ramp!(
+            _mm256_setr_pd(lifted[3], lifted[7], lifted[11], lifted[15]),
+            params
+        )
+    } else {
+        _mm_set1_epi32(flat as i32)
+    };
+    if let Some(n) = normals {
+        assert!(n.len() >= 16);
+        let x = _mm256_setr_pd(n[0], n[4], n[8], n[12]);
+        let y = _mm256_setr_pd(n[1], n[5], n[9], n[13]);
+        let z = _mm256_setr_pd(n[2], n[6], n[10], n[14]);
+        let length = hypot3!(x, y, z);
+        let lit = _mm256_cmp_pd::<_CMP_GT_OQ>(length, _mm256_setzero_pd());
+        colour = shade!(colour, intensity!(light, x, y, z, length), lit);
+    }
+    colours[..4].copy_from_slice(&u32x4_lanes(colour));
 }
 
 /// Each vertex of `positions`: its lifted position, and its colour - `flat`,
 /// or the ramp at its true z when `use_ramp` - shaded by the hillshade of its
 /// normal when `normals` is given.
 #[target_feature(enable = "avx2")]
-pub(super) unsafe fn surface_vertices(
+pub(super) fn surface_vertices(
     lifted: &[f64],
     normals: Option<&[f64]>,
     params: &KernelParams,
@@ -371,51 +351,47 @@ pub(super) unsafe fn surface_vertices(
     colours: &mut [u32],
 ) {
     let count = positions.len();
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); the
-    // helper is handed slices of four vertices each.
-    unsafe {
-        let light = light_of!(params);
-        let mut i = 0;
-        while i + 4 <= count {
-            surface_vertices_four(
-                &lifted[4 * i..4 * i + 16],
-                normals.map(|normals| &normals[4 * i..4 * i + 16]),
-                params,
-                &light,
-                flat,
-                use_ramp,
-                &mut positions[i..i + 4],
-                &mut colours[i..i + 4],
-            );
-            i += 4;
-        }
-        if i == count {
-            return;
-        }
-        // The last one to three through the same code, padded: a zero normal
-        // is left unshaded, and the padding's results are thrown away.
-        let rest = count - i;
-        let mut in_lifted = [0.0; 16];
-        let mut in_normals = [0.0; 16];
-        in_lifted[..4 * rest].copy_from_slice(&lifted[4 * i..4 * i + 4 * rest]);
-        if let Some(normals) = normals {
-            in_normals[..4 * rest].copy_from_slice(&normals[4 * i..4 * i + 4 * rest]);
-        }
-        let mut out_positions = [Point3::default(); 4];
-        let mut out_colours = [0u32; 4];
+    let light = light_of!(params);
+    let mut i = 0;
+    while i + 4 <= count {
         surface_vertices_four(
-            &in_lifted,
-            normals.map(|_| &in_normals[..]),
+            &lifted[4 * i..4 * i + 16],
+            normals.map(|normals| &normals[4 * i..4 * i + 16]),
             params,
             &light,
             flat,
             use_ramp,
-            &mut out_positions,
-            &mut out_colours,
+            &mut positions[i..i + 4],
+            &mut colours[i..i + 4],
         );
-        positions[i..].copy_from_slice(&out_positions[..rest]);
-        colours[i..count].copy_from_slice(&out_colours[..rest]);
+        i += 4;
     }
+    if i == count {
+        return;
+    }
+    // The last one to three through the same code, padded: a zero normal
+    // is left unshaded, and the padding's results are thrown away.
+    let rest = count - i;
+    let mut in_lifted = [0.0; 16];
+    let mut in_normals = [0.0; 16];
+    in_lifted[..4 * rest].copy_from_slice(&lifted[4 * i..4 * i + 4 * rest]);
+    if let Some(normals) = normals {
+        in_normals[..4 * rest].copy_from_slice(&normals[4 * i..4 * i + 4 * rest]);
+    }
+    let mut out_positions = [Point3::default(); 4];
+    let mut out_colours = [0u32; 4];
+    surface_vertices_four(
+        &in_lifted,
+        normals.map(|_| &in_normals[..]),
+        params,
+        &light,
+        flat,
+        use_ramp,
+        &mut out_positions,
+        &mut out_colours,
+    );
+    positions[i..].copy_from_slice(&out_positions[..rest]);
+    colours[i..count].copy_from_slice(&out_colours[..rest]);
 }
 
 /// Four faces of mesh_faces: face j's corners at corners[j], its number (for
@@ -425,7 +401,7 @@ pub(super) unsafe fn surface_vertices(
     clippy::too_many_arguments,
     reason = "The C++ helper's arguments, one a buffer."
 )]
-unsafe fn mesh_faces_four(
+fn mesh_faces_four(
     points: &[Point3],
     corners: &[[u32; 3]; 4],
     numbers: &[usize; 4],
@@ -437,53 +413,38 @@ unsafe fn mesh_faces_four(
     colours: &mut [u32],
 ) {
     assert!(positions.len() >= 12 && colours.len() >= 12);
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); every
-    // store writes a local array.
-    unsafe {
-        let factor = _mm256_set1_pd(params[PARAM_LIFT_FACTOR]);
-        let datum = _mm256_set1_pd(params[PARAM_LIFT_DATUM]);
-        let mut normal = [[0.0; 4]; 4];
-        for (j, face) in corners.iter().enumerate() {
-            let [pa, pb, pc] = face.map(|vertex| points[vertex as usize]);
-            let a = lift_point!(_mm256_setr_pd(pa.x, pa.y, pa.z, 0.0), factor, datum);
-            let b = lift_point!(_mm256_setr_pd(pb.x, pb.y, pb.z, 0.0), factor, datum);
-            let d = lift_point!(_mm256_setr_pd(pc.x, pc.y, pc.z, 0.0), factor, datum);
-            _mm256_storeu_pd(
-                normal[j].as_mut_ptr(),
-                cross!(_mm256_sub_pd(b, a), _mm256_sub_pd(d, a)),
-            );
-            // Corners in the order c, b, a, as scene.rs adds them.
-            let mut lanes = [[0.0; 4]; 3];
-            _mm256_storeu_pd(lanes[0].as_mut_ptr(), d);
-            _mm256_storeu_pd(lanes[1].as_mut_ptr(), b);
-            _mm256_storeu_pd(lanes[2].as_mut_ptr(), a);
-            for (k, corner) in lanes.iter().enumerate() {
-                positions[3 * j + k] = Point3::new(corner[0], corner[1], corner[2]);
-            }
+    let factor = _mm256_set1_pd(params[PARAM_LIFT_FACTOR]);
+    let datum = _mm256_set1_pd(params[PARAM_LIFT_DATUM]);
+    let mut normal = [[0.0; 4]; 4];
+    for (j, face) in corners.iter().enumerate() {
+        let [pa, pb, pc] = face.map(|vertex| points[vertex as usize]);
+        let a = lift_point!(_mm256_setr_pd(pa.x, pa.y, pa.z, 0.0), factor, datum);
+        let b = lift_point!(_mm256_setr_pd(pb.x, pb.y, pb.z, 0.0), factor, datum);
+        let d = lift_point!(_mm256_setr_pd(pc.x, pc.y, pc.z, 0.0), factor, datum);
+        normal[j] = f64x4_lanes(cross!(_mm256_sub_pd(b, a), _mm256_sub_pd(d, a)));
+        // Corners in the order c, b, a, as scene.rs adds them.
+        let lanes = [f64x4_lanes(d), f64x4_lanes(b), f64x4_lanes(a)];
+        for (k, corner) in lanes.iter().enumerate() {
+            positions[3 * j + k] = Point3::new(corner[0], corner[1], corner[2]);
         }
-        let x = _mm256_setr_pd(normal[0][0], normal[1][0], normal[2][0], normal[3][0]);
-        let y = _mm256_setr_pd(normal[0][1], normal[1][1], normal[2][1], normal[3][1]);
-        let z = _mm256_setr_pd(normal[0][2], normal[1][2], normal[2][2], normal[3][2]);
-        let area = hypot3!(x, y, z);
-        let lit = _mm256_cmp_pd::<_CMP_GT_OQ>(area, _mm256_set1_pd(1.0e-12));
-        let base: [u32; 4] = numbers.map(|number| {
-            if number < face_colours.len() {
-                face_colours[number]
-            } else {
-                flat
-            }
-        });
-        let shaded = shade!(
-            _mm_loadu_si128(base.as_ptr().cast::<__m128i>()),
-            intensity!(light, x, y, z, area),
-            lit
-        );
-        let mut out = [0u32; 4];
-        _mm_storeu_si128(out.as_mut_ptr().cast::<__m128i>(), shaded);
-        // Each face's colour on its three vertices.
-        for (j, &colour) in out.iter().enumerate() {
-            colours[3 * j..3 * j + 3].fill(colour);
+    }
+    let x = _mm256_setr_pd(normal[0][0], normal[1][0], normal[2][0], normal[3][0]);
+    let y = _mm256_setr_pd(normal[0][1], normal[1][1], normal[2][1], normal[3][1]);
+    let z = _mm256_setr_pd(normal[0][2], normal[1][2], normal[2][2], normal[3][2]);
+    let area = hypot3!(x, y, z);
+    let lit = _mm256_cmp_pd::<_CMP_GT_OQ>(area, _mm256_set1_pd(1.0e-12));
+    let base: [u32; 4] = numbers.map(|number| {
+        if number < face_colours.len() {
+            face_colours[number]
+        } else {
+            flat
         }
+    });
+    let shaded = shade!(u32x4(&base), intensity!(light, x, y, z, area), lit);
+    let out = u32x4_lanes(shaded);
+    // Each face's colour on its three vertices.
+    for (j, &colour) in out.iter().enumerate() {
+        colours[3 * j..3 * j + 3].fill(colour);
     }
 }
 
@@ -495,7 +456,7 @@ unsafe fn mesh_faces_four(
     clippy::too_many_arguments,
     reason = "The signature mirrors the C++ kernel entry, one argument a buffer."
 )]
-pub(super) unsafe fn mesh_faces(
+pub(super) fn mesh_faces(
     points: &[Point3],
     faces: &[[u32; 3]],
     first: usize,
@@ -506,37 +467,11 @@ pub(super) unsafe fn mesh_faces(
     positions: &mut [Point3],
     colours: &mut [u32],
 ) {
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); the
-    // helper is handed slices of four faces each.
-    unsafe {
-        let light = light_of!(params);
-        let mut done = 0;
-        while done + 4 <= count {
-            let numbers: [usize; 4] = std::array::from_fn(|j| first + done + j);
-            let corners = numbers.map(|number| faces[number]);
-            mesh_faces_four(
-                points,
-                &corners,
-                &numbers,
-                params,
-                &light,
-                face_colours,
-                flat,
-                &mut positions[3 * done..3 * done + 12],
-                &mut colours[3 * done..3 * done + 12],
-            );
-            done += 4;
-        }
-        if done == count {
-            return;
-        }
-        // The last one to three, padded with copies of the last face.
-        let rest = count - done;
-        let numbers: [usize; 4] =
-            std::array::from_fn(|j| first + done + if j < rest { j } else { rest - 1 });
+    let light = light_of!(params);
+    let mut done = 0;
+    while done + 4 <= count {
+        let numbers: [usize; 4] = std::array::from_fn(|j| first + done + j);
         let corners = numbers.map(|number| faces[number]);
-        let mut out_positions = [Point3::default(); 12];
-        let mut out_colours = [0u32; 12];
         mesh_faces_four(
             points,
             &corners,
@@ -545,12 +480,34 @@ pub(super) unsafe fn mesh_faces(
             &light,
             face_colours,
             flat,
-            &mut out_positions,
-            &mut out_colours,
+            &mut positions[3 * done..3 * done + 12],
+            &mut colours[3 * done..3 * done + 12],
         );
-        positions[3 * done..3 * done + 3 * rest].copy_from_slice(&out_positions[..3 * rest]);
-        colours[3 * done..3 * done + 3 * rest].copy_from_slice(&out_colours[..3 * rest]);
+        done += 4;
     }
+    if done == count {
+        return;
+    }
+    // The last one to three, padded with copies of the last face.
+    let rest = count - done;
+    let numbers: [usize; 4] =
+        std::array::from_fn(|j| first + done + if j < rest { j } else { rest - 1 });
+    let corners = numbers.map(|number| faces[number]);
+    let mut out_positions = [Point3::default(); 12];
+    let mut out_colours = [0u32; 12];
+    mesh_faces_four(
+        points,
+        &corners,
+        &numbers,
+        params,
+        &light,
+        face_colours,
+        flat,
+        &mut out_positions,
+        &mut out_colours,
+    );
+    positions[3 * done..3 * done + 3 * rest].copy_from_slice(&out_positions[..3 * rest]);
+    colours[3 * done..3 * done + 3 * rest].copy_from_slice(&out_colours[..3 * rest]);
 }
 
 /// mix(lo, hi, e / 8) of every channel: lo + (hi - lo) * e/8 + 0.5 is exact in
@@ -558,49 +515,47 @@ pub(super) unsafe fn mesh_faces(
 /// truncating it is flooring 8 lo + (hi - lo) e + 4 over 8 - which fits a
 /// 16-bit lane.
 #[target_feature(enable = "avx2")]
-pub(super) unsafe fn fade(base: &[u32], ink: &[u32], eighths: i32, out: &mut [u32]) {
+pub(super) fn fade(base: &[u32], ink: &[u32], eighths: i32, out: &mut [u32]) {
     let count = out.len();
     assert!(base.len() >= count && ink.len() >= count);
-    // SAFETY: the caller has proved the processor runs AVX2 (Kernels); each
-    // load and store reaches eight colours, inside the slices as asserted.
-    unsafe {
-        let zero = _mm256_setzero_si256();
-        let e = _mm256_set1_epi16(eighths as i16);
-        let four = _mm256_set1_epi16(4);
-        macro_rules! channel {
-            ($lo:expr, $hi:expr) => {{
-                let lo = $lo;
-                let moved = _mm256_mullo_epi16(_mm256_sub_epi16($hi, lo), e);
-                _mm256_srli_epi16::<3>(_mm256_add_epi16(
-                    _mm256_add_epi16(_mm256_slli_epi16::<3>(lo), moved),
-                    four,
-                ))
-            }};
+    let zero = _mm256_setzero_si256();
+    let e = _mm256_set1_epi16(eighths as i16);
+    let four = _mm256_set1_epi16(4);
+    macro_rules! channel {
+        ($lo:expr, $hi:expr) => {{
+            let lo = $lo;
+            let moved = _mm256_mullo_epi16(_mm256_sub_epi16($hi, lo), e);
+            _mm256_srli_epi16::<3>(_mm256_add_epi16(
+                _mm256_add_epi16(_mm256_slli_epi16::<3>(lo), moved),
+                four,
+            ))
+        }};
+    }
+    let i = count / 8 * 8;
+    let steps = out[..i]
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
+        .zip(base[..i].as_chunks::<8>().0)
+        .zip(ink[..i].as_chunks::<8>().0);
+    for ((result, lo), hi) in steps {
+        let b = u32x8(lo);
+        let n = u32x8(hi);
+        // Unpacking and packing both work within 128-bit halves, so the
+        // bytes come back in their places.
+        let low = channel!(_mm256_unpacklo_epi8(b, zero), _mm256_unpacklo_epi8(n, zero));
+        let high = channel!(_mm256_unpackhi_epi8(b, zero), _mm256_unpackhi_epi8(n, zero));
+        *result = u32x8_lanes(_mm256_packus_epi16(low, high));
+    }
+    for ((result, &lo_word), &hi_word) in
+        out[i..].iter_mut().zip(&base[i..count]).zip(&ink[i..count])
+    {
+        let mut mixed = 0u32;
+        for shift in (0..32).step_by(8) {
+            let lo = ((lo_word >> shift) & 0xFF) as i32;
+            let hi = ((hi_word >> shift) & 0xFF) as i32;
+            mixed |= (((8 * lo + (hi - lo) * eighths + 4) >> 3) as u32) << shift;
         }
-        let mut i = 0;
-        while i + 8 <= count {
-            let b = _mm256_loadu_si256(base[i..i + 8].as_ptr().cast::<__m256i>());
-            let n = _mm256_loadu_si256(ink[i..i + 8].as_ptr().cast::<__m256i>());
-            // Unpacking and packing both work within 128-bit halves, so the
-            // bytes come back in their places.
-            let low = channel!(_mm256_unpacklo_epi8(b, zero), _mm256_unpacklo_epi8(n, zero));
-            let high = channel!(_mm256_unpackhi_epi8(b, zero), _mm256_unpackhi_epi8(n, zero));
-            _mm256_storeu_si256(
-                out[i..i + 8].as_mut_ptr().cast::<__m256i>(),
-                _mm256_packus_epi16(low, high),
-            );
-            i += 8;
-        }
-        for ((result, &lo_word), &hi_word) in
-            out[i..].iter_mut().zip(&base[i..count]).zip(&ink[i..count])
-        {
-            let mut mixed = 0u32;
-            for shift in (0..32).step_by(8) {
-                let lo = ((lo_word >> shift) & 0xFF) as i32;
-                let hi = ((hi_word >> shift) & 0xFF) as i32;
-                mixed |= (((8 * lo + (hi - lo) * eighths + 4) >> 3) as u32) << shift;
-            }
-            *result = mixed;
-        }
+        *result = mixed;
     }
 }

@@ -159,15 +159,20 @@ the Rust packs the same way, and has no benchmark of its own yet):
    kernel has no minimum length: a probe build with the minimum at 1 packed
    four vertices as fast as the loop (minimums 64 against 67 ns; in the A/A
    copy 66 against 68). On 64-bit ARM the same step is
-   `crates/katana_gpu/src/simd/pack_neon.rs`: LD3 splits two vertices'
-   doubles into x, y and z registers, FCVTN rounds them to float, and ST4
-   interleaves them with the colour words into four whole vertices. It is held
+   `crates/katana_gpu/src/simd/pack_neon.rs`: two vertices' doubles make x, y
+   and z registers, FCVTN rounds them to float, and each of the four vertices
+   is built from those registers' lanes and its colour word. It is held
    to the loop by the same test; the Rust's NEON has not yet been compiled or
    run on an ARM host (`docs/rust.md`, "Not done"), and its any-length rule is
-   the AVX2 kernel's, not measured on ARM. The owner has decided that the
-   hand-written kernels go, for their `unsafe`, and the scalar loop, which
-   gives the same bits, stays, with the speed measured before and after
-   (`docs/rust.md`, "Removing `unsafe` is decided but not done").
+   the AVX2 kernel's, not measured on ARM. Both kernels are safe functions
+   (2026-11-20): a vertex register becomes a `GpuVertex` through its lanes
+   (`crates/katana_core/src/simd/x86_lanes.rs`) where the C++ stored it
+   through a pointer, and on ARM the C++'s LD3 and ST4, a pointer load and
+   store, gave way to registers built from the fields and records built from
+   the lanes. The one unsafe call left is the entry in
+   `crates/katana_gpu/src/simd/pack_kernels.rs` (`docs/performance.md`,
+   "Safe kernels"); whether LLVM still makes each vertex one 16-byte store is
+   for the benchmark before and after to say.
 
 Measured on the C++ build, with its `compare_benchmarks.py --alternate 7
 BM_GpuPack before=... after=... after_again=...`, on the cloud container's

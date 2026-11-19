@@ -1307,7 +1307,7 @@ outside its layering check.
 
 Edition 2024; `rust-version` 1.98, the older of the two compilers. `unsafe`
 is denied in the workspace's lints and allowed only where a module must be
-unsafe - an FFI adapter, an OS call, a SIMD kernel, or the one module that
+unsafe - an FFI adapter, an OS call, a SIMD kernel's entry, or the one module that
 hands the task pool's tasks disjoint parts of one buffer
 (`katana_render`'s `disjoint.rs`: tiles of a framebuffer have no safe slice
 form, and every step rests on the pool's contract that each index runs once
@@ -1489,7 +1489,9 @@ layer, a layer with no crate (the `rust_layering_catches_*` tests).
 - **SIMD.** The 23 kernel entries are ported with their layers, bit-identical
   to their scalar references, with `KATANA_SIMD` kept. `#[target_feature]`
   confines the AVX2 code to the kernel itself, so the object check the C++
-  needs (tools/check_simd_kernels.cmake) has no twin.
+  needs (tools/check_simd_kernels.cmake) has no twin. Since 2026-11-20 the
+  kernels are safe functions of slices, each entered by one unsafe call
+  (`docs/performance.md`, "Safe kernels").
 - **Names.** The naming rule holds in the port: comments, identifiers and
   messages say "the archive format", "survey code file", "style library";
   the kept tokens keep their spelling (`.12da`, the `katana_archive12d`
@@ -2208,7 +2210,11 @@ what it would take.
   `curl`, and `winreg`, `keyring` or `sysinfo` for the updater's operating
   system calls); the hand-written SIMD kernels go and their scalar versions,
   which give identical results, stay, with the speed measured before and
-  after. Then every other crate carries `#![forbid(unsafe_code)]`. It was
+  after. (The kernels part was superseded on 2026-11-20: they stay, as safe
+  functions, one unsafe call at each kernel's entry, which keeps their speed;
+  `docs/performance.md`, "Safe kernels". Their speed before and after is
+  still to be measured.) Then every other crate carries
+  `#![forbid(unsafe_code)]`. It was
   stopped at the owner's word as too big for then: about 1,050 uses, most
   in katana_gis (about 480), katana_update (about 175), katana_core (about
   95) and katana_geodesy (about 70).
