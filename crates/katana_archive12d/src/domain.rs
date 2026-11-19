@@ -222,6 +222,9 @@ pub struct ImportedMesh {
     pub edges_in_file: usize,
     pub vertex_infos_in_file: usize,
     pub edge_infos_in_file: usize,
+    /// The polygonal faces the file's `polymesh` groups the triangles into;
+    /// read, counted and not modelled (archive.rs, Polymesh).
+    pub polymesh_faces_in_file: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

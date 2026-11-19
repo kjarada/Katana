@@ -1896,6 +1896,30 @@ The mapping is documented in full at the head of
   a face naming a vertex that does not exist is refused by the READER,
   which can say which line. Vertex and edge infos, the edge list ("for
   checking only", manual 1.4.9) and `blend` are read and not modelled.
+- **A `polymesh` is read, and its triangles were never lost (2026-11-19).**
+  A real 18 MB `.12daz` (version 15.01.08.60) said `not read:
+  primitive_3d/trimesh_3d/polymesh (125)`, which read as 125 meshes dropped.
+  They were not: a `polymesh` sits INSIDE a `trimesh_3d`, beside its
+  `vertices` and `faces`, and groups the mesh's triangles into the
+  polygonal faces they make - a pavement layer's top, bottom and sides -
+  each with an `info` (colour "acad 040", name "PT1 Side"), a `normal`, its
+  triangles as `face_indices` numbered from 1, `edge_indices`, and a
+  `boundary` and `holes` as loops of vertices. In that file the face
+  indices run to the mesh's triangle count (5 488 in one mesh of 2 738
+  vertices), so they number triangles, not vertices; 77 of the 125 hold 818
+  faces between them, the other 48 none. The manual's section on
+  `primitive_3d` does not describe it. The reader now reads it into
+  `katana_archive12d::archive::Polymesh` - indices zero-based and checked
+  against the mesh, one that names nothing left out and said - and the
+  writer writes it back, so an archive read and written keeps it. The
+  import draws every triangle, as it did, and says how many meshes group
+  their triangles into how many polymesh faces. Not done: the grouping is
+  not modelled in the session, so an export of the DRAWING does not write
+  it, and a face's own colour is not used for a triangle the file leaves
+  uncoloured - nothing available here says which wins. Tests:
+  `polymesh::a_polymesh_is_read_as_the_faces_its_triangles_make_and_not_reported_unread`,
+  `polymesh::a_polymesh_written_reads_back_as_it_was_read`,
+  `polymesh::a_mesh_with_a_polymesh_imports_every_triangle_and_says_the_grouping_is_not_drawn`.
 - **Super tins are built.** A super tin is a ranked list of tins that
   behaves as one surface, and the 12da carries only the list (manual 1.4.8):
   `katana_terrain::super_surface::combine_surfaces` makes the surface, a later member overriding an
@@ -2117,7 +2141,12 @@ a worse lie than leaving the text upright. The undocumented parts of a
 super alignment (`computator`, `floating_arc_end_radius_length` and the rest)
 are read as fields and not interpreted; such an alignment arrives through its
 solved geometry, which is what the manual says a reader should use. A 12da
-declares no coordinate system, so nothing is reprojected.
+declares no coordinate system, so nothing is reprojected. Colour names of
+the form "acad 040" - the AutoCAD Colour Index, which the writing program
+uses on meshes - are not in the palette: thirteen of them in one real
+archive (2026-11-19) fell back to the inherited colour, each said by a
+warning. Mapping them wants the index's 255 RGB values from a source
+outside this program.
 
 Unverified, found on 2026-11-03 (`docs/plan_view.md`, "Why an imported
 archive's symbols do not change with it"): whether a symbol block's `size`

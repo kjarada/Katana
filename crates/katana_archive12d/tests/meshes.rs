@@ -262,3 +262,187 @@ mod mesh_export {
         assert_eq!(twice.face_flags, vec![1, 2, 0]);
     }
 }
+
+// A `polymesh` inside a trimesh_3d, as the format's program exports one: the
+// mesh's triangles grouped into the polygonal faces they make, each with its
+// own info, its triangles numbered from 1 (face_indices), and its boundary
+// and holes as loops of vertices. Invented here: a 2 x 2 square of two
+// triangles whose one polygonal face is "Top", plus a second face naming a
+// triangle 7 the mesh does not have. Before 2026-11-19 the block was skipped
+// and said as "not read: primitive_3d/trimesh_3d/polymesh".
+const WITH_POLYMESH: &str = r#"primitive_3d {
+  name Pavement
+  colour red
+  trimesh_3d {
+    vertices {
+      0 0 1
+      2 0 1
+      2 2 1
+      0 2 1
+    }
+    faces { 1 2 3  1 3 4 }
+    polymesh {
+      info {
+        flag 0
+        key 255
+        colour "no colour"
+        name ""
+      }
+      faces {
+        face {
+          valid true
+          info {
+            flag 0
+            key 255
+            colour "acad 040"
+            name "Top"
+          }
+          normal 0 0 1
+          face_indices { 1 2 }
+          edge_indices { 1 2 3 4 }
+          boundary {
+            centroid 1 1 1
+            radius 0
+            vertex_indices { 1 2 3 4 }
+          }
+          holes {
+            hole {
+              centroid 1 1 1
+              radius 0
+              vertex_indices { 1 3 }
+            }
+          }
+        }
+        face {
+          valid true
+          face_indices { 2 7 }
+        }
+      }
+      edge_indices { 1 2 3 4 5 }
+    }
+  }
+}"#;
+
+mod polymesh {
+    use super::*;
+    use katana_archive12d::{Polymesh, PolymeshFace, PolymeshLoop, TrimeshInfo};
+
+    fn top_info() -> TrimeshInfo {
+        TrimeshInfo {
+            flag: 0,
+            key: 255,
+            colour: String::from("acad 040"),
+            name: String::from("Top"),
+        }
+    }
+
+    #[test]
+    fn a_polymesh_is_read_as_the_faces_its_triangles_make_and_not_reported_unread() {
+        let archive = match read_archive(WITH_POLYMESH, &ReadOptions::default()) {
+            Ok(archive) => archive,
+            Err(error) => panic!("{}", error.describe()),
+        };
+        assert!(
+            archive.unrecognised.is_empty(),
+            "{:?}",
+            archive.unrecognised
+        );
+        let mesh = get::<Trimesh>(&archive.elements[0]);
+        // The triangles are the mesh's own, read from faces as before.
+        assert_eq!(mesh.faces, vec![[0, 1, 2], [0, 2, 3]]);
+        let polymesh = mesh.polymesh.as_ref().expect("the polymesh is read");
+        assert_eq!(polymesh.info.as_ref().map(|info| info.key), Some(255));
+        assert_eq!(polymesh.edge_indices, vec![1, 2, 3, 4, 5]);
+        assert_eq!(polymesh.faces.len(), 2);
+        let top = &polymesh.faces[0];
+        assert_eq!(top.valid, "true");
+        assert_eq!(top.info, Some(top_info()));
+        assert_eq!(top.normal, Some([0.0, 0.0, 1.0]));
+        // Numbered from 1 in the file, zero-based here: both triangles.
+        assert_eq!(top.triangles, vec![0, 1]);
+        assert_eq!(top.edge_indices, vec![1, 2, 3, 4]);
+        let boundary = top.boundary.as_ref().expect("the boundary");
+        assert_eq!(boundary.centroid, Some([1.0, 1.0, 1.0]));
+        assert_eq!(boundary.radius, Some(0.0));
+        assert_eq!(boundary.vertices, vec![0, 1, 2, 3]);
+        assert_eq!(top.holes.len(), 1);
+        assert_eq!(top.holes[0].vertices, vec![0, 2]);
+        // Triangle 7 is not the mesh's: left out, and said.
+        assert_eq!(polymesh.faces[1].triangles, vec![1]);
+        assert!(
+            any_contains(&archive.warnings, "names 1 triangles or vertices"),
+            "{}",
+            joined(&archive.warnings)
+        );
+    }
+
+    #[test]
+    fn a_polymesh_written_reads_back_as_it_was_read() {
+        let first = match read_archive(WITH_POLYMESH, &ReadOptions::default()) {
+            Ok(archive) => archive,
+            Err(error) => panic!("{}", error.describe()),
+        };
+        let text = write_archive(&first, &WriteOptions::default());
+        let second = match read_archive(&text, &ReadOptions::default()) {
+            Ok(archive) => archive,
+            Err(error) => panic!("{}\n{text}", error.describe()),
+        };
+        assert!(second.unrecognised.is_empty(), "{:?}", second.unrecognised);
+        let expected = Polymesh {
+            info: Some(TrimeshInfo {
+                flag: 0,
+                key: 255,
+                colour: String::from("no colour"),
+                name: String::new(),
+            }),
+            faces: vec![
+                PolymeshFace {
+                    valid: String::from("true"),
+                    info: Some(top_info()),
+                    normal: Some([0.0, 0.0, 1.0]),
+                    triangles: vec![0, 1],
+                    edge_indices: vec![1, 2, 3, 4],
+                    boundary: Some(PolymeshLoop {
+                        centroid: Some([1.0, 1.0, 1.0]),
+                        radius: Some(0.0),
+                        vertices: vec![0, 1, 2, 3],
+                    }),
+                    holes: vec![PolymeshLoop {
+                        centroid: Some([1.0, 1.0, 1.0]),
+                        radius: Some(0.0),
+                        vertices: vec![0, 2],
+                    }],
+                },
+                PolymeshFace {
+                    valid: String::from("true"),
+                    triangles: vec![1],
+                    ..PolymeshFace::default()
+                },
+            ],
+            edge_indices: vec![1, 2, 3, 4, 5],
+        };
+        assert_eq!(
+            get::<Trimesh>(&second.elements[0]).polymesh,
+            Some(expected),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_mesh_with_a_polymesh_imports_every_triangle_and_says_the_grouping_is_not_drawn() {
+        let domain = import(WITH_POLYMESH);
+        assert_eq!(domain.meshes.len(), 1);
+        assert_eq!(domain.meshes[0].mesh.triangle_count(), 2);
+        assert_eq!(domain.meshes[0].polymesh_faces_in_file, 2);
+        assert!(
+            any_contains(&domain.warnings, "1 meshes group their triangles into 2 polymesh faces"),
+            "{}",
+            joined(&domain.warnings)
+        );
+        assert!(
+            !any_contains(&domain.warnings, "not read"),
+            "{}",
+            joined(&domain.warnings)
+        );
+    }
+}
