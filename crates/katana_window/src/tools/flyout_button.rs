@@ -1920,6 +1920,9 @@ pub struct Strip {
     pub vertical: bool,
     pub icon_size: i32,
     pub items: Vec<StripItem>,
+    /// A column draws the rule down its inner side (`column_rule`); off where a dock panel's own
+    /// border is beside it (`layout::column_rules_its_inner_side`), which would double it.
+    pub inner_rule: bool,
 }
 
 /// What a frame of a toolbar did.
@@ -2026,7 +2029,7 @@ pub fn tool_bar_strip(
     // one), and the Drafting bar's foot is the status bar's rule. Its own, on its bottom edge, was
     // under a top row's and, under a row docked along the bottom, a stray rule the bar's length
     // over the Drafting bar, half a pixel of it showing at 125 % (the seventh look audit).
-    if vertical {
+    if vertical && strip.inner_rule {
         let edge = column_rule(painter, bar, ctx.content_rect());
         painter.line_segment(edge, egui::Stroke::new(1.0, palette::border().to_egui()));
     }

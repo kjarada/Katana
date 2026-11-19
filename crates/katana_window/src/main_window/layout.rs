@@ -976,6 +976,7 @@ pub fn menu_sign_clashes(window: &mut MainWindow) -> MenuSigns {
             vertical: place.vertical(),
             icon_size,
             items,
+            inner_rule: true,
         };
         let mut holder = strip_sign_holder(&strip);
         for item in &bar.items {
@@ -1189,6 +1190,28 @@ pub fn top_widget_size(bars: &BarSettings, name: &str, icon_size: i32) -> Option
         return Some((name_width(bars, title), height));
     }
     widget_size(name, icon_size)
+}
+
+/// Whether a toolbar column at `column`, docked down `side`, draws the rule down its inner side:
+/// not where a dock panel in `panels` touches that side, since the panel's own one-pixel border is
+/// the rule there, and both drew a seam two pixels wide - at 125 % a rule, a gap and a rule (the
+/// eighth look audit). Between two columns, and beside the views or a torn-off menu's band, the
+/// column's rule is the only one, and stays. Along the top and the bottom a line draws none.
+pub fn column_rules_its_inner_side(side: Side, column: Rect, panels: &[Rect]) -> bool {
+    // A panel laid against a column starts on the column's edge; half a point either way takes
+    // the rounding of the two rectangles' sums.
+    const TOUCHING: f32 = 0.5;
+    let inner = match side {
+        Side::Left => column.max.x,
+        Side::Right => column.min.x,
+        Side::Top | Side::Bottom => return false,
+    };
+    !panels.iter().any(|panel| {
+        let edge = if side == Side::Left { panel.min.x } else { panel.max.x };
+        (edge - inner).abs() <= TOUCHING
+            && panel.max.y > column.min.y
+            && panel.min.y < column.max.y
+    })
 }
 
 /// `bar` as a docked line draws it: along the top or the bottom its name first when names are

@@ -1916,6 +1916,21 @@ to keep is not grouped ("2000000"): a whole-number box has no grouped look,
 and one that shows "2,000,000" must also read it back when typed, which the
 shared box does not.
 
+**The tenth round (the eighth audit, 8.9, 2026-11-20).** Round nine's
+column rules ran full length, but beside a dock panel the column's inner
+rule and the panel's own border made a seam two pixels wide, at 125 % a
+rule, a gap and a rule: a column now rules its inner side only where no
+panel's border is beside it (`layout::column_rules_its_inner_side`), between
+two columns and beside the views or a torn-off menu's band as before.
+Page Setup's Frame listed the frames' names ("a3_landscape"); it lists
+their titles (`frame::frame_title`: "A3 landscape", "A3 utility
+cross-section"), the name still what the line says. The menu a headless
+step opens (`--panel <menu>`) was a plain Area, so it drew a row's trailing
+room as no popup does, and the menu shots showed what no click shows: it is
+a Menu by its kind now, as the menu bar's popups are. A short rule parts
+the tray of minimised items from the status message, as the readouts are
+parted at the right.
+
 ### The icons' colours: discipline and function (2026-11-19)
 
 The owner, on 2026-11-19: "make the icons colorful based on their discipline

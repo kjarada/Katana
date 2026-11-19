@@ -120,6 +120,7 @@ impl DrawBar {
             items: self
                 .actions
                 .strip_items(&self.targets.tool_bars["Draw"], &|_| None),
+            inner_rule: true,
         }
     }
 
@@ -1788,6 +1789,7 @@ mod tool_bar_separators {
             vertical,
             icon_size: 20,
             items: vec![button("first"), StripItem::Separator, button("second")],
+            inner_rule: true,
         }
     }
 

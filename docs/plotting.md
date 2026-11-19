@@ -261,7 +261,7 @@ a new or generated sheet takes and `frame=on` means:
 
 | Where | What |
 |---|---|
-| Sheet Set > Page Setup... | Frame (`pageSetupFrame`): the default, then the frames the customisation in use offers, by name. A frame chosen there is Save's `frame=` |
+| Sheet Set > Page Setup... | Frame (`pageSetupFrame`): the default, then the frames the customisation in use offers, each by its title (`frame_title`: "A3 landscape", "A3 utility cross-section"; a frame this build does not have by its name). The name of the frame chosen there is Save's `frame=` |
 | `SHEETS PAGESETUP frame=<name>` | the set's frame, put on every sheet that has a frame, as one step (`set_page_setup_frame`, `PAGE_SETUP`); a sheet whose frame is off keeps it off |
 | `SHEET SET n frame=<name>` / `SHEET NEW ... frame=<name>` | one sheet's frame |
 | `SHEETS FRAMES` | the frames on offer: `frames count=2 set=a3_landscape customisation="NSW"`, then `frame name=... from=default` or `from=customisation` a line, then a `problem ...` line for the set's frame when it is not on offer and for each frame the customisation names that Katana does not have |
