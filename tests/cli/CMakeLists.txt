@@ -1390,6 +1390,14 @@ if(KATANA_TEST_CLI)
     set_tests_properties(cli.archive_custom_colours_and_native_leaders_are_imported PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
         TIMEOUT 90)
+    add_test(NAME cli.archive_index_colour_names_draw_in_the_index_colour_and_an_unknown_name_is_said_once
+        COMMAND ${CMAKE_COMMAND}
+            "-DPROGRAM=${KATANA_PROGRAM_katana_cli}"
+            "-DFIXTURES=${PROJECT_SOURCE_DIR}/tests/archive12d/data"
+            -P "${PROJECT_SOURCE_DIR}/tests/archive12d/check_indexed_colours.cmake")
+    set_tests_properties(cli.archive_index_colour_names_draw_in_the_index_colour_and_an_unknown_name_is_said_once PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
+        TIMEOUT 90)
     set(_copc "${CMAKE_CURRENT_BINARY_DIR}/cli-scan.copc.laz")
     # INFO reports a band's statistics when a sidecar beside the file holds
     # them, and every GDAL run on the shared sample writes one for as long as

@@ -65,6 +65,23 @@ mod layer_dialog {
     }
 
     #[test]
+    fn a_layer_of_no_dimension_style_of_its_own_says_the_drawings_default_in_words() {
+        // The sixth look audit's H: the list's first item read "(default)", a bracketed
+        // placeholder. It is words, and choosing it still stores no name of the layer's own.
+        let mut bench = fixture();
+        bench.fill("layerTable", "survey");
+        // The layer's own undefined name is kept, marked, at the top; the drawing's default is
+        // the first of the list's own items under it.
+        let items = bench.items("layerDimensionStyle");
+        assert_eq!(items[0], "Old Survey Dimensions (not defined)");
+        assert_eq!(items[1], "Drawing default");
+        assert!(!items.iter().any(|item| item.starts_with('(')), "{items:?}");
+        bench.fill("layerDimensionStyle", "Drawing default");
+        bench.press("layerSave");
+        assert_eq!(stored(&bench).dimension_style, "");
+    }
+
+    #[test]
     fn editing_the_weight_alone_saves_it_and_still_keeps_the_undefined_names() {
         let mut bench = fixture();
         bench.fill("layerTable", "survey");

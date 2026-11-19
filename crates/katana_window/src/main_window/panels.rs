@@ -562,7 +562,16 @@ impl MainWindow {
                 continue;
             }
             let at = if vertical {
-                Rect::from_min_size(Pos2::new(rect.min.x, along), Vec2::new(rect.width(), room))
+                // Each bar at its own breadth against the column's outer edge, the window's side:
+                // a column is as broad as its broadest bar, and a bar drawn the column's breadth
+                // claimed the void beside its buttons as its own (the sixth look audit's
+                // Properties bar docked left, Draw's 39 points in a 220 point column).
+                let own = self.column_breadth(bar).min(rect.width());
+                let x = match side {
+                    Side::Right => rect.max.x - own,
+                    _ => rect.min.x,
+                };
+                Rect::from_min_size(Pos2::new(x, along), Vec2::new(own, room))
             } else {
                 Rect::from_min_size(Pos2::new(along, rect.min.y), Vec2::new(room, rect.height()))
             };
@@ -652,9 +661,9 @@ impl MainWindow {
                     .layout(Layout::left_to_right(Align::Center)),
             );
             if let Some(title) = name.strip_prefix("toolBarName:") {
-                // The name in the secondary text, centred on the buttons' row and set a little
-                // in from the rule before it.
-                child.add_space(2.0);
+                // The name in the secondary text, centred on the buttons' row and set clear of
+                // the grip before it (layout::NAME_LEAD).
+                child.add_space(layout::NAME_LEAD as f32);
                 let _ = controls::label_as(
                     &mut child,
                     "toolBarName",
@@ -1689,6 +1698,9 @@ fn current_style_ui(ui: &mut Ui, exec: &mut super::executor::Executor, panels: &
     });
     panels.current_style.choose(index, &items);
     ui.horizontal(|ui| {
+        // Clear of the grip before it, as a bar's name is (layout::NAME_LEAD): the Properties bar
+        // shows no name, its "Style" stands first, and the dots touched it ("#Style").
+        ui.add_space(layout::NAME_LEAD as f32);
         ui.label(RichText::new("Style").color(palette::text_muted().to_egui()));
         ui.spacing_mut().combo_width = (ui.available_width() - 4.0).max(60.0);
         let response = controls::choice(ui, "CurrentStyleCombo", &items, &mut panels.current_style)
@@ -2635,16 +2647,11 @@ pub fn log_cover_bottom(galley: &egui::Galley, at: Pos2, view_top: f32) -> Optio
     (bottom > view_top + 0.5).then_some(bottom)
 }
 
-/// The command log's text as the log panel shows it: each error line ("! ...") without the code
-/// its description starts with (command_log::without_error_code), every other line as it is.
+/// The command log's text as the log panel shows it: each line in the words a person reads
+/// (command_log::shown_log - an error as a sentence without its code, a warning record as the
+/// sentence it carries), the log's own record kept as it was logged.
 pub fn shown_log(log: &str) -> String {
-    log.split('\n')
-        .map(|line| match line.strip_prefix("! ") {
-            Some(error) => format!("! {}", crate::command_log::without_error_code(error)),
-            None => String::from(line),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    crate::command_log::shown_log(log)
 }
 
 /// The top on the screen of the first row of `galley`, drawn at `at`, that starts a logical line

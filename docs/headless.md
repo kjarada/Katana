@@ -465,7 +465,7 @@ placed `*viewMenuPanelPlace:viewMenu:float:600,200,260,400`, closed
 makes it the target, and its items are pressed by their action names
 (`!viewGrid`). `?toolBarLayout` prints every toolbar's place in order and
 every torn-off menu's; `?DrawToolBar` one toolbar's
-(`place=right:0 at=1 shown=yes drawn=1321,143,39,45`); `?viewMenuTornOff` a
+(`place=right:1 at=0 shown=yes drawn=1282,143,39,663` after `*viewToolBarDockDrawRight`: a column of its own beside Modify's); `?viewMenuTornOff` a
 torn-off menu's (`place=left items=31 drawn=...`). A layout a headless run
 makes is not saved: it neither reads nor writes the settings file.
 

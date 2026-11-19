@@ -1,0 +1,39 @@
+breakline line
+model "Test/Indexed"
+primitive_3d {
+  name "Red Slab"
+  model "Test/Meshes"
+  colour "acad 001"
+  trimesh_3d {
+    info { flag 0 key 255 colour "acad 001" name "Red Slab" }
+    vertices {
+      0 0 1
+      10 0 1
+      10 10 1
+      0 10 1
+    }
+    faces { 1 2 3  1 3 4 }
+  }
+}
+primitive_3d {
+  name "Blue Slab"
+  model "Test/Meshes"
+  colour "acad 005"
+  trimesh_3d {
+    info { flag 0 key 255 colour "acad 005" name "Blue Slab" }
+    vertices {
+      20 0 1
+      30 0 1
+      30 10 1
+      20 10 1
+    }
+    faces { 1 2 3  1 3 4 }
+    face_infos { 0 0 "acad 010" "Top" 0 0 "vis something" "Edge" }
+    face_flags { 1 2 }
+  }
+}
+string super { name "Upper Case" colour "ACAD 5" data_2d { 0 20 10 20 } }
+string super { name "Padded" colour "acad 010" data_2d { 0 30 10 30 } }
+string super { name "Unknown" colour "vis something" data_2d { 0 40 10 40 } }
+string super { name "By Block" colour "acad 000" data_2d { 0 50 10 50 } }
+string super { name "Again" colour "Vis_Something" data_2d { 0 60 10 60 } }

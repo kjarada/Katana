@@ -21,6 +21,7 @@ pub mod entity;
 pub mod entity_database;
 pub mod entity_geometry;
 pub mod geometry_blob;
+pub mod indexed_colours;
 pub mod label_text;
 pub mod label_values;
 pub mod layer_path;

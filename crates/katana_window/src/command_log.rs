@@ -181,6 +181,18 @@ impl CommandLog {
         let said = format!("{title}: {}", simplified(text));
         if self.headless {
             self.log(&said, true);
+            // The status bar says it in a person's words: the box's title as a sentence's start,
+            // and the error's sentence without its code. It read "Open Failed: NotFound: no
+            // Katana project in this directory [...]" (the sixth look audit's I); the log's record
+            // keeps both, as --report and the tests read them.
+            let shown = format!(
+                "{}: {}",
+                title_as_words(title),
+                without_error_code(&simplified(text))
+            );
+            if let Some((status, _)) = self.status.as_mut() {
+                *status = shown;
+            }
             return;
         }
         if let Some(capture) = self.captures.last_mut() {
@@ -264,6 +276,81 @@ pub fn without_error_code(text: &str) -> &str {
                 .and_then(|rest| rest.strip_prefix(": "))
         })
         .unwrap_or(text)
+}
+
+/// A box's title ("Open Failed", "Export IFC Failed") as the start of a sentence: each word after
+/// the first that is a capital and small letters made small ("Open failed", "Export IFC failed");
+/// an initialism or a name in capitals is left as it is.
+fn title_as_words(title: &str) -> String {
+    title
+        .split(' ')
+        .enumerate()
+        .map(|(at, word)| {
+            let mut letters = word.chars();
+            let capitalised = letters.next().is_some_and(char::is_uppercase)
+                && letters.clone().next().is_some()
+                && letters.all(char::is_lowercase);
+            if at > 0 && capitalised {
+                word.to_lowercase()
+            } else {
+                String::from(word)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// An error's words as a person reads them: its sentence without the code it starts with, or -
+/// a box's failure, "Open Failed: NotFound: ..." (`CommandLog::warn_user`) - the box's title as
+/// words and the sentence after it without its code ("Open failed: ...").
+fn error_words(error: &str) -> String {
+    let sentence = without_error_code(error);
+    if sentence.len() != error.len() {
+        return String::from(sentence);
+    }
+    if let Some((title, rest)) = error.split_once(": ") {
+        let said = without_error_code(rest);
+        if said.len() != rest.len() {
+            return format!("{}: {said}", title_as_words(title));
+        }
+    }
+    String::from(error)
+}
+
+/// The command log's text as the log panel shows it, a line at a time (`shown_log_line`).
+pub fn shown_log(log: &str) -> String {
+    log.split('\n')
+        .map(shown_log_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One line of the log as a person reads it: an error ("! ...") as a sentence - without the code
+/// its description starts with (`without_error_code`), its first letter a capital as the status
+/// bar shows it ("! unknown command; ..." read as a fragment, the sixth look audit's H) - and a
+/// warning record (`warning text="..."`) as the sentence it carries, "Warning: ...", where its
+/// quotes were shown escaped. Every other line as it is. What is shown only: the log's record, what
+/// --report, the drivers and the tests read, keeps the line as it was logged.
+pub fn shown_log_line(line: &str) -> String {
+    if let Some(error) = line.strip_prefix("! ") {
+        return format!("! {}", crate::drive::controls::sentence_start(&error_words(error)));
+    }
+    if line.starts_with("warning ") {
+        let records = katana_app::geo::replies::parse_records(line);
+        if let [record] = records.as_slice()
+            && record.kind == "warning"
+            && record.body.is_empty()
+            && let [(key, text)] = record.fields.as_slice()
+            && key == "text"
+            && !text.is_empty()
+        {
+            return format!(
+                "Warning: {}",
+                crate::drive::controls::sentence_start(text)
+            );
+        }
+    }
+    String::from(line)
 }
 
 impl Console for CommandLog {
@@ -390,7 +477,7 @@ mod tests {
 
     use katana_core::{Error, ErrorCode};
 
-    use super::{CommandLog, without_error_code};
+    use super::{CommandLog, shown_log, shown_log_line, without_error_code};
 
     #[test]
     fn the_status_bar_shows_an_errors_sentence_and_the_log_keeps_its_code() {
@@ -413,6 +500,70 @@ mod tests {
         assert_eq!(
             log.status_message(now + super::STATUS_MESSAGE + Duration::from_millis(1)),
             None
+        );
+    }
+
+    #[test]
+    fn a_boxs_failure_is_said_in_the_status_bar_without_its_code_and_logged_whole() {
+        // The sixth look audit's I: headless, the status bar read "Open Failed: NotFound: no
+        // Katana project in this directory [...]".
+        let described = Error::new(ErrorCode::NotFound, "no Katana project in this directory")
+            .with_context("/data/site")
+            .describe();
+        let mut log = CommandLog::new();
+        log.set_headless(true);
+        log.warn_user("Open Failed", &described);
+        assert_eq!(
+            log.status_message(Instant::now()),
+            Some("Open failed: no Katana project in this directory [/data/site]")
+        );
+        assert_eq!(log.blocks(), [format!("! Open Failed: {described}")]);
+        // A title's initialism stays as it is.
+        log.warn_user("Export IFC Failed", "said");
+        assert_eq!(
+            log.status_message(Instant::now()),
+            Some("Export IFC failed: said")
+        );
+    }
+
+    #[test]
+    fn the_log_shows_an_error_as_a_sentence_and_a_warning_record_as_its_words() {
+        // The sixth look audit's H: "! unknown command; type HELP [FOO]" began small, and a
+        // warning's quotes showed escaped.
+        assert_eq!(
+            shown_log_line("! unknown command; type HELP [FOO]"),
+            "! Unknown command; type HELP [FOO]"
+        );
+        assert_eq!(
+            shown_log_line("! ParseFailure: unknown arrow head [x]"),
+            "! Unknown arrow head [x]"
+        );
+        assert_eq!(
+            shown_log_line(r#"warning text="super tin \"Site Surfaces\" ranks the tins""#),
+            r#"Warning: Super tin "Site Surfaces" ranks the tins"#
+        );
+        assert_eq!(shown_log_line("warning text=one"), "Warning: One");
+        // A box's failure as the status bar says it.
+        assert_eq!(
+            shown_log_line("! Open Failed: NotFound: no Katana project in this directory [/p]"),
+            "! Open failed: no Katana project in this directory [/p]"
+        );
+        assert_eq!(shown_log_line("! Style: no style"), "! Style: no style");
+        // Only the warning record itself: another record, a warning with other fields, a reply
+        // and an echoed line are shown as they are.
+        for line in [
+            "warning text=\"a\" layer=0",
+            "settings_warning text=\"line 3\"",
+            "warning text=",
+            "warnings=2",
+            "> SELECT 99999",
+            "imported points=3",
+        ] {
+            assert_eq!(shown_log_line(line), line);
+        }
+        assert_eq!(
+            shown_log("> FOO\n! unknown command; type HELP [FOO]"),
+            "> FOO\n! Unknown command; type HELP [FOO]"
         );
     }
 

@@ -57,7 +57,7 @@ use crate::customisation::scope_filter_widget::WIDGET_WIDTH;
 use crate::drive::{
     Choice, LineOptions, SpinRange, button, check, choice, label_as, line_with, spin, whole,
 };
-use crate::format::grouped;
+use crate::format::{grouped, grouped_in_threes};
 use crate::geo::gis_tool_dialog::GisDialogContext;
 use crate::geo::terrain_dialog_parts::why_status;
 use crate::gis_dialog_support::ok_cancel_beside;
@@ -1116,14 +1116,16 @@ impl PointCloudImportDialog {
         }
         let budget = u64::try_from(self.budget).unwrap_or(0);
         let step = PointCloudEngine::decimation_for_budget(self.point_count, budget);
+        // Grouped as the description's "Point cloud" row above is ("40,000 points"), whatever the
+        // locale: under a C locale this said "Every point: 40000." beneath it.
         let mut text = if step > 1 {
             format!(
-                "One point in {step} - about {} of {}.",
-                grouped(self.point_count / u64::from(step)),
-                grouped(self.point_count)
+                "One point in {step} (about {} of {}).",
+                grouped_in_threes(self.point_count / u64::from(step)),
+                grouped_in_threes(self.point_count)
             )
         } else {
-            format!("Every point: {}.", grouped(self.point_count))
+            format!("Every point ({}).", grouped_in_threes(self.point_count))
         };
         // A class filter thins after the step, and how much depends on the file: say so rather
         // than print a number that is only an upper bound.

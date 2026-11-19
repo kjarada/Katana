@@ -715,13 +715,14 @@ pub fn tool_bar_place_menu(bar: &ToolBar, place: &BarPlace, icon: &'static str) 
             bar.title
         ));
     for side in Side::ALL {
-        // Each side its own icon, an arrow into a box from that side, so the four are told apart
-        // without reading them (the third look audit's G).
+        // Each side its own icon, a bar against that side of a window, so the four are told
+        // apart without reading them (the third look audit's G), drawn at Float's size: the
+        // standard views' arrows they borrowed were smaller (the sixth look audit).
         let (text, icon) = match side {
-            Side::Top => ("Dock &Top", "ViewBack"),
-            Side::Left => ("Dock &Left", "ViewLeft"),
-            Side::Right => ("Dock &Right", "ViewRight"),
-            Side::Bottom => ("Dock &Bottom", "ViewFront"),
+            Side::Top => ("Dock &Top", "DockTop"),
+            Side::Left => ("Dock &Left", "DockLeft"),
+            Side::Right => ("Dock &Right", "DockRight"),
+            Side::Bottom => ("Dock &Bottom", "DockBottom"),
         };
         let along = if side.vertical() { "down" } else { "along" };
         menu.items.push(MenuItem::Action(
@@ -922,10 +923,14 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         "Erase the selected entities",
     )
     .shortcut(plain(Key::Delete));
+    // Titled sections, as every other menu has: Edit and Help were the two left with bare rules
+    // (the sixth look audit). Erase and Attributes change what is selected, so they are one
+    // group; Copy View as Image takes nothing selected, and closes the menu as a group of its own.
     let edit = Menu::new("editMenu", "&Edit")
+        .section("History")
         .action(undo.clone())
         .action(redo.clone())
-        .separator()
+        .section("Selection")
         .action(select_all.clone())
         .action(
             act(
@@ -945,15 +950,8 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             )
             .opens("selectByIdDialog"),
         )
+        .section("Change the selection")
         .action(erase.clone())
-        .action(act(
-            "editCopyViewImage",
-            "CopyViewImage",
-            "Copy &View as Image",
-            "Copy the plan view, as it is on screen, to the clipboard as an image (SNAPSHOT \
-             CLIPBOARD)",
-        ))
-        .separator()
         .action(
             act(
                 "editAttributes",
@@ -963,7 +961,15 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
                  one undo step",
             )
             .shortcut(ctrl(Key::Num1)),
-        );
+        )
+        .section("Clipboard")
+        .action(act(
+            "editCopyViewImage",
+            "CopyViewImage",
+            "Copy &View as Image",
+            "Copy the plan view, as it is on screen, to the clipboard as an image (SNAPSHOT \
+             CLIPBOARD)",
+        ));
 
     // ---- View -------------------------------------------------------------------------------
     let active = exec.workspace.state(exec.workspace.active_id());
@@ -1010,7 +1016,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     signs.insert(
         String::from("viewMeshesMenu"),
         (
-            "ViewTop",
+            "MeshFaces",
             String::from(
                 "How plan views, plots and sheets draw imported meshes: their faces, their \
                  footprints, or not at all",
@@ -1021,20 +1027,20 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     for (display, icon, text, tip) in [
         (
             katana_cad::scene::MeshPlanDisplay::Faces,
-            "ViewTop",
+            "MeshFaces",
             "&Faces",
             "Each face seen from above, filled in its colour and shaded by its slope (VIEWS \
              MESHES FACES)",
         ),
         (
             katana_cad::scene::MeshPlanDisplay::Footprint,
-            "GisHull",
+            "MeshFootprint",
             "F&ootprints",
             "Each mesh as the dashed outline of its hull (VIEWS MESHES FOOTPRINT)",
         ),
         (
             katana_cad::scene::MeshPlanDisplay::Hidden,
-            "LayerVisible",
+            "MeshHidden",
             "&Hidden",
             "Meshes drawn in the 3D views only (VIEWS MESHES HIDDEN)",
         ),
@@ -1382,6 +1388,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
 
     // ---- Help -------------------------------------------------------------------------------
     let help = Menu::new("helpMenu", "&Help")
+        .section("Reference")
         .action(
             act(
                 "helpCommandReference",
@@ -1410,7 +1417,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
             )
             .opens("keyboardShortcutsDialog"),
         )
-        .separator()
+        .section("Katana")
         .action(update)
         .action(act(
             "helpAbout",
@@ -1740,6 +1747,28 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     // reportWidget reads the statusTip of every item, a submenu's menuAction() among them.
     for menu in &mut menus {
         tip_submenus(menu, &signs);
+    }
+    // A menu of the menu bar opens from no item, so it had no icon of its own, and its torn-off
+    // panel's title bar showed the generic panel icon (the sixth look audit). Each takes the icon
+    // View > Toolbars shows for the toolbar of its name, else its first item's.
+    for menu in &mut menus {
+        if !menu.icon.is_empty() {
+            continue;
+        }
+        let title = menu.title.replace('&', "");
+        let icon = bars
+            .iter()
+            .find(|(bar, _)| bar.title == title)
+            .map(|(bar, _)| tool_bar_icon(bar, &family_icon))
+            .or_else(|| {
+                menu.actions()
+                    .into_iter()
+                    .map(|action| action.icon)
+                    .find(|icon| !icon.is_empty())
+            });
+        if let Some(icon) = icon {
+            menu.icon = icon;
+        }
     }
     Composed {
         menus,

@@ -720,6 +720,11 @@ impl UtilityToolsDialog {
         scope.views = context.views;
         // What the utility tools usually act on: everything drawn.
         scope.set_choice(ScopeChoice::Drawing);
+        // The scope is a column of its own beside the tabs whatever the source, so the tabs never
+        // move: with a schedule chosen it is drawn whole and greyed, saying why (the sixth look
+        // audit's G - its one line there left the column empty, or moved the tabs across it).
+        scope.keep_shape_when_unused(true);
+        scope.set_unused_note("Not used: the services come from the schedule file");
         // The layers, views and alignments follow the drawing: a DRAW adds layers, an undo takes
         // them away.
         let watcher = context
@@ -1264,18 +1269,16 @@ impl UtilityToolsDialog {
                          the drawing and draws them as services; Report, Verify, Clearance and \
                          Check read the services UTILITY DRAW drew, each line whole, where a \
                          scope that takes part of a line takes all of it. Both by the scope and \
-                         filter below. Regrade and Schedule always read what is drawn",
+                         filter at the left. Regrade and Schedule always read what is drawn",
                     )
                     .clicked()
                     {
                         self.source = UtilitySource::Drawing;
                     }
                 });
-                // Where the scope is in either layout: under this section. What each tab reads of
-                // the drawing is the radio's tooltip; said here, the note wrapped to two lines
-                // beside the radio and named "the left", where the scope is not when it is unused
-                // (the fifth look audit).
-                note(ui, "chosen by the scope and filter below");
+                // Where the scope is whatever the source and the tab: the column at the left under
+                // this section. What each tab reads of the drawing is the radio's tooltip.
+                note(ui, "chosen by the scope and filter at the left");
             });
         });
         controls::custom(
@@ -1285,33 +1288,25 @@ impl UtilityToolsDialog {
         );
 
         // ---- the scope and filter, and the tabs that read them ----
-        // Every tab is the tallest tab's height (`tallest_tab`), so the dialog keeps one size as
-        // the tabs are turned: drawn as tall as the page in front, it was 353 high on Report and
-        // 771 on Regrade (the fifth look audit). A scope that applies stands at the left of the
-        // tabs; one that does not is its one line under "Services from", and the tabs have the
-        // body's width - beside them it left a column some 400 by 350 empty.
+        // One layout whatever the tab and the source (the sixth look audit's G): the scope is the
+        // column at the left - in use while the tab reads the drawing, whole and greyed with why
+        // while a schedule is read - and the tabs head the column beside it, the tallest page's
+        // height on every tab. Two layouts, the scope's one line over full-width tabs under a
+        // schedule and the scope beside them on the drawing, made the dialog 695 high on Draw to
+        // Check and 765 on Regrade and Schedule, and the tab strip jumped from x 20 to x 449 as
+        // the tab was turned.
         let tallest = self.tallest_tab(ui, &*host);
-        ui.vertical(|ui| {
+        ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
             ui.set_min_height(tallest);
-            if drawing {
-                ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(SCOPE_WIDTH);
-                        self.scope.ui(ui);
-                    });
-                    ui.vertical(|ui| {
-                        self.tools_ui(ui, &*host, tool, true);
-                    });
+            ui.vertical(|ui| {
+                ui.set_width(SCOPE_WIDTH);
+                ui.add_enabled_ui(drawing, |ui| {
+                    self.scope.ui(ui);
                 });
-            } else {
-                ui.vertical(|ui| {
-                    ui.set_width(SCOPE_WIDTH);
-                    ui.add_enabled_ui(false, |ui| {
-                        self.scope.ui(ui);
-                    });
-                });
-                self.tools_ui(ui, &*host, tool, false);
-            }
+            });
+            ui.vertical(|ui| {
+                self.tools_ui(ui, &*host, tool, drawing);
+            });
         });
 
         // ---- the line, as it will run: read again, after what this frame's controls changed ----
@@ -1391,52 +1386,29 @@ impl UtilityToolsDialog {
         }
     }
 
-    /// The height under "Services from" of the tallest tab shown in the front tab's layout: a tab
-    /// that reads the drawing beside the scope in use (the taller of the two), one that reads a
-    /// schedule under the scope's one line. Every such tab is measured each frame in a sizing
-    /// pass (shell::dialog::measured_height), so the tallest is known whichever tab the dialog
-    /// opens on and whichever is in front. Only the tabs of the front's layout: with a schedule
-    /// chosen, Regrade and Schedule still read the drawing beside the scope, and their height
-    /// held under Report left some 400 points empty under its note.
+    /// The height under "Services from" of the scope's column and the tabs' beside it: the
+    /// taller of the scope (in use or greyed, as tall either way but for its note) and the
+    /// tallest page, every page measured each frame in a sizing pass
+    /// (shell::dialog::measured_height), so the height is the same whichever tab is in front and
+    /// whichever source is chosen.
     fn tallest_tab(&mut self, ui: &mut Ui, host: &dyn Host) -> f32 {
         let width = ui.available_width();
         let beside = (width - SCOPE_WIDTH - ui.spacing().item_spacing.x).max(0.0);
-        let scope_in_use = self.scope.measure_in_use(ui, SCOPE_WIDTH, true);
-        // Under the section above it, the scope's line has a heading's gap over it.
-        let scope_unused = self.scope.measure_unused(ui, SCOPE_WIDTH)
-            + (crate::shell::dialog::SECTION_GAP - ui.spacing().item_spacing.y).max(0.0)
-            + ui.spacing().item_spacing.y;
-        let source = self.source;
-        let reads_drawing = |tool: UtilityTool| {
-            matches!(tool, UtilityTool::Regrade | UtilityTool::Schedule)
-                || source == UtilitySource::Drawing
-        };
-        let front = reads_drawing(self.tool);
-        let mut tallest: f32 = 0.0;
+        let mut tallest = self
+            .scope
+            .measure(ui, SCOPE_WIDTH, true, true)
+            .max(self.scope.measure(ui, SCOPE_WIDTH, true, false));
+        // The source only greys a page's fields (Draw's geometry group), so a page is as tall on
+        // either: measured once.
         for at in 0..UTILITY_TOOL_COUNT {
             let tool = UtilityTool::from_index(at);
-            let drawing = reads_drawing(tool);
-            if drawing != front {
-                continue;
-            }
-            let height = if drawing {
-                let page = crate::shell::dialog::measured_height(
-                    ui,
-                    ("utilityTabBeside", at),
-                    beside,
-                    |ui| self.tools_ui(ui, host, tool, true),
-                );
-                page.max(scope_in_use)
-            } else {
-                scope_unused
-                    + crate::shell::dialog::measured_height(
-                        ui,
-                        ("utilityTabUnder", at),
-                        width,
-                        |ui| self.tools_ui(ui, host, tool, false),
-                    )
-            };
-            tallest = tallest.max(height);
+            let page = crate::shell::dialog::measured_height(
+                ui,
+                ("utilityTabBeside", at),
+                beside,
+                |ui| self.tools_ui(ui, host, tool, true),
+            );
+            tallest = tallest.max(page);
         }
         tallest
     }

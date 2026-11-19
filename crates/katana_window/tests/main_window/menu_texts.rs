@@ -279,4 +279,47 @@ mod menu_texts {
             .collect();
         assert!(lower.is_empty(), "View's items not in Title Case: {lower:?}");
     }
+
+    #[test]
+    fn every_menu_of_the_menu_bar_groups_its_items_under_titled_sections() {
+        // Edit and Help were the two menus left with bare rules where every other has headed
+        // sections (the sixth look audit).
+        let window = MainWindow::new();
+        let composed = window.composed();
+        assert!(composed.menus.len() >= 12, "the premise: the menu bar's menus");
+        for name in ["editMenu", "helpMenu"] {
+            let first = menu(&window, name).items.first().cloned();
+            assert!(
+                matches!(first, Some(MenuItem::Section(_))),
+                "{name} starts with a section: {first:?}"
+            );
+        }
+        for menu in &composed.menus {
+            assert!(
+                !menu
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, MenuItem::Separator)),
+                "{} has a bare rule",
+                menu.name
+            );
+        }
+        // Edit keeps every item it had.
+        let edit = menu(&window, "editMenu");
+        let mut names: Vec<String> = edit.actions().iter().map(|action| action.name.clone()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "editAttributes",
+                "editCopyViewImage",
+                "editDeselect",
+                "editErase",
+                "editRedo",
+                "editSelectAll",
+                "editSelectById",
+                "editUndo"
+            ]
+        );
+    }
 }

@@ -24,11 +24,13 @@ use katana_commands::{
 };
 use katana_core::{ErrorCode, Result};
 use katana_entity::tables::Layer;
-use katana_entity::{EntityId, PropertyValue, TextGeometry};
+use katana_entity::entity::ENTITY_TYPES;
+use katana_entity::{EntityId, EntityType, PropertyValue, TextGeometry};
 use katana_geometry::{Box2, Point2};
 use katana_window::customisation::{
     ScopeChoice, ScopeFilterView, ScopeFilterWidget, scope_filter_views,
 };
+use katana_window::customisation::scope_filter_widget::kind_words;
 use katana_window::drive::{ControlKind, Harness};
 
 mod scope_filter_widget {
@@ -321,6 +323,92 @@ mod scope_filter_widget {
             read.filter.types, filter.types,
             "the words read back as the boxes say"
         );
+    }
+
+    #[test]
+    fn a_type_box_says_its_kind_in_words_and_keeps_the_name_the_grammar_reads() {
+        // The sixth look audit's H: the curve polyline's box read "CurvePolyline", the variant's
+        // spelling among words. Its label is words; its name and its TYPE= word are as they were.
+        let mut bench = Bench::new();
+        let curve = bench.harness.control("gmTypeCurvePolyline").expect("drawn");
+        assert_eq!(curve.text, "Curved polyline");
+        assert_eq!(
+            bench.harness.control("gmTypeLeader").expect("drawn").text,
+            "Leader"
+        );
+        // Counted, the words and the count.
+        bench.widget.show_type_counts(&[(EntityType::CurvePolyline, 3)]);
+        bench.draw();
+        let counted = bench.harness.control("gmTypeCurvePolyline").expect("drawn");
+        assert_eq!(counted.text, "Curved polyline (3)");
+        // No label is a code's CamelCase.
+        for kind in ENTITY_TYPES {
+            let words = kind_words(kind);
+            assert!(
+                !words.chars().skip(1).any(char::is_uppercase),
+                "{kind:?}: {words}"
+            );
+        }
+        bench.press("gmScopeDrawing");
+        bench.tick("gmTypeCurvePolyline", true);
+        assert_eq!(words(&bench.widget), "DRAWING WHERE TYPE=curvepolyline");
+    }
+
+    #[test]
+    fn a_scope_that_keeps_its_shape_is_drawn_whole_and_greyed_saying_why() {
+        // The sixth look audit's G: beside Subsurface Utilities' tabs the unused scope's one line
+        // left its column empty, or the tabs moved across it. Kept in shape, it is every control,
+        // greyed and refused, with the dialog's words under its heading - as tall as in use but
+        // for that line.
+        let mut bench = Bench::new();
+        bench.widget.keep_shape_when_unused(true);
+        bench.widget.set_unused_note("Not used: the services come from the file");
+        bench.draw();
+        let used = bench.harness.control("gmScope").expect("drawn").rect;
+        let widget = &mut bench.widget;
+        let mut off = |ui: &mut egui::Ui| {
+            ui.add_enabled_ui(false, |ui| {
+                widget.ui(ui);
+            });
+        };
+        bench.harness.run(&mut off).expect("the widget is drawn disabled");
+        let unused = bench.harness.control("gmScope").expect("recorded").rect;
+        assert!(
+            unused.height() > used.height() && unused.height() < used.height() + 40.0,
+            "kept in shape it is {} high, in use {}",
+            unused.height(),
+            used.height()
+        );
+        for name in ["gmScopeDrawing", "gmTypeLine", "gmFilterLayer", "gmDrawnOnly"] {
+            let control = bench.harness.control(name).expect("drawn");
+            assert!(control.visible && !control.enabled, "{name}: {control:?}");
+        }
+        bench.harness.fill("gmFilterLayer", "survey/*");
+        let refused = bench.harness.run(&mut off).expect_err("a fill of it is refused");
+        assert!(refused.contains("is disabled"), "{refused}");
+        let widget = &mut bench.widget;
+        let texts = painted_texts(&mut bench.harness, |ui: &mut egui::Ui| {
+            ui.add_enabled_ui(false, |ui| {
+                widget.ui(ui);
+            });
+        });
+        for said in ["Apply to", "Not used: the services come from the file", "The whole drawing"] {
+            assert!(texts.iter().any(|text| text == said), "{said}: {texts:?}");
+        }
+        // Measured as drawn, in use and not, without drawing.
+        let widget = &mut bench.widget;
+        let mut measured = (0.0, 0.0);
+        bench
+            .harness
+            .run(|ui| {
+                measured = (
+                    widget.measure(ui, 400.0, true, true),
+                    widget.measure(ui, 400.0, true, false),
+                );
+            })
+            .expect("measured");
+        assert!((measured.0 - used.height()).abs() <= 1.0, "{measured:?} {used:?}");
+        assert!((measured.1 - unused.height()).abs() <= 1.0, "{measured:?} {unused:?}");
     }
 
     #[test]

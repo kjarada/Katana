@@ -1147,14 +1147,71 @@ Quantities writes m² and m³. Leaders' text style says its default as Settings
 does, "Standard (default)". A footer starts on a whole pixel, so it is 49
 whatever fraction of a pixel its body ends on: four footers (Leaders,
 Settings, Symbol Library, Edit Text) measured 50. Survey > Export Survey Points hands its `SURVEY EXPORT` line to the
-executor (`docs/survey.md`, "Point files on the command line"). Not done: an
-arrow's CamelCase token ("ClosedFilled") is shown as written, Grid's height
+executor (`docs/survey.md`, "Point files on the command line"). Not done: Grid's height
 source (its items are property names after "geometry"), the
 numbers still kept as text (Viewshed's heights, Surface From's Most points,
 Alignment Manager's Start chainage), the zero placeholders (Global Modify's
 Symbol, Leaders' Along and At x, Dimension Styles' Round to), Layers'
 "(default)" and Keyboard Shortcuts' "(no menu)", the manager pattern for Dimension and
 Surface Styles, and the import wizard's line (`docs/survey.md`).
+
+**The eighth round, the dialogs and the words (the sixth audit, 2026-11-19).**
+Subsurface Utilities has one layout whatever the tab and the source: the scope
+is the column at the left, in use while the tab reads the drawing and drawn
+whole and greyed while a schedule is read, saying why under its heading ("Not
+used: the services come from the schedule file";
+`ScopeFilterWidget::keep_shape_when_unused`), and the tabs head the column beside it, every page
+the tallest's height. It had two layouts - the scope's one line over
+full-width tabs under a schedule, the scope beside the tabs on the drawing -
+so the dialog was 695 high on Draw to Check and 765 on Regrade and Schedule,
+the tab strip jumped from x 20 to x 449, Report stood over some 300 points of
+nothing, and "What is drawn: chosen by the scope and filter below" sat over a
+scope that said it was not used; it now says "at the left", where the scope
+always is. *Rejected:* the one-line unused scope beside the tabs, which left
+its column empty, and the greyed whole scope under a dialog's fields, which
+the sixth round replaced for being most of those dialogs - whole is right
+only for a scope in a column of its own. A type box says its kind in words
+("Curved polyline", `scope_filter_widget::kind_words`), its name and its TYPE=
+word as they were. A box's title in the headless status bar is said as a
+sentence's start and its error without its code ("Open failed: no Katana
+project in this directory [...]", `CommandLog::warn_user`; the log keeps "Open
+Failed: NotFound: ..."). Empty is said once: the Point Report's empty table
+says what the scope found and what to do, its line over the table withdrawn;
+the Code Manager's Issues with none says "No issues: checked 1103 rules being
+edited." as the table's words. Every confirmation's pair is Cancel then OK: the
+sheet list's Rename row had OK first. The Title Block keeps Cancel and OK, not
+Close and Apply: it is modal, and but for the logo (stored by its own button)
+changes nothing until OK applies every page as one undo step. A number's
+placeholder zero says what it means: Global Modify's symbol size "Its own
+size", Dimension Styles' Round to empty with "None" (a blank reads as 0),
+Leaders' Along greyed "Tip on nothing" and Arrange's At x greyed "Topmost
+note's" (`leader_manager::spin_or_words`). Viewshed's and Line of Sight's
+heights and reach, Surface From's Most points and the Alignment Manager's
+Start chainage are short number wells (`controls::number_line`). Volumes'
+Make Cut/Fill Map and Make Envelope grey with Base and Top one surface (their
+lines refuse it, the tooltip says why); the unlabelled Cut Fill icon by Map
+name is gone; the empty results say "Nothing measured yet: Measure lists the
+quantities, Save CSV... measures and writes them", Save CSV... running the
+line itself, so lit with nothing listed. Import Point Cloud's estimate is
+grouped as its description is, whatever the locale ("Every point (40,000).",
+`format::grouped_in_threes`). Layers' Dimension style says "Drawing default"
+for a layer of none of its own ("Default" may be a style's name). Keyboard
+Shortcuts says "No menu". New icons, at Float's size and in their discipline:
+MeshFaces, MeshFootprint and MeshHidden for View > Meshes Seen from Above
+(General; the items had View Top's square, read as a bullet, and GIS's hull in
+GIS teal), DockTop, DockLeft, DockRight and DockBottom for a toolbar's Place
+menu (the view cube's faces, ten units where Float's box is sixteen), and
+SheetCopy for the sheet list's Copy Sheet (Plotting; it had Modify > Copy's
+drafting cyan). The menus name the new mesh and dock icons (View > Meshes
+Seen from Above: MeshFaces, MeshFootprint, MeshHidden; a toolbar's Place:
+DockTop, DockLeft, DockRight, DockBottom), and the command log shows its lines
+through `command_log::shown_log` (an error's sentence capitalised, "! Unknown
+command; ...", a box's failure as the status bar says it, and a `warning
+text="..."` record as "Warning: ..."), the panel's `shown_log` being that one.
+A choice in sentence case shows a CamelCase token in words
+(`drive::controls::token_words`: Leaders' arrow "ClosedFilled" is "Closed
+filled"; ByLayer and ByBlock, and capitals throughout, as written), and a fill
+may name either.
 
 **The main window, third round.** A panel's tools are 24 point squares (the
 style's button padding had made them 32, and Reference Data's ran off its
@@ -1773,6 +1830,33 @@ window's; a dialog that set a font of its own other than the fixed-pitch one
 keeps it. `resources/icon_sheet.png` is regenerated by `katana_make_icons` and
 carries every icon, the menu items' of 2026-09-26 included.
 
+**The docking round (the sixth audit, 2026-11-19).** Making the toolbars dock
+and the menus tear off ("Toolbars that dock and float, menus that tear off",
+below) regressed the most-seen chrome, and the sixth audit scored the window
+8.0, down from 8.5. Every menu was 590 points wide - File needs 201, Edit
+157 - because the tear-off line asked for the room egui's sizing pass offers
+a popup; it now asks for 48 and takes the column's width after, and a menu
+bar popup's items never wrap (`TextWrapMode::Extend`): egui sizes the popup
+before a tall menu's scroll bar shows, and the bar took its width from the
+items (View > Toolbars' Show Toolbar Names wrapped). A shortcut or
+a submenu's arrow stands as far in from the menu's right edge as the icons
+from its left (the button's padding and a check column, `right_trail`); it
+stood 2 points from the edge. A tick ends some three points before its item's
+icon, which it touched (`theme::style::menu_tick`, 7 points across and held to
+the check column's left). Edit and Help are in titled sections like every
+other menu (History, Selection, Change the selection, Clipboard; Reference,
+Katana). A toolbar's grip no longer reads "#" before its name: its dots end
+four points before the word (and before the Properties bar's "Style", which
+has no name before it), start clear of the window's edge, sit on the
+buttons' middle line at every icon size, and are faint until the pointer is
+on them. A toolbar's separator is a 1 point rule across the bar on a whole
+device pixel at any scale; its cell was its own 9 points, so it was a grey
+dot, read as a gap (`flyout_button::separator_cell`). A floating bar shares
+its buttons between its rows, and a torn-off menu along the top or the bottom
+flows into columns. A drop target is filled faintly in the accent under its
+outline, as VS Code and Blender show one, where the outline alone was lost
+over a busy plan.
+
 ### The icons' colours: discipline and function (2026-11-19)
 
 The owner, on 2026-11-19: "make the icons colorful based on their discipline
@@ -2011,26 +2095,40 @@ a point of the window with a width. The window's list of places, in order,
 is the order of the bars along each line; the geometry gives each side as
 many lines as its shown bars use (`layout::BarLines`), so a side with no bar
 takes no room, a fourth top row moves the views down a row, and a column is
-as broad as its broadest bar (the Properties bar's style box docked down a
-side widens its column to 220). A bar's orientation follows its side.
+as broad as its broadest bar. Each bar of a column is drawn at its own
+breadth against the window's edge, so a narrow bar never claims the void
+beside it (the Properties bar's style box docked down a side makes its
+column 220 broad, and Dock Left gives it a column of its own). A bar's
+orientation follows its side.
 
-* **By the mouse.** Every docked bar has a grip, six dots in the muted
-  token in the padding before its first item, and is dragged by it or by its
-  name (the handle, a named control `<Bar>Grip`). While it is dragged, where
-  it would go is outlined in the accent: the row or column under the pointer,
-  with the bar it would go before; the strip beside a side's bars, which
-  opens a new line there; or, anywhere else, the floating bar's own
-  rectangle. It moves when it is let go. A right-click on the grip offers the
-  bar's Place items, its toggle and Reset Toolbars.
+* **By the mouse.** Every docked bar has a grip, six dots in the padding
+  before its first item (`docking_ui::grip_dots`): two columns of three
+  along a row, 2.5 points in from the bar's start, so the first bar of a row
+  is clear of the window's edge; centred on the buttons' middle line, which
+  with large icons is not the row's; and ending some four points before the
+  bar's name, which starts `layout::NAME_LEAD` (4) points after the padding.
+  They are the muted token at 55 % at rest and the text's colour under the
+  pointer and while dragged (`paint_grip`). The bar is dragged by the grip
+  or by its name (the handle, a named control `<Bar>Grip`). While it is
+  dragged, where it would go is outlined in the accent over a faint accent
+  fill (`DROP_FILL`, 18 %): the row or column under the pointer, with the
+  bar it would go before; the strip beside a side's bars, which opens a new
+  line there; or, anywhere else, the floating bar's own rectangle. It moves
+  when it is let go. A right-click on the grip offers the bar's Place items,
+  its toggle and Reset Toolbars.
 * **By the menus.** View > Toolbars > Place has a submenu per toolbar
   (`viewToolBarPlace<Bar>`) with Dock Top, Dock Left, Dock Right, Dock
   Bottom and Float, the one it is at ticked, each side with its own icon - an
   arrow into a box from that side - so the four are told apart without
   reading them (`viewToolBarDock<Bar><Side>`,
   `<Side>` Top, Left, Right, Bottom or Float; `<Bar>` the toolbar's title
-  without spaces, as its toggle `viewToolBar<Bar>` is named). Dock Top puts
-  the bar on the first top row it fits in whole at the window's width, else a
-  row of its own; a side or the bottom, at the end of the side's first line.
+  without spaces, as its toggle `viewToolBar<Bar>` is named). Every side
+  docks a bar as Dock Top always did (`MainWindow::line_for`): on the first
+  line of that side it fits in whole - along the top and the bottom at the
+  window's width, down the left and the right in the column's height, and
+  down a side only beside bars of its own breadth - else on a line of its
+  own, the side's next. Draw docked right goes beside Modify's column, not
+  under it.
   View > Toolbars > Reset Toolbars (`viewToolBarsReset`) puts every bar back
   where a new window has it and shows it; Reset Window Layout does that too
   and closes the torn-off menus.
@@ -2038,9 +2136,12 @@ side widens its column to 220). A bar's orientation follows its side.
   ground with a border: a title strip (its grip and its name) over its
   buttons, wrapped in rows of its width (`flyout_button::wrap_strip`,
   `tool_bar_wrapped`) - every button shown, none behind an arrow, a
-  separator that would begin or end a row left out. Its right edge
-  (`<Bar>Resize`) sets the width, between its widest item and the width that
-  holds every button in one row; the height follows. A double click on its
+  separator that would begin or end a row left out and one inside a row a
+  rule across it. Its right edge (`<Bar>Resize`) sets the width asked,
+  between its widest item and the width that holds every button in one row;
+  the bar is drawn at the least width that lays its buttons out in as few
+  rows (`balanced_wrap_width`), so its rows share the buttons out and it has
+  no empty end; the height follows. A double click on its
   title docks it where it was last docked (as built for one never docked).
   It is kept on the window: its title strip stays within reach.
 * **One door.** A drag, a menu item, a right-click, a `*` step and a test
@@ -2053,10 +2154,23 @@ side widens its column to 220). A bar's orientation follows its side.
 **A menu tears off into a panel.** Every menu of the menu bar, and every
 submenu, starts with a tear-off line - a dashed rule in the muted token
 (`tearOff<Menu>`, drawn by `drive::action::tear_off_line`) - as Qt's
-tear-off menus did. Clicked, the menu is torn off where its line was: a
+tear-off menus did. The line takes the menu's width and never sets it: it
+asks for 48 points, which in egui's sizing pass (unjustified) is all it
+takes, and the column's whole width after, the column being justified.
+Clicked, the menu is torn off where its line was: a
 panel of the window's own chrome named `<menu>TornOff`, the menu's title and
-icon on its title bar, holding the menu's items drawn by the one menu drawer
-(`menu_items_ui`) with their icons, ticks, shortcuts and submenus. A click on
+icon on its title bar - a menu of the menu bar the icon View > Toolbars
+shows for the toolbar of its name, else its first item's - holding the
+menu's items drawn by the one menu drawer
+(`menu_items_ui`) with their icons, ticks, shortcuts and submenus. Along the
+top or the bottom the items flow into columns side by side
+(`docking::flow_columns`, `docking_ui::flowed_items_ui`): each column filled
+to the band's height, then the next; a section starts a new column when it
+does not fit under the items before it but fits one of its own; a section's
+title is never last in a column and a rule never first; no item is cut at
+the band's bottom; the columns, each as wide as its widest item, scroll
+across when they are wider than the band. Down a side, and floating, it is
+one column that scrolls. A click on
 an item runs its action as the menu's does, and the panel stays open; its
 ticks follow the window, since the items are made again each frame.
 
@@ -2090,8 +2204,8 @@ window as it was.
 
 **What a headless run reads.** `?toolBarLayout` reports every toolbar's
 place in order and every torn-off menu's (`FileToolBar=top:0 ...
-viewMenuTornOff=left`); `?<Bar>` a toolbar's (`place=right:0 at=1 shown=yes
-drawn=1321,143,39,45`, its place, its index along its line, whether it is
+viewMenuTornOff=left`); `?<Bar>` a toolbar's (`place=right:1 at=0 shown=yes
+drawn=1282,143,39,663`, its place, its index along its line, whether it is
 shown and where it was drawn); `?<menu>TornOff` a torn-off menu's
 (`place=float:... items=31 drawn=...`).
 
@@ -2100,7 +2214,20 @@ shown and where it was drawn); `?<menu>TornOff` a torn-off menu's
 * *A grip of its own before every bar* (a widget 6 points long): it cost
   every bar 8 points with the strip's spacing, the first row's five bars 40
   of the 33 a 1280 laptop leaves it, and the left column a Draw tool. The
-  dots are drawn in the padding every bar has.
+  dots are drawn in the padding every bar has; the 2 points more before a
+  bar's name (`NAME_LEAD` 4, was 2) that keep them clear of it cost the
+  rows 8, 6 and 4 points: at 1280 they need 1255, 1255 and 1278.
+* *A grip shown only under the pointer*, as some editors draw one: the grip
+  is how a person learns the bars move, and since a row has no rule between
+  its bars it is what says where each begins. It is faint at rest instead.
+* *Docking a side's bar at the end of its first line* whatever that line
+  held, as the sides did until the sixth look audit: Draw docked right
+  behind Modify was one button long (`drawn=1321,761,39,45`), its twenty
+  tools behind an arrow, and the Properties bar docked left made the whole
+  left column 220 broad with Draw's buttons in its first 39 points.
+* *A torn-off menu along the top or the bottom in one column*, as down a
+  side: a band of six items' height showed four of Draw's forty, 85 % of it
+  empty.
 * *Moving a docked bar with the pointer while it is dragged*, as Qt does:
   the row reflows under the pointer at every frame and the person chases the
   place they aimed at. The bar moves once, when it is let go, and the outline
@@ -5686,6 +5813,10 @@ they are easiest to break:
   height; never a least height kept from a frame as drawn.
 - **A tool with nothing to act on is greyed**, and a primary with nothing to
   run; a form that does not read keeps its button lit, so a press says why.
+- **Say a thing once, in words**: an empty list says it is empty and what to
+  do in one place (the table's own words), a number whose 0 or unused value
+  means something says it ("Its own size", "Tip on nothing"), and a token or a
+  placeholder is never shown in brackets or a code's CamelCase.
 - **A form is `shell::dialog`'s form**, never a hand-built `egui::Grid` of
   labels and fields; a Grid is for a table (the Title Block's revision
   cells), and lines up only its own cells.

@@ -32,6 +32,7 @@ pub mod window_support;
 
 mod command_line;
 mod geo_menus;
+mod imported_meshes;
 mod menu_texts;
 mod meshes_in_plan;
 mod screen_fit_dialogs;

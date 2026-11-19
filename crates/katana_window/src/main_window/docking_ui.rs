@@ -4,27 +4,31 @@
 //! a torn-off menu's panel, a drag's drop target - and of a docked bar's grip.
 //!
 //! THE GRIP. Every docked toolbar has six dots in the padding before its first item - its grip -
-//! and is dragged by it, and by its name when it shows one: the grip costs no room, so no bar is
-//! longer for being movable and the rows still fit a 1280 laptop. The handle is a named control
-//! (`<Bar>Grip`), and its right-click menu holds the bar's View > Toolbars > Place items. A drag shows where the bar would go as an accent
-//! outline, the only accent in the window that is not a thing chosen or active, since it is the
-//! place being chosen; it is moved when it is let go. Rejected: moving the bar with the pointer
-//! while it is docked, which reflows the row under the pointer at every frame and leaves the
-//! person chasing the place they aimed at.
+//! and is dragged by it, and by its name when it shows one: the grip costs a bar no more than the
+//! 2 points before its name that keep the dots clear of it (layout::NAME_LEAD), so the rows still
+//! fit a 1280 laptop. The dots are faint at rest and lit under the pointer (`paint_grip`). The
+//! handle is a named control (`<Bar>Grip`), and its right-click menu holds the bar's View >
+//! Toolbars > Place items. A drag shows where the bar would go as an accent outline over a faint
+//! accent fill, the only accent in the window that is not a thing chosen or active, since it is
+//! the place being chosen; it is moved when it is let go. Rejected: moving the bar with the
+//! pointer while it is docked, which reflows the row under the pointer at every frame and leaves
+//! the person chasing the place they aimed at.
 //!
 //! A FLOATING TOOLBAR is an egui Area over the views: a title strip (its grip and its name) over
-//! its buttons, wrapped in rows of its width (`flyout_button::tool_bar_wrapped`), and a right edge
-//! that sets the width. A double click on its title docks it where it was last docked. Rejected:
-//! an egui Window, whose title bar, frame and resize grip are egui's and would not match the
-//! window's chrome; and a floating bar sized by its height as well, which is two ways to choose one
-//! shape.
+//! its buttons, wrapped in rows of its width (`flyout_button::tool_bar_wrapped`) and drawn at the
+//! least width for those rows (`balanced_wrap_width`), and a right edge that sets the width. A
+//! double click on its title docks it where it was last docked. Rejected: an egui Window, whose
+//! title bar, frame and resize grip are egui's and would not match the window's chrome; and a
+//! floating bar sized by its height as well, which is two ways to choose one shape.
 //!
 //! A TORN-OFF MENU is a panel of the window's own chrome (the panels' `DockChrome`, its title bar
-//! with Minimise, Float and Close), named `<menu>TornOff`, holding the menu's items drawn by the
-//! one menu drawer (drive::action::menu_items_ui): its icons, ticks and shortcuts, each item a
-//! click that runs its action as the menu's does, and kept open. Docked, it is in a band between
-//! the views and a side; floating, an Area of its own sized by its edges. Its title bar is dragged
-//! to a side of the views to dock it there, or into the views to float it.
+//! with its menu's icon, Minimise, Float and Close), named `<menu>TornOff`, holding the menu's
+//! items drawn by the one menu drawer (drive::action::menu_items_ui): its icons, ticks and
+//! shortcuts, each item a click that runs its action as the menu's does, and kept open. Docked,
+//! it is in a band between the views and a side - down a side in one column that scrolls, along
+//! the top or the bottom flowed into columns side by side (`flowed_items_ui`); floating, an Area
+//! of its own sized by its edges. Its title bar is dragged to a side of the views to dock it
+//! there, or into the views to float it.
 
 use std::collections::BTreeMap;
 
@@ -35,9 +39,9 @@ use katana_core::{ErrorCode, Status};
 use super::actions::{BarPlace, Composed, reset_tool_bars_action, tool_bar_place_menu};
 use super::docking::{
     DRAG_THRESHOLD, DockingAction, DropSpot, DropZones, FLOAT_HEADER, FLOAT_WIDTH, FloatAt,
-    LEAST_PANEL, NEW_LINE_ZONE, PANEL_SIZE, PanelDrag, PanelPlace, Places, Side,
-    apply_drop, drop_spot, last_line, line_members, panel_dock_name, panel_drop_side, panel_menu,
-    panel_place_text, spot_at, spot_outline,
+    FlowItem, LEAST_PANEL, NEW_LINE_ZONE, PANEL_SIZE, PanelDrag, PanelPlace, Places, Side,
+    apply_drop, drop_spot, flow_columns, last_line, line_members, panel_dock_name,
+    panel_drop_side, panel_menu, panel_place_text, spot_at, spot_outline,
 };
 use super::layout::{self, BarLines, Geometry, natural_width};
 use super::window::MainWindow;
@@ -46,8 +50,16 @@ use crate::drive::action::{Menu, MenuItem, ToolBar};
 use crate::drive::registry::{ControlKind, ControlRecord, record};
 use crate::theme::palette;
 use crate::tools::flyout_button::{
-    StripItem, TOOL_BAR_PADDING_ACROSS, TOOL_BAR_PADDING_ALONG, wrap_strip,
+    StripItem, TOOL_BAR_PADDING_ACROSS, TOOL_BAR_PADDING_ALONG, balanced_wrap_width, wrap_strip,
 };
+
+/// How near two bars' breadths are for them to share a column (`MainWindow::line_for`): the
+/// breadths are whole points, so equal within rounding.
+const BREADTH_TOLERANCE: f32 = 1.0;
+
+/// The opacity of the accent filling a drop target under its outline (`drags_ui`): enough to
+/// read as a place over a plan's lines, faint enough that what is under it still shows.
+pub const DROP_FILL: f32 = 0.18;
 
 /// The toolbars a frame shows, by where they are.
 pub struct Arranged<'a> {
@@ -85,25 +97,55 @@ pub fn arrange<'a>(bars: &'a [(ToolBar, BarPlace)], shown: &dyn Fn(&str) -> bool
     }
 }
 
-/// The six dots of a grip in `rect`: two columns of three along a row's bar, three columns of two
-/// across a column's, in the muted token - a handle that reads as one without a line of its own.
-pub fn paint_grip(painter: &egui::Painter, rect: Rect, vertical: bool) {
-    let colour = palette::text_muted().to_egui();
-    let (columns, rows) = if vertical { (3, 2) } else { (2, 3) };
-    let step = 3.0;
-    let origin = rect.center()
-        - Vec2::new(
-            step * (columns - 1) as f32 / 2.0,
-            step * (rows - 1) as f32 / 2.0,
-        );
-    for column in 0..columns {
-        for row in 0..rows {
-            painter.circle_filled(
-                origin + Vec2::new(column as f32 * step, row as f32 * step),
-                0.8,
-                colour,
-            );
+/// The grip's dots: their radius, and the step between them.
+pub const GRIP_DOT: f32 = 0.8;
+pub const GRIP_STEP: f32 = 2.5;
+/// How far the grip's first column of dots is from the bar's start: the dots' ink starts some
+/// two points in, clear of the window's edge for the first bar of a row.
+pub const GRIP_INSET: f32 = 2.5;
+/// The grip's opacity at rest: present, so a person sees the bars can be moved and where each
+/// begins, but below everything the bar holds; at full strength under the pointer and while
+/// dragged.
+pub const GRIP_AT_REST: f32 = 0.55;
+
+/// The six dots of a docked bar's grip, for a bar starting at `start` (its corner) and `breadth`
+/// across: two columns of three along a row's bar, three columns of two across a column's, in the
+/// bar's padding before its first item and centred across the bar on its buttons' middle line.
+///
+/// They were centred in the padding's 6 points and on the line's rectangle: their ink began a
+/// point from the window's edge and ended some 3 points before a bar's name, so "File" read
+/// "#File" (the sixth look audit), and with large icons, whose buttons are broader than the line,
+/// the dots sat above the buttons' middle like a superscript.
+pub fn grip_dots(start: Pos2, breadth: f32, vertical: bool) -> Vec<Pos2> {
+    let mut dots = Vec::with_capacity(6);
+    for along in 0..2 {
+        for across in 0..3 {
+            let along = GRIP_INSET + along as f32 * GRIP_STEP;
+            let across = breadth / 2.0 + (across as f32 - 1.0) * GRIP_STEP;
+            dots.push(if vertical {
+                Pos2::new(start.x + across, start.y + along)
+            } else {
+                Pos2::new(start.x + along, start.y + across)
+            });
         }
+    }
+    dots
+}
+
+/// The grip's dots painted, in the muted token: at GRIP_AT_REST, or in the text's colour when
+/// `lit` (the pointer on its handle, or the bar dragged).
+///
+/// Chosen: dots always shown, faint at rest. Rejected: dots shown only under the pointer, as some
+/// editors draw them: the grip is how a person learns the bars move, and since a row has no rule
+/// between its bars, it is also what says where each bar begins.
+pub fn paint_grip(painter: &egui::Painter, dots: &[Pos2], lit: bool) {
+    let colour = if lit {
+        palette::text().to_egui()
+    } else {
+        palette::text_muted().to_egui().gamma_multiply(GRIP_AT_REST)
+    };
+    for dot in dots {
+        painter.circle_filled(*dot, GRIP_DOT, colour);
     }
 }
 
@@ -223,10 +265,16 @@ impl MainWindow {
         Ok(())
     }
 
-    /// Toolbar `name` docked to `side` (None: floated), as View > Toolbars > Place does: along the
-    /// top, in the first row it fits in whole at the window's width, else a row of its own; down
-    /// a side or along the bottom, at the end of the side's first line. A bar already on that side
-    /// stays where it is on it.
+    /// Toolbar `name` docked to `side` (None: floated), as View > Toolbars > Place does: on the
+    /// first line of that side it fits in whole - along the top and the bottom at the window's
+    /// width, down the left and the right in the column's height, and down a side only beside
+    /// bars of its own breadth - else on a line of its own, the side's next. A bar already on that
+    /// side stays where it is on it.
+    ///
+    /// Every side did what Dock Top did from the sixth look audit on: a side or the bottom put the
+    /// bar at the end of its first line whatever that line held, and Draw docked right behind
+    /// Modify was one button long, its twenty tools behind an arrow; the Properties bar docked
+    /// left made the whole left column as broad as its style box.
     pub fn dock_bar(&mut self, name: &str, side: Option<Side>) -> Status {
         let places = self.bar_places();
         let Some(place) = places
@@ -242,15 +290,7 @@ impl MainWindow {
             Some(side) if place.docked().is_some_and(|(at, _)| at == side) => {
                 return self.show_bar(name);
             }
-            Some(Side::Top) => self.top_row_for(name, &places),
-            Some(side) => match last_line(&places, side) {
-                Some(_) => DropSpot::Line {
-                    side,
-                    line: 0,
-                    before: None,
-                },
-                None => DropSpot::NewLine { side, before: 0 },
-            },
+            Some(side) => self.line_for(name, side, &places),
         };
         self.drop_bar(name, &spot)
     }
@@ -260,38 +300,85 @@ impl MainWindow {
         Ok(())
     }
 
-    /// The first top row with room for `name` whole at the window's last width (the rows as the
-    /// toolbar-fit check measures them), else a new row under the last.
-    fn top_row_for(&self, name: &str, places: &Places) -> DropSpot {
-        let width = self.ui.docking.screen.width();
+    /// The first line of `side` with room for `name` whole (the lines as the window last drew
+    /// them, measured as the toolbar-fit check measures a row), else a new line after the last.
+    /// Down the left and the right a line is also only one of bars of `name`'s breadth: a column
+    /// is as broad as its broadest bar, and a narrow bar beside a broad one leaves a void.
+    fn line_for(&self, name: &str, side: Side, places: &Places) -> DropSpot {
+        let vertical = side.vertical();
+        let room = self.side_room(side);
         let composed = self.composed();
+        let bar_of = |bar: &str| composed.bars.iter().find(|(each, _)| each.name == bar);
         let natural = |bar: &str| -> f32 {
-            composed
-                .bars
-                .iter()
-                .find(|(each, _)| each.name == bar)
-                .map_or(0.0, |(each, _)| self.docked_natural(each, false) as f32)
+            bar_of(bar).map_or(0.0, |(each, _)| self.docked_natural(each, vertical) as f32)
+        };
+        let breadth = |bar: &str| -> f32 {
+            bar_of(bar).map_or(layout::SIDE, |(each, _)| self.column_breadth(each))
         };
         let needed = natural(name);
-        let last = last_line(places, Side::Top);
-        for line in 0..=last.unwrap_or(0) {
-            let taken: f32 = line_members(places, Side::Top, line)
-                .into_iter()
-                .filter(|bar| *bar != name && self.ui.bars.shown(bar))
-                .map(natural)
-                .sum();
-            if last.is_some() && taken + needed <= width {
-                return DropSpot::Line {
-                    side: Side::Top,
-                    line,
-                    before: None,
-                };
+        let own = breadth(name);
+        let last = last_line(places, side);
+        if let Some(last) = last {
+            for line in 0..=last {
+                let members: Vec<&str> = line_members(places, side, line)
+                    .into_iter()
+                    .filter(|bar| *bar != name && self.ui.bars.shown(bar))
+                    .collect();
+                let taken: f32 = members.iter().map(|bar| natural(bar)).sum();
+                let alike = !vertical
+                    || members
+                        .iter()
+                        .all(|bar| (breadth(bar) - own).abs() <= BREADTH_TOLERANCE);
+                if alike && taken + needed <= room {
+                    return DropSpot::Line {
+                        side,
+                        line,
+                        before: None,
+                    };
+                }
             }
         }
         DropSpot::NewLine {
-            side: Side::Top,
+            side,
             before: last.map_or(0, |last| last + 1),
         }
+    }
+
+    /// How long a line of `side` is: the window's width along the top and the bottom, the height
+    /// between the top and bottom toolbars down the left and the right - as the last frame laid
+    /// the window out, or as it would be laid out now before one has.
+    fn side_room(&self, side: Side) -> f32 {
+        let screen = self.ui.docking.screen;
+        if !side.vertical() {
+            return screen.width();
+        }
+        let composed = self.composed();
+        let shown = |name: &str| self.ui.bars.shown(name);
+        let lines = self.bar_lines(&arrange(&composed.bars, &shown));
+        layout::geometry(
+            screen,
+            &self.ui.docks,
+            false,
+            &lines,
+            self.ui.docking.panels.band_breadths(),
+        )
+        .middle
+        .height()
+    }
+
+    /// How broad `bar` is down a side: its broadest item and the strip's padding across it, and
+    /// never less than a column (SIDE).
+    pub(crate) fn column_breadth(&self, bar: &ToolBar) -> f32 {
+        let docked = layout::docked_bar(bar, self.ui.bars.names_shown, true);
+        let strip = self.strip_of(&docked, true, self.ui.bars.icon_size);
+        let widest = strip
+            .items
+            .iter()
+            .map(|item| item.size(self.ui.bars.icon_size).0)
+            .max()
+            .unwrap_or(0)
+            + 2 * TOOL_BAR_PADDING_ACROSS;
+        (widest as f32).max(layout::SIDE)
     }
 
     /// The width `bar` needs docked to show every action: as a row draws it when `vertical` is
@@ -451,19 +538,8 @@ impl MainWindow {
     pub(crate) fn bar_lines(&self, arranged: &Arranged<'_>) -> BarLines {
         let breadth = |bars: &Vec<&ToolBar>| -> f32 {
             bars.iter()
-                .map(|bar| {
-                    let docked = layout::docked_bar(bar, self.ui.bars.names_shown, true);
-                    let strip = self.strip_of(&docked, true, self.ui.bars.icon_size);
-                    strip
-                        .items
-                        .iter()
-                        .map(|item| item.size(self.ui.bars.icon_size).0)
-                        .max()
-                        .unwrap_or(0)
-                        + 2 * TOOL_BAR_PADDING_ACROSS
-                })
-                .max()
-                .map_or(layout::SIDE, |widest| (widest as f32).max(layout::SIDE))
+                .map(|bar| self.column_breadth(bar))
+                .fold(layout::SIDE, f32::max)
         };
         BarLines {
             top: arranged.lines[Side::Top.index()].len(),
@@ -490,20 +566,7 @@ impl MainWindow {
         bar_rect: Rect,
         handle: Rect,
     ) {
-        // The dots in the bar's padding before its first item, across a row, along a column.
         let vertical = place.vertical();
-        let dots = if vertical {
-            Rect::from_min_size(
-                bar_rect.min,
-                Vec2::new(bar_rect.width(), TOOL_BAR_PADDING_ALONG as f32),
-            )
-        } else {
-            Rect::from_min_size(
-                bar_rect.min,
-                Vec2::new(TOOL_BAR_PADDING_ALONG as f32, bar_rect.height()),
-            )
-        };
-        paint_grip(ui.painter(), dots, vertical);
         let response = ui
             .interact(
                 handle,
@@ -516,6 +579,18 @@ impl MainWindow {
                  right-click for where it goes",
                 bar.title
             ));
+        // The dots centred on the strip's own breadth, which is the line's only at the standard
+        // icon size (layout::bar_breadth).
+        let lit = response.hovered()
+            || response.dragged()
+            || self
+                .ui
+                .docking
+                .bar_drag
+                .as_ref()
+                .is_some_and(|(name, _)| *name == bar.name);
+        let breadth = layout::bar_breadth(self.ui.bars.icon_size);
+        paint_grip(ui.painter(), &grip_dots(bar_rect.min, breadth, vertical), lit);
         let mut grip = ControlRecord::new(&format!("{}Grip", bar.name), ControlKind::Other);
         grip.text = bar.title.clone();
         grip.enabled = true;
@@ -612,12 +687,13 @@ impl MainWindow {
             let sizes: Vec<(i32, i32)> = strip.items.iter().map(|item| item.size(icon_size)).collect();
             let least = sizes.iter().map(|size| size.0).max().unwrap_or(0) + 2 * TOOL_BAR_PADDING_ALONG;
             let natural = natural_width(&strip.items, icon_size).max(least);
-            let width = at.width.clamp(least as f32, natural as f32).round();
+            let asked = at.width.clamp(least as f32, natural as f32).round();
             let separators: Vec<bool> = strip
                 .items
                 .iter()
                 .map(|item| *item == StripItem::Separator)
                 .collect();
+            let width = balanced_wrap_width(&sizes, &separators, asked as i32) as f32;
             let body = wrap_strip(&sizes, &separators, width as i32).size.1 as f32;
             let size = Vec2::new(width, FLOAT_HEADER + body);
             // Kept on the window: its title strip always within reach of the pointer.
@@ -645,15 +721,17 @@ impl MainWindow {
                         palette::window().to_egui(),
                     );
                     let header = Rect::from_min_size(rect.min, Vec2::new(width, FLOAT_HEADER));
-                    let grip = Rect::from_min_size(
-                        header.min + Vec2::new(4.0, 0.0),
-                        Vec2::new(TOOL_BAR_PADDING_ALONG as f32, FLOAT_HEADER),
-                    );
-                    paint_grip(&painter, grip, false);
+                    // The grip as a docked bar's, a little further in from the frame's corner,
+                    // and the name as far after it as a docked bar's name is (layout::NAME_LEAD
+                    // past the padding).
+                    let grip_start = header.min + Vec2::new(2.0, 0.0);
+                    let name_x = grip_start.x
+                        + TOOL_BAR_PADDING_ALONG as f32
+                        + layout::NAME_LEAD as f32;
                     // The name kept to the strip: a bar narrowed to a button's width is not
                     // as wide as its name.
                     painter.with_clip_rect(header.shrink2(Vec2::new(2.0, 0.0))).text(
-                        Pos2::new(grip.max.x + 4.0, header.center().y),
+                        Pos2::new(name_x, header.center().y),
                         egui::Align2::LEFT_CENTER,
                         &bar.title,
                         egui::TextStyle::Small.resolve(ui.style()),
@@ -685,6 +763,11 @@ impl MainWindow {
                     if handle.double_clicked() {
                         events.push(FloatEvent::DockBack(bar.name.clone()));
                     }
+                    paint_grip(
+                        &painter,
+                        &grip_dots(grip_start, FLOAT_HEADER, false),
+                        handle.hovered() || handle.dragged() || dragging,
+                    );
                     self.bar_context_menu(&handle, &bar, BarPlace::Floating(at));
                     let buttons = Rect::from_min_max(Pos2::new(rect.min.x, header.max.y), rect.max);
                     let mut floating_strip = strip.clone();
@@ -711,10 +794,13 @@ impl MainWindow {
                     resize_record.enabled = true;
                     resize_record.visible = true;
                     record(ui, &resize, resize_record);
+                    // The width asked, not the width drawn, follows the edge: the drawn width keeps
+                    // to the least for its rows (`balanced_wrap_width`), and a drag measured from
+                    // it would never reach the next row count.
                     if resize.dragged() {
                         events.push(FloatEvent::Width(
                             bar.name.clone(),
-                            width + resize.drag_delta().x,
+                            asked + resize.drag_delta().x,
                         ));
                     }
                     painter.rect_stroke(
@@ -814,7 +900,7 @@ impl MainWindow {
                         Vec2::new(each, band.height()),
                     )
                 };
-                self.menu_panel_at(ui, rect, menu, composed);
+                self.menu_panel_at(ui, rect, menu, composed, !side.vertical());
             }
             // The seam between the band and the views: dragged, it sets the band's breadth.
             let seam = match side {
@@ -890,7 +976,7 @@ impl MainWindow {
                 .fixed_pos(corner)
                 .constrain(false)
                 .show(&ctx, |ui| {
-                    self.menu_panel_at(ui, rect, &menu, composed);
+                    self.menu_panel_at(ui, rect, &menu, composed, false);
                     // The right and bottom edges and the corner between them size it.
                     let edge = 4.0;
                     for (part, area, cursor) in [
@@ -944,9 +1030,17 @@ impl MainWindow {
     }
 
     /// Torn-off menu `menu`'s panel at `rect`: the chrome's title bar, and the menu's items by the
-    /// one menu drawer, in a column that scrolls; a click runs the item's action and keeps the
-    /// panel open.
-    fn menu_panel_at(&mut self, ui: &mut Ui, rect: Rect, menu: &str, composed: &Composed) {
+    /// one menu drawer - in a column that scrolls, or, `across` a band along the top or the
+    /// bottom, flowed into columns side by side (`flowed_items_ui`); a click runs the item's
+    /// action and keeps the panel open.
+    fn menu_panel_at(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        menu: &str,
+        composed: &Composed,
+        across: bool,
+    ) {
         let Some(found) = crate::drive::steps::find_menu(&composed.menus, menu) else {
             return;
         };
@@ -955,14 +1049,18 @@ impl MainWindow {
         self.ui.docking.drawn.push((dock.clone(), rect));
         self.dock_at(ui, rect, &dock, |window, ui| {
             let mut chosen = None;
-            egui::ScrollArea::vertical()
-                .id_salt(("katanaTornOffItems", dock.as_str()))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
-                        crate::drive::action::menu_items_ui(ui, &found, &mut chosen);
+            if across {
+                flowed_items_ui(ui, &found, &dock, &mut chosen);
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt(("katanaTornOffItems", dock.as_str()))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
+                            crate::drive::action::menu_items_ui(ui, &found, &mut chosen);
+                        });
                     });
-                });
+            }
             if let Some(chosen) = chosen {
                 window.ui.triggered.push(chosen);
             }
@@ -1030,7 +1128,15 @@ impl MainWindow {
             egui::Order::Foreground,
             egui::Id::new("katanaDropTarget"),
         ));
+        // The target filled faintly in the accent under its outline, as VS Code and Blender show
+        // where a dragged panel lands: a 2 point outline alone was lost over a busy plan (the
+        // sixth look audit).
         let outline = |rect: Rect| {
+            painter.rect_filled(
+                rect.shrink(1.0),
+                egui::CornerRadius::same(2),
+                palette::accent().to_egui().gamma_multiply(DROP_FILL),
+            );
             painter.rect_stroke(
                 rect.shrink(1.0),
                 egui::CornerRadius::same(2),
@@ -1135,7 +1241,155 @@ impl MainWindow {
     }
 }
 
-/// The error for a torn-off menu's action on a menu not torn off.
+/// The least width of a column of a torn-off menu flowed across a band, and the space between two
+/// columns: some sixteen characters of an item's text, and the menu frame's gap twice.
+pub const FLOW_LEAST_COLUMN: f32 = 160.0;
+pub const FLOW_COLUMN_GAP: f32 = 12.0;
+
+/// `menu`'s items flowed into columns the height of `ui` (docking::flow_columns), side by side
+/// in a strip that scrolls across when they are wider than the band; each column as wide as its
+/// widest item. The items are drawn by the one menu drawer (drive::action::menu_item_ui), each
+/// once, so a step finds each by its name as in any menu.
+///
+/// The heights the columns are flowed by are the items' as the last frame drew them (kept under
+/// the panel's id), worked out from the style before a frame has; a frame that finds them
+/// changed asks for another, so no item is left cut at the band's bottom.
+fn flowed_items_ui(ui: &mut Ui, menu: &Menu, dock: &str, chosen: &mut Option<String>) {
+    egui::containers::menu::menu_style(ui.style_mut());
+    let room = ui.available_height().max(0.0);
+    let spacing = ui.spacing().item_spacing.y;
+    let key = egui::Id::new(("katanaTornOffFlow", dock));
+    let kept: Vec<f32> = ui.data(|data| data.get_temp(key)).unwrap_or_default();
+    let kinds: Vec<FlowItem> = menu
+        .items
+        .iter()
+        .map(|item| match item {
+            MenuItem::Section(_) => FlowItem::Section,
+            MenuItem::Separator => FlowItem::Separator,
+            MenuItem::Action(_) | MenuItem::Menu(_) => FlowItem::Item,
+        })
+        .collect();
+    let heights: Vec<f32> = if kept.len() == menu.items.len() {
+        kept.clone()
+    } else {
+        menu.items.iter().map(|item| item_height(ui, item)).collect()
+    };
+    let widths: Vec<f32> = menu.items.iter().map(|item| item_width(ui, item)).collect();
+    let columns = flow_columns(&kinds, &heights, room, spacing);
+    let mut drawn = heights.clone();
+    egui::ScrollArea::horizontal()
+        .id_salt(("katanaTornOffColumns", dock))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = FLOW_COLUMN_GAP;
+                for column in &columns {
+                    let width = column
+                        .iter()
+                        .map(|&index| widths[index])
+                        .fold(FLOW_LEAST_COLUMN, f32::max);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(width, room),
+                        Layout::top_down_justified(Align::Min),
+                        |ui| {
+                            ui.set_width(width);
+                            ui.spacing_mut().item_spacing.y = spacing;
+                            for &index in column {
+                                let response = crate::drive::action::menu_item_ui(
+                                    ui,
+                                    &menu.items[index],
+                                    chosen,
+                                );
+                                drawn[index] = response.rect.height();
+                            }
+                        },
+                    );
+                }
+            });
+        });
+    // A rule left out at a column's top drew nothing: its kept height stays as it was.
+    let changed = kept.len() != drawn.len()
+        || kept
+            .iter()
+            .zip(&drawn)
+            .any(|(kept, drawn)| (kept - drawn).abs() > 0.5);
+    if changed {
+        ui.data_mut(|data| data.insert_temp(key, drawn));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// An item's height before a frame has drawn it, as the menu drawer draws it: an action's or a
+/// submenu's button a control high (its icon and its text inside), a section's title a line of
+/// its font and its padding, a rule its height.
+fn item_height(ui: &Ui, item: &MenuItem) -> f32 {
+    use crate::theme::style::{MENU_ICON_SIZE, SECTION_PADDING, SEPARATOR_HEIGHT, section_font_id};
+    match item {
+        MenuItem::Action(_) | MenuItem::Menu(_) => ui
+            .spacing()
+            .interact_size
+            .y
+            .max(MENU_ICON_SIZE)
+            .max(ui.text_style_height(&egui::TextStyle::Button)),
+        MenuItem::Section(title) => {
+            ui.painter()
+                .layout_no_wrap(title.clone(), section_font_id(), egui::Color32::PLACEHOLDER)
+                .size()
+                .y
+                + SECTION_PADDING
+        }
+        MenuItem::Separator => SEPARATOR_HEIGHT,
+    }
+}
+
+/// The width an item needs, as the menu drawer lays it out: the button's padding, the gutter, its
+/// text, and its shortcut or submenu arrow with the space after it; a section's title from the
+/// items' text indent with the theme's margins. A column is as wide as its widest item.
+fn item_width(ui: &Ui, item: &MenuItem) -> f32 {
+    use crate::theme::style::{INDENT, MENU_CHECK_WIDTH, MENU_GUTTER_WIDTH, section_font_id};
+    let text = |text: String, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text, font, egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let body = egui::TextStyle::Button.resolve(ui.style());
+    let padding = ui.spacing().button_padding.x;
+    let gap = ui.spacing().icon_spacing;
+    // The gutter, the gap after it and the text; then, for a shortcut or an arrow, the gap before
+    // the space egui grows between them, the gap after it, the right-hand text, and the space
+    // after that (drive::action's right_trail) - the check column's width in all.
+    let button = |label: String, right: Option<String>| {
+        let mut width = 2.0 * padding + MENU_GUTTER_WIDTH + gap + text(label, body.clone());
+        if let Some(right) = right {
+            width += 2.0 * gap + text(right, body.clone()) + MENU_CHECK_WIDTH.max(gap);
+        }
+        width
+    };
+    match item {
+        MenuItem::Action(action) => button(
+            action.display_text(),
+            action
+                .shortcut
+                .as_ref()
+                .map(crate::drive::action::shortcut_text),
+        ),
+        MenuItem::Menu(submenu) => button(
+            submenu.title.replace('&', ""),
+            Some(String::from(
+                egui::containers::menu::SubMenuButton::RIGHT_ARROW,
+            )),
+        ),
+        MenuItem::Section(title) => {
+            crate::theme::style::menu_text_indent(ui)
+                + text(title.clone(), section_font_id())
+                + padding
+                + 2.0 * INDENT
+        }
+        MenuItem::Separator => 0.0,
+    }
+}
+
 fn not_torn_off(menu: &str) -> katana_core::Error {
     make_error(
         ErrorCode::NotFound,

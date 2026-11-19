@@ -1131,7 +1131,7 @@ pub fn widget_size(name: &str, icon_size: i32) -> Option<(i32, i32)> {
 }
 
 /// A toolbar's name before its buttons: its text as the window last drew it (`measure_names`), and
-/// the label's margins - 2 points before the word, NAME_GAP after it. Until a frame has measured
+/// the label's margins - NAME_LEAD points before the word, NAME_GAP after it. Until a frame has measured
 /// it, the estimate the window began with, 7 points a character and 12 of margins: wider than the
 /// secondary text's words are, it cost the third row the 18 points it was short of 1280 by.
 pub fn name_width(bars: &BarSettings, title: &str) -> i32 {
@@ -1143,6 +1143,12 @@ pub fn name_width(bars: &BarSettings, title: &str) -> i32 {
 
 /// The space after a toolbar's name before its first button, beside the strip's own spacing.
 pub const NAME_GAP: i32 = 6;
+/// The space before a toolbar's name, after the strip's padding that holds its grip: with the
+/// padding, the grip's dots end some four points before the word (main_window::docking_ui's
+/// `grip_dots`). It was 2, and the dots touched the word ("#File", the sixth look audit); the 2
+/// points more cost each named bar 2 of its row, and the rows still fit 1280 (the third, the
+/// fullest, needed 1274 and needs 1278).
+pub const NAME_LEAD: i32 = 4;
 
 /// Measures each title in `titles` in the secondary text, as its label is drawn (panels'
 /// strip_ui), into `bars.name_widths`: the label's room on its row follows the text size.
@@ -1154,7 +1160,7 @@ pub fn measure_names<'a>(bars: &mut BarSettings, ui: &egui::Ui, titles: impl Ite
             .layout_no_wrap(String::from(title), font.clone(), egui::Color32::PLACEHOLDER)
             .size()
             .x;
-        let width = text.ceil() as i32 + 2 + NAME_GAP;
+        let width = text.ceil() as i32 + NAME_LEAD + NAME_GAP;
         bars.name_widths.insert(String::from(title), width);
     }
 }

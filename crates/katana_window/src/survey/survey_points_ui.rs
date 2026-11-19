@@ -890,6 +890,16 @@ const REPORT_HEADERS: [&str; 7] = [
     "Source file",
 ];
 
+/// What the Point Report's empty table says: what the scope found - none - and what to do, once.
+fn empty_report_words(scope: &str) -> String {
+    let found = scope.trim().trim_end_matches('.');
+    if found.is_empty() {
+        String::from("Select survey points, or add some, and press Refresh.")
+    } else {
+        format!("{found}: add some and press Refresh.")
+    }
+}
+
 /// The Point Report's decimals: the C++ default, which the text report and the CSV use too.
 const REPORT_DECIMALS: i32 = 3;
 
@@ -954,7 +964,18 @@ impl SurveyPointReportDialog {
                     "The selected survey points, or every survey point when none is selected. \
                      Coordinates to 3 decimals; a blank elevation is a point with none.",
                 );
-                coloured_label(ui, "scope", &form.scope, palette::text().to_egui());
+                // What the table holds, over it; with nothing listed, said once, by the empty
+                // table: "No survey points in the drawing." over the header and "Select survey
+                // points, or add some ..." under it said it twice (the sixth look audit's H). The
+                // line is still recorded for a driver, withdrawn.
+                let empty = form.rows.is_empty();
+                if empty {
+                    drive::controls::withdrawn(ui, "reportScope", |ui| {
+                        coloured_label(ui, "scope", &form.scope, palette::text().to_egui());
+                    });
+                } else {
+                    coloured_label(ui, "scope", &form.scope, palette::text().to_egui());
+                }
                 // The points in the window's one table look: a fixed-pitch text table in a box
                 // wrapped its header over two lines at the dialog's width. The text is still what
                 // Copy copies, and still there for a driver ("report"), off the dialog.
@@ -964,9 +985,7 @@ impl SurveyPointReportDialog {
                     &REPORT_HEADERS,
                     &form.rows,
                     None,
-                    // What to do: the line above already says there are none (said twice, the
-                    // fifth look audit).
-                    "Select survey points, or add some and press Refresh.",
+                    &empty_report_words(&form.scope),
                 );
                 super::survey_dialogs::offstage(ui, "reportText", |ui| {
                     drive::text_with(
@@ -1127,7 +1146,21 @@ impl SurveyPointReportDialog {
 mod tests {
     use std::cmp::Ordering;
 
-    use super::{natural_order, number_order};
+    use super::{empty_report_words, natural_order, number_order};
+
+    #[test]
+    fn an_empty_point_report_says_what_it_found_and_what_to_do_once() {
+        // The sixth look audit's H: "No survey points in the drawing." over the table's header,
+        // then "Select survey points, or add some ..." under it.
+        assert_eq!(
+            empty_report_words("No survey points in the drawing."),
+            "No survey points in the drawing: add some and press Refresh."
+        );
+        assert_eq!(
+            empty_report_words(""),
+            "Select survey points, or add some, and press Refresh."
+        );
+    }
 
     #[test]
     fn point_ids_sort_as_a_person_reads_them_and_a_blank_before_every_number() {

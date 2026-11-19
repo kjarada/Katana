@@ -46,7 +46,7 @@ The public interface:
 | `crates/katana_dxf/src/reader.rs` | `read_dxf(bytes)`, `read_dxf_file(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `is_dxf_path`. |
 | `crates/katana_dxf/src/writer.rs` | `write_dxf(model)`, `write_dxf_file(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layer_name_for`. |
 | `crates/katana_dxf/src/import_command.rs` | `import_command(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
-| `crates/katana_dxf/src/codes.rs` | The indexed colours, lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
+| `crates/katana_dxf/src/codes.rs` | The indexed colours (re-exported from `katana_entity::indexed_colours`, the one table; see "Colours" below), lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
 
 ## Reading
 
@@ -113,9 +113,24 @@ What is kept, and how:
   in a tilted plane is projected onto the plan, a circle or arc as chords, and
   counted.
 - **Colours.** Group 420 (true colour) wins over group 62 (indexed); ByLayer
-  is left ByLayer. Indexed colours 1-9 are the named colours, 250-255 the grey
-  ramp, 10-249 computed from their hue, brightness and saturation (within a
-  unit or two of the published table, which no screen shows).
+  is left ByLayer. Group 62 is the AutoCAD Colour Index, and its table is not
+  this crate's: it is `katana_entity::indexed_colours` (2026-11-19), which
+  `codes.rs` re-exports, because the archive reader names the same indices
+  ("acad 040", `docs/interop.md`, "Colours") and may not see this crate - the
+  two are siblings in `tools/check_layering.cmake`'s table, and the entity
+  layer is below both. One table, so index 30 is one orange in either file.
+  1-9 are the named colours (8 and 9 grey 128 and 192, as AutoCAD shows them
+  today), 10-255 the published table acadrgb.txt, copied. Until then
+  10-249 were COMPUTED from their hue, brightness and saturation and rounded
+  to the nearest; the published table truncates, so 108 of the 240 came out
+  a unit higher in a channel (index 20 was 255,64,0 where the table says
+  255,63,0, and `dxf_codes::the_hue_range_steps_fifteen_degrees_at_five_brightnesses`
+  now says 63, from the table). *Rejected: keeping the formula*, which is the
+  table's structure but not its numbers - the structure is kept as a test
+  instead (every entry within 1.25 of it), which catches a row copied into
+  the wrong place. *Rejected: ezdxf's `DXF_DEFAULT_COLORS`*, whose 10-249 are
+  another palette (index 12 is 165,0,0 there, 189,0,0 in the published table
+  and in AutoCAD's colour dialog).
 - **Linetypes.** A pattern that starts with a gap, or holds two dashes
   together, is turned into Katana's form - dashes and gaps alternating from a
   dash - by merging runs and rotating the cycle, which draws the same line. A

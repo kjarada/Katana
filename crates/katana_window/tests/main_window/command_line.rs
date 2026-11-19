@@ -42,15 +42,21 @@ mod command_line {
         // sentence does (command_log::without_error_code).
         let log = "> LAYER SET nothing\n! NotFound: no layer nothing [LAYER]\n\
                    ! ParseFailure: a number was expected\n  at word 3\nlayer=0 current";
+        // Each error a sentence, its first word a capital as the status bar shows it
+        // (command_log::shown_log_line; "! unknown command" read as a fragment, the sixth look
+        // audit's H).
         assert_eq!(
             panels::shown_log(log),
-            "> LAYER SET nothing\n! no layer nothing [LAYER]\n! a number was expected\n  at \
+            "> LAYER SET nothing\n! No layer nothing [LAYER]\n! A number was expected\n  at \
              word 3\nlayer=0 current"
         );
-        // A line that only mentions a code, or names one mid-sentence, is as it was.
+        // A box's failure, its title then the error ("Open Failed: NotFound: ..."), shows the
+        // title as words and the sentence without its code, as the status bar does (the sixth
+        // look audit's I: the code leaked; command_log::shown_log_line). A line that is not an
+        // error and only mentions a code is as it was.
         assert_eq!(
-            panels::shown_log("! Style: NotFound: x\nNotFound: a reply"),
-            "! Style: NotFound: x\nNotFound: a reply"
+            panels::shown_log("! Style: NotFound: x\n! Open Failed: NotFound: no file\nNotFound: a reply"),
+            "! Style: x\n! Open failed: no file\nNotFound: a reply"
         );
 
         let mut window = MainWindow::new();
