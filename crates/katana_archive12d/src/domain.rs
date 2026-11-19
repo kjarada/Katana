@@ -87,7 +87,8 @@ pub use katana_entity::entity::{ELEVATION_PROPERTY, ELEVATIONS_PROPERTY};
 // (katana_entity::colour_names, which says what each returns): a
 // customisation's own colours are resolved beside them there, by cad, which
 // may not see this crate. An archive carries only the NAME of a colour, so a
-// name that is not one of the 27 ("pen 025", "vis concrete") is left ByLayer
+// name that is neither one of the 27 nor an AutoCAD Colour Index name ("acad
+// 040") nor the customisation's ("pen 025", "vis concrete") is left ByLayer
 // rather than guessed at. The functions THEMSELVES, not copies.
 pub use katana_entity::colour_names::{
     nearest_standard_colour, standard_colour, standard_colour_names,

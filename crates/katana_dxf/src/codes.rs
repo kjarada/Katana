@@ -2,120 +2,21 @@
 //! so that the reader and the writer cannot disagree about them - and exposed
 //! so that tests check them against values worked out by hand.
 
-use std::sync::LazyLock;
-
 use katana_entity::Color;
 use katana_math::numerics::PI;
 
 // ---- colour ----------------------------------------------------------------
 
-/// Group 62 values that are not colours.
-pub const COLOUR_BY_BLOCK: i32 = 0;
-pub const COLOUR_BY_LAYER: i32 = 256;
-/// Index 7 is the drawing's foreground: white on a dark background, black on a
-/// light one. Katana draws it white.
-pub const COLOUR_FOREGROUND: i32 = 7;
+// Group 62 is the AutoCAD Colour Index, whose one table is the entity layer's
+// (katana_entity::indexed_colours): the archive reader names the same indices
+// ("acad 030") and may not see this crate. Re-exported, not wrapped, so that
+// katana_dxf::indexed_colour IS that function.
+pub use katana_entity::indexed_colours::{
+    COLOUR_BY_BLOCK, COLOUR_BY_LAYER, COLOUR_FOREGROUND, indexed_colour, nearest_indexed_colour,
+};
 
 fn rgb(r: i32, g: i32, b: i32) -> Color {
     Color::new(r as u8, g as u8, b as u8, 255)
-}
-
-/// Indexed colours 10-249: hue (index - 10) / 10 in steps of 15 degrees, then
-/// within the hue five brightnesses, each full and then a third saturated.
-fn computed_hue(index: i32) -> Color {
-    const VALUES: [f64; 5] = [255.0, 189.0, 129.0, 104.0, 79.0];
-    let offset = index - 10;
-    let hue = offset / 10;
-    let step = offset % 10;
-    let value = VALUES[(step / 2) as usize];
-    let saturation = if step % 2 == 0 { 1.0 } else { 1.0 / 3.0 };
-    // The hue's pure components, 0 to 1, by the usual six sectors of 60
-    // degrees; 15 degrees is a quarter of a sector, so f is exact.
-    let sector = hue / 4;
-    let f = f64::from(hue % 4) / 4.0;
-    let (r, g, b) = match sector {
-        0 => (1.0, f, 0.0),
-        1 => (1.0 - f, 1.0, 0.0),
-        2 => (0.0, 1.0, f),
-        3 => (0.0, 1.0 - f, 1.0),
-        4 => (f, 0.0, 1.0),
-        _ => (1.0, 0.0, 1.0 - f),
-    };
-    // std::lround: halves away from zero, as f64::round.
-    let channel = |pure: f64| (value * (1.0 - saturation * (1.0 - pure))).round() as i32;
-    rgb(channel(r), channel(g), channel(b))
-}
-
-static TABLE: LazyLock<[Color; 256]> = LazyLock::new(|| {
-    const NAMED: [[i32; 3]; 10] = [
-        [0, 0, 0],
-        [255, 0, 0],
-        [255, 255, 0],
-        [0, 255, 0],
-        [0, 255, 255],
-        [0, 0, 255],
-        [255, 0, 255],
-        [255, 255, 255],
-        [128, 128, 128],
-        [192, 192, 192],
-    ];
-    const GREYS: [i32; 6] = [51, 80, 105, 130, 190, 255];
-    let mut out = [Color::default(); 256];
-    for (i, colour) in out.iter_mut().enumerate().skip(1) {
-        let index = i as i32;
-        *colour = if index <= 9 {
-            let named = NAMED[i];
-            rgb(named[0], named[1], named[2])
-        } else if index >= 250 {
-            let grey = GREYS[i - 250];
-            rgb(grey, grey, grey)
-        } else {
-            computed_hue(index)
-        };
-    }
-    out
-});
-
-/// The RGB of indexed colour 1-255. None for 0 (ByBlock), 256 (ByLayer) and
-/// anything outside the range.
-///
-/// 1-9 are the named colours (red, yellow, green, cyan, blue, magenta, white,
-/// grey 128, grey 192), 250-255 a grey ramp, and 10-249 twenty-four hues 15
-/// degrees apart, each at five brightnesses (255, 189, 129, 104, 79), full and
-/// then a third saturated. The hues are computed rather than tabulated: the
-/// published table rounds some of them a unit or two differently, which no
-/// screen shows and which cannot move a colour to a different index.
-pub fn indexed_colour(index: i32) -> Option<Color> {
-    if !(1..=255).contains(&index) {
-        return None;
-    }
-    Some(TABLE[index as usize])
-}
-
-/// The index whose RGB is nearest `colour` (squared distance; the lower index
-/// on a tie). Black is the foreground, 7, since no index is black and the
-/// nearest dark red would be a surprise.
-pub fn nearest_indexed_colour(colour: Color) -> i32 {
-    if colour.r == 0 && colour.g == 0 && colour.b == 0 {
-        return COLOUR_FOREGROUND;
-    }
-    let mut best = COLOUR_FOREGROUND;
-    let mut best_distance = i64::MAX;
-    for (i, candidate) in TABLE.iter().enumerate().skip(1) {
-        let dr = i64::from(candidate.r) - i64::from(colour.r);
-        let dg = i64::from(candidate.g) - i64::from(colour.g);
-        let db = i64::from(candidate.b) - i64::from(colour.b);
-        let distance = dr * dr + dg * dg + db * db;
-        if distance < best_distance {
-            // strict: the lower index wins a tie
-            best_distance = distance;
-            best = i as i32;
-            if distance == 0 {
-                break;
-            }
-        }
-    }
-    best
 }
 
 /// Group 420: 0x00RRGGBB.

@@ -1832,6 +1832,46 @@ The mapping is documented in full at the head of
   are listed by `katana_entity::colour_names::standard_colour_names()`, read from the same table
   `standard_colour` draws with, which is what the Survey Code Manager's colour
   field offers; the dialog keeps no copy of the table.
+- **AutoCAD Colour Index names (2026-11-19).** The writing program colours
+  meshes, their faces and their polymesh faces "acad 001" to "acad 255": the
+  index's numbers. A real archive of 646 meshes used nine of them, and with
+  the rest of its names drew every mesh in the one default colour, with a
+  warning per name. They are now standard names, resolved by
+  `katana_entity::colour_names::standard_colour` as "red" is, against the
+  one index table, `katana_entity::indexed_colours` (the published table;
+  `docs/dxf.md`, "Colours", says where it comes from and why it moved there
+  from the DXF crate). They are compared as every colour name is, after the
+  fold: any case, `_` or `-` as the blank, one to three digits with or
+  without the zero padding (`ACAD 5`, `acad 005`). "acad 0" and "acad 256"
+  are ByBlock and ByLayer, the inherited colour said on purpose: left ByLayer
+  and not reported. A customisation cannot give an index name another
+  colour, for the reason it cannot redefine a standard name
+  (`docs/customisation.md`, "Colour names"). A mesh's resolved colour is the
+  colour the window draws its plan footprint and its 3D faces in
+  (`MeshItem::imported`, `imported_meshes::a_mesh_coloured_by_an_index_name_is_drawn_in_that_colour_in_plan_and_in_3d`);
+  a polymesh face's colour is read and, like the grouping, not drawn.
+  *Rejected: mapping them in the archive reader only*: a survey code rule or
+  a linestyle pen naming "acad 040" would then draw in one colour on import
+  and in none when coded, from two resolvers. *Rejected: listing them with
+  the 27*: the Survey Code Manager's colour field would bury the words under
+  255 numbers.
+- **Colour names nothing defines are said once, in one line.** That
+  archive's other four names, of the form "vis ...", are NOT defined in it:
+  it carries colour names and no RGB at all - no colour table, no block that
+  gives a name its colour. They come from the writing program's own colour
+  file, which Katana does not read. So their RGB is not invented: what they
+  colour keeps the name (export writes it back) and the inherited colour,
+  and the import says in one line which names were not found and where they
+  can be defined ("4 colour names are not a standard name, an AutoCAD Colour
+  Index name ("acad 040") or one of the active customisation's colours, so
+  what they colour keeps the name and the inherited colour: "vis
+  concrete1", ...", at most 20 named and the rest counted;
+  `indexed_colour_names::a_name_nothing_defines_keeps_the_inherited_colour_and_is_said_once_in_one_line`).
+  To give them colours, put them in a customisation's `colours`
+  (`"vis grass": "#5A8A3C"`), load it - File > Settings > Import, or
+  `CUSTOMISE "<file>"` - and import the archive again. *Rejected: a warning
+  per name*, as before: four lines for one fact, each taking one of the 20
+  places the import names problems in.
 - **Drafting leaders.** `drafting_element { leader { ... } }` is read as a
   typed `DraftingLeader`, not skipped as an unknown top-level block. It
   becomes one native `LeaderGeometry`: arrow and hook coordinates, the
@@ -2141,12 +2181,12 @@ a worse lie than leaving the text upright. The undocumented parts of a
 super alignment (`computator`, `floating_arc_end_radius_length` and the rest)
 are read as fields and not interpreted; such an alignment arrives through its
 solved geometry, which is what the manual says a reader should use. A 12da
-declares no coordinate system, so nothing is reprojected. Colour names of
-the form "acad 040" - the AutoCAD Colour Index, which the writing program
-uses on meshes - are not in the palette: thirteen of them in one real
-archive (2026-11-19) fell back to the inherited colour, each said by a
-warning. Mapping them wants the index's 255 RGB values from a source
-outside this program.
+declares no coordinate system, so nothing is reprojected. A colour name the
+archive does not define and no customisation has ("vis grass") draws in the
+inherited colour until a customisation gives it an RGB: the writing
+program's own colour file defines it, and Katana does not read that file
+(no description of its format is available here). A polymesh face's colour
+is read and not drawn, with the grouping it belongs to.
 
 Unverified, found on 2026-11-03 (`docs/plan_view.md`, "Why an imported
 archive's symbols do not change with it"): whether a symbol block's `size`
