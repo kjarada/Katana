@@ -449,6 +449,8 @@ pub mod select_by_id_dialog;
 // P:   pub mod kept_name_combo;
 // P
 pub mod plan_painter;
+// The meshes' faces in plan (2026-11-19), beside the plan painter that draws them.
+pub mod mesh_plan_painter;
 // P (the previews, left for CU1)
 pub mod kept_name_combo;
 // I

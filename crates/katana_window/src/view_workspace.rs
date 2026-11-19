@@ -56,7 +56,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use egui::{Align, Layout, Pos2, Rect, Sense, Ui, UiBuilder, Vec2};
 use egui_dock::{DockState, Node, NodeIndex, SurfaceIndex, TabPath, Tree};
 use katana_cad::interactive_tool::{ToolInput, tool_catalog};
-use katana_cad::scene::{SceneMesh, SceneOptions, SceneSurface};
+use katana_cad::scene::{MeshPlanDisplay, SceneMesh, SceneOptions, SceneSurface};
 use katana_cad::scope_verbs::{ScopeViewFn, scope_view_of};
 use katana_cad::section::{Section, SectionDesign};
 use katana_cad::view_link::linkable;
@@ -1867,6 +1867,20 @@ impl ViewVerbHost for Shared {
 
     fn has_reference(&self, id: u64) -> bool {
         self.inner.borrow().references.contains(&id)
+    }
+
+    fn mesh_plan_display(&self) -> Option<MeshPlanDisplay> {
+        Some(crate::plan_painter::mesh_plan_display())
+    }
+
+    fn set_mesh_plan_display(&self, display: MeshPlanDisplay) -> Status {
+        // The window's one switch: every plan view repaints at its next frame, its kept drawing
+        // being keyed on it (viewport_widget's DrawingKey), and plots and sheets read it as they
+        // are made (plan_source_of).
+        if self.mode.get() != HostMode::Record {
+            crate::plan_painter::set_mesh_plan_display(display);
+        }
+        Ok(())
     }
 }
 

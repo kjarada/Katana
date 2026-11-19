@@ -1103,15 +1103,28 @@ What follows from that:
   neighbours. A bag of triangles does not, and computing adjacency would
   cost more than the lines save - so `SceneMesh` defaults to `Shaded`. The
   numbers are in `scene.rs` beside the default.
-- **In plan it is a footprint.** `TriangleMesh::plan_hull()` is the convex
+- **In plan it is its faces, seen from above** (since 2026-11-19;
+  `docs/plan_view.md`, "Meshes in plan"): filled in their colours, shaded by
+  slope with the 3D views' light, the highest face seen where faces overlap,
+  beneath the drawing. Until then it was only a footprint, so that 1 453
+  meshes of 90 656 triangles from one archive would not bury the drawing
+  they were context for - and a design model that was nothing but meshes
+  (646 meshes, 877 368 triangles of kerbs, pavements and batters) was an
+  empty plan. The footprint stays one choice of View > Meshes Seen from Above
+  (`VIEWS MESHES FACES|FOOTPRINT|HIDDEN`, cad's `scene::MeshPlanDisplay`), for
+  a drawing the meshes are context for.
+- **The footprint is a hull.** `TriangleMesh::plan_hull()` is the convex
   hull of the vertices: exact and cheap whatever the topology, unlike a
   silhouette. It is a HULL and says so - a horseshoe-shaped mesh's hull
   covers ground the mesh does not. A degenerate footprint comes back as it
   is rather than as nothing: a vertical wall gives the two ends of a
   segment, because seen from above a wall IS a line and drawing that line is
-  the truth about where it stands. One real archive brings 1 453 meshes of
-  90 656 triangles, so drawing their triangles in plan would bury the
-  drawing they are context for.
+  the truth about where it stands.
+- **Its rim is topological.** `TriangleMesh::boundary_edges()` is the edges
+  exactly one face uses, matched by vertex index whichever way the faces
+  wind: the rim of an open mesh, nothing for a closed one. Faces that meet at
+  one position through different vertex indices are not joined, as a file
+  that repeats its vertices per face does not join them.
 - **`triangle(i)` refuses a face that names a vertex which does not exist**,
   rather than trusting `validate()` to have been called. The scene builder
   is the last thing between a file and a read past the end of a vector.
@@ -1379,6 +1392,7 @@ VIEWS ISOLATE <id> <layer>
 VIEWS HIDE|SHOW|ISOLATE <id> LAYER <name>...      each word after LAYER is one layer, commas and all
 VIEWS HIDE|SHOW <id> REFERENCE <ref>[,<ref>...]   the imported rasters and point clouds a view hides
 VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
+VIEWS MESHES [FACES|FOOTPRINT|HIDDEN] how the window's plan views, plots and sheets draw meshes: meshes=faces
 ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
      | CENTRE x,y [SCALE s]  [view=<id>]
@@ -1549,6 +1563,17 @@ is applied, so `ghosts=off ghosts=maybe` changes nothing; a key other than
 (`view_verbs_test::views_set_refuses_what_it_does_not_take_and_changes_nothing`). `SET`
 and not a word of its own, so the next switch a view gains is a key, not a
 verb.
+
+**`MESHES` is the window's switch, not a view's**, which is why it is not a
+`SET` key: how every plan view, plot and sheet draws the meshes the window
+holds - their faces, their footprints, or not at all (`docs/plan_view.md`,
+"Meshes in plan"). `VIEWS MESHES` replies `meshes=faces`; with a word it
+sets it and replies the same. A word other than the three, or a second
+word, is refused and changes nothing; a host that draws no meshes in plan
+refuses it (`ViewVerbHost::mesh_plan_display`, None by default), and without
+a window it is refused with the rest of VIEWS
+(`view_verbs_test::views_meshes_refuses_what_it_does_not_take_and_changes_nothing`).
+View > Meshes Seen from Above runs this line.
 
 `ZOOM` replies the record of the view it moved without `title`, `active`,
 `linked`, `ghosts` and `hidden` - where the view looks, not what it shows -

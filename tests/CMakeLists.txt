@@ -928,6 +928,25 @@ if(KATANA_TEST_WINDOW)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
+    # Meshes in plan (docs/plan_view.md, "Meshes in plan"): the archive's
+    # trimesh is drawn in the plan view as its faces, which the view's report
+    # counts; VIEWS MESHES, the line View > Meshes Seen from Above runs, answers, and
+    # switched to footprints the view draws no faces. Set back to faces for
+    # the picture.
+    add_test(NAME qt_a_mesh_is_drawn_in_plan_as_its_faces_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/all_geometries.12da"
+            "-DDRIVE=?PlanView1|<VIEWS MESHES|<VIEWS MESHES footprint|?PlanView1|<VIEWS MESHES faces"
+            "-DEXPECT=PlanView1: [^\r\n]* meshes=[1-9][0-9]* mesh_triangles=[1-9][0-9]* .*--run-line VIEWS MESHES: ok=yes[\r\n]+  reply: meshes=faces.*--run-line VIEWS MESHES footprint: ok=yes[\r\n]+  reply: meshes=footprint.*PlanView1: drawn=[0-9]+ ghosts=[0-9]+ grips=[0-9]+[ \r\n]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/mesh_faces_in_plan_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_mesh_is_drawn_in_plan_as_its_faces_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
     # ---- the GIS menu: GDAL and PDAL through the QActions a person clicks ----
     #
     # Surface From Raster on the sample DEM. The expected range is the

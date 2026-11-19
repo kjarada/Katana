@@ -678,12 +678,14 @@ editor shows exactly what plots. It reads no widget and keeps its caches
   scale drawn. Match lines are dash-dot with their label along them; a key
   plan fades the drawing and outlines the other sheets, numbered.
 - **Imagery under the plan.** Rasters (an aerial photo, a GeoTIFF), point
-  clouds and mesh footprints print beneath the linework, as the plan view
+  clouds and meshes print beneath the linework, as the plan view
   shows them. A raster is cropped to what the viewport shows and averaged
   down to at most `SheetPaintOptions::raster_dpi_cap` (200 dpi in a PDF, 110 in
   the editor) and 16 megapixels, so a sheet over a 400-megapixel orthophoto
   embeds only its viewport's few megapixels; a cloud is splatted into an
-  image of the viewport at the same cap; a footprint is a 0.13 mm dashed
+  image of the viewport at the same cap; a mesh's faces are an image at
+  the same cap printed at half opacity, or, with View > Meshes Seen from Above >
+  Footprints, a 0.13 mm dashed
   outline. `docs/plan_view.md`, "Imagery on paper", has the rule and the
   measurements.
 - **Sections.** Cut once per drawing revision from the window's visible

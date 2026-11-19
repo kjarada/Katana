@@ -2584,6 +2584,15 @@ pub fn report_view(window: &mut MainWindow, name: &str) -> Option<String> {
                     plan.grip_count()
                 );
                 let stats = plan.last_paint_stats();
+                // meshplan: the meshes drawn as their faces (docs/plan_view.md, "Meshes in plan").
+                if stats.meshes_drawn > 0 {
+                    text.push_str(&format!(
+                        " meshes={} mesh_triangles={} mesh_covered={}",
+                        stats.meshes_drawn,
+                        stats.mesh_triangles_in_view,
+                        stats.mesh_pixels_covered
+                    ));
+                }
                 if stats.surfaces_drawn > 0 {
                     text.push_str(&format!(
                         " surfaces={} triangles={} edges={} tinted={} contours={} labels={} \

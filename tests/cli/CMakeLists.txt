@@ -682,6 +682,15 @@ if(KATANA_TEST_CLI)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 ${KATANA_PROGRAM_katana_cli} -c "PLOT a.pdf")
     set_tests_properties(cli.a_window_verb_in_a_batch_fails_it PROPERTIES WILL_FAIL TRUE)
+    # VIEWS MESHES is the window's switch for how its plan views draw the
+    # meshes it holds; katana_cli holds none (an archive's meshes are held=no
+    # here), so it is refused with the rest of VIEWS, saying where it runs.
+    add_test(NAME cli.views_meshes_is_refused_saying_where_it_runs
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "VIEWS MESHES footprint" -c "POINT 1,1")
+    set_tests_properties(cli.views_meshes_is_refused_saying_where_it_runs PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: Unsupported: VIEWS is the desktop window's[^\r\n]*katana --command"
+        FAIL_REGULAR_EXPRESSION "unknown command|point created|meshes=")
 
     add_test(NAME cli.paper_style_scale_lists_no_invented_views_in_a_new_session
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"

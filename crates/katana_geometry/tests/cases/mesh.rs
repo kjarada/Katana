@@ -103,5 +103,54 @@ mod triangle_mesh {
         assert!(mesh.plan_hull().is_empty());
         assert!(mesh.triangle(0).is_none());
         assert!(mesh.bounds().empty());
+        assert!(mesh.boundary_edges().is_empty());
+    }
+    #[test]
+    fn a_closed_mesh_has_no_boundary_and_an_open_one_has_its_rim() {
+        // The cube is closed: each of its 18 edges is shared by two faces.
+        assert!(unit_cube().boundary_edges().is_empty());
+        // Its top alone is a square of two triangles: the four sides are the rim, and the
+        // diagonal 4-6 is shared.
+        let mut top = unit_cube();
+        top.faces = vec![[4, 5, 6], [4, 6, 7]];
+        let rim = top.boundary_edges();
+        let pairs: Vec<(u32, u32)> = rim.iter().map(|edge| (edge.a, edge.b)).collect();
+        assert_eq!(pairs, vec![(4, 5), (4, 7), (5, 6), (6, 7)]);
+        let faces: Vec<u32> = rim.iter().map(|edge| edge.face).collect();
+        assert_eq!(faces, vec![0, 1, 0, 1]);
+    }
+    #[test]
+    fn faces_wound_opposite_ways_still_share_their_edge() {
+        // 0-1-2 runs counter-clockwise seen from above, 0-3-2 clockwise: the diagonal 0-2 is
+        // still one edge of both, so the rim is the square's four sides.
+        let mesh = TriangleMesh {
+            vertices: vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+            ],
+            faces: vec![[0, 1, 2], [0, 3, 2]],
+        };
+        let pairs: Vec<(u32, u32)> = mesh
+            .boundary_edges()
+            .iter()
+            .map(|edge| (edge.a, edge.b))
+            .collect();
+        assert_eq!(pairs, vec![(0, 1), (0, 3), (1, 2), (2, 3)]);
+    }
+    #[test]
+    fn a_face_that_names_a_missing_vertex_or_repeats_one_makes_no_edge() {
+        let mesh = TriangleMesh {
+            vertices: vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            faces: vec![[0, 1, 9], [0, 0, 2]],
+        };
+        // The first face is skipped whole. The second's sides are 0-0 (no edge), 0-2 and 2-0:
+        // the one edge 0-2 twice, so shared, and no rim.
+        assert!(mesh.boundary_edges().is_empty());
     }
 }
