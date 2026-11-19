@@ -1615,7 +1615,7 @@ fn why_not<T>(made: &Result<T>) -> String {
 
 /// What the results table says while it lists nothing.
 const RESULTS_EMPTY: &str =
-    "Nothing measured yet: Measure lists the quantities, Save CSV... measures and writes them";
+    "Nothing measured yet: Measure lists the quantities, Save CSV... measures and writes them.";
 
 /// The body's width: the Inside group's ways and its tick on one row.
 const VOLUMES_WIDTH: f32 = 600.0;

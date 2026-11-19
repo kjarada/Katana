@@ -689,6 +689,69 @@ pub fn number_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &st
 /// wide (Visuals::text_cursor's stroke).
 const CARET_ROOM: f32 = 2.0;
 
+/// A value control of a form that has nothing to show - a manager's form while its list is empty
+/// (Label Styles with no style): a field's well, `width` wide (None: a number box's least,
+/// NUMBER_FIELD_WIDTH), holding no value but `hint` in a placeholder's muted text (a
+/// `no_value_hint`, "No style"), greyed as its `Ui` is. Recorded under `name` as the `kind` it
+/// stands for, its value empty and its hint as its text, so a driver still finds it, reads it
+/// empty, and is refused a fill or a press of it as disabled (or, drawn enabled, as taking none).
+///
+/// Drawn in place of the box, choice or field that a chosen thing fills: greyed, a number box
+/// still showed its number and a choice its first item ("0.00 mm", "0", "Auto", "Standard"),
+/// which read as values a style held (the seventh look audit).
+pub fn no_value(
+    ui: &mut Ui,
+    name: &str,
+    kind: ControlKind,
+    hint: &str,
+    width: Option<f32>,
+) -> Response {
+    let taken = take(ui, name);
+    if let Some(taken) = &taken {
+        match &taken.posted.act {
+            Act::Fill(text) => refuse_fill(ui, taken, name, text),
+            Act::Press => refuse(ui, taken, no_button(&taken.posted)),
+            Act::ScrollTo => {}
+        }
+    }
+    let muted = crate::theme::palette::text_muted().to_egui();
+    let galley = ui.painter().layout_no_wrap(
+        String::from(hint),
+        egui::TextStyle::Body.resolve(ui.style()),
+        muted,
+    );
+    // A number box's least, or the width asked, and never less than the hint and its insets.
+    let width = width
+        .unwrap_or(NUMBER_FIELD_WIDTH)
+        .min(ui.available_width().max(NUMBER_FIELD_WIDTH))
+        .max(galley.size().x + 2.0 * FIELD_INSET);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, ui.spacing().interact_size.y),
+        egui::Sense::hover(),
+    );
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.visuals();
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            visuals.widgets.inactive.corner_radius,
+            visuals.text_edit_bg_color(),
+            visuals.widgets.inactive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        let at = egui::pos2(
+            rect.left() + FIELD_INSET,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        painter.galley(at, galley, muted);
+    }
+    scroll_if_asked(ui, taken.as_ref(), &response);
+    let mut record = base_record(ui, name, kind);
+    record.text = String::from(hint);
+    super::registry::record(ui, &response, record);
+    response
+}
+
 // ---- colours ----------------------------------------------------------------------------------
 
 /// The side of a colour's swatch (`colour_swatch`): a menu icon's 16 less two either side, so a

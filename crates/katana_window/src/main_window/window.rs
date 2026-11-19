@@ -506,7 +506,10 @@ impl MainWindow {
         // A toolbar docked or floated, a menu torn off and its panel placed (main_window::
         // docking): one door, whatever asked - a menu item, a toolbar's right-click menu, a step.
         if let Some(action) = super::docking::parse_action(name) {
-            let status = self.docking_action(action);
+            // A bar that does not dock down a side is refused there with the reason, before the
+            // move: its greyed Dock Left and Dock Right items are refused by name as any is.
+            let refused = super::docking::side_refused(&action, |key| self.bar_named(key).ok());
+            let status = refused.and_then(|()| self.docking_action(action));
             self.after_call();
             return status;
         }

@@ -355,4 +355,101 @@ mod theme {
             );
         }
     }
+
+    #[test]
+    fn a_menus_widest_plain_row_ends_as_far_in_from_its_right_edge_as_its_icons_start_from_its_left()
+    {
+        // The seventh look audit: a menu is as wide as its widest row, and where that row had no
+        // shortcut or arrow ("Sheets and Plotting Commands...", "Project Coordinate System...")
+        // its text ran to 3 pixels from the popup's right edge, while the icons stood 15 in from
+        // its left and a shortcut 16 in from its right. The plain row is made the widest here, a
+        // row with a shortcut beside it; both must keep at least the icons' inset on the right.
+        let mut harness = Harness::new();
+        apply(harness.context());
+        katana_window::icons::install(
+            harness.context(),
+            katana_window::icons::default_rasteriser().expect("the window's rasteriser"),
+        );
+        let plain_text = "Sheets and Plotting Commands Reference...";
+        let menu = drive::Menu::new("helpMenu", "&Help")
+            .action(
+                Action::new("helpCommandReference", "Command Reference...")
+                    .icon("Grid")
+                    .shortcut(egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::F1)),
+            )
+            .action(Action::new("helpSheetsCommands", plain_text).icon("Grid"));
+        let at = Pos2::new(40.0, 40.0);
+        let mut popup = Rect::NOTHING;
+        let mut draw = |ui: &mut Ui| {
+            let ctx = ui.ctx().clone();
+            let mut chosen = None;
+            popup = popup_menu(&ctx, "helpMenu", at, |ui| {
+                drive::menu_items_ui(ui, &menu, &mut chosen);
+            })
+            .rect;
+        };
+        harness.show(&mut draw).expect("the menu is drawn");
+        let output = harness.frame(&mut draw);
+        let plain_row = harness
+            .control("helpSheetsCommands")
+            .expect("the plain row is recorded")
+            .rect;
+        let shortcut_row = harness
+            .control("helpCommandReference")
+            .expect("the shortcut row is recorded")
+            .rect;
+        let shapes: Vec<Shape> = output
+            .shapes
+            .iter()
+            .flat_map(|clipped| match &clipped.shape {
+                Shape::Vec(inner) => inner.clone(),
+                other => vec![other.clone()],
+            })
+            .collect();
+        output.drop_without_applying_deltas();
+        let text_ink = |wanted: &str| {
+            shapes
+                .iter()
+                .find_map(|shape| match shape {
+                    Shape::Text(text) if text.galley.text() == wanted => {
+                        Some(text.galley.mesh_bounds.translate(text.pos.to_vec2()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{wanted:?} is drawn"))
+        };
+        let icon = shapes
+            .iter()
+            .filter(|shape| matches!(shape, Shape::Mesh(_)))
+            .map(Shape::visual_bounding_rect)
+            .find(|icon| plain_row.expand(0.5).contains_rect(*icon))
+            .expect("the plain row shows its icon");
+        let left_inset = icon.left() - popup.left();
+        assert!(left_inset > 0.0, "the icon inside the popup: {icon:?} in {popup:?}");
+        // The rows are the column's whole width, the popup's frame around them.
+        assert!(
+            (plain_row.width() - shortcut_row.width()).abs() < 0.5,
+            "the rows alike wide: {plain_row:?} {shortcut_row:?}"
+        );
+        let plain_ink = text_ink(plain_text);
+        assert!(
+            popup.right() - plain_ink.right() >= left_inset - 0.5,
+            "the plain row's text ends {} in from the right, its icon starts {left_inset} in from \
+             the left",
+            popup.right() - plain_ink.right()
+        );
+        let shortcut_ink = text_ink("F1");
+        assert!(
+            popup.right() - shortcut_ink.right() >= left_inset - 0.5,
+            "the shortcut ends {} in from the right, the icon starts {left_inset} in from the left",
+            popup.right() - shortcut_ink.right()
+        );
+        // The plain row is the widest: its text and the trail after it set the popup's width,
+        // so the trail is no wider than the icons' inset either - the two sides match.
+        assert!(
+            popup.right() - plain_ink.right() <= left_inset + MENU_CHECK_WIDTH,
+            "no wide empty strip after the widest row's text: {}",
+            popup.right() - plain_ink.right()
+        );
+    }
 }

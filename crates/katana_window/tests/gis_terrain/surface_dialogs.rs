@@ -148,6 +148,65 @@ mod surface_from_dialog {
     }
 
     #[test]
+    fn only_the_rows_of_the_chosen_source_are_shown_the_others_kept_hidden_and_off() {
+        // The seventh look audit: with From = Drawing, four greyed rows about rasters and clouds
+        // stood over the scope, and the dialog was tall enough to scroll and cut its Command row.
+        // Each row a source does not use is hidden, its control still there under its name, off.
+        let rows = [
+            "surfaceFromSource",
+            "surfaceFromClasses",
+            "surfaceFromMax",
+            "surfaceFromArea",
+            "surfaceFromScope",
+        ];
+        let shown_for = |kind: SurfaceFromKind| -> Vec<&str> {
+            match kind {
+                SurfaceFromKind::Drawing => vec!["surfaceFromScope"],
+                SurfaceFromKind::Cloud => {
+                    vec!["surfaceFromSource", "surfaceFromClasses", "surfaceFromMax"]
+                }
+                SurfaceFromKind::Raster => {
+                    vec!["surfaceFromSource", "surfaceFromMax", "surfaceFromArea"]
+                }
+            }
+        };
+        for kind in [
+            SurfaceFromKind::Drawing,
+            SurfaceFromKind::Cloud,
+            SurfaceFromKind::Raster,
+        ] {
+            let bench = from_bench(ran_host(), kind);
+            let shown = shown_for(kind);
+            for name in rows {
+                assert!(bench.has(name), "{kind:?}: {name} is still there by its name");
+                let wanted = shown.contains(&name);
+                assert_eq!(bench.visible(name), wanted, "{kind:?}: {name} shown");
+                if !wanted {
+                    assert!(!bench.enabled(name), "{kind:?}: {name} hidden is off");
+                }
+            }
+            // Name and Command apply to every source, and the Command row is drawn whole: not
+            // cut by the body's edge, as it was at the foot of a scrolling body.
+            for name in ["surfaceFromName", "surfaceFromCommand"] {
+                assert!(bench.visible(name), "{kind:?}: {name}");
+            }
+            let command = bench.control("surfaceFromCommand");
+            // Half a point for egui's rounding of a widget's rectangle to the pixel grid.
+            assert!(
+                command.clip.expand(0.5).contains_rect(command.rect),
+                "{kind:?}: the Command row whole: {:?} in {:?}",
+                command.rect,
+                command.clip
+            );
+        }
+        // A cloud's window, a field it does not show, says the cloud's word, not "raster".
+        let bench = from_bench(ran_host(), SurfaceFromKind::Cloud);
+        assert!(bench.placeholder("surfaceFromArea").contains("the whole cloud"));
+        let bench = from_bench(ran_host(), SurfaceFromKind::Raster);
+        assert!(bench.placeholder("surfaceFromArea").contains("the whole raster"));
+    }
+
+    #[test]
     fn with_no_raster_run_is_off_and_the_status_says_why() {
         let bench = from_bench(ran_host(), SurfaceFromKind::Raster);
         assert!(!bench.enabled("surfaceFromRun"));

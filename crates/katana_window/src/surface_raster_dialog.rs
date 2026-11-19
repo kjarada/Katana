@@ -44,6 +44,7 @@ use katana_interop::export::raster_export_formats;
 use katana_interop::terrain_io::suggested_cell_size;
 
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
+use crate::drive::controls::withdrawn;
 use crate::drive::{Choice, SpinRange, button, choice, label, spin};
 use crate::format::grouped;
 use crate::geo::terrain_dialog_parts::{
@@ -311,6 +312,18 @@ impl SurfaceFromDialog {
     }
 }
 
+/// What `add` draws when it applies to the chosen source (`applies`); withdrawn when it does not
+/// (drive::controls::withdrawn) - taking no room, and still drawn under its names for a driver,
+/// which reads it hidden and off and is refused a fill or a press of it as disabled, as when the
+/// row stood greyed.
+fn for_source<R>(ui: &mut Ui, applies: bool, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    if applies {
+        add(ui)
+    } else {
+        withdrawn(ui, salt, add)
+    }
+}
+
 impl Framed for SurfaceFromDialog {
     fn frame_mut(&mut self) -> &mut DialogFrame {
         &mut self.frame
@@ -324,19 +337,22 @@ impl Framed for SurfaceFromDialog {
             self.reload(&*host);
         }
         let kind = self.kind();
-        row(ui, "Source:", |ui| {
-            ui.add_enabled_ui(kind != SurfaceFromKind::Drawing, |ui| {
+        // Only the rows of the chosen source are shown; the others are hidden, still there under
+        // their names for a driver and off as they were (`for_source`). Four greyed
+        // rows about rasters and clouds stood over the drawing's scope, and a dialog that tall
+        // scrolled and cut its Command row at the footer (the seventh look audit).
+        let cloud = kind == SurfaceFromKind::Cloud;
+        let raster = kind == SurfaceFromKind::Raster;
+        let drawing = kind == SurfaceFromKind::Drawing;
+        for_source(ui, !drawing, "surfaceFromSource", |ui| {
+            row(ui, "Source:", |ui| {
                 // What is missing in the source's own words: a raster, or a point cloud.
-                let hint = if kind == SurfaceFromKind::Cloud {
-                    "No point cloud"
-                } else {
-                    "No raster"
-                };
+                let hint = if cloud { "No point cloud" } else { "No raster" };
                 self.source.ui_with_hint(ui, "surfaceFromSource", hint);
             });
         });
-        row(ui, "Classes:", |ui| {
-            ui.add_enabled_ui(kind == SurfaceFromKind::Cloud, |ui| {
+        for_source(ui, cloud, "surfaceFromClasses", |ui| {
+            row(ui, "Classes:", |ui| {
                 field(
                     ui,
                     "surfaceFromClasses",
@@ -345,8 +361,8 @@ impl Framed for SurfaceFromDialog {
                 );
             });
         });
-        row(ui, "Most points:", |ui| {
-            ui.add_enabled_ui(kind != SurfaceFromKind::Drawing, |ui| {
+        for_source(ui, !drawing, "surfaceFromMax", |ui| {
+            row(ui, "Most points:", |ui| {
                 // A short well, as every number kept as text is: filling the row, it read as a
                 // sentence's field (the sixth look audit's H).
                 crate::drive::controls::number_line(
@@ -357,17 +373,19 @@ impl Framed for SurfaceFromDialog {
                 );
             });
         });
-        row(ui, "Window:", |ui| {
-            ui.add_enabled_ui(kind == SurfaceFromKind::Raster, |ui| {
-                field(
-                    ui,
-                    "surfaceFromArea",
-                    &mut self.area,
-                    "x0,y0,x1,y1 - blank: the whole raster",
-                );
+        for_source(ui, raster, "surfaceFromArea", |ui| {
+            row(ui, "Window:", |ui| {
+                // The source's own word: hidden for a cloud, its placeholder still read by a
+                // driver said "the whole raster" there (the seventh look audit).
+                let whole = if cloud {
+                    "x0,y0,x1,y1 - blank: the whole cloud"
+                } else {
+                    "x0,y0,x1,y1 - blank: the whole raster"
+                };
+                field(ui, "surfaceFromArea", &mut self.area, whole);
             });
         });
-        ui.add_enabled_ui(kind == SurfaceFromKind::Drawing, |ui| {
+        for_source(ui, drawing, "surfaceFromScope", |ui| {
             self.scope.ui(ui);
         });
         row(ui, "Name:", |ui| {

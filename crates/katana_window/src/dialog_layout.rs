@@ -328,6 +328,10 @@ pub fn cell_text(ui: &Ui, row: egui::Rect, left: f32, right: f32, text: RichText
     ui.painter().galley(at, galley, theme::text().to_egui());
 }
 
+/// How far an empty `list_well`'s words stand in from its border, beside the well's own 2 point
+/// margin: with it, a field's text inset (drive::controls::FIELD_INSET, the theme's GROUP_GAP of 8).
+const EMPTY_LIST_INSET: i8 = 6;
+
 /// A `pick_list` in a well `height` high - a field's fill under a border, its rows scrolling in
 /// it - the list beside a form (Text Styles, Label Styles): a list of one name over a column of
 /// nothing beside a form of twenty rows read as a void (the second look audit's N15). While it has
@@ -356,9 +360,15 @@ pub fn list_well(
                 .show(ui, |ui| {
                     let list = pick_list(ui, name, rows, current);
                     if rows.is_empty() {
-                        // In the middle of the well, as a preview with nothing to show says what
-                        // to choose: at the well's top left it read as the first row of a list.
-                        ui.centered_and_justified(|ui| empty_table(ui, empty));
+                        // At the well's top left, a field's inset in from its border, as an
+                        // empty table says it under its header and the scope's layer well says
+                        // it: centred in a well some 330 points high (Label Styles with none),
+                        // it stood apart from every other manager's empty list (the seventh look
+                        // audit, which reversed the fifth round's centring). Muted and wrapped, it
+                        // does not read as a list's first row.
+                        egui::Frame::new()
+                            .inner_margin(egui::Margin::symmetric(EMPTY_LIST_INSET, 2))
+                            .show(ui, |ui| empty_table(ui, empty));
                     }
                     list
                 })

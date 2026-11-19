@@ -11,7 +11,9 @@
 //! Drafting bar, the left's column 0 at the window's left edge), so a new line next to the views is
 //! always the side's next number. The order of the window's list of places is the order of the bars
 //! along a line. The Drafting bar stays where it is: its toggles are words, which a 39 point column
-//! cannot hold, and it is the drawing's state rather than a set of commands.
+//! cannot hold, and it is the drawing's state rather than a set of commands. The Properties bar,
+//! one choice box broader than a column, docks along the top or the bottom or floats, never down a
+//! side (`ROW_ONLY_BARS`).
 //!
 //! ONE DOOR. A drag dropped, a View > Toolbars item, a bar's right-click menu, a `*` step and a
 //! test all end in `drop_bar` on the window's list (`apply_drop` here), which is normalised after
@@ -23,6 +25,8 @@
 //! moved by its title bar and sized by its edges.
 
 use egui::{Pos2, Rect, Vec2};
+use katana_core::error::make_error;
+use katana_core::{ErrorCode, Status};
 
 use super::actions::BarPlace;
 
@@ -195,6 +199,49 @@ pub fn normalise(places: &mut Places) {
     }
 }
 
+/// The toolbars that never dock down a side: the Properties bar is one choice box, the current
+/// style's, some 214 points broad. Down the left it made a column that broad for one control a
+/// row high, an empty 218 x 625 point column beside the panels (the seventh look audit). So it
+/// docks along the top or the bottom, or floats; a side is refused with `side_refused`'s reason,
+/// its Dock Left and Dock Right items are greyed (actions::tool_bar_place_menu), a drag to a side
+/// floats it (`drop_spot`), and a saved layout that had it down a side leaves it where the window
+/// builds it (layout::restore_layout).
+///
+/// Rejected: drawing it down a side as a short row across the column's top, which would be a
+/// fourth shape of docked bar for one bar, and still a column as broad as its box below it.
+/// The Surface Edit bar has a choice box too, but a column of tools under it that a side shows.
+pub const ROW_ONLY_BARS: [&str; 1] = ["PropertiesToolBar"];
+
+/// Whether toolbar `bar` (its object name) docks down the left and the right.
+pub fn docks_down_a_side(bar: &str) -> bool {
+    !ROW_ONLY_BARS.contains(&bar)
+}
+
+/// The refusal of a docking `action` that would put a bar of ROW_ONLY_BARS down a side, its
+/// object name found by `named` from the name or key the action gives; Ok for any other action.
+pub fn side_refused(action: &DockingAction, named: impl Fn(&str) -> Option<String>) -> Status {
+    let (key, side) = match action {
+        DockingAction::Dock { key, side } => (key, *side),
+        DockingAction::Place { bar, side, .. } => (bar, *side),
+        _ => return Ok(()),
+    };
+    let Some(side) = side.filter(|side| side.vertical()) else {
+        return Ok(());
+    };
+    match named(key) {
+        Some(bar) if !docks_down_a_side(&bar) => Err(make_error(
+            ErrorCode::Unsupported,
+            format!(
+                "this toolbar docks along the top or the bottom, or floats; not down the {}: \
+                 its box is broader than a column",
+                side.word()
+            ),
+            bar,
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Where a dragged toolbar would go if it were let go now.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DropSpot {
@@ -308,10 +355,12 @@ pub struct DropZones {
 /// Where a bar dragged to `pointer` lands: on the line under the pointer, before the first of its
 /// bars whose middle is past the pointer along the line; else on a new line, in the strip beside
 /// a side's bars; else floating, its grip under the pointer (`grab` is the pointer's offset from
-/// the bar's corner) at `width`.
+/// the bar's corner) at `width`. A bar that does not dock down a side (`ROW_ONLY_BARS`) dragged
+/// onto one floats there instead.
 pub fn drop_spot(zones: &DropZones, dragged: &str, pointer: Pos2, grab: Vec2, width: f32) -> DropSpot {
+    let takes = |side: &Side| !side.vertical() || docks_down_a_side(dragged);
     for (side, line, rect) in &zones.lines {
-        if !rect.contains(pointer) {
+        if !rect.contains(pointer) || !takes(side) {
             continue;
         }
         let along = |at: Pos2| if side.vertical() { at.y } else { at.x };
@@ -332,7 +381,7 @@ pub fn drop_spot(zones: &DropZones, dragged: &str, pointer: Pos2, grab: Vec2, wi
         };
     }
     for (side, before, rect) in &zones.new_lines {
-        if rect.contains(pointer) {
+        if rect.contains(pointer) && takes(side) {
             return DropSpot::NewLine {
                 side: *side,
                 before: *before,

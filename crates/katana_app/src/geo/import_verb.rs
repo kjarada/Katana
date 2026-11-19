@@ -680,10 +680,12 @@ fn apply_import(context: &mut Context<'_>, mut imported: Imported) -> Result<Str
                     &imported.request,
                 )?;
             } else {
+                // A whole sentence: ending on "the drawing's" it read as cut off mid-phrase in
+                // the command log (the seventh look audit).
                 extra.push(warning_text(&format!(
                     "{}; UNDO, then IMPORT <file> LOCAL moves it as one piece so its lower-left \
                      corner sits at 0,0, or IMPORT <file> ALONGSIDE puts that corner on the \
-                     drawing's",
+                     drawing's lower-left corner.",
                     advice.message
                 )));
             }

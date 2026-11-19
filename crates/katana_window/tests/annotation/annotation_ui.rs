@@ -468,6 +468,53 @@ mod annotation_managers_look {
     }
 
     #[test]
+    fn with_no_label_style_every_value_control_is_off_and_shows_no_value() {
+        // The seventh look audit: with no styles the form's labels were greyed but its controls
+        // showed values - Offset 0.00 mm, Priority 0, Marker size 0.00 mm, Shortest segment
+        // 0.0 mm, Chainage labels 0.001, Tick length 0.00 mm - and its choices their first items,
+        // which read as a style's. Each is off, holds no value and says the one empty word.
+        let mut bench = themed(Bench::new(interpreter_host(), LabelStyleManagerDialog::new));
+        assert_eq!(bench.document().model().label_styles.size(), 0, "the premise");
+        let values = [
+            "labelStyleKind",
+            "labelStyleTextStyle",
+            "labelStylePaperHeight",
+            "labelStylePlacement",
+            "labelStyleOrientation",
+            "labelStyleOffset",
+            "labelStylePriority",
+            "labelStyleMarker",
+            "labelStyleMarkerSize",
+            "labelStyleMinimumLength",
+            "labelStyleInterval",
+            "labelStyleTickInterval",
+            "labelStyleTickLength",
+        ];
+        for name in values {
+            let control = bench.control(name);
+            assert!(!control.enabled, "{name} is off");
+            assert_eq!(control.value, "", "{name} shows no value");
+            assert_eq!(control.text, "No style", "{name} says why");
+        }
+        assert_eq!(bench.value("labelStyleTemplate"), "");
+        assert_eq!(bench.control("labelStyleTemplate").text, "No style");
+        for name in ["labelStyleLeader", "labelStyleDisplace"] {
+            let control = bench.control(name);
+            assert!(!control.enabled, "{name} is off");
+            assert_eq!(control.checked, Some(false), "{name} is clear");
+        }
+        // A style chosen, the form holds its values again, and they can be edited.
+        assert!(bench.dialog.add_defaults(&mut bench.host));
+        bench.dialog.select(bench.host.document(), "Spot Level");
+        bench.draw();
+        for name in ["labelStyleOffset", "labelStylePriority", "labelStylePlacement"] {
+            let control = bench.control(name);
+            assert!(control.enabled, "{name} is on");
+            assert!(!control.value.is_empty(), "{name} shows the style's value");
+        }
+    }
+
+    #[test]
     fn a_style_managers_list_rows_span_its_column_not_their_words() {
         // N10: the chosen name was a pill as wide as "Standard"; the row spans the list, which is
         // as wide as the New row under it less the well's border.

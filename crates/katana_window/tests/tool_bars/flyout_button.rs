@@ -1831,3 +1831,99 @@ mod tool_bar_separators {
         }
     }
 }
+
+mod tool_bar_edges {
+    use super::*;
+    use katana_window::tools::flyout_button::column_rule;
+
+    #[test]
+    fn a_columns_rule_is_on_its_inner_side_on_the_last_whole_device_pixel_inside_it() {
+        // The seventh look audit: a column's rule was on its right edge whatever its side,
+        // centred on the edge. Down the left the next column's ground covered it where that
+        // column had a bar, so the rule between two columns showed only below the inner bar; down
+        // the right it ran along the window's edge, none between Modify's column and the next.
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1360.0, 860.0));
+        let left = Rect::from_min_max(Pos2::new(0.0, 143.0), Pos2::new(39.0, 806.0));
+        let right = Rect::from_min_max(Pos2::new(1321.0, 143.0), Pos2::new(1360.0, 806.0));
+        for ratio in RATIOS {
+            let ratio = ratio as f32;
+            let mut harness = Harness::new().with_pixels_per_point(ratio);
+            let mut rules = Vec::new();
+            harness
+                .frame(|ui: &mut Ui| {
+                    let painter = ui.painter();
+                    rules = [left, right]
+                        .iter()
+                        .map(|bar| column_rule(painter, *bar, screen))
+                        .collect();
+                })
+                .drop_without_applying_deltas();
+            let pixel = |at: f32| at * ratio;
+            let [left_rule, right_rule] = rules[..] else {
+                panic!("two rules");
+            };
+            // Down the left, its right side: the last whole device pixel inside the bar, so the
+            // next column's ground, from the bar's edge on, never touches it.
+            assert_eq!(left_rule[0].x, left_rule[1].x, "{ratio}: a vertical rule");
+            let x = pixel(left_rule[0].x);
+            assert!((x - x.floor() - 0.5).abs() < 1e-3, "{ratio}: on a pixel's centre: {x}");
+            assert!(x + 0.5 <= pixel(left.right()) + 1e-3, "{ratio}: inside the left column");
+            assert!(x + 0.5 > pixel(left.right()) - 1.0, "{ratio}: its last pixel: {x}");
+            // Down the right, its left side, facing the next column and the panels.
+            let x = pixel(right_rule[0].x);
+            assert!((x - x.floor() - 0.5).abs() < 1e-3, "{ratio}: on a pixel's centre: {x}");
+            assert!(x - 0.5 >= pixel(right.left()) - 1e-3, "{ratio}: inside the right column");
+            assert!(x - 0.5 < pixel(right.left()) + 1.0, "{ratio}: its first pixel: {x}");
+            assert_eq!(left_rule[0].y, left.top());
+            assert_eq!(left_rule[1].y, left.bottom(), "the bar's whole length");
+        }
+    }
+
+    #[test]
+    fn a_row_draws_no_rule_of_its_own_along_its_length() {
+        // The seventh look audit: under a row docked along the bottom, at 125 %, a stray rule the
+        // bar's length showed over the Drafting bar - the bar's own, on its bottom edge. The line
+        // a row is docked in rules the whole row (main_window::panels); the bar draws none.
+        for ratio in RATIOS {
+            let built = draw_bar(20);
+            // The Draw bar along a row, as docked to the top or the bottom.
+            let mut strip = built.strip();
+            strip.vertical = false;
+            let mut harness = Harness::new().with_pixels_per_point(ratio as f32);
+            let room = 700.0;
+            let mut bar = Rect::NOTHING;
+            let output = harness.frame(|ui: &mut Ui| {
+                let at = ui.cursor().min;
+                let _ = tool_bar_strip(
+                    ui,
+                    &strip,
+                    room,
+                    &mut |_ui: &mut Ui, _rect: Rect, _name: &str| false,
+                );
+                bar = Rect::from_min_max(at, ui.min_rect().max);
+            });
+            let border = palette::border().to_egui();
+            let along: Vec<String> = output
+                .shapes
+                .iter()
+                .flat_map(|clipped| match &clipped.shape {
+                    egui::Shape::Vec(inner) => inner.clone(),
+                    other => vec![other.clone()],
+                })
+                .filter_map(|shape| match shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == border
+                            && (points[0].y - points[1].y).abs() < 0.01
+                            && (points[0].x - points[1].x).abs() >= room - 1.0 =>
+                    {
+                        Some(format!("{points:?}"))
+                    }
+                    _ => None,
+                })
+                .collect();
+            output.drop_without_applying_deltas();
+            assert!(bar.width() >= room - 0.5, "{ratio}: the premise: the bar drawn {bar:?}");
+            assert!(along.is_empty(), "{ratio}: a rule along the row: {along:?}");
+        }
+    }
+}

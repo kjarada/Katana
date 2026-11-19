@@ -2554,7 +2554,14 @@ impl StyleManagerDialog {
                     None,
                     TableLook {
                         fill: true,
-                        empty: "No style matches: New makes one",
+                        // What is empty, the drawing's styles or what the filter left of them:
+                        // "No style matches" with no styles at all read as a filter's doing (the
+                        // seventh look audit).
+                        empty: if self.style_rows.is_empty() {
+                            "No styles: New makes one"
+                        } else {
+                            "No style matches the filter"
+                        },
                     },
                 );
                 if let Some(&row) = shown.chosen.and_then(|at| self.style_view.get(at))

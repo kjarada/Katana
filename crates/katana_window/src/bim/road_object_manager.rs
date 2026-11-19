@@ -82,6 +82,12 @@ pub const LAYER: usize = 7;
 pub const QUANTITIES: usize = 8;
 pub const PROBLEM: usize = 9;
 
+/// What the table says while it lists nothing: what places a road object, where "Nothing to
+/// list" said only what was not there (the seventh look audit). The BIM menu's Road objects
+/// section holds an item a kind, Barrier first.
+pub const NO_ROAD_OBJECTS: &str =
+    "No road objects in the scope: BIM > Barrier, Sign and the rest place them";
+
 /// Why the scope's entity-only controls are greyed: a road object has none of them.
 pub const NOT_AN_ENTITY: &str = "A road object is not an entity: it has no type, style or text to \
                                  match. Its kind is a property: key kind, value barrier";
@@ -702,6 +708,7 @@ impl RoadObjectManagerDialog {
             )
             .extended()
             .filling()
+            .empty_text(NO_ROAD_OBJECTS)
             .max_height(300.0),
             count: String::new(),
             info: String::new(),
