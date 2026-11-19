@@ -9,7 +9,7 @@ use std::f64::consts::PI;
 
 use crate::canvas::Path;
 
-use super::tool_icons::{STROKE, TINT, ToolInk, arc, polyline, pt, rectangle};
+use super::tool_icons::{Mark, STROKE, TINT, ToolInk, arc, polyline, pt, rectangle};
 
 /// A chevron arrowhead with its tip at (x, y), pointing along `degrees` counter-clockwise from
 /// east as on paper (the painter's y points down).
@@ -198,8 +198,8 @@ fn paint_erase(ink: &mut ToolInk<'_>) {
         false,
         STROKE,
     );
-    ink.line(10.0, 11.0, 10.0, 17.0, true, STROKE);
-    ink.line(14.0, 11.0, 14.0, 17.0, true, STROKE);
+    ink.mark_line(10.0, 11.0, 10.0, 17.0, Mark::Remove, STROKE);
+    ink.mark_line(14.0, 11.0, 14.0, 17.0, Mark::Remove, STROKE);
 }
 
 pub fn paint_modify_transform_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {

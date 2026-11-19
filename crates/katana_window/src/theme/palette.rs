@@ -76,8 +76,9 @@ pub const fn text_disabled() -> Color {
     Color::rgb(0x5f, 0x63, 0x6b)
 }
 
-/// One accent, used for everything interactive: the checked tool, focus, selection in lists, the
-/// primary button and the accent stroke of every icon. Blue rather than the red of the logo,
+/// One accent, used for everything interactive: the checked tool's frame, focus, selection in
+/// lists, the primary button, and the bright part of an active General icon (icons::icon_colours;
+/// the disciplines' hues keep clear of it). Blue rather than the red of the logo,
 /// because in an engineering program red already means "error" and a checked tool must not read
 /// as one (#4c8dff).
 pub const fn accent() -> Color {
@@ -103,6 +104,88 @@ pub const fn selection() -> Color {
 
 pub const fn error() -> Color {
     Color::rgb(0xff, 0x6b, 0x6b)
+}
+
+// ---- the icons' disciplines ------------------------------------------------------------------------
+//
+// The owner's ask of 2026-11-19: "make the icons colorful based on their discipline and function".
+// An icon's bright part - what the command acts on (icons, the module comment) - takes the hue of
+// the discipline the command belongs to; the object it acts on stays in the quiet grey. The hues
+// were chosen as a SET, in OKLCH (Ottosson's OKLab in polar form, where equal steps of lightness and
+// chroma look equal across hues): lightness about 0.76 and chroma about 0.13, so that no discipline
+// shouts over another and each sits a little above the muted text (L 0.70) and well below the text
+// colour (L 0.88), which keeps the drawing the brightest thing on screen. The hues go round the
+// wheel clear of the accent's blue (h 261: the accent means active, chosen, primary), the error red
+// (h 23: it means remove), and the create green below. The earth tones are spread by lightness as
+// well as hue - Terrain a darker amber, Utilities a lighter yellow - because orange, amber and
+// yellow lie 30 degrees apart.
+//
+// Each figure below is worked out from the sRGB value: the OKLCH by Ottosson's matrices, and the
+// contrast against `panel` (#25262a) as WCAG 2.1's relative-luminance ratio. Every one is far past
+// WCAG 2.1's 3 : 1 for a graphical object (1.4.11); the smallest is Terrain's 5.8 : 1. Every pair,
+// and each against the accent, the error red, the selection and the three text greys, is at least
+// 0.08 apart in OKLab (the closest: Survey and the create green, 0.084; Plotting and the text
+// colour, 0.086), about four times the 0.02 that is just noticeable. tests/tool_bars/theme.rs
+// works the same figures out again from these values.
+
+/// Drawing and modifying geometry: a cool cyan, 33 degrees round from the accent's blue
+/// (#3fc0f2; OKLCH 0.76 0.13 228; 7.2 : 1 on the panel).
+pub const fn discipline_drafting() -> Color {
+    Color::rgb(0x3f, 0xc0, 0xf2)
+}
+
+/// Text, labels, dimensions and leaders: violet (#be9df7; OKLCH 0.76 0.13 300; 6.7 : 1).
+pub const fn discipline_annotation() -> Color {
+    Color::rgb(0xbe, 0x9d, 0xf7)
+}
+
+/// Survey: a leaf green, held a little yellow of the create green (#92c268; OKLCH 0.76 0.13 132;
+/// 7.3 : 1).
+pub const fn discipline_survey() -> Color {
+    Color::rgb(0x92, 0xc2, 0x68)
+}
+
+/// Terrain, surfaces, volumes and their analysis: an earth amber, a step darker than the rest
+/// (#c9983f; OKLCH 0.71 0.12 79; 5.8 : 1).
+pub const fn discipline_terrain() -> Color {
+    Color::rgb(0xc9, 0x98, 0x3f)
+}
+
+/// GIS data and its processing: teal (#43cdba; OKLCH 0.77 0.12 182; 7.7 : 1).
+pub const fn discipline_gis() -> Color {
+    Color::rgb(0x43, 0xcd, 0xba)
+}
+
+/// BIM and roads: templates, corridors, road objects, IFC: orange (#fc9664; OKLCH 0.77 0.14 46;
+/// 7.0 : 1).
+pub const fn discipline_roads() -> Color {
+    Color::rgb(0xfc, 0x96, 0x64)
+}
+
+/// Subsurface utilities: the yellow of a locator's paint, a step lighter (#e0d159; OKLCH 0.85
+/// 0.14 102; 9.7 : 1).
+pub const fn discipline_utilities() -> Color {
+    Color::rgb(0xe0, 0xd1, 0x59)
+}
+
+/// Plotting and sheets: a paper slate, little chroma, so output reads as the quiet end of the set
+/// (#a6c1d9; OKLCH 0.80 0.05 245; 8.1 : 1).
+pub const fn discipline_plotting() -> Color {
+    Color::rgb(0xa6, 0xc1, 0xd9)
+}
+
+/// Format and customisation: styles, symbols, codes, layers: pink (#eb8ec4; OKLCH 0.76 0.13 345;
+/// 6.6 : 1).
+pub const fn discipline_format() -> Color {
+    Color::rgb(0xeb, 0x8e, 0xc4)
+}
+
+/// An icon's create mark - the plus of New, of a new layer, of an added vertex - and the tick of a
+/// check: a clear green, more chroma than the disciplines so a mark is read as a sign rather than
+/// a discipline (#4bde81; OKLCH 0.80 0.18 152; 8.7 : 1). Its opposite, the cross or the struck line
+/// of a delete, is `error`.
+pub const fn icon_create() -> Color {
+    Color::rgb(0x4b, 0xde, 0x81)
 }
 
 // ---- text ----------------------------------------------------------------------------------------

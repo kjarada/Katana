@@ -6,7 +6,7 @@
 
 use crate::canvas::PointF;
 
-use super::tool_icons::{FINE, STROKE, TINT, ToolInk, polyline, pt, rectangle};
+use super::tool_icons::{FINE, Mark, STROKE, TINT, ToolInk, polyline, pt, rectangle};
 
 /// The corners of the TIN and its centre, on the 24-unit grid.
 const CORNERS: [PointF; 4] = [
@@ -58,10 +58,10 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         // The TIN with no centre yet, and the new vertex with its plus.
         draw_tin(ink, false);
         ink.dot(12.0, 12.0, 2.4, true);
-        ink.line(12.0, 6.5, 12.0, 9.0, true, STROKE);
-        ink.line(12.0, 15.0, 12.0, 17.5, true, STROKE);
-        ink.line(6.5, 12.0, 9.0, 12.0, true, STROKE);
-        ink.line(15.0, 12.0, 17.5, 12.0, true, STROKE);
+        ink.mark_line(12.0, 6.5, 12.0, 9.0, Mark::Create, STROKE);
+        ink.mark_line(12.0, 15.0, 12.0, 17.5, Mark::Create, STROKE);
+        ink.mark_line(6.5, 12.0, 9.0, 12.0, Mark::Create, STROKE);
+        ink.mark_line(15.0, 12.0, 17.5, 12.0, Mark::Create, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.deletepoint" {
@@ -70,8 +70,7 @@ pub fn paint_terrain_edit_icon(tool_id: &str, ink: &mut ToolInk<'_>) -> bool {
         // crossed square - the third look audit's "mostly the crossed square".
         draw_tin(ink, false);
         ink.dot(12.0, 12.0, 1.6, false);
-        ink.line(9.0, 9.0, 15.0, 15.0, true, STROKE);
-        ink.line(15.0, 9.0, 9.0, 15.0, true, STROKE);
+        ink.cross(12.0, 12.0, 3.0, STROKE);
         return true;
     }
     if tool_id == "terrain.edit.movepoint" {

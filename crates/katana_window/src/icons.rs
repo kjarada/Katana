@@ -7,8 +7,8 @@
 //! ```text
 //! * They are crisp at every size and on every HiDPI scale, because nothing is ever resampled -
 //!   a 20 px toolbar icon and a 40 px one at 200% are both painted directly.
-//! * They follow the theme. The two tones are the palette's colours (icon_colours), so changing
-//!   the theme recolours every icon; a bitmap set would need redrawing per theme.
+//! * They follow the theme. Their colours are the palette's (icon_colours), so changing the
+//!   theme recolours every icon; a bitmap set would need redrawing per theme.
 //! * They cannot go missing. A resource path that is wrong at run time is a blank button; a
 //!   function that is wrong does not compile.
 //! ```
@@ -20,15 +20,29 @@
 //! one light tint (TINT) under their outline, never a solid fill; solid marks are only the small
 //! ones a drawing has - a node, a dot, an arrowhead. No gradients, no shading.
 //!
-//! Two tones. Each mark is drawn in the QUIET tone (the object) or the BRIGHT one (the part the
-//! command acts on - the arrow of Import, the new geometry of a draw tool, the cut line of a
-//! section); the code calls the bright one "accent", its name from before. Which colours the two
-//! tones are is the mode's (icon_colours): at rest the secondary text colour and the text colour,
-//! so a toolbar is quiet and its icons still say what each command acts on; ACTIVE - the tool
-//! that runs, the toggle that is on - the text colour and the accent, the one place the accent
-//! is; disabled, both the disabled text colour. Until 2026-11-16 every icon's bright part was the
-//! accent blue at rest, and a toolbar of them was a field of blue in which the running tool did
-//! not stand out. An icon that needs a sentence to explain belongs in a menu, not on a toolbar.
+//! Two tones and a discipline. Each mark is drawn in the QUIET tone (the object) or the BRIGHT one
+//! (the part the command acts on - the arrow of Import, the new geometry of a draw tool, the cut
+//! line of a section); the code calls the bright one "accent", its name from before. The bright
+//! tone is the hue of the command's DISCIPLINE (the owner's ask of 2026-11-19: "make the icons
+//! colorful based on their discipline and function"): Drafting cyan, Annotation violet, Survey
+//! green, Terrain amber, GIS teal, BIM and roads orange, Utilities yellow, Plotting slate, Format
+//! pink, each one token of the palette, and the text colour for General - File, Edit, View, Help -
+//! which has no hue. Which discipline an icon is, is one table (Icon::discipline, and
+//! tool_discipline for the catalogue's tools); which colours, the mode's (icon_colours): at rest
+//! the secondary text colour and the hue; ACTIVE - the tool that runs, the toggle that is on - the
+//! text colour and the same hue, the button's accent frame saying it runs (a General icon takes
+//! the accent, having no hue to keep); disabled, everything the disabled text colour.
+//!
+//! Function marks (tool_icons::Mark), few and always the same: the plus of something created and
+//! the tick of a check in the create green, the cross or struck line of something deleted in the
+//! error red, whatever the discipline. Import's and Export's arrows are the bright part already.
+//!
+//! Until 2026-11-16 every icon's bright part was the accent blue at rest, and a toolbar of them
+//! was a field of blue in which the running tool did not stand out; from then until 2026-11-19 it
+//! was the text colour, a monochrome set in which a menu's disciplines could not be told apart at
+//! a glance. The hues are kept at one lightness and chroma (palette, "the icons' disciplines") so
+//! a toolbar is colourful and still calm, and the accent stays the one sign of what is active. An
+//! icon that needs a sentence to explain belongs in a menu, not on a toolbar.
 //!
 //! The application icon (the katana on its tile) is painted by the same code, which is what
 //! `katana_make_icons` writes out as resources/katana.ico for the executable's Windows resource.
@@ -57,8 +71,9 @@ use crate::canvas::{
 };
 use crate::theme::palette;
 use crate::tools::icons_terrain::draw_tin;
+pub use crate::tools::tool_icons::IconColours;
 use crate::tools::tool_icons::{
-    FINE, GRID, STROKE, TINT, ToolInk, arc, circle, paint_tool_icon_weighted, polyline, pt,
+    FINE, GRID, Mark, STROKE, TINT, ToolInk, arc, circle, paint_tool_icon_weighted, polyline, pt,
     rectangle, start, weight_at,
 };
 
@@ -846,6 +861,320 @@ impl Icon {
     }
 }
 
+// ---- disciplines ---------------------------------------------------------------------------------
+
+/// The discipline an icon's command belongs to: what colours its bright part (the owner's ask of
+/// 2026-11-19, "make the icons colorful based on their discipline and function"). The guide is the
+/// menu or toolbar family the command is found in; one discipline, one hue (palette's
+/// `discipline_*`), so a GIS command looks GIS on whatever menu or panel it is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Discipline {
+    /// File, Edit, View, Window, Help: no hue - the bright part is the text colour.
+    General,
+    Drafting,
+    Annotation,
+    Survey,
+    Terrain,
+    Gis,
+    /// BIM and roads.
+    Roads,
+    /// Subsurface utilities. Its menu items still borrow the icons of the commands they resemble
+    /// (survey::utility_workbench), each of which keeps its own discipline; the hue waits for
+    /// icons of their own (docs/desktop.md, "Not done").
+    Utilities,
+    /// Plotting and sheets.
+    Plotting,
+    /// Format and customisation.
+    Format,
+}
+
+/// Every discipline, General first.
+pub const DISCIPLINES: [Discipline; 10] = [
+    Discipline::General,
+    Discipline::Drafting,
+    Discipline::Annotation,
+    Discipline::Survey,
+    Discipline::Terrain,
+    Discipline::Gis,
+    Discipline::Roads,
+    Discipline::Utilities,
+    Discipline::Plotting,
+    Discipline::Format,
+];
+
+impl Discipline {
+    /// The discipline as the docs and the contact sheet name it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Drafting => "Drafting",
+            Self::Annotation => "Annotation",
+            Self::Survey => "Survey",
+            Self::Terrain => "Terrain",
+            Self::Gis => "GIS",
+            Self::Roads => "BIM and roads",
+            Self::Utilities => "Utilities",
+            Self::Plotting => "Plotting",
+            Self::Format => "Format",
+        }
+    }
+
+    /// The discipline's hue (palette), or None for General, which has none.
+    pub const fn hue(self) -> Option<Color> {
+        match self {
+            Self::General => None,
+            Self::Drafting => Some(palette::discipline_drafting()),
+            Self::Annotation => Some(palette::discipline_annotation()),
+            Self::Survey => Some(palette::discipline_survey()),
+            Self::Terrain => Some(palette::discipline_terrain()),
+            Self::Gis => Some(palette::discipline_gis()),
+            Self::Roads => Some(palette::discipline_roads()),
+            Self::Utilities => Some(palette::discipline_utilities()),
+            Self::Plotting => Some(palette::discipline_plotting()),
+            Self::Format => Some(palette::discipline_format()),
+        }
+    }
+}
+
+impl Icon {
+    /// The discipline of the command this icon stands for. A match with no catch-all, so a new
+    /// icon does not compile until it is given one.
+    pub const fn discipline(self) -> Discipline {
+        match self {
+            // File, Edit, View, Window and Help: the program, its files, its views and its
+            // panels. No hue: the bright part is the text colour, the accent while active.
+            Self::New
+            | Self::Open
+            | Self::Save
+            | Self::SaveAs
+            | Self::Import
+            | Self::Export
+            | Self::Undo
+            | Self::Redo
+            | Self::Erase
+            | Self::SelectAll
+            | Self::Select
+            | Self::ZoomExtents
+            | Self::Properties
+            | Self::Minimise
+            | Self::Float
+            | Self::Dock
+            | Self::Maximise
+            | Self::Restore
+            | Self::Close
+            | Self::CommandLine
+            | Self::ViewPlan
+            | Self::View3D
+            | Self::ViewSection
+            | Self::ViewElevation
+            | Self::ViewLayersFiltered
+            | Self::Rename
+            | Self::ZoomTo
+            | Self::Help
+            | Self::About
+            | Self::RecentScripts
+            | Self::Quit
+            | Self::Deselect
+            | Self::SelectById
+            | Self::CopyViewImage
+            | Self::Attributes
+            | Self::ThinLines
+            | Self::LayoutSingle
+            | Self::LayoutSplitVertical
+            | Self::LayoutSplitHorizontal
+            | Self::LayoutThreeLeft
+            | Self::LayoutThreeTop
+            | Self::LayoutQuad
+            | Self::ViewTop
+            | Self::ViewBottom
+            | Self::ViewFront
+            | Self::ViewBack
+            | Self::ViewLeft
+            | Self::ViewRight
+            | Self::ViewIsoSouthWest
+            | Self::ViewIsoSouthEast
+            | Self::ViewIsoNorthEast
+            | Self::ViewIsoNorthWest
+            | Self::Perspective
+            | Self::VerticalExaggeration
+            | Self::Panels
+            | Self::Toolbars
+            | Self::TextSize
+            | Self::ResetLayout
+            | Self::LayerVisible
+            | Self::LayerLocked
+            | Self::ViewUnlinked
+            | Self::ViewLinked
+            | Self::ZoomIn
+            | Self::ZoomOut
+            | Self::ZoomSelection
+            | Self::Settings
+            | Self::Download
+            | Self::DrawingSummary
+            | Self::ProjectCrs
+            | Self::StartScreen
+            | Self::CommandReference
+            | Self::Keyboard
+            | Self::ToolbarIconsSmall
+            | Self::ToolbarIconsStandard
+            | Self::ToolbarIconsLarge
+            | Self::TextSizeSmall
+            | Self::TextSizeStandard
+            | Self::TextSizeLarge
+            | Self::TextSizeExtraLarge => Discipline::General,
+            // Draw and Modify, and the drafting aids beside them: the grid and the snaps.
+            Self::Point
+            | Self::Line
+            | Self::Polyline
+            | Self::Rectangle
+            | Self::Circle
+            | Self::Arc
+            | Self::Move
+            | Self::Copy
+            | Self::Grid
+            | Self::Snap
+            | Self::SnapEndpoint
+            | Self::SnapMidpoint
+            | Self::SnapCenter
+            | Self::SnapIntersection
+            | Self::SnapPerpendicular
+            | Self::SnapTangent
+            | Self::SnapNearest
+            | Self::SnapGrid => Discipline::Drafting,
+            // Annotate's editors and managers.
+            Self::EditText
+            | Self::EditLabel
+            | Self::LabelLayout
+            | Self::LeaderManager
+            | Self::LeadersForSelection
+            | Self::ArrangeLeaders => Discipline::Annotation,
+            // The Survey menu: computations, points in and out, codes applied, linework.
+            Self::SurveyInverse
+            | Self::SurveyForward
+            | Self::SurveyArea
+            | Self::SurveyAngle
+            | Self::SurveyTraverse
+            | Self::SurveyLevelBook
+            | Self::SurveyConverter
+            | Self::SurveyImport
+            | Self::SurveyExport
+            | Self::SurveyPointManager
+            | Self::SurveyPointReport
+            | Self::SurveyLinework
+            | Self::ApplyCodes
+            | Self::SurveyParcelReport => Discipline::Survey,
+            // Terrain: surfaces made, edited, styled and analysed; sections and volumes.
+            Self::SurfaceFromCloud
+            | Self::SurfaceFromRaster
+            | Self::SurfaceFromDrawing
+            | Self::Section
+            | Self::SectionAlignment
+            | Self::Volumes
+            | Self::CutFillMap
+            | Self::SurfaceEdit
+            | Self::SurfaceLevels
+            | Self::SurfaceSmooth
+            | Self::SurfaceThin
+            | Self::SurfaceDeleteLong
+            | Self::SurfaceCombine
+            | Self::SurfacesPanel
+            | Self::SurfaceStyles
+            | Self::TerrainContours
+            | Self::TerrainShading
+            | Self::TerrainSlope
+            | Self::TerrainZonal
+            | Self::TerrainDrape
+            | Self::TerrainViewshed
+            | Self::GridDem
+            | Self::DemTools
+            | Self::SurfaceDeletePoints
+            | Self::SurfaceDeleteTriangles
+            | Self::SurfaceAddPoints
+            | Self::SurfaceDeleteBreakline => Discipline::Terrain,
+            // GIS: data in and out, its processing, the reference data and online data.
+            Self::ImportVector
+            | Self::ImportRaster
+            | Self::ImportPointCloud
+            | Self::ExportPointCloud
+            | Self::ExportDem
+            | Self::ConvertCopc
+            | Self::DatasetInfo
+            | Self::Processing
+            | Self::ReferenceData
+            | Self::GisFormats
+            | Self::GisBuffer
+            | Self::GisDissolve
+            | Self::GisOverlay
+            | Self::GisHull
+            | Self::GisClip
+            | Self::GisSql
+            | Self::GisCheck
+            | Self::GisRepair
+            | Self::GisCoverage
+            | Self::BuildOverviews
+            | Self::OnlineData => Discipline::Gis,
+            // BIM and roads: templates, corridors, road objects, the road model, IFC.
+            Self::CorridorQuantities
+            | Self::CorridorSurface
+            | Self::RoadBarrier
+            | Self::RoadGuidePosts
+            | Self::RoadSign
+            | Self::RoadLightPole
+            | Self::RoadCulvert
+            | Self::RoadWall
+            | Self::RoadFence
+            | Self::RoadLineMarking
+            | Self::RoadObjects
+            | Self::RoadTemplate
+            | Self::Corridor
+            | Self::RoadModel
+            | Self::ImportIfc
+            | Self::ExportIfc => Discipline::Roads,
+            // Plotting and sheets: output on paper or as a picture.
+            Self::Plot | Self::Sheets | Self::PlotSheets | Self::ExportImage => {
+                Discipline::Plotting
+            }
+            // Format and customisation: layers, styles, symbols, codes, the annotation styles (the
+            // Format menu's), Purge and Global Modify (the customisation workbench's).
+            Self::Layers
+            | Self::LayerNew
+            | Self::LayerNewChild
+            | Self::FormatStyles
+            | Self::FormatSymbols
+            | Self::FormatSurveyCodes
+            | Self::Purge
+            | Self::GlobalModify
+            | Self::TextStyles
+            | Self::LabelStyles
+            | Self::DimensionStyles
+            | Self::LayerColour => Discipline::Format,
+        }
+    }
+}
+
+/// The discipline of the catalogue tool `tool_id`, by the family its id begins with - which is
+/// the catalogue's category (katana_cad::interactive_tool): draw and modify are Drafting,
+/// annotate Annotation, terrain Terrain; the Tools menu's inquiry and selection tools, and any id
+/// no family claims, General.
+pub fn tool_discipline(tool_id: &str) -> Discipline {
+    let family = tool_id.split('.').next().unwrap_or_default();
+    match family {
+        "draw" | "modify" => Discipline::Drafting,
+        "annotate" => Discipline::Annotation,
+        "terrain" => Discipline::Terrain,
+        _ => Discipline::General,
+    }
+}
+
+/// The discipline of the icon named `name` (an icon's name or a tool's id, as paint_named_icon
+/// takes them); None for a name not in the set.
+pub fn named_icon_discipline(name: &str) -> Option<Discipline> {
+    if let Some(which) = Icon::from_name(name) {
+        return Some(which.discipline());
+    }
+    name.contains('.').then(|| tool_discipline(name))
+}
+
 // ---- the marks icons are built from ------------------------------------------------------------
 
 /// A rectangle, its corners rounded by `radius` when it has one.
@@ -1248,9 +1577,10 @@ fn draw_isometric_view(ink: &mut ToolInk<'_>, dx: f64, dy: f64) {
 
 // ---- the icons ---------------------------------------------------------------------------------
 
-/// Paints `which` into `rect` with the given colours. Exposed so that the contact sheet and the
-/// tests can paint without going through the cache. `rect` is taken as the icon's size on screen
-/// for its weights (weight_at): right wherever a canvas pixel is a screen pixel.
+/// Paints `which` into `rect` in two colours, its function marks in the bright one. Exposed so
+/// that the tests can paint a shape without going through the cache or the disciplines. `rect` is
+/// taken as the icon's size on screen for its weights (weight_at): right wherever a canvas pixel
+/// is a screen pixel.
 pub fn paint_icon(
     canvas: &mut dyn Canvas,
     which: Icon,
@@ -1258,17 +1588,23 @@ pub fn paint_icon(
     neutral: Color,
     accent: Color,
 ) {
-    paint_icon_weighted(canvas, which, rect, neutral, accent, weight_at(rect.width));
+    paint_icon_weighted(
+        canvas,
+        which,
+        rect,
+        IconColours::two(neutral, accent),
+        weight_at(rect.width),
+    );
 }
 
-/// paint_icon with the strokes `weight` times as wide as drawn (weight_at): for a caller that
-/// knows the icon's size on screen, which `rect` in device pixels does not say.
+/// Paints `which` into `rect` in `colours` (icon_colours), the strokes `weight` times as wide as
+/// drawn (weight_at): for a caller that knows the icon's size on screen, which `rect` in device
+/// pixels does not say.
 pub fn paint_icon_weighted(
     canvas: &mut dyn Canvas,
     which: Icon,
     rect: RectF,
-    neutral: Color,
-    accent: Color,
+    colours: IconColours,
     weight: f64,
 ) {
     canvas.save();
@@ -1276,7 +1612,7 @@ pub fn paint_icon_weighted(
     canvas.translate(rect.x, rect.y);
     canvas.scale(rect.width / GRID, rect.height / GRID);
     {
-        let mut ink = ToolInk::new(canvas, neutral, accent).weighted(weight);
+        let mut ink = ToolInk::in_colours(canvas, colours).weighted(weight);
         let ink = &mut ink;
         match which {
             Icon::New => {
@@ -1299,8 +1635,7 @@ pub fn paint_icon_weighted(
                     false,
                     STROKE,
                 );
-                ink.line(12.5, 12.0, 12.5, 18.0, true, STROKE);
-                ink.line(9.5, 15.0, 15.5, 15.0, true, STROKE);
+                ink.plus(12.5, 15.0, 3.0);
             }
             Icon::Open => {
                 ink.stroke(
@@ -1406,8 +1741,8 @@ pub fn paint_icon_weighted(
                     false,
                     STROKE,
                 );
-                ink.line(10.0, 11.0, 10.0, 17.0, true, STROKE);
-                ink.line(14.0, 11.0, 14.0, 17.0, true, STROKE);
+                ink.mark_line(10.0, 11.0, 10.0, 17.0, Mark::Remove, STROKE);
+                ink.mark_line(14.0, 11.0, 14.0, 17.0, Mark::Remove, STROKE);
             }
             Icon::SelectAll => {
                 ink.dashed(&rectangle(3.5, 3.5, 17.0, 17.0), true);
@@ -2063,8 +2398,7 @@ pub fn paint_icon_weighted(
                     false,
                     STROKE,
                 );
-                ink.line(19.0, 2.5, 19.0, 9.5, true, STROKE);
-                ink.line(15.5, 6.0, 22.5, 6.0, true, STROKE);
+                ink.plus(19.0, 6.0, 3.5);
             }
             Icon::LayerNewChild => {
                 ink.stroke(&rounded(3.0, 3.0, 9.0, 5.0, 1.0), false, STROKE);
@@ -2074,8 +2408,7 @@ pub fn paint_icon_weighted(
                     STROKE,
                 );
                 ink.stroke(&rounded(11.0, 14.5, 10.0, 5.0, 1.0), true, STROKE);
-                ink.line(18.5, 3.0, 18.5, 10.0, true, STROKE);
-                ink.line(15.0, 6.5, 22.0, 6.5, true, STROKE);
+                ink.plus(18.5, 6.5, 3.5);
             }
             Icon::Rename => {
                 // A name field with the text cursor in it.
@@ -2150,8 +2483,10 @@ pub fn paint_icon_weighted(
                     ],
                     true,
                 );
+                // The area the tool computes, outlined bright as well as tinted: a tint alone
+                // is a quarter of the hue, and at 16 px it did not say Survey.
                 ink.fill(&parcel, true, TINT);
-                ink.stroke(&parcel, false, STROKE);
+                ink.stroke(&parcel, true, STROKE);
                 for p in [
                     pt(3.0, 19.0),
                     pt(5.0, 6.0),
@@ -2962,7 +3297,7 @@ pub fn paint_icon_weighted(
                 for x in [9.0, 15.0] {
                     let y = 15.0 - (x - 3.0) * 4.0 / 18.0;
                     ink.dot(x, y, 1.8, true);
-                    ink.line(x - 2.5, y - 2.5, x + 2.5, y + 2.5, true, FINE);
+                    ink.mark_line(x - 2.5, y - 2.5, x + 2.5, y + 2.5, Mark::Remove, FINE);
                 }
             }
             Icon::SurfaceDeleteLong => {
@@ -2976,7 +3311,7 @@ pub fn paint_icon_weighted(
                     false,
                     STROKE,
                 );
-                ink.line(5.0, 21.0, 19.0, 10.0, true, STROKE);
+                ink.mark_line(5.0, 21.0, 19.0, 10.0, Mark::Remove, STROKE);
             }
             Icon::SurfaceCombine => {
                 ink.stroke(&rectangle(3.0, 4.0, 18.0, 16.0), false, STROKE);
@@ -3019,6 +3354,9 @@ pub fn paint_icon_weighted(
                     false,
                     STROKE,
                 );
+                // The picked triangle outlined bright over the quiet edges: its tint alone is a
+                // quarter of the hue, and at 16 px it did not say Terrain.
+                ink.stroke(&picked, true, STROKE);
             }
             // ---- road model (docs/road_design.md) ----
             Icon::RoadTemplate => {
@@ -3459,9 +3797,9 @@ pub fn paint_icon_weighted(
                     false,
                     STROKE,
                 );
-                ink.stroke(
+                ink.mark_stroke(
                     &polyline(&[pt(10.5, 16.5), pt(14.0, 20.0), pt(21.0, 12.0)], false),
-                    true,
+                    Mark::Create,
                     STROKE,
                 );
             }
@@ -3620,8 +3958,7 @@ pub fn paint_icon_weighted(
                     STROKE,
                 );
                 for (x, y) in [(10.5, 11.0), (13.5, 13.0)] {
-                    ink.line(x - 1.7, y - 1.7, x + 1.7, y + 1.7, true, FINE);
-                    ink.line(x + 1.7, y - 1.7, x - 1.7, y + 1.7, true, FINE);
+                    ink.cross(x, y, 1.7, FINE);
                 }
             }
             Icon::SurfaceDeleteTriangles => {
@@ -3639,8 +3976,7 @@ pub fn paint_icon_weighted(
             Icon::SurfaceDeleteBreakline => {
                 draw_tin(ink, true);
                 ink.dashed(&polyline(&[pt(3.0, 13.0), pt(21.0, 9.0)], false), true);
-                ink.line(9.5, 8.5, 14.5, 13.5, true, STROKE);
-                ink.line(14.5, 8.5, 9.5, 13.5, true, STROKE);
+                ink.cross(12.0, 11.0, 2.5, STROKE);
             }
             Icon::OnlineData => {
                 // The globe in the lower left 15 units, as the GIS data's glyphs, so Import's
@@ -3847,15 +4183,26 @@ pub enum IconMode {
     Disabled,
 }
 
-/// The quiet and the bright tone an icon is painted in (see the module comment): at rest the
-/// secondary text colour and the text colour; active the text colour and the accent; disabled
-/// both the disabled text colour. Hover is shown by the button's background, so that one icon
+/// The colours an icon of `discipline` is painted in, in `mode` (see the module comment). At rest
+/// the object in the secondary text colour and the bright part in the discipline's hue - the text
+/// colour for General, which has none. Active, the object in the text colour and the bright part
+/// keeping its hue: the button's accent frame says the tool runs, and a General icon, with no hue
+/// to keep, takes the accent as it always has. The function marks are the create green and the
+/// error red in both. Disabled, everything the disabled text colour: a command that cannot run
+/// shows no discipline and no mark. Hover is shown by the button's background, so that one icon
 /// serves a toolbar and a menu without the two disagreeing.
-pub fn icon_colours(mode: IconMode) -> (Color, Color) {
+pub fn icon_colours(mode: IconMode, discipline: Discipline) -> IconColours {
+    let hue = discipline.hue();
+    let marked = |quiet: Color, bright: Color| IconColours {
+        quiet,
+        bright,
+        create: palette::icon_create(),
+        remove: palette::error(),
+    };
     match mode {
-        IconMode::Normal => (palette::text_muted(), palette::text()),
-        IconMode::Active => (palette::text(), palette::accent()),
-        IconMode::Disabled => (palette::text_disabled(), palette::text_disabled()),
+        IconMode::Normal => marked(palette::text_muted(), hue.unwrap_or(palette::text())),
+        IconMode::Active => marked(palette::text(), hue.unwrap_or(palette::accent())),
+        IconMode::Disabled => IconColours::two(palette::text_disabled(), palette::text_disabled()),
     }
 }
 
@@ -3882,22 +4229,21 @@ pub fn paint_named_icon_at(
     mode: IconMode,
     ratio: f64,
 ) -> bool {
-    let (neutral, accent) = icon_colours(mode);
+    let Some(discipline) = named_icon_discipline(name) else {
+        return false;
+    };
+    let colours = icon_colours(mode, discipline);
     let ratio = if ratio.is_finite() && ratio > 0.0 {
         ratio
     } else {
         1.0
     };
     let weight = weight_at(rect.width / ratio);
-    if let Some(which) = Icon::from_name(name) {
-        paint_icon_weighted(canvas, which, rect, neutral, accent, weight);
-        return true;
+    match Icon::from_name(name) {
+        Some(which) => paint_icon_weighted(canvas, which, rect, colours, weight),
+        None => paint_tool_icon_weighted(canvas, name, rect, colours, weight),
     }
-    if name.contains('.') {
-        paint_tool_icon_weighted(canvas, name, rect, neutral, accent, weight);
-        return true;
-    }
-    false
+    true
 }
 
 // ---- the raster canvas and the cache -----------------------------------------------------------

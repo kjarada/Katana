@@ -65,6 +65,41 @@ pub fn weight_at(logical_pixels: f64) -> f64 {
     }
 }
 
+/// What a FUNCTION mark of an icon says (the owner's ask of 2026-11-19, icons' module comment):
+/// the plus of something made, the tick of a check passed; the cross or the struck line of
+/// something deleted. A mark is drawn in its own colour whatever the icon's discipline, so a
+/// delete reads as a delete on every menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Mark {
+    /// Made or added, or checked and found good: the create green.
+    Create,
+    /// Deleted or taken out: the error red.
+    Remove,
+}
+
+/// The colours an icon is painted in: the quiet tone of the object, the bright tone of what the
+/// command acts on (its discipline's hue; icons::icon_colours), and the two function marks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IconColours {
+    pub quiet: Color,
+    pub bright: Color,
+    pub create: Color,
+    pub remove: Color,
+}
+
+impl IconColours {
+    /// Two tones only, the marks in the bright one: how an icon was painted before marks had
+    /// colours of their own, and how a caller that names two colours still paints one.
+    pub const fn two(quiet: Color, bright: Color) -> Self {
+        Self {
+            quiet,
+            bright,
+            create: bright,
+            remove: bright,
+        }
+    }
+}
+
 /// A pen and brush for each of the two tones, and the handful of marks every icon is built from.
 /// Keeping the marks here is what keeps the set consistent: a node is the same node on every
 /// draw tool.
@@ -72,6 +107,9 @@ pub struct ToolInk<'a> {
     canvas: &'a mut dyn Canvas,
     neutral: Color,
     accent: Color,
+    /// The colours of the two function marks; the bright tone until `marked` gives them their own.
+    create: Color,
+    remove: Color,
     /// What every stroke's width is multiplied by (weight_at).
     weight: f64,
 }
@@ -82,8 +120,54 @@ impl<'a> ToolInk<'a> {
             canvas,
             neutral,
             accent,
+            create: accent,
+            remove: accent,
             weight: 1.0,
         }
+    }
+
+    /// An ink in all four of `colours`.
+    pub fn in_colours(canvas: &'a mut dyn Canvas, colours: IconColours) -> Self {
+        Self {
+            canvas,
+            neutral: colours.quiet,
+            accent: colours.bright,
+            create: colours.create,
+            remove: colours.remove,
+            weight: 1.0,
+        }
+    }
+
+    fn mark_tone(&self, mark: Mark) -> Color {
+        match mark {
+            Mark::Create => self.create,
+            Mark::Remove => self.remove,
+        }
+    }
+
+    /// A function mark's line, `width` grid units wide as `stroke` draws one.
+    pub fn mark_line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, mark: Mark, width: f64) {
+        let mut path = start(x1, y1);
+        path.line_to(pt(x2, y2));
+        self.mark_stroke(&path, mark, width);
+    }
+
+    /// A function mark's path, stroked as `stroke` strokes.
+    pub fn mark_stroke(&mut self, path: &Path, mark: Mark, width: f64) {
+        let tone = self.mark_tone(mark);
+        self.stroke_in(path, tone, width);
+    }
+
+    /// The create mark: a plus centred on (x, y), its arms `arm` units out, at the full STROKE.
+    pub fn plus(&mut self, x: f64, y: f64, arm: f64) {
+        self.mark_line(x - arm, y, x + arm, y, Mark::Create, STROKE);
+        self.mark_line(x, y - arm, x, y + arm, Mark::Create, STROKE);
+    }
+
+    /// The remove mark: a cross centred on (x, y), its arms `arm` units out along each diagonal.
+    pub fn cross(&mut self, x: f64, y: f64, arm: f64, width: f64) {
+        self.mark_line(x - arm, y - arm, x + arm, y + arm, Mark::Remove, width);
+        self.mark_line(x + arm, y - arm, x - arm, y + arm, Mark::Remove, width);
     }
 
     /// The ink with its strokes `weight` times as wide as drawn (weight_at).
@@ -101,8 +185,13 @@ impl<'a> ToolInk<'a> {
     /// The path stroked with round caps and joins, `width` grid units wide at the design size
     /// (STROKE or FINE; ThinLines alone shows other weights, since weight is its meaning).
     pub fn stroke(&mut self, path: &Path, accent: bool, width: f64) {
+        let tone = self.tone(accent);
+        self.stroke_in(path, tone, width);
+    }
+
+    fn stroke_in(&mut self, path: &Path, tone: Color, width: f64) {
         let pen = Pen::with(
-            self.tone(accent),
+            tone,
             width * self.weight,
             PenStyle::Solid,
             PenCap::Round,
@@ -270,8 +359,7 @@ pub fn paint_tool_icon(
         canvas,
         tool_id,
         rect,
-        neutral,
-        accent,
+        IconColours::two(neutral, accent),
         weight_at(rect.width),
     );
 }
@@ -282,8 +370,7 @@ pub fn paint_tool_icon_weighted(
     canvas: &mut dyn Canvas,
     tool_id: &str,
     rect: RectF,
-    neutral: Color,
-    accent: Color,
+    colours: IconColours,
     weight: f64,
 ) {
     canvas.save();
@@ -291,7 +378,7 @@ pub fn paint_tool_icon_weighted(
     canvas.translate(rect.x, rect.y);
     canvas.scale(rect.width / GRID, rect.height / GRID);
     {
-        let mut ink = ToolInk::new(canvas, neutral, accent).weighted(weight);
+        let mut ink = ToolInk::in_colours(canvas, colours).weighted(weight);
         if !paint_tool(tool_id, &mut ink) {
             // The initial of the last part of the id, in a frame: visibly a placeholder, never
             // mistaken for a finished icon.
