@@ -19,7 +19,7 @@ use katana_core::{ErrorCode, Result};
 
 use super::buffer_dialog::Words;
 use super::gis_tool_dialog::{
-    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target,
+    GisDialogContext, GisScopeWords, GisTool, GisToolFrame, gis_check, gis_field, gis_layer_target, gis_number,
     gis_scope,
 };
 use crate::host::Host;
@@ -124,13 +124,14 @@ impl GisTool for GisHullDialog {
         // The ratio and the holes are a concave boundary's alone.
         let concave = self.kind.text() == "concave";
         ui.add_enabled_ui(concave, |ui| {
-            gis_field(
+            gis_number(
                 ui,
                 "gisHullRatio",
                 "Ratio:",
                 &mut self.ratio,
-                "0.1 - from 0 (tightest) to 1 (convex)",
-                "concave=: GEOS's ratio of the longest edge; 1 gives the convex hull",
+                "0 to 1",
+                "concave=: GEOS's ratio of the longest edge, from 0 (tightest) to 1 (the convex \
+                 hull)",
             );
             gis_check(ui, "gisHullHoles", "Allow holes", &mut self.holes).on_hover_text(
                 "holes: where the points leave a gap inside, the boundary has a hole",

@@ -3823,7 +3823,15 @@ impl SheetEditor {
         let set = document.sheet_set();
         let index = self.current_sheet();
         let Some(sheet) = set.sheets.get(index) else {
-            ui.label("No sheet.");
+            // Muted and in the middle of the pane, as an empty list says it: at its top left in
+            // the text colour it read as a value (the fourth look audit's 5).
+            let room = ui.available_rect_before_wrap();
+            let size = egui::vec2(room.width(), room.height().max(ui.spacing().interact_size.y));
+            ui.allocate_ui(size, |ui| {
+                ui.centered_and_justified(|ui| {
+                    crate::dialog_layout::empty_table(ui, "No sheet");
+                });
+            });
             return;
         };
         let selected = sheet
@@ -3883,7 +3891,7 @@ impl SheetEditor {
         let plan = v.kind == ViewportKind::Plan || v.kind == ViewportKind::KeyPlan;
         let section = v.kind == ViewportKind::LongSection || v.kind == ViewportKind::CrossSections;
         let cross = v.kind == ViewportKind::CrossSections;
-        ui.strong(format!("{}  ({})", kind_name(v.kind), v.id));
+        dialog::section(ui, &format!("{}  ({})", kind_name(v.kind), v.id));
         dialog::form(ui, |form| {
             let ui = form.ui();
             dialog::labelled(ui, "Title", |ui| {
@@ -3968,7 +3976,10 @@ impl SheetEditor {
                 });
             }
             if plan || section {
-                ui.scope(|ui| {
+                // Each tick in the field column, as a form's ticks are (shell::dialog::
+                // check_row): at the label column they stood under the labels (the fourth look
+                // audit's 5).
+                field_tick(ui, |ui| {
                     if let Some(on) =
                         self.fields
                             .check(ui, "sheetViewportAutoCentre", "Centre on what it shows", v.auto_centre)
@@ -4198,7 +4209,7 @@ impl SheetEditor {
                 });
             }
             if plan {
-                ui.scope(|ui| {
+                field_tick(ui, |ui| {
                     if let Some(on) = self
                         .fields
                         .check(ui, "sheetViewportNorthArrow", "North arrow", v.north_arrow)
@@ -4206,7 +4217,7 @@ impl SheetEditor {
                         self.edit(&id, "EDIT_VIEWPORT", move |e| e.north_arrow = on);
                     }
                 });
-                ui.scope(|ui| {
+                field_tick(ui, |ui| {
                     if let Some(on) = self
                         .fields
                         .check(ui, "sheetViewportScaleBar", "Scale bar", v.scale_bar)
@@ -4305,7 +4316,7 @@ impl SheetEditor {
             {
                 self.queued.push(Queued::LegendScope(id.clone(), scope));
             }
-            ui.scope(|ui| {
+            field_tick(ui, |ui| {
                 if let Some(on) = self.fields.check(
                     ui,
                     "sheetViewportLocked",
@@ -4319,7 +4330,7 @@ impl SheetEditor {
 
         // Where the view is on the paper, in paper millimetres from its lower-left corner: typed,
         // as VIEW SET rect= takes it, and refused as a typed rectangle is when it misses the paper.
-        ui.strong("On the paper");
+        dialog::section(ui, "On the paper");
         let exact = [v.rect.min.x, v.rect.min.y, v.rect.width(), v.rect.height()];
         let names = ["sheetViewportX", "sheetViewportY", "sheetViewportW", "sheetViewportH"];
         let mut finished = false;
@@ -4413,7 +4424,8 @@ impl SheetEditor {
                 change,
             });
         };
-        ui.strong("Sheet");
+        // Headings, as a dialog's sections are: the strong body text read as one more row.
+        dialog::section(ui, "Sheet");
         dialog::form(ui, |form| {
             let ui = form.ui();
             dialog::labelled(ui, "Name", |ui| {
@@ -4462,7 +4474,7 @@ impl SheetEditor {
                     }
                 }
             });
-            ui.scope(|ui| {
+            field_tick(ui, |ui| {
                 if let Some(on) =
                     self.fields
                         .check(ui, "sheetFrame", "Frame and title block", !sheet.frame.is_empty())
@@ -4480,7 +4492,7 @@ impl SheetEditor {
                     );
                 }
             });
-            ui.scope(|ui| {
+            field_tick(ui, |ui| {
                 if let Some(on) = self
                     .fields
                     .check(ui, "sheetFrameLegend", "Utility legend block", sheet.frame_legend)
@@ -4496,8 +4508,9 @@ impl SheetEditor {
         });
 
         // Title-block values: what each field prints, and what this sheet overrides.
-        ui.strong("Title block on this sheet");
-        ui.label(
+        dialog::section(ui, "Title block on this sheet");
+        dialog::note(
+            ui,
             "A value here is for this sheet only. Values every sheet shares are set with Title \
              Block.",
         );
@@ -5235,7 +5248,12 @@ impl SheetEditor {
                     // title, and its close button at the right, a flat tool - a strong word and a
                     // small framed cross read as a dialog's heading (the third look audit's E).
                     let title = String::from(self.checks.window_title());
-                    let closed = pane_title_bar(ui, "DrawingSummary", &title);
+                    let closed = pane_title_bar(
+                        ui,
+                        "DrawingSummary",
+                        &title,
+                        Some(("sheetChecksClose", "Close the Checks pane")),
+                    );
                     if closed {
                         self.checks.close();
                     }
@@ -5253,6 +5271,7 @@ impl SheetEditor {
             .exact_size(SHEET_LIST_WIDTH)
             .frame(pane)
             .show(ui, |ui| {
+            pane_title_bar(ui, "Sheets", "Sheets", None);
             self.list_ui(ui, &*host);
         });
         // About the window's side panels' width (the look of 2026-11-16; it was 300): a form's
@@ -5262,6 +5281,12 @@ impl SheetEditor {
             .exact_size(PROPERTIES_WIDTH)
             .frame(pane)
             .show(ui, |ui| {
+            pane_title_bar(ui, "Properties", "Properties", None);
+            // The thin bar's handle in the secondary text colour, as the main window's panels'
+            // tables have it (panels::scroll_bar_seen): the theme's handle on the panel's grey
+            // was all but invisible, and the pane's fields ran on under the fold with nothing to
+            // say so (the fourth look audit's 5).
+            crate::main_window::panels::scroll_bar_seen(ui);
             egui::ScrollArea::vertical().id_salt("sheetProperties").show(ui, |ui| {
                 // Its rows share one label column, as a dialog's do. Its boxes and buttons are
                 // drawn across the panel rather than under the fields: at PROPERTIES_WIDTH a box's
@@ -5403,33 +5428,54 @@ impl SheetEditor {
             // panel_tool): flat icons a control high, framed only under the pointer, their names
             // and what they do in their tooltips - raised framed squares here were a second look
             // of one thing (the third look audit's E). Each keeps its name for its drivers.
+            // What acts on a sheet greys with none, Up on the first and Down on the last: lit,
+            // they invited a press that did nothing (the fourth look audit's 1).
+            let count = set.sheets.len();
+            let at = self.current_sheet();
+            let has_sheet = at < count;
             let tools = [
-                ("sheetListNew", "New", "New Sheet", "A new blank sheet"),
-                ("sheetListCopy", "Copy", "Copy Sheet", "Duplicate this sheet"),
-                ("sheetListRemove", "Erase", "Remove Sheet", "Remove this sheet"),
+                ("sheetListNew", "New", "New Sheet", "A new blank sheet", true),
+                ("sheetListCopy", "Copy", "Copy Sheet", "Duplicate this sheet", has_sheet),
+                ("sheetListRemove", "Erase", "Remove Sheet", "Remove this sheet", has_sheet),
             ];
-            for (name, icon, label, tip) in tools {
-                if crate::main_window::panels::panel_tool(ui, name, icon, label, tip).clicked() {
+            for (name, icon, label, tip, enabled) in tools {
+                let clicked = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        crate::main_window::panels::panel_tool(ui, name, icon, label, tip).clicked()
+                    })
+                    .inner;
+                if clicked {
                     self.queued.push(Queued::Trigger(String::from(name)));
                 }
             }
             // Up and Down are arrows painted, not characters: the window's font has no U+2191 or
             // U+2193, and they were drawn as two empty boxes. Flat, as the tools beside them.
-            for (name, text, tip, up) in [
-                ("sheetListUp", "Move Up", "Move this sheet up", true),
-                ("sheetListDown", "Move Down", "Move this sheet down", false),
+            for (name, text, tip, up, enabled) in [
+                ("sheetListUp", "Move Up", "Move this sheet up", true, has_sheet && at > 0),
+                (
+                    "sheetListDown",
+                    "Move Down",
+                    "Move this sheet down",
+                    false,
+                    has_sheet && at + 1 < count,
+                ),
             ] {
                 let side = crate::theme::style::CONTROL_HEIGHT;
-                let response = controls::button_as(
-                    ui,
-                    name,
-                    text,
-                    egui::Button::new("")
-                        .frame_when_inactive(false)
-                        .min_size(egui::vec2(side, side)),
-                )
-                .on_hover_text(tip);
-                paint_arrow(ui, response.rect, up);
+                let response = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        let response = controls::button_as(
+                            ui,
+                            name,
+                            text,
+                            egui::Button::new("")
+                                .frame_when_inactive(false)
+                                .min_size(egui::vec2(side, side)),
+                        )
+                        .on_hover_text(tip);
+                        paint_arrow(ui, response.rect, up);
+                        response
+                    })
+                    .inner;
                 if response.clicked() {
                     self.queued.push(Queued::Trigger(String::from(name)));
                 }
@@ -5725,13 +5771,27 @@ fn paint_arrow(ui: &Ui, rect: egui::Rect, up: bool) {
     painter.line_segment([tip, tip + egui::vec2(head, -sign * head)], ink);
 }
 
+/// A tick of the properties pane in the field column, as a form's ticks are (shell::dialog::
+/// check_row), its words wrapping in the field column's room: on one line "Frame and title block"
+/// ran past the pane, and a right pane's content wider than the pane overflows to the left - the
+/// pane's labels were cut at its left edge.
+fn field_tick<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    dialog::labelled(ui, "", |ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        ui.set_max_width(ui.available_width());
+        add(ui)
+    })
+}
+
 /// The toolbar's actions that act on a sheet: greyed while the set has none.
 const NEEDS_A_SHEET: [&str; 4] = ["sheetFitPage", "sheetCheck", "sheetPlotSheet", "sheetPlotAll"];
 
 /// A pane's title bar, as the main window's docks wear one (dock_chrome): the pane's icon and its
-/// title in the text colour on the pane's own ground, a control high, and a flat close tool at its
-/// right. True when the close tool was clicked.
-fn pane_title_bar(ui: &mut Ui, icon: &str, title: &str) -> bool {
+/// title in the text colour on the pane's own ground, a control high, and - for a pane that
+/// closes - a flat close tool at its right, `close` its name and tooltip. True when the close tool
+/// was clicked. Every pane of the editor wears one: the Checks pane alone had one, beside a list
+/// and a properties pane with none (the fourth look audit's 5).
+fn pane_title_bar(ui: &mut Ui, icon: &str, title: &str, close: Option<(&str, &str)>) -> bool {
     let height = crate::theme::style::CONTROL_HEIGHT;
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
@@ -5745,16 +5805,12 @@ fn pane_title_bar(ui: &mut Ui, icon: &str, title: &str) -> bool {
     crate::icons::show_icon(child.painter(), at, icon, crate::icons::IconMode::Normal);
     child.label(title);
     let mut closed = false;
-    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        closed = crate::main_window::panels::panel_tool(
-            ui,
-            "sheetChecksClose",
-            "Close",
-            "Close",
-            "Close the Checks pane",
-        )
-        .clicked();
-    });
+    if let Some((name, tip)) = close {
+        child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            closed = crate::main_window::panels::panel_tool(ui, name, "Close", "Close", tip)
+                .clicked();
+        });
+    }
     closed
 }
 

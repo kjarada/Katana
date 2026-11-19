@@ -44,7 +44,6 @@ use super::terrain_dialog_support::{
     terrain_reply_field, terrain_sources,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::check;
 use crate::host::Host;
 use crate::shell::DialogFrame;
 
@@ -331,14 +330,15 @@ impl Framed for SlopeAnalysisDialog {
         row(ui, "Name:", |ui| {
             field(ui, "slopeName", &mut self.name, "the source's");
         });
-        check(
+        // At the fields' edge, as every check box of a form is; the scope under a heading's gap.
+        crate::shell::dialog::check_row(
             ui,
             "slopeClip",
             "Keep inside closed shapes of the drawing",
             &mut self.clip,
         );
         let clip = self.clip;
-        ui.add_enabled_ui(clip, |ui| {
+        crate::geo::terrain_dialog_parts::headed_enabled_ui(ui, clip, |ui| {
             self.scope.ui(ui);
         });
         command_field(ui, "slopeCommand", &self.command());

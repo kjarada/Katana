@@ -96,6 +96,29 @@ pub(crate) fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -
     dialog::labelled(ui, label, add)
 }
 
+/// A scope and filter widget (or any group headed by a `section`) drawn enabled or not, under
+/// the gap a heading has over what is above it. `add_enabled_ui` draws in a child `Ui` whose top
+/// is the cursor, so the "Apply to" heading inside could not see the rows above it and stood a
+/// row's spacing under them (Volumes' 8 points under its corners, Clip's boundary right under its
+/// radio buttons; the fourth look audit's 7). At a column's top there is nothing above, and no gap.
+pub(crate) fn headed_enabled_ui<R>(
+    ui: &mut Ui,
+    enabled: bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    heading_gap(ui);
+    ui.add_enabled_ui(enabled, add).inner
+}
+
+/// The gap `shell::dialog::section` gives a heading over what is above it, for a heading drawn in
+/// a child `Ui` that cannot see the rows above it (`headed_enabled_ui`); nothing at a column's
+/// top.
+pub(crate) fn heading_gap(ui: &mut Ui) {
+    if ui.cursor().min.y > ui.max_rect().min.y + 0.5 {
+        ui.add_space((dialog::SECTION_GAP - ui.spacing().item_spacing.y).max(0.0));
+    }
+}
+
 /// A one-line field with its placeholder.
 pub(crate) fn field(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str) -> Response {
     line_with(
@@ -349,30 +372,38 @@ pub(crate) fn check_list_with_current(
     let spacing = ui.spacing().item_spacing.y;
     let row = ui.spacing().interact_size.y + spacing;
     let whole_rows = ((height + spacing) / row).floor().max(1.0);
-    let rect = egui::ScrollArea::vertical()
-        .id_salt(name)
-        .max_height(whole_rows * row - spacing)
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            for (at, (label, on)) in items.iter_mut().enumerate() {
-                if shows_current {
-                    ui.horizontal(|ui| {
-                        if crate::drive::controls::check_box(ui, on, "").changed() {
-                            changed = true;
-                        }
-                        if ui
-                            .selectable_label(*current == Some(at), label.as_str())
-                            .clicked()
-                        {
-                            *current = Some(at);
-                        }
-                    });
-                } else if crate::drive::controls::check_box(ui, on, label.as_str()).changed() {
-                    changed = true;
-                }
+    let draw = |ui: &mut Ui| {
+        for (at, (label, on)) in items.iter_mut().enumerate() {
+            if shows_current {
+                ui.horizontal(|ui| {
+                    if crate::drive::controls::check_box(ui, on, "").changed() {
+                        changed = true;
+                    }
+                    if ui
+                        .selectable_label(*current == Some(at), label.as_str())
+                        .clicked()
+                    {
+                        *current = Some(at);
+                    }
+                });
+            } else if crate::drive::controls::check_box(ui, on, label.as_str()).changed() {
+                changed = true;
             }
-        })
-        .inner_rect;
+        }
+    };
+    // A list asked to be as tall as its rows is drawn in the body without a scroll area of its own:
+    // a scroll area is no taller than the room the body's own shows, so it scrolled inside the
+    // body's, two bars side by side (Statistics by Area's; the fourth look audit).
+    let rect = if height.is_finite() {
+        egui::ScrollArea::vertical()
+            .id_salt(name)
+            .max_height(whole_rows * row - spacing)
+            .auto_shrink([false, true])
+            .show(ui, draw)
+            .inner_rect
+    } else {
+        ui.vertical(draw).response.rect
+    };
     let response = ui.interact(rect, ui.id().with(name), egui::Sense::hover());
     if let Some(taken) = &taken
         && taken.posted.act == Act::ScrollTo

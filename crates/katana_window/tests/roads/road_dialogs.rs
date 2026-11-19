@@ -658,7 +658,7 @@ mod corridor_dialog {
         d.fill("corridorName", "Main");
         d.fill("corridorAlignment", "road");
         d.fill("corridorTemplate", "urban street");
-        d.fill("corridorSurface", "(none)");
+        d.fill("corridorSurface", "None");
         d.fill("corridorInterval", "20");
         d.press("corridorNew");
         assert_eq!(
@@ -810,8 +810,8 @@ mod corridor_dialog {
             "ground"
         );
 
-        // The person can say what it should be: (none) clears the target.
-        d.fill("corridorSurface", "(none)");
+        // The person can say what it should be: None clears the target.
+        d.fill("corridorSurface", "None");
         d.press("corridorApply");
         assert_eq!(
             d.document()
@@ -945,7 +945,7 @@ mod corridor_dialog {
         d.fill("corridorName", "Main");
         d.fill("corridorAlignment", "road");
         d.fill("corridorTemplate", "urban street");
-        d.fill("corridorSurface", "(none)");
+        d.fill("corridorSurface", "None");
         d.press("corridorNew");
         assert_eq!(
             d.last(),

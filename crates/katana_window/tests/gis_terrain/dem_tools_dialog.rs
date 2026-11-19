@@ -208,7 +208,7 @@ mod dem_tools_dialog {
         bench.fill("demReprojectKind", "File");
         bench.fill("demReprojectFile", "C:/data/new.tif");
         bench.fill("demReprojectCrs", "EPSG:28356");
-        // The item at index 1: the first raster after "(none)".
+        // The item at index 1: the first raster after "None".
         let like = bench.items("demReprojectLike")[1].clone();
         bench.fill("demReprojectLike", &like);
         assert!(!bench.enabled("demReprojectCrs"));

@@ -156,6 +156,30 @@ pub(crate) fn field_if(
         .inner
 }
 
+/// A number kept as text (`drive::controls::number_line`: a short well, as a number box is),
+/// drawn disabled when `enabled` is false. Text, not a box: an empty field is "not given" (a
+/// height difference) and a typed one is read by the survey parser with its own refusal, which a
+/// box clamping to a range would never let through.
+pub(crate) fn number_if(
+    ui: &mut Ui,
+    enabled: bool,
+    name: &str,
+    value: &mut String,
+    placeholder: &str,
+    tip: &str,
+) -> Response {
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            drive::controls::number_line(ui, name, value, placeholder)
+        })
+        .inner;
+    if tip.is_empty() {
+        response
+    } else {
+        response.on_hover_text(tip)
+    }
+}
+
 /// A choice over `items`.
 pub(crate) fn choice_of(ui: &mut Ui, name: &str, items: &[&str], chosen: &mut Choice) -> Response {
     let items: Vec<String> = items.iter().map(|item| String::from(*item)).collect();
@@ -638,8 +662,9 @@ impl SurveyForwardDialog {
                     )
                 });
                 form_row(ui, "Height difference:", |ui| {
-                    field(
+                    number_if(
                         ui,
+                        true,
                         "heightDifference",
                         &mut form.height_difference,
                         "optional",
@@ -1094,7 +1119,7 @@ impl SurveyTraverseDialog {
         // The least-squares precisions, a field each: an angle's in seconds, a distance's as
         // millimetres plus parts per million of its length.
         form_row(ui, "Angle precision (\"):", |ui| {
-            field_if(
+            number_if(
                 ui,
                 least_squares,
                 "angleSigma",
@@ -1104,7 +1129,7 @@ impl SurveyTraverseDialog {
             )
         });
         form_row(ui, "Distance precision (mm):", |ui| {
-            field_if(
+            number_if(
                 ui,
                 least_squares,
                 "distanceSigma",
@@ -1114,7 +1139,7 @@ impl SurveyTraverseDialog {
             )
         });
         form_row(ui, "Distance precision (ppm):", |ui| {
-            field_if(
+            number_if(
                 ui,
                 least_squares,
                 "distancePpm",

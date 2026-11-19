@@ -30,7 +30,7 @@ use katana_gis::processing as gp;
 use super::geo_dialog_support::{GeoRunPanel, line_word};
 use super::terrain_dialog_parts::{Framed, field, host_views, invalid, row, show_framed};
 use crate::customisation::{DocumentWatcher, ScopeChoice, ScopeFilterWidget};
-use crate::drive::controls::custom;
+use crate::drive::controls::{custom, number_line};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{Choice, check, choice};
 use crate::host::Host;
@@ -426,14 +426,15 @@ impl GridDemDialog {
         let takes_power = self.takes_power;
         row(ui, "Power:", |ui| {
             ui.add_enabled_ui(takes_power, |ui| {
-                field(ui, "gridPower", &mut self.power, "GDAL's default")
+                // Numbers are short wells, as a number box is (the fourth look audit's 2).
+                number_line(ui, "gridPower", &mut self.power, "GDAL's default")
                     .on_hover_text("power=: the weighting power of the inverse-distance methods");
             });
         });
         let takes_radius = self.takes_radius;
         row(ui, "Search radius (m):", |ui| {
             ui.add_enabled_ui(takes_radius, |ui| {
-                field(ui, "gridRadius", &mut self.radius, "GDAL's default")
+                number_line(ui, "gridRadius", &mut self.radius, "GDAL's default")
                     .on_hover_text("radius=: how far from a cell a point may be and count, metres");
             });
         });

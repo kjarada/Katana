@@ -804,7 +804,7 @@ earthworks dashed; Zoom Extents counts them. The meshes are made again from
 the event loop when the road model, the surfaces, the alignments or the
 layers change, and handed over only when what is shown changed. Show Road
 Model (`set_road_model_shown`) takes them out of all of it for the session, as
-View > Thin screen lines is set.
+View > Thin Screen Lines (Faster) is set.
 
 **Show Road Model has a line**, `ROADMODEL SHOW [ON|OFF]` (alone, the other of
 the two), as View > Grid has `GRID`: it is the window's own, the session's

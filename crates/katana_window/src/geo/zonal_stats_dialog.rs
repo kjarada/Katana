@@ -29,7 +29,6 @@ use super::terrain_dialog_support::{
     terrain_sources,
 };
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::check;
 use crate::host::Host;
 use crate::shell::DialogFrame;
 
@@ -289,6 +288,8 @@ impl Framed for ZonalStatsDialog {
         row(ui, "Source:", |ui| {
             self.source.ui(ui, "zonalSource");
         });
+        // Its "Apply to" a heading's gap under Source, as every heading has.
+        crate::geo::terrain_dialog_parts::heading_gap(ui);
         ui.scope(|ui| {
             self.scope.ui(ui);
         })
@@ -317,8 +318,9 @@ impl Framed for ZonalStatsDialog {
             field(ui, "zonalCsv", &mut self.csv, "blank: no file");
         });
         let writes = !self.csv.trim().is_empty();
+        // At the fields' edge, as every check box of a form is.
         ui.add_enabled_ui(writes, |ui| {
-            check(
+            crate::shell::dialog::check_row(
                 ui,
                 "zonalOverwrite",
                 "Replace the file if it is there",

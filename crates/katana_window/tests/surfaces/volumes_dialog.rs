@@ -562,6 +562,10 @@ mod volumes_dialog {
             host,
         };
         bench.draw();
+        // The scope's controls shown whole, as they are when the boundary is the scope: while it
+        // does not apply the scope is one line (customisation::scope_filter_widget), and the
+        // dialog is no longer the tallest.
+        bench.press("volumesBoundaryScope");
         let available = bench.harness.screen();
         let target = bench
             .harness

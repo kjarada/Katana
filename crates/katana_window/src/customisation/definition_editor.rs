@@ -1910,12 +1910,22 @@ impl DefinitionEditorDialog {
         let in_library = self.in_library;
         let save_enabled = self.save_enabled;
         let revert_enabled = self.revert_enabled;
-        // The one footer (shell::dialog::button_row): New, Duplicate and Delete at the left;
-        // Revert, Close, then Save, the primary, last at the right.
+        // The one footer (shell::dialog::button_row): Revert first at the left, as it reads the
+        // library's definition back (where Surface Styles keeps it; it stood beside Close, the
+        // fourth look audit's 4), then New, Duplicate and Delete; Close, then Save, the primary,
+        // last at the right.
         let (left, right) = dialog::button_row(
             ui,
             |ui| {
                 let mut pressed = None;
+                ui.add_enabled_ui(revert_enabled, |ui| {
+                    if controls::button(ui, "definitionRevert", "Revert")
+                        .on_hover_text("Forget what was changed here")
+                        .clicked()
+                    {
+                        pressed = Some(Pressed::Revert);
+                    }
+                });
                 ui.add_enabled_ui(live, |ui| {
                     if controls::button(ui, "definitionNew", "New")
                         .on_hover_text("An empty definition of the kind shown")
@@ -1948,14 +1958,6 @@ impl DefinitionEditorDialog {
             },
             |ui| {
                 let mut pressed = None;
-                ui.add_enabled_ui(revert_enabled, |ui| {
-                    if controls::button(ui, "definitionRevert", "Revert")
-                        .on_hover_text("Forget what was changed here")
-                        .clicked()
-                    {
-                        pressed = Some(Pressed::Revert);
-                    }
-                });
                 if controls::button(ui, "definitionClose", "Close").clicked() {
                     pressed = Some(Pressed::Close);
                 }

@@ -994,7 +994,9 @@ impl IfcExportDialog {
             }
         });
         labelled(ui, "Detected spacing (m)", |ui| {
-            if controls::line(ui, "ifcExportSpacing", &mut self.spacing)
+            // A number kept as text, refused in the dialog's own sentence: a short well, as a
+            // number box is (the fourth look audit's 2).
+            if controls::number_line(ui, "ifcExportSpacing", &mut self.spacing, "")
                 .on_hover_text(
                     "The longest detected spacing that keeps QL-B, in metres: a path interpolated \
                      across a longer gap was not traced (the project specification sets it)",

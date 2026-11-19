@@ -27,9 +27,9 @@ use katana_gis::processing::DatasetKind;
 use super::geo_dialog_support::line_word;
 use super::terrain_dialog_parts::{field, host_views, invalid, one_column, remove_current, row};
 use crate::customisation::{ScopeChoice, ScopeFilterWidget};
-use crate::drive::controls::custom;
+use crate::drive::controls::{choice_with_hint, custom};
 use crate::drive::registry::{ControlKind, ControlRecord};
-use crate::drive::{Choice, button, choice, rows};
+use crate::drive::{Choice, button, choice};
 use crate::host::Host;
 use crate::ifc_dialogs::{from_native_separators, get_open_file_name, to_native_separators};
 use crate::survey::survey_dialogs::offstage;
@@ -319,45 +319,43 @@ impl BindingPicker {
             BindingKind::RASTER => {
                 let name = self.named("Raster");
                 row(ui, "Raster:", |ui| {
-                    changed = choice(ui, &name, &self.raster_texts, &mut self.raster)
-                        .on_hover_text(
-                            "A reference raster, read at full precision from its own file \
-                             (RASTER <id>)",
-                        )
-                        .changed();
+                    // An empty list says what is missing in the control, muted, as every empty
+                    // choice does.
+                    changed = choice_with_hint(
+                        ui,
+                        &name,
+                        &self.raster_texts,
+                        &mut self.raster,
+                        "No reference raster",
+                    )
+                    .on_hover_text(
+                        "A reference raster, read at full precision from its own file \
+                         (RASTER <id>)",
+                    )
+                    .changed();
                 });
-                // Under the list, not beside it: the list fills its row.
+                // Under the list, not beside it: the list fills its row. Where one comes from, in
+                // a sentence: the menu, not a verb's token (it said "no reference raster yet -
+                // GIS > Import Raster, or REFS").
                 if self.raster_texts.is_empty() {
                     row(ui, "", |ui| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(
-                                    "no reference raster yet - GIS > Import Raster, or REFS",
-                                )
-                                .weak(),
-                            )
-                            .wrap(),
-                        )
+                        crate::shell::dialog::note(ui, "Import one with GIS > Import Raster.")
                     });
                 }
             }
             BindingKind::SURFACE => {
                 let name = self.named("Surface");
                 row(ui, "Surface:", |ui| {
-                    changed = choice(ui, &name, &self.surfaces, &mut self.surface)
-                        .on_hover_text(
-                            "A surface, sampled at the centre of each cell (SURFACE <name>)",
-                        )
-                        .changed();
+                    changed =
+                        choice_with_hint(ui, &name, &self.surfaces, &mut self.surface, "No surface")
+                            .on_hover_text(
+                                "A surface, sampled at the centre of each cell (SURFACE <name>)",
+                            )
+                            .changed();
                 });
                 if self.surfaces.is_empty() {
                     row(ui, "", |ui| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new("no surface yet - Terrain > Surfaces").weak(),
-                            )
-                            .wrap(),
-                        )
+                        crate::shell::dialog::note(ui, "Build one from the Terrain menu.")
                     });
                 }
                 let name = self.named("Cell");
@@ -442,6 +440,10 @@ impl BindingPicker {
     }
 }
 
+/// The rows a `BindingList`'s well shows before it scrolls: a mosaic of a few tiles is seen whole,
+/// and the well is as tall as its Add and Remove beside it and a row more.
+const LISTED_ROWS: f32 = 3.0;
+
 /// Several datasets for one argument - a mosaic's tiles, raster calc's inputs: a picker, and the
 /// list its Add builds. With nothing listed, the picker's own dataset is the one.
 pub struct BindingList {
@@ -507,17 +509,25 @@ impl BindingList {
         let add_name = format!("{}Add", self.prefix);
         let remove_name = format!("{}Remove", self.prefix);
         let listed = one_column(&self.listed);
-        let (add, remove) = ui
-            .horizontal(|ui| {
+        // A row of the form: the list in a well three rows high, saying so while it is empty,
+        // with its Add and Remove beside its top. With nothing listed the bare list took no room
+        // and the two buttons stood alone at the dialog's left edge under the picker (the fourth
+        // look audit).
+        let (add, remove) = row(ui, "Listed:", |ui| {
+            let width = crate::shell::dialog::beside_a_button(ui, "Remove");
+            ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt(format!("{list_name}Scroll"))
-                        .max_height(110.0)
-                        .show(ui, |ui| {
-                            rows(ui, &list_name, &listed, &mut self.current).on_hover_text(
-                                "The datasets, in order; none listed: the one picked above",
-                            );
-                        });
+                    ui.set_width(width);
+                    let height = crate::dialog_layout::rows_height(ui, LISTED_ROWS);
+                    crate::dialog_layout::list_well(
+                        ui,
+                        &list_name,
+                        &listed,
+                        &mut self.current,
+                        height,
+                        "None: the one picked above",
+                    )
+                    .on_hover_text("The datasets, in order; none listed: the one picked above");
                 });
                 ui.vertical(|ui| {
                     let add = button(ui, &add_name, "Add").clicked();
@@ -526,7 +536,8 @@ impl BindingList {
                 })
                 .inner
             })
-            .inner;
+            .inner
+        });
         if add {
             match self.add() {
                 Ok(()) => changed = true,

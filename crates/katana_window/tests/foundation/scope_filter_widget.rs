@@ -366,8 +366,10 @@ mod scope_filter_widget {
             .harness
             .control("gmView")
             .expect("the view list is drawn");
-        assert_eq!(views.items, ["Plan 1 (VIEW 1)", "3D 1 (VIEW 2)"]);
-        bench.type_text("gmView", "Plan 1 (VIEW 1)");
+        // "(view 1)", as Zoom To's and Paper Style Scale's view lists say it (the fourth look
+        // audit: the C++'s "(VIEW 1)" here stood beside their "(view 1)").
+        assert_eq!(views.items, ["Plan 1 (view 1)", "3D 1 (view 2)"]);
+        bench.type_text("gmView", "Plan 1 (view 1)");
         assert_eq!(words(&bench.widget), "VIEW 1 EXTENTS");
         bench.tick("gmOnScreen", true);
         assert_eq!(words(&bench.widget), "VIEW 1");
@@ -545,6 +547,8 @@ mod scope_filter_widget {
         // Plan 1 hides survey: its layers anywhere are the roads; on screen (x -1..12, y -1..6)
         // the line alone, the text at y 10 being off it.
         bench.press("gmScopeView");
+        // Filled in the spelling the list had (a driver's, the utilities' process test's): a
+        // choice's fill reads its item in either case.
         bench.type_text("gmView", "Plan 1 (VIEW 1)");
         same(&bench, &[ln, tx], "Plan 1 anywhere");
         bench.tick("gmOnScreen", true);
@@ -622,5 +626,163 @@ mod scope_filter_widget {
         assert_eq!(views[1].id, model.id);
         assert_eq!(views[1].hidden.as_deref(), Some(&model.layers));
         assert!(views[1].on_screen.is_none());
+    }
+
+    /// The texts painted in a frame of `draw`.
+    fn painted_texts(harness: &mut Harness, draw: impl FnMut(&mut egui::Ui)) -> Vec<String> {
+        let output = harness.frame(draw);
+        crate::control_look::flat(&output.shapes)
+            .into_iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Text(text) => Some(String::from(text.galley.text())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_scope_that_does_not_apply_is_one_line_with_every_control_still_recorded_and_refused() {
+        // The fourth look audit ("For 10"): drawn in a disabled Ui - Contours' with its clip off,
+        // Volumes' with corners for its boundary - the widget was a greyed block some 550 px high,
+        // most of its dialog. It is its heading and one muted line; its controls are still read by
+        // their names, and a press or a fill of one is refused as disabled, as when they were
+        // drawn greyed.
+        let mut bench = Bench::new();
+        let used = bench.harness.control("gmScope").expect("drawn").rect;
+        let widget = &mut bench.widget;
+        let mut off = |ui: &mut egui::Ui| {
+            ui.add_enabled_ui(false, |ui| {
+                widget.ui(ui);
+            });
+        };
+        bench.harness.run(&mut off).expect("the widget is drawn disabled");
+        let unused = bench.harness.control("gmScope").expect("still recorded");
+        assert!(!unused.enabled);
+        assert!(
+            unused.rect.height() < used.height() / 4.0,
+            "the unused scope is {} high, the scope in use {}",
+            unused.rect.height(),
+            used.height()
+        );
+        assert!(
+            unused.rect.height() < 3.0 * katana_window::theme::style::CONTROL_HEIGHT,
+            "a heading and a line: {}",
+            unused.rect.height()
+        );
+        let texts = painted_texts(&mut bench.harness, &mut off);
+        assert!(texts.iter().any(|text| text == "Apply to"), "{texts:?}");
+        assert!(
+            texts
+                .iter()
+                .any(|text| text == katana_window::customisation::scope_filter_widget::UNUSED_NOTE),
+            "{texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|text| text == "The whole drawing"),
+            "no control is painted: {texts:?}"
+        );
+        for part in ["ScopeGroup", "ScopeDrawing", "View", "Layers", "FilterLayer", "DrawnOnly"] {
+            let control = bench
+                .harness
+                .control(&format!("gm{part}"))
+                .unwrap_or_else(|| panic!("gm{part} is recorded"));
+            assert!(!control.enabled, "gm{part}");
+        }
+        assert_eq!(
+            bench.harness.control("gmScopeSelection").expect("recorded").checked,
+            Some(true),
+            "a control's record keeps what it holds"
+        );
+        bench.harness.press("gmScopeDrawing");
+        let refused = bench.harness.run(&mut off).expect_err("a press of it is refused");
+        assert!(refused.contains("is disabled"), "{refused}");
+        assert_eq!(bench.widget.choice(), ScopeChoice::Selection);
+        let widget = &mut bench.widget;
+        let mut off = |ui: &mut egui::Ui| {
+            ui.add_enabled_ui(false, |ui| {
+                widget.ui(ui);
+            });
+        };
+        bench.harness.fill("gmFilterLayer", "survey/*");
+        let refused = bench.harness.run(&mut off).expect_err("a fill of it is refused");
+        assert!(refused.contains("is disabled"), "{refused}");
+
+        // The dialog says why in its own words.
+        bench
+            .widget
+            .set_unused_note("The corners above bound the volume");
+        let widget = &mut bench.widget;
+        let texts = painted_texts(&mut bench.harness, |ui: &mut egui::Ui| {
+            ui.add_enabled_ui(false, |ui| {
+                widget.ui(ui);
+            });
+        });
+        assert!(
+            texts
+                .iter()
+                .any(|text| text == "The corners above bound the volume"),
+            "{texts:?}"
+        );
+
+        // Enabled again, every control is drawn and takes a press as before.
+        bench.draw();
+        assert!(bench.enabled("gmScopeDrawing"));
+        bench.press("gmScopeDrawing");
+        assert_eq!(bench.widget.choice(), ScopeChoice::Drawing);
+    }
+
+    #[test]
+    fn a_scope_that_picks_a_boundary_is_headed_so_and_not_apply_to() {
+        // The fourth look audit: Clip's boundary scope was a second group headed "Apply to" beside
+        // the dialog's own. A dialog names the group; unnamed, it is "Apply to".
+        let mut bench = Bench::new();
+        let widget = &mut bench.widget;
+        let texts = painted_texts(&mut bench.harness, |ui: &mut egui::Ui| {
+            widget.ui(ui);
+        });
+        assert!(texts.iter().any(|text| text == "Apply to"), "{texts:?}");
+        bench.widget.set_heading("Boundary from");
+        assert_eq!(bench.widget.heading_text(), "Boundary from");
+        let widget = &mut bench.widget;
+        let texts = painted_texts(&mut bench.harness, |ui: &mut egui::Ui| {
+            widget.ui(ui);
+        });
+        assert!(texts.iter().any(|text| text == "Boundary from"), "{texts:?}");
+        assert!(!texts.iter().any(|text| text == "Apply to"), "{texts:?}");
+        // Not an edit, and the controls keep their names.
+        assert_eq!(bench.draw(), 0);
+        assert!(bench.harness.control("gmScopeDrawing").is_some());
+    }
+
+    #[test]
+    fn the_layer_list_is_a_well_whose_scroll_bar_is_drawn_inside_it() {
+        // The fourth look audit: the list was a bare scroll area as wide as the widget's column,
+        // its bar a stray vertical line at the column's far edge (Grid's at x 407). It is a well -
+        // a field's fill under a border - with the list and its bar inside.
+        let mut bench = Bench::new();
+        bench.widget.set_choice(ScopeChoice::Layers);
+        bench.draw();
+        let list = bench.harness.control("gmLayers").expect("drawn").rect;
+        let widget = &mut bench.widget;
+        let output = bench.harness.frame(|ui| {
+            widget.ui(ui);
+        });
+        let input = katana_window::theme::palette::input().to_egui();
+        let wells: Vec<egui::Rect> = crate::control_look::flat(&output.shapes)
+            .into_iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Rect(rect) if rect.fill == input && rect.stroke.width > 0.0 => {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .collect();
+        // The list is the well: its record's rectangle is the well's, and the bar is drawn in it.
+        assert!(
+            wells.iter().any(|well| (well.left() - list.left()).abs() <= 1.0
+                && (well.right() - list.right()).abs() <= 1.0
+                && (well.top() - list.top()).abs() <= 1.0),
+            "the list {list:?} is a well: {wells:?}"
+        );
     }
 }

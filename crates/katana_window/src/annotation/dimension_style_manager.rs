@@ -949,29 +949,44 @@ impl DimensionStyleManagerDialog {
         );
     }
 
-    fn footer(&mut self, ui: &mut Ui, _host: &mut dyn Host) {
+    fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         let problem = self.problem.clone();
-        // The one footer (shell::dialog::button_row): the last refusal at the left; Revert, Close,
-        // then Apply, the primary, last at the right. Close is the footer's own: the dialog had
-        // only its title bar's cross to dismiss it.
-        let (_, (closed, reverted, applied)) = dialog::button_row(
+        // Apply and Revert grey while the form changes nothing: an accent Apply that stores
+        // nothing invites the click (the fourth look audit's 1). A form that does not read keeps
+        // them lit, so Apply says why and Revert can throw it away.
+        let edited = !matches!(self.apply_line(host.document()), Ok(line) if line.is_empty());
+        // The one footer (shell::dialog::button_row): Revert at the left, as it reads the drawing
+        // back (Surface Styles' place for it), with the last refusal; Close, then Apply, the
+        // primary, last at the right. Revert stood beside Close at the right in four dialogs and
+        // at the left in one (the fourth look audit's 4).
+        let (reverted, (closed, applied)) = dialog::button_row(
             ui,
             |ui| {
+                let reverted = ui
+                    .add_enabled_ui(edited, |ui| {
+                        controls::button(ui, "dimStyleRevert", "Revert")
+                            .on_hover_text("Throw the form's edits away")
+                            .clicked()
+                    })
+                    .inner;
                 problem_line(ui, "dimStyleProblem", &problem);
+                reverted
             },
             |ui| {
-                let reverted = controls::button(ui, "dimStyleRevert", "Revert")
-                    .on_hover_text("Throw the form's edits away")
-                    .clicked();
                 let closed = controls::button(ui, "dimStyleClose", "Close")
                     .on_hover_text("Close the dialog; edits not applied are dropped")
                     .clicked();
-                let applied = controls::primary(ui, "dimStyleApply", "Apply")
-                    .on_hover_text(
-                        "Store the fields the form changed, as one undo step (DIMSTYLE SET)",
-                    )
-                    .clicked();
-                (closed, reverted, applied)
+                let applied = ui
+                    .add_enabled_ui(edited, |ui| {
+                        controls::primary(ui, "dimStyleApply", "Apply")
+                            .on_hover_text(
+                                "Store the fields the form changed, as one undo step (DIMSTYLE \
+                                 SET)",
+                            )
+                            .clicked()
+                    })
+                    .inner;
+                (closed, applied)
             },
         );
         if closed {

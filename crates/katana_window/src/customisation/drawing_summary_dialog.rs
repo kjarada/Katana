@@ -42,7 +42,10 @@
 use std::rc::Rc;
 
 use egui::{Context, Ui};
-use katana_cad::customisation_report::{customisation_summary, format_customisation_reply};
+use katana_cad::customisation_report::{
+    CustomisationSummary, customisation_summary, format_customisation_reply,
+};
+use katana_cad::customisation_state::CustomisationOrigin;
 use katana_cad::document::Document;
 use katana_cad::document_status::document_status;
 use katana_core::text::format_general;
@@ -54,7 +57,9 @@ use crate::drive::mailbox::{Act, fill_disabled, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, settle, take};
 use crate::host::Host;
 use crate::shell::DialogFrame;
+use crate::main_window::panels::sentence_start;
 use crate::shell::dialog;
+use crate::survey::survey_dialogs::hidden;
 
 const DIALOG: &str = "drawingSummaryDialog";
 const TITLE: &str = "Drawing Summary";
@@ -75,6 +80,64 @@ pub struct DrawingSummaryContext {
     /// The project's coordinate system as the status bar says it (projectCrsLabel); None, the
     /// project's own text, or that it has none.
     pub crs: Option<Rc<dyn Fn() -> String>>,
+}
+
+/// The customisation as the pane's rows say it: what is loaded and where it came from, what it
+/// holds, its sources and the automation - the reply's records in words.
+fn customisation_rows(summary: &CustomisationSummary) -> Vec<(&'static str, String)> {
+    let origin = match summary.origin {
+        CustomisationOrigin::None => "",
+        CustomisationOrigin::BuiltIn => "built in",
+        CustomisationOrigin::Kept => "kept from the last session",
+        CustomisationOrigin::Loaded => "loaded in this session",
+        CustomisationOrigin::Edited => "changed in this session",
+    };
+    let loaded = if summary.origin == CustomisationOrigin::None {
+        String::from("None loaded")
+    } else if summary.name.is_empty() {
+        sentence_start(origin)
+    } else {
+        format!("{}, {origin}", summary.name)
+    };
+    let mut rows = vec![
+        ("Customisation", loaded),
+        (
+            "Definitions",
+            format!(
+                "{} in {}: {} offered as symbols, {} as linestyles",
+                counted(summary.definitions, "definition", "definitions"),
+                counted(summary.groups, "group", "groups"),
+                summary.symbols,
+                summary.linestyles
+            ),
+        ),
+        (
+            "Survey codes",
+            format!(
+                "{} over {}",
+                counted(summary.rules, "rule", "rules"),
+                counted(summary.codes, "code", "codes")
+            ),
+        ),
+    ];
+    if !summary.loaded.is_empty() {
+        let names: Vec<&str> = summary
+            .loaded
+            .iter()
+            .map(|source| source.name.as_str())
+            .collect();
+        rows.push(("Sources", names.join(", ")));
+    }
+    let on_off = |on: bool| if on { "on" } else { "off" };
+    rows.push((
+        "On survey import",
+        format!(
+            "coding {}, linework {}",
+            on_off(summary.automation.codes_on_survey_import),
+            on_off(summary.automation.linework_on_survey_import)
+        ),
+    ));
+    rows
 }
 
 fn counted(count: usize, one: &str, many: &str) -> String {
@@ -149,6 +212,10 @@ pub struct DrawingSummaryDialog {
     selection: String,
     history: String,
     customisation: String,
+    /// The customisation said as label/value rows, what a person reads: the reply's records
+    /// (`customisation`) shown in a monospace well were a raw record dump in a dialog of rows (the
+    /// fourth look audit's 6). The records stay the pane's value, for drivers and tests.
+    customisation_rows: Vec<(&'static str, String)>,
     unresolved: Vec<String>,
     unresolved_current: Option<usize>,
     status: String,
@@ -169,6 +236,7 @@ impl DrawingSummaryDialog {
             selection: String::new(),
             history: String::new(),
             customisation: String::new(),
+            customisation_rows: Vec::new(),
             unresolved: Vec::new(),
             unresolved_current: None,
             status: String::new(),
@@ -251,6 +319,7 @@ impl DrawingSummaryDialog {
         let summary = customisation_summary(document);
         let report = format_customisation_reply(&summary);
         self.customisation = String::from(report.trim_end_matches('\n'));
+        self.customisation_rows = customisation_rows(&summary);
         // QListWidget::clear: nothing is chosen in the list read again.
         self.unresolved.clone_from(&summary.coverage.unresolved);
         self.unresolved_current = None;
@@ -339,23 +408,32 @@ impl DrawingSummaryDialog {
             )
             .wrap(),
         );
-        // Wrapped at the pane's edge: the reply's records are longer than the pane is wide (the
-        // linework record is 143 characters), and left unwrapped the end of each lay out of sight
-        // behind a scroll bar. A record still begins its own line and starts with its word, so a
-        // wrapped one reads as one.
+        // What it is, as the rows over it say the drawing: label and value. The records - what a
+        // bare CUSTOMISE replies, word for word - stay the pane's value under its name, drawn
+        // hidden, where a driver and the tests read them.
+        dialog::form(ui, |form| {
+            for (title, text) in &self.customisation_rows {
+                form.row(title, |ui| {
+                    dialog::text_value(ui, |ui| {
+                        ui.add(egui::Label::new(text.as_str()).wrap());
+                    });
+                });
+            }
+        });
         let mut report = self.customisation.clone();
-        // The pane as wide as the dialog, so fewer of its records wrap.
-        ui.spacing_mut().text_edit_width = BODY_WIDTH;
-        controls::text_with(
-            ui,
-            "drawingSummaryCustomisation",
-            &mut report,
-            TextOptions {
-                read_only: true,
-                rows: 8,
-                monospace: true,
-            },
-        );
+        hidden(ui, "drawingSummaryCustomisation", |ui| {
+            ui.spacing_mut().text_edit_width = BODY_WIDTH;
+            controls::text_with(
+                ui,
+                "drawingSummaryCustomisation",
+                &mut report,
+                TextOptions {
+                    read_only: true,
+                    rows: 8,
+                    monospace: true,
+                },
+            );
+        });
         dialog::section(ui, "Names no library defines");
         dialog::note(
             ui,

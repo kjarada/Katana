@@ -366,7 +366,7 @@ impl GisTool for GisSqlDialog {
                 "gisSqlCsv",
                 "Rows to CSV",
                 &mut self.csv,
-                "none",
+                "No file",
                 "csv=: AS REPORT - the rows written to this file too",
             );
         });

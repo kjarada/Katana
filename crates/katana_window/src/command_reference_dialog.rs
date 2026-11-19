@@ -516,12 +516,13 @@ impl ReferenceState {
             "commandReferenceSearch",
             &mut self.search,
             LineOptions {
-                placeholder: "Search: words that must all occur, such as layer colour",
-                // Across the table it searches, as its placeholder is long.
+                placeholder: crate::drive::controls::SEARCH_HINT,
+                // Across the table it searches.
                 width: Some(f32::INFINITY),
                 ..LineOptions::default()
             },
-        );
+        )
+        .on_hover_text("Words that must all occur, such as layer colour");
         self.filter();
         let mut chosen = None;
         let mut activated = None;

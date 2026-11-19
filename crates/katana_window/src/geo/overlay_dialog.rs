@@ -328,7 +328,7 @@ impl GisTool for GisOverlayDialog {
             "gisOverlayCsv",
             "Rows to CSV:",
             &mut self.csv,
-            "none",
+            "No file",
             "csv=: the rows - each piece's area or length and properties - written to this file \
              too",
         );

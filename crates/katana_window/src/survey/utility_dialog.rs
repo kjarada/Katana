@@ -1093,7 +1093,7 @@ impl UtilityToolsDialog {
         self.status.set(text, is_error);
     }
 
-    /// The file name Save As offers, "utility_draw.txt": named for the tool whose reply
+    /// The file name Save Report offers, "utility_draw.txt": named for the tool whose reply
     /// utilityOutput shows, which stays while another tab is brought forward to prepare the next
     /// run. The tab in front before anything has run.
     pub fn suggested_file_name(&self) -> String {
@@ -1104,7 +1104,7 @@ impl UtilityToolsDialog {
         )
     }
 
-    /// Writes the reply to `path` as UTF-8 text: what Save As does once a file is chosen.
+    /// Writes the reply to `path` as UTF-8 text: what Save Report does once a file is chosen.
     pub fn save_output_to(&self, path: &Path) -> Status {
         let bytes = format!("{}\n", self.output);
         std::fs::write(path, bytes.as_bytes()).map_err(|error| {
@@ -1150,7 +1150,8 @@ impl UtilityToolsDialog {
         }
     }
 
-    /// Save As.
+    /// Save Report: the reply, a text report, written to a file chosen - named for what it writes
+    /// (the fourth look audit's words), as Save CSV... is elsewhere.
     fn save_output(&mut self, host: &dyn Host) {
         if host.headless() {
             self.set_status(
@@ -1242,9 +1243,8 @@ impl UtilityToolsDialog {
                         "utilitySchedule",
                         &mut self.schedule,
                         "the utility schedule: a .csv, one row per located vertex",
-                        "The schedule of located services (docs/subsurface_utilities.md, \"The \
-                         schedule format\"): rows with the same line id form one service, in \
-                         order",
+                        "The schedule of located services: rows with the same line id form one \
+                         service, in order",
                     );
                     if controls::button(ui, "utilityScheduleBrowse", "Browse...").clicked() {
                         self.browse(&*host, PathField::Schedule, "Utility Schedule", false);
@@ -1323,9 +1323,9 @@ impl UtilityToolsDialog {
     }
 
     /// The reply, once there is one, and the design's one footer row (shell::dialog::button_row),
-    /// kept below the scrolling body: Copy and Save As - they act on the reply - and what happened
-    /// last at the left; Close, then Run - the dialog's act, in the accent - at the right. Run was
-    /// in the body, under the line, in a button's grey.
+    /// kept below the scrolling body: Copy and Save Report - they act on the reply - and what
+    /// happened last at the left; Close, then Run - the dialog's act, in the accent - at the
+    /// right. Run was in the body, under the line, in a button's grey.
     fn footer(&mut self, ui: &mut Ui, host: &mut dyn Host) {
         // The reports are tables: shown as written, in a fixed pitch.
         let mut reply = self.output.clone();
@@ -1341,7 +1341,7 @@ impl UtilityToolsDialog {
                 let acted = ui
                     .add_enabled_ui(has_output, |ui| {
                         let copy = controls::button(ui, "utilityCopy", "Copy").clicked();
-                        let save = controls::button(ui, "utilitySave", "Save As...").clicked();
+                        let save = controls::button(ui, "utilitySave", "Save Report...").clicked();
                         (copy, save)
                     })
                     .inner;
@@ -1390,7 +1390,7 @@ impl UtilityToolsDialog {
         hold_label_column(ui);
         ui.add_enabled_ui(grades, |ui| {
             labelled(ui, "Detected spacing (m):", |ui| {
-                plain_line(
+                number_field(
                     ui,
                     "utilitySpacing",
                     &mut self.spacing,
@@ -1401,13 +1401,14 @@ impl UtilityToolsDialog {
                 );
             });
             labelled(ui, "Minimum cover (m):", |ui| {
-                plain_line(
+                number_field(
                     ui,
                     "utilityMinCover",
                     &mut self.min_cover,
-                    "none - cover is given, not tested",
+                    "not tested",
                     "MINCOVER: flag every vertex whose cover is less than this - in the report's \
-                     findings, and on each drawn point (utility.cover_below_minimum)",
+                     findings, and on each drawn point (utility.cover_below_minimum). Left blank, \
+                     cover is given, not tested",
                 );
             });
         });
@@ -1491,7 +1492,7 @@ impl UtilityToolsDialog {
                         ui,
                         "utilityScheduleSchema",
                         &mut self.schedule_schema,
-                        "none - the schedule format's own words",
+                        "No schema - the schedule format's own words",
                         "SCHEMA: write in this delivery schema's column names and spellings",
                     );
                     if controls::button(ui, "utilityScheduleSchemaBrowse", "Browse...").clicked() {
@@ -1562,7 +1563,7 @@ impl UtilityToolsDialog {
                         );
                     });
                     labelled(left, "H uncertainty (m)", |ui| {
-                        plain_line(
+                        number_field(
                             ui,
                             "utilityHUnc",
                             &mut self.horizontal_uncertainty,
@@ -1573,7 +1574,7 @@ impl UtilityToolsDialog {
                         );
                     });
                     labelled(right, "V uncertainty (m)", |ui| {
-                        plain_line(
+                        number_field(
                             ui,
                             "utilityVUnc",
                             &mut self.vertical_uncertainty,
@@ -1635,7 +1636,7 @@ impl UtilityToolsDialog {
                         );
                     });
                     labelled(left, "Diameter (mm)", |ui| {
-                        plain_line(
+                        number_field(
                             ui,
                             "utilityDiameter",
                             &mut self.diameter,
@@ -1698,8 +1699,8 @@ impl UtilityToolsDialog {
                         "utilityDesign",
                         &mut self.design,
                         "the proposed works: a .csv of the centre line",
-                        "The design centre line (docs/subsurface_utilities.md): easting, northing \
-                         and an optional level at each vertex",
+                        "The design centre line: easting, northing and an optional level at each \
+                         vertex",
                     );
                     if controls::button(ui, "utilityDesignBrowse", "Browse...").clicked() {
                         self.browse(host, PathField::Design, "Proposed Works", false);
@@ -1751,13 +1752,13 @@ impl UtilityToolsDialog {
         }
         ui.add_enabled_ui(source == UtilityDesignSource::Entity, |ui| {
             labelled(ui, "Level (m)", |ui| {
-                plain_line(
+                number_field(
                     ui,
                     "utilityDesignLevel",
                     &mut self.design_level,
-                    "its own heights, if it has them",
+                    "its own",
                     "LEVEL: the works' level, metres; left blank, the levels the line or \
-                     polyline carries, or none",
+                     polyline carries, if it has them, or none",
                 );
             });
         });
@@ -1799,16 +1800,17 @@ impl UtilityToolsDialog {
         }
         let requirement = ClearanceRequirement::default();
         labelled(ui, "Works width (m):", |ui| {
-            plain_line(
+            number_field(
                 ui,
                 "utilityWidth",
                 &mut self.width,
-                "default 0 m - the centre line itself",
-                "WIDTH: the works' width - a pipe's outside diameter, a trench's width",
+                "default 0 m",
+                "WIDTH: the works' width - a pipe's outside diameter, a trench's width. Left \
+                 blank, 0 m: the centre line itself",
             );
         });
         labelled(ui, "Horizontal clearance (m):", |ui| {
-            plain_line(
+            number_field(
                 ui,
                 "utilityH",
                 &mut self.horizontal,
@@ -1817,7 +1819,7 @@ impl UtilityToolsDialog {
             );
         });
         labelled(ui, "Vertical clearance (m):", |ui| {
-            plain_line(
+            number_field(
                 ui,
                 "utilityV",
                 &mut self.vertical,
@@ -1826,7 +1828,7 @@ impl UtilityToolsDialog {
             );
         });
         labelled(ui, "Unverified margin (m):", |ui| {
-            plain_line(
+            number_field(
                 ui,
                 "utilityMargin",
                 &mut self.margin,
@@ -1891,6 +1893,14 @@ fn path_line(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip
         },
     )
     .on_hover_text(tip);
+}
+
+/// A number kept as text with its placeholder and tip (`controls::number_line`): a short well, as
+/// a number box is, where it filled its row (the fourth look audit's 2). Text, not a box: a blank
+/// is the verb's own default (or "not given"), which a box could not show, and a typed value is
+/// read and refused by the dialog with its own sentence.
+fn number_field(ui: &mut Ui, name: &str, value: &mut String, placeholder: &str, tip: &str) {
+    controls::number_line(ui, name, value, placeholder).on_hover_text(tip);
 }
 
 /// A one-line field with its placeholder and tip, filling its row: a field with no Browse after

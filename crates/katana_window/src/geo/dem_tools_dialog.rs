@@ -34,7 +34,7 @@ use super::binding_picker::{BindingKind, BindingList, BindingPicker};
 use super::geo_dialog_support::{GeoRunPanel, line_word};
 use super::terrain_dialog_parts::{Framed, field, host_views, invalid, row, show_framed};
 use crate::customisation::{DocumentWatcher, ScopeChoice, ScopeFilterWidget};
-use crate::drive::controls::custom;
+use crate::drive::controls::{NO_CHOICE, custom, number_line};
 use crate::drive::registry::{ControlKind, ControlRecord};
 use crate::drive::{Choice, check, choice, label, radio, tabs};
 use crate::host::Host;
@@ -498,7 +498,8 @@ impl DemToolsDialog {
         self.difference_within.reload(model);
         let kept = String::from(self.like_id());
         self.like_ids = vec![String::new()];
-        self.like_texts = vec![String::from("(none)")];
+        // The one empty word (the fourth look audit's 3): it read "(none)".
+        self.like_texts = vec![String::from(NO_CHOICE)];
         for raster in host.reference().rasters() {
             self.like_ids.push(format!("{}", raster.id));
             self.like_texts
@@ -606,19 +607,20 @@ impl DemToolsDialog {
                     "The raster's cells with no value filled by inverse-distance weighting from \
                      the cells round them; the reply counts what was empty and what was filled.",
                 );
+                // Numbers are short wells, as a number box is (the fourth look audit's 2).
                 row(ui, "Search distance (cells):", |ui| {
-                    field(
-                        ui,
-                        "demFillDistance",
-                        &mut self.fill_distance,
-                        "GDAL's default, 100",
-                    )
-                    .on_hover_text("distance=: how far to look for values, in cells");
+                    number_line(ui, "demFillDistance", &mut self.fill_distance, "100")
+                        .on_hover_text(
+                            "distance=: how far to look for values, in cells; left blank, GDAL's \
+                             default, 100",
+                        );
                 });
                 row(ui, "Smoothing passes:", |ui| {
-                    field(ui, "demFillSmoothing", &mut self.fill_smoothing, "none").on_hover_text(
-                        "smoothing=: passes of a 3 x 3 average over what was filled",
-                    );
+                    number_line(ui, "demFillSmoothing", &mut self.fill_smoothing, "0")
+                        .on_hover_text(
+                            "smoothing=: passes of a 3 x 3 average over what was filled; left \
+                             blank, none",
+                        );
                 });
                 row(ui, "Strategy:", |ui| {
                     choice(
@@ -681,7 +683,7 @@ impl DemToolsDialog {
                     );
                 });
                 row(ui, "Cell:", |ui| {
-                    field(
+                    number_line(
                         ui,
                         "demReprojectTargetCell",
                         &mut self.reproject_cell,
