@@ -359,10 +359,11 @@ impl VertexPanel {
         // The table shows WHOLE columns, as many as the panel has room for, and the rest scroll
         // in: a view as wide as the panel cut the column at its edge through the middle of a field
         // (Height, at the default 240; the fourth look audit's S\main_vertices.png), which read as
-        // a table that failed to fit rather than one that scrolls. Room is kept for the vertical
-        // bar as egui allocates it (a floating bar's, theme::style's thin bars), which floats over
-        // the view's right edge only when the rows overflow.
-        let room = ui.available_width() - ui.spacing().scroll.allocated_width();
+        // a table that failed to fit rather than one that scrolls. No room is kept for the vertical
+        // bar: theme::style's bars float, over the view's right edge and only while the rows
+        // overflow, and keeping its 6 px lost the default panel its Height column by a few points
+        // (the first shot of this fix showed # Easting Northing and a gap beside them).
+        let room = ui.available_width();
         let whole = whole_columns_width(&widths, dialog_layout::INNER, room);
         let shown = egui::ScrollArea::both()
             .id_salt("vertexTableScroll")

@@ -1358,21 +1358,28 @@ pub fn spin(ui: &mut Ui, name: &str, value: &mut f64, range: SpinRange) -> Respo
             range.suffix
         )
     };
+    // The suffix only where the box shows a number: egui 0.36's DragValue::suffix APPENDS to the
+    // atoms after the number (`extend_right`), so a box at its special value showed its words and
+    // the unit ("Text style's mm"), and one that set the suffix again inside a formatter showed it
+    // twice ("2.500 mm mm"). The formatter writes the number alone; the unit is the box's atom,
+    // left off while the special words are shown.
+    let at_special = !range.special.is_empty() && *value == range.minimum;
     let mut drag = egui::DragValue::new(value)
         .range(range.minimum..=range.maximum)
         .speed(range.step)
-        .fixed_decimals(range.decimals)
-        .suffix(range.suffix);
+        .fixed_decimals(range.decimals);
+    if !at_special && !range.suffix.is_empty() {
+        drag = drag.suffix(range.suffix);
+    }
     if !range.special.is_empty() {
         let minimum = range.minimum;
         let decimals = range.decimals;
         let special = range.special;
-        let suffix = range.suffix;
-        drag = drag.suffix("").custom_formatter(move |number, _| {
+        drag = drag.custom_formatter(move |number, _| {
             if number == minimum {
                 String::from(special)
             } else {
-                format!("{}{suffix}", crate::format::qt_fixed(number, decimals))
+                crate::format::qt_fixed(number, decimals)
             }
         });
     }

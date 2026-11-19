@@ -497,6 +497,47 @@ mod control_look {
     }
 
     #[test]
+    fn a_number_box_with_a_unit_and_special_words_shows_the_words_alone_and_the_unit_once() {
+        // egui 0.36's DragValue::suffix appends: a box of a unit and special words showed "Text
+        // style's mm" at its special value and "2.500 mm mm" elsewhere (the integration of the
+        // sixth round, agent C's Format dialogs).
+        let mut harness = Harness::new();
+        apply(harness.context());
+        let range = SpinRange::new(0.0, 10.0, 0.5, 3)
+            .with_suffix(" mm")
+            .with_special_text("Text style's");
+        let plain = SpinRange::new(0.0, 10.0, 0.5, 3).with_suffix(" mm");
+        let (mut special, mut sized, mut unit) = (0.0, 2.5, 2.5);
+        let mut draw = |ui: &mut Ui| {
+            drive::spin(ui, "special", &mut special, range);
+            drive::spin(ui, "sized", &mut sized, range);
+            drive::spin(ui, "unit", &mut unit, plain);
+        };
+        harness.show(&mut draw).expect("drawn");
+        let output = harness.frame(&mut draw);
+        let shapes = flat(&output.shapes);
+        output.drop_without_applying_deltas();
+        for (name, shown) in [
+            ("special", "Text style's"),
+            ("sized", "2.500 mm"),
+            ("unit", "2.500 mm"),
+        ] {
+            let control = harness.control(name).expect("drawn");
+            let words: String = words_in(&shapes, control.rect)
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
+            assert_eq!(words, shown, "{name}");
+        }
+        // The record is the box's text without its unit, as before.
+        assert_eq!(
+            harness.control("special").expect("drawn").value,
+            "Text style's"
+        );
+        assert_eq!(harness.control("sized").expect("drawn").value, "2.500");
+    }
+
+    #[test]
     fn a_fill_in_another_case_is_refused_where_two_items_read_it() {
         // Which item "Plan" means only the items' own spelling can tell: neither is chosen.
         let mut harness = Harness::new();
