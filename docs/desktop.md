@@ -149,15 +149,17 @@ JSON in the per-user configuration folder, under the key names the C++ used,
 finds the same names; the C++'s settings were the Windows registry's binary
 form, which is not read, so nothing the C++ saved is carried over), and in it
 the layout - which panels and toolbars are
-shown, where each toolbar is docked or floats, and the menus torn off
-("Toolbars that dock and float, menus that tear off") - the text size, the toolbar icon size and
+shown, where each toolbar is docked or floats, the menus torn off
+("Toolbars that dock and float, menus that tear off") and the panels that
+float ("The window's own panels float and minimise") - the text size, the toolbar icon size and
 whether the toolbars show their names, written when the window closes and
 read before its first frame (`katana_window::main_window::layout::restore_session`).
 A layout from another version (`LAYOUT_VERSION`, raised when a change to the
 toolbars or panels would make an old layout put them wrong; the one before
 the third toolbar row is carried over, "Fitting the screen") is not applied.
-Not done in the Rust: the window's place and size, and the minimised panels,
-are not kept, and the native window opens at 1360 x 860 points whatever the
+Not done in the Rust: the window's place and size are not kept (what is
+minimised is not kept either, by decision: the tray is a session's, and a
+minimised panel or menu comes back open at its place), and the native window opens at 1360 x 860 points whatever the
 screen, as every session did before 2026-09-26. View > Reset Window Layout
 puts the panels and toolbars back as a new window has them and leaves the
 size and the appearance alone. The views inside the workspace are not kept:
@@ -434,7 +436,9 @@ kept, like Format > Layers, so several lookups need no reopening, and
 `editAttributes`, `viewZoomExtents`, `viewGrid` and `viewSnap`; the snap
 modes `viewSnapModeEndpoint` to `viewSnapModeGrid` (by their menu names:
 Endpoint, Midpoint, Center, Intersection, Perpendicular, Tangent, Nearest,
-Grid); the viewport layouts `viewLayoutSingle`, `viewLayoutSplitVertical`,
+Grid); the tilings of the open views `viewTile`, `viewTileSideBySide` and
+`viewTileStacked` (below, "Tiling the open views"); the viewport layouts
+`viewLayoutSingle`, `viewLayoutSplitVertical`,
 `viewLayoutSplitHorizontal`, `viewLayoutThreeLeft`, `viewLayoutThreeTop` and
 `viewLayoutQuad`; `viewShowsPlan` and the other Active Viewport Shows items;
 the standard 3D views `viewStandardTop`, `Bottom`, `Front`, `Back`, `Left`,
@@ -1936,18 +1940,61 @@ owner's ask of 2026-11-16 was rounds until the window looked good; the
 ninth audit scored 9.1, with no regression in 311 shots, and the rounds
 stopped there. Not done, the audit's remaining polish, worst first:
 
-- The command log, three rows high, shows only the end of a long record
-  (a far import's warning starts mid-sentence at the top): nothing keeps
-  the start of the newest record in view.
-- The sheet editor's Checks panel sizes its columns from what it holds, so
-  Fix's header jumps when results arrive; fixed widths would hold still.
-- The status bar's rules have uneven gaps either side (8 and 16 points at
-  the tray's, 16 and 16, 8 and 9, 16 and 8 at the readouts').
-- Road Objects' scope greys some filter rows and not others.
-- A floating torn-off Draw menu shows the Select arrow as its icon; a
-  narrow torn-off menu docked down a side wraps its long rows; Layers keeps
-  Revert at the left of its footer; the tear-off line's dashes end 6 to 9
-  points from the right edge by their phase, 6 from the left.
+- ~~The command log, three rows high, shows only the end of a long record
+  (a far import's warning starts mid-sentence at the top).~~ Done in round
+  11: following its newest output, the log shows a record taller than
+  itself from the record's first row (`panels::log_follow_offset`), because
+  a reply is read from its start and its end is one scroll away; a record
+  that fits is at the log's end as before, and a log a person has scrolled
+  is left where they put it until the next record. Rejected: growing the
+  log to fit the record, which would move the views every time a command
+  replied.
+- Done (round 11): the sheet editor's Checks table gives its columns widths
+  of their own (Severity 72, Sheet 160, View 96, Fix 320 at the least and
+  Problem what is left, a long cell cut short with the whole in the row's
+  hover text), because a column sized from its cells put Fix's header in a
+  different place for an empty table and for every check's findings.
+- ~~The status bar's rules have uneven gaps either side (8 and 16 points
+  at the tray's, 16 and 16, 8 and 9, 16 and 8 at the readouts').~~ Done in
+  round 11: every rule is drawn by one helper (`panels::status_rule`) with
+  `STATUS_RULE_GAP`, the row's group gap of 8 points, clear on each side,
+  so that no two can drift apart again; a readout that shows nothing takes
+  no room, and the CRS button has no padding across, because its words are
+  all of it that shows until the pointer is on it. The rules are on record
+  as `StatusBarRule0` (the tray's) to `StatusBarRule3` and the message as
+  `statusMessage`, for the test that measures the gaps.
+- Done (round 11): the shared scope and filter widget no longer draws greyed
+  the filter controls a tool says do not apply (Road Objects' types, style
+  and text, which the verb refuses for a road object) but leaves them out
+  and says why once under the filter (`ScopeFilterWidget::leave_out`), so
+  every filter row shown is live, as all of Global Modify's are - greyed in
+  place they stood among the lit rows that do apply, beside lit labels,
+  with the reason only in a hover; rejected, greying the whole filter
+  (layer, colour, property and drawn only do match a road object) and
+  lighting it all (the verb would refuse what was typed).
+
+Done since, in round 11 (2026-11-21), the last item's four parts:
+
+- A torn-off Draw menu is titled with a draw tool's icon: a menu of the
+  menu bar was lent its toolbar's first button's icon, which for Draw is
+  Select, a command the menu does not hold, so the panel now takes the lent
+  icon only where the menu holds that command and its own first item's
+  otherwise (`docking::menu_panel_icon`).
+- A torn-off menu's rows in one column are one line each, cut short with an
+  ellipsis and said whole under the pointer (`docking_ui::column_items_ui`),
+  and a band down a side is no narrower than a floating panel's 160 points
+  (`docking::least_band`; 96 stays the least height along the top and the
+  bottom), because wrapped rows were of two heights and broke the column of
+  icons.
+- Layers keeps Revert at its footer's left, and that part of the audit's
+  item is declined: Revert at the left is every manager's place for it (it
+  reads the drawing back; the fifth look audit moved Layers' there to match
+  Dimension Styles, Text, Road Templates and the definition editor), and
+  one dialog moved alone would be the inconsistency that audit removed.
+- The tear-off line lays out a whole number of dashes and centres them
+  (`drive::action::tear_off_dashes`), so its margins are equal at both ends
+  at every width, where the right one followed the phase of the 5 point
+  period.
 
 ### The icons' colours: discipline and function (2026-11-19)
 
@@ -2172,6 +2219,142 @@ second way, which is what this removed). Not carried by any line: a layer whose
 name holds a double quote or a line break, which the tokenizer has no escape
 for - the popup then logs why and leaves the box as it was.
 
+### Tiling the open views
+
+The owner asked on 2026-11-21 for "a good way to arrange" the views. What
+there was is the six presets of View > Viewport Layout
+(`ViewWorkspace::arrange`): each is a fixed picture - one, two, three or four
+places - that OPENS views of the default kinds until its places are full,
+tabs any view beyond its places onto the last, and leaves the floating views
+out. That answers "give me the four-up arrangement"; it does not answer "tidy
+the views I have", which five views, or three with one of them floating, had
+no item for.
+
+**Tile arranges the views that are open now.** It opens none and closes
+none, and gives every view a place of its own, of equal size, with no tabs.
+Three items head View > Viewport Layout under "Arrange the open views", the
+presets below them under "Presets":
+
+| Item | Action | Line | What it makes |
+| --- | --- | --- | --- |
+| Tile | `viewTile` | `VIEWS TILE` (or `VIEWS TILE GRID`) | a grid |
+| Tile Side by Side | `viewTileSideBySide` | `VIEWS TILE COLUMNS` | one row |
+| Tile Stacked | `viewTileStacked` | `VIEWS TILE ROWS` | one column |
+
+Each item hands its line to the window's executor (`tiling_line` in
+`crates/katana_window/src/main_window/actions.rs`), so a click, a typed
+line, a script and `katana --command` take one path, logged, with one reply:
+`tiled=3 kind=grid docked=1 minimised=0` - the views arranged, how many of
+them were floating and were docked, and how many stayed in the tray
+(`docs/cad.md`, "The window's views: VIEWS and ZOOM"). `katana_cli` and
+`katana_mcp` have no views and no dock area, and refuse the line with the
+rest of VIEWS, saying where it runs
+(`cli.views_tile_is_refused_saying_where_it_runs`); an agent that wants a
+tiled window drives `katana --command "VIEWS TILE"`.
+
+The rules, each decided once and the same from the menu and the line
+(`ViewWorkspace::tile`):
+
+- **The grid** has at most ceil(sqrt(n)) columns and the fewest rows that
+  hold the views at that width, the views dealt over the rows as evenly as
+  they go with the fuller rows on top: 2 are side by side, 3 are two over
+  one, 4 are two over two, 5 are three over two, 7 are three over two over
+  two, 12 are three rows of four (`katana_cad::viewport_layout::tile_rows`).
+  The rows are of one height and the views of a row of one width, so a row
+  with fewer views has wider ones. *Rejected:* every row full and the
+  remainder alone on the last (7 as 3, 3, 1), which leaves one view three
+  times the width of the rest.
+- **Order:** the active view takes the first place, top left, and the rest
+  follow in the order they were opened - the view being worked in stays under
+  the eye, and the same views always tile the same way.
+- **A floating view is docked into the tiling.** A person who asks for the
+  views to be arranged wants them all arranged, and a floating view left out
+  would sit over the tiles just made. `docked=` counts them.
+- **A minimised view stays in the tray**, and is not counted among the
+  tiled (`minimised=`): minimising is how a person says "not now". Its tray
+  button then brings it back as a page on the first tile, the tiles as they
+  are. The chrome keeps, for each minimised dock, the whole layout it left,
+  and puts that layout back when the same views are open - which undid the
+  tiling at the first view restored - so the workspace brings each one back,
+  parks it on the first tile and minimises it again from there.
+- **A maximised view is restored first**, as before opening or arranging: a
+  maximise is a passing state, not a layout.
+- **One view, or none, is nothing to arrange** and no error: the reply says
+  `tiled=1` or `tiled=0` and no view moves. (One FLOATING view is docked, by
+  the rule above.)
+- **It is not an edit.** A layout is the window's, not the drawing's: no
+  undo step, nothing to save, as a view's own layers are not
+  (`view_tiling::a_floating_view_is_docked_into_the_tiling_and_nothing_of_the_drawing_changes`).
+  Undoing an arrangement is arranging again.
+
+**Equal means equal to the point.** The tiling is a pure plan,
+`katana_cad::viewport_layout::tile_plan`: the steps that cut one view's
+place into `parts` equal parts, of which it keeps the first and the next
+view is given the rest, which the following step cuts again - a third off
+the whole and then half of what is left, where halving twice (what a
+preset's `dock_splits` does) gives a half and two quarters. A test applies
+the steps to rectangles and gets `tile_rects`, as the presets' test does
+(`viewport_layout::docking_the_tile_steps_reproduces_every_tilings_rectangles`).
+The rows are cut first and then each row from the left, so every step cuts a
+place holding one view, the only split the dock tree is asked for. The
+window turns `parts` into egui_dock's fraction from the extent in points
+(`equal_fraction` in `crates/katana_window/src/view_workspace.rs`, of which
+the halving of a newly opened view is the case of two): the first place is
+(extent - the separators) / parts rounded down, and the rest is cut from
+what is left, so three across 800 points are 264, 264 and 264 with the two
+4-point separators, and three down 600 are 197, 197 and 198. The bare 1 /
+parts makes each place narrower than the one cut before it (of five across
+W points the first is W / 5 - 2 and the last W / 5 - 4.17: every cut takes
+half a separator off each side, and a place cut later pays again). The
+fractions are kept by the dock tree, so the tiles stay equal to within a
+point or two when the window is resized. The presets' three-view pictures are left
+as they are: "Three: Left" is one tall view and two stacked by intent.
+
+*Rejected:*
+
+- *Cascading the views as floating windows*, the other half of a classic
+  Window menu. A view floats as a window INSIDE the main window here and
+  cannot leave it, so a cascade would stack every view over the one drawing
+  area and hide all but the front one's body - the opposite of arranging
+  them.
+- *Tiling on its own whenever a view opens or closes.* The window changing
+  the layout by itself is what the dock workspace was made to end (above):
+  a person who has sized a plan view beside a narrow section would lose that
+  at every `VIEWS OPEN`. Opening still splits the active view in halves;
+  Tile is asked for.
+- *Making the presets tile what is open* (dropping "opens the views it
+  lacks"). "Four: Equal" on a new drawing is how a person gets plan, 3D,
+  section and elevation in one click, and scripts and the headless tests
+  drive `viewLayoutQuad` for that.
+- *A keyboard shortcut.* No key is conventionally Tile's, and the table
+  (`--check-shortcuts`) has no obvious free one; the menu letters and the
+  line are enough until someone asks.
+- *A new method on the dock chrome to re-record a minimised dock's layout*,
+  in place of bringing each back and minimising it again: cleaner, and worth
+  doing when the chrome is next changed, but the chrome's public calls
+  already say it.
+
+Tested: the plan in `crates/katana_cad/tests/leaf/viewport_layout.rs` (0,
+1, 2, 3, 4, 5, 7 and 12 views of each kind: the places cover the area once,
+none overlapping, equal within a row; none is nothing and one is the whole
+area); the line in `crates/katana_cad/tests/top_verbs/view_verbs.rs`
+(`view_verbs_test::views_tile_asks_the_window_for_a_grid_columns_or_rows_and_says_what_it_arranged`
+and the refusals beside it); the workspace and the menu in
+`crates/katana_window/tests/workspace/view_tiling.rs` (`view_tiling::*`:
+three and five views each in its own place, equal to the point; a floating
+view docked; a minimised one left in the tray and brought back onto the
+tiling; a maximise undone; one view and none; each menu item giving the
+layout its typed line gives).
+
+Not done: a tiling is not kept between sessions, because no layout of the
+VIEWS is (below, "The dock chrome"); a view's title bar has no shortcut menu
+to offer Tile from, and there is no Window menu; a floating view's own
+rectangle is not kept through a minimise (egui_dock's window state is never
+drawn here, so it has none to give), so a minimised floating view restored
+after a tiling may come back docked; and no headless run of the real window
+drives `viewTile` yet - `-DDRIVE=>VIEWS OPEN 3d|>VIEWS OPEN section|*viewTile`
+expecting `tiled=3 kind=grid` is the test to add to `tests/CMakeLists.txt`.
+
 ### Toolbars that dock and float, menus that tear off
 
 The owner's ask of 2026-11-19: "make toolbars and menus resizable and
@@ -2265,7 +2448,8 @@ takes, and the column's whole width after, the column being justified.
 Clicked, the menu is torn off where its line was: a
 panel of the window's own chrome named `<menu>TornOff`, the menu's title and
 icon on its title bar - a menu of the menu bar the icon View > Toolbars
-shows for the toolbar of its name, else its first item's - holding the
+shows for the toolbar of its name where the menu holds that command, else
+its first item's - holding the
 menu's items drawn by the one menu drawer
 (`menu_items_ui`) with their icons, ticks, shortcuts and submenus. Along the
 top or the bottom the items flow into columns side by side
@@ -2287,7 +2471,8 @@ ticks follow the window, since the items are made again each frame.
   between the views and that side's panels, which every panel docked to that
   side shares; dragged from a band into the views, it floats. A band's seam
   with the views (`menuBandSeam<Side>`, pressed up to 3 points either side
-  of its 4) sets its breadth (96 to 640; 240 at the sides and 168 along the
+  of its 4) sets its breadth (160 to 640 down a side, 96 to 640 along the top and
+  bottom; 240 at the sides and 168 along the
   top and bottom to begin with). The title bar's Float floats it, and reads
   Dock while it floats, docking it again where it was; Minimise hides it to
   the tray at the left of the status bar (`MinimisedToolBar`, its button
@@ -2303,7 +2488,8 @@ ticks follow the window, since the items are made again each frame.
   events (`tool_bar_docking.rs`, `torn_off_menus`). Rejected: a tray of its
   own for the menus beside one for the views - the window had none drawn at
   all, so a minimised view was also lost until this; one tray in the status
-  bar holds both (the main window's own panels hide on Minimise, as before).
+  bar holds both, and since 2026-11-21 the main window's own panels too
+  ("The window's own panels float and minimise", below).
 * **The actions.** `viewMenuTearOff<Menu>` (the menu's object name with its
   first letter upper case: `viewMenuTearOffViewMenu`,
   `viewMenuTearOffViewToolBars`), `viewMenuPanelDock<Menu><Side>`,
@@ -2380,6 +2566,145 @@ place it. The panel's Float button shows the same icon floating or docked.
 Two bars cannot share one floating frame. A torn-off submenu of a menu that
 is rebuilt with a new name (a workbench's) is dropped when no menu has its
 name.
+
+### The window's own panels float and minimise
+
+The owner's report of 2026-11-21: "float minimise for panels don't work
+properly". Layers, Properties, the command line, Reference Data, Surfaces,
+Vertices and the survey points wear the same title bar as a view and a
+torn-off menu, with the same Minimise, Float and Close, but the window
+places them itself (`crates/katana_window/src/main_window/layout.rs`'s
+`Geometry`), and its
+`panel_request` dropped a Float request and did for Minimise what it does
+for Close: the panel was hidden with nothing in the tray, and only View >
+Panels brought it back. The buttons were there and did not do what they
+said.
+
+**The model.** `WindowPanels`
+(`crates/katana_window/src/main_window/docking.rs`) is plain data
+beside the geometry: which panels float and at what rectangle
+(`floating`), where each last floated (`floated_before`, where its Float
+puts it next), and which are in the tray (`minimised`, in the order they
+went). A panel it does not name is docked. Whether a panel is SHOWN stays
+where it was - `layout::Docks`' flags, the drawing's own for Vertices, the
+survey workbench's for the survey points - so View > Panels, a panel's
+Close and the tools that open a panel are unchanged: a floating panel is a
+shown one the geometry leaves out, and a minimised one is a hidden one with
+a tray button.
+
+* **Float.** The title bar's Float button, or a double click on the title,
+  takes the panel out of the docked layout: the geometry is worked out from
+  the docked panels only (`Docks::docked_only`), so it closes up exactly as
+  it does for a hidden panel - Reference Data takes the whole left column
+  when Layers floats, the views take Properties' 244 points or the command
+  line's 114. The panel is drawn by the one function that draws it docked
+  (`MainWindow::window_panel_at`) in an egui Area over the views, first
+  where it stood, 24 points down and along and at its docked size, and from
+  then on where it last floated. Its button reads Dock while it floats
+  (`DockChrome::set_floating`) and puts it back in its place of the
+  geometry, as a second double click does.
+* **Moved and sized.** A floating panel is dragged by its title bar and
+  sized by any of its four edges and four corners, the controls
+  `<Dock>Resize<Part>` (`LayersDockResizeLeft` ... `BottomRight`), by the
+  code that sizes a torn-off menu (`docking_ui::resize_handles_ui`, made one
+  function for both; the least size is the menus' 160 x 96). It is kept
+  wholly between the menu bar and the status bar (`docking::kept_inside`):
+  over the menu bar it would hide the menus, over the status bar the tray
+  its own Minimise sends it to. Wholly, where a floating toolbar or
+  torn-off menu keeps only its title's corner on the window: a panel is
+  where a person types and reads (the command line's field is its last
+  row), and half off the edge it has lost the part they came for. The
+  rectangle kept is the one asked; it is brought inside when it is drawn, so
+  one saved in a larger window returns to its place when the window is
+  large again.
+* **Reference Data and Surfaces** share a place as two tabs. Floating
+  either floats that one page under its own title; the other has the place
+  to itself, with no tabs. Docked again, it is the page in front.
+* **Minimise.** Hides the panel and puts `Restore<Dock>`
+  (`RestoreLayersDock`) in `MinimisedToolBar`, the tray at the left of the
+  status bar that the torn-off menus and the views use
+  (`MainWindow::tray_items`); the button puts it back where it was, docked
+  or floating at its rectangle. A minimised panel is unticked in View >
+  Panels, and ticking it there restores it - the tray button goes, since a
+  button for a panel on screen would put back nothing
+  (`settle_window_panels`, which also takes a panel out of the tray when a
+  tool opens it). Close is as it was: hidden, no tray button, View > Panels
+  brings it back, floating if it was floating.
+* **The actions**, for a `*` step, the drive harness and an agent:
+  `viewPanelFloat<Dock>`, `viewPanelDock<Dock>`, `viewPanelMinimise<Dock>`,
+  `viewPanelRestore<Dock>` and
+  `viewPanelPlace:<Dock>:float:<x>,<y>,<width>,<height>`, `<Dock>` one of
+  `LayersDock`, `PropertiesDock`, `CommandLineDock`, `ReferenceDataDock`,
+  `SurfacesDock`, `VerticesDock`, `SurveyPointsDock`
+  (`docking::parse_action`, through `MainWindow::docking_action`, the door
+  the toolbars' and menus' actions use). Float and Dock show a hidden
+  panel; Minimise of a panel not shown and Restore of one not minimised are
+  refused with the reason. They are not menu items: the title bar is the
+  mouse's way. `?windowPanels` reports each panel
+  (`LayersDock=float:63,167,240,312 PropertiesDock=docked;minimised ...`).
+  View > Panels' toggles (`viewPanelLayers` ...) begin with the same word;
+  a name is one of these only when a panel's dock follows the prefix.
+* **Kept between sessions.** The layout's `"windowPanels"`
+  (`["LayersDock=float:400,300,260,340"]`) names the panels that float; a
+  panel not named is docked. It is a key added to version 3, not a version
+  4: a build that does not know it reads the rest and docks the panels, and
+  a layout without it - every one saved before this - is read as all
+  docked, so neither build refuses the other's layout, where a new version
+  would have had every older build refuse the whole layout for the sake of
+  where one panel floats. A minimised panel is saved shown, at its place,
+  and comes back open, as a minimised torn-off menu does.
+
+**Rejected.**
+
+* *Moving these panels into egui_dock*, where a float, a tab and a tray
+  come ready made (the views' area has them). The reasons the panels are
+  not egui_dock's stand ("Fitting the screen", `layout.rs`'s module
+  comment): a dock tree holds shares, not sizes, so the panels' 240 points
+  and the command line's 110 would not hold as the window is sized, and
+  every panel would wear a tab strip over its title bar. It would also be a
+  second dock area beside the views' - a panel could be dropped among the
+  views, maximised or linked - or one tree for both, which Window >
+  Layout's arrangements rebuild from the views alone. And the look rounds'
+  geometry, every measured rectangle of it, would be to do again. The
+  float here is some 300 lines beside a geometry that is unchanged when
+  nothing floats.
+* *Docking a floating panel by where its title bar is let go*, as a
+  torn-off menu docks to the side of the views it is dropped at. These
+  panels' places are the geometry's - Layers over Reference Data at the
+  left, Properties at the right, the command line under the views - not a
+  side a person chooses, and a drop near the top edge that put the panel at
+  the left would read as a miss. The Dock button and a double click put it
+  back.
+* *A second resize and a second tray for the panels.* The torn-off menus'
+  eight handles and the status bar's tray were generalised instead.
+* *Keeping a floating panel's place inside `Docks`* (a rectangle beside
+  each flag): `Docks` is five booleans the geometry, View > Panels and the
+  saved layout's first keys read, and Vertices and the survey points are
+  not in it at all. The places are a list of their own, and `Docks` is
+  asked which panels are docked.
+* *Restoring the tray from the saved layout*: the views' and the menus'
+  trays are a session's, and a window that opens with its panels hidden
+  behind buttons in the status bar is harder to read than one that opens
+  with them shown.
+
+Tested in `crates/katana_window/tests/main_window/panel_floating.rs`, the
+window's cases with real pointer events (`Event::PointerButton`, as the
+torn-off menus' are: the harness's own press marks a button clicked without
+the pointer): Float and Dock for Layers, Properties and the command line
+with the rectangles the layout closes up to, a title-bar drag, one stopped
+at the window's corner, a drag of each edge and a corner, Minimise and the
+tray's button from docked and from floating, View > Panels' tick, the
+Reference Data and Surfaces pair, the saved layout there and back, a layout
+saved before this, and the plain model (`window_panels_model`) with
+rectangles that are not rectangles.
+
+**Not done.** A floating panel stays inside the main window, as a floating
+view, toolbar and menu do. A double click on a title is the chrome's own
+request and has no pointer test of its own (two clicks within egui's
+double-click time). Vertices and the survey points float and minimise by
+the same code but have no window test: each needs its tool's state to be
+shown. The floating panels' order over one another is egui's (the last one
+pressed is on top) and is not saved.
 
 ### Linked views: a design view and an as-built view that move together
 
@@ -2881,7 +3206,8 @@ while it draws. A view is dragged by egui_dock's own tab, not by this bar
 (where the C++'s was dragged by its bar); a double click on the bar is the
 Float button. The four panels are laid out by the main window itself
 (`crates/katana_window/src/main_window/layout.rs`), at the C++ window's
-geometry, and wear the same bar.
+geometry, and wear the same bar; what its Float and Minimise do for them is
+in "The window's own panels float and minimise".
 
 **One owner.** One `DockChrome` per window holds the tray and the
 bookkeeping, and the panels (`MainWindow`) and the views (`ViewWorkspace`)
@@ -2946,13 +3272,15 @@ and 197), held by `view_chrome::opening_a_view_splits_it_into_equal_halves_whate
 
 Tested in `crates/katana_window/tests/workspace/view_chrome.rs` (`view_chrome::*`),
 each test shown failing without its fix. The window tests build the real
-window (`crates/katana_window/tests/main_window/`), but no case of them is
-written yet for the four panels' bars, their exact minimise and restore, F9
-from a floating panel and a floating maximise, which the C++ tested only in a
-hand-run harness. Not done: a Window menu; keeping the VIEWS between
+window (`crates/katana_window/tests/main_window/`): the panels' bars - their
+Float, Minimise and the tray's restore - are held there since 2026-11-21
+("The window's own panels float and minimise"), but no case is written yet
+for F9 from a floating panel and a floating maximise, which the C++ tested
+only in a hand-run harness. Not done: a Window menu; keeping the VIEWS between
 sessions - the panels' places are kept (`MainWindow::save_session` and
-`restore_layout`), and which panels are minimised is not yet
-(`minimised_names` and `minimise_named` are ready for it), and the saved
+`restore_layout`), and which docks are minimised is not, by decision (the
+tray is a session's; `minimised_names` and `minimise_named` are there should
+the views' ever be kept), and the saved
 layout does not see the views' docks, which are the workspace's own area's,
 so a maximised view needs no `unmaximise_all` before it; a layout that kept
 the views would; a floating active view left minimised during an arrange
@@ -2960,8 +3288,8 @@ stays hidden and active, since only the tray button (`DockChrome::restore`)
 restores it. The Survey
 Point Manager dock (`SurveyPointsDock`) wears the chrome now that
 the window's dock chrome hands it over, and the workbench has the chrome
-forget the dock before deleting it; its minimise, tray and float have been
-seen only in a screenshot, with no automated test.
+forget the dock before deleting it; its Minimise, tray and Float are the
+window's own panels' since 2026-11-21, with no automated test for this dock.
 
 ## The Properties panel: a tree read a level at a time
 

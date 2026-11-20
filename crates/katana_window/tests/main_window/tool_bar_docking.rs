@@ -6,13 +6,15 @@
 
 use egui::{Event, Modifiers, PointerButton, Pos2, Rect};
 use katana_window::MainWindow;
-use katana_window::drive::Posted;
+use katana_window::drive::action::{Action, Menu};
+use katana_window::drive::{ControlKind, Posted};
 use katana_window::drive::headless::Headless;
 use katana_window::drive::DrivenWindow;
 use katana_window::main_window::actions::BarPlace;
 use katana_window::main_window::docking::{
-    DropSpot, DropZones, FloatAt, FlowItem, PanelPlace, Side, apply_drop, drop_spot,
-    flow_columns, normalise, panel_drop_side, parse_action, DockingAction,
+    DropSpot, DropZones, FloatAt, FlowItem, LEAST_BAND, LEAST_PANEL, MenuPanels, PANEL_ICON,
+    PanelPlace, Side, apply_drop, drop_spot, flow_columns, least_band, menu_panel_icon,
+    normalise, panel_drop_side, parse_action, DockingAction,
 };
 use katana_window::main_window::docking_ui::{GRIP_DOT, grip_dots};
 use katana_window::main_window::layout;
@@ -21,7 +23,7 @@ use katana_window::tools::flyout_button::{
 };
 
 /// The window drawn until it is idle, and the runner that drew it.
-fn settled(window: &mut MainWindow) -> Headless {
+pub(crate) fn settled(window: &mut MainWindow) -> Headless {
     let mut headless = Headless::new();
     headless
         .settle(window)
@@ -35,7 +37,7 @@ fn place_of(window: &MainWindow, bar: &str) -> BarPlace {
         .unwrap_or_else(|| panic!("the window has a toolbar {bar}"))
 }
 
-fn drawn(headless: &Headless, target: &str) -> Rect {
+pub(crate) fn drawn(headless: &Headless, target: &str) -> Rect {
     headless
         .snapshot()
         .target(target)
@@ -44,7 +46,7 @@ fn drawn(headless: &Headless, target: &str) -> Rect {
 }
 
 /// The pointer pressed at `from`, moved to `to` over a few frames, and let go there.
-fn drag(window: &mut MainWindow, headless: &mut Headless, from: Pos2, to: Pos2) {
+pub(crate) fn drag(window: &mut MainWindow, headless: &mut Headless, from: Pos2, to: Pos2) {
     headless.push_event(Event::PointerMoved(from));
     let _ = headless.frame(window);
     headless.push_event(Event::PointerButton {
@@ -65,6 +67,38 @@ fn drag(window: &mut MainWindow, headless: &mut Headless, from: Pos2, to: Pos2) 
         pressed: false,
         modifiers: Modifiers::NONE,
     });
+    headless
+        .settle(window)
+        .unwrap_or_else(|problem| panic!("{problem}"));
+}
+
+/// The pointer clicked on `panel`'s title-bar button `button` as a person clicks it: moved
+/// there, pressed and let go a frame later, with no move between. The harness's own press
+/// (`Posted::press`) marks the button clicked without the pointer, so it passed while a real
+/// click on Float or Minimise did nothing (the owner, 2026-11-19).
+pub(crate) fn click_bar_button(
+    window: &mut MainWindow,
+    headless: &mut Headless,
+    panel: &str,
+    button: &str,
+) {
+    let at = headless
+        .snapshot()
+        .control(panel, button)
+        .unwrap_or_else(|| panic!("{panel} has its {button}"))
+        .rect
+        .center();
+    headless.push_event(Event::PointerMoved(at));
+    let _ = headless.frame(window);
+    for pressed in [true, false] {
+        headless.push_event(Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        let _ = headless.frame(window);
+    }
     headless
         .settle(window)
         .unwrap_or_else(|problem| panic!("{problem}"));
@@ -813,33 +847,6 @@ mod torn_off_menus {
         );
     }
 
-    /// The pointer clicked on `panel`'s title-bar button `button` as a person clicks it: moved
-    /// there, pressed and let go a frame later, with no move between. The harness's own press
-    /// (`Posted::press`) marks the button clicked without the pointer, so it passed while a real
-    /// click on Float or Minimise did nothing (the owner, 2026-11-19).
-    fn click_bar_button(window: &mut MainWindow, headless: &mut Headless, panel: &str, button: &str) {
-        let at = headless
-            .snapshot()
-            .control(panel, button)
-            .unwrap_or_else(|| panic!("{panel} has its {button}"))
-            .rect
-            .center();
-        headless.push_event(Event::PointerMoved(at));
-        let _ = headless.frame(window);
-        for pressed in [true, false] {
-            headless.push_event(Event::PointerButton {
-                pos: at,
-                button: PointerButton::Primary,
-                pressed,
-                modifiers: Modifiers::NONE,
-            });
-            let _ = headless.frame(window);
-        }
-        headless
-            .settle(window)
-            .unwrap_or_else(|problem| panic!("{problem}"));
-    }
-
     #[test]
     fn a_click_on_a_floating_torn_off_menus_dock_button_docks_it_and_float_floats_it_again() {
         let mut window = MainWindow::new();
@@ -1049,22 +1056,119 @@ mod torn_off_flow {
         let window = MainWindow::new();
         let composed = window.composed();
         for menu in &composed.menus {
+            let icon = menu_panel_icon(menu, true);
             assert!(
-                katana_window::icons::is_named_icon(menu.icon),
-                "{} has an icon: {:?}",
-                menu.name,
-                menu.icon
+                katana_window::icons::is_named_icon(icon),
+                "{} has an icon: {icon:?}",
+                menu.name
             );
         }
+    }
+
+    #[test]
+    fn a_torn_off_draw_menus_title_icon_is_a_draw_command_not_the_select_arrow() {
+        // The ninth look audit: the Draw menu was lent the icon of the Draw toolbar's first
+        // button, which is Select - a command the Draw menu does not hold. This case said so
+        // itself until then: it asserted the panel's icon was the one View > Toolbars lists the
+        // Draw toolbar with.
+        let mut window = MainWindow::new();
+        window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+        let icon_of = |window: &MainWindow| {
+            String::from(
+                window
+                    .ui
+                    .panels
+                    .chrome
+                    .title_bar("drawMenuTornOff")
+                    .expect("the panel's title bar")
+                    .icon(),
+            )
+        };
+        let installed = icon_of(&window);
+        assert_ne!(installed, "Select");
+        // One of the Draw menu's own commands: a draw tool, by its id, of the Drafting
+        // discipline and so in its hue.
+        let composed = window.composed();
         let draw = composed
             .menus
             .iter()
             .find(|menu| menu.name == "drawMenu")
             .expect("the Draw menu");
-        let toggle = composed
-            .action("viewToolBarDraw")
-            .expect("View > Toolbars > Draw");
-        assert_eq!(draw.icon, toggle.icon, "the icon its toolbar is listed with");
+        assert!(
+            draw.actions().iter().any(|action| action.icon == installed),
+            "{installed:?} is the icon of an item of Draw"
+        );
+        assert_eq!(
+            katana_window::icons::named_icon_discipline(&installed),
+            Some(katana_window::icons::Discipline::Drafting),
+            "{installed:?}"
+        );
+        // And the same once a frame has drawn it, floating and docked.
+        settled(&mut window);
+        assert_eq!(icon_of(&window), installed);
+        window.trigger("viewMenuPanelDockDrawMenuLeft").expect("docked");
+        settled(&mut window);
+        assert_eq!(icon_of(&window), installed);
+    }
+
+    #[test]
+    fn a_torn_off_submenu_keeps_the_icon_its_item_shows() {
+        let mut window = MainWindow::new();
+        let composed = window.composed();
+        let sign = katana_window::drive::steps::find_menu(&composed.menus, "viewToolBars")
+            .expect("View > Toolbars")
+            .icon;
+        assert!(!sign.is_empty(), "the premise: the submenu's item has an icon");
+        window.trigger("viewMenuTearOffViewToolBars").expect("torn off");
+        let bar = window
+            .ui
+            .panels
+            .chrome
+            .title_bar("viewToolBarsTornOff")
+            .expect("the panel's title bar");
+        assert_eq!(bar.icon(), sign);
+    }
+
+    #[test]
+    fn a_narrow_torn_off_menu_docked_down_a_side_lays_every_row_out_one_line_high() {
+        // The ninth look audit: at a narrow band the long rows wrapped onto two lines.
+        for side in [Side::Left, Side::Right] {
+            let mut window = MainWindow::new();
+            window.trigger("viewMenuTearOffDrawMenu").expect("torn off");
+            window
+                .trigger(&format!("viewMenuPanelDockDrawMenu{}", side.title()))
+                .expect("docked");
+            // As narrow as a band goes: asked for less than the least, it is the least.
+            window
+                .trigger(&format!("viewMenuBand:{}:40", side.word()))
+                .expect("the band is set");
+            let headless = settled(&mut window);
+            let panel = drawn(&headless, "drawMenuTornOff");
+            assert!(
+                (panel.width() - least_band(side)).abs() <= 1.0,
+                "{side:?}: the band is at its least: {panel:?}"
+            );
+            let frame = headless.snapshot();
+            let rows: Vec<(String, Rect)> = frame
+                .in_target("drawMenuTornOff")
+                .filter(|control| control.kind == ControlKind::MenuItem && control.visible)
+                .filter(|control| panel.intersects(control.rect))
+                .map(|control| (control.name.clone(), control.rect))
+                .collect();
+            assert!(rows.len() >= 8, "{side:?}: the menu's rows are drawn: {}", rows.len());
+            let height = rows[0].1.height();
+            for (name, rect) in &rows {
+                assert!(
+                    (rect.height() - height).abs() <= 0.5,
+                    "{side:?}: {name} is {} high, the first row {height}",
+                    rect.height()
+                );
+                assert!(
+                    rect.min.x >= panel.min.x - 0.5 && rect.max.x <= panel.max.x + 0.5,
+                    "{side:?}: {name} {rect:?} is cut short inside {panel:?}"
+                );
+            }
+        }
     }
 }
 
@@ -1215,6 +1319,70 @@ mod docking_model {
                 width: 200.0
             })
         );
+    }
+
+    #[test]
+    fn a_menu_of_the_menu_bar_is_titled_with_its_toolbars_icon_only_where_it_holds_that_command() {
+        let draw = Menu::new("drawMenu", "&Draw")
+            .section("Lines")
+            .action(Action::new("draw.line", "&Line").icon("draw.line"))
+            .action(Action::new("draw.arc", "&Arc").icon("draw.arc"));
+        // Lent Select by its toolbar, which it does not hold: its own first icon.
+        assert_eq!(menu_panel_icon(&draw.clone().icon("Select"), true), "draw.line");
+        // Lent an icon it holds: that one, though it is not its first.
+        assert_eq!(menu_panel_icon(&draw.clone().icon("draw.arc"), true), "draw.arc");
+        // With none: its first.
+        assert_eq!(menu_panel_icon(&draw, true), "draw.line");
+        // Held by a submenu's item, or by the submenu itself, is held.
+        let view = Menu::new("viewMenu", "&View")
+            .submenu(
+                Menu::new("viewToolBars", "&Toolbars")
+                    .icon("Toolbars")
+                    .action(Action::new("viewToolBarFile", "File").icon("New")),
+            )
+            .action(Action::new("viewGrid", "&Grid").icon("Grid"));
+        assert_eq!(menu_panel_icon(&view.clone().icon("New"), true), "New");
+        assert_eq!(menu_panel_icon(&view.clone().icon("Toolbars"), true), "Toolbars");
+        // The first icon is a submenu's own before what is inside it.
+        assert_eq!(menu_panel_icon(&view.clone().icon("Select"), true), "Toolbars");
+    }
+
+    #[test]
+    fn a_submenu_is_titled_with_its_own_icon_and_a_menu_with_none_anywhere_with_the_panels() {
+        // A submenu's icon is its item's, whatever it holds.
+        let toolbars = Menu::new("viewToolBars", "&Toolbars")
+            .icon("Toolbars")
+            .action(Action::new("viewToolBarFile", "File").icon("New"));
+        assert_eq!(menu_panel_icon(&toolbars, false), "Toolbars");
+        // A submenu with none takes its first item's.
+        let bare = Menu::new("sub", "Sub").action(Action::new("a", "A").icon("Grid"));
+        assert_eq!(menu_panel_icon(&bare, false), "Grid");
+        // Nothing to show: the generic icon; and a lent icon is better than that.
+        let plain = Menu::new("plain", "Plain")
+            .section("Things")
+            .separator()
+            .action(Action::new("a", "A"));
+        assert_eq!(menu_panel_icon(&plain, true), PANEL_ICON);
+        assert_eq!(menu_panel_icon(&plain, false), PANEL_ICON);
+        assert_eq!(menu_panel_icon(&plain.clone().icon("Select"), true), "Select");
+        assert_eq!(menu_panel_icon(&Menu::new("empty", ""), true), PANEL_ICON);
+    }
+
+    #[test]
+    fn a_band_down_a_side_is_never_narrower_than_a_floating_panel() {
+        // Down a side the breadth is every row's width; along the top and the bottom it is a
+        // height, and keeps the lesser limit.
+        let mut panels = MenuPanels::default();
+        for side in Side::ALL {
+            panels.set_band(side, 10.0);
+            let least = if side.vertical() { LEAST_PANEL.x } else { LEAST_BAND };
+            assert_eq!(least_band(side), least, "{side:?}");
+            assert_eq!(panels.bands[side.index()], least, "{side:?}");
+            panels.set_band(side, 300.0);
+            assert_eq!(panels.bands[side.index()], 300.0, "{side:?}");
+        }
+        assert_eq!(LEAST_PANEL.x, 160.0);
+        assert_eq!(LEAST_BAND, 96.0);
     }
 
     #[test]

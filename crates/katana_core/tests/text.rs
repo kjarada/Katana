@@ -20,21 +20,31 @@ mod c_locale {
 
     impl Drop for Restore {
         fn drop(&mut self) {
+            // SAFETY: the name is a NUL-terminated string that lives across
+            // the call; LOCK is still held (the guard is declared before
+            // this value, so it is dropped after), so no other case of this
+            // binary is in setlocale or reading the locale it sets.
             unsafe { setlocale(LC_CTYPE, self.0.as_ptr()) };
         }
     }
 
     pub fn with_available_locales(mut check: impl FnMut(&str)) {
         let _lock = LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // SAFETY: a null name only asks for the current locale's name; LOCK
+        // is held, so no other case of this binary changes it meanwhile.
         let previous = unsafe { setlocale(LC_CTYPE, std::ptr::null()) };
         let saved = if previous.is_null() {
             CString::new("C").unwrap()
         } else {
+            // SAFETY: not null (above); setlocale returns a NUL-terminated
+            // string good until its next call, and it is copied here first.
             unsafe { CStr::from_ptr(previous) }.to_owned()
         };
         let _restore = Restore(saved);
         for name in ["en_US.ISO-8859-1", "de_DE.ISO8859-1", ".1252", "C"] {
             let locale = CString::new(name).unwrap();
+            // SAFETY: the name is a NUL-terminated string that lives across
+            // the call, made under LOCK as the others.
             if !unsafe { setlocale(LC_CTYPE, locale.as_ptr()) }.is_null() {
                 check(name);
             }

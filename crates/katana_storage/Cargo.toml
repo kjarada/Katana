@@ -7,6 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# Applying a project's contents to the model, measured (docs/performance.md, "Checking a
+# project's contents"): a plain program, no benchmark library, so no crate is added for it.
+[[bench]]
+name = "apply_contents"
+harness = false
+
 [dependencies]
 katana_core.workspace = true
 katana_entity.workspace = true

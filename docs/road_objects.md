@@ -422,7 +422,7 @@ that, `unmade=4`. `LAYERS` and `DRAWING` do not ask for an extent and take it.
   made.
 - `TYPE=`, `STYLE=` and `TEXT=` are about entities, and a road object has no
   type, style or text: they are **refused**, naming the word, never ignored
-  (`katana_cad::road::road_object_scope::check_filter_fits`). The manager greys the controls that say them.
+  (`katana_cad::road::road_object_scope::check_filter_fits`). The manager leaves out the controls that say them, and says why under the filter.
 
 The reply is led by the scope's record (`katana_cad::scope_verbs::scope_record`), then the verb's own
 records:
@@ -560,7 +560,7 @@ whole drawing, and three buttons that put them into a line for the executor:
 objects it took (the status says `1 chosen - scope=drawing where=... matched=1`),
 **Quantities** runs `ROADOBJECT QUANTITIES <scope>` and shows the answer in the
 details, **Delete Matching** runs `ROADOBJECT DELETE <scope>` - one undo step. The
-controls that are about entities (types, style, text) are greyed with the reason;
+controls that are about entities (types, style, text) are left out, with the reason under the filter;
 "Selected entities" has a tip saying what the selection means here. Controls that
 do not read - no layer ticked, a colour that is not one - are refused in the
 status, with the control's own reason, and nothing is run. Zoom To frames the
@@ -647,7 +647,7 @@ are refused, naming what is wrong. `VIEW` is the window's and is not offered.
   the culvert preview's hole, the scroll area, the manager's unreadable record
   and Copy's keys; the manager by scope (`RoadObjectManager.*Matching*`,
   `RoadObjectManager.QuantitiesRuns...`): the shared controls starting on the
-  drawing with the entity ones greyed, and Select Matching, Quantities and Delete
+  drawing with the entity ones left out, and Select Matching, Quantities and Delete
   Matching each handing the line a person would type to the executor, the
   controls that do not read refused with nothing run.
 - `crates/katana_app/tests/mcp/mcp_server.rs` - `katana_road_objects`

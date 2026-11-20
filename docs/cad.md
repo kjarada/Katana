@@ -1393,6 +1393,7 @@ VIEWS HIDE|SHOW|ISOLATE <id> LAYER <name>...      each word after LAYER is one l
 VIEWS HIDE|SHOW <id> REFERENCE <ref>[,<ref>...]   the imported rasters and point clouds a view hides
 VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
 VIEWS MESHES [FACES|FOOTPRINT|HIDDEN] how the window's plan views, plots and sheets draw meshes: meshes=faces
+VIEWS TILE [GRID|COLUMNS|ROWS]        arranges the views open now: tiled=3 kind=grid docked=1 minimised=0
 ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
      | CENTRE x,y [SCALE s]  [view=<id>]
@@ -1574,6 +1575,31 @@ refuses it (`ViewVerbHost::mesh_plan_display`, None by default), and without
 a window it is refused with the rest of VIEWS
 (`view_verbs_test::views_meshes_refuses_what_it_does_not_take_and_changes_nothing`).
 View > Meshes Seen from Above runs this line.
+
+**`TILE` arranges the views that are open** (the owner's request of
+2026-11-21; `docs/desktop.md`, "Tiling the open views", has the decision and
+what was rejected): every view the window shows is given a place of its own
+of equal size, none opened and none closed. `GRID`, which `TILE` alone is,
+makes rows of columns as near square as the count allows; `COLUMNS` puts the
+views side by side; `ROWS` stacks them. The active view takes the first
+place and the rest follow in the order opened. The reply is one record,
+`tiled=3 kind=grid docked=1 minimised=0`: the views arranged, how many of
+them were floating and were docked into the tiling, and how many are
+minimised and so were left in the tray. One view, or none, is an answer
+(`tiled=1`, `tiled=0`), not a refusal, as a scope that takes nothing is. A
+word other than the three, or a second word, is refused and arranges
+nothing. There was no layout verb before it: the presets of View > Viewport
+Layout are menu items only, since each opens the views its picture lacks,
+which `VIEWS OPEN` already says a line at a time. The plan is cad's and pure
+(`katana_cad::viewport_layout::tile_plan`, tested without a window); the
+docks are the window's, reached through `ViewVerbHost::tile`, whose default
+refuses - so a host with no dock area, and `katana_cli` and `katana_mcp`
+with no host at all, never answer `tiled=0` as though they had arranged
+none (`view_verbs_test::views_tile_refuses_what_it_does_not_take_and_asks_nothing_of_the_window`,
+`view_verbs_test::views_and_zoom_are_refused_by_name_without_a_window`,
+`cli.views_tile_is_refused_saying_where_it_runs`). It is the window's
+layout, not the drawing: no undo step, as `HIDE` and `SHOW` are none. View >
+Viewport Layout's Tile, Tile Side by Side and Tile Stacked run these lines.
 
 `ZOOM` replies the record of the view it moved without `title`, `active`,
 `linked`, `ghosts` and `hidden` - where the view looks, not what it shows -

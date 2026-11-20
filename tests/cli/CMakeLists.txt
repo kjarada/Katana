@@ -719,6 +719,15 @@ if(KATANA_TEST_CLI)
     set_tests_properties(cli.views_meshes_is_refused_saying_where_it_runs PROPERTIES
         PASS_REGULAR_EXPRESSION "error: Unsupported: VIEWS is the desktop window's[^\r\n]*katana --command"
         FAIL_REGULAR_EXPRESSION "unknown command|point created|meshes=")
+    # VIEWS TILE arranges the window's docked views; katana_cli has no dock
+    # area and no views, so it too is refused with the rest of VIEWS, saying
+    # where it runs, and never answers tiled=0 as though it had arranged none.
+    add_test(NAME cli.views_tile_is_refused_saying_where_it_runs
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "VIEWS TILE ROWS" -c "POINT 1,1")
+    set_tests_properties(cli.views_tile_is_refused_saying_where_it_runs PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: Unsupported: VIEWS is the desktop window's[^\r\n]*katana --command"
+        FAIL_REGULAR_EXPRESSION "unknown command|point created|tiled=")
 
     add_test(NAME cli.paper_style_scale_lists_no_invented_views_in_a_new_session
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"

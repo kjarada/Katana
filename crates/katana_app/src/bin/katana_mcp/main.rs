@@ -81,64 +81,77 @@ mod protocol {
     }
 }
 
-/// The same on Windows, through the C runtime's own calls, which keep the
-/// runtime's descriptors and the process's standard handles in step (the
-/// runtime's _dup2 of descriptor 1 sets STD_OUTPUT_HANDLE, which Rust's
-/// stdout writes through). Written, not compiled before step 8.
+/// The same on Windows. The protocol's stream is std's duplicate of the
+/// process's standard output handle (DuplicateHandle, not inherited: a
+/// program the server starts does not hold the client's pipe open, as on the
+/// other systems); the C runtime's _dup2 then points descriptor 1 at the file
+/// of descriptor 2, which keeps the runtime's descriptors and the process's
+/// standard handles in step (it sets STD_OUTPUT_HANDLE, which Rust's stdout
+/// writes through) - std has no form of that, so it stays the runtime's.
 #[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "the protocol's stream is made with the C runtime's _dup, _dup2, _setmode and \
-              _get_osfhandle, which std does not have; confined to this module"
-)]
 mod protocol {
-    use std::ffi::c_int;
     use std::fs::File;
     use std::io::Write;
-    use std::os::windows::io::{FromRawHandle, RawHandle};
-
-    // io.h and fcntl.h of the UCRT.
-    unsafe extern "C" {
-        fn _dup(fd: c_int) -> c_int;
-        fn _dup2(old: c_int, new: c_int) -> c_int;
-        fn _setmode(fd: c_int, mode: c_int) -> c_int;
-        fn _get_osfhandle(fd: c_int) -> isize;
-    }
-
-    // fcntl.h: _O_BINARY.
-    const BINARY: c_int = 0x8000;
-    // What _fileno answers for stdin, stdout and stderr.
-    const INPUT: c_int = 0;
-    const OUTPUT: c_int = 1;
-    const ERROR: c_int = 2;
-    // _get_osfhandle's answer for a descriptor that is not open.
-    const NO_HANDLE: isize = -1;
+    use std::os::windows::io::{AsHandle, AsRawHandle};
 
     /// The protocol's stream; None when the descriptors could not be made.
     pub(super) fn take() -> Option<File> {
-        let _ = std::io::stdout().flush();
-        // SAFETY: _dup reads the runtime's descriptor table and makes a new
-        // descriptor for its standard output; nothing is borrowed.
-        let protocol = unsafe { _dup(OUTPUT) };
-        // SAFETY: points the runtime's descriptor 1 (and the process's
-        // standard output handle) at the file of descriptor 2.
-        if protocol < 0 || unsafe { _dup2(ERROR, OUTPUT) } != 0 {
+        let output = std::io::stdout();
+        let _ = output.lock().flush();
+        // A process started with no standard output has a null handle, which
+        // std would "duplicate" as another null one: there is no client to
+        // talk to, as when the runtime's _dup refused the closed descriptor.
+        if output.as_raw_handle().is_null() {
             return None;
         }
-        // Binary, both ways: a message ends in "\n", never "\r\n".
-        // SAFETY: both are open descriptors of this runtime.
+        // Duplicated BEFORE descriptor 1 is pointed elsewhere: _dup2 closes
+        // the file descriptor 1 had, and the copy is what keeps it open.
+        let protocol = output.as_handle().try_clone_to_owned().ok()?;
+        point_output_at_error()?;
+        // The File writes its bytes to the handle as they are, below the
+        // runtime's text mode: a message ends in "\n", never "\r\n".
+        Some(File::from(protocol))
+    }
+
+    // Descriptor 1 made the file of descriptor 2, and standard input read as
+    // the bytes it holds: the C runtime's own table, which std never touches.
+    #[allow(
+        unsafe_code,
+        reason = "the C runtime's _dup2 and _setmode, which std does not have, point descriptor 1 \
+                  at the file of descriptor 2 and make descriptor 0 binary"
+    )]
+    fn point_output_at_error() -> Option<()> {
+        use std::ffi::c_int;
+
+        // io.h of the UCRT.
+        unsafe extern "C" {
+            fn _dup2(old: c_int, new: c_int) -> c_int;
+            fn _setmode(fd: c_int, mode: c_int) -> c_int;
+        }
+
+        // fcntl.h: _O_BINARY.
+        const BINARY: c_int = 0x8000;
+        // What _fileno answers for stdin, stdout and stderr.
+        const INPUT: c_int = 0;
+        const OUTPUT: c_int = 1;
+        const ERROR: c_int = 2;
+
+        // SAFETY: points the runtime's descriptor 1 (and the process's
+        // standard output handle) at the file of descriptor 2; both are the
+        // process's own standard streams, no Rust object owns descriptor 1's
+        // handle (std's Stdout asks for the handle at each write), and the
+        // call takes no pointer.
+        if unsafe { _dup2(ERROR, OUTPUT) } != 0 {
+            return None;
+        }
+        // Binary, for whatever reads standard input through the runtime (the
+        // server itself reads the handle's bytes through std).
+        // SAFETY: descriptor 0 is the runtime's own; the call takes no
+        // pointer, and a descriptor that is not open is refused, not read.
         unsafe {
-            _setmode(protocol, BINARY);
             _setmode(INPUT, BINARY);
         }
-        // SAFETY: `protocol` is the open descriptor _dup has just made.
-        let handle = unsafe { _get_osfhandle(protocol) };
-        if handle == NO_HANDLE {
-            return None;
-        }
-        // SAFETY: the handle is the one under `protocol`, which nothing else
-        // in this program writes to or closes; the File owns it from here.
-        Some(unsafe { File::from_raw_handle(handle as RawHandle) })
+        Some(())
     }
 }
 

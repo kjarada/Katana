@@ -1422,7 +1422,8 @@ the lint counts); the updater's hardening of its OpenSSL variables and the
 lending of them to each launch (`crates/katana_updater/src/lib.rs`,
 `crates/katana_update/src/signature.rs`), which change the process's
 environment; the console's code page and wide reading, the module list on
-macOS and Windows, the error boxes, the registry and the Windows test
+macOS and Windows, the error boxes (moved behind katana_update's wrapper by
+the second pass, below), the registry and the Windows test
 oracles (Credential Manager, process token, byte-range lock, the C locale).
 Each is in Not done with what it would take.
 
@@ -1686,6 +1687,137 @@ leaves the thread as it was, and another thread never sees it; an XML tree
 is read through its views and freed once; a list Rust hands GDAL replaces a
 key in place. The crate's own suites (`gdal_core`, `processing`) hold the
 behaviour, unchanged.
+
+### The second pass over what was left (2026-11-21)
+
+The owner's word once more, for every `unsafe` outside the FFI modules, the
+task pool and the rasteriser's disjoint writes (both measured and kept,
+above). Each was read and put to one question: is there a safe form that
+does the same thing and cannot be slower? Five were removed; the rest are
+what safe Rust cannot say, and are listed here so that the next reader does
+not look again. Counted as the keyword opening a block, an extern block, a
+function or an impl, comments and lint names aside, in the crates' code
+outside the FFI modules and those two files: 61 before, 56 after. Not built
+when written: the integration build's clippy and suite are the evidence.
+
+Removed:
+
+- **katana_mcp's protocol stream on Windows**
+  (`crates/katana_app/src/bin/katana_mcp/main.rs`) was the C runtime's _dup
+  of descriptor 1, its handle taken out with _get_osfhandle and wrapped in a
+  File from the raw handle: three blocks. It is std's duplicate of the
+  process's standard output handle, as the other systems' already was. Two
+  things differ, neither in what a client reads. The copy is not inherited
+  (std duplicates without inheritance, the runtime with), so a program the
+  server starts no longer holds the client's pipe open - the decision
+  already taken for the other systems. And no runtime descriptor is made for
+  the copy, so its _setmode went: the File writes the handle's bytes below
+  the runtime's text mode, as it did. A process with no standard output is
+  refused as before (std would "duplicate" a null handle as another null
+  one, so it is asked first). _dup2 and standard input's _setmode stay, in
+  one function: std cannot point a descriptor at another's file.
+- **The window's console attach** (`crates/katana_app/src/console.rs`) read
+  the standard output handle with GetStdHandle; std's `as_raw_handle` of its
+  standard output is that call, and katana_cli already read its handles so.
+  AttachConsole stays.
+- **The helper's error mode** (`crates/katana_updater/src/lib.rs`) called
+  SetErrorMode itself. It calls katana_update's `turn_error_boxes_off`
+  (`crates/katana_update/src/process.rs`), which sets the same three flags
+  through the wrapper the launcher already used, so the call is with the
+  update layer's other Windows calls and the helper keeps only its two
+  environment functions. Its test,
+  `turning_the_error_boxes_off_sets_the_three_flags_of_winbase_h_and_no_other`
+  (`crates/katana_update/src/spawn_win.rs`), holds the mode to 0x8003, the
+  three values of winbase.h added by hand.
+
+Narrowed: the stub's allow covered its whole module and now covers the one
+function that reads the registry
+(`crates/katana_updater/src/bin/katana_updater_stub.rs`); katana_mcp's
+covered its Windows module and now covers the one function of two runtime
+calls. Given the SAFETY comment they lacked: the module lists of macOS and
+Windows (`crates/katana_core/src/library_data.rs`) and the Windows and C
+locale oracles of `crates/katana_core/tests/path_text.rs`,
+`crates/katana_core/tests/sha256.rs` and `crates/katana_core/tests/text.rs`.
+
+What remains outside the FFI modules, and why each cannot be safe:
+
+```text
+SIMD entries (25): calling a target-feature function from code compiled
+without the feature is unsafe by the language's rule; the processor is
+checked first, and the kernels behind each entry are safe
+  katana_geometry/src/simd/mod.rs          10  five kernels, AVX2 and NEON
+  katana_cad/src/simd/scene_kernels.rs      5  the five scene kernels
+  katana_core/src/text_kernels.rs           4  UTF-8 validation and UTF-16
+                                               narrowing, AVX2 and NEON
+  katana_core/src/simd/baseline.rs          2  compare and select
+  katana_render/src/simd/mod.rs             2  the two raster kernels
+  katana_gpu/src/simd/pack_kernels.rs       2  vertex packing, AVX2, NEON
+A String's spare capacity (2)
+  katana_core/src/text_kernels.rs           2  as_mut_vec and set_len in
+                                               append_ascii_utf16
+The C library and the system, each call with no form in std (25)
+  katana_math/src/libm.rs                   1  the extern block of asinh,
+                                               erf, erfc, lgamma (safe fn)
+  katana_core/src/library_data.rs           7  dyld's image list (macOS);
+                                               EnumProcessModules and
+                                               GetModuleFileNameW (Windows)
+  katana_core/src/path_text.rs              3  MultiByteToWideChar, the ANSI
+                                               code page
+  katana_app/src/bin/katana_cli/main.rs     5  GetConsoleMode, the output
+                                               code page, ReadConsoleW
+  katana_app/src/bin/katana_mcp/main.rs     5  dup2; _dup2 and _setmode
+  katana_app/src/console.rs                 1  AttachConsole
+  katana_update/src/posix.rs                2  kill with signal 0
+  katana_updater/src/bin/katana_updater_stub.rs
+                                            1  RegGetValueW, the tests' own
+                                               reading of RunOnce
+The process's environment (4): changing it is unsafe since edition 2024
+  katana_update/src/signature.rs            2  harden_open_ssl_environment,
+                                               an unsafe fn, and remove_var
+  katana_updater/src/lib.rs                 2  the call of it, first thing
+                                               in the program; set_var and
+                                               remove_var lending the
+                                               person's values to a launch
+Kept on purpose, measured (above), and not in the 56
+  katana_core/src/task_pool.rs              8
+  katana_render/src/disjoint.rs             6
+```
+
+PROJ's handle code and declarations in katana_geodesy's proj_internal are
+that crate's FFI module, with the FFI modules above. The tests' own unsafe
+is their oracles, the system asked behind the code's back, and stays:
+katana_core's three named above, katana_gis's
+`crates/katana_gis/tests/gdal_core/gdal_pdal_adapters.rs`, the update
+crate's (above) and `crates/katana_updater/tests/helper.rs`. The cases that
+set the hardening's variables (`crates/katana_update/tests/signature.rs`)
+change the real environment because that is what the hardening reads.
+
+Looked at and left, with the reason:
+
+- **`append_ascii_utf16`'s two blocks.** Safe forms are a push per unit (a
+  capacity check and a length store per byte, where the kernel writes 32 at
+  a store), a zero-filled buffer truncated after (every byte written twice),
+  or narrowing into a byte vector made a String after (every byte validated
+  again, or copied). Each is more work per byte of the text decoder's inner
+  loop; a candidate only with a benchmark, which the text kernels do not
+  have (Not done).
+- **The SIMD entries.** A kernel is a safe function of slices already; what
+  is left is the language's rule about the call. Compiling the whole crate
+  with the feature would make them safe and stop the program starting on a
+  processor without AVX2.
+- **libm.** As recorded above: std's `asinh` has other digits and its `erf`
+  and `ln_gamma` are not stable.
+- **katana_cli's console and katana_mcp's descriptors into
+  `crates/katana_app/src/console.rs`.** That would make the library's one
+  OS module the package's only one, at the price of console handles and the
+  protocol's stream in katana_app's public interface for two programs' sake;
+  each is already one named module of its program.
+- **The hardening.** Taking the three variables out of this process is what
+  keeps the OpenSSL in it from reading them; it is not a child's
+  environment, so a child's safe one does not reach it. Lending the values
+  to a launch could be the request's own environment (Not done).
+- **std's whole-file `try_lock` for the hashing test's byte-range lock.** It
+  locks the whole file, and the case needs a read that fails part way.
 
 ## The toolchains
 
@@ -2576,14 +2708,19 @@ what it would take.
     `StyleManagerDialog::set_object_name`); a manager made on its own keeps
     `layerManager` and `styleManager`, which its twins drive it by.
 - **What is left of removing `unsafe`** (the owner's ask of 2026-11-16, taken
-  on 2026-11-19 and 20: "Unsafe that calls no C library, removed", "Unsafe
-  confined to FFI modules" and "GDAL's unsafe confined to katana_gis's FFI
-  modules", above). Kept on purpose, measured: the task pool's warm workers
+  on 2026-11-19 to 21: "Unsafe that calls no C library, removed", "Unsafe
+  confined to FFI modules", "GDAL's unsafe confined to katana_gis's FFI
+  modules" and "The second pass over what was left", above, the last with
+  the table of every site that remains). Kept on purpose, measured: the task pool's warm workers
   and the rasteriser's disjoint writes, whose safe forms cost a frame some
   two-thirds and a tenth. Left: the updater's OpenSSL hardening
   (`harden_open_ssl_environment`, still an `unsafe fn`), which takes
   `SpawnRequest` carrying an environment for the child and the self-test
-  asking of the children what it now asks of the process; libm's four
+  asking of the children what it now asks of the process; katana_updater's
+  windows-sys feature `Win32_System_Diagnostics_Debug` and the comment above
+  it in `crates/katana_updater/Cargo.toml`, unused since the helper's
+  SetErrorMode moved to katana_update (the manifest is the integrator's to
+  edit); libm's four
   functions until std's `erf` and `ln_gamma` are stable (`asinh` would stay,
   std's digits differ); the FFI modules themselves, which no Rust can make
   safe - only a safe crate in place of our own bindings (`rusqlite`, `proj`,

@@ -308,6 +308,73 @@ fn same_subject(a: &Finding, b: &Finding) -> bool {
         && a.subject == b.subject
 }
 
+// ---- the table's columns ------------------------------------------------------------------------
+//
+// The columns keep widths of their own, whatever the table holds. Sized from their cells (egui's
+// Grid measures a column by its widest cell) they were as wide as their titles while the table was
+// empty and as wide as the longest finding once it was not, so "Fix" stood 250 points from the left
+// before a check and 900 after it, and moved again with every check (the ninth look audit). The
+// widths are for the window's text at its default size; a cell that does not fit is cut short with
+// an ellipsis, the whole of it in the row's hover text.
+
+/// The Severity column: "Warning", the longest of severity_name's three words, with room to spare
+/// at the larger text sizes.
+const SEVERITY_WIDTH: f32 = 72.0;
+
+/// The Sheet column: a sheet's number and name as sheet_text writes them ("12  LONG SECTION"), some
+/// twenty characters.
+const SHEET_WIDTH: f32 = 160.0;
+
+/// The View column: a viewport's id ("vp12", "legend-2"), a dozen characters.
+const VIEW_WIDTH: f32 = 96.0;
+
+/// The least the Fix column is: a short sentence of what to do ("Drag it back inside the drawing
+/// area"), some forty-five characters. It is the last column, so it also takes the scroll bar's
+/// room while there is no bar.
+const FIX_WIDTH: f32 = 320.0;
+
+/// The least the Problem column is, in a pane too narrow to leave it more: it takes what the others
+/// leave, the finding's message being the longest thing in a row. Narrower than this the table is
+/// cut at the pane's edge rather than its columns squeezed to nothing.
+const PROBLEM_LEAST_WIDTH: f32 = 200.0;
+
+/// The Fix column's title, recorded under this name where it is drawn: what a test of the columns'
+/// places reads.
+pub const FIX_HEADER: &str = "sheetChecksFixHeader";
+
+/// The Problem column's width in a table `room` wide: what the other four and the four gaps between
+/// the five leave, PROBLEM_LEAST_WIDTH at the least.
+fn problem_width(room: f32) -> f32 {
+    (room - SEVERITY_WIDTH - SHEET_WIDTH - VIEW_WIDTH - FIX_WIDTH - 4.0 * TABLE_COLUMN_GAP)
+        .max(PROBLEM_LEAST_WIDTH)
+}
+
+/// One cell of the table, `width` wide whatever `add` draws in it: the column it is in is as wide
+/// as its widest cell, so every cell of a column, its title too, is drawn through here.
+fn fixed_cell<R>(
+    ui: &mut Ui,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let height = ui.spacing().interact_size.y - TABLE_ROW_GAP;
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_width(width);
+            add(ui)
+        },
+    )
+}
+
+/// A cell's words on one line, cut short where the cell ends. The label's own hover text for what
+/// it cut is off: the row's says the whole of every cell, and the two stood one over the other.
+fn cell_label(text: impl Into<egui::WidgetText>) -> egui::Label {
+    egui::Label::new(text)
+        .truncate()
+        .show_tooltip_when_elided(false)
+}
+
 /// One row of the list: its severity, sheet, view, what is wrong and what to do (the columns), and
 /// the tooltip every cell shows.
 #[derive(Clone, Debug, PartialEq)]
@@ -582,6 +649,17 @@ impl SheetChecksDock {
         } else {
             self.summary.clone()
         };
+        // The room the columns share is the pane's less the scroll bar's, bar or no bar: the bar
+        // comes with the findings that overflow the pane and takes its width from the table's, and
+        // a Problem column sized from what was left would move Fix by that much just then.
+        let room = ui.available_width() - ui.spacing().scroll.allocated_width();
+        let widths = [
+            SEVERITY_WIDTH,
+            SHEET_WIDTH,
+            VIEW_WIDTH,
+            problem_width(room),
+        ];
+        let mut fix_header = None;
         let response = egui::ScrollArea::vertical()
             .id_salt(name)
             .max_height(180.0)
@@ -593,8 +671,21 @@ impl SheetChecksDock {
                     .with_row_color(move |row, style| table_row_colour(row, &chosen, style))
                     .show(ui, |ui| {
                     // Every column named: an empty first header cell stood 55 points wide over
-                    // the severities (the fourth look audit's 5).
-                    table_header(ui, &["Severity", "Sheet", "View", "Problem", "Fix"], true);
+                    // the severities (the fourth look audit's 5). Each title in a cell of its
+                    // column's width, so an empty table's columns are where a full one's are.
+                    for (title, width) in ["Severity", "Sheet", "View", "Problem"]
+                        .into_iter()
+                        .zip(widths)
+                    {
+                        fixed_cell(ui, width, |ui| table_header(ui, &[title], false));
+                    }
+                    // The last title's cell reaches the pane's edge, as table_header's `fill`
+                    // makes one, so the header strip and the stripes span the pane; drawn here
+                    // for its place, which `fill` does not hand back.
+                    let rest = ui.available_width().max(FIX_WIDTH);
+                    fix_header = Some(
+                        fixed_cell(ui, rest, |ui| table_header(ui, &["Fix"], false)).response,
+                    );
                     ui.end_row();
                     for (at, row) in self.rows.iter().enumerate() {
                         let colour = match row.severity {
@@ -603,14 +694,32 @@ impl SheetChecksDock {
                             Severity::Info => Color::rgb(25, 118, 210),
                         };
                         let chosen = self.current == Some(at);
-                        let mut first = ui.selectable_label(
-                            chosen,
-                            egui::RichText::new(row.cells[0].as_str()).color(colour.to_egui()),
-                        );
-                        for cell in &row.cells[1..] {
-                            first = first.union(ui.label(cell.as_str()));
+                        let mut first = fixed_cell(ui, widths[0], |ui| {
+                            ui.selectable_label(
+                                chosen,
+                                egui::RichText::new(row.cells[0].as_str()).color(colour.to_egui()),
+                            )
+                        })
+                        .inner;
+                        for (cell, width) in row.cells[1..4].iter().zip(&widths[1..]) {
+                            let drawn =
+                                fixed_cell(ui, *width, |ui| ui.add(cell_label(cell.as_str())));
+                            first = first.union(drawn.inner);
                         }
-                        let first = first.on_hover_text(row.tip.as_str());
+                        // What to do, to the pane's edge as its title is.
+                        let rest = ui.available_width().max(FIX_WIDTH);
+                        let fix = fixed_cell(ui, rest, |ui| {
+                            ui.add(cell_label(row.cells[4].as_str()))
+                        });
+                        first = first.union(fix.inner);
+                        // The sheet and the view lead the hover text, which the cells may have
+                        // cut short as they may the message and the fix the tip already says.
+                        let place = if row.cells[2].is_empty() {
+                            row.cells[1].clone()
+                        } else {
+                            format!("{} - {}", row.cells[1], row.cells[2])
+                        };
+                        let first = first.on_hover_text(format!("{place}\n\n{}", row.tip));
                         if first.clicked() {
                             self.current = Some(at);
                         }
@@ -632,6 +741,11 @@ impl SheetChecksDock {
             && taken.posted.act == Act::ScrollTo
         {
             settle(ui, taken, Ok(()));
+        }
+        if let Some(header) = &fix_header {
+            let mut title = ControlRecord::new(FIX_HEADER, ControlKind::Label);
+            title.text = String::from("Fix");
+            controls::custom(ui, header, title);
         }
         let mut record = ControlRecord::new(name, ControlKind::Rows);
         record.items = self.rows.iter().map(|row| row.cells.join(" | ")).collect();

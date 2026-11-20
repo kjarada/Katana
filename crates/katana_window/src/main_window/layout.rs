@@ -15,8 +15,9 @@
 //! command line, a 73 point bottom and 5 point gaps: a drawing area of 660 x 473 in the same
 //! window, where this leaves 794 x 549 (41 % more). The panels keep their widths and the command
 //! line its height at every size, as Qt's resizeDocks left them, and the views take what is left;
-//! a panel hidden gives its room to the views. Rejected: egui_dock for the four panels, whose
-//! split shares would not hold these numbers as the window is sized, and whose tabs would draw a
+//! a panel hidden gives its room to the views, and so does one that floats (`Docks::docked_only`;
+//! main_window::docking's `WindowPanels` says which do). Rejected: egui_dock for the four panels,
+//! whose split shares would not hold these numbers as the window is sized, and whose tabs would draw a
 //! strip over every panel. Those are the numbers of the toolbars as built: since the toolbars can
 //! be moved (main_window::docking), each side has as many lines as its shown bars use
 //! (`BarLines`), and the torn-off menus' bands are taken from the views' sides.
@@ -27,9 +28,10 @@
 //! `appearance/toolBarNames`, `start/showAtStart`, `start/coordinateSystem`, `scripts/recent`,
 //! `files/projectFolder` - so a reader of either finds the same names. The layout is the window's
 //! own form, a JSON object of its own (`LAYOUT_VERSION`): which panels and toolbars are shown, the
-//! top toolbars' rows, and from version 3 every toolbar's place in its order and the torn-off menus
-//! (`layout_json`), with a version as saveState had one. A version 2 layout, the rows alone, is
-//! carried over with every other toolbar as built. A headless run reads and writes none of it.
+//! top toolbars' rows, and from version 3 every toolbar's place in its order, the torn-off menus
+//! and the window's own panels that float (`layout_json`), with a version as saveState had one. A
+//! version 3 layout saved before the panels could float names none, and all are docked. A version
+//! 2 layout, the rows alone, is carried over with every other toolbar as built. A headless run reads and writes none of it.
 //!
 //! THE OLDER BUILD'S LAYOUT (decided here, for --check-session-restore and --check-toolbar-fit):
 //! a version 1 layout in the Rust's own form - every toolbar of the second row, Surface Edit and
@@ -43,8 +45,8 @@ use katana_app::console::Console;
 
 use super::actions::{BarPlace, Composed};
 use super::docking::{
-    MenuPanels, PANEL_SIZE, PanelPlace, Places, Side, docks_down_a_side, normalise,
-    panel_place_from_text, panel_place_text,
+    MenuPanels, PANEL_SIZE, PanelPlace, Places, Side, WindowPanels, docks_down_a_side,
+    is_window_panel, normalise, panel_place_from_text, panel_place_text,
 };
 use super::window::MainWindow;
 use crate::drive::action::{Action, Menu, MenuItem, ToolBar, ToolBarItem, shortcut_text};
@@ -146,6 +148,21 @@ impl Docks {
             } else {
                 "ReferenceDataDock"
             }),
+        }
+    }
+
+    /// The panels the geometry places: these, less those `panels` floats. A floating panel is
+    /// shown, but over the views in a frame of its own, and the docked layout closes up as if it
+    /// were hidden.
+    pub fn docked_only(&self, panels: &WindowPanels) -> Self {
+        let docked = |shown: bool, dock: &str| shown && !panels.is_floating(dock);
+        Self {
+            layers: docked(self.layers, "LayersDock"),
+            properties: docked(self.properties, "PropertiesDock"),
+            command_line: docked(self.command_line, "CommandLineDock"),
+            reference: docked(self.reference, "ReferenceDataDock"),
+            surfaces: docked(self.surfaces, "SurfacesDock"),
+            surfaces_in_front: self.surfaces_in_front,
         }
     }
 
@@ -488,10 +505,21 @@ pub fn bar_breadth(icon_size: i32) -> f32 {
 /// The layout in the Rust's own form (see the module comment): which panels and toolbars are
 /// shown and the toolbars' rows by name, with its version; from version 3 also every toolbar's
 /// place in its order ("bars", main_window::docking's `BarPlace::text`), the torn-off menus
-/// ("menuPanels") and their bands' breadths ("menuBands"). The rows are written in every version,
-/// so a build that knows only them still finds the top rows.
+/// ("menuPanels"), their bands' breadths ("menuBands") and the window's own panels that float
+/// ("windowPanels", each `<Dock>=float:<x>,<y>,<width>,<height>`; a panel not named is docked).
+/// The rows are written in every version, so a build that knows only them still finds the top
+/// rows.
+///
+/// "windowPanels" is a key added to version 3, not a version 4: a build that does not know it
+/// reads the rest and docks the panels, and a layout without it is read as all docked, so neither
+/// build refuses the other's layout. A new version would have had every older build refuse the
+/// whole layout (`restore_layout`) for the sake of where one panel floats.
 fn layout_json(window: &MainWindow, version: i64, rows: &BTreeMap<String, usize>) -> String {
     let docks = &window.ui.docks;
+    let window_panels = &window.ui.docking.window_panels;
+    // A minimised panel is saved shown, at its place, and comes back open, as a minimised
+    // torn-off menu does (below): the tray is a session's.
+    let shown = |flag: bool, dock: &str| flag || window_panels.is_minimised(dock);
     let quoted = |items: Vec<String>| -> String {
         items
             .iter()
@@ -509,7 +537,11 @@ fn layout_json(window: &MainWindow, version: i64, rows: &BTreeMap<String, usize>
     let mut text = format!(
         "{{\"version\":{version},\"layers\":{},\"properties\":{},\"commandLine\":{},\
          \"reference\":{},\"surfaces\":{},\"hidden\":[{hidden}],\"rows\":[{placed}]",
-        docks.layers, docks.properties, docks.command_line, docks.reference, docks.surfaces,
+        shown(docks.layers, "LayersDock"),
+        shown(docks.properties, "PropertiesDock"),
+        shown(docks.command_line, "CommandLineDock"),
+        shown(docks.reference, "ReferenceDataDock"),
+        shown(docks.surfaces, "SurfacesDock"),
     );
     if version >= LAYOUT_VERSION_WITH_DOCKING {
         let bars = quoted(
@@ -541,8 +573,18 @@ fn layout_json(window: &MainWindow, version: i64, rows: &BTreeMap<String, usize>
                 })
                 .collect(),
         );
+        let floating = quoted(
+            window_panels
+                .floating
+                .iter()
+                .map(|(dock, rect)| {
+                    format!("{dock}={}", panel_place_text(&PanelPlace::Floating(*rect)))
+                })
+                .collect(),
+        );
         text.push_str(&format!(
-            ",\"bars\":[{bars}],\"menuPanels\":[{menus}],\"menuBands\":[{bands}]"
+            ",\"bars\":[{bars}],\"menuPanels\":[{menus}],\"menuBands\":[{bands}],\
+             \"windowPanels\":[{floating}]"
         ));
     }
     text.push('}');
@@ -608,6 +650,9 @@ pub struct SavedLayout {
     pub menu_panels: Vec<(String, PanelPlace)>,
     /// The bands' breadths (version 3), by side.
     pub menu_bands: Vec<(Side, f32)>,
+    /// The window's own panels that float, and where (version 3, since 2026-11-21); empty for a
+    /// layout saved before, whose panels are all docked.
+    pub window_panels: Vec<(String, Rect)>,
 }
 
 /// Reads a layout `layout_json` wrote.
@@ -677,6 +722,16 @@ pub fn read_layout(text: &str) -> Option<SavedLayout> {
             Some((Side::from_word(&side)?, breadth.parse::<i32>().ok()? as f32))
         })
         .collect();
+    // A name that is no panel's, or a place that is not a floating rectangle, is passed over: the
+    // rest of the layout is still good.
+    let window_panels = pairs("windowPanels")
+        .into_iter()
+        .filter(|(dock, _)| is_window_panel(dock))
+        .filter_map(|(dock, place)| match panel_place_from_text(&place)? {
+            PanelPlace::Floating(rect) => Some((dock, rect)),
+            PanelPlace::Docked(_) => None,
+        })
+        .collect();
     Some(SavedLayout {
         version,
         docks,
@@ -685,6 +740,7 @@ pub fn read_layout(text: &str) -> Option<SavedLayout> {
         bars,
         menu_panels,
         menu_bands,
+        window_panels,
     })
 }
 
@@ -724,6 +780,14 @@ pub fn restore_layout(window: &mut MainWindow, text: &str) -> bool {
     for (menu, place) in saved.menu_panels {
         panels.tear_off(&menu, Rect::from_min_size(Pos2::ZERO, PANEL_SIZE));
         panels.place(&menu, place);
+    }
+    // The window's own panels: those the layout names float where it says, every other is docked,
+    // and none is minimised (a layout saved before they could float names none). A rectangle
+    // saved in a larger window is brought inside this one when it is drawn (docking::kept_inside).
+    let window_panels = &mut window.ui.docking.window_panels;
+    *window_panels = WindowPanels::default();
+    for (dock, rect) in saved.window_panels {
+        window_panels.float(&dock, rect);
     }
     true
 }

@@ -23,12 +23,21 @@
 //! side of the views or floating at a rectangle. The panels docked to one side share a band
 //! between the views and that side's panels, whose breadth the person drags; a floating one is
 //! moved by its title bar and sized by its edges.
+//!
+//! THE WINDOW'S OWN PANELS. Layers, Properties, the command line, Reference Data, Surfaces,
+//! Vertices and the survey points are placed by the window's geometry (main_window::layout), not
+//! by a band. `WindowPanels` says which of them float, and where, and which are minimised to the
+//! status bar's tray; a panel it does not name is docked in its place of the geometry. Whether a
+//! panel is shown at all stays where it was (`layout::Docks`, the drawing's and the survey
+//! workbench's own flags): a minimised panel is a hidden one with a tray button, a floating one
+//! is a shown one the geometry leaves out (`Docks::docked_only`).
 
 use egui::{Pos2, Rect, Vec2};
 use katana_core::error::make_error;
 use katana_core::{ErrorCode, Status};
 
 use super::actions::BarPlace;
+use crate::drive::action::{Menu, MenuItem};
 
 /// A side of the window a toolbar or a torn-off menu docks along.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -435,7 +444,8 @@ pub struct MenuPanel {
 /// A torn-off menu's band's breadth before the person drags it: the side panels' 240 at the left
 /// and right, and some six items' height along the top and bottom.
 pub const DEFAULT_BANDS: [f32; 4] = [168.0, 240.0, 240.0, 168.0];
-/// The least and most a band is dragged to.
+/// The least and most a band is dragged to. LEAST_BAND is a band's least height along the top
+/// and the bottom; down a side a band is never narrower than a floating panel (`least_band`).
 pub const LEAST_BAND: f32 = 96.0;
 pub const MOST_BAND: f32 = 640.0;
 /// A floating menu panel's size when it is torn off.
@@ -444,6 +454,18 @@ pub const PANEL_SIZE: Vec2 = Vec2::new(260.0, 420.0);
 pub const LEAST_PANEL: Vec2 = Vec2::new(160.0, 96.0);
 /// How near a side of the views a torn-off menu dragged by its title bar docks there.
 pub const PANEL_EDGE_ZONE: f32 = 48.0;
+
+/// The least breadth of `side`'s band: LEAST_BAND high along the top and the bottom, some three
+/// items; LEAST_PANEL's width down a side, where the breadth is the width of every row. At 96
+/// points wide a row had some 50 for its text after its gutter, and nearly every item of a menu
+/// was cut or, before its rows were elided, wrapped onto two lines (the ninth look audit).
+pub const fn least_band(side: Side) -> f32 {
+    if side.vertical() {
+        LEAST_PANEL.x
+    } else {
+        LEAST_BAND
+    }
+}
 
 /// The torn-off menus and their bands.
 #[derive(Clone, Debug, PartialEq)]
@@ -550,9 +572,10 @@ impl MenuPanels {
         true
     }
 
-    /// `side`'s band dragged to `breadth`, kept between LEAST_BAND and MOST_BAND.
+    /// `side`'s band dragged to `breadth`, kept between the side's least (`least_band`) and
+    /// MOST_BAND.
     pub fn set_band(&mut self, side: Side, breadth: f32) {
-        self.bands[side.index()] = breadth.clamp(LEAST_BAND, MOST_BAND);
+        self.bands[side.index()] = breadth.clamp(least_band(side), MOST_BAND);
     }
 }
 
@@ -639,6 +662,58 @@ pub fn flow_columns(kinds: &[FlowItem], heights: &[f32], room: f32, spacing: f32
     columns
 }
 
+/// The icon of a panel that has none of its own: the window's panels'.
+pub const PANEL_ICON: &str = "Panels";
+
+/// The icon on the title bar of `menu`'s torn-off panel.
+///
+/// A submenu's is the icon its item shows in its parent menu. A menu of the menu bar
+/// (`on_menu_bar`) opens from no item; main_window::actions lends it the icon View > Toolbars
+/// shows for the toolbar of its name, which is that bar's first button. That stands for the menu
+/// only where the menu holds that command: the Draw toolbar begins with Select, which the Draw
+/// menu does not hold, and a torn-off Draw menu was titled with the Select arrow (the ninth look
+/// audit). Such a menu takes the first icon of its own items instead, and so does any menu with
+/// no icon; PANEL_ICON when it holds none.
+///
+/// Rejected: an icon named for each menu in a table here, a second list of the menu bar to keep
+/// in step with the one the window composes.
+pub fn menu_panel_icon(menu: &Menu, on_menu_bar: bool) -> &'static str {
+    let own = !menu.icon.is_empty() && (!on_menu_bar || menu_holds_icon(menu, menu.icon));
+    if own {
+        return menu.icon;
+    }
+    first_menu_icon(menu).unwrap_or(if menu.icon.is_empty() {
+        PANEL_ICON
+    } else {
+        menu.icon
+    })
+}
+
+/// Whether an item of `menu`, or of a submenu of it at any depth, shows `icon`.
+fn menu_holds_icon(menu: &Menu, icon: &str) -> bool {
+    menu.items.iter().any(|item| match item {
+        MenuItem::Action(action) => action.icon == icon,
+        MenuItem::Menu(submenu) => submenu.icon == icon || menu_holds_icon(submenu, icon),
+        MenuItem::Section(_) | MenuItem::Separator => false,
+    })
+}
+
+/// The first icon `menu`'s items show, in their order: an action's, or a submenu's own, else the
+/// first inside it.
+fn first_menu_icon(menu: &Menu) -> Option<&'static str> {
+    menu.items.iter().find_map(|item| match item {
+        MenuItem::Action(action) => (!action.icon.is_empty()).then_some(action.icon),
+        MenuItem::Menu(submenu) => {
+            if submenu.icon.is_empty() {
+                first_menu_icon(submenu)
+            } else {
+                Some(submenu.icon)
+            }
+        }
+        MenuItem::Section(_) | MenuItem::Separator => None,
+    })
+}
+
 /// The dock object name of `menu`'s torn-off panel: its drive target and its chrome's.
 pub fn panel_dock_name(menu: &str) -> String {
     format!("{menu}TornOff")
@@ -703,14 +778,166 @@ pub fn panel_drop_side(views: Rect, pointer: Pos2) -> Option<Side> {
         .map(|(side, _)| side)
 }
 
+// ---- the window's own panels ---------------------------------------------------------------------
+
+/// The window's own panels, by their docks' object names: those the window's geometry places
+/// (main_window::layout), which float and minimise by `WindowPanels`.
+pub const WINDOW_PANELS: [&str; 7] = [
+    "LayersDock",
+    "PropertiesDock",
+    "CommandLineDock",
+    "ReferenceDataDock",
+    "SurfacesDock",
+    "VerticesDock",
+    "SurveyPointsDock",
+];
+
+/// Whether `dock` is one of the window's own panels.
+pub fn is_window_panel(dock: &str) -> bool {
+    WINDOW_PANELS.contains(&dock)
+}
+
+/// How far down and along a panel floated from its docked place is put, so that it is seen to
+/// have left it: a title bar's height, near enough (dock_chrome::BAR_HEIGHT is 26).
+pub const FLOAT_STEP: f32 = 24.0;
+
+/// Where the window's own panels are, beside what the geometry says: which float, and at what
+/// rectangle, and which are minimised to the tray. Plain data; the window draws what it says
+/// (main_window::docking_ui) and saves the floating ones with its layout (main_window::layout).
+///
+/// A panel is in `floating` whether or not it is shown: closed or minimised while floating, it
+/// comes back floating where it was. `minimised` is the tray's order.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowPanels {
+    /// The floating panels and their rectangles in the window's points, in the order they were
+    /// floated.
+    pub floating: Vec<(String, Rect)>,
+    /// Where each panel docked again last floated: where its Float button floats it next.
+    pub floated_before: Vec<(String, Rect)>,
+    /// The panels their Minimise hid to the tray, in the order they went.
+    pub minimised: Vec<String>,
+}
+
+impl WindowPanels {
+    /// `dock`'s floating rectangle; None for a docked panel.
+    pub fn floating_rect(&self, dock: &str) -> Option<Rect> {
+        self.floating
+            .iter()
+            .find(|(name, _)| name == dock)
+            .map(|(_, rect)| *rect)
+    }
+
+    pub fn is_floating(&self, dock: &str) -> bool {
+        self.floating_rect(dock).is_some()
+    }
+
+    /// The rectangle `dock` floated at before it was last docked.
+    pub fn rect_before(&self, dock: &str) -> Option<Rect> {
+        self.floated_before
+            .iter()
+            .find(|(name, _)| name == dock)
+            .map(|(_, rect)| *rect)
+    }
+
+    /// `dock` floated at `rect`, or moved there when it floats already. False, nothing changed,
+    /// for a name that is not a window panel's or a rectangle that is not one (`is_placeable`).
+    pub fn float(&mut self, dock: &str, rect: Rect) -> bool {
+        if !is_window_panel(dock) || !is_placeable(rect) {
+            return false;
+        }
+        match self.floating.iter_mut().find(|(name, _)| name == dock) {
+            Some((_, at)) => *at = rect,
+            None => self.floating.push((String::from(dock), rect)),
+        }
+        true
+    }
+
+    /// `dock` docked again, its rectangle kept for the next time it is floated. False for a
+    /// panel that was not floating.
+    pub fn dock(&mut self, dock: &str) -> bool {
+        let Some(at) = self.floating.iter().position(|(name, _)| name == dock) else {
+            return false;
+        };
+        let (name, rect) = self.floating.remove(at);
+        self.floated_before.retain(|(other, _)| *other != name);
+        self.floated_before.push((name, rect));
+        true
+    }
+
+    pub fn is_minimised(&self, dock: &str) -> bool {
+        self.minimised.iter().any(|name| name == dock)
+    }
+
+    /// `dock` put in the tray, keeping its place. False for a name that is not a window panel's
+    /// or one in the tray already.
+    pub fn minimise(&mut self, dock: &str) -> bool {
+        if !is_window_panel(dock) || self.is_minimised(dock) {
+            return false;
+        }
+        self.minimised.push(String::from(dock));
+        true
+    }
+
+    /// `dock` taken out of the tray. False for a panel that was not minimised.
+    pub fn restore(&mut self, dock: &str) -> bool {
+        let before = self.minimised.len();
+        self.minimised.retain(|name| name != dock);
+        self.minimised.len() != before
+    }
+}
+
+/// Whether `rect` can be a floating panel's: every number finite, and some width and height.
+pub fn is_placeable(rect: Rect) -> bool {
+    [rect.min.x, rect.min.y, rect.max.x, rect.max.y]
+        .iter()
+        .all(|number| number.is_finite())
+        && rect.width() > 0.0
+        && rect.height() > 0.0
+}
+
+/// A floating panel's rectangle `rect` kept inside `bounds`, the part of the window it may
+/// cover: no smaller than LEAST_PANEL and no larger than the bounds, then moved the least that
+/// brings it wholly inside. A rectangle that is not one (`is_placeable`: a zero or negative size,
+/// a number that is not finite) becomes a PANEL_SIZE one at the bounds' corner. Bounds that are
+/// not a rectangle themselves leave `rect` as it is: there is nothing to keep it inside.
+///
+/// Wholly inside, where a floating toolbar or torn-off menu keeps only its title's corner on the
+/// window: a panel is where a person types and reads (the command line's field is its last
+/// row), and one half off the window's edge has lost the part they came for.
+pub fn kept_inside(rect: Rect, bounds: Rect) -> Rect {
+    if !is_placeable(bounds) {
+        return rect;
+    }
+    let rect = if is_placeable(rect) {
+        rect
+    } else {
+        Rect::from_min_size(bounds.min, PANEL_SIZE)
+    };
+    // The bounds last: in a window smaller than the least panel, the panel is the window's size.
+    let size = Vec2::new(
+        rect.width().max(LEAST_PANEL.x).min(bounds.width()),
+        rect.height().max(LEAST_PANEL.y).min(bounds.height()),
+    );
+    let corner = Pos2::new(
+        rect.min.x.min(bounds.max.x - size.x).max(bounds.min.x),
+        rect.min.y.min(bounds.max.y - size.y).max(bounds.min.y),
+    );
+    Rect::from_min_size(corner, size)
+}
+
 // ---- the actions --------------------------------------------------------------------------------
 
 /// The prefix of a toolbar's dock actions (`viewToolBarDock<Bar><Side>`, `<Side>` one of Top,
 /// Left, Right, Bottom or Float), of the precise placing (`viewToolBarPlace:<bar>:<side>:<line>:
 /// <index>` or `viewToolBarPlace:<bar>:float:<x>,<y>,<width>`), of tearing a menu off
 /// (`viewMenuTearOff<Menu>`), of a torn-off menu's places (`viewMenuPanelDock<Menu><Side>`,
-/// `viewMenuPanelClose<Menu>`, `viewMenuPanelPlace:<menu>:<place>`) and of a band's breadth
-/// (`viewMenuBand:<side>:<breadth>`).
+/// `viewMenuPanelClose<Menu>`, `viewMenuPanelPlace:<menu>:<place>`), of a band's breadth
+/// (`viewMenuBand:<side>:<breadth>`), and of one of the window's own panels floated, docked,
+/// minimised and restored (`viewPanelFloat<Dock>`, `viewPanelDock<Dock>`,
+/// `viewPanelMinimise<Dock>`, `viewPanelRestore<Dock>`, `<Dock>` one of WINDOW_PANELS, and
+/// `viewPanelPlace:<Dock>:float:<x>,<y>,<width>,<height>`). View > Panels' own toggles
+/// (`viewPanelLayers` ...) begin with the same word and are none of these: a name is one only
+/// when what follows the prefix is a window panel's dock.
 pub const DOCK_ACTION: &str = "viewToolBarDock";
 pub const PLACE_ACTION: &str = "viewToolBarPlace:";
 pub const RESET_ACTION: &str = "viewToolBarsReset";
@@ -719,6 +946,11 @@ pub const PANEL_DOCK_ACTION: &str = "viewMenuPanelDock";
 pub const PANEL_CLOSE_ACTION: &str = "viewMenuPanelClose";
 pub const PANEL_PLACE_ACTION: &str = "viewMenuPanelPlace:";
 pub const BAND_ACTION: &str = "viewMenuBand:";
+pub const WINDOW_PANEL_FLOAT_ACTION: &str = "viewPanelFloat";
+pub const WINDOW_PANEL_DOCK_ACTION: &str = "viewPanelDock";
+pub const WINDOW_PANEL_MINIMISE_ACTION: &str = "viewPanelMinimise";
+pub const WINDOW_PANEL_RESTORE_ACTION: &str = "viewPanelRestore";
+pub const WINDOW_PANEL_PLACE_ACTION: &str = "viewPanelPlace:";
 
 /// What a docking action asks, read from its object name.
 #[derive(Clone, Debug, PartialEq)]
@@ -740,6 +972,12 @@ pub enum DockingAction {
     PanelClose { menu: String },
     PanelPlace { menu: String, place: PanelPlace },
     Band { side: Side, breadth: f32 },
+    /// One of the window's own panels floated: at `rect`, or (None) where its Float button
+    /// would put it.
+    WindowPanelFloat { dock: String, rect: Option<Rect> },
+    WindowPanelDock { dock: String },
+    WindowPanelMinimise { dock: String },
+    WindowPanelRestore { dock: String },
 }
 
 /// The name of `bar`'s dock action to `side` (None: Float), from its key (its title without
@@ -853,6 +1091,35 @@ pub fn parse_action(name: &str) -> Option<DockingAction> {
             menu: menu_from_key(rest),
         });
     }
+    if let Some(rest) = name.strip_prefix(WINDOW_PANEL_PLACE_ACTION) {
+        let (dock, place) = rest.split_once(':')?;
+        let PanelPlace::Floating(rect) = panel_place_from_text(place)? else {
+            return None;
+        };
+        return is_window_panel(dock).then(|| DockingAction::WindowPanelFloat {
+            dock: String::from(dock),
+            rect: Some(rect),
+        });
+    }
+    // The dock named whole after the prefix: `viewPanelLayers`, View > Panels' own toggle, is
+    // none of these.
+    let window_panel = |prefix: &str| {
+        name.strip_prefix(prefix)
+            .filter(|dock| is_window_panel(dock))
+            .map(String::from)
+    };
+    if let Some(dock) = window_panel(WINDOW_PANEL_FLOAT_ACTION) {
+        return Some(DockingAction::WindowPanelFloat { dock, rect: None });
+    }
+    if let Some(dock) = window_panel(WINDOW_PANEL_DOCK_ACTION) {
+        return Some(DockingAction::WindowPanelDock { dock });
+    }
+    if let Some(dock) = window_panel(WINDOW_PANEL_MINIMISE_ACTION) {
+        return Some(DockingAction::WindowPanelMinimise { dock });
+    }
+    if let Some(dock) = window_panel(WINDOW_PANEL_RESTORE_ACTION) {
+        return Some(DockingAction::WindowPanelRestore { dock });
+    }
     None
 }
 
@@ -862,6 +1129,8 @@ pub fn parse_action(name: &str) -> Option<DockingAction> {
 #[derive(Clone, Debug)]
 pub struct DockingState {
     pub panels: MenuPanels,
+    /// Which of the window's own panels float or are minimised (saved with the layout).
+    pub window_panels: WindowPanels,
     /// The window's rectangle at the last frame: what Dock Top fits a bar into.
     pub screen: Rect,
     /// The views' area at the last frame, the torn-off menus' bands included: what a torn-off
@@ -870,12 +1139,14 @@ pub struct DockingState {
     /// The views alone at the last frame, the bands left out.
     pub drawing: Rect,
     pub zones: DropZones,
-    /// Each toolbar drawn at the last frame, docked or floating, by object name.
+    /// Each toolbar, torn-off menu's panel and window panel drawn at the last frame, docked or
+    /// floating, by object name.
     pub drawn: Vec<(String, Rect)>,
     /// The toolbar being dragged by its grip: its name, and the pointer's offset from its corner.
     pub bar_drag: Option<(String, Vec2)>,
-    /// A torn-off menu pressed on its title bar: its menu, where the press was, its rectangle
-    /// then, and whether the pointer has moved far enough to be a drag.
+    /// A torn-off menu, or a floating panel of the window's own, pressed on its title bar: its
+    /// name, where the press was, its rectangle then, and whether the pointer has moved far
+    /// enough to be a drag.
     pub panel_drag: Option<PanelDrag>,
     /// Each toolbar's last docked place, where a double click on its floating title docks it.
     pub docked_before: Vec<(String, BarPlace)>,
@@ -883,10 +1154,12 @@ pub struct DockingState {
     pub pointer: Option<Pos2>,
 }
 
-/// A torn-off menu's title bar held down (see `DockingState::panel_drag`).
+/// A title bar held down (see `DockingState::panel_drag`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelDrag {
-    pub menu: String,
+    /// A torn-off menu's object name, or the dock of one of the window's own panels
+    /// (`is_window_panel`; no menu has a dock's name).
+    pub name: String,
     pub from: Pos2,
     pub rect: Rect,
     pub moved: bool,
@@ -915,6 +1188,7 @@ impl Default for DockingState {
         );
         Self {
             panels: MenuPanels::default(),
+            window_panels: WindowPanels::default(),
             screen,
             views: built.views_and_bands,
             drawing: built.views,
@@ -929,7 +1203,7 @@ impl Default for DockingState {
 }
 
 impl DockingState {
-    /// Toolbar `name`'s rectangle as the last frame drew it.
+    /// Toolbar or panel `name`'s rectangle as the last frame drew it.
     pub fn drawn_rect(&self, name: &str) -> Option<Rect> {
         self.drawn
             .iter()

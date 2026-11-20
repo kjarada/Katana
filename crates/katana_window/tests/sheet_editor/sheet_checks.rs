@@ -25,8 +25,8 @@ mod sheet_checks {
     use katana_window::canvas::{Canvas, Color, Image, RasterCanvas};
     use katana_window::plan_painter::{PlanSource, plan_source_of};
     use katana_window::plotting::sheet_checks::{
-        check_sheets_for, check_sheets_icon, plan_resolver, preflight_log, preflight_options_for,
-        severity_icon,
+        FIX_HEADER, check_sheets_for, check_sheets_icon, plan_resolver, preflight_log,
+        preflight_options_for, severity_icon,
     };
     use katana_window::sheet_editor::SourceProvider;
     use katana_window::sheet_painter::{
@@ -586,6 +586,73 @@ mod sheet_checks {
             ),
         );
         assert_eq!(shown.editor.current_sheet(), 0);
+    }
+
+    /// Where the Fix column's title is drawn across the pane: its left and right edges. Not its
+    /// height: the dock is as tall as what it lists, so the title's row moves down the window as
+    /// the findings come, by design.
+    fn fix_title_across(shown: &Shown) -> (f32, f32) {
+        let title = shown.control(FIX_HEADER).expect("the Fix column's title");
+        assert!(title.visible);
+        assert_eq!(title.text, "Fix");
+        (title.rect.left(), title.rect.right())
+    }
+
+    #[test]
+    fn the_fix_column_stands_in_one_place_whether_the_table_is_empty_or_full() {
+        // The columns were sized from their cells, so Fix's title stood under the titles' own
+        // widths while nothing was listed and jumped right by the longest finding's length when
+        // a check ran (the ninth look audit). The property: its place across the pane is the
+        // same with nothing listed, with a check's findings, and with a finding far longer than
+        // the pane.
+        let mut document = Document::new(None);
+        add(
+            &mut document,
+            sheet_of("s1", "NOTES", vec![notes_at("vp1", under_the_title_block())]),
+        );
+        let mut shown = shown(document);
+        // Nothing listed, said by the test: a shown editor has a check of its own due in a
+        // moment (RECHECK_DELAY_MS), which a run handed over drops, so no frame here lists
+        // anything the test did not.
+        let set = shown.sheet_set();
+        let _ = shown.editor.checks_mut().check_now_with(Vec::new(), &set);
+        shown.draw();
+        assert!(shown.editor.checks().rows().is_empty());
+        let empty = fix_title_across(&shown);
+        // The title is in the pane, right of the four columns before it.
+        let list = shown.control("sheetChecksList").expect("the list");
+        assert!(empty.0 > list.rect.left() && empty.0 < list.rect.right(), "{empty:?}");
+
+        // A check: the view under the title block, and what else the checker finds.
+        let _ = shown.editor.check_sheets(&mut shown.host);
+        shown.draw();
+        assert!(!shown.editor.checks().rows().is_empty());
+        assert_eq!(fix_title_across(&shown), empty);
+
+        // A finding whose every cell is longer than its column, the message some 2,000 points
+        // of words on a 1,400 point screen.
+        let long = "the view runs under the title block and off the paper ".repeat(6);
+        let _ = shown.editor.checks_mut().check_now_with(
+            vec![finding(
+                Severity::Error,
+                "viewport.outside",
+                Some((0, "s1")),
+                "a-viewport-with-a-very-long-id-of-its-own",
+                "",
+                &long,
+                &long,
+            )],
+            &set,
+        );
+        shown.draw();
+        assert_eq!(shown.editor.checks().rows().len(), 1);
+        assert_eq!(fix_title_across(&shown), empty);
+
+        // And back to nothing listed.
+        let _ = shown.editor.checks_mut().check_now_with(Vec::new(), &set);
+        shown.draw();
+        assert!(shown.editor.checks().rows().is_empty());
+        assert_eq!(fix_title_across(&shown), empty);
     }
 
     fn move_bottom(shown: &mut Shown, bottom: f64) {

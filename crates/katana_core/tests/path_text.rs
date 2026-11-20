@@ -31,12 +31,18 @@ mod narrow_file {
 
     pub fn write(path: &[u8]) {
         let path = CString::new(path).unwrap();
+        // SAFETY: both arguments are NUL-terminated strings that live across
+        // the call.
         let file = unsafe { fopen(path.as_ptr(), c"wb".as_ptr()) };
         assert!(
             !file.is_null(),
             "the narrow file must be created on the integration platform"
         );
+        // SAFETY: `file` is the open stream fopen returned (not null,
+        // asserted above), and the six bytes read are the literal's six.
         let written = unsafe { fwrite(b"narrow".as_ptr().cast(), 1, 6, file) };
+        // SAFETY: the stream is open and is closed here once, never used
+        // after.
         let closed = unsafe { fclose(file) };
         assert_eq!(written, 6);
         assert_eq!(closed, 0);

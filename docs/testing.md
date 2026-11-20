@@ -765,9 +765,13 @@ What no test covers:
 Speed is measured, never asserted (Rules 5 and 6, "Measure, then claim").
 The C++ build's benchmarks - Google Benchmark cases in one
 `katana_benchmarks` program, compared with a script that alternated the
-builds - went with the C++ tree on 2026-11-15, and the Rust has none yet
-(`docs/performance.md`). The practice they followed stands for whatever
-replaces them, because this machine is shared with other builds and often on
+builds - went with the C++ tree on 2026-11-15. The Rust's are plain programs
+beside their crates (a `benches` folder, `harness = false`: no benchmark
+library), each printing `cell=<name> min_ms=.. median_ms=..` for cells it
+alternates itself, an A/A pair among them
+(`crates/katana_render/benches/rasterise.rs` is the model;
+`docs/performance.md` lists them). The practice the C++ ones followed stands
+for them, because this machine is shared with other builds and often on
 battery, so one run of one binary against one run of another measures the
 machine as much as the code: single runs of the same binary have differed by
 up to 2x.

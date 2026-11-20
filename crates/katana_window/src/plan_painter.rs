@@ -3347,11 +3347,11 @@ impl<'p> PlanPainter<'p> {
         // Every label that is drawn: its own flag and its layer, through the one visibility rule.
         // Whether it is in view is asked of its pieces, which are where its target is now, not
         // where it was made. In the model's order (its ids ascending, as for_each walks it).
+        // One pass over the entities: this runs on every repaint of a drawing that has a label
+        // style, whatever the view shows, and listing the ids to look each one up again was a
+        // lookup for every entity of the drawing a pan.
         let mut labels: Vec<&'p Entity> = Vec::new();
-        for id in model.entities.ids() {
-            let Some(entity) = model.entities.find(id) else {
-                continue;
-            };
+        for entity in model.entities.iter() {
             if !matches!(entity.geometry, Geometry::Label(_)) {
                 continue;
             }

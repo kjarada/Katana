@@ -1000,6 +1000,7 @@ mod mcp_server {
             "EXAGGERATION 2",
             "VIEWS",
             "VIEWS LINK 1,2",
+            "VIEWS TILE",
             "ZOOM IN",
             "Z",
         ] {

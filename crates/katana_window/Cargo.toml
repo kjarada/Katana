@@ -29,6 +29,12 @@ path = "src/bin/katana_tool_icon_sheet/main.rs"
 name = "mesh_plan"
 harness = false
 
+# The plan view's frames, measured (docs/performance.md, "The plan view's frames"): the same kind
+# of program.
+[[bench]]
+name = "plan_frames"
+harness = false
+
 [dependencies]
 katana_app.workspace = true
 katana_archive12d.workspace = true

@@ -9,9 +9,11 @@
 //! C++ installed every panel under the window's): its title bar with Minimise, Float and Close, the
 //! dock a drive target named as the C++ object (LayersDock, PropertiesDock, CommandLineDock,
 //! ReferenceDataDock, SurfacesDock, VerticesDock, SurveyPointsDock). The panels are laid out to the
-//! C++'s geometry (main_window::layout), not by egui_dock: a Minimise or a Close hides the panel,
-//! which View > Panels brings back; Float and Maximise are a view's, not a panel's, here
-//! (docs/rust.md records the difference).
+//! C++'s geometry (main_window::layout), not by egui_dock: Close hides the panel, which View >
+//! Panels brings back; Minimise hides it to the status bar's tray, whose button puts it back
+//! where it was; Float takes it out of the geometry into a frame of its own over the views
+//! (main_window::docking's `WindowPanels`, drawn by main_window::docking_ui). Maximise is a
+//! view's, not a panel's.
 //!
 //! The layer tree, which the C++ left unnamed, is drawn as rows a person clicks; `--toggle-layer`
 //! reaches it through `toggle_layer_through_panel`, which flips a layer's box as a click does.
@@ -35,6 +37,7 @@ use crate::drive::registry::{TargetKind, TargetSpec, WINDOW, begin_target, end_t
 use crate::host::Host;
 use crate::import_placement::DialogResult;
 use crate::shell::{DialogFrame, Workbench};
+use crate::survey::survey_workbench::POINTS_DOCK;
 use crate::theme::palette;
 use crate::tools::flyout_button::{Strip, TOOL_BAR_PADDING_ALONG, tool_bar_strip};
 use crate::view_workspace::Scenery;
@@ -84,6 +87,9 @@ pub struct Panels {
     /// What the command log was last laid out for - its blocks, its line's height and its own
     /// height - so a change of any scrolls it to its last line (command_line_ui).
     pub log_laid_out: (usize, f32, f32),
+    /// The log stands at its newest record's first row, the record being taller than the log
+    /// (command_line_ui, `log_follow_offset`), rather than at its end: until a person scrolls it.
+    pub log_at_record_top: bool,
 }
 
 impl Default for Panels {
@@ -117,6 +123,7 @@ impl Default for Panels {
             snap: String::new(),
             frame_stats: String::new(),
             log_laid_out: (0, 0.0, 0.0),
+            log_at_record_top: false,
         }
     }
 }
@@ -388,14 +395,18 @@ impl MainWindow {
         ui.painter()
             .rect_filled(screen, 0.0, crate::theme::palette::window().to_egui());
         let composed = self.composed();
-        let right_extra = self.ui.drawing.vertices_shown() || self.ui.survey.point_manager_shown();
+        // The panels the geometry places are those shown and not floating: a floating panel is
+        // drawn over the views, and the docked layout closes up as if it were hidden.
+        self.settle_window_panels();
+        let docked = self.docked_docks();
+        let right_extra = self.window_panel_docked("VerticesDock") || self.window_panel_docked(POINTS_DOCK);
         // The toolbars' lines first: what they take of each side is the room the rest is laid
         // out in (main_window::docking).
         let shown = |name: &str| self.ui.bars.shown(name);
         let lines = self.bar_lines(&arrange(&composed.bars, &shown));
         let geometry = layout::geometry(
             screen,
-            &self.ui.docks,
+            &docked,
             right_extra,
             &lines,
             self.ui.docking.panels.band_breadths(),
@@ -409,6 +420,7 @@ impl MainWindow {
         self.panels_ui(ui, &geometry);
         self.views_ui(ui, &geometry);
         self.menu_panels_ui(ui, &geometry, &composed);
+        self.floating_window_panels_ui(ui);
         self.floating_bars_ui(ui, &composed);
         self.status_bar_ui(ui, &geometry);
         self.step_menu_ui(ui, &composed);
@@ -800,14 +812,18 @@ impl MainWindow {
         }
     }
 
-    /// The four panels and the docks beside them, each in its dock of the window's chrome.
+    /// The four panels and the docks beside them that the geometry places - those shown and not
+    /// floating - each in its dock of the window's chrome.
     fn panels_ui(&mut self, ui: &mut Ui, geometry: &Geometry) {
+        let docked = self.docked_docks();
         if let Some(rect) = geometry.layers {
-            self.dock_at(ui, rect, "LayersDock", layers_ui);
+            self.window_panel_at(ui, rect, "LayersDock");
         }
         if let Some(rect) = geometry.lower_left {
-            let tabs = self.ui.docks.lower_left_tabs();
-            let front = self.ui.docks.lower_left().unwrap_or("ReferenceDataDock");
+            // The docked ones of the pair: one of them floated leaves the other the place alone,
+            // under its own title, and floats as a panel of one page.
+            let tabs = docked.lower_left_tabs();
+            let front = docked.lower_left().unwrap_or("ReferenceDataDock");
             // Two docks in the one place: their tabs are the title of its bar, the one in front
             // over the accent's bar and the others muted (drive::controls::title_tabs), as an IDE
             // draws a tabbed panel. A strip of tabs over the bar, whose title then said the tab in
@@ -834,6 +850,7 @@ impl MainWindow {
                 }
             };
             let grouped = tabs.len() > 1;
+            self.ui.docking.drawn.push((String::from(front), rect));
             if front == "SurfacesDock" {
                 self.dock_titled_at(ui, rect, "SurfacesDock", grouped.then_some(tab_titles), |window, ui| {
                     window.ui.surfaces.ui(ui, &mut window.exec);
@@ -848,37 +865,95 @@ impl MainWindow {
             }
         }
         if let Some(rect) = geometry.properties {
-            let mut docks: Vec<&'static str> = Vec::new();
-            if self.ui.docks.properties {
-                docks.push("PropertiesDock");
-            }
-            if self.ui.drawing.vertices_shown() {
-                docks.push("VerticesDock");
-            }
-            if self.ui.survey.point_manager_shown() {
-                docks.push(crate::survey::survey_workbench::POINTS_DOCK);
-            }
+            let docks: Vec<&'static str> = ["PropertiesDock", "VerticesDock", POINTS_DOCK]
+                .into_iter()
+                .filter(|dock| self.window_panel_docked(dock))
+                .collect();
             let count = docks.len().max(1) as f32;
             let each = (rect.height() - layout::SEPARATOR * (count - 1.0)) / count;
             for (at, dock) in docks.into_iter().enumerate() {
                 let top = rect.min.y + at as f32 * (each + layout::SEPARATOR);
                 let place = Rect::from_min_size(Pos2::new(rect.min.x, top), Vec2::new(rect.width(), each));
-                match dock {
-                    "PropertiesDock" => {
-                        self.dock_at(ui, place, dock, properties_ui);
-                    }
-                    "VerticesDock" => self.dock_at(ui, place, dock, |window, ui| {
-                        window.ui.drawing.dock_ui(ui, &mut window.exec.document);
-                    }),
-                    _ => self.dock_at(ui, place, dock, |window, ui| {
-                        let name = crate::survey::survey_workbench::POINTS_DOCK;
-                        window.ui.survey.dock_ui(ui, &mut window.exec, name);
-                    }),
-                }
+                self.window_panel_at(ui, place, dock);
             }
         }
         if let Some(rect) = geometry.command_line {
-            self.dock_at(ui, rect, "CommandLineDock", command_line_ui);
+            self.window_panel_at(ui, rect, "CommandLineDock");
+        }
+    }
+
+    /// One of the window's own panels drawn at `rect` - its place of the geometry, or its floating
+    /// frame's (main_window::docking_ui) - with its chrome's title bar and its contents: one
+    /// drawing of a panel, wherever it is. Where it was drawn is kept (`DockingState::drawn`), for
+    /// its Float button to float it from and its title bar to move it by.
+    pub(crate) fn window_panel_at(&mut self, ui: &mut Ui, rect: Rect, dock: &str) {
+        self.ui.docking.drawn.push((String::from(dock), rect));
+        match dock {
+            "LayersDock" => self.dock_at(ui, rect, dock, layers_ui),
+            "PropertiesDock" => self.dock_at(ui, rect, dock, properties_ui),
+            "CommandLineDock" => self.dock_at(ui, rect, dock, command_line_ui),
+            "ReferenceDataDock" => self.dock_at(ui, rect, dock, reference_ui),
+            "SurfacesDock" => self.dock_at(ui, rect, dock, |window, ui| {
+                window.ui.surfaces.ui(ui, &mut window.exec);
+            }),
+            "VerticesDock" => self.dock_at(ui, rect, dock, |window, ui| {
+                window.ui.drawing.dock_ui(ui, &mut window.exec.document);
+            }),
+            POINTS_DOCK => self.dock_at(ui, rect, dock, |window, ui| {
+                window.ui.survey.dock_ui(ui, &mut window.exec, POINTS_DOCK);
+            }),
+            _ => {}
+        }
+    }
+
+    /// Whether window panel `dock` (docking::WINDOW_PANELS) is shown: its flag of the layout's,
+    /// the drawing's own for Vertices, the survey workbench's for the survey points.
+    pub fn window_panel_shown(&self, dock: &str) -> bool {
+        let docks = &self.ui.docks;
+        match dock {
+            "LayersDock" => docks.layers,
+            "PropertiesDock" => docks.properties,
+            "CommandLineDock" => docks.command_line,
+            "ReferenceDataDock" => docks.reference,
+            "SurfacesDock" => docks.surfaces,
+            "VerticesDock" => self.ui.drawing.vertices_shown(),
+            POINTS_DOCK => self.ui.survey.point_manager_shown(),
+            _ => false,
+        }
+    }
+
+    /// Window panel `dock` shown or hidden, as View > Panels and its own Close do: Reference Data
+    /// and Surfaces shown come to the front of their pair, and Surfaces is refreshed.
+    pub(crate) fn show_window_panel(&mut self, dock: &str, show: bool) {
+        let docks = &mut self.ui.docks;
+        match dock {
+            "LayersDock" => docks.layers = show,
+            "PropertiesDock" => docks.properties = show,
+            "CommandLineDock" => docks.command_line = show,
+            "ReferenceDataDock" => {
+                docks.reference = show;
+                if show {
+                    docks.surfaces_in_front = false;
+                }
+            }
+            "SurfacesDock" => {
+                docks.surfaces = show;
+                if show {
+                    docks.surfaces_in_front = true;
+                    self.ui.surfaces.refresh(&self.exec.document);
+                }
+            }
+            // The drawing's action is a toggle: asked only when it would change what is shown.
+            "VerticesDock" => {
+                if self.ui.drawing.vertices_shown() != show {
+                    let _ = self.ui.drawing.trigger(
+                        &mut self.exec.document,
+                        crate::drawing::drawing_ui::VERTICES_PANEL_ACTION,
+                    );
+                }
+            }
+            POINTS_DOCK => self.ui.survey.show_point_manager(show),
+            _ => {}
         }
     }
 
@@ -1004,14 +1079,6 @@ impl MainWindow {
                 |ui| {
                     ui.spacing_mut().item_spacing.x = crate::theme::style::GROUP_GAP;
                     ui.spacing_mut().interact_size.y = bar.height() - 4.0;
-                    let divider = |ui: &mut Ui| {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 12.0), Sense::hover());
-                        ui.painter().vline(
-                            ui.painter().round_to_pixel_center(rect.center().x),
-                            rect.y_range(),
-                            egui::Stroke::new(1.0, palette::border().to_egui()),
-                        );
-                    };
                     let coordinates = &self.ui.panels.coordinates;
                     let _ = controls::label_as(
                         ui,
@@ -1020,11 +1087,11 @@ impl MainWindow {
                         egui::Label::new(RichText::new(coordinates).small().monospace())
                             .selectable(false),
                     );
-                    divider(ui);
+                    status_rule(ui, "StatusBarRule3");
                     let snap = &self.ui.panels.snap;
-                    let _ = controls::label_as(ui, "statusSnap", snap, quiet(snap));
+                    let _ = status_readout(ui, "statusSnap", snap, snap, quiet(snap));
                     let _ = controls::label_as(ui, "statusLayer", &layer, quiet(&layer));
-                    divider(ui);
+                    status_rule(ui, "StatusBarRule2");
                     let stats = &self.ui.panels.frame_stats;
                     let mut count_tip = String::from("Entities selected, of all the drawing holds");
                     if is_timing(stats) {
@@ -1037,8 +1104,14 @@ impl MainWindow {
                     // label's report (--report FrameStatsLabel, the tests' "Plan N drawn") and the
                     // count's tooltip, not printed in a person's status bar.
                     let shown = if is_timing(stats) { "" } else { stats.as_str() };
-                    let _ = controls::label_as(ui, "FrameStatsLabel", stats, quiet(shown));
-                    divider(ui);
+                    let _ = status_readout(ui, "FrameStatsLabel", stats, shown, quiet(shown));
+                    status_rule(ui, "StatusBarRule1");
+                    // The button has no frame until the pointer is on it, so what a person sees
+                    // of it is its words: with a button's padding either side of them, the rule
+                    // beside it stood that much further from the words than from the readout on
+                    // its other side (the ninth look audit). Across only: its height is the
+                    // bar's.
+                    let padding = std::mem::replace(&mut ui.spacing_mut().button_padding.x, 0.0);
                     crs_clicked = controls::button_as(
                         ui,
                         "statusProjectCrs",
@@ -1052,6 +1125,7 @@ impl MainWindow {
                     )
                     .on_hover_text("The project's coordinate system: click to change it")
                     .clicked();
+                    ui.spacing_mut().button_padding.x = padding;
                     self.ui.update.status_button_ui(ui, &mut self.exec);
                     self.exec.jobs.status_ui(ui);
                 },
@@ -1095,16 +1169,19 @@ impl MainWindow {
                     end_target(ui, shown.response.rect);
                     // A short rule between the tray and the message, as between the readouts at
                     // the right: run on, the tray's last button read as the message's first word
-                    // (the eighth look audit).
-                    let (rule, _) = ui.allocate_exact_size(Vec2::new(1.0, 12.0), Sense::hover());
-                    ui.painter().vline(
-                        ui.painter().round_to_pixel_center(rule.center().x),
-                        rule.y_range(),
-                        egui::Stroke::new(1.0, palette::border().to_egui()),
-                    );
-                    ui.add_space(crate::theme::style::GROUP_GAP);
+                    // (the eighth look audit). The readouts' rule, by the one helper: drawn here
+                    // by hand with a space after it, it stood 8 points from the tray and 16 from
+                    // the message (the ninth).
+                    status_rule(ui, "StatusBarRule0");
                 }
-                ui.add(egui::Label::new(RichText::new(message.as_str()).small()).truncate());
+                // Named, so that what stands at the right of the tray's rule is on record as
+                // what stands at its left is (the status bar's rules, tests/main_window).
+                let _ = controls::label_as(
+                    ui,
+                    "statusMessage",
+                    &message,
+                    egui::Label::new(RichText::new(message.as_str()).small()).truncate(),
+                );
             },
         );
         if let Some(dock) = restored {
@@ -1116,26 +1193,33 @@ impl MainWindow {
     }
 
     /// The tray's buttons, as (dock, title): the torn-off menus minimised, in the order they went,
-    /// then the views (`ViewWorkspace::tray_actions`). The main window's own panels hide on
-    /// Minimise, View > Panels bringing them back, so they have none.
+    /// then the window's own panels (docking's `WindowPanels`), then the views
+    /// (`ViewWorkspace::tray_actions`). One tray for all three: a panel, a menu and a view
+    /// minimised into trays of their own would be three places to look for what Minimise hid.
     fn tray_items(&self) -> Vec<(String, String)> {
-        let mut items: Vec<(String, String)> = self
-            .ui
-            .docking
+        let titled = |dock: String, untitled: &str| {
+            let title = self
+                .ui
+                .panels
+                .chrome
+                .title_bar(&dock)
+                .map_or_else(|| String::from(untitled), |bar| String::from(bar.title()));
+            (dock, title)
+        };
+        let docking = &self.ui.docking;
+        let mut items: Vec<(String, String)> = docking
             .panels
             .minimised
             .iter()
-            .map(|panel| {
-                let dock = super::docking::panel_dock_name(&panel.menu);
-                let title = self
-                    .ui
-                    .panels
-                    .chrome
-                    .title_bar(&dock)
-                    .map_or_else(|| panel.menu.clone(), |bar| String::from(bar.title()));
-                (dock, title)
-            })
+            .map(|panel| titled(super::docking::panel_dock_name(&panel.menu), panel.menu.as_str()))
             .collect();
+        items.extend(
+            docking
+                .window_panels
+                .minimised
+                .iter()
+                .map(|dock| titled(dock.clone(), dock.as_str())),
+        );
         items.extend(self.exec.workspace.tray_actions().into_iter().filter_map(|action| {
             let dock = action.name.strip_prefix("Restore").map(String::from)?;
             Some((dock, action.display_text()))
@@ -1143,11 +1227,15 @@ impl MainWindow {
         items
     }
 
-    /// A tray button pressed: its torn-off menu or view put back where it was.
+    /// A tray button pressed: its torn-off menu, window panel or view put back where it was.
     pub(crate) fn restore_from_tray(&mut self, dock: &str) {
-        let restored = match super::docking::panel_menu(dock) {
-            Some(menu) => self.ui.docking.panels.restore(menu),
-            None => self.exec.workspace.restore_named(dock),
+        let restored = if super::docking::is_window_panel(dock) {
+            self.restore_window_panel(dock).is_ok()
+        } else {
+            match super::docking::panel_menu(dock) {
+                Some(menu) => self.ui.docking.panels.restore(menu),
+                None => self.exec.workspace.restore_named(dock),
+            }
         };
         if !restored {
             self.exec
@@ -1499,27 +1587,17 @@ impl MainWindow {
         self.ui.docks.properties = true;
     }
 
-    /// A panel's title bar asked: Minimise and Close hide it (View > Panels brings it back).
+    /// A panel's title bar asked: a torn-off menu's (`menu_panel_request`), or one of the
+    /// window's own (`window_panel_request`: Float floats it or docks it again, Minimise hides
+    /// it to the tray, Close hides it and View > Panels brings it back).
+    ///
+    /// Float was dropped here and Minimise did what Close does, with no button in the tray: a
+    /// panel minimised was only to be had back from View > Panels (the owner, 2026-11-21).
     fn panel_request(&mut self, request: ChromeRequest) {
         if self.menu_panel_request(&request) {
             return;
         }
-        let name = match &request {
-            ChromeRequest::Minimise(name) | ChromeRequest::Close(name) => name.clone(),
-            _ => return,
-        };
-        let docks = &mut self.ui.docks;
-        match name.as_str() {
-            "LayersDock" => docks.layers = false,
-            "PropertiesDock" => docks.properties = false,
-            "CommandLineDock" => docks.command_line = false,
-            "ReferenceDataDock" => docks.reference = false,
-            "SurfacesDock" => docks.surfaces = false,
-            "VerticesDock" => {
-                let _ = self.ui.drawing.trigger(&mut self.exec.document, crate::drawing::drawing_ui::VERTICES_PANEL_ACTION);
-            }
-            _ => self.ui.survey.show_point_manager(false),
-        }
+        let _ = self.window_panel_request(&request);
     }
 }
 
@@ -2497,10 +2575,62 @@ fn zoom_to_selected_reference(window: &mut MainWindow) {
     window.exec.workspace.zoom_to(&bounds);
 }
 
+// ---- the status bar's rules -----------------------------------------------------------------------
+
+/// The clear space either side of a status bar rule, to the edge of what stands beside it: the
+/// gap between a row's groups (theme::style::GROUP_GAP), which is what parted the readouts before
+/// they had rules. One number for both sides of every rule: each drawn where it stood, the rules
+/// had 8 and 16 points, 16 and 16, 8 and 9, and 16 and 8 either side (the ninth look audit).
+pub const STATUS_RULE_GAP: f32 = crate::theme::style::GROUP_GAP;
+
+/// A status bar rule's size: a hairline, shorter than the bar's words with their line are tall.
+const STATUS_RULE: Vec2 = Vec2::new(1.0, 12.0);
+
+/// A short rule between two parts of the status bar, STATUS_RULE_GAP clear either side whatever
+/// the row's own spacing and whichever way it is laid out, on record as `name` (StatusBarRule<n>,
+/// counted from the left) so that a test can measure the gaps. Every rule of the bar is drawn
+/// here, so that no two can differ.
+fn status_rule(ui: &mut Ui, name: &str) {
+    use crate::drive::registry::{ControlKind, ControlRecord};
+    // The row puts its own spacing after each item, the rule included: what is added here makes
+    // it up to the gap.
+    let pad = (STATUS_RULE_GAP - ui.spacing().item_spacing.x).max(0.0);
+    ui.add_space(pad);
+    let (rect, response) = ui.allocate_exact_size(STATUS_RULE, Sense::hover());
+    ui.painter().vline(
+        ui.painter().round_to_pixel_center(rect.center().x),
+        rect.y_range(),
+        egui::Stroke::new(1.0, palette::border().to_egui()),
+    );
+    controls::custom(ui, &response, ControlRecord::new(name, ControlKind::Other));
+    ui.add_space(pad);
+}
+
+/// A readout of the status bar that may show nothing (the snap with none on, a view's readout
+/// while a frame's timings are all there is), on record as `name` with `text`: showing nothing it
+/// takes no room, where an empty label still took the row's spacing after it and doubled the gap
+/// at the rule beside it.
+fn status_readout(
+    ui: &mut Ui,
+    name: &str,
+    text: &str,
+    shown: &str,
+    label: egui::Label,
+) -> egui::Response {
+    let spacing = ui.spacing().item_spacing.x;
+    if shown.is_empty() {
+        ui.spacing_mut().item_spacing.x = 0.0;
+    }
+    let response = controls::label_as(ui, name, text, label);
+    ui.spacing_mut().item_spacing.x = spacing;
+    response
+}
+
 // ---- the command line ---------------------------------------------------------------------------
 
-/// The space above a text box's first line: egui's TextEdit margin, `Margin::symmetric(4, 2)`.
-const LOG_MARGIN: f32 = 2.0;
+/// The space above a text box's first line, and below its last: egui's TextEdit margin,
+/// `Margin::symmetric(4, 2)`.
+pub const LOG_MARGIN: f32 = 2.0;
 
 /// The command line: its log, and the field a line is typed in - Enter runs it, Up and Down browse
 /// the history, Esc cancels the running tool, and several lines pasted run at once.
@@ -2522,9 +2652,18 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
     // it, and the log stood part way down its text with a half line cut at its top and its foot
     // (Extra Large, the second look audit's T8). Only then: every frame, it would stop a person
     // scrolling back through it.
+    //
+    // Its last line, unless the newest record is taller than the log: then the record's first
+    // row, so that it is read from its start (`log_follow_offset`; a far import's warning, three
+    // rows of it in a log three rows high, started mid-sentence - the ninth look audit).
     let laid_out = (window.exec.log.blocks().len(), line, height);
     let to_the_end = window.ui.panels.log_laid_out != laid_out;
     window.ui.panels.log_laid_out = laid_out;
+    let newest = crate::command_log::newest_record_start(window.exec.log.blocks());
+    // Standing at a record's top the log does not stick to its bottom: egui's own note that it
+    // was at its end, kept from the pass before and not ours to clear, pulled it back down in
+    // the pass that is shown.
+    let held = window.ui.panels.log_at_record_top;
     ui.allocate_ui(Vec2::new(ui.available_width(), height), |ui| {
         // The log is read, not typed in: drawn on the panel itself, with no well or frame of a
         // field, so the one field of the panel is the line below it.
@@ -2541,7 +2680,7 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
         }
         let shown = egui::ScrollArea::vertical()
             .id_salt("katanaCommandLog")
-            .stick_to_bottom(true)
+            .stick_to_bottom(!held)
             .auto_shrink([false, false])
             .min_scrolled_height(height)
             .max_height(height)
@@ -2557,12 +2696,26 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
         // audit's J), so what is above the first whole row is covered with the log's own ground.
         // A row is a row whether or not it starts a line: covering down to the first row that
         // starts one left the top row blank where a wrapped line's last row was (the seventh look
-        // audit), which the third audit's "in." alone had led to. Only at the end: scrolled back,
-        // a person reads a long line part by part.
+        // audit), which the third audit's "in." alone had led to. Only at the end, or at the
+        // newest record's top where the log put itself: scrolled back, a person reads a long line
+        // part by part.
         let (galley, galley_pos) = &shown.inner;
-        let at_end = shown.state.offset.y + 1.0
-            >= shown.content_size.y - shown.inner_rect.height();
-        if at_end
+        let view = shown.inner_rect.height();
+        let end = (shown.content_size.y - view).max(0.0);
+        // The record's first row in the scrolled content: the galley is LOG_MARGIN below its top.
+        let record_top = newest
+            .and_then(|start| log_record_top(galley, start))
+            .map(|top| LOG_MARGIN + top);
+        let wanted = log_follow_offset(
+            shown.state.offset.y,
+            to_the_end || held,
+            record_top,
+            shown.content_size.y,
+            view,
+        );
+        let at_end = shown.state.offset.y + 1.0 >= shown.content_size.y - view;
+        let at_record = held && (shown.state.offset.y - wanted).abs() <= 1.0;
+        if (at_end || at_record)
             && let Some(top) = log_cover_bottom(galley, *galley_pos, shown.inner_rect.top())
         {
             let cover = Rect::from_min_max(
@@ -2577,10 +2730,15 @@ fn command_line_ui(window: &mut MainWindow, ui: &mut Ui) {
             // this one is laid out again (an offset given before the content is measured - "past
             // the end" - drew the content off the view in the pass that was shown).
             let mut state = shown.state;
-            state.offset.y = (shown.content_size.y - shown.inner_rect.height()).max(0.0);
+            state.offset.y = wanted;
             state.store(ui.ctx(), shown.id);
             ui.ctx()
-                .request_discard("the command log scrolled to its last line");
+                .request_discard("the command log scrolled to its newest record");
+            window.ui.panels.log_at_record_top = wanted < end - 0.5;
+        } else if held && !at_record {
+            // A person scrolled it, or it was laid out at another width: it is theirs from here,
+            // and at its end it sticks there again.
+            window.ui.panels.log_at_record_top = false;
         }
     });
     let placeholder = window.ui.panels.placeholder.clone();
@@ -2746,6 +2904,47 @@ pub fn log_cover_bottom(galley: &egui::Galley, at: Pos2, view_top: f32) -> Optio
     };
     let bottom = ink_top.floor();
     (bottom > view_top + 0.5).then_some(bottom)
+}
+
+/// Where the command log scrolls to, as an offset into its content: `offset`, where it is, kept
+/// when it is not `following` its newest output (a person has scrolled it); following, its end -
+/// the last row at the foot of the view - unless the newest record's first row would then be
+/// above the view, the record being taller than it: then that row at the view's top, LOG_MARGIN
+/// below it as the log's first row is, so that the record is read from its start and the rows
+/// shown are whole. `record_top` is the top of the newest record's first row in the content, None
+/// when the log holds nothing; `content_height` and `view_height` are the scroll area's.
+///
+/// A record just as tall as the view is at its end, as a shorter one is: all of it shows there.
+/// Half a point is allowed for a row's place being rounded to a pixel.
+pub fn log_follow_offset(
+    offset: f32,
+    following: bool,
+    record_top: Option<f32>,
+    content_height: f32,
+    view_height: f32,
+) -> f32 {
+    if !following {
+        return offset;
+    }
+    let end = (content_height - view_height).max(0.0);
+    match record_top {
+        Some(top) if top < end - 0.5 => (top - LOG_MARGIN).max(0.0),
+        _ => end,
+    }
+}
+
+/// The top, in `galley`'s own coordinates, of the row that holds its character `start` (the
+/// newest record's first, command_log::newest_record_start); the last row's for a `start` at or
+/// past the text's end (a record of no words). None for a galley of no rows.
+pub fn log_record_top(galley: &egui::Galley, start: usize) -> Option<f32> {
+    let mut before = 0;
+    for row in &galley.rows {
+        before += row.char_count_including_newline().0;
+        if start < before {
+            return Some(row.pos.y);
+        }
+    }
+    galley.rows.last().map(|row| row.pos.y)
 }
 
 /// The command log's text as the log panel shows it: each line in the words a person reads

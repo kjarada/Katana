@@ -63,7 +63,9 @@ use katana_entity::entity::{ENTITY_TYPES, to_string};
 use katana_entity::{EntityType, Model};
 use katana_geometry::Box2;
 
-use crate::drive::controls::{Choice, LineOptions, check, choice, line_with, radio};
+use crate::drive::controls::{
+    Choice, LineOptions, check, choice, line_with, radio, withdrawn,
+};
 use crate::drive::mailbox::{Act, lists_no, no_button};
 use crate::drive::registry::{ControlKind, ControlRecord, record, settle, take};
 use crate::shell::dialog;
@@ -176,9 +178,9 @@ pub struct ScopeFilterWidget {
     drawn_only: bool,
     /// A setter changed a control since the last frame: reported then, as its signal would be.
     pending: bool,
-    /// The filter's controls greyed by the tool, each with why: drawn disabled, the reason their
-    /// hover text, their values kept.
-    greyed: BTreeMap<String, String>,
+    /// The filter's controls the tool leaves out, each with why (`leave_out`): not shown, the
+    /// reason a note under the filter, their values kept.
+    left_out: BTreeMap<String, String>,
     /// What it says while it does not apply (`set_unused_note`); empty for UNUSED_NOTE.
     unused_note: String,
     /// The scope's group's heading (`set_heading`); empty for SCOPE_HEADING.
@@ -220,6 +222,37 @@ fn no_area_on_screen(view: &ScopeFilterView) -> Error {
     )
 }
 
+/// One of the filter's fields on its labelled row, `tip` its hover text when it has one: true when
+/// it was edited. One the tool leaves out (`ScopeFilterWidget::leave_out`) has no row: it is
+/// recorded hidden and disabled where the row would be, taking no room.
+fn filter_row(
+    ui: &mut Ui,
+    label: &str,
+    name: &str,
+    value: &mut String,
+    placeholder: &str,
+    tip: &str,
+    left_out: bool,
+) -> bool {
+    let options = LineOptions {
+        placeholder,
+        ..LineOptions::default()
+    };
+    if left_out {
+        withdrawn(ui, name, |ui| {
+            line_with(ui, name, value, options);
+        });
+        return false;
+    }
+    dialog::labelled(ui, label, |ui| {
+        let mut response = line_with(ui, name, value, options);
+        if !tip.is_empty() {
+            response = response.on_hover_text(tip);
+        }
+        response.changed()
+    })
+}
+
 impl ScopeFilterWidget {
     /// The controls named from `name_prefix`: the selection chosen, sublayers ticked, nothing else.
     pub fn new(name_prefix: &str) -> Self {
@@ -252,7 +285,7 @@ impl ScopeFilterWidget {
             filter_text: String::new(),
             drawn_only: false,
             pending: false,
-            greyed: BTreeMap::new(),
+            left_out: BTreeMap::new(),
             unused_note: String::new(),
             heading: String::new(),
             keeps_shape: false,
@@ -260,22 +293,34 @@ impl ScopeFilterWidget {
         }
     }
 
-    /// Greys the filter's control `object_name` with `reason` as its hover text: a tool whose
-    /// data has nothing the control reads (a road object has no entity type, style or text) says
-    /// so where the verb would refuse it by name. The control keeps its value and is drawn
-    /// disabled, so a driver's fill or press of it is refused as disabled.
-    pub fn grey(&mut self, object_name: &str, reason: &str) {
-        self.greyed
+    /// Leaves the filter's control `object_name` out, `reason` said once in a note under the
+    /// filter: a tool whose data has nothing the control reads (a road object has no entity type,
+    /// style or text) says so where the verb would refuse it by name. Any control of
+    /// `control_names` can be left out, and the rule is one for all of them: a control that is
+    /// shown applies and is live, as every one of Global Modify's is, and one that does not apply
+    /// is not shown. They were drawn greyed in their places once, each with the reason as its
+    /// hover text, and the filter read half-lit - grey boxes under a lit "Types" label, a grey
+    /// field after a lit "Style", lit and grey rows in turn - with the reason nowhere a person
+    /// saw without hovering (the ninth look audit, Road Objects). The control keeps its value
+    /// and its record, hidden and disabled (drive::controls::withdrawn), so a driver's fill or
+    /// press of it is still refused as disabled.
+    pub fn leave_out(&mut self, object_name: &str, reason: &str) {
+        self.left_out
             .insert(String::from(object_name), String::from(reason));
     }
 
-    /// Why the control `object_name` is greyed, if it is.
-    pub fn greyed(&self, object_name: &str) -> Option<&str> {
-        self.greyed.get(object_name).map(String::as_str)
+    /// Why the control `object_name` is left out, if it is.
+    pub fn left_out(&self, object_name: &str) -> Option<&str> {
+        self.left_out.get(object_name).map(String::as_str)
     }
 
-    /// The object names of the filter's controls, in the order they are drawn: what a tool greys
-    /// from.
+    /// Whether the control named by `part` after the prefix is left out.
+    fn is_left_out(&self, part: &str) -> bool {
+        self.left_out.contains_key(&self.named(part))
+    }
+
+    /// The object names of the filter's controls, in the order they are drawn: what a tool
+    /// leaves out from.
     pub fn control_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .types
@@ -806,7 +851,7 @@ impl ScopeFilterWidget {
             } else if unused {
                 self.unused_lines(ui);
                 let salt = self.object_name();
-                crate::drive::controls::withdrawn(ui, &salt, |ui| {
+                withdrawn(ui, &salt, |ui| {
                     // Laid out as it would be, and not drawn: its records and its answers to a
                     // driver are the controls' own.
                     if self.controls_ui(ui, None) {
@@ -919,26 +964,30 @@ impl ScopeFilterWidget {
         let filter_group = ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = dialog::FORM_SPACING.y;
             dialog::section(ui, "Only those that match (optional)");
-            dialog::form_label(ui, "Types (none: all)");
             let prefix = self.prefix.clone();
-            let greyed = &self.greyed;
-            let types = &mut self.types;
-            for row in types.chunks_mut(4) {
+            let left_out = &self.left_out;
+            let (hidden, mut shown): (Vec<&mut TypeBox>, Vec<&mut TypeBox>) =
+                self.types.iter_mut().partition(|type_box| {
+                    left_out.contains_key(&format!("{prefix}Type{}", kind_name(type_box.kind)))
+                });
+            // The boxes' label only over boxes: over none it was a lit label of nothing.
+            if !shown.is_empty() {
+                dialog::form_label(ui, "Types (none: all)");
+            }
+            for row in shown.chunks_mut(4) {
                 ui.horizontal(|ui| {
                     for type_box in row {
                         let name = format!("{prefix}Type{}", kind_name(type_box.kind));
-                        let grey = greyed.get(&name);
-                        ui.add_enabled_ui(grey.is_none(), |ui| {
-                            let mut response =
-                                check(ui, &name, &type_box.label, &mut type_box.ticked);
-                            if let Some(reason) = grey {
-                                response = response.on_disabled_hover_text(reason.as_str());
-                            }
-                            if response.changed() {
-                                changed = true;
-                            }
-                        });
+                        if check(ui, &name, &type_box.label, &mut type_box.ticked).changed() {
+                            changed = true;
+                        }
                     }
+                });
+            }
+            for type_box in hidden {
+                let name = format!("{prefix}Type{}", kind_name(type_box.kind));
+                withdrawn(ui, &name, |ui| {
+                    check(ui, &name, &type_box.label, &mut type_box.ticked);
                 });
             }
             let wild = " - * and ? are wildcards";
@@ -966,100 +1015,112 @@ impl ScopeFilterWidget {
             // dialog holding the widget do (shell::dialog's THE LABEL COLUMN).
             for (label, part, placeholder, tip) in fields {
                 let name = self.named(part);
-                let grey = self.greyed.get(&name).cloned();
+                let out = self.is_left_out(part);
                 let field = match part {
                     "FilterLayer" => &mut self.filter_layer,
                     "FilterStyle" => &mut self.filter_style,
                     _ => &mut self.filter_colour,
                 };
-                dialog::labelled(ui, label, |ui| {
-                    ui.add_enabled_ui(grey.is_none(), |ui| {
-                        let mut response = line_with(
-                            ui,
-                            &name,
-                            field,
-                            LineOptions {
-                                placeholder,
-                                ..LineOptions::default()
-                            },
-                        );
-                        if let Some(reason) = &grey {
-                            response = response.on_disabled_hover_text(reason.as_str());
-                        } else if !tip.is_empty() {
-                            response = response.on_hover_text(tip.as_str());
-                        }
-                        if response.changed() {
-                            changed = true;
-                        }
-                    });
-                });
+                if filter_row(ui, label, &name, field, placeholder, &tip, out) {
+                    changed = true;
+                }
             }
-            dialog::labelled(ui, "Property", |ui| {
-                let key = self.named("FilterProperty");
-                // The key and the value share the row.
-                let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                if line_with(
+            let key = self.named("FilterProperty");
+            let value = self.named("FilterValue");
+            let key_out = self.is_left_out("FilterProperty");
+            let value_out = self.is_left_out("FilterValue");
+            let value_tip = format!("The value as the properties panel prints it{wild}");
+            if key_out || value_out {
+                // One of the two alone is a row of its own, and neither is no row.
+                if filter_row(
                     ui,
+                    "Property",
                     &key,
                     &mut self.filter_property,
-                    LineOptions {
-                        placeholder: "key",
-                        width: Some(half),
-                        ..LineOptions::default()
-                    },
-                )
-                .changed()
-                {
+                    "key",
+                    "",
+                    key_out,
+                ) {
                     changed = true;
                 }
-                let value = self.named("FilterValue");
-                if line_with(
+                if filter_row(
                     ui,
+                    "Property value",
                     &value,
                     &mut self.filter_value,
-                    LineOptions {
-                        placeholder: "value, e.g. TREE*",
-                        width: Some(half),
-                        ..LineOptions::default()
-                    },
-                )
-                .on_hover_text(format!("The value as the properties panel prints it{wild}"))
-                .changed()
-                {
+                    "value, e.g. TREE*",
+                    &value_tip,
+                    value_out,
+                ) {
                     changed = true;
                 }
-            });
-            dialog::labelled(ui, "Text", |ui| {
-                let name = self.named("FilterText");
-                let grey = self.greyed.get(&name).cloned();
-                ui.add_enabled_ui(grey.is_none(), |ui| {
-                    let mut response = line_with(
+            } else {
+                dialog::labelled(ui, "Property", |ui| {
+                    // The key and the value share the row.
+                    let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                    if line_with(
                         ui,
-                        &name,
-                        &mut self.filter_text,
+                        &key,
+                        &mut self.filter_property,
                         LineOptions {
-                            placeholder: "a text's words, e.g. CH *",
+                            placeholder: "key",
+                            width: Some(half),
                             ..LineOptions::default()
                         },
-                    );
-                    if let Some(reason) = &grey {
-                        response = response.on_disabled_hover_text(reason.as_str());
+                    )
+                    .changed()
+                    {
+                        changed = true;
                     }
-                    if response.changed() {
+                    if line_with(
+                        ui,
+                        &value,
+                        &mut self.filter_value,
+                        LineOptions {
+                            placeholder: "value, e.g. TREE*",
+                            width: Some(half),
+                            ..LineOptions::default()
+                        },
+                    )
+                    .on_hover_text(value_tip.as_str())
+                    .changed()
+                    {
                         changed = true;
                     }
                 });
-            });
-            let name = self.named("DrawnOnly");
-            if check(
+            }
+            let name = self.named("FilterText");
+            let out = self.is_left_out("FilterText");
+            if filter_row(
                 ui,
+                "Text",
                 &name,
-                "Only what is drawn (not hidden)",
-                &mut self.drawn_only,
-            )
-            .changed()
-            {
+                &mut self.filter_text,
+                "a text's words, e.g. CH *",
+                "",
+                out,
+            ) {
                 changed = true;
+            }
+            let name = self.named("DrawnOnly");
+            let drawn_label = "Only what is drawn (not hidden)";
+            if self.is_left_out("DrawnOnly") {
+                withdrawn(ui, &name, |ui| {
+                    check(ui, &name, drawn_label, &mut self.drawn_only);
+                });
+            } else if check(ui, &name, drawn_label, &mut self.drawn_only).changed() {
+                changed = true;
+            }
+            // Why what is left out is: each reason once, however many controls it is for, where
+            // the controls would have stood last.
+            let mut reasons: Vec<&str> = Vec::new();
+            for reason in self.left_out.values() {
+                if !reasons.contains(&reason.as_str()) {
+                    reasons.push(reason.as_str());
+                }
+            }
+            for reason in reasons {
+                dialog::note(ui, reason);
             }
         });
         let group_name = self.named("FilterGroup");

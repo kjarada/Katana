@@ -213,7 +213,7 @@ use katana_update::fsops::{EntryKind, FsOps, RetryPolicy, make_system_fs_ops};
 use katana_update::install::update_work_directory;
 use katana_update::process::{
     Launcher, SpawnRequest, SpawnResult, make_system_launcher, make_system_process_ops,
-    utf8_arguments,
+    turn_error_boxes_off, utf8_arguments,
 };
 use katana_update::recover::{Settled, recover_in_process, settle_unproved};
 use katana_update::recover_internal::{name_as_text, one_line};
@@ -1333,29 +1333,6 @@ fn refused_by_the_platform(command: &Command, fs: &dyn FsOps) -> Option<i32> {
 
 // ---- the services of a run, and main ------------------------------------------------------------
 
-// No box of the system's for THIS process to wait behind (see the top). The programs it starts
-// get the default mode from the launcher.
-#[allow(
-    unsafe_code,
-    reason = "SetErrorMode is a Win32 call, a foreign function"
-)]
-fn turn_error_boxes_off() {
-    #[cfg(windows)]
-    {
-        // The values of the Windows SDK's winbase.h.
-        const SEM_FAILCRITICALERRORS: u32 = 0x1;
-        const SEM_NOGPFAULTERRORBOX: u32 = 0x2;
-        const SEM_NOOPENFILEERRORBOX: u32 = 0x8000;
-        // SAFETY: SetErrorMode only sets the process's error mode, and returns the old one, which
-        // is not wanted back.
-        unsafe {
-            windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode(
-                SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX,
-            );
-        }
-    }
-}
-
 // The real file system, process scan, launcher and registry - in the test build optionally
 // wrapped or re-rooted (see the top) - for one swap or one recovery.
 fn run_with_services(
@@ -1430,6 +1407,9 @@ fn run(build: Build) -> i32 {
         return EXIT_INTERNAL;
     }
 
+    // No box of the system's for THIS process to wait behind (see the top). The programs it starts
+    // get the default mode from the launcher. The call is katana_update's, with its other
+    // Windows calls.
     turn_error_boxes_off();
 
     // The command line, as UTF-8 and never from the standard library's argv.

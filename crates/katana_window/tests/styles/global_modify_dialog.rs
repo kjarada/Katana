@@ -336,6 +336,21 @@ mod global_modify_dialog {
         assert_eq!(bench.text("globalModifyTypeLine"), "Line");
     }
 
+    // The rule every dialog's filter keeps (the shared widget's `leave_out`): what the filter
+    // shows applies and is live. Global Modify changes entities, which have every one of them,
+    // so it shows them all - the model Road Objects' half-lit filter was put right by.
+    #[test]
+    fn every_filter_control_is_shown_and_live() {
+        let bench = DialogFixture::new().dialog();
+        let names = bench.dialog.scope_filter().control_names();
+        // A box a kind (katana_entity's ENTITY_TYPES), the six fields and Drawn only.
+        assert_eq!(names.len(), katana_entity::entity::ENTITY_TYPES.len() + 7);
+        for name in &names {
+            assert!(!bench.hidden(name), "{name}");
+            assert!(bench.enabled(name), "{name}");
+        }
+    }
+
     #[test]
     fn opened_with_nothing_selected_it_applies_to_the_whole_drawing() {
         let fixture = DialogFixture::new();

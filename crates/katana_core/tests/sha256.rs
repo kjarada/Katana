@@ -509,18 +509,20 @@ mod windows_lock {
             offset_high: 0,
             event: std::ptr::null_mut(),
         };
-        assert_ne!(
-            unsafe { LockFileEx(file.as_raw_handle(), 3, 0, 4096, 0, &mut range) },
-            0
-        );
+        // SAFETY: the handle is the open file's, borrowed for the call;
+        // `range` is a live OVERLAPPED of the layout above, whose event is
+        // null, so the call (which fails at once rather than wait, flag 1)
+        // keeps no pointer to it.
+        let locked = unsafe { LockFileEx(file.as_raw_handle(), 3, 0, 4096, 0, &mut range) };
+        assert_ne!(locked, 0);
         Range { file, range }
     }
     impl Range<'_> {
         pub fn unlock(mut self) {
-            assert_ne!(
-                unsafe { UnlockFileEx(self.file.as_raw_handle(), 0, 4096, 0, &mut self.range) },
-                0
-            );
+            // SAFETY: as the lock's; the range is the one locked.
+            let unlocked =
+                unsafe { UnlockFileEx(self.file.as_raw_handle(), 0, 4096, 0, &mut self.range) };
+            assert_ne!(unlocked, 0);
         }
     }
 }

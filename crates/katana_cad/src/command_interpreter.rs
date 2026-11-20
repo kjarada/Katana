@@ -3640,6 +3640,9 @@ Views     the desktop window's views, except SCALE also edits saved plan views h
           VIEWS SCALE id AUTO|1:N   paper linestyles and symbols at a reference scale,
           independent of zoom and ANNOSCALE; AUTO keeps their screen size. Saved plan-view
           ids are available to katana_cli and katana_mcp; other view operations need the window
+          VIEWS TILE [GRID|COLUMNS|ROWS]   arranges the views open now, each a place of its own
+          of equal size, the active one first: a grid, side by side or stacked. Floating views
+          are docked in, minimised ones stay in the tray; none is opened or closed
 Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTENTS (E, ALL,
           A) | IN [f] | OUT [f] | f | fX | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE
           pixels-per-unit]   [view=id]; IN and OUT are by 2 about the view's centre;

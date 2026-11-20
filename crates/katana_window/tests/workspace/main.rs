@@ -31,5 +31,7 @@ mod view_layers_popup;
 mod view_links;
 mod view_scale;
 mod view_selection;
+// Not a twin: tiling the open views (the owner's request of 2026-11-21).
+mod view_tiling;
 mod workspace_tools;
 mod workspace_views;

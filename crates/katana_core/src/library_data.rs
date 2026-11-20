@@ -155,12 +155,21 @@ mod native {
     }
 
     pub fn loaded_library_path(prefix: &str) -> Option<PathBuf> {
+        // SAFETY: the call takes nothing and returns dyld's count of loaded
+        // images.
         let count = unsafe { _dyld_image_count() };
         for index in 0..count {
+            // SAFETY: the call takes an index by value, and answers null for
+            // one past the list (an image unloaded since the count).
             let name = unsafe { _dyld_get_image_name(index) };
             if name.is_null() {
                 continue;
             }
+            // SAFETY: not null (above); dyld's name of an image is a
+            // NUL-terminated string that lives as long as the image is
+            // loaded, and the bytes are copied into the path before this
+            // turn of the loop ends. An image unloaded by another thread in
+            // between would end that: Katana unloads no library.
             let bytes = unsafe { CStr::from_ptr(name) }.to_bytes();
             if bytes.is_empty() {
                 continue;
@@ -202,6 +211,10 @@ mod native {
     pub fn loaded_library_path(prefix: &str) -> Option<PathBuf> {
         let mut modules = vec![std::ptr::null_mut::<c_void>(); 1024];
         let mut bytes = 0;
+        // SAFETY: GetCurrentProcess returns the pseudo-handle of this
+        // process, which is never closed. `modules` holds the byte capacity
+        // passed, which is the most the call writes, and `bytes` is a live
+        // u32 it writes.
         let status = unsafe {
             K32EnumProcessModules(
                 GetCurrentProcess(),
@@ -221,6 +234,9 @@ mod native {
         for module in modules {
             let mut candidate = vec![b' ' as u16; 512];
             loop {
+                // SAFETY: `module` is a handle the enumeration returned (a
+                // module unloaded since is refused, 0); `candidate` holds
+                // the units passed as its capacity, the most the call writes.
                 let length = unsafe {
                     GetModuleFileNameW(module, candidate.as_mut_ptr(), candidate.len() as u32)
                 };

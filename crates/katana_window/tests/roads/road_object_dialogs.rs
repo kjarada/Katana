@@ -21,7 +21,7 @@ use katana_window::bim::road_object_dialog::{
     Place, RoadObjectDialog, RoadObjectForm, road_object_add_line, road_object_preview,
 };
 use katana_window::bim::road_object_manager::{
-    RoadObjectManagerDialog, road_objects_frame, scope_control_tip,
+    NOT_AN_ENTITY, RoadObjectManagerDialog, road_objects_frame, scope_control_tip,
 };
 use katana_window::bim::road_object_workbench::{
     KIND_ACTIONS, MANAGER_ACTION, RoadObjectWorkbench,
@@ -941,6 +941,51 @@ mod road_object_manager {
         ] {
             assert_eq!(d.control(name).kind, ControlKind::Button, "{name}");
         }
+    }
+
+    #[test]
+    fn every_filter_control_the_manager_shows_is_live_and_what_it_leaves_out_is_not_shown() {
+        // The filter was half-lit: grey type boxes, Style and Text among a lit Layer, Colour,
+        // Property and Drawn only (the ninth look audit). The rule is Global Modify's: what the
+        // filter shows applies and is live. What a road object can be matched by is the verb's
+        // own list (docs/road_objects.md, "The WHERE keys, read for a road object": LAYER=,
+        // PROP=key:pattern, COLOUR= and DRAWN; TYPE=, STYLE= and TEXT= are refused).
+        let mut d = scoped_manager();
+        let names = d.dialog.scope_mut().control_names();
+        let mut shown = Vec::new();
+        for name in &names {
+            let control = d.control(name);
+            if control.visible {
+                // One state for every row a person sees.
+                assert!(control.enabled, "{name} is shown and greyed");
+                shown.push(name.as_str());
+            } else {
+                // Left out for the stated reason, and still refused as disabled to a driver.
+                assert!(!control.enabled, "{name}");
+                assert_eq!(
+                    d.dialog.scope_mut().left_out(name),
+                    Some(NOT_AN_ENTITY),
+                    "{name}"
+                );
+            }
+        }
+        assert_eq!(
+            shown,
+            [
+                "roadObjectManagerFilterLayer",
+                "roadObjectManagerFilterColour",
+                "roadObjectManagerFilterProperty",
+                "roadObjectManagerFilterValue",
+                "roadObjectManagerDrawnOnly",
+            ]
+        );
+        // A fill of one left out is refused, as it was while it was drawn greyed.
+        d.harness
+            .target("roadObjectManagerDialog")
+            .fill("roadObjectManagerFilterStyle", "kerb");
+        let refused = d.try_settle().expect_err("a fill of a control left out");
+        assert!(refused.contains("roadObjectManagerFilterStyle"), "{refused}");
+        assert_eq!(d.text("roadObjectManagerFilterStyle"), "");
     }
 
     #[test]

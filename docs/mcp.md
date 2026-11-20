@@ -1120,7 +1120,7 @@ project that matters.
 **stdout belongs to the protocol.** A single stray line on it - a warning a
 verb prints, a library's `printf` - and the client reads a message that is not
 JSON and drops the connection. So each command runs with its output and its errors captured into the
-reply, and, below that, `main.rs` duplicates file descriptor 1 for the protocol and points descriptor 1 itself at stderr
+reply, and, below that, `main.rs` duplicates standard output for the protocol (a copy a program the server starts does not inherit) and points descriptor 1 itself at stderr
 before the session is created: whatever else writes to "stdout" lands in the
 client's log of the server. The test
 `mcp_server::nothing_a_command_prints_leaks_onto_the_real_streams` pins the first half.

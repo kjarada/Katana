@@ -469,6 +469,23 @@ every torn-off menu's; `?DrawToolBar` one toolbar's
 torn-off menu's (`place=left items=31 drawn=...`). A layout a headless run
 makes is not saved: it neither reads nor writes the settings file.
 
+**The window's own panels.** Layers, Properties, the command line, Reference
+Data, Surfaces, Vertices and the survey points float and minimise by their
+title bars (`docs/desktop.md`, "The window's own panels float and
+minimise"), and by a `*` step each: `*viewPanelFloatLayersDock`,
+`*viewPanelDockLayersDock`, `*viewPanelMinimisePropertiesDock`,
+`*viewPanelRestorePropertiesDock`, and a precise rectangle
+`*viewPanelPlace:CommandLineDock:float:400,300,600,150` - the panel named by
+its dock (`LayersDock`, `PropertiesDock`, `CommandLineDock`,
+`ReferenceDataDock`, `SurfacesDock`, `VerticesDock`, `SurveyPointsDock`). A
+floating panel is the same dock target (`%LayersDock`), its eight sizing
+edges and corners are the controls `LayersDockResizeLeft` and its seven
+siblings (the dock's name, Resize, then Top, Right, Bottom, TopLeft, TopRight,
+BottomLeft or BottomRight), and a minimised one's button in the status
+bar's tray is `%MinimisedToolBar|!RestoreLayersDock`. `?windowPanels` prints
+where each is: `LayersDock=float:63,167,240,312 PropertiesDock=docked;minimised
+... SurfacesDock=docked;hidden`.
+
 **The pointer.** A headless run has no mouse, and a tool's preview and its
 picks follow one: before the pointer steps a run could start Insert Vertex
 but never show where a vertex would go, and a pick step (a vertex, a

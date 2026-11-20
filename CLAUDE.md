@@ -409,6 +409,15 @@ in.
 - **Agents read egui's and egui_dock's API from the fetched sources**
   (`\\wsl.localhost\Ubuntu-24.04\root\.cargo\registry\src\...`), never from
   memory: they change at every release.
+- **Merge finished trees into main, then build once, on main - the owner's
+  standing instruction (2026-11-21): "merge into main then compile once if
+  anything need to change we change on main".** When the agents have
+  reported, their branches are merged into the main checkout's working tree
+  (`git merge --squash`, uncommitted), and the one build and suite run happen
+  THERE. What the first compile breaks is fixed on main, and the commit is
+  made when the suite is green (section 6). Do not build an integration
+  worktree first: it compiles everything twice and the owner tests main's
+  copy.
 - **Ask agents for evidence**: what changed, the tests written and what each
   should show, what they could not check by reading. Then verify centrally,
   by building the merged result and running the WHOLE suite yourself.

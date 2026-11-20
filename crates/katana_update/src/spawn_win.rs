@@ -266,6 +266,12 @@ pub(crate) fn process_is_elevated() -> bool {
     token_elevation_type().is_some_and(|kind| is_elevated_half(kind as u32))
 }
 
+// The process module says what is asked and why (turn_error_boxes_off). The mode is SET to the
+// three flags, not added to what the process had, as the helper has always set it.
+pub(crate) fn turn_error_boxes_off() {
+    set_error_mode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+}
+
 // The command line as UTF-8 (process.rs, utf8_arguments).
 pub(crate) fn utf8_arguments() -> Vec<Vec<u8>> {
     if let Some(wide) = command_line_arguments() {
@@ -279,4 +285,27 @@ pub(crate) fn utf8_arguments() -> Vec<Vec<u8>> {
     std::env::args_os()
         .map(|argument| argument.to_string_lossy().into_owned().into_bytes())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // winbase.h: SEM_NOALIGNMENTFAULTEXCEPT, which SetErrorMode's documentation says cannot be
+    // cleared once a process has set it - so it is expected as the process had it.
+    const SEM_NOALIGNMENTFAULTEXCEPT: u32 = 0x4;
+
+    // 0x8003 is SEM_FAILCRITICALERRORS (0x1), SEM_NOGPFAULTERRORBOX (0x2) and
+    // SEM_NOOPENFILEERRORBOX (0x8000) of winbase.h, added by hand. No other case of this binary
+    // changes the error mode, so reading it by setting it and putting it back races nothing.
+    #[test]
+    fn turning_the_error_boxes_off_sets_the_three_flags_of_winbase_h_and_no_other() {
+        let before = set_error_mode(0);
+        set_error_mode(before);
+
+        turn_error_boxes_off();
+        let after = set_error_mode(before);
+
+        assert_eq!(after, 0x8003 | (before & SEM_NOALIGNMENTFAULTEXCEPT));
+    }
 }

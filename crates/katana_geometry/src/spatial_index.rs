@@ -1,7 +1,59 @@
 use crate::{Box2, Point2};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 pub type SpatialId = u64;
+
+/// The hash of the index's own keys - an entity id, or a cell's two numbers
+/// packed into 64 bits - in place of the standard library's keyed SipHash.
+///
+/// Every rebuild hashes each box once and each cell it covers once, and every
+/// query hashes each cell it covers and then each id it finds there to fetch
+/// its box, so the hash is most of what the index does besides comparing
+/// boxes. SipHash is there to keep an attacker's chosen keys from colliding,
+/// which a drawing's ids and cells are not; one multiply-and-shift mix is
+/// enough to spread them (docs/performance.md, "The spatial index's hashing").
+///
+/// The mix is the finaliser of SplitMix64 (G. Steele, D. Lea and C. Flood,
+/// "Fast splittable pseudorandom number generators", OOPSLA 2014; the
+/// constants are D. Stafford's "Mix13", as in S. Vigna's public-domain
+/// splitmix64.c). It is a bijection of the 64 bits, so two keys never hash
+/// alike, and it spreads a change in any bit over the low bits that pick a
+/// bucket and the high bits the table tags an entry with: ids are consecutive
+/// integers, and a cell key differs from its neighbour only in bit 0 or 32.
+///
+/// Nothing the index answers depends on the hash: a query's ids are sorted
+/// before they are returned, and a cell's ids are kept in the order they were
+/// filed.
+#[derive(Clone, Copy, Debug, Default)]
+struct KeyHasher(u64);
+
+const fn mix(key: u64) -> u64 {
+    let key = (key ^ (key >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    let key = (key ^ (key >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    key ^ (key >> 31)
+}
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    // What a u64 key calls, and so the only path the index takes.
+    fn write_u64(&mut self, key: u64) {
+        self.0 = mix(self.0 ^ key);
+    }
+
+    // Any other key type, a byte at a time: correct, and never reached while
+    // both maps are keyed by a u64.
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.0 = mix(self.0 ^ u64::from(byte));
+        }
+    }
+}
+
+type KeyMap<Value> = HashMap<u64, Value, BuildHasherDefault<KeyHasher>>;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SpatialEntry {
     pub id: SpatialId,
@@ -10,8 +62,8 @@ pub struct SpatialEntry {
 #[derive(Clone, Debug)]
 pub struct SpatialIndex {
     cell_size: f64,
-    cells: HashMap<u64, Vec<SpatialId>>,
-    boxes: HashMap<SpatialId, Box2>,
+    cells: KeyMap<Vec<SpatialId>>,
+    boxes: KeyMap<Box2>,
     oversized: Vec<SpatialId>,
     bounds: Box2,
 }
@@ -19,8 +71,8 @@ impl Default for SpatialIndex {
     fn default() -> Self {
         Self {
             cell_size: 1.0,
-            cells: HashMap::new(),
-            boxes: HashMap::new(),
+            cells: KeyMap::default(),
+            boxes: KeyMap::default(),
             oversized: Vec::new(),
             bounds: Box2::default(),
         }

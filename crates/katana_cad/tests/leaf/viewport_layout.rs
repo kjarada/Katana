@@ -16,7 +16,10 @@
 use std::collections::BTreeSet;
 
 use crate::near;
-use katana_cad::viewport_layout::{cell_count, default_view_kind, dock_splits, layout_rects};
+use katana_cad::viewport_layout::{
+    TILE_KINDS, TileKind, TileSplit, cell_count, default_view_kind, dock_splits, layout_rects,
+    tile_plan, tile_rects, tile_rows,
+};
 use katana_cad::{CellRect, DockSplit, LayoutKind, ViewKind};
 use katana_entity::EnumName;
 
@@ -65,6 +68,52 @@ fn simulate_docking(steps: &[DockSplit], views: usize) -> Vec<CellRect> {
             existing.height /= 2.0;
             added.y = existing.y + existing.height;
             added.height = existing.height;
+        }
+        placed[step.added] = added;
+        is_placed[step.added] = true;
+    }
+    for (i, &placed_here) in is_placed.iter().enumerate() {
+        assert!(placed_here, "view {i} was never placed");
+    }
+    placed
+}
+
+// The counts the tilings are checked at: none, one, the small ones a person has, a prime, and
+// a dozen.
+const TILE_COUNTS: [usize; 8] = [0, 1, 2, 3, 4, 5, 7, 12];
+
+// Applies a tiling's steps to rectangles the way the window cuts a dock: the existing view keeps
+// the first of `parts` equal parts of its place, to the left or on top, and the added view is
+// given the rest.
+fn simulate_tiling(steps: &[TileSplit], views: usize) -> Vec<CellRect> {
+    let mut placed = vec![CellRect::default(); views];
+    let mut is_placed = vec![false; views];
+    if views > 0 {
+        placed[0] = CellRect::new(0.0, 0.0, 1.0, 1.0);
+        is_placed[0] = true;
+    }
+    for step in steps {
+        assert!(step.existing < views);
+        assert!(step.added < views);
+        assert!(step.parts >= 2, "a cut leaves the added view a part");
+        assert!(
+            is_placed[step.existing],
+            "a step can only cut a view already placed"
+        );
+        assert!(!is_placed[step.added], "each view is placed exactly once");
+        let existing = &mut placed[step.existing];
+        let mut added = *existing;
+        let parts = step.parts as f64;
+        if step.side_by_side {
+            let kept = existing.width / parts;
+            added.x = existing.x + kept;
+            added.width = existing.width - kept;
+            existing.width = kept;
+        } else {
+            let kept = existing.height / parts;
+            added.y = existing.y + kept;
+            added.height = existing.height - kept;
+            existing.height = kept;
         }
         placed[step.added] = added;
         is_placed[step.added] = true;
@@ -218,5 +267,208 @@ mod viewport_layout {
             DockSplit::new(1, 3, false),
         ];
         assert_eq!(dock_splits(LayoutKind::Quad), expected);
+    }
+
+    // ---- the tilings ---------------------------------------------------------
+
+    #[test]
+    fn a_grid_has_the_fewest_rows_of_at_most_ceil_sqrt_columns_dealt_evenly() {
+        // Worked by hand: columns = ceil(sqrt(n)), rows = ceil(n / columns), the
+        // views dealt over the rows as evenly as they go, the fuller rows on top.
+        // 7: columns 3, rows 3, 7 = 3 + 2 + 2. 12: columns 4, rows 3, 4 each.
+        let expected: [(usize, &[usize]); 8] = [
+            (0, &[]),
+            (1, &[1]),
+            (2, &[2]),
+            (3, &[2, 1]),
+            (4, &[2, 2]),
+            (5, &[3, 2]),
+            (7, &[3, 2, 2]),
+            (12, &[4, 4, 4]),
+        ];
+        for (count, rows) in expected {
+            assert_eq!(tile_rows(count, TileKind::Grid), rows, "{count} views");
+        }
+    }
+
+    #[test]
+    fn side_by_side_is_one_row_and_stacked_is_one_view_a_row() {
+        for count in TILE_COUNTS {
+            let columns = tile_rows(count, TileKind::Columns);
+            let rows = tile_rows(count, TileKind::Rows);
+            if count == 0 {
+                assert!(columns.is_empty());
+                assert!(rows.is_empty());
+            } else {
+                assert_eq!(columns, [count]);
+                assert_eq!(rows, vec![1; count]);
+            }
+        }
+    }
+
+    #[test]
+    fn every_tiling_places_every_view_whatever_the_count() {
+        // Every count to 200, and a million in a grid (1000 rows of 1000): each
+        // view has a row, no row is empty, and a grid's rows differ by one view at
+        // most and are never more than its widest row holds.
+        for kind in TILE_KINDS {
+            for count in 0..=200usize {
+                let rows = tile_rows(count, kind);
+                assert_eq!(rows.iter().sum::<usize>(), count, "{} {count}", kind.word());
+                assert!(rows.iter().all(|&views| views > 0));
+                assert_eq!(tile_plan(count, kind).len(), count.saturating_sub(1));
+                assert_eq!(tile_rects(count, kind).len(), count);
+            }
+        }
+        for count in 1..=200usize {
+            let rows = tile_rows(count, TileKind::Grid);
+            let widest = rows.iter().copied().max().unwrap_or(0);
+            let narrowest = rows.iter().copied().min().unwrap_or(0);
+            assert!(widest - narrowest <= 1, "{count}: {rows:?}");
+            assert!(rows.len() <= widest, "{count}: {rows:?}");
+            // ceil(sqrt(count)) columns at most: the square of one fewer holds
+            // fewer views than there are.
+            assert!((widest - 1) * (widest - 1) < count, "{count}: {rows:?}");
+        }
+        let million = tile_rows(1_000_000, TileKind::Grid);
+        assert_eq!(million.len(), 1000);
+        assert!(million.iter().all(|&views| views == 1000));
+    }
+
+    #[test]
+    fn no_views_tile_to_nothing_and_one_view_has_the_whole_area() {
+        for kind in TILE_KINDS {
+            assert!(tile_rects(0, kind).is_empty(), "{}", kind.word());
+            assert!(tile_plan(0, kind).is_empty(), "{}", kind.word());
+            assert_eq!(
+                tile_rects(1, kind),
+                [CellRect::new(0.0, 0.0, 1.0, 1.0)],
+                "{}",
+                kind.word()
+            );
+            assert!(tile_plan(1, kind).is_empty(), "{}", kind.word());
+        }
+    }
+
+    #[test]
+    fn every_tiling_covers_the_area_once_with_equal_places_in_each_row() {
+        for kind in TILE_KINDS {
+            for count in TILE_COUNTS {
+                let rects = tile_rects(count, kind);
+                let rows = tile_rows(count, kind);
+                assert_eq!(rects.len(), count);
+                let what = format!("{} of {count}", kind.word());
+
+                // Inside the area, and the areas add to the whole (or to nothing
+                // for no view).
+                let mut area = 0.0;
+                for rect in &rects {
+                    assert!(rect.width > 0.0 && rect.height > 0.0, "{what}");
+                    assert!(rect.x >= 0.0 && rect.y >= 0.0, "{what}");
+                    assert!(rect.x + rect.width <= 1.0 + 1e-12, "{what}");
+                    assert!(rect.y + rect.height <= 1.0 + 1e-12, "{what}");
+                    area += rect.width * rect.height;
+                }
+                near(area, if count == 0 { 0.0 } else { 1.0 }, 1e-12);
+
+                // No two overlap: one ends, in x or in y, where the other begins.
+                for (at, one) in rects.iter().enumerate() {
+                    for other in &rects[at + 1..] {
+                        let apart_x = one.x + one.width <= other.x + 1e-12
+                            || other.x + other.width <= one.x + 1e-12;
+                        let apart_y = one.y + one.height <= other.y + 1e-12
+                            || other.y + other.height <= one.y + 1e-12;
+                        assert!(apart_x || apart_y, "{what}: {one:?} over {other:?}");
+                    }
+                }
+
+                // The rows are of one height, 1 / rows, and the views of a row of
+                // one width, 1 / the row's views, in the order given.
+                let mut next = 0;
+                for (row, &views) in rows.iter().enumerate() {
+                    for column in 0..views {
+                        let rect = rects[next];
+                        next += 1;
+                        near(rect.height, 1.0 / rows.len() as f64, 1e-12);
+                        near(rect.y, row as f64 / rows.len() as f64, 1e-12);
+                        near(rect.width, 1.0 / views as f64, 1e-12);
+                        near(rect.x, column as f64 / views as f64, 1e-12);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn docking_the_tile_steps_reproduces_every_tilings_rectangles() {
+        for kind in TILE_KINDS {
+            for count in TILE_COUNTS {
+                let expected = tile_rects(count, kind);
+                let steps = tile_plan(count, kind);
+                assert_eq!(
+                    steps.len(),
+                    count.saturating_sub(1),
+                    "one step per view after the first"
+                );
+                let docked = simulate_tiling(&steps, count);
+                for (i, (docked_rect, expected_rect)) in docked.iter().zip(&expected).enumerate() {
+                    let what = format!("{} of {count}, view {i}", kind.word());
+                    // Thirds and fifths are not exact in binary: a few ulps.
+                    assert!((docked_rect.x - expected_rect.x).abs() < 1e-12, "{what}");
+                    assert!((docked_rect.y - expected_rect.y).abs() < 1e-12, "{what}");
+                    assert!(
+                        (docked_rect.width - expected_rect.width).abs() < 1e-12,
+                        "{what}"
+                    );
+                    assert!(
+                        (docked_rect.height - expected_rect.height).abs() < 1e-12,
+                        "{what}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn three_in_a_row_are_cut_a_third_then_a_half_never_halved_twice() {
+        // Worked by hand. Halving twice, as a preset's steps do, would leave a half
+        // and two quarters; a third off the whole and then half of what is left
+        // gives three thirds. The parts are the contract, so they are pinned.
+        let step = |existing, added, side_by_side, parts| TileSplit {
+            existing,
+            added,
+            side_by_side,
+            parts,
+        };
+        assert_eq!(
+            tile_plan(3, TileKind::Columns),
+            [step(0, 1, true, 3), step(1, 2, true, 2)]
+        );
+        assert_eq!(
+            tile_plan(3, TileKind::Rows),
+            [step(0, 1, false, 3), step(1, 2, false, 2)]
+        );
+        // Five in a grid, 3 over 2: the rows first - view 3 begins the second - and
+        // then each row from the left.
+        assert_eq!(
+            tile_plan(5, TileKind::Grid),
+            [
+                step(0, 3, false, 2),
+                step(0, 1, true, 3),
+                step(1, 2, true, 2),
+                step(3, 4, true, 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_tiling_has_a_distinct_word_and_menu_name() {
+        let mut words = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        for kind in TILE_KINDS {
+            assert!(words.insert(kind.word()), "duplicate word {}", kind.word());
+            assert!(names.insert(kind.name()), "duplicate name {}", kind.name());
+        }
+        assert_eq!(words.len(), 3);
     }
 }

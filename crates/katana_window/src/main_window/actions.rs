@@ -20,7 +20,7 @@ use egui::{Key, KeyboardShortcut, Modifiers};
 use katana_cad::snapping::SnapModes;
 use katana_cad::view_link::linkable;
 use katana_cad::view_verbs::{ZoomRequestKind, zoom_takes};
-use katana_cad::viewport_layout::{LayoutKind, ViewKind};
+use katana_cad::viewport_layout::{LayoutKind, TileKind, ViewKind};
 use katana_entity::EnumName;
 use katana_render::camera::{StandardView, to_string as standard_view_name};
 
@@ -569,6 +569,41 @@ pub const LAYOUTS: [(LayoutKind, &str, &str, &str); 6] = [
         "Four views of equal size",
     ),
 ];
+
+/// The tilings View > Viewport Layout offers above its presets: kind, action name, icon, tip. Each
+/// runs VIEWS TILE with the kind's word (`tiling_line`), as a typed line would.
+pub const TILINGS: [(TileKind, &str, &str, &str); 3] = [
+    (
+        TileKind::Grid,
+        "viewTile",
+        "LayoutTile",
+        "Give every open view a place of its own of equal size, in a grid; opens and closes none \
+         (VIEWS TILE)",
+    ),
+    (
+        TileKind::Columns,
+        "viewTileSideBySide",
+        "LayoutTileColumns",
+        "Put the open views side by side, each the same width; opens and closes none (VIEWS TILE \
+         COLUMNS)",
+    ),
+    (
+        TileKind::Rows,
+        "viewTileStacked",
+        "LayoutTileRows",
+        "Stack the open views one above the other, each the same height; opens and closes none \
+         (VIEWS TILE ROWS)",
+    ),
+];
+
+/// The line a tiling's menu item hands the window's executor: None for a name that is no
+/// tiling's.
+pub fn tiling_line(action: &str) -> Option<String> {
+    TILINGS
+        .iter()
+        .find(|(_, name, ..)| *name == action)
+        .map(|(kind, ..)| format!("VIEWS TILE {}", kind.word().to_ascii_uppercase()))
+}
 
 /// The kinds View > Active Viewport Shows offers.
 pub const KINDS: [(ViewKind, &str, &str); 4] = [
@@ -1128,9 +1163,25 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         String::from("viewLayoutMenu"),
         (
             "LayoutQuad",
-            String::from("Arrange the open views: one, two, three or four, side by side or stacked"),
+            String::from(
+                "Arrange the views: tile the ones that are open, or a preset of one, two, three \
+                 or four",
+            ),
         ),
     );
+    // The tilings first: they arrange the views a person has, which is what "arrange my views"
+    // most often means; a preset below opens the views its picture lacks.
+    layout_menu
+        .items
+        .push(MenuItem::Section(String::from("Arrange the open views")));
+    for (kind, name, icon, tip) in TILINGS {
+        layout_menu
+            .items
+            .push(MenuItem::Action(act(name, icon, kind.name(), tip)));
+    }
+    layout_menu
+        .items
+        .push(MenuItem::Section(String::from("Presets")));
     for (kind, name, icon, tip) in LAYOUTS {
         layout_menu.items.push(MenuItem::Action(act(
             &format!("viewLayout{name}"),

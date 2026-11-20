@@ -210,6 +210,20 @@ pub fn process_is_elevated() -> bool {
     }
 }
 
+/// Turns the system's error boxes off for THIS process, for good: no "there is no disk in the
+/// drive", no crash box, no "cannot open file" box. For a program that runs with no window on a
+/// desktop nobody may be watching (the helper), where a box would hold the work until somebody
+/// clicked it. The programs the launcher starts do not inherit it (spawn_win.rs,
+/// CREATE_DEFAULT_ERROR_MODE).
+///
+/// Windows: SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
+/// SEM_NOOPENFILEERRORBOX), the mode set to exactly those. Elsewhere there are no such boxes and
+/// nothing is done.
+pub fn turn_error_boxes_off() {
+    #[cfg(windows)]
+    crate::spawn_win::turn_error_boxes_off();
+}
+
 #[doc(hidden)]
 pub mod detail {
     /// Which answer of TokenElevationType is the elevated half of a split token: the one decision

@@ -56,11 +56,6 @@
 
 #[cfg(windows)]
 mod stub {
-    #![allow(
-        unsafe_code,
-        reason = "the helper's RunOnce value is read through RegGetValueW, a foreign function"
-    )]
-
     use std::ffi::{OsStr, OsString};
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -132,7 +127,12 @@ mod stub {
     }
 
     // The RunOnce value of the helper under HKCU\<base> - under HKCU itself for an empty base - or
-    // "-" when it is not there.
+    // "-" when it is not there. Read with RegGetValueW here, not through katana_update's registry
+    // seam: the stub is what the helper's tests see the registry with, behind the code they check.
+    #[allow(
+        unsafe_code,
+        reason = "the helper's RunOnce value is read through RegGetValueW, a foreign function"
+    )]
     fn run_once_value(base: &OsStr) -> String {
         let mut key: Vec<u16> = base.encode_wide().collect();
         if !key.is_empty() {

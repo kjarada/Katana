@@ -62,10 +62,10 @@ use katana_cad::section::{Section, SectionDesign};
 use katana_cad::view_link::linkable;
 use katana_cad::view_set::{NO_VIEW, ViewId, ViewSet, ViewState, restore_view_paper_scales};
 use katana_cad::view_verbs::{
-    ViewVerbHost, ZoomRequest, ZoomRequestKind, apply_plan_zoom, zoom_takes,
+    TileOutcome, ViewVerbHost, ZoomRequest, ZoomRequestKind, apply_plan_zoom, zoom_takes,
 };
 use katana_cad::viewport_layout::{
-    LayoutKind, ViewKind, cell_count, default_view_kind, dock_splits,
+    LayoutKind, TileKind, ViewKind, cell_count, default_view_kind, dock_splits, tile_plan,
 };
 use katana_cad::{CommandInterpreter, Document, ListenerHandle, SnapModes, SnapResult};
 use katana_core::error::make_error;
@@ -369,10 +369,23 @@ fn on_pixel(value: f32, pixels_per_point: f32) -> f32 {
 /// whose borders are the middle less and plus half the separator: the C++'s resizeDocks in pixels,
 /// so that the other docks of the row keep theirs.
 fn half_fraction(extent: f32) -> f32 {
-    if extent <= SEPARATOR + 2.0 {
-        return 0.5;
+    equal_fraction(extent, 2)
+}
+
+/// The fraction that cuts the first of `parts` equal places off `extent`, a separator between each
+/// two: the first (extent - the separators) / parts rounded down, the rest left for the cuts that
+/// follow, each worked from what is left - so the places of a row differ by a point at most. The
+/// bare 1 / parts takes half a separator off each side of every cut, which each place cut later
+/// pays again: of five across W points the first is W / 5 - 2 and the last W / 5 - 4.17, by
+/// egui_dock's arithmetic (leaf_rects), and the gap grows with the count. An extent with no room
+/// for a point each, or none known yet, is cut by 1 / parts.
+fn equal_fraction(extent: f32, parts: usize) -> f32 {
+    let count = parts.max(1) as f32;
+    let gaps = SEPARATOR * (count - 1.0);
+    if parts < 2 || !extent.is_finite() || extent <= gaps + count {
+        return 1.0 / count;
     }
-    let first = ((extent - SEPARATOR) / 2.0).floor().max(1.0);
+    let first = ((extent - gaps) / count).floor().max(1.0);
     ((first + SEPARATOR / 2.0) / extent).clamp(0.0, 1.0)
 }
 
@@ -1327,6 +1340,126 @@ impl Inner {
         }
     }
 
+    // ---- tiling ----------------------------------------------------------------------------
+
+    /// VIEWS TILE: the views in the dock area re-docked each in a place of its own of equal size
+    /// (tile_plan), the active one first and the rest in the order opened; none opened, none
+    /// closed. A floating view is docked in - a person who asks for the views to be arranged
+    /// wants them all arranged; a minimised one stays in the tray; a maximise is undone first.
+    /// One docked view, or none, is left as it is.
+    fn tile(&mut self, views: &RefCell<ViewSet>, kind: TileKind) -> TileOutcome {
+        // A maximise is a passing state, not a layout: the views a docked one hid are back before
+        // any is counted, and a floating one's record is gone before its view is docked.
+        if let Some(chrome) = &mut self.chrome {
+            chrome.unmaximise_all(&mut self.layout);
+        }
+        let tray: Vec<String> = self
+            .chrome
+            .as_ref()
+            .map(DockChrome::minimised_names)
+            .unwrap_or_default();
+        let active = views.borrow().active_id();
+        let mut ids: Vec<ViewId> = self
+            .docks
+            .iter()
+            .map(|view| view.id)
+            .filter(|&id| self.shown(id))
+            .collect();
+        if let Some(at) = ids.iter().position(|&id| id == active) {
+            let first = ids.remove(at);
+            ids.insert(0, first);
+        }
+        let docked = ids.iter().filter(|&&id| self.floating(id)).count();
+        let outcome = TileOutcome {
+            tiled: ids.len(),
+            docked,
+            minimised: tray.len(),
+        };
+        if ids.is_empty() || (ids.len() == 1 && docked == 0) {
+            // Nothing to arrange; the undone maximise may still have resized a view.
+            self.relayout(views);
+            return outcome;
+        }
+        // A minimised view remembers the whole layout it left (dock_chrome's Minimised), and its
+        // tray button puts that layout back when the same views are open - which would undo the
+        // tiling at the first view restored. So each is brought back, parked on the tiling's
+        // first place, and minimised again from there, in the tray's order: its button then
+        // brings it back as a tab on the first tile, the tiles as they are. (A floating one is
+        // left floating and minimised again from its window.)
+        if let Some(chrome) = &mut self.chrome {
+            for name in &tray {
+                chrome.restore(&mut self.layout, name);
+            }
+        }
+        let parked: Vec<String> = tray
+            .iter()
+            .filter(|name| {
+                self.layout
+                    .find_tab_from(|tab| tab.0 == **name)
+                    .is_some_and(|path| path.surface.is_main())
+            })
+            .cloned()
+            .collect();
+        let leaving: BTreeSet<String> = ids
+            .iter()
+            .map(|id| dock_name(*id))
+            .chain(parked.iter().cloned())
+            .collect();
+        crate::dock_chrome::remove_tabs(&mut self.layout, |tab| leaving.contains(&tab.0));
+        // Each view's place in points as the steps cut it, where the area has been laid out: a
+        // cut's fraction is worked from the extent it cuts (equal_fraction).
+        let mut tree = Tree::new(vec![ViewTab(dock_name(ids[0]))]);
+        let mut sizes: Vec<Option<Vec2>> = vec![None; ids.len()];
+        sizes[0] = self.area.map(|area| area.size());
+        for step in tile_plan(ids.len(), kind) {
+            let existing = dock_name(ids[step.existing]);
+            let Some((node, _)) = tree.find_tab_from(|tab| tab.0 == existing) else {
+                continue;
+            };
+            let fraction = match sizes[step.existing] {
+                Some(mut size) => {
+                    let extent = if step.side_by_side { size.x } else { size.y };
+                    let fraction = equal_fraction(extent, step.parts);
+                    // egui_dock's borders: the middle less and plus half the separator.
+                    let kept = (extent * fraction - SEPARATOR * 0.5).max(0.0);
+                    let rest = (extent - extent * fraction - SEPARATOR * 0.5).max(0.0);
+                    let mut added = size;
+                    if step.side_by_side {
+                        size.x = kept;
+                        added.x = rest;
+                    } else {
+                        size.y = kept;
+                        added.y = rest;
+                    }
+                    sizes[step.existing] = Some(size);
+                    sizes[step.added] = Some(added);
+                    fraction
+                }
+                // Before the first layout a place's size means nothing: the bare share.
+                None => equal_fraction(f32::NAN, step.parts),
+            };
+            let tab = vec![ViewTab(dock_name(ids[step.added]))];
+            if step.side_by_side {
+                let _ = tree.split_right(node, fraction, tab);
+            } else {
+                let _ = tree.split_below(node, fraction, tab);
+            }
+        }
+        *self.layout.main_surface_mut() = tree;
+        for name in &parked {
+            self.layout.push_to_first_leaf(ViewTab(name.clone()));
+        }
+        if let Some(chrome) = &mut self.chrome {
+            for name in &tray {
+                chrome.minimise(&mut self.layout, name);
+            }
+            chrome.refresh(&mut self.layout);
+        }
+        self.relayout(views);
+        self.push(WorkspaceEvent::ViewsChanged);
+        outcome
+    }
+
     // ---- the tools -------------------------------------------------------------------------
 
     fn start_tool(
@@ -1881,6 +2014,14 @@ impl ViewVerbHost for Shared {
             crate::plan_painter::set_mesh_plan_display(display);
         }
         Ok(())
+    }
+
+    fn tile(&self, kind: TileKind) -> Result<TileOutcome> {
+        if self.mode.get() == HostMode::Record {
+            // A probe arranges nothing: the copy it runs on has no docks.
+            return Ok(TileOutcome::default());
+        }
+        Ok(self.inner.borrow_mut().tile(&self.views, kind))
     }
 }
 
@@ -2457,6 +2598,19 @@ impl ViewWorkspace {
         inner.relayout(views);
         inner.push(WorkspaceEvent::ViewsChanged);
         inner.drain_all(views, Some(&mut *cx));
+    }
+
+    /// Arranges the views that are open, each in a place of its own of equal size - a grid, side
+    /// by side or stacked - opening none and closing none: what VIEWS TILE does, which is how the
+    /// View menu's Tile items reach it (docs/desktop.md, "Tiling the open views"). The active
+    /// view takes the first place and the rest follow in the order opened; a floating view is
+    /// docked into the tiling, a minimised one stays in the tray, a maximised one is restored
+    /// first. One docked view, or none, is left as it is, and counted all the same.
+    pub fn tile(&self, kind: TileKind) -> TileOutcome {
+        let mut inner = self.inner();
+        let outcome = inner.tile(self.views_cell(), kind);
+        inner.drain_all(self.views_cell(), None);
+        outcome
     }
 
     /// The open views' ids, in the order they were opened.

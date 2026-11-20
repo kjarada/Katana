@@ -10,8 +10,9 @@ how a comparison is made is `docs/testing.md`, "Benchmarks".
 with 16 logical cores, GCC 16.2 in MSYS2 UCRT64, `-O3 -DNDEBUG
 -ffp-contract=off -fno-fast-math`), with Google Benchmark programs and a
 script that alternated the builds. Both went with the C++ on 2026-11-15
-(`docs/rust.md`, "The C++ is removed"). **The Rust has no benchmarks yet and
-has not been measured against any figure here** ("Not done"). The figures are
+(`docs/rust.md`, "The C++ is removed"). **The Rust has no twin of these
+benchmarks and has not been measured against any figure here** ("Not done");
+its own, written since, are listed there. The figures are
 kept because the Rust ports the same algorithms, culls, caches and kernels,
 bit for bit where the tests say so: each records why the code is shaped as it
 is and what a Rust benchmark should find again. None is a claim about the
@@ -416,16 +417,269 @@ libstdc++ form of `hypot` only, where the C++ chose libc++'s on macOS. No
 minimum was ever measured on ARM: each is the AVX2 one, on the reasoning that
 the fixed cost it repays is the same.
 
+## Changes of 2026-11-21, measured
+
+Six changes made for speed, each found by reading the code and then measured.
+Each is one change, with its own benchmark cells, its own test that the fast
+path gives what the slow one gave, and its own hunks. Every benchmark is a
+plain program in the house form (`crates/katana_render/benches/rasterise.rs`),
+on generated data, using only members the base build has, so one source
+measures both builds; `KATANA_BENCH_ROUNDS` sets the rounds.
+
+**How they were measured** (2026-11-21, the owner's Windows machine, MSYS2
+UCRT64, Release, on mains power with nothing else building): the base is the
+commit before the changes with only the benchmark files added, built in a
+tree of its own. By the method of `docs/testing.md`, "Benchmarks", each
+program ran base, changed and base again (the A/A control), four times over
+with the order reversed every time, 15 samples a cell a run. A table gives
+the least of the four minimums and the median of the four medians, in
+milliseconds, as min / median. The A/A column is the same base program under
+a second name: where it differs from the base, that is the machine. All six
+were kept: each is outside its A/A spread.
+
+### The plan view's frames
+
+egui paints a frame for every pointer move anywhere in the window, and
+`PlanView::ui` (`crates/katana_window/src/viewport_widget.rs`) answered each
+one in full although the kept drawing (the `DrawingKey`) was still good: a
+copy of the drawing, the furniture over it, **the picture converted pixel by
+pixel into egui's colours, and the whole of it handed to the texture** - a
+second pass over every pixel and an upload of the whole view to the graphics
+card, for a picture the texture already held. Two changes, apart:
+
+1. **The texture is given the picture only when the picture changed.** A
+   paint compares the picture it made with the one before, whole, and counts
+   a revision when they differ; egui's side converts and hands over only a
+   revision it has not shown. **Rejected:** a key over what the furniture is
+   drawn from (the tool's feedback, the grips, the snap, the typed line, the
+   selection box, the hint), which would also save the copy and the furniture:
+   one input missed and the screen shows a stale picture, where a comparison
+   of the pixels cannot be wrong. The comparison costs a pass over the two
+   buffers when they are equal and stops at the first difference when they
+   are not, which for a pan is in the first rows; a frame that changes only
+   the prompt band at the bottom pays nearly the whole pass for nothing.
+   Held by `view_ui::the_texture_is_given_the_picture_when_it_changes_and_only_then`
+   (every picture handed over is the view's picture, a changed picture is
+   always handed over, an unchanged one never).
+2. **The picture is laid into a kept buffer** (`Image::copy_from`,
+   `crates/katana_window/src/canvas/image.rs`): the view keeps the picture
+   before the last and paints the next into it, where `clone` allocated a
+   whole frame each time and the system handed it over as untouched pages.
+   The price is one more frame of memory a plan view (6.4 MB at 1600 x 1000,
+   31 MB at 3840 x 2000). Held by
+   `view_ui::a_picture_laid_into_a_kept_buffer_is_the_picture_a_new_view_paints`.
+
+`cargo bench --locked -p katana_window --bench plan_frames`
+(`crates/katana_window/benches/plan_frames.rs`): 100 000 lines, a 1600 x 1000
+view through egui headless. Headless, a texture handed over is only queued,
+so the upload itself is not in these times: the desktop gains more than the
+table says.
+
+| ms, min / median | base | base (A/A) | changes 1 and 2 | changed / base |
+|---|---|---|---|---|
+| `idle_frames` (30 frames, nothing changed) | 101.39 / 108.37 | 101.24 / 108.34 | 52.05 / 56.93 | 0.51 / 0.53 |
+| `pan_frames` (10 frames, each repainted) | 108.64 / 115.10 | 109.39 / 116.22 | 99.91 / 107.89 | 0.92 / 0.94 |
+| `uploads=` of `idle_frames` | 30 | 30 | 0 | |
+
+An idle frame costs half what it did (3.4 ms to 1.7 ms a frame), and a pan,
+which the comparison could only have slowed, is 6 to 8 % quicker: the kept
+buffer's gain is larger than the comparison's cost there. **The two changes
+were measured together, not apart**: what each gives alone is not known, and
+the pan's figure is the only evidence for the second.
+
+### The labels' walk
+
+A repaint of a drawing that has any label style looked for its labels by
+listing every entity's id and looking each one up again (`draw_labels`,
+`crates/katana_window/src/plan_painter.rs`): a tree lookup for every entity
+of the drawing on every pan and zoom, whatever the view showed, where the
+entities drawn come through the spatial index. It is now one pass over the
+entities in the same order (`EntityDatabase::iter`,
+`crates/katana_entity/src/entity_database.rs`; `for_each` cannot be used, a
+label is kept past the visit). **Not done:** finding the labels without
+walking the drawing at all - a label is placed where its target is, not where
+it was made, so the index does not answer it; a list of the label ids kept
+by the database would. Held by
+`entity_walk::the_walk_hands_out_what_each_id_finds_in_ascending_id_order`
+and the label cases of the plan painter's tests, which place the same labels.
+
+`cargo bench --locked -p katana_window --bench plan_frames`: a hundredth of
+the 100 000 lines' area in view, without and with one label style.
+
+| ms, min / median | base | changed |
+|---|---|---|
+| `paint_zoomed` (no label style: the control, which must not move) | 10.05 / 10.51 | 9.91 / 10.44 |
+| `paint_zoomed_label_style` | 15.19 / 17.17 | 11.30 / 12.08 |
+
+Changed / base 0.74 on the minimum and 0.70 on the median with a label style
+(A/A 0.98 / 0.99), and 0.99 / 0.99 without one (A/A 1.00 / 1.00): the control
+did not move. Both builds drew the same 1 131 entities.
+
+### Layer counts
+
+`EntityDatabase::count_on_layer` walked every entity. The layers panel asks
+it once for each layer row on every frame it is shown, and the layer manager
+and LAYER LIST once a layer: a drawing of 100 000 entities on 200 layers was
+20 million comparisons of layer names a frame. The database now keeps a count
+a layer, moved by `add`, `insert`, `replace`, `remove`, `clear` and
+`adopt_contents` - the only members that change the entities - so the answer
+is one lookup; `ids_on_layer` still walks, and is what the test holds the
+counts to after every step of 4 000 generated changes
+(`layer_counts::every_layer_count_is_the_length_of_the_walk_after_every_kind_of_change`;
+a refused change and a copy of the database have a case each). The price is
+a hash lookup an entity added, removed or moved to another layer, which
+`add_entities`, `replace_onto_another_layer` and `remove_entities` measure.
+**Rejected:** caching the counts in the panel, keyed on the model's revision:
+three callers would each keep one, and two of them are another agent's files.
+
+`cargo bench --locked -p katana_entity --bench entity_database`
+(`crates/katana_entity/benches/entity_database.rs`).
+
+| ms, min / median | base | base (A/A) | changed |
+|---|---|---|---|
+| `count_every_layer` (200 layers, 100 000 entities) | 339.00 / 385.67 | 351.45 / 399.71 | 0.003 / 0.003 |
+| `add_entities` (100 000) | 22.33 / 23.47 | 22.34 / 23.88 | 24.32 / 25.94 |
+| `replace_onto_another_layer` (10 000) | 9.75 / 10.67 | 9.81 / 10.75 | 10.29 / 11.19 |
+| `remove_entities` (10 000) | 9.24 / 9.98 | 9.57 / 10.20 | 9.61 / 10.36 |
+
+The counts of every layer went from a third of a second to three
+microseconds. **The price is real and was kept:** adding is 9 to 11 % slower
+(A/A 1.00 / 1.02), which is 2.4 ms for 100 000 entities, once, at a load or
+an import; moving to another layer is 5 % slower (A/A 1.01); removing is
+inside the A/A spread (1.04 against 1.02 to 1.04). A frame of the layers
+panel repays a load's whole price a hundred times over.
+
+### The spatial index's hashing
+
+`SpatialIndex` (`crates/katana_geometry/src/spatial_index.rs`) keeps two hash
+maps keyed by a 64-bit number - a box by its id, a cell's ids by the cell -
+and hashed both with the standard library's keyed SipHash. A rebuild hashes
+every box once and every cell it covers; a query hashes every cell it covers
+and then every id it finds, to fetch the box it compares. The keys are now
+mixed by SplitMix64's finaliser (the source is cited at the hasher), a
+bijection of the 64 bits, a few instructions where SipHash is some tens.
+SipHash defends a table against chosen keys, which a drawing's ids and cells
+are not. **Nothing the index answers depends on the hash:** a query's ids are
+sorted before they are returned and a cell's are kept in the order filed, so
+the answers are the same to the id - held by the existing cases against a
+scan (`crates/katana_geometry/tests/cases/spatial_index.rs`) and, on keys a
+weak hash would fold together (consecutive ids, ids differing only above bit
+32, cells either side of zero), by
+`spatial_index_keys::a_rebuilt_index_answers_as_a_scan_of_every_box_does` and
+its two neighbours. **Rejected:** the identity as the hash (consecutive ids
+land in consecutive buckets, but a cell key's low half is its north number
+alone, and the table's seven tag bits would be the top of the east number:
+long probe runs on any real site); keeping the box beside the id in each cell
+to save the second lookup (five times the memory of a cell's entry, for the
+lookup this makes cheap).
+
+`cargo bench --locked -p katana_geometry --bench spatial_index`
+(`crates/katana_geometry/benches/spatial_index.rs`); the `ids=` of a cell
+must be the same in both builds.
+
+| ms, min / median | base | base (A/A) | changed |
+|---|---|---|---|
+| `query_view` (200 windows of 1 % of the site) | 18.86 / 24.58 | 18.81 / 20.82 | 14.84 / 16.84 |
+| `query_cursor` (20 000 windows at the cursor) | 5.45 / 7.23 | 5.39 / 6.25 | 4.50 / 5.34 |
+| `rebuild` (100 000 boxes) | 16.99 / 19.20 | 17.11 / 17.89 | 14.64 / 15.55 |
+| `move_boxes` (10 000 moved and moved back) | 8.00 / 8.83 | 7.97 / 8.64 | 6.72 / 7.42 |
+
+**Read the minimums here.** The medians of this program were noisy on the
+day - the base's own second copy is 0.85 of the first on `query_view`'s
+median - so a median's ratio is no result; the minimums agree with
+themselves (A/A 0.99 to 1.01 in every cell). On the minimums changed / base
+is 0.79 for `query_view`, 0.83 for `query_cursor`, 0.86 for `rebuild` and
+0.84 for `move_boxes`. The `ids=` of every cell is the same in both builds
+(207 400 and 20 585).
+
+### Checking a project's contents
+
+`validate_contents` (`crates/katana_storage/src/project_store.rs`) runs before
+a project's contents are applied to the model and before they are saved. For
+every entity it built the text "id=N" that only a refusal prints - the same
+waste the load's own comment says it avoids - and put the id into an ordered
+set, a tree node for every few entities, to refuse a repeat. The text is now
+built when a check fails, and the ids are a sorted vector while they ascend,
+which is the order a project's entities always come in (the model walks them
+so, the load reads them `ORDER BY id`); an id that does not ascend is told
+apart exactly, through a set of the few that do not. What is refused, and the
+words of the refusal, are the same in every order: held against an ordered
+set filled one id at a time, over hand-picked and 600 generated lists
+(`contents_checks::generated_orders_with_and_without_repeats_are_judged_as_a_set_judges_them`
+and its neighbours, which also hold the relationship check and the two
+refusals that print the id).
+
+`cargo bench --locked -p katana_storage --bench apply_contents`
+(`crates/katana_storage/benches/apply_contents.rs`): 100 000 entities, no
+database opened. `refuse_last` is the check alone; the other two are the
+check and the model.
+
+| ms, min / median | base | base (A/A) | changed |
+|---|---|---|---|
+| `apply_consuming` (what an open calls) | 41.12 / 42.85 | 41.15 / 42.36 | 29.71 / 31.25 |
+| `apply_copying` | 41.88 / 43.94 | 42.76 / 44.29 | 31.19 / 32.49 |
+| `refuse_last` (the check alone) | 17.39 / 18.39 | 17.65 / 18.46 | 4.67 / 4.91 |
+
+Changed / base 0.72 / 0.73 for what an open calls and 0.27 / 0.27 for the
+check alone, against an A/A of 1.00 / 0.99 and 1.01 / 1.00.
+
+### Found and left alone
+
+Hot spots read on 2026-11-21 and not changed, with what each would take:
+
+- **The plan view's copy and furniture on an unchanged frame.** With the
+  texture kept, an idle frame still copies the drawing, paints the furniture
+  and compares. Skipping all three needs a key over everything the furniture
+  reads (rejected above until someone lists it with a test for each input).
+- **The sheet editor repaints its whole canvas every frame**
+  (`crates/katana_window/src/sheet_editor.rs`, `paint_canvas`), and hands it
+  to its texture every frame. It needs what the plan view has: a kept picture
+  and a key that says when it is stale; the comparison used above would save
+  only the upload, the smaller part there.
+- **`for_each_candidate` works every candidate's extent out a second time**
+  (`crates/katana_cad/src/spatial_query.rs`): the index has already compared
+  the stored box, which is the same box unless the index is stale - and a
+  dimension's box depends on its style, which a table edit changes without
+  touching the entity. Dropping the second test changes answers in exactly
+  that case, so it needs the index refreshed on a dimension style's change
+  first.
+- **`drawing_key` lists the whole selection every frame**
+  (`crates/katana_window/src/viewport_widget.rs`): a vector of every selected
+  id, to hash it. An iterator over the set would do; a fraction of a
+  millisecond at 100 000 selected.
+- **A stored entity's two property maps are parsed from JSON on every load**
+  (`properties_from_json`, `crates/katana_entity/src/serialization.rs`), and
+  nearly every one is the text of an empty object, parsed into a tree to
+  learn so: 200 000 parses for 100 000 entities. A test for that exact text
+  before the parser is the whole change; it wants a load benchmark with a
+  real database to be judged by.
+- **Other lists of every id followed by a lookup each**, as the labels' walk
+  was: `crates/katana_cad/src/linework.rs` (three), `survey_coding.rs`,
+  `utilities/utility_data.rs` and `code_table.rs` in the same folder, and the
+  archive and IFC exports. Each is a verb's one pass, not a frame's, so each
+  is worth a few milliseconds a run at 100 000 entities; `EntityDatabase::iter`
+  is there for them.
+- **Global Modify's match** (`global_modify::match_entities`) resolves the
+  layer and matches the layer patterns for every entity; entities come in
+  runs on one layer, so remembering the last layer's answers would do. Read
+  as a few milliseconds at 100 000 entities and left: it runs once a command.
+
 ## Not done
 
 - **No Rust benchmarks.** None of the measurements above has a Rust twin,
   so no claim about the Rust's speed can be made yet, and the first change
   made for speed must first add the benchmark it is judged by, with the A/A
   method of `docs/testing.md`, "Benchmarks". The tables above say what each
-  should find. The one Rust benchmark so far is new work, not a twin: the
-  meshes' faces in plan (`crates/katana_window/benches/mesh_plan.rs`, a plain
-  program with no benchmark library; figures in `docs/plan_view.md`, "Meshes
-  in plan").
+  should find. The Rust benchmarks so far are new work, not twins,
+  each a plain program with no benchmark library: the meshes' faces in plan
+  (`crates/katana_window/benches/mesh_plan.rs`; figures in
+  `docs/plan_view.md`, "Meshes in plan"), the rasteriser's frame and the task
+  pool's dispatch (`crates/katana_render/benches/rasterise.rs`), and the four
+  of "Changes of 2026-11-21" above (`plan_frames`, `entity_database`,
+  `spatial_index`, `apply_contents`), measured there.
+- **The plan view's two changes were measured together.** What the kept
+  buffer gives without the kept texture, and the reverse, needs a build of
+  each alone (`plan_frames`).
 - **The safe kernels' speed is unmeasured.** The kernels were made safe on
   2026-11-20 rather than removed ("Safe kernels" above); that the folds into
   single loads and stores happened, and that no kernel slowed, needs the

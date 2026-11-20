@@ -15,7 +15,11 @@
 //! * dock_splits, the same pictures as a sequence of dock splits, tested to
 //!   reproduce layout_rects exactly;
 //! * the kind each slot of a preset opens (default_view_kind) and the camera
-//!   a fresh view of a kind starts with (configure_camera).
+//!   a fresh view of a kind starts with (configure_camera);
+//! * the tilings (TileKind, tile_plan, tile_rects): the views open NOW, each
+//!   given a place of its own of equal size, where a preset is a fixed picture
+//!   that opens the views it lacks (the owner's request of 2026-11-21 for "a
+//!   good way to arrange them"; docs/desktop.md, "Tiling the open views").
 
 use katana_entity::EnumName;
 use katana_render::{Camera, Projection, StandardView};
@@ -253,4 +257,157 @@ pub fn dock_splits(kind: LayoutKind) -> Vec<DockSplit> {
             DockSplit::new(1, 3, false),
         ],
     }
+}
+
+// ---- the tilings ---------------------------------------------------------------------------
+
+/// How VIEWS TILE and View > Viewport Layout's Tile items arrange the views
+/// that are open: every one a place of its own, none opened and none closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TileKind {
+    /// Rows of columns, as near square as the count allows (tile_rows).
+    Grid,
+    /// One row: the views side by side.
+    Columns,
+    /// One column: the views stacked.
+    Rows,
+}
+
+/// Every tiling, in the menu's order.
+pub const TILE_KINDS: [TileKind; 3] = [TileKind::Grid, TileKind::Columns, TileKind::Rows];
+
+/// What the menu calls it.
+impl EnumName for TileKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Grid => "Tile",
+            Self::Columns => "Tile Side by Side",
+            Self::Rows => "Tile Stacked",
+        }
+    }
+}
+
+impl TileKind {
+    /// The word VIEWS TILE takes and replies with (kind=grid).
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::Columns => "columns",
+            Self::Rows => "rows",
+        }
+    }
+
+    /// The tiling `word` names, in any case; None for any other word.
+    pub fn from_word(word: &str) -> Option<Self> {
+        TILE_KINDS
+            .into_iter()
+            .find(|kind| word.eq_ignore_ascii_case(kind.word()))
+    }
+}
+
+/// How many views each row of a tiling of `count` views holds, top to bottom;
+/// empty for none. A grid has ceil(sqrt(count)) columns at most and as few rows
+/// as hold the views at that width, the views dealt over the rows as evenly as
+/// they go, the fuller rows on top: 3 is 2 over 1, 5 is 3 over 2, 7 is 3 over 2
+/// over 2. Rejected: every row full and the remainder alone on the last (7 as
+/// 3, 3, 1), which leaves one view three times as wide as the rest where the
+/// ask is places of near equal size.
+pub fn tile_rows(count: usize, kind: TileKind) -> Vec<usize> {
+    if count == 0 {
+        return Vec::new();
+    }
+    match kind {
+        TileKind::Columns => vec![count],
+        TileKind::Rows => vec![1; count],
+        TileKind::Grid => {
+            // The least whole number whose square holds them: ceil(sqrt(count)),
+            // counted up so that no rounding of a real decides a row.
+            let mut columns = 1usize;
+            while columns.saturating_mul(columns) < count {
+                columns += 1;
+            }
+            let rows = count.div_ceil(columns);
+            let (each, over) = (count / rows, count % rows);
+            (0..rows)
+                .map(|row| if row < over { each + 1 } else { each })
+                .collect()
+        }
+    }
+}
+
+/// The places of a tiling of `count` views, in the order the views are given
+/// (the first is the top left), top-left origin, in normalised coordinates:
+/// the rows of equal height, the views of a row of equal width. One view has
+/// the whole area; none has no place.
+pub fn tile_rects(count: usize, kind: TileKind) -> Vec<CellRect> {
+    let rows = tile_rows(count, kind);
+    let height = 1.0 / rows.len().max(1) as f64;
+    let mut rects = Vec::with_capacity(count);
+    for (row, &views) in rows.iter().enumerate() {
+        let width = 1.0 / views as f64;
+        for column in 0..views {
+            rects.push(CellRect::new(
+                column as f64 * width,
+                row as f64 * height,
+                width,
+                height,
+            ));
+        }
+    }
+    rects
+}
+
+/// One step of building a tiling out of docked views, as a DockSplit is of a
+/// preset - but a split that leaves EQUAL places, where a preset's halves:
+/// `existing`'s place is cut into `parts` equal parts along the split, of
+/// which it keeps the first; `added` is given the rest, which the steps after
+/// cut again until every view of the row (or every row) has one part. Halving
+/// three views in a row would leave a half and two quarters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TileSplit {
+    /// Index of a view already placed.
+    pub existing: usize,
+    /// Index of the view this step places.
+    pub added: usize,
+    /// True: `added` to the right; false: below.
+    pub side_by_side: bool,
+    /// How many equal parts `existing`'s place is cut into; 2 or more. The
+    /// share `existing` keeps is 1 / parts.
+    pub parts: usize,
+}
+
+/// The steps that build tile_rects(count, kind) out of docks, for every view
+/// after the first, in order; empty for one view or none. The rows are cut
+/// first, each from what is left under the row before it, and then each row
+/// into its views from the left - so every step cuts a place that holds ONE
+/// view, which is the only split the window's dock tree is asked for.
+pub fn tile_plan(count: usize, kind: TileKind) -> Vec<TileSplit> {
+    let rows = tile_rows(count, kind);
+    // The index of each row's first view.
+    let mut starts = Vec::with_capacity(rows.len());
+    let mut next = 0;
+    for &views in &rows {
+        starts.push(next);
+        next += views;
+    }
+    let mut steps = Vec::with_capacity(count.saturating_sub(1));
+    for row in 1..rows.len() {
+        steps.push(TileSplit {
+            existing: starts[row - 1],
+            added: starts[row],
+            side_by_side: false,
+            parts: rows.len() - (row - 1),
+        });
+    }
+    for (row, &views) in rows.iter().enumerate() {
+        for column in 1..views {
+            steps.push(TileSplit {
+                existing: starts[row] + column - 1,
+                added: starts[row] + column,
+                side_by_side: true,
+                parts: views - (column - 1),
+            });
+        }
+    }
+    steps
 }

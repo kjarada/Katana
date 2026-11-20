@@ -25,11 +25,26 @@
 //! with its menu's icon, Minimise, Float and Close), named `<menu>TornOff`, holding the menu's
 //! items drawn by the one menu drawer (drive::action::menu_items_ui): its icons, ticks and
 //! shortcuts, each item a click that runs its action as the menu's does, and kept open. Docked,
-//! it is in a band between the views and a side - down a side in one column that scrolls, along
-//! the top or the bottom flowed into columns side by side (`flowed_items_ui`); floating, an Area
+//! it is in a band between the views and a side - down a side in one column that scrolls, its
+//! rows one line each and cut short with an ellipsis where they do not fit (`column_items_ui`),
+//! along the top or the bottom flowed into columns side by side (`flowed_items_ui`); floating, an Area
 //! of its own sized by any edge or corner (`RESIZE_HANDLES`). Its title bar is dragged to a side
 //! of the views to dock it there, or into the views to float it; its Minimise hides it to the
 //! status bar's tray (`MainWindow::tray_items`), whose button puts it back where it was.
+//!
+//! THE WINDOW'S OWN PANELS (Layers, Properties, the command line, Reference Data, Surfaces,
+//! Vertices, the survey points) float and minimise too (the owner, 2026-11-21: "float minimise
+//! for panels don't work properly" - Float was dropped and Minimise was a second Close). Float
+//! takes the panel out of the window's geometry, which closes up as if it were hidden
+//! (`Docks::docked_only`), and draws it in an Area of its own over the views, with the same
+//! chrome, moved by its title bar and sized by the same eight edges and corners as a torn-off
+//! menu (`resize_handles_ui`), kept between the menu bar and the status bar
+//! (`docking::kept_inside`); its button, reading Dock, or a double click on its title puts it
+//! back in its place of the geometry. Minimise hides it to the same tray. Rejected: docking a
+//! floating panel by where its title bar is let go, as a torn-off menu docks to a side of the
+//! views - these panels' places are the geometry's (Layers over Reference Data at the left,
+//! Properties at the right, the command line under the views), not a side a person chooses, and
+//! a drop near an edge that put the panel somewhere else than that edge would read as a miss.
 
 use std::collections::BTreeMap;
 
@@ -39,10 +54,11 @@ use katana_core::{ErrorCode, Status};
 
 use super::actions::{BarPlace, Composed, reset_tool_bars_action, tool_bar_place_menu};
 use super::docking::{
-    DRAG_THRESHOLD, DockingAction, DropSpot, DropZones, FLOAT_HEADER, FLOAT_WIDTH, FloatAt,
-    FlowItem, LEAST_PANEL, NEW_LINE_ZONE, PANEL_SIZE, PanelDrag, PanelPlace, Places, Side,
-    apply_drop, drop_spot, flow_columns, last_line, line_members, panel_dock_name,
-    panel_drop_side, panel_menu, panel_place_text, spot_at, spot_outline,
+    DRAG_THRESHOLD, DockingAction, DropSpot, DropZones, FLOAT_HEADER, FLOAT_STEP, FLOAT_WIDTH,
+    FloatAt, FlowItem, LEAST_PANEL, NEW_LINE_ZONE, PANEL_SIZE, PanelDrag, PanelPlace, Places,
+    Side, WINDOW_PANELS, apply_drop, drop_spot, flow_columns, is_window_panel, kept_inside,
+    last_line, line_members, menu_panel_icon, panel_dock_name, panel_drop_side, panel_menu,
+    panel_place_text, spot_at, spot_outline,
 };
 use super::layout::{self, BarLines, Geometry, natural_width};
 use super::window::MainWindow;
@@ -58,13 +74,14 @@ use crate::tools::flyout_button::{
 /// breadths are whole points, so equal within rounding.
 const BREADTH_TOLERANCE: f32 = 1.0;
 
-/// How far in from a floating torn-off menu's edge a press sizes it: Windows' own sizing border
-/// is 8 pixels at 100% (GetSystemMetrics SM_CXSIZEFRAME plus SM_CXPADDEDBORDER), and 6 points
-/// keeps clear of an item's icon, 15 points in.
+/// How far in from a floating panel's edge - a torn-off menu's, or one of the window's own - a
+/// press sizes it: Windows' own sizing border is 8 pixels at 100% (GetSystemMetrics
+/// SM_CXSIZEFRAME plus SM_CXPADDEDBORDER), and 6 points keeps clear of an item's icon, 15 points
+/// in.
 const RESIZE_EDGE: f32 = 6.0;
 
-/// One edge or corner of a floating torn-off menu that sizes it, and which of the rectangle's
-/// sides it moves: `moves` is (left, top, right, bottom).
+/// One edge or corner of a floating panel that sizes it, and which of the rectangle's sides it
+/// moves: `moves` is (left, top, right, bottom).
 struct ResizeHandle {
     part: &'static str,
     cursor: CursorIcon,
@@ -130,6 +147,46 @@ impl ResizeHandle {
         }
         sized
     }
+}
+
+/// Whether a press at `pointer` on a floating panel drawn at `rect` is on one of its sizing
+/// edges, which run along its title bar too: it sizes the panel then, and does not also move it.
+fn on_resize_handle(rect: Rect, pointer: Pos2) -> bool {
+    RESIZE_HANDLES
+        .iter()
+        .any(|handle| handle.area(rect).contains(pointer))
+}
+
+/// The eight sizing edges and corners of the floating panel `dock` drawn at `rect` - a torn-off
+/// menu's panel or one of the window's own - each a named control `<dock>Resize<Part>`: the
+/// rectangle a drag of one makes of it this frame, None while none is dragged. Called after the
+/// panel's contents are drawn, inside its Area: the handles are inside the panel's rectangle,
+/// where the Area's layer takes the pointer, and over the title bar and a scroll bar at the
+/// edges.
+///
+/// Every edge and corner sizes it, as a window's do. They were the right and bottom edges only,
+/// 4 points in, and a person going for the left edge, or missing a strip that thin, found it
+/// would not size (the owner, 2026-11-19).
+fn resize_handles_ui(ui: &Ui, rect: Rect, dock: &str) -> Option<Rect> {
+    let mut resized = None;
+    for handle in RESIZE_HANDLES {
+        let response = ui
+            .interact(
+                handle.area(rect),
+                egui::Id::new(("katanaPanelResize", dock, handle.part)),
+                Sense::drag(),
+            )
+            .on_hover_cursor(handle.cursor);
+        let mut control =
+            ControlRecord::new(&format!("{dock}Resize{}", handle.part), ControlKind::Other);
+        control.enabled = true;
+        control.visible = true;
+        record(ui, &response, control);
+        if response.dragged() {
+            resized = Some(handle.resized(rect, response.drag_delta()));
+        }
+    }
+    resized
 }
 
 /// The opacity of the accent filling a drop target under its outline (`drags_ui`): enough to
@@ -280,6 +337,235 @@ impl MainWindow {
             DockingAction::Band { side, breadth } => {
                 self.ui.docking.panels.set_band(side, breadth);
                 Ok(())
+            }
+            DockingAction::WindowPanelFloat { dock, rect } => self.float_window_panel(&dock, rect),
+            DockingAction::WindowPanelDock { dock } => self.dock_window_panel(&dock),
+            DockingAction::WindowPanelMinimise { dock } => self.minimise_window_panel(&dock),
+            DockingAction::WindowPanelRestore { dock } => self.restore_window_panel(&dock),
+        }
+    }
+
+    // ---- the window's own panels ----------------------------------------------------------------
+
+    /// The panels the window's geometry places this frame: those shown, less those that float.
+    pub(crate) fn docked_docks(&self) -> layout::Docks {
+        self.ui.docks.docked_only(&self.ui.docking.window_panels)
+    }
+
+    /// Whether window panel `dock` is shown and in its place of the geometry, not floating.
+    pub(crate) fn window_panel_docked(&self, dock: &str) -> bool {
+        self.window_panel_shown(dock) && !self.ui.docking.window_panels.is_floating(dock)
+    }
+
+    /// What a floating panel may cover: the window between its menu bar and its status bar. Over
+    /// the menu bar it would hide the menus, the one fixed place every command is found from;
+    /// over the status bar, the tray its own Minimise sends it to.
+    pub(crate) fn float_bounds(&self) -> Rect {
+        let screen = self.ui.docking.screen;
+        let bottom = screen.max.y - layout::STATUS_BAR;
+        let top = (screen.min.y + layout::MENU_BAR).min(bottom);
+        Rect::from_min_max(Pos2::new(screen.min.x, top), Pos2::new(screen.max.x, bottom))
+    }
+
+    /// Where window panel `dock` floats when its Float button or an action floats it: where it
+    /// last floated; else where it stands docked, FLOAT_STEP down and along and at its docked
+    /// size, so that it is seen to have left its place; else, not drawn yet, where a torn-off
+    /// menu is first put. Kept inside the window.
+    fn window_panel_float_rect(&self, dock: &str) -> Rect {
+        let rect = self
+            .ui
+            .docking
+            .window_panels
+            .rect_before(dock)
+            .or_else(|| {
+                self.ui
+                    .docking
+                    .drawn_rect(dock)
+                    .map(|docked| docked.translate(Vec2::splat(FLOAT_STEP)))
+            })
+            .unwrap_or_else(|| self.panel_float_rect(None));
+        kept_inside(rect, self.float_bounds())
+    }
+
+    /// Window panel `dock` floated at `rect`, or (None) where its Float button would put it, and
+    /// shown; a panel floating already is left where it is by None.
+    pub fn float_window_panel(&mut self, dock: &str, rect: Option<Rect>) -> Status {
+        if !is_window_panel(dock) {
+            return Err(no_window_panel(dock));
+        }
+        let floating = self.ui.docking.window_panels.is_floating(dock);
+        let rect = rect.or_else(|| (!floating).then(|| self.window_panel_float_rect(dock)));
+        if let Some(rect) = rect
+            && !self.ui.docking.window_panels.float(dock, rect)
+        {
+            return Err(make_error(
+                ErrorCode::InvalidArgument,
+                "a floating panel needs a rectangle with a width and a height",
+                dock,
+            ));
+        }
+        self.show_placed_window_panel(dock);
+        Ok(())
+    }
+
+    /// Window panel `dock` put back in its place of the window's geometry, and shown.
+    pub fn dock_window_panel(&mut self, dock: &str) -> Status {
+        if !is_window_panel(dock) {
+            return Err(no_window_panel(dock));
+        }
+        self.ui.docking.window_panels.dock(dock);
+        self.show_placed_window_panel(dock);
+        Ok(())
+    }
+
+    /// A panel just placed is shown, and out of the tray: placing a thing nobody can see would
+    /// read as an action that did nothing.
+    fn show_placed_window_panel(&mut self, dock: &str) {
+        self.ui.docking.window_panels.restore(dock);
+        self.show_window_panel(dock, true);
+    }
+
+    /// Window panel `dock` hidden to the status bar's tray, keeping its place - docked, or
+    /// floating at its rectangle - for when its tray button puts it back.
+    pub fn minimise_window_panel(&mut self, dock: &str) -> Status {
+        if !is_window_panel(dock) {
+            return Err(no_window_panel(dock));
+        }
+        if !self.window_panel_shown(dock) {
+            return Err(make_error(
+                ErrorCode::InvalidState,
+                "the panel is not shown; there is nothing to minimise",
+                dock,
+            ));
+        }
+        self.show_window_panel(dock, false);
+        self.ui.docking.window_panels.minimise(dock);
+        Ok(())
+    }
+
+    /// Window panel `dock` put back from the tray where it was.
+    pub fn restore_window_panel(&mut self, dock: &str) -> Status {
+        if !self.ui.docking.window_panels.restore(dock) {
+            return Err(make_error(
+                ErrorCode::InvalidState,
+                "the panel is not minimised; there is nothing to put back",
+                dock,
+            ));
+        }
+        self.show_window_panel(dock, true);
+        Ok(())
+    }
+
+    /// The window panels' bookkeeping brought in line with the window, before a frame lays it
+    /// out: a minimised panel shown again by another way - View > Panels ticked, a tool that
+    /// opens it, Reset Layout - is out of the tray, since a button there for a panel on screen
+    /// would put back nothing; and each panel's bar is told whether it floats, so its Float
+    /// button reads Dock while it does (`DockChrome::set_floating`).
+    pub(crate) fn settle_window_panels(&mut self) {
+        let shown_again: Vec<String> = self
+            .ui
+            .docking
+            .window_panels
+            .minimised
+            .iter()
+            .filter(|dock| self.window_panel_shown(dock))
+            .cloned()
+            .collect();
+        for dock in shown_again {
+            self.ui.docking.window_panels.restore(&dock);
+        }
+        for dock in WINDOW_PANELS {
+            let floating = self.ui.docking.window_panels.is_floating(dock);
+            self.ui.panels.chrome.set_floating(dock, floating);
+        }
+    }
+
+    /// The title bar of one of the window's own panels asked: Float floats it, or docks it again;
+    /// Minimise hides it to the tray; Close hides it, View > Panels bringing it back; a press on
+    /// a floating one's bar starts a drag that moves it. False for a request about any other
+    /// dock.
+    pub(crate) fn window_panel_request(&mut self, request: &ChromeRequest) -> bool {
+        let dock = match request {
+            ChromeRequest::Minimise(name)
+            | ChromeRequest::Close(name)
+            | ChromeRequest::Float(name)
+            | ChromeRequest::Pressed(name) => name,
+            _ => return false,
+        };
+        if !is_window_panel(dock) {
+            return false;
+        }
+        let floating = self.ui.docking.window_panels.is_floating(dock);
+        let status = match request {
+            ChromeRequest::Minimise(_) => self.minimise_window_panel(dock),
+            ChromeRequest::Close(_) => {
+                self.show_window_panel(dock, false);
+                Ok(())
+            }
+            ChromeRequest::Float(_) if floating => self.dock_window_panel(dock),
+            ChromeRequest::Float(_) => self.float_window_panel(dock, None),
+            _ => {
+                // A docked panel's bar is pressed to no end: it is moved by its Float button.
+                if floating && let Some(rect) = self.ui.docking.drawn_rect(dock) {
+                    let pointer = self.ui.docking.pointer.unwrap_or_else(|| rect.center());
+                    if !on_resize_handle(rect, pointer) {
+                        self.ui.docking.panel_drag = Some(PanelDrag {
+                            name: dock.clone(),
+                            from: pointer,
+                            rect,
+                            moved: false,
+                        });
+                    }
+                }
+                Ok(())
+            }
+        };
+        if let Err(error) = status {
+            self.exec.log_message(&error.describe(), true);
+        }
+        true
+    }
+
+    /// The window's own panels that float, each over the views in an Area of its own: the panel
+    /// as it is drawn docked (`window_panel_at`), kept inside the window, with its edges and
+    /// corners to size it.
+    pub(crate) fn floating_window_panels_ui(&mut self, ui: &Ui) {
+        let bounds = self.float_bounds();
+        let floating: Vec<(String, Rect)> = self
+            .ui
+            .docking
+            .window_panels
+            .floating
+            .iter()
+            .filter(|(dock, _)| self.window_panel_shown(dock))
+            .cloned()
+            .collect();
+        let ctx = ui.ctx().clone();
+        for (dock, rect) in floating {
+            // Where it is drawn, not what is kept: a rectangle saved in a larger window comes
+            // back inside this one, and returns to its place when the window is large again.
+            let rect = kept_inside(rect, bounds);
+            let mut resized = None;
+            egui::Area::new(egui::Id::new(("katanaFloatingPanel", dock.as_str())))
+                .order(egui::Order::Middle)
+                .fixed_pos(rect.min)
+                .constrain(false)
+                .show(&ctx, |ui| {
+                    // The whole panel is the Area's, whatever its contents fill of it: the
+                    // Area's rectangle is what says the pointer is over this layer (egui's
+                    // layer_id_at), and a widget covering the panel is what keeps a press on an
+                    // empty part of it from reaching the view underneath (egui's hit_test).
+                    // Without it the Area is as large as what the panel's contents take, and
+                    // under a short Properties list the rest of the panel would be the plan's.
+                    let _ = ui.allocate_rect(rect, Sense::hover());
+                    self.window_panel_at(ui, rect, &dock);
+                    resized = resize_handles_ui(ui, rect, &dock);
+                });
+            if let Some(rect) = resized {
+                self.ui
+                    .docking
+                    .window_panels
+                    .float(&dock, kept_inside(rect, bounds));
             }
         }
     }
@@ -432,7 +718,7 @@ impl MainWindow {
         let lines = self.bar_lines(&arrange(&composed.bars, &shown));
         layout::geometry(
             screen,
-            &self.ui.docks,
+            &self.docked_docks(),
             false,
             &lines,
             self.ui.docking.panels.band_breadths(),
@@ -508,7 +794,7 @@ impl MainWindow {
         let Some(found) = crate::drive::steps::find_menu(&composed.menus, menu) else {
             return Err(make_error(ErrorCode::NotFound, "no menu is named", menu));
         };
-        let icon = if found.icon.is_empty() { "Panels" } else { found.icon };
+        let icon = menu_panel_icon(found, on_menu_bar(&composed, menu));
         let title = found.title.replace('&', "");
         self.ui
             .panels
@@ -553,7 +839,32 @@ impl MainWindow {
     /// `--report` of a toolbar (`place=top:0 at=1 shown=yes drawn=x,y,w,h`), of a torn-off menu's
     /// panel (`place=left items=12 drawn=...`), or of `toolBarLayout` (every toolbar's place in
     /// order, `Name=place` each); None for any other name.
+    ///
+    /// `windowPanels` reports the window's own panels, `<Dock>=docked` or
+    /// `<Dock>=float:<x>,<y>,<width>,<height>` each, with `;minimised` after one in the tray and
+    /// `;hidden` after one closed. A panel's own name is left to the report its dock always had.
     pub fn docking_report(&self, name: &str) -> Option<String> {
+        if name == "windowPanels" {
+            let panels = &self.ui.docking.window_panels;
+            let parts: Vec<String> = WINDOW_PANELS
+                .iter()
+                .map(|dock| {
+                    let place = match panels.floating_rect(dock) {
+                        Some(rect) => panel_place_text(&PanelPlace::Floating(rect)),
+                        None => String::from("docked"),
+                    };
+                    let state = if panels.is_minimised(dock) {
+                        ";minimised"
+                    } else if self.window_panel_shown(dock) {
+                        ""
+                    } else {
+                        ";hidden"
+                    };
+                    format!("{dock}={place}{state}")
+                })
+                .collect();
+            return Some(parts.join(" "));
+        }
         let places = self.bar_places();
         if name == "toolBarLayout" {
             let mut parts: Vec<String> = places
@@ -940,7 +1251,7 @@ impl MainWindow {
             let Some(found) = crate::drive::steps::find_menu(&composed.menus, menu) else {
                 continue;
             };
-            let icon = if found.icon.is_empty() { "Panels" } else { found.icon };
+            let icon = menu_panel_icon(found, on_menu_bar(composed, menu));
             let dock = panel_dock_name(menu);
             let chrome = &mut self.ui.panels.chrome;
             chrome
@@ -1065,31 +1376,7 @@ impl MainWindow {
                 .constrain(false)
                 .show(&ctx, |ui| {
                     self.menu_panel_at(ui, rect, &menu, composed, false);
-                    // Every edge and corner sizes it, as a window's do. They were the right and
-                    // bottom edges only, 4 points in, and a person going for the left edge, or
-                    // missing a strip that thin, found it would not size (the owner, 2026-11-19).
-                    // The handles are inside the panel's rectangle, where the Area's layer takes
-                    // the pointer, and drawn after its contents, so they are over the title bar
-                    // and the scroll bar at the edges.
-                    for handle in RESIZE_HANDLES {
-                        let response = ui
-                            .interact(
-                                handle.area(rect),
-                                egui::Id::new(("katanaTornOffResize", menu.as_str(), handle.part)),
-                                Sense::drag(),
-                            )
-                            .on_hover_cursor(handle.cursor);
-                        let mut control = ControlRecord::new(
-                            &format!("{}Resize{}", panel_dock_name(&menu), handle.part),
-                            ControlKind::Other,
-                        );
-                        control.enabled = true;
-                        control.visible = true;
-                        record(ui, &response, control);
-                        if response.dragged() {
-                            resized = Some(handle.resized(rect, response.drag_delta()));
-                        }
-                    }
+                    resized = resize_handles_ui(ui, rect, &panel_dock_name(&menu));
                 });
             if let Some(rect) = resized {
                 self.ui.docking.panels.place(&menu, PanelPlace::Floating(rect));
@@ -1098,9 +1385,9 @@ impl MainWindow {
     }
 
     /// Torn-off menu `menu`'s panel at `rect`: the chrome's title bar, and the menu's items by the
-    /// one menu drawer - in a column that scrolls, or, `across` a band along the top or the
-    /// bottom, flowed into columns side by side (`flowed_items_ui`); a click runs the item's
-    /// action and keeps the panel open.
+    /// one menu drawer - in a column that scrolls, each row one line (`column_items_ui`), or,
+    /// `across` a band along the top or the bottom, flowed into columns side by side
+    /// (`flowed_items_ui`); a click runs the item's action and keeps the panel open.
     fn menu_panel_at(
         &mut self,
         ui: &mut Ui,
@@ -1125,7 +1412,7 @@ impl MainWindow {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
-                            crate::drive::action::menu_items_ui(ui, &found, &mut chosen);
+                            column_items_ui(ui, &found, &mut chosen);
                         });
                     });
             }
@@ -1178,15 +1465,11 @@ impl MainWindow {
                 // A press on a floating panel's sizing edge, which runs along its title bar too,
                 // sizes it and does not also move it.
                 let floating = matches!(panel.place, PanelPlace::Floating(_));
-                if floating
-                    && RESIZE_HANDLES
-                        .iter()
-                        .any(|handle| handle.area(rect).contains(pointer))
-                {
+                if floating && on_resize_handle(rect, pointer) {
                     return true;
                 }
                 self.ui.docking.panel_drag = Some(PanelDrag {
-                    menu,
+                    name: menu,
                     from: pointer,
                     rect,
                     moved: false,
@@ -1199,7 +1482,7 @@ impl MainWindow {
     /// A drag in progress, after everything else is drawn: a toolbar's drop target outlined in the
     /// accent until it is let go, and then the bar moved there; a torn-off menu's title bar held
     /// and moved, which floats it with the pointer or docks it to the side of the views it is let
-    /// go at.
+    /// go at; a floating window panel's, which moves it.
     pub(crate) fn drags_ui(&mut self, ui: &mut Ui, geometry: &Geometry) {
         let ctx = ui.ctx().clone();
         let (pointer, down) =
@@ -1269,14 +1552,27 @@ impl MainWindow {
             if !drag.moved && (at - drag.from).length() > DRAG_THRESHOLD {
                 drag.moved = true;
             }
+            if is_window_panel(&drag.name) {
+                // One of the window's own panels: it goes with the pointer while it floats, by
+                // whole points so its border stays on the pixels, and where it is let go is
+                // where it stays - it docks by its button (see the module comment).
+                if drag.moved && self.ui.docking.window_panels.is_floating(&drag.name) {
+                    let moved = drag.rect.translate((at - drag.from).round());
+                    let kept = kept_inside(moved, self.float_bounds());
+                    self.ui.docking.window_panels.float(&drag.name, kept);
+                    ctx.request_repaint();
+                }
+                self.ui.docking.panel_drag = down.then_some(drag);
+                return;
+            }
             let floating = matches!(
-                self.ui.docking.panels.find(&drag.menu).map(|panel| panel.place),
+                self.ui.docking.panels.find(&drag.name).map(|panel| panel.place),
                 Some(PanelPlace::Floating(_))
             );
             let side = panel_drop_side(geometry.views_and_bands, at);
             if drag.moved && floating {
                 let moved = drag.rect.translate(at - drag.from);
-                self.ui.docking.panels.place(&drag.menu, PanelPlace::Floating(moved));
+                self.ui.docking.panels.place(&drag.name, PanelPlace::Floating(moved));
             }
             if down {
                 if drag.moved
@@ -1300,7 +1596,7 @@ impl MainWindow {
                         None => None,
                     };
                     if let Some(place) = place {
-                        self.ui.docking.panels.place(&drag.menu, place);
+                        self.ui.docking.panels.place(&drag.name, place);
                     }
                 }
             }
@@ -1321,6 +1617,68 @@ impl MainWindow {
             Side::Top => Rect::from_min_max(views.min, Pos2::new(views.max.x, views.min.y + breadth)),
             Side::Bottom => Rect::from_min_max(Pos2::new(views.min.x, views.max.y - breadth), views.max),
         }
+    }
+}
+
+/// Whether `menu` (its object name) is a menu of the menu bar, which opens from no item, and not
+/// a submenu (docking::menu_panel_icon).
+fn on_menu_bar(composed: &Composed, menu: &str) -> bool {
+    composed.menus.iter().any(|each| each.name == menu)
+}
+
+/// `menu`'s items in the one column of a torn-off menu down a side or floating, as wide as `ui`,
+/// drawn by the one menu drawer (drive::action::menu_item_ui), each row ONE line: a row whose
+/// text does not fit is cut short with an ellipsis, and says the whole of it under the pointer.
+///
+/// The rows wrapped: a panel narrower than its menu - docked down a side at the band's least, or
+/// a floating one drawn in - showed a long row on two lines and its neighbours on one, so the
+/// rows were of two heights and the icons no longer a column a row apart (the ninth look audit).
+/// Rejected: a panel never narrower than its widest row, which for Draw is most of a side
+/// panel's width taken from the views to show shortcuts a person already knows; and a column
+/// that scrolls across, which hides the shortcuts instead of the ends of the longest texts.
+pub(crate) fn column_items_ui(ui: &mut Ui, menu: &Menu, chosen: &mut Option<String>) {
+    egui::containers::menu::menu_style(ui.style_mut());
+    // egui cuts the first text of a button - an item's own text, its shortcut after it kept
+    // whole - where the mode is Truncate (egui's AtomLayout).
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    let width = ui.available_width();
+    for item in &menu.items {
+        let needed = item_width(ui, item);
+        // Each row in a scope held to the column's width: a section's title, which asks for
+        // its whole width, would otherwise widen the column for every row after it, and they
+        // would run under the panel's edge uncut.
+        let response = ui
+            .scope(|ui| {
+                ui.set_max_width(width);
+                crate::drive::action::menu_item_ui(ui, item, chosen)
+            })
+            .inner;
+        if needed > width + 0.5
+            && let Some(whole) = item_text(item)
+        {
+            // A greyed item says it too: what cannot be run should still be readable.
+            let _ = response
+                .on_hover_text(whole.clone())
+                .on_disabled_hover_text(whole);
+        }
+    }
+}
+
+/// An item's whole text, as a row cut short says it under the pointer: an action's text and its
+/// shortcut in parentheses, a submenu's or a section's title; None for a rule.
+fn item_text(item: &MenuItem) -> Option<String> {
+    match item {
+        MenuItem::Action(action) => Some(match &action.shortcut {
+            Some(shortcut) => format!(
+                "{} ({})",
+                action.display_text(),
+                crate::drive::action::shortcut_text(shortcut)
+            ),
+            None => action.display_text(),
+        }),
+        MenuItem::Menu(submenu) => Some(submenu.title.replace('&', "")),
+        MenuItem::Section(title) => Some(title.clone()),
+        MenuItem::Separator => None,
     }
 }
 
@@ -1479,4 +1837,108 @@ fn not_torn_off(menu: &str) -> katana_core::Error {
         "that menu is not torn off; viewMenuTearOff<Menu> tears it off",
         menu,
     )
+}
+
+fn no_window_panel(dock: &str) -> katana_core::Error {
+    make_error(
+        ErrorCode::NotFound,
+        "no panel of the window is named; its panels are LayersDock, PropertiesDock, \
+         CommandLineDock, ReferenceDataDock, SurfacesDock, VerticesDock and SurveyPointsDock",
+        dock,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Key, KeyboardShortcut, Modifiers};
+
+    use super::column_items_ui;
+    use crate::drive::action::{Action, Menu};
+
+    /// A menu whose rows are of every length: short, long, long with a shortcut, a submenu.
+    fn mixed() -> Menu {
+        Menu::new("drawMenu", "&Draw")
+            .section("Curves by their construction")
+            .action(Action::new("short", "&Arc").icon("Arc"))
+            .action(Action::new("long", "Circle by Tangent, Tangent and Radius").icon("Circle"))
+            .action(
+                Action::new("longWithShortcut", "Polyline through Surveyed Points")
+                    .icon("Polyline")
+                    .shortcut(KeyboardShortcut::new(
+                        Modifiers::COMMAND | Modifiers::SHIFT,
+                        Key::P,
+                    )),
+            )
+            .separator()
+            .submenu(Menu::new("sub", "Ellipses and Elliptical Arcs").icon("Circle"))
+            .action(Action::new("last", "&Point").icon("Point"))
+    }
+
+    /// The rows of `mixed`, by name, drawn in a column `width` wide as a torn-off menu's panel
+    /// draws them; or, `wrapped`, as it drew them before, by the menu drawer with nothing said of
+    /// wrapping.
+    fn rows(width: f32, wrapped: bool) -> Vec<(String, egui::Rect)> {
+        let menu = mixed();
+        let mut harness = crate::drive::Harness::new();
+        for _ in 0..3 {
+            let _ = harness.frame(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 400.0),
+                    egui::Layout::top_down_justified(egui::Align::Min),
+                    |ui| {
+                        ui.set_max_width(width);
+                        let mut chosen = None;
+                        if wrapped {
+                            crate::drive::action::menu_items_ui(ui, &menu, &mut chosen);
+                        } else {
+                            column_items_ui(ui, &menu, &mut chosen);
+                        }
+                    },
+                );
+            });
+        }
+        ["short", "long", "longWithShortcut", "last"]
+            .into_iter()
+            .map(|name| {
+                let control = harness
+                    .control(name)
+                    .unwrap_or_else(|| panic!("{name} is drawn"));
+                (String::from(name), control.rect)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_torn_off_menus_rows_are_one_line_each_however_narrow_its_column() {
+        // From the least a column is (docking::LEAST_PANEL, a band's and a floating panel's 160
+        // points): what cannot be cut - the gutter, an ellipsis and the shortcut whole - is 140
+        // of them, so a narrower column, which no panel has, could not hold a row.
+        for width in [160.0_f32, 200.0, 400.0] {
+            let rows = rows(width, false);
+            let height = rows[0].1.height();
+            assert!(height > 0.0, "the premise: the rows are drawn");
+            for (name, rect) in &rows {
+                assert!(
+                    (rect.height() - height).abs() <= 0.5,
+                    "at {width}, {name} is {} high and the first row {height}",
+                    rect.height()
+                );
+                assert!(
+                    rect.width() <= width + 0.5,
+                    "at {width}, {name} is {} wide: cut short, not run on",
+                    rect.width()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_narrow_column_is_one_the_menu_drawer_alone_wraps() {
+        // That the widths above reach the case: drawn as the panel drew its rows before, the
+        // long row at 120 points is taller than the short one.
+        let rows = rows(120.0, true);
+        let short = rows[0].1.height();
+        let long = rows[1].1.height();
+        assert!(long > short + 4.0, "long {long}, short {short}");
+    }
 }

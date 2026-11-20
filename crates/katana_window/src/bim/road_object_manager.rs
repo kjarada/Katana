@@ -14,9 +14,12 @@
 //! (docs/road_objects.md, "Scope and filter"): Select Matches runs LIST <scope> and chooses the
 //! rows of the objects it took, Quantities runs QUANTITIES <scope> and shows the answer in the
 //! details, Delete Matching runs DELETE <scope> - one undo step. A scope that takes nothing is
-//! said, not refused. The filter's entity-only controls (types, style, text) are to be greyed: a
-//! road object has none, and the verb would refuse them by name (`scope_control_greyed`; the shared
-//! widget has no way yet to grey one of its controls - reported to the foundation).
+//! said, not refused. The filter's entity-only controls (types, style, text) are left out: a road
+//! object has none, and the verb would refuse them by name (`scope_control_left_out`, handed to the
+//! shared widget's `leave_out`). They are not shown, and the filter says why once under what it
+//! does show, so every control it shows is live, as Global Modify's are: greyed in their places
+//! they made the filter half-lit, grey rows among lit ones and grey fields beside lit labels (the
+//! ninth look audit).
 //!
 //! NON-MODAL, kept by the workbench. It hears the Document through a DocumentWatcher, so a
 //! ROADOBJECT typed on the command line, an undo or an open reloads it once, keeping the chosen
@@ -88,13 +91,15 @@ pub const PROBLEM: usize = 9;
 pub const NO_ROAD_OBJECTS: &str =
     "No road objects in the scope: BIM > Barrier, Sign and the rest place them";
 
-/// Why the scope's entity-only controls are greyed: a road object has none of them.
+/// Why the scope's entity-only controls are left out, as the filter says it under its controls: a
+/// road object has none of them.
 pub const NOT_AN_ENTITY: &str = "A road object is not an entity: it has no type, style or text to \
                                  match. Its kind is a property: key kind, value barrier";
 
-/// Whether the scope's control `name` is greyed in the manager: the type boxes, the style and the
-/// text, which a road object has none of (the C++'s loop over the scope widget's children).
-pub fn scope_control_greyed(name: &str) -> bool {
+/// Whether the scope's control `name` is left out of the manager: the type boxes, the style and
+/// the text, which a road object has none of (the C++'s loop over the scope widget's children,
+/// which greyed them).
+pub fn scope_control_left_out(name: &str) -> bool {
     name.starts_with("roadObjectManagerType")
         || name == "roadObjectManagerFilterStyle"
         || name == "roadObjectManagerFilterText"
@@ -102,7 +107,7 @@ pub fn scope_control_greyed(name: &str) -> bool {
 
 /// The tip the manager gives the scope's control `name`; None where it keeps the widget's own.
 pub fn scope_control_tip(name: &str) -> Option<&'static str> {
-    if scope_control_greyed(name) {
+    if scope_control_left_out(name) {
         return Some(NOT_AN_ENTITY);
     }
     match name {
@@ -684,8 +689,8 @@ impl RoadObjectManagerDialog {
         let mut scope = ScopeFilterWidget::new("roadObjectManager");
         scope.set_choice(ScopeChoice::Drawing);
         for name in scope.control_names() {
-            if scope_control_greyed(&name) {
-                scope.grey(&name, NOT_AN_ENTITY);
+            if scope_control_left_out(&name) {
+                scope.leave_out(&name, NOT_AN_ENTITY);
             }
         }
         let mut body = Body {

@@ -225,6 +225,12 @@ pub enum Icon {
     LayoutThreeLeft,
     LayoutThreeTop,
     LayoutQuad,
+    // View > Viewport Layout's Tile items, which arrange the views open now: the tiles drawn
+    // apart with no window round them, where a preset is one window divided - so Tile's four are
+    // not Four: Equal's, nor Tile Side by Side's three Two: Vertical's.
+    LayoutTile,
+    LayoutTileColumns,
+    LayoutTileRows,
     // The standard 3D views. An orthographic view is the object in plan with
     // the accent on the face seen and an arrow from where the eye is; Top is
     // that face filled, Bottom the same face dashed, seen through. An
@@ -463,7 +469,7 @@ pub enum Icon {
 
 /// Every value of Icon, in declaration order, for the contact sheet and for the test that every
 /// icon paints something.
-pub const ALL_ICONS: [Icon; 205] = [
+pub const ALL_ICONS: [Icon; 208] = [
     Icon::New,
     Icon::Open,
     Icon::Save,
@@ -560,6 +566,9 @@ pub const ALL_ICONS: [Icon; 205] = [
     Icon::LayoutThreeLeft,
     Icon::LayoutThreeTop,
     Icon::LayoutQuad,
+    Icon::LayoutTile,
+    Icon::LayoutTileColumns,
+    Icon::LayoutTileRows,
     Icon::ViewTop,
     Icon::ViewBottom,
     Icon::ViewFront,
@@ -776,6 +785,9 @@ impl Icon {
             Self::LayoutThreeLeft => "LayoutThreeLeft",
             Self::LayoutThreeTop => "LayoutThreeTop",
             Self::LayoutQuad => "LayoutQuad",
+            Self::LayoutTile => "LayoutTile",
+            Self::LayoutTileColumns => "LayoutTileColumns",
+            Self::LayoutTileRows => "LayoutTileRows",
             Self::ViewTop => "ViewTop",
             Self::ViewBottom => "ViewBottom",
             Self::ViewFront => "ViewFront",
@@ -1018,6 +1030,9 @@ impl Icon {
             | Self::LayoutThreeLeft
             | Self::LayoutThreeTop
             | Self::LayoutQuad
+            | Self::LayoutTile
+            | Self::LayoutTileColumns
+            | Self::LayoutTileRows
             | Self::ViewTop
             | Self::ViewBottom
             | Self::ViewFront
@@ -1401,6 +1416,18 @@ fn draw_turn(ink: &mut ToolInk<'_>, mirrored: bool) {
 /// The window every layout, panel and toolbar icon is drawn in.
 fn draw_frame(ink: &mut ToolInk<'_>) {
     ink.stroke(&rounded(2.5, 4.0, 19.0, 16.0, 1.5), false, STROKE);
+}
+
+/// A tiling's tiles (x, y, width, height), two units apart inside the frame's box: the first -
+/// the active view's - filled in the accent, as a preset's main view is.
+fn draw_tiles(ink: &mut ToolInk<'_>, tiles: &[(f64, f64, f64, f64)]) {
+    for (at, &(x, y, w, h)) in tiles.iter().enumerate() {
+        let tile = rounded(x, y, w, h, 1.0);
+        if at == 0 {
+            ink.fill(&tile, true, TINT);
+        }
+        ink.stroke(&tile, false, STROKE);
+    }
 }
 
 /// A pencil in the accent at the lower right: the icon edits what it is on.
@@ -2948,6 +2975,32 @@ pub fn paint_icon_weighted(
                 ink.line(12.0, 4.0, 12.0, 20.0, false, STROKE);
                 ink.line(2.5, 12.0, 21.5, 12.0, false, STROKE);
             }
+            // ---- the tilings: each open view a tile of its own, the active one in the accent ----
+            Icon::LayoutTile => draw_tiles(
+                ink,
+                &[
+                    (2.5, 4.0, 8.5, 7.0),
+                    (13.0, 4.0, 8.5, 7.0),
+                    (2.5, 13.0, 8.5, 7.0),
+                    (13.0, 13.0, 8.5, 7.0),
+                ],
+            ),
+            Icon::LayoutTileColumns => draw_tiles(
+                ink,
+                &[
+                    (2.5, 4.0, 5.0, 16.0),
+                    (9.5, 4.0, 5.0, 16.0),
+                    (16.5, 4.0, 5.0, 16.0),
+                ],
+            ),
+            Icon::LayoutTileRows => draw_tiles(
+                ink,
+                &[
+                    (2.5, 4.0, 19.0, 4.0),
+                    (2.5, 10.0, 19.0, 4.0),
+                    (2.5, 16.0, 19.0, 4.0),
+                ],
+            ),
             // ---- the standard 3D views ----------------------------------------------------------
             Icon::ViewTop => {
                 ink.fill(&rectangle(7.0, 7.0, 10.0, 10.0), true, TINT);

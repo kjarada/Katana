@@ -46,6 +46,9 @@
 //!                                       one persisted, undoable edit
 //! VIEWS SCALE LIST                      plan views and their paper-style scales;
 //!                                       headless: the saved assignments only
+//! VIEWS TILE [GRID|COLUMNS|ROWS]        arranges the views open now, each a
+//!                                       place of its own of equal size:
+//!                                       tiled=3 kind=grid docked=1 minimised=0
 //! ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 //! ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
 //!      | CENTRE x,y [SCALE s]  [view=<id>]
@@ -100,6 +103,17 @@
 //! it (cad cannot see the Reference Data panel's layers; the host answers).
 //! The reply is the view's record, whose hiddenrefs= lists the reference
 //! layers a view hides.
+//!
+//! TILE arranges the views the window shows, opening none and closing none
+//! (the owner's request of 2026-11-21; docs/desktop.md, "Tiling the open
+//! views"): GRID, which TILE alone is, rows of columns as near square as the
+//! count allows; COLUMNS side by side; ROWS stacked (viewport_layout.rs,
+//! tile_plan). The active view takes the first place, the rest follow in the
+//! order they were opened. A floating view is docked into the tiling (docked=
+//! counts them), a minimised one stays in the tray (minimised=), a maximised
+//! one is restored first. One view, or none, is nothing to arrange: tiled=1 or
+//! tiled=0, and no refusal. It is the window's layout, not the drawing: no
+//! undo step, as HIDE and SHOW are none.
 //!
 //! Records, one per line, key=value, reals as format_exact_real writes them
 //! and angles in degrees; ghosts= is the view's switch (VIEWS SET), and
@@ -174,13 +188,14 @@ use crate::view_set::{
     set_view_paper_scales, view_paper_scales,
 };
 use crate::view_transform::ViewTransform;
-use crate::viewport_layout::ViewKind;
+use crate::viewport_layout::{TileKind, ViewKind};
 
 const VIEWS_USAGE: &str = "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIVATE id | LINK \
      id[,id...] [TO id] | UNLINK id[,id...]|ALL | HIDE id \
      layer[,layer...]|LAYER name...|REFERENCE ref[,ref...] | SHOW id \
      layer[,layer...]|LAYER name...|REFERENCE ref[,ref...]|ALL | ISOLATE id layer|LAYER name | SET \
-     id ghosts=on|off | MESHES [FACES|FOOTPRINT|HIDDEN] | SCALE id [AUTO|N|1:N] | SCALE LIST";
+     id ghosts=on|off | MESHES [FACES|FOOTPRINT|HIDDEN] | SCALE id [AUTO|N|1:N] | SCALE LIST | \
+     TILE [GRID|COLUMNS|ROWS]";
 const ZOOM_USAGE: &str = "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 | CENTRE \
      x,y [SCALE s] | SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b \
      [ONLY] [WHERE k=v ...]] [view=id]";
@@ -287,6 +302,17 @@ pub fn apply_plan_zoom(view: &mut ViewTransform, request: &ZoomRequest) -> bool 
     }
 }
 
+/// What VIEWS TILE did, for its reply.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TileOutcome {
+    /// The views arranged, each in a place of its own.
+    pub tiled: usize,
+    /// Of those, the views that were floating and were docked into the tiling.
+    pub docked: usize,
+    /// The minimised views, left in the tray and out of the tiling.
+    pub minimised: usize,
+}
+
 /// The window's side: what the verbs need of the views the Document does not
 /// hold. The window's workspace answers it; a test answers with a ViewSet of
 /// its own. Every method takes `&self` (see the module comment): a host keeps
@@ -333,6 +359,16 @@ pub trait ViewVerbHost {
     /// draws no meshes refuses it - the default.
     fn set_mesh_plan_display(&self, _display: MeshPlanDisplay) -> Status {
         Err(no_meshes_in_plan())
+    }
+    /// Arranges the views the window shows as `kind` says (VIEWS TILE): each a place of its own
+    /// of equal size, the active view first and the rest in the order opened; floating views
+    /// docked in, minimised ones left in the tray, none opened and none closed. One view or none
+    /// is no failure. A host with no dock area to arrange refuses it - the default.
+    fn tile(&self, _kind: TileKind) -> Result<TileOutcome> {
+        Err(Error::new(
+            ErrorCode::Unsupported,
+            "VIEWS TILE needs the window's dock area, which holds the views it arranges",
+        ))
     }
 }
 
@@ -822,6 +858,29 @@ fn views_verb(document: &Document, host: &dyn ViewVerbHost, args: &[String]) -> 
             ));
         };
         return Ok(view_record(&views, view));
+    }
+    if action == "TILE" {
+        if let Some(word) = args.get(2) {
+            return Err(refuse_views_word(word));
+        }
+        let kind = match args.get(1) {
+            None => TileKind::Grid,
+            Some(word) => TileKind::from_word(word).ok_or_else(|| {
+                make_error(
+                    ErrorCode::ParseFailure,
+                    format!("VIEWS TILE takes GRID, COLUMNS or ROWS, not '{word}'"),
+                    word.as_str(),
+                )
+            })?,
+        };
+        let outcome = host.tile(kind)?;
+        return Ok(format!(
+            "tiled={} kind={} docked={} minimised={}",
+            outcome.tiled,
+            kind.word(),
+            outcome.docked,
+            outcome.minimised
+        ));
     }
     if action == "ACTIVATE" {
         if args.len() != 2 {

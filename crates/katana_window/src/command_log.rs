@@ -325,6 +325,22 @@ pub fn shown_log(log: &str) -> String {
         .join("\n")
 }
 
+/// Where the newest record - the last block logged - starts in the log as the panel shows it
+/// (`shown_log` of the blocks joined by line ends), counted in characters as a text's layout
+/// counts them; None for a log that holds nothing. What the panel reads a record from its start
+/// by, when the record is taller than the panel (main_window::panels::log_follow_offset).
+///
+/// Counted in the shown text, not the record: an error is shown without its code and a warning
+/// as its sentence, so a line's length differs between the two.
+pub fn newest_record_start(blocks: &[String]) -> Option<usize> {
+    let (_, earlier) = blocks.split_last()?;
+    if earlier.is_empty() {
+        return Some(0);
+    }
+    // The earlier blocks as shown, and the line end that parts the newest from them.
+    Some(shown_log(&earlier.join("\n")).chars().count() + 1)
+}
+
 /// One line of the log as a person reads it: an error ("! ...") as a sentence - without the code
 /// its description starts with (`without_error_code`), its first letter a capital as the status
 /// bar shows it ("! unknown command; ..." read as a fragment, the sixth look audit's H) - and a
@@ -511,7 +527,32 @@ mod tests {
 
     use katana_core::{Error, ErrorCode};
 
-    use super::{CommandLog, shown_log, shown_log_line, without_error_code};
+    use super::{
+        CommandLog, newest_record_start, shown_log, shown_log_line, without_error_code,
+    };
+
+    #[test]
+    fn the_newest_record_starts_after_the_earlier_ones_as_they_are_shown() {
+        // Counted by hand, in the text the panel shows (shown_log), a line end between records.
+        let block = |text: &str| String::from(text);
+        // Nothing logged: no record to start anywhere.
+        assert_eq!(newest_record_start(&[]), None);
+        // One record is the log's start, however many lines it has.
+        assert_eq!(newest_record_start(&[block("one\ntwo")]), Some(0));
+        // "> A" is 3 characters and its line end 1: the second record starts at 4.
+        assert_eq!(newest_record_start(&[block("> A"), block("reply=1")]), Some(4));
+        // An earlier record of two lines, "ab" and "cd": 2 + 1 + 2, and its line end.
+        assert_eq!(newest_record_start(&[block("ab\ncd"), block("x")]), Some(6));
+        // An error is shown without its code: "! NotFound: no file" is shown "! No file", 9
+        // characters, where the record has 19 - so the newest starts at 10, not 20.
+        let blocks = [block("! NotFound: no file"), block("next")];
+        assert_eq!(shown_log(&blocks[0]), "! No file");
+        assert_eq!(newest_record_start(&blocks), Some(10));
+        // Characters, not bytes, as a text's layout counts them: "é" is one.
+        assert_eq!(newest_record_start(&[block("é"), block("x")]), Some(2));
+        // An empty newest record starts at the text's end.
+        assert_eq!(newest_record_start(&[block("ab"), block("")]), Some(3));
+    }
 
     #[test]
     fn the_status_bar_shows_an_errors_sentence_and_the_log_keeps_its_code() {

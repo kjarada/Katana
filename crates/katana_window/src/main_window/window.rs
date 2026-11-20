@@ -46,6 +46,7 @@ use katana_update::ApplyRequest;
 
 use super::actions::{
     Composed, ICON_SIZES, KINDS, LAYOUTS, STANDARD_VIEWS, compose, text_size_action_name,
+    tiling_line,
 };
 use super::executor::{
     Executor, RECENT_SCRIPTS_KEY, SNAP_MENU_MODES, WindowRequest, ask_yes_no, show_warning,
@@ -693,6 +694,13 @@ impl MainWindow {
             "viewUnlinkAll" => {
                 let _ = exec.run_verb_line("VIEWS UNLINK ALL");
             }
+            // View > Viewport Layout's tilings, through the verb a typed line runs: one path,
+            // logged, with the reply saying how many views were arranged.
+            "viewTile" | "viewTileSideBySide" | "viewTileStacked" => {
+                if let Some(line) = tiling_line(name) {
+                    let _ = exec.run_verb_line(&line);
+                }
+            }
             "viewSelectionGhosts" => {
                 let active = exec.workspace.active_id();
                 match exec.workspace.state(active) {
@@ -740,6 +748,7 @@ impl MainWindow {
                 ui.bars.hidden.clear();
                 ui.bars.places = None;
                 ui.docking.panels = super::docking::MenuPanels::default();
+                ui.docking.window_panels = super::docking::WindowPanels::default();
                 ui.docking.docked_before.clear();
                 exec.log_message(
                     "The panels and toolbars are back where a new window has them.",

@@ -56,18 +56,18 @@ pub fn attach_parent_console() {
 #[cfg(windows)]
 #[allow(
     unsafe_code,
-    reason = "The console calls are Win32 functions; std has no way to attach to a parent's console."
+    reason = "AttachConsole is a Win32 function; std has no way to attach to a parent's console."
 )]
 mod windows_console {
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::System::Console::{
-        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
-    };
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
 
     pub(super) fn attach_unless_redirected() {
-        // SAFETY: GetStdHandle reads this process's standard output handle; it takes no pointer
-        // and touches no memory of ours.
-        let out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        // The process's standard output handle, from std: its as_raw_handle is GetStdHandle of
+        // STD_OUTPUT_HANDLE, asked at each call, with "no handle" told as null (the test below
+        // keeps both of the system's ways of saying it). katana_cli reads its handles so too.
+        let out: HANDLE = std::io::stdout().as_raw_handle();
         if out.is_null() || out == INVALID_HANDLE_VALUE {
             // SAFETY: AttachConsole attaches this process to its parent's console, or fails
             // (no parent console, one already attached) and changes nothing; it takes no pointer.

@@ -14,7 +14,8 @@ use katana_cad::scene::MeshPlanDisplay;
 use katana_cad::scope_verbs::scope_view_of;
 use katana_cad::selection::extent_of;
 use katana_cad::view_set::set_view_paper_scales;
-use katana_cad::view_verbs::{apply_plan_zoom, zoom_takes};
+use katana_cad::view_verbs::{TileOutcome, apply_plan_zoom, zoom_takes};
+use katana_cad::viewport_layout::TileKind;
 use katana_cad::{
     CommandInterpreter, Document, ViewId, ViewKind, ViewSet, ViewState, ViewTransform,
     ViewVerbHost, ZoomRequest, ZoomRequestKind,
@@ -46,6 +47,12 @@ struct RecordingHost {
     references: RefCell<BTreeSet<u64>>,
     // How the window draws its meshes in plan (VIEWS MESHES); None: a host that draws none.
     meshes: RefCell<Option<MeshPlanDisplay>>,
+    // The tilings asked of the window (VIEWS TILE), in order.
+    tiles: RefCell<Vec<TileKind>>,
+    // The views the window has floating and minimised, which a ViewSet does not know: what a
+    // tiling docks and what it leaves in the tray.
+    floating: RefCell<BTreeSet<ViewId>>,
+    minimised: RefCell<BTreeSet<ViewId>>,
 }
 
 impl ViewVerbHost for RecordingHost {
@@ -112,6 +119,28 @@ impl ViewVerbHost for RecordingHost {
         }
         *meshes = Some(display);
         Ok(())
+    }
+
+    // What the window's workspace does, minus the docks: every view not minimised is arranged,
+    // the floating ones among them docked.
+    fn tile(&self, kind: TileKind) -> Result<TileOutcome> {
+        self.tiles.borrow_mut().push(kind);
+        let minimised = self.minimised.borrow();
+        let mut floating = self.floating.borrow_mut();
+        let shown: Vec<ViewId> = self
+            .set
+            .borrow()
+            .views()
+            .iter()
+            .map(|view| view.id)
+            .filter(|id| !minimised.contains(id))
+            .collect();
+        let docked = shown.iter().filter(|&&id| floating.remove(&id)).count();
+        Ok(TileOutcome {
+            tiled: shown.len(),
+            docked,
+            minimised: minimised.len(),
+        })
     }
 }
 
@@ -761,6 +790,96 @@ mod view_verbs_test {
         assert!(t.setting_changes().is_empty());
     }
 
+    // ---- VIEWS TILE ---------------------------------------------------------------------------
+
+    #[test]
+    fn views_tile_asks_the_window_for_a_grid_columns_or_rows_and_says_what_it_arranged() {
+        let mut t = ViewVerbsTest::new();
+        let plan = t.plan();
+        let model = t.add(ViewKind::Model3D);
+        let section = t.add(ViewKind::Section);
+        // TILE alone is the grid; the reply counts the views arranged, three of three.
+        assert_eq!(t.ok("VIEWS TILE"), "tiled=3 kind=grid docked=0 minimised=0");
+        assert_eq!(
+            t.ok("VIEWS TILE GRID"),
+            "tiled=3 kind=grid docked=0 minimised=0"
+        );
+        assert_eq!(
+            t.ok("VIEWS TILE COLUMNS"),
+            "tiled=3 kind=columns docked=0 minimised=0"
+        );
+        // The words as a person types them.
+        assert_eq!(
+            t.ok("views tile Rows"),
+            "tiled=3 kind=rows docked=0 minimised=0"
+        );
+        assert_eq!(
+            *t.host.tiles.borrow(),
+            [
+                TileKind::Grid,
+                TileKind::Grid,
+                TileKind::Columns,
+                TileKind::Rows
+            ]
+        );
+        // One floating view is docked by the tiling and one minimised view is left out of it:
+        // two of the three are arranged, and the reply says each count.
+        t.host.floating.borrow_mut().insert(model);
+        t.host.minimised.borrow_mut().insert(section);
+        assert_eq!(t.ok("VIEWS TILE"), "tiled=2 kind=grid docked=1 minimised=1");
+        // It opened none, closed none and made none active.
+        assert_eq!(t.host.set.borrow().size(), 3);
+        assert!(t.host.set.borrow().find(plan).is_some());
+        // The window's layout, not the drawing: nothing to undo and nothing to save.
+        assert_eq!(t.document.history().undo_count(), 0);
+        assert!(!t.document.is_modified());
+    }
+
+    #[test]
+    fn views_tile_of_one_view_or_none_is_an_answer_not_a_refusal() {
+        let mut t = ViewVerbsTest::new();
+        assert_eq!(t.ok("VIEWS TILE"), "tiled=0 kind=grid docked=0 minimised=0");
+        t.plan();
+        assert_eq!(
+            t.ok("VIEWS TILE ROWS"),
+            "tiled=1 kind=rows docked=0 minimised=0"
+        );
+    }
+
+    #[test]
+    fn views_tile_refuses_what_it_does_not_take_and_asks_nothing_of_the_window() {
+        let mut t = ViewVerbsTest::new();
+        t.plan();
+        let word = t.refused("VIEWS TILE diagonal");
+        assert_eq!(word.code, ErrorCode::ParseFailure);
+        assert_eq!(
+            word.message,
+            "VIEWS TILE takes GRID, COLUMNS or ROWS, not 'diagonal'"
+        );
+        let extra = t.refused("VIEWS TILE GRID ROWS");
+        assert_eq!(extra.code, ErrorCode::ParseFailure);
+        assert!(
+            extra.message.starts_with("VIEWS does not take 'ROWS'"),
+            "{}",
+            extra.message
+        );
+        assert!(t.host.tiles.borrow().is_empty());
+    }
+
+    #[test]
+    fn the_tiling_words_go_both_ways_and_nothing_else_reads_as_one() {
+        for kind in katana_cad::viewport_layout::TILE_KINDS {
+            assert_eq!(TileKind::from_word(kind.word()), Some(kind));
+            assert_eq!(
+                TileKind::from_word(&kind.word().to_ascii_uppercase()),
+                Some(kind)
+            );
+        }
+        assert_eq!(TileKind::from_word(""), None);
+        assert_eq!(TileKind::from_word("grids"), None);
+        assert_eq!(TileKind::from_word("tile"), None);
+    }
+
     #[test]
     fn views_meshes_refuses_what_it_does_not_take_and_changes_nothing() {
         let mut t = ViewVerbsTest::new();
@@ -805,6 +924,8 @@ mod view_verbs_test {
             ("VIEWS", "VIEWS"),
             ("VIEWS LINK 1,2", "VIEWS"),
             ("VIEWS MESHES footprint", "VIEWS"),
+            ("VIEWS TILE", "VIEWS"),
+            ("VIEWS TILE ROWS", "VIEWS"),
             ("ZOOM", "ZOOM"),
             ("Z", "ZOOM"),
             ("ZOOM IN view=1", "ZOOM"),

@@ -887,6 +887,40 @@ fn validate_metadata(metadata: &ProjectMetadata) -> Status {
     Ok(())
 }
 
+/// The entity ids validate_contents has met, as a set: `insert` is false for
+/// one already there, as BTreeSet's is.
+///
+/// A project's entities come in ascending id order from everywhere that makes
+/// one - the model walks them so (capture_model) and the load reads them
+/// `ORDER BY id` - so an id above the last is new without looking, and the ids
+/// are a sorted vector. An ordered set built one id at a time allocated tree
+/// nodes for every entity on every open and every save
+/// (docs/performance.md, "Checking a project's contents"). Ids that come out
+/// of order are still told apart exactly: they go into `others`.
+#[derive(Default)]
+struct SeenIds {
+    /// Strictly ascending.
+    ascending: Vec<EntityId>,
+    /// Those that arrived at or below the highest already in `ascending` and
+    /// are not in it. Never above its last, so an id above the last is in
+    /// neither.
+    others: BTreeSet<EntityId>,
+}
+
+impl SeenIds {
+    fn insert(&mut self, id: EntityId) -> bool {
+        if self.ascending.last().is_none_or(|&last| id > last) {
+            self.ascending.push(id);
+            return true;
+        }
+        self.ascending.binary_search(&id).is_err() && self.others.insert(id)
+    }
+
+    fn contains(&self, id: EntityId) -> bool {
+        self.ascending.binary_search(&id).is_ok() || self.others.contains(&id)
+    }
+}
+
 fn validate_contents(contents: &ProjectContents) -> Status {
     validate_metadata(&contents.metadata)?;
     let mut layer_names: BTreeSet<&str> = BTreeSet::from([DEFAULT_LAYER_NAME]);
@@ -904,33 +938,36 @@ fn validate_contents(contents: &ProjectContents) -> Status {
         .iter()
         .map(|style| style.name.as_str())
         .collect();
-    let mut ids: BTreeSet<EntityId> = BTreeSet::new();
+    let mut ids = SeenIds::default();
+    ids.ascending.reserve(contents.entities.len());
     let mut highest: EntityId = 0;
     for entity in &contents.entities {
-        let context = format!("id={}", entity.id);
+        // Built only when a check fails, as the load builds its own: on a
+        // sound project this was a string made and dropped for every entity.
+        let context = || format!("id={}", entity.id);
         if entity.id == INVALID_ENTITY_ID || !ids.insert(entity.id) {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 "entity id is missing or duplicated",
-                context,
+                context(),
             ));
         }
         if !layer_names.contains(entity.layer.as_str()) {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 "entity refers to an unknown layer",
-                format!("{context} layer={}", entity.layer),
+                format!("{} layer={}", context(), entity.layer),
             ));
         }
         if !entity.style.is_empty() && !style_names.contains(entity.style.as_str()) {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 "entity refers to an unknown style",
-                format!("{context} style={}", entity.style),
+                format!("{} style={}", context(), entity.style),
             ));
         }
         if let Err(error) = validate(&entity.geometry) {
-            return Err(make_error(error.code, error.message, context));
+            return Err(make_error(error.code, error.message, context()));
         }
         highest = highest.max(entity.id);
     }
@@ -942,7 +979,7 @@ fn validate_contents(contents: &ProjectContents) -> Status {
         ));
     }
     for relationship in &contents.relationships {
-        if !ids.contains(&relationship.from) || !ids.contains(&relationship.to) {
+        if !ids.contains(relationship.from) || !ids.contains(relationship.to) {
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 "relationship refers to an entity that is not in the project",

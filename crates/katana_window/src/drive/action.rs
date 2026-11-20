@@ -537,6 +537,43 @@ pub const TEAR_OFF_HEIGHT: f32 = 9.0;
 /// Every menu's items are wider, so it never widens one.
 pub const TEAR_OFF_LEAST_WIDTH: f32 = 48.0;
 
+/// The tear-off line's dashes: a dash, the gap after it, and the least the run of dashes stands in
+/// from each end of the line - the 6 points the line always began at from the menu's left.
+pub const TEAR_OFF_DASH: f32 = 3.0;
+pub const TEAR_OFF_GAP: f32 = 2.0;
+pub const TEAR_OFF_INSET: f32 = 6.0;
+
+/// The dashes of a tear-off line `width` long, each its start and end from the line's left: as
+/// many whole dashes as fit between the insets, the run centred, so the margin is the same at
+/// both ends whatever the width. One dash, centred and no longer than the line, for a line too
+/// short for a dash between its insets; none for a width that is not positive or not finite.
+///
+/// The line was dashed from 6 points in at the left until 6 from the right, and the last dash
+/// ended wherever the 5 point period left it: 6 to 9 points from the right edge against the
+/// left's 6, by the menu's width (the ninth look audit).
+pub fn tear_off_dashes(width: f32) -> Vec<(f32, f32)> {
+    if !width.is_finite() || width <= 0.0 {
+        return Vec::new();
+    }
+    let period = TEAR_OFF_DASH + TEAR_OFF_GAP;
+    // n dashes and the n - 1 gaps between them are n periods less a gap.
+    let room = width - 2.0 * TEAR_OFF_INSET;
+    let count = ((room + TEAR_OFF_GAP) / period).floor();
+    if count < 1.0 {
+        let dash = TEAR_OFF_DASH.min(width);
+        let start = (width - dash) / 2.0;
+        return vec![(start, start + dash)];
+    }
+    let run = count * period - TEAR_OFF_GAP;
+    let margin = (width - run) / 2.0;
+    (0..count as usize)
+        .map(|at| {
+            let start = margin + at as f32 * period;
+            (start, start + TEAR_OFF_DASH)
+        })
+        .collect()
+}
+
 /// The object name of `menu`'s tear-off line: `tearOff` and the menu's object name with its first
 /// letter upper case ("tearOffViewMenu"), as the action that tears it off is named after it
 /// (`viewMenuTearOffViewMenu`, main_window::docking).
@@ -586,15 +623,16 @@ pub fn tear_off_line(ui: &mut Ui, menu: &Menu) -> Response {
         }
         .to_egui();
         let y = painter.round_to_pixel_center(rect.center().y);
-        painter.add(egui::Shape::dashed_line(
-            &[
-                egui::pos2(rect.left() + 6.0, y),
-                egui::pos2(rect.right() - 6.0, y),
-            ],
-            egui::Stroke::new(1.0, colour),
-            3.0,
-            2.0,
-        ));
+        let stroke = egui::Stroke::new(1.0, colour);
+        for (start, end) in tear_off_dashes(rect.width()) {
+            painter.line_segment(
+                [
+                    egui::pos2(rect.left() + start, y),
+                    egui::pos2(rect.left() + end, y),
+                ],
+                stroke,
+            );
+        }
     }
     let title = menu.title.replace('&', "");
     response = response.on_hover_text(format!(
@@ -667,7 +705,10 @@ fn submenu_item(ui: &mut Ui, submenu: &Menu, add: impl FnOnce(&mut Ui)) -> Respo
 mod tests {
     use egui::{Key, KeyboardShortcut, Modifiers};
 
-    use super::{Action, Menu, menu_items_tearable_ui, menu_items_ui, shortcut_text};
+    use super::{
+        Action, Menu, TEAR_OFF_DASH, TEAR_OFF_GAP, TEAR_OFF_INSET, TEAR_OFF_LEAST_WIDTH,
+        menu_items_tearable_ui, menu_items_ui, shortcut_text, tear_off_dashes,
+    };
 
     /// A menu like File: sections, items with and without shortcuts, a submenu.
     fn file_like() -> Menu {
@@ -738,6 +779,53 @@ mod tests {
             "with its tear-off line {with}, without {without}"
         );
         assert!(with < 300.0, "{with}");
+    }
+
+    #[test]
+    fn the_tear_off_lines_dashes_are_whole_and_stand_as_far_in_from_each_end() {
+        // Widths of every phase of the 5 point period, a menu's usual ones among them (Edit 157,
+        // File 201) and the least the line asks (48).
+        for width in [48.0_f32, 157.0, 158.0, 159.5, 160.0, 161.0, 201.0, 590.0] {
+            let dashes = tear_off_dashes(width);
+            let first = dashes.first().expect("a line this long has dashes");
+            let last = dashes.last().expect("a line this long has dashes");
+            let left = first.0;
+            let right = width - last.1;
+            assert!((left - right).abs() <= 0.5, "{width}: {left} and {right}");
+            assert!(left >= TEAR_OFF_INSET - 1e-3, "{width}: {left}");
+            // No room for one more dash and its gap: the margins are less than half a period
+            // over the inset each.
+            assert!(
+                left < TEAR_OFF_INSET + (TEAR_OFF_DASH + TEAR_OFF_GAP) / 2.0 + 1e-3,
+                "{width}: {left}"
+            );
+            for (at, dash) in dashes.iter().enumerate() {
+                assert!((dash.1 - dash.0 - TEAR_OFF_DASH).abs() <= 1e-3, "{width}: {dash:?}");
+                assert!(dash.0 >= left - 1e-3 && dash.1 <= width - right + 1e-3);
+                if let Some(next) = dashes.get(at + 1) {
+                    assert!((next.0 - dash.1 - TEAR_OFF_GAP).abs() <= 1e-3, "{width}: {dash:?}");
+                }
+            }
+        }
+        // Worked by hand: 48 less the two insets is 36, which holds 7 dashes and 6 gaps (33)
+        // and not 8 (38); the 15 left over is 7.5 at each end.
+        let least = tear_off_dashes(TEAR_OFF_LEAST_WIDTH);
+        assert_eq!(least.len(), 7);
+        assert!((least[0].0 - 7.5).abs() <= 1e-3, "{least:?}");
+        assert!((least[6].1 - 40.5).abs() <= 1e-3, "{least:?}");
+    }
+
+    #[test]
+    fn a_tear_off_line_too_short_for_its_insets_has_one_dash_and_no_line_has_none() {
+        // 14 points: 2 between the insets, less than a dash, so one dash centred.
+        assert_eq!(tear_off_dashes(14.0), vec![(5.5, 8.5)]);
+        // Shorter than a dash: the dash is the line.
+        assert_eq!(tear_off_dashes(2.0), vec![(0.0, 2.0)]);
+        // 15 points: exactly a dash between the insets.
+        assert_eq!(tear_off_dashes(15.0), vec![(6.0, 9.0)]);
+        for width in [0.0, -4.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(tear_off_dashes(width).is_empty(), "{width}");
+        }
     }
 
     #[test]

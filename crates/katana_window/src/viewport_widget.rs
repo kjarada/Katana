@@ -819,6 +819,8 @@ fn draw_empty_hint(canvas: &mut dyn Canvas, width: i32, height: i32) {
 #[derive(Default)]
 struct EguiSide {
     texture: Option<egui::TextureHandle>,
+    /// The `picture_revision` whose pixels the texture holds; None before the first.
+    shown_revision: Option<u64>,
     /// Whether the pointer was over the view at the last frame.
     inside: bool,
     /// The buttons pressed in the view and not yet released there.
@@ -904,6 +906,15 @@ pub struct PlanView {
     last_drawing_ms: f64,
     /// The last paint whole: the drawing with the furniture over it.
     picture: Image,
+    /// Counted by each paint that left `picture` different from what it was. egui's side
+    /// converts the picture and hands it to the texture only when this has moved: a frame is
+    /// painted for every pointer move anywhere in the window, and most leave this view's
+    /// picture exactly as it was (docs/performance.md, "The plan view's frames").
+    picture_revision: u64,
+    /// The picture before the last, kept for its pixels' buffer alone: the next paint is laid
+    /// into it, where a fresh copy of the drawing each frame allocated, and first touched, a
+    /// whole frame of memory.
+    spare: Image,
 
     panning: bool,
     last_mouse: PointF,
@@ -974,6 +985,8 @@ impl PlanView {
             last_frame_ms: 0.0,
             last_drawing_ms: 0.0,
             picture: Image::default(),
+            picture_revision: 0,
+            spare: Image::default(),
             panning: false,
             last_mouse: PointF::default(),
             box_start: None,
@@ -2652,7 +2665,8 @@ impl PlanView {
             self.grips
                 .refresh(document, Some(&state.layers), self.notified());
         }
-        let mut picture = self.drawing.clone();
+        let mut picture = std::mem::take(&mut self.spare);
+        picture.copy_from(&self.drawing);
         let mut preview_count = 0;
         let mut preview_counts = PreviewCounts::default();
         let mut prompt_band = String::new();
@@ -2847,7 +2861,13 @@ impl PlanView {
                 }
             });
         }
-        self.picture = picture;
+        // Compared whole, pixel for pixel, never guessed from what was asked to be drawn: the
+        // furniture depends on the tool, the grips, the snap and the typed line, and a key
+        // over all of those that missed one would leave the screen showing a stale picture.
+        if picture != self.picture {
+            self.picture_revision += 1;
+        }
+        self.spare = std::mem::replace(&mut self.picture, picture);
         self.last_preview_count = preview_count;
         self.last_preview_counts = preview_counts;
         self.prompt_band = prompt_band;
@@ -3154,17 +3174,23 @@ impl PlanView {
         }
 
         if ui.is_rect_visible(rect) {
-            let picture = self.paint(cx, state).to_color_image();
-            // One texture for the view's life, its pixels replaced each paint.
+            let _ = self.paint(cx, state);
+            let revision = self.picture_revision;
+            // One texture for the view's life, its pixels replaced by each paint that changed
+            // them: converting a picture and handing it over is a pass over every pixel and a
+            // whole upload to the graphics card, which a frame that painted the same picture
+            // again has no use for.
             let texture = match &mut self.egui.texture {
                 Some(texture) => {
-                    texture.set(picture, egui::TextureOptions::NEAREST);
+                    if self.egui.shown_revision != Some(revision) {
+                        texture.set(self.picture.to_color_image(), egui::TextureOptions::NEAREST);
+                    }
                     texture.id()
                 }
                 None => {
                     let texture = ui.ctx().load_texture(
                         self.name.as_str(),
-                        picture,
+                        self.picture.to_color_image(),
                         egui::TextureOptions::NEAREST,
                     );
                     let id = texture.id();
@@ -3172,6 +3198,7 @@ impl PlanView {
                     id
                 }
             };
+            self.egui.shown_revision = Some(revision);
             ui.painter().image(
                 texture,
                 rect,

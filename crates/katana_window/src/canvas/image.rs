@@ -110,6 +110,17 @@ impl Image {
         Self::from_bytes(width, height, ImageFormat::Rgba8Premultiplied, data)
     }
 
+    /// Makes this image `source`, pixel for pixel, in the buffer it already has when that is
+    /// large enough: what `*self = source.clone()` gives, without a new allocation for a view
+    /// that copies an image of the same size every frame.
+    pub fn copy_from(&mut self, source: &Image) {
+        self.width = source.width;
+        self.height = source.height;
+        self.format = source.format;
+        self.device_pixel_ratio = source.device_pixel_ratio;
+        self.data.clone_from(&source.data);
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
