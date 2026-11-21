@@ -14,7 +14,10 @@
 //! * `add_entities`: the 100 000 lines added to an empty database (a load, an import);
 //! * `replace_onto_another_layer`: 10 000 of them replaced by a copy on another layer (a Global
 //!   Modify of a tenth of the drawing);
-//! * `remove_entities`: 10 000 of them removed.
+//! * `remove_entities`: 10 000 of them removed;
+//! * `read_empty_property_maps`: `properties_from_json` of the empty object 200 000 times, what
+//!   a load of the 100 000 entities reads for their two property columns
+//!   (docs/performance.md, "Empty property maps").
 //!
 //! Prints one `cell=... min_ms=... median_ms=... samples=...` line a cell. Run in Release:
 //! `cargo bench --locked -p katana_entity --bench entity_database` (or through
@@ -24,6 +27,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
+use katana_entity::serialization::properties_from_json;
 use katana_entity::{Entity, EntityDatabase, EntityId, Geometry};
 use katana_geometry::{Point2, Segment2};
 
@@ -98,6 +102,16 @@ fn sample(cell: &str, layers: &[String], database: &EntityDatabase) -> f64 {
             }
             black_box(copy.size());
         }
+        "read_empty_property_maps" => {
+            started = Instant::now();
+            let mut members = 0;
+            for _ in 0..2 * ENTITIES {
+                members += properties_from_json(black_box("{}"))
+                    .expect("the empty object is a property map")
+                    .len();
+            }
+            assert_eq!(black_box(members), 0);
+        }
         "remove_entities" => {
             let mut copy = database.clone();
             started = Instant::now();
@@ -133,6 +147,7 @@ fn main() {
         "add_entities",
         "replace_onto_another_layer",
         "remove_entities",
+        "read_empty_property_maps",
         "count_every_layer_again",
     ];
     let mut samples: Vec<(&str, Vec<f64>)> = cells.iter().map(|cell| (*cell, Vec::new())).collect();

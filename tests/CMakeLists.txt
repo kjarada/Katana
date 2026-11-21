@@ -2772,6 +2772,18 @@ if(KATANA_TEST_WINDOW)
             "-DFORBID=unknown command"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/linked_plan_views_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Tiling (docs/desktop.md, "Tiling the open views"): three views of three kinds
+    # tiled by the typed line and by the two menu items that run the same
+    # line, each replying with how many it laid out and how; a kind the verb
+    # does not know is refused by name.
+    add_test(NAME qt_views_tile_by_the_line_and_by_the_menu_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN section|>VIEWS OPEN 3d|>VIEWS TILE COLUMNS|*viewTileStacked|*viewTile|>VIEWS TILE DIAGONAL"
+            "-DEXPECT=tiled=3 kind=columns docked=0 minimised=0.*tiled=3 kind=rows docked=0 minimised=0.*tiled=3 kind=grid docked=0 minimised=0.*VIEWS TILE takes GRID, COLUMNS or ROWS, not 'DIAGONAL'"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/views_tiled_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # And out again: UNLINK of one of two leaves the other alone, which is no
     # link, so both leave, a ZOOM moves one view only and the buttons show
     # the open chain.
@@ -3267,6 +3279,7 @@ if(KATANA_TEST_WINDOW)
                          qt_dist_typed_at_the_command_line_reports_the_inverse_headless
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_linked_plan_views_zoom_together_headless
+                         qt_views_tile_by_the_line_and_by_the_menu_headless
                          qt_unlinking_one_of_two_views_unlinks_both_headless
                          qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
                          qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless

@@ -571,7 +571,18 @@ pub fn properties_to_json(properties: &PropertyMap) -> Result<String> {
     Ok(properties_to_value(properties).dump())
 }
 
+/// What `properties_to_json` writes for a map with nothing in it, and so what nearly every
+/// stored entity's two property columns hold.
+const EMPTY_PROPERTIES: &str = "{}";
+
 pub fn properties_from_json(json: &str) -> Result<PropertyMap> {
+    // A load reads two of these an entity, and for almost all of them the text is the empty
+    // object: answered here, it is not parsed into a tree to learn that it has no members
+    // (docs/performance.md, "Empty property maps"). Any other spelling of an empty object goes
+    // through the parser and gives the same map.
+    if json == EMPTY_PROPERTIES {
+        return Ok(PropertyMap::new());
+    }
     guarded(
         Json::parse(json)
             .map_err(Failure::from)

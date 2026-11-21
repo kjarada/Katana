@@ -48,12 +48,11 @@ path = "src/bin/katana_update_e2e.rs"
 katana_core.workspace = true
 katana_update.workspace = true
 
-# The helper turns the system's error boxes off for itself (SetErrorMode), and the stub reads the
-# helper's RunOnce value (RegGetValueW).
+# The stub reads the helper's RunOnce value (RegGetValueW). The helper's SetErrorMode is
+# katana_update's since 2026-11-21 (`process::turn_error_boxes_off`), and its feature went there.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
-    "Win32_System_Diagnostics_Debug",
     "Win32_System_Registry",
 ] }
 

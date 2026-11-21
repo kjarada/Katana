@@ -2716,11 +2716,7 @@ what it would take.
   two-thirds and a tenth. Left: the updater's OpenSSL hardening
   (`harden_open_ssl_environment`, still an `unsafe fn`), which takes
   `SpawnRequest` carrying an environment for the child and the self-test
-  asking of the children what it now asks of the process; katana_updater's
-  windows-sys feature `Win32_System_Diagnostics_Debug` and the comment above
-  it in `crates/katana_updater/Cargo.toml`, unused since the helper's
-  SetErrorMode moved to katana_update (the manifest is the integrator's to
-  edit); libm's four
+  asking of the children what it now asks of the process; libm's four
   functions until std's `erf` and `ln_gamma` are stable (`asinh` would stay,
   std's digits differ); the FFI modules themselves, which no Rust can make
   safe - only a safe crate in place of our own bindings (`rusqlite`, `proj`,

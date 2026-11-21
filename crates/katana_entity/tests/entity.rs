@@ -19,6 +19,7 @@ use katana_entity::entity::{
 use katana_entity::entity_geometry::{bounding_box, distance_to, transformed};
 use katana_entity::serialization::{
     entity_from_json, entity_to_json, geometry_from_json, geometry_to_json, properties_from_json,
+    properties_to_json,
 };
 use katana_entity::{
     Alignment, ChangeEvent, ChangeKind, Color, DimensionGeometry, Entity, EntityDatabase, EntityId,
@@ -801,6 +802,25 @@ mod entity_utf8 {
             ..TextGeometry::default()
         };
         assert!(validate(&Geometry::Text(text)).is_ok());
+    }
+
+    #[test]
+    fn the_empty_object_reads_as_no_properties_however_it_is_spelt() {
+        // "{}" is answered without the parser; the other spellings go through it. All are the
+        // map with nothing in it, and "{}" is what an empty map is written as, so the short way
+        // is the one a stored entity takes.
+        for text in ["{}", "{ }", " {}", "{}
+", "{
+}"] {
+            let read = properties_from_json(text).expect(text);
+            assert!(read.is_empty(), "{text:?}");
+        }
+        assert_eq!(properties_to_json(&PropertyMap::new()).expect("written"), "{}");
+        // What only looks like it is still refused or read in full.
+        assert!(properties_from_json("").is_err());
+        assert!(properties_from_json("{").is_err());
+        assert!(properties_from_json("[]").is_err());
+        assert_eq!(properties_from_json(r#"{"a":1}"#).expect("one member").len(), 1);
     }
 
     // The C++ also refuses a value and a name of CP1252 bytes, which a String

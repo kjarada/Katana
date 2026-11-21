@@ -2351,9 +2351,10 @@ VIEWS is (below, "The dock chrome"); a view's title bar has no shortcut menu
 to offer Tile from, and there is no Window menu; a floating view's own
 rectangle is not kept through a minimise (egui_dock's window state is never
 drawn here, so it has none to give), so a minimised floating view restored
-after a tiling may come back docked; and no headless run of the real window
-drives `viewTile` yet - `-DDRIVE=>VIEWS OPEN 3d|>VIEWS OPEN section|*viewTile`
-expecting `tiled=3 kind=grid` is the test to add to `tests/CMakeLists.txt`.
+after a tiling may come back docked. The real window is driven through it
+by `qt_views_tile_by_the_line_and_by_the_menu_headless` (three views tiled
+by the typed line and by two of the menu's items, and a kind the verb does
+not know refused by name).
 
 ### Toolbars that dock and float, menus that tear off
 

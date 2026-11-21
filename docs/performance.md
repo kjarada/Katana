@@ -419,7 +419,7 @@ the fixed cost it repays is the same.
 
 ## Changes of 2026-11-21, measured
 
-Six changes made for speed, each found by reading the code and then measured.
+Seven changes made for speed, each found by reading the code and then measured.
 Each is one change, with its own benchmark cells, its own test that the fast
 path gives what the slow one gave, and its own hunks. Every benchmark is a
 plain program in the house form (`crates/katana_render/benches/rasterise.rs`),
@@ -434,7 +434,7 @@ program ran base, changed and base again (the A/A control), four times over
 with the order reversed every time, 15 samples a cell a run. A table gives
 the least of the four minimums and the median of the four medians, in
 milliseconds, as min / median. The A/A column is the same base program under
-a second name: where it differs from the base, that is the machine. All six
+a second name: where it differs from the base, that is the machine. All seven
 were kept: each is outside its A/A spread.
 
 ### The plan view's frames
@@ -623,6 +623,30 @@ check and the model.
 Changed / base 0.72 / 0.73 for what an open calls and 0.27 / 0.27 for the
 check alone, against an A/A of 1.00 / 0.99 and 1.01 / 1.00.
 
+### Empty property maps
+
+Found on 2026-11-21 and left then; done the same day, after the rest. A
+stored entity's two property maps are read from JSON on every load
+(`properties_from_json`, `crates/katana_entity/src/serialization.rs`), and
+nearly every one is the text `{}`, which was parsed into a tree to learn
+that it has no members: 200 000 parses for 100 000 entities. That exact
+text - what `properties_to_json` writes for an empty map - is now answered
+before the parser; any other spelling of an empty object still goes through
+it and gives the same map
+(`the_empty_object_reads_as_no_properties_however_it_is_spelt`).
+
+`cargo bench --locked -p katana_entity --bench entity_database`, measured as
+the others were, the base being the commit before with the cell added.
+
+| ms, min / median | base | base (A/A) | changed |
+|---|---|---|---|
+| `read_empty_property_maps` (200 000 reads) | 21.68 / 22.31 | 21.58 / 22.11 | 0.585 / 0.629 |
+
+Changed / base 0.03 on both, A/A 1.00 / 0.99: 21 ms off the load of a
+drawing of 100 000 entities. **Not measured:** a whole load from a real
+database, where this is one part among the reading of the rows; no load
+benchmark exists yet.
+
 ### Found and left alone
 
 Hot spots read on 2026-11-21 and not changed, with what each would take:
@@ -647,12 +671,6 @@ Hot spots read on 2026-11-21 and not changed, with what each would take:
   (`crates/katana_window/src/viewport_widget.rs`): a vector of every selected
   id, to hash it. An iterator over the set would do; a fraction of a
   millisecond at 100 000 selected.
-- **A stored entity's two property maps are parsed from JSON on every load**
-  (`properties_from_json`, `crates/katana_entity/src/serialization.rs`), and
-  nearly every one is the text of an empty object, parsed into a tree to
-  learn so: 200 000 parses for 100 000 entities. A test for that exact text
-  before the parser is the whole change; it wants a load benchmark with a
-  real database to be judged by.
 - **Other lists of every id followed by a lookup each**, as the labels' walk
   was: `crates/katana_cad/src/linework.rs` (three), `survey_coding.rs`,
   `utilities/utility_data.rs` and `code_table.rs` in the same folder, and the
