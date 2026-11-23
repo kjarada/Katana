@@ -13,6 +13,12 @@ publish.workspace = true
 name = "apply_contents"
 harness = false
 
+# A project of 100 000 entities saved and loaded through its database (docs/performance.md, "A
+# project saved and loaded"): the same form.
+[[bench]]
+name = "project_load"
+harness = false
+
 [dependencies]
 katana_core.workspace = true
 katana_entity.workspace = true

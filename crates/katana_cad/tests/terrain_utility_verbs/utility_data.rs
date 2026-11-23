@@ -624,6 +624,36 @@ mod utility_data {
         );
     }
 
+    // The drawing is read in entity order (docs/performance.md, "The verbs'
+    // walks"), and the order shows where two points could each be refused:
+    // the one of the lower id is.
+    #[test]
+    fn of_two_points_whose_line_was_deleted_the_one_of_the_lower_id_is_refused() {
+        let mut session = Session::default();
+        session.ok(&format!("UTILITY DRAW {}", sample("schedule.csv")));
+        let strays = [
+            ("W1-2", point(&session, "W1-2")),
+            ("W1-4", point(&session, "W1-4")),
+        ];
+        select(&mut session, strays.iter().map(|(_, id)| *id).collect());
+        session.ok("PROP DELETE utility.line");
+        let (vertex, id) = if strays[0].1 < strays[1].1 {
+            strays[0]
+        } else {
+            strays[1]
+        };
+        // Neither is in the scope, which takes a point of W1 that kept its
+        // line: both are found by the walk of the drawing, in its order.
+        let kept = point(&session, "W1-5");
+        select(&mut session, vec![kept]);
+        let refusal = session.refused("UTILITY REGRADE SELECTION").message;
+        let named = format!(
+            "point {vertex} (#{id}) is a vertex of a schedule and has no utility.line, the line it \
+             is a point of"
+        );
+        assert!(refusal.starts_with(&named), "{refusal}");
+    }
+
     // ---- REGRADE --------------------------------------------------------------------------
 
     #[test]

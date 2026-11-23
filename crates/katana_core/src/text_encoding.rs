@@ -92,10 +92,17 @@ fn from_utf16(bytes: &[u8], little_endian: bool) -> Result<String> {
     };
     let units = bytes.len() / 2;
     let mut out = String::with_capacity(units + 16);
+    // Where the runs of ASCII are narrowed before they are appended: one for the whole
+    // decode, since a text dense with other characters asks for a run at every one of them.
+    let mut scratch = [0u8; crate::text_kernels::APPEND_BLOCK];
     let mut index = 0;
     while index < units {
-        index +=
-            crate::text_kernels::append_ascii_utf16(&bytes[2 * index..], little_endian, &mut out);
+        index += crate::text_kernels::append_ascii_utf16(
+            &bytes[2 * index..],
+            little_endian,
+            &mut scratch,
+            &mut out,
+        );
         if index == units {
             break;
         }

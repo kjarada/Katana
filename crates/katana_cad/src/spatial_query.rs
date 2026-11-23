@@ -67,7 +67,8 @@ pub fn query_extents(model: &Model, entity: &Entity) -> Box2 {
             // guessed at, because a style with a large text height makes any
             // fixed guess wrong. It costs a handful of vector appends per
             // dimension, and only on the scan path - the indexed path stores
-            // this box once when the entity changes.
+            // this box when the entity changes, and again when a table it is
+            // drawn from does (extent_follows_tables).
             let drawing = build_dimension(
                 dimension,
                 resolve_dimension_style(model, entity),
@@ -80,6 +81,21 @@ pub fn query_extents(model: &Model, entity: &Entity) -> Box2 {
         _ => {}
     }
     bounding_box(&entity.geometry)
+}
+
+/// Whether query_extents reads anything but `entity` itself to make its box.
+/// True for a dimension, whose box is what it draws by the style its layer
+/// names (resolve_dimension_style reads the layers and the dimension styles);
+/// every other kind's box is its geometry's alone.
+///
+/// The Document's index stores each box when its entity changes, so a box
+/// that follows a table must be stored again when the table changes: the
+/// Document does that for the entities this names (apply_to_spatial_index). A
+/// kind given a table-drawn box in query_extents must be named here too, and
+/// its tables added to the Document's list of them, or the index goes on
+/// holding the box as it was.
+pub(crate) fn extent_follows_tables(entity: &Entity) -> bool {
+    matches!(entity.geometry, Geometry::Dimension(_))
 }
 
 /// Whether the index is worth using for a query this wide, or whether the
@@ -131,6 +147,11 @@ pub fn worth_indexing(index: &SpatialIndex, reach: Box2) -> bool {
 /// visit exactly the same entities in the same order - asserted by tests that
 /// run each query both ways and compare. `scratch` is the caller's reusable
 /// buffer, so a mouse-move path allocates nothing (PLAN.MD section 33).
+///
+/// `index` must hold, for every entity of `model`, the box query_extents
+/// gives it as `model` stands: the Document's own index for the Document's
+/// own model, or one built from the model and asked before the model changes.
+/// What it answers is believed, and no candidate's box is worked out again.
 pub fn for_each_candidate(
     model: &Model,
     index: Option<&SpatialIndex>,
@@ -151,6 +172,17 @@ pub fn for_each_candidate(
     // The index reports ids ascending and find() is a lookup rather than a
     // scan, so the visit order matches the scanning path exactly. Callers rely
     // on that: picking resolves a tie by preferring the entity visited later.
+    //
+    // NO SECOND TEST OF THE BOX. The index has compared `reach` with the box
+    // it stores, by the very test the scan applies (Box2::intersects), and
+    // the stored box IS query_extents: the Document stores it when the entity
+    // changes, stores it again when a table it is drawn from changes, and
+    // builds the whole index again after a new or opened drawing and after a
+    // command that failed part way (Document::apply_to_spatial_index and
+    // step). Working the box out again here - a pass over a polyline's
+    // vertices, a whole drawing of a dimension - for every candidate of every
+    // repaint, pick and snap only repeated the index's answer
+    // (docs/performance.md, "The broad phase's second extent").
     for &id in scratch.iter() {
         // The index has outlived an entity. That is a defect in whatever
         // maintains it, but a stale id must not be dereferenced, and skipping
@@ -158,8 +190,6 @@ pub fn for_each_candidate(
         let Some(entity) = model.entities.find(id) else {
             continue;
         };
-        if query_extents(model, entity).intersects(reach) {
-            visit(entity);
-        }
+        visit(entity);
     }
 }

@@ -395,6 +395,8 @@ impl MainWindow {
         ui.painter()
             .rect_filled(screen, 0.0, crate::theme::palette::window().to_egui());
         let composed = self.composed();
+        // The keys before anything that would take one is drawn (main_window::shortcuts).
+        self.shortcut_pass(ui, &composed);
         // The panels the geometry places are those shown and not floating: a floating panel is
         // drawn over the views, and the docked layout closes up as if it were hidden.
         self.settle_window_panels();

@@ -1003,6 +1003,45 @@ mod ifc_export_drawing {
         assert_eq!(rules[1].kinds, vec![EntityType::Ellipse]);
     }
 
+    // The export walks the drawing once, in entity order (docs/performance.md,
+    // "The verbs' walks"): the products are written by ascending id, across
+    // the gaps deleted entities leave.
+    #[test]
+    fn entities_are_written_in_the_order_of_their_ids_whatever_ids_are_missing() {
+        // Entity k is the lot number (37 k) mod 127: 127 is prime, so no two
+        // of 120 entities share one, and the numbers are in no order of their
+        // own.
+        let lot = |id: EntityId| format!("LOT {}", (id * 37) % 127);
+        let mut model = Model::default();
+        for id in 1..=120 {
+            add(
+                &mut model,
+                TextGeometry {
+                    position: p(334000.0 + id as f64, 6250020.0),
+                    text: lot(id),
+                    ..TextGeometry::default()
+                },
+                "Survey/Points",
+                &[],
+            );
+        }
+        for id in (5..=120).step_by(5) {
+            must(model.entities.remove(id));
+        }
+        let kept: Vec<EntityId> = (1..=120).filter(|id: &EntityId| !id.is_multiple_of(5)).collect();
+
+        let out = exported(&input(Some(&model), Vec::new(), None), &mga56());
+        assert_eq!(out.entities_written, kept.len());
+        let written = instances_of(&out.text, "IFCTEXTLITERALWITHEXTENT");
+        assert_eq!(written.len(), kept.len());
+        for (line, id) in written.iter().zip(&kept) {
+            assert!(
+                line.contains(&format!("('{}',", lot(*id))),
+                "entity {id}: {line}"
+            );
+        }
+    }
+
     #[test]
     fn selection_and_options_limit_what_is_written() {
         let model = scenario();

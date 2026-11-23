@@ -32,6 +32,18 @@ pub const ALT: KeyModifiers = KeyModifiers {
     ..KeyModifiers::NONE
 };
 
+/// The turn of a test that opens the Plot dialog or runs a plot. The program lets one plot run at
+/// a time by a flag of the whole process, and opens no Plot dialog while it is up; this program's
+/// tests run side by side in one process, so a test opening the dialog while another's plot ran
+/// was told "A plot is already running" and failed, now and then (seen on 2026-11-23). Each such
+/// test holds this for its length.
+pub fn plot_turn() -> std::sync::MutexGuard<'static, ()> {
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // A test that failed holding it has said so itself; the next still takes its turn.
+    TURN.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub fn bx(x0: f64, y0: f64, x1: f64, y1: f64) -> Box2 {
     Box2::new(Point2::new(x0, y0), Point2::new(x1, y1))
 }

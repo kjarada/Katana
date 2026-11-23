@@ -26,15 +26,23 @@
 //! `DockRole` it is told, and of a tab nothing but its dock's object name (`DockTab`).
 //!
 //! WHAT egui_dock CANNOT DO that the C++ did: a floating dock is a window inside the main window,
-//! not one that can go to another screen (an owner's question, the plan's last section); and a
-//! dock is dragged by egui_dock's own tab, not by this bar. Rolling a dock up to its title bar was
-//! rejected in the C++ (it took the whole column with it) and is not done here either.
+//! not one that can go to another screen (an owner's question, the plan's last section). Rolling
+//! a dock up to its title bar was rejected in the C++ (it took the whole column with it) and is
+//! not done here either.
+//!
+//! WHERE A FLOATING DOCK IS is the chrome's own record (`float_rect`, `set_float_rect`), in its
+//! owner's coordinates. egui_dock keeps a window's rectangle only while its own DockArea draws
+//! the window, and no owner of this chrome draws with it (the workspace draws its views itself),
+//! so `WindowState::rect` is NOTHING here always: read from there, every floating view was drawn
+//! at one default place, a floating maximise filled nothing, and a minimised floating view had no
+//! rectangle to come back to. The chrome keeps the rectangle through a maximise and a minimise
+//! and gives it back; its owner says where a dock floats, moves it, and draws it there.
 //!
 //! The icons are the window's (I's icon set, by name), lent through `ChromeIcons`; the colours
 //! are the theme's tokens. Every button is a named control (drive::controls), so a step presses
 //! `DockMinimiseButton` of `View2` as a person clicks it.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use egui::{
@@ -96,6 +104,16 @@ const RADIUS: u8 = 4;
 /// Qt's dash pattern for a one pixel pen: four on, two off.
 const DASH: f32 = 4.0;
 const GAP: f32 = 2.0;
+/// Where a dock floats when nothing says where: 400 by 300 points, 40 in from the corner of the
+/// room its owner draws it in - the place every floating view was drawn at while its rectangle
+/// was read from egui_dock (see the module comment).
+pub const DEFAULT_FLOAT: Rect =
+    Rect::from_min_max(Pos2::new(40.0, 40.0), Pos2::new(440.0, 340.0));
+
+/// Whether `rect` is somewhere a dock can be: finite, with an area.
+fn is_place(rect: Rect) -> bool {
+    rect.is_finite() && rect.is_positive()
+}
 
 /// `value` (points) on the device pixel grid: every button sits on whole device pixels at every
 /// scale, so its icon is drawn at the same device pixels in each (the 125 % reruns).
@@ -456,6 +474,20 @@ impl WindowButton {
             Self::Close => "DockCloseButton",
         }
     }
+
+    /// The icon it shows for a dock in the state `facts` tell: Float is Dock while the dock
+    /// floats, Maximise is Restore while it is maximised. One table for the bar's button and for
+    /// the item a view's shortcut menu shows for it.
+    pub const fn icon(self, facts: BarFacts) -> &'static str {
+        match self {
+            Self::Minimise => "Minimise",
+            Self::Float if facts.floating => "Dock",
+            Self::Float => "Float",
+            Self::Maximise if facts.maximised => "Restore",
+            Self::Maximise => "Maximise",
+            Self::Close => "Close",
+        }
+    }
 }
 
 /// What a bar shows of its dock's state, read from the chrome before the dock area is drawn.
@@ -501,6 +533,9 @@ pub enum ChromeRequest {
     Tool(String, String),
     /// A minimised dock's tray button.
     Restore(String),
+    /// A right-click on a view's bar that is not on a button: its shortcut menu, which its owner
+    /// shows where the pointer is. A panel's bar asks for none.
+    Menu(String),
 }
 
 /// The title bar of one dock (DockTitleBar): its icon, its title, the leading control that takes
@@ -745,7 +780,7 @@ impl DockTitleBar {
         match which {
             WindowButton::Minimise => TitleBarButton::new(
                 which.name(),
-                "Minimise",
+                which.icon(facts),
                 "Minimise",
                 &format!(
                     "Hide this {what} to the bar at the bottom of the window; its button there puts it back where it was."
@@ -753,15 +788,28 @@ impl DockTitleBar {
             ),
             WindowButton::Float if facts.floating => TitleBarButton::new(
                 which.name(),
-                "Dock",
+                which.icon(facts),
                 "Dock",
                 &format!(
                     "Put this {what} back where it was docked in the window. Double-clicking the title bar does the same."
                 ),
             ),
+            // What a floating view does, and no more: it stays inside the main window (leaving it
+            // waits on the owner: docs/rust.md, "Decisions waiting on the owner"), it is moved by
+            // its title bar, and only this button or a tiling docks it - there is no dropping it
+            // on a place, which the tip promised. A panel's sentence is left as the main window's
+            // docking draws it (main_window::docking_ui).
+            WindowButton::Float if self.role == DockRole::View => TitleBarButton::new(
+                which.name(),
+                which.icon(facts),
+                "Float",
+                "Lift this view out of its place into a window over the drawing area, inside the \
+                 main window; drag its title bar to move it. Double-clicking the title bar does \
+                 the same, and Dock - this button again - puts it back.",
+            ),
             WindowButton::Float => TitleBarButton::new(
                 which.name(),
-                "Float",
+                which.icon(facts),
                 "Float",
                 &format!(
                     "Take this {what} out into a window of its own, inside the main window. Double-clicking the title bar does the same; drag the title bar back over the window to dock it anywhere."
@@ -769,7 +817,7 @@ impl DockTitleBar {
             ),
             WindowButton::Maximise if facts.maximised => TitleBarButton::new(
                 which.name(),
-                "Restore",
+                which.icon(facts),
                 "Restore",
                 if facts.floating {
                     "Put this window back to the size and place it had."
@@ -779,17 +827,17 @@ impl DockTitleBar {
             ),
             WindowButton::Maximise => TitleBarButton::new(
                 which.name(),
-                "Maximise",
+                which.icon(facts),
                 "Maximise",
                 if facts.floating {
-                    "Fill the screen this window is on."
+                    "Fill the drawing area with this window, over the docked views, until Restore."
                 } else {
                     "Give this view the whole drawing area, hiding the other docked views until Restore."
                 },
             ),
             WindowButton::Close => TitleBarButton::new(
                 which.name(),
-                "Close",
+                which.icon(facts),
                 "Close",
                 if self.role == DockRole::View {
                     "Close this view. Its zoom and the layers it hides go with it; the drawing is not changed."
@@ -866,6 +914,9 @@ impl DockTitleBar {
         }
         if bar.double_clicked() && self.floatable {
             requests.push(ChromeRequest::Float(String::from(dock)));
+        }
+        if self.role == DockRole::View && bar.secondary_clicked() {
+            requests.push(ChromeRequest::Menu(String::from(dock)));
         }
 
         let font = egui::TextStyle::Body.resolve(ui.style());
@@ -1002,7 +1053,7 @@ struct Installed {
 struct Minimised<Tab> {
     tab: Tab,
     floating: bool,
-    /// Floating: its window's rectangle.
+    /// Floating: its window's rectangle, from the chrome's own record (`DockChrome::windows`).
     window: Rect,
     /// The layout as it was, the dock in it.
     layout: DockState<Tab>,
@@ -1053,7 +1104,8 @@ fn names<Tab: DockTab>(state: &DockState<Tab>) -> BTreeSet<String> {
 
 /// `returning` put back where `layout` had them: the layout whole, every tab as it is now, when the
 /// tabs it holds are the tabs open now and the returning; else each returning tab where there is
-/// room - in a window of its own at `window` when it was floating, else the first place there is.
+/// room - in a window of its own when it was floating (`window`, the rectangle it had), else the
+/// first place there is.
 fn put_back<Tab: DockTab>(
     state: &mut DockState<Tab>,
     layout: &DockState<Tab>,
@@ -1079,15 +1131,12 @@ fn put_back<Tab: DockTab>(
         *state = layout.filter_map_tabs(|tab| by_name.remove(tab.dock_name()));
     } else {
         for tab in returning {
-            match window.filter(|rect| rect.is_finite() && rect.is_positive()) {
-                Some(rect) => {
-                    let surface = state.add_window(vec![tab]);
-                    if let Some(window) = state.get_window_state_mut(surface) {
-                        window.set_position(rect.min);
-                        window.set_size(rect.size());
-                    }
-                }
-                None => state.push_to_first_leaf(tab),
+            // Where the window is, is the chrome's to say once the tab floats (`restore`): a
+            // window of egui_dock's has no rectangle here (see the module comment).
+            if window.is_some_and(is_place) {
+                let _ = state.add_window(vec![tab]);
+            } else {
+                state.push_to_first_leaf(tab);
             }
         }
     }
@@ -1107,6 +1156,10 @@ pub struct DockChrome<Tab> {
     floated: Vec<Floated<Tab>>,
     /// The docks floating at the last refresh: what their bars show.
     floating: BTreeSet<String>,
+    /// Where each dock floating in the `DockState` is, in its owner's coordinates (see the module
+    /// comment, "WHERE A FLOATING DOCK IS"). A minimised dock's rectangle is with its tray
+    /// record, a maximised one's with its maximise.
+    windows: BTreeMap<String, Rect>,
     requests: Vec<ChromeRequest>,
     changed: bool,
     icons: ChromeIcons,
@@ -1120,6 +1173,7 @@ impl<Tab: DockTab> DockChrome<Tab> {
             maximised: Vec::new(),
             floated: Vec::new(),
             floating: BTreeSet::new(),
+            windows: BTreeMap::new(),
             requests: Vec::new(),
             changed: false,
             icons,
@@ -1199,6 +1253,13 @@ impl<Tab: DockTab> DockChrome<Tab> {
         let floating = self.floating.clone();
         self.floated
             .retain(|record| floating.contains(&record.name) || !open.contains(&record.name));
+        // A rectangle for every dock that floats and for no other: one docked by anything but
+        // its own button keeps none, and one a layout given back whole floated again (`put_back`)
+        // has one to be drawn at.
+        self.windows.retain(|name, _| floating.contains(name));
+        for name in &floating {
+            self.windows.entry(name.clone()).or_insert(DEFAULT_FLOAT);
+        }
         let mut ended = Vec::new();
         for record in &self.maximised {
             let crossed =
@@ -1227,6 +1288,26 @@ impl<Tab: DockTab> DockChrome<Tab> {
             self.floating.insert(String::from(name));
         } else {
             self.floating.remove(name);
+        }
+    }
+
+    /// Where dock `name` floats, in its owner's coordinates; None for a dock that does not float
+    /// in the `DockState` (docked, minimised, or one of the main window's panels, which that
+    /// window places itself).
+    pub fn float_rect(&self, name: &str) -> Option<Rect> {
+        self.windows.get(name).copied()
+    }
+
+    /// Puts the floating dock `name` at `rect`: where its owner floats it, where a drag left it,
+    /// where a saved layout had it. False, and nothing changed, for a dock that does not float
+    /// and for a rectangle that is no place (not finite, or with no area).
+    pub fn set_float_rect(&mut self, name: &str, rect: Rect) -> bool {
+        match self.windows.get_mut(name) {
+            Some(place) if is_place(rect) => {
+                *place = rect;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -1356,10 +1437,10 @@ impl<Tab: DockTab> DockChrome<Tab> {
             return;
         };
         let floating = !path.surface.is_main();
+        // The rectangle it floats at goes to the tray with it, to come back to. (The maximise
+        // undone above has already given a floating view back the one it had before it.)
         let window = if floating {
-            state
-                .get_window_state_mut(path.surface)
-                .map_or(Rect::NOTHING, |window| window.rect())
+            self.windows.get(name).copied().unwrap_or(DEFAULT_FLOAT)
         } else {
             Rect::NOTHING
         };
@@ -1367,6 +1448,7 @@ impl<Tab: DockTab> DockChrome<Tab> {
         let Some(tab) = state.remove_tab(path) else {
             return;
         };
+        self.windows.remove(name);
         self.minimised.push(Minimised {
             tab,
             floating,
@@ -1378,7 +1460,8 @@ impl<Tab: DockTab> DockChrome<Tab> {
 
     /// Puts a minimised dock back where it was, the current tab of its group; false when it is not
     /// minimised. A docked view maximised in the window meanwhile is restored first: the dock comes
-    /// back beside it, so the maximise is over.
+    /// back beside it, so the maximise is over. A dock that floated comes back floating, at the
+    /// rectangle it had, whatever has opened, closed or been arranged since.
     pub fn restore(&mut self, state: &mut DockState<Tab>, name: &str) -> bool {
         let Some(at) = self
             .minimised
@@ -1393,6 +1476,17 @@ impl<Tab: DockTab> DockChrome<Tab> {
         }
         let window = record.floating.then_some(record.window);
         put_back(state, &record.layout, vec![record.tab], window);
+        // Floating again - in the layout given back whole, or in a window of its own - it is
+        // where it was: the rectangle was lost here while it was egui_dock's to keep, and the
+        // dock then came back in the first docked place when its neighbours had changed.
+        if record.floating && find(state, name).is_some_and(|path| !path.surface.is_main()) {
+            let rect = if is_place(record.window) {
+                record.window
+            } else {
+                DEFAULT_FLOAT
+            };
+            self.windows.insert(String::from(name), rect);
+        }
         self.changed = true;
         true
     }
@@ -1478,8 +1572,9 @@ impl<Tab: DockTab> DockChrome<Tab> {
 
     // ---- float -----------------------------------------------------------------------------
 
-    /// Floats a docked dock where it stands, or docks a floating one back where it came from, in
-    /// the layout it left.
+    /// Floats a docked dock, or docks a floating one back where it came from, in the layout it
+    /// left. A dock floated is given a rectangle - its leaf's where egui_dock has drawn one, else
+    /// `DEFAULT_FLOAT` - which its owner, knowing where the dock stood, sets (`set_float_rect`).
     pub fn toggle_floating(&mut self, state: &mut DockState<Tab>, name: &str) {
         let floatable = self.title_bar(name).is_some_and(|bar| bar.floatable);
         if !floatable {
@@ -1499,15 +1594,15 @@ impl<Tab: DockTab> DockChrome<Tab> {
                 .leaf(path.node_path())
                 .map(|leaf| leaf.rect)
                 .ok()
-                .filter(|rect| rect.is_finite() && rect.is_positive())
-                .unwrap_or_else(|| {
-                    Rect::from_min_size(Pos2::new(40.0, 40.0), Vec2::new(400.0, 300.0))
-                });
+                .filter(|rect| is_place(*rect))
+                .unwrap_or(DEFAULT_FLOAT);
             state.detach_tab(path, rect);
+            self.windows.insert(String::from(name), rect);
         } else {
             let Some(tab) = state.remove_tab(path) else {
                 return;
             };
+            self.windows.remove(name);
             match self.floated.iter().position(|record| record.name == name) {
                 Some(at) => {
                     let record = self.floated.remove(at);
@@ -1531,14 +1626,18 @@ impl<Tab: DockTab> DockChrome<Tab> {
             return;
         };
         if !path.surface.is_main() {
-            let window = state
-                .get_window_state_mut(path.surface)
-                .map_or(Rect::NOTHING, |window| {
-                    let before = window.rect();
-                    window.set_position(screen.min);
-                    window.set_size(screen.size());
-                    before
-                });
+            // With no room to fill - its owner has laid nothing out yet - there is nothing to
+            // maximise into.
+            if !is_place(screen) {
+                return;
+            }
+            // It takes the room's rectangle in the chrome's own record, which is what its owner
+            // draws it at; the one it had is kept to go back to. Set on egui_dock's window, as
+            // this was, neither was ever read (see the module comment).
+            let window = self
+                .windows
+                .insert(String::from(name), screen)
+                .unwrap_or(DEFAULT_FLOAT);
             self.maximised.push(Maximised {
                 name: String::from(name),
                 floating: true,
@@ -1584,14 +1683,11 @@ impl<Tab: DockTab> DockChrome<Tab> {
         };
         let record = self.maximised.remove(at);
         if record.floating {
-            if let Some(path) = find(state, name)
-                && !path.surface.is_main()
-                && record.window.is_finite()
-                && record.window.is_positive()
-                && let Some(window) = state.get_window_state_mut(path.surface)
+            // Back at the rectangle it had, while it still floats: docked meanwhile, it has none.
+            if is_place(record.window)
+                && let Some(place) = self.windows.get_mut(name)
             {
-                window.set_position(record.window.min);
-                window.set_size(record.window.size());
+                *place = record.window;
             }
         } else if let Some(layout) = &record.layout {
             let returning: Vec<Tab> = record
@@ -1652,6 +1748,7 @@ impl<Tab: DockTab> DockChrome<Tab> {
             record.hidden.retain(|tab| tab.dock_name() != name);
         }
         self.floated.retain(|record| record.name != name);
+        self.windows.remove(name);
         self.changed = true;
     }
 }

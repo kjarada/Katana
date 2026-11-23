@@ -30,7 +30,10 @@
 //! status bar's tray; a panel it does not name is docked in its place of the geometry. Whether a
 //! panel is shown at all stays where it was (`layout::Docks`, the drawing's and the survey
 //! workbench's own flags): a minimised panel is a hidden one with a tray button, a floating one
-//! is a shown one the geometry leaves out (`Docks::docked_only`).
+//! is a shown one the geometry leaves out (`Docks::docked_only`). The floating ones are listed in
+//! their order over one another, the one on top last (`WindowPanels::stacking`): the order is the
+//! window's own state, saved with the layout as the order of its list, and egui's Areas are made
+//! to follow it (`next_to_raise`, main_window::docking_ui).
 
 use egui::{Pos2, Rect, Vec2};
 use katana_core::error::make_error;
@@ -738,7 +741,22 @@ pub fn panel_place_text(place: &PanelPlace) -> String {
     }
 }
 
-/// The place `panel_place_text` writes; None for anything else.
+/// The farthest from the window's corner a floating panel's corner is kept, and the most its
+/// width and its height, in points: 2^23. A rectangle is kept as two corners of single-precision
+/// numbers (IEEE 754 binary32, a 24-bit significand: every whole number up to 2^24 is one, and
+/// from there on only every second, fourth ... is), so a corner and a size each within 2^23 leave
+/// the far corner within 2^24 and the size is read back as it was written. No window is a
+/// thousandth of it.
+pub const FARTHEST: f32 = 8_388_608.0;
+
+/// The place `panel_place_text` writes; None for anything else - a number that is not a whole
+/// one a 32-bit integer holds ("nan", "inf", "1.5", "99999999999"), too few or too many numbers,
+/// a width or a height of nothing or less.
+///
+/// A corner or a size past FARTHEST is brought to it. A panel placed at 2147483647,2147483647
+/// 300 x 200 - a whole number the text may hold - had its far corner rounded to the next number
+/// a float has there, 256 on, and came back 256 x 256; at a width of 100 it had no width at all
+/// and was refused as a rectangle "with no width".
 pub fn panel_place_from_text(text: &str) -> Option<PanelPlace> {
     if let Some(rest) = text.strip_prefix("float:") {
         let numbers: Vec<f32> = rest
@@ -752,8 +770,8 @@ pub fn panel_place_from_text(text: &str) -> Option<PanelPlace> {
             return None;
         }
         return Some(PanelPlace::Floating(Rect::from_min_size(
-            Pos2::new(x, y),
-            Vec2::new(width, height),
+            Pos2::new(x.clamp(-FARTHEST, FARTHEST), y.clamp(-FARTHEST, FARTHEST)),
+            Vec2::new(width.min(FARTHEST), height.min(FARTHEST)),
         )));
     }
     Side::from_word(text).map(PanelPlace::Docked)
@@ -807,10 +825,19 @@ pub const FLOAT_STEP: f32 = 24.0;
 ///
 /// A panel is in `floating` whether or not it is shown: closed or minimised while floating, it
 /// comes back floating where it was. `minimised` is the tray's order.
+///
+/// THE ORDER of `floating` is the panels' order over one another, the lowest first and the one
+/// on top last: a panel floated goes on top, one pressed or shown again is brought up
+/// (`raise_together`), one moved or sized stays where it is in the order. It is the list the
+/// layout saves ("windowPanels"), so the order is kept between sessions by the order it is
+/// written in, and a layout saved before the order meant anything restores in the order it
+/// lists - which is the order egui gave panels first shown together, so it reads as it did.
+/// Rejected: a list of the order beside this one, in the model and in the file - two lists of
+/// the same panels to keep in step, for what the order of one says.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowPanels {
-    /// The floating panels and their rectangles in the window's points, in the order they were
-    /// floated.
+    /// The floating panels and their rectangles in the window's points, in their order over one
+    /// another: the lowest first.
     pub floating: Vec<(String, Rect)>,
     /// Where each panel docked again last floated: where its Float button floats it next.
     pub floated_before: Vec<(String, Rect)>,
@@ -839,8 +866,38 @@ impl WindowPanels {
             .map(|(_, rect)| *rect)
     }
 
-    /// `dock` floated at `rect`, or moved there when it floats already. False, nothing changed,
-    /// for a name that is not a window panel's or a rectangle that is not one (`is_placeable`).
+    /// The floating panels in their order over one another, the lowest first: those hidden -
+    /// closed or minimised while floating - among them, at the place they come back to.
+    pub fn stacking(&self) -> Vec<&str> {
+        self.floating
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    /// `dock` brought over the other floating panels. False, nothing changed, for a panel that
+    /// does not float or is on top already.
+    pub fn raise(&mut self, dock: &str) -> bool {
+        match self.floating.iter().position(|(name, _)| name == dock) {
+            Some(at) if at + 1 < self.floating.len() => {
+                let panel = self.floating.remove(at);
+                self.floating.push(panel);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Those of `docks` that float brought over the rest in one move, each keeping its place
+    /// among those brought up with it (`raise_in`): what egui does with the panels pressed or
+    /// shown again in one frame, which the order here follows.
+    pub fn raise_together(&mut self, docks: &[String]) {
+        raise_in(&mut self.floating, |(name, _)| docks.contains(name));
+    }
+
+    /// `dock` floated at `rect`, over the panels floating already, or moved there when it floats
+    /// already, its place in their order kept. False, nothing changed, for a name that is not a
+    /// window panel's or a rectangle that is not one (`is_placeable`).
     pub fn float(&mut self, dock: &str, rect: Rect) -> bool {
         if !is_window_panel(dock) || !is_placeable(rect) {
             return false;
@@ -884,6 +941,43 @@ impl WindowPanels {
         self.minimised.retain(|name| name != dock);
         self.minimised.len() != before
     }
+}
+
+/// Those of `order` that `raised` picks moved to its end - over the rest - each keeping its place
+/// among those moved, and the rest theirs.
+///
+/// This is what egui does at the end of a frame with the Areas that asked in it to be on top
+/// (egui 0.36's `Areas::end_pass`: a stable sort of its layers by whether each wants the top),
+/// so a list kept by this function, given the panels egui brings up, is in egui's order: several
+/// panels shown again in one frame are all over the rest, and as they were among themselves.
+pub fn raise_in<T>(order: &mut Vec<T>, raised: impl Fn(&T) -> bool) {
+    let (up, rest): (Vec<T>, Vec<T>) = std::mem::take(order).into_iter().partition(raised);
+    *order = rest;
+    order.extend(up);
+}
+
+/// The one panel to bring up next so that `stacked` - the panels as egui has them, the lowest
+/// first - comes to the order `wanted`; None when it is in that order already. Every panel of
+/// `wanted` is in `stacked`, each once.
+///
+/// egui has no call that puts a layer under another, only one that brings a layer to the top
+/// (`Context::move_to_top`), and brought up in one frame several layers keep the order they had
+/// (`raise_in`). So an order is reached one panel a frame: those of `wanted` that already stand
+/// in its order from the lowest up are left, and the next is brought up, which puts it over
+/// them; after at most one frame fewer than there are panels, every one is in its place.
+///
+/// Used where the window's order (`WindowPanels::stacking`) and egui's have parted: a layout
+/// restored over panels already drawn, an action that brings a panel up, panels put back
+/// together that egui remembers in an older order.
+pub fn next_to_raise(stacked: &[String], wanted: &[String]) -> Option<String> {
+    // How many of `wanted`, from the lowest, stand in that order in `stacked` already.
+    let mut in_order = 0;
+    for name in stacked {
+        if wanted.get(in_order) == Some(name) {
+            in_order += 1;
+        }
+    }
+    wanted.get(in_order).cloned()
 }
 
 /// Whether `rect` can be a floating panel's: every number finite, and some width and height.
@@ -1152,6 +1246,10 @@ pub struct DockingState {
     pub docked_before: Vec<(String, BarPlace)>,
     /// Where the pointer was at the last frame: where a torn-off menu's title bar was pressed.
     pub pointer: Option<Pos2>,
+    /// The floating views that were maximised at the last frame, each filling the views' area:
+    /// one that was not among them has just been maximised, and the window's own floating panels,
+    /// menus and toolbars are brought over it (main_window::docking_ui).
+    pub views_filling: Vec<katana_cad::view_set::ViewId>,
 }
 
 /// A title bar held down (see `DockingState::panel_drag`).
@@ -1198,6 +1296,7 @@ impl Default for DockingState {
             panel_drag: None,
             docked_before: Vec::new(),
             pointer: None,
+            views_filling: Vec::new(),
         }
     }
 }

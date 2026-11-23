@@ -151,6 +151,15 @@ in the window Delete on a hot vertex erased the whole polyline: the view's own
 Delete path was never reached, and only a bare view in a test ever took it.
 The view now claims Delete when a vertex grip is hot
 (`GripController::has_hot_vertex`), and leaves it to Erase otherwise.
+The window's side of the question is its shortcut pass
+(`MainWindow::shortcut_pass`; `docs/desktop.md`, "A key reaches its action"),
+which asks the view that has the keyboard, else the one a typed line goes to,
+and hands a claimed key to a view that has not the keyboard as its own key
+press. For that pass the view claims one key more: Escape while a point pick
+waits, which answers the pick with no point where Edit > Deselect, the
+window's holder of Escape, would have cleared the selection and left the
+pick waiting
+(`plan_view_grips::a_view_waiting_for_a_point_pick_claims_escape_from_the_windows_deselect`).
 
 **Delete inside a vertex tool is the tool's.** A vertex tool works on a
 SELECTED polyline - a vertex's grips are there only while it is, and the

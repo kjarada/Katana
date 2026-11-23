@@ -466,14 +466,46 @@ test `update_test_keys_are_in_no_shipped_program` reads the bytes of the four
 programs to see that no test key is in them.
 
 **Nothing in the environment changes what "verified" means.** The Rust
-verifier reads no file and loads no code, so there is no OpenSSL
-configuration to subvert; the helper's first act still removes
-`OPENSSL_CONF`, `OPENSSL_MODULES` and `OPENSSL_ENGINES` from its process
-(`katana_update::signature::harden_open_ssl_environment`, the C++'s guard
-kept for the programs it starts), and its self-test passes under hostile
-values of all three
-(`helper_program::the_self_test_passes_under_a_hostile_open_ssl_conf_modules_or_engines_and_says_what_it_removed`).
-It lends the person's own values back to the programs it starts.
+verifier reads no file and loads no code, and the helper links nothing that
+reads the environment for itself (it imports the operating system's DLLs
+alone), so there is no OpenSSL configuration to subvert in it. The only
+place `OPENSSL_CONF`, `OPENSSL_MODULES` and `OPENSSL_ENGINES` can reach is a
+program the helper starts, so the hardening is what each launch is told
+(`katana_update::signature::harden_open_ssl_environment`, since 2026-11-22):
+the request of every program the helper starts says to start it without the
+three, whatever the helper's process holds and however the names are
+spelled, and then hands on the person's own values, which the helper read
+first thing. The launcher makes the child's environment from the request
+(`SpawnRequest::environment`, `katana_update::process::child_environment`)
+and hands it to the system with the program. The helper's own environment
+is never changed. Its self-test passes under hostile values of all three,
+now with the variables in its own environment while it verifies
+(`helper_program::the_self_test_passes_under_a_hostile_open_ssl_conf_modules_or_engines_and_says_what_it_removed`),
+and its `openssl_environment=cleared` is asked of the environment such a
+launch hands over, not of the process.
+
+Until then the helper's first act removed the three from its own process,
+the C++'s guard for the libcrypto it linked, and lent the person's values
+back to the process for the length of each launch: four changes of the
+environment a launch, each one Rust calls unsafe because another thread may
+be reading it, to hide the variables from a process in which nothing reads
+them. What a program the helper starts holds is the same as before: the
+person's values, and none of the three when the person had none, or had one
+set to nothing. What changed is that the removal no longer stands between a
+hostile value and a library that reads it, should one ever be linked into
+the helper; two cases would show that, since both now verify with the
+variables present
+(`signature::a_configuration_file_named_by_the_environment_does_not_change_what_verifies`
+and the self-test case above), and the import-table test refuses such a
+library when it is a DLL. Rejected: leaving the removal as an `unsafe fn`
+for that day's sake (a guard for a reader that does not exist, paid for
+with the one unsafe contract in the update layer's public interface); and
+having the launcher keep the three from every child (the engine's launches
+are of the helper, which must be handed the person's values to hand them
+on). What a hardened launch hands over is tested of real processes
+(`signature::hardening_leaves_none_of_the_three_variables_to_a_program_this_one_starts`)
+and of the launcher
+(`launcher::a_variable_the_request_takes_out_is_kept_from_the_child_however_its_name_is_spelled`).
 
 **What the verifier refuses beyond the equation.** Measured while the C++
 signature code was written: OpenSSL 3.6.5 answered "valid" for an all-zero

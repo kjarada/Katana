@@ -92,7 +92,7 @@
 //!       missing or unsigned manifest, a signature that does not match, another product or
 //!       target, a path rule, a downgrade, a release meant only to be announced, one that needs
 //!       a newer helper) - or --selftest found that this binary cannot verify a signature
-//!   30  internal error: an unexpected error (a panic), or the environment could not be hardened
+//!   30  internal error: an unexpected error (a panic)
 //!   99  (the test build only) a simulated crash, from --die-at
 //! ```
 //!
@@ -115,21 +115,30 @@
 //!                Where this program swaps nothing (not Windows): recover=refused, a reason=
 //!                line (`platform`), exit=13, detail= - and for the swap outcome=refused with the
 //!                same three lines (refused_by_the_platform, below)
-//!   --selftest:  selftest=ok|failed, version=, applier=, ed25519=, openssl_environment=,
-//!                openssl_removed= (the names of the variables below that were set when the
-//!                program started, or none), keys=, and a problem= line for each thing wrong
+//!   --selftest:  selftest=ok|failed, version=, applier=, ed25519=, openssl_environment=
+//!                (`cleared` when none of the variables below is in the environment a program
+//!                this one starts is handed, `set` when one is), openssl_removed= (the names of
+//!                those that were set when the program started, and so are kept from such a
+//!                program, or none), keys=, and a problem= line for each thing wrong
 //! ```
 //!
-//! THE ENVIRONMENT. The program hardens its environment FIRST - before an argument is read: it
-//! removes OPENSSL_CONF, OPENSSL_MODULES and OPENSSL_ENGINES from this process
-//! (signature.rs, harden_open_ssl_environment), so that nothing in the environment can change what
-//! "verified" means. The one statement that stands before the call reads those three values and
-//! touches nothing else, as signature.rs says a helper must that means to hand them on: the
-//! program the helper starts afterwards - the new version for its health check, the old or new
-//! one at the end - is the person's program and must see the person's environment, so each launch
-//! lends the values back for its duration (HandOnLauncher). --selftest runs after the hardening
-//! and says whether the variables are really gone, so it fails on a binary whose hardening is
-//! missing.
+//! THE ENVIRONMENT. Nothing in the environment can change what "verified" means: the verifier
+//! reads no file and loads no code (katana_update's signature.rs), and this program links nothing
+//! that reads the environment for itself (it imports the operating system's DLLs alone). What
+//! OPENSSL_CONF, OPENSSL_MODULES and OPENSSL_ENGINES can still reach is a program this one
+//! starts, so EVERY LAUNCH IS HARDENED: its request is told to start the program without the
+//! three, whatever this process holds (signature.rs, harden_open_ssl_environment), and is then
+//! handed the person's own values, read FIRST - before an argument is read - because the program
+//! the helper starts - the new version for its health check, the old or new one at the end - is
+//! the person's program and must see the person's environment (HandOnLauncher). So a program
+//! started here holds of the three exactly what the person had when the helper started, by a
+//! decision made at each launch and written in its request, and THIS PROCESS'S ENVIRONMENT IS
+//! NEVER CHANGED. (Until 2026-11-22 the program removed the three from its own environment and
+//! lent them back for the length of each launch, as the C++ did for the libcrypto in its
+//! process: four changes of the environment a launch, each unsafe beside a second thread, to
+//! hide the variables from a process in which nothing reads them.) --selftest asks the
+//! environment such a launch would hand a program, with nothing handed on, whether the variables
+//! are really gone from it, so it fails on a binary whose hardening is missing.
 //!
 //! The helper also turns the system's error boxes off for ITSELF (SetErrorMode: no "there is no
 //! disk in the drive", no crash box): it runs with no window, on a desktop nobody may be watching,
@@ -212,21 +221,21 @@ use katana_update::fault_fs::{FaultFs, SimulatedCrash};
 use katana_update::fsops::{EntryKind, FsOps, RetryPolicy, make_system_fs_ops};
 use katana_update::install::update_work_directory;
 use katana_update::process::{
-    Launcher, SpawnRequest, SpawnResult, make_system_launcher, make_system_process_ops,
-    turn_error_boxes_off, utf8_arguments,
+    Launcher, SpawnRequest, SpawnResult, child_environment, make_system_launcher,
+    make_system_process_ops, turn_error_boxes_off, utf8_arguments, variable_in,
 };
 use katana_update::recover::{Settled, recover_in_process, settle_unproved};
 use katana_update::recover_internal::{name_as_text, one_line};
 use katana_update::registry::{RegistryOps, make_system_registry_ops};
 use katana_update::signature::{
-    SignatureBytes, check_public_key, harden_open_ssl_environment, parse_public_key_hex,
-    verify_ed25519,
+    OPEN_SSL_VARIABLES, SignatureBytes, check_public_key, harden_open_ssl_environment,
+    parse_public_key_hex, verify_ed25519,
 };
 use katana_update::state::state_directory;
 use katana_update::trust::{Trust, production_trust};
 use katana_update::version::{program_version, program_version_text};
 use std::any::Any;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -422,11 +431,9 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
 
 // ---- the environment ----------------------------------------------------------------------------
 
-const OPENSSL_VARIABLES: [&str; 3] = ["OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"];
-
 // One of the three, as the person had it set when the helper started.
 struct UserVariable {
-    // An element of OPENSSL_VARIABLES.
+    // An element of OPEN_SSL_VARIABLES.
     name: &'static str,
     value: OsString,
 }
@@ -436,72 +443,37 @@ fn read_variable(name: &str) -> Option<OsString> {
     std::env::var_os(name).filter(|value| !value.is_empty())
 }
 
-#[allow(
-    unsafe_code,
-    reason = "edition 2024 marks changing the environment unsafe; the program's one thread is the \
-              promise"
-)]
-fn write_variable(name: &str, value: Option<&OsStr>) {
-    // SAFETY: the helper does one thing at a time on its one thread, and no thread of it reads
-    // the environment while a variable is written: the values are lent before a launch starts and
-    // taken back after it has returned (HandOnLauncher).
-    unsafe {
-        match value {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
-    }
-}
-
-// The person's OPENSSL_* values, read BEFORE harden_open_ssl_environment removes them.
+// The person's OPENSSL_* values, read first thing in the program: what the person's own Katana
+// is handed when this program starts it, whatever became of the environment in between.
 fn capture_open_ssl_variables() -> Vec<UserVariable> {
-    OPENSSL_VARIABLES
+    OPEN_SSL_VARIABLES
         .iter()
         .filter_map(|&name| read_variable(name).map(|value| UserVariable { name, value }))
         .collect()
 }
 
-fn open_ssl_variable_is_set(name: &str) -> bool {
-    read_variable(name).is_some()
-}
-
-#[allow(
-    unsafe_code,
-    reason = "the hardening changes the environment, which edition 2024 marks unsafe"
-)]
-fn harden_environment() -> Status {
-    // SAFETY: called first thing in the program, before any thread is started, so no other thread
-    // reads or writes the environment while it runs (harden_open_ssl_environment's contract).
-    unsafe { harden_open_ssl_environment() }
-}
-
-// The values lent back to this process for the length of one launch: written when it is made,
-// removed when it goes, also when the launch panics.
-struct Lent<'a>(&'a [UserVariable]);
-
-impl<'a> Lent<'a> {
-    fn new(variables: &'a [UserVariable]) -> Self {
-        for variable in variables {
-            write_variable(variable.name, Some(variable.value.as_os_str()));
-        }
-        Self(variables)
-    }
-}
-
-impl Drop for Lent<'_> {
-    fn drop(&mut self) {
-        for variable in self.0 {
-            write_variable(variable.name, None);
-        }
-    }
+// `request` as this program makes every launch: hardened - none of the three is inherited from
+// this process, whatever it holds by then - and then `hand_on`, the person's own values, set for
+// the child. The order is the rule: the hardening drops what a request said of the three before
+// it, so the values handed on are added after it. This process's environment is not touched; the
+// decision travels in the request, and the system launcher builds the child's environment from
+// it (katana_update's process.rs).
+fn hardened(request: &SpawnRequest, hand_on: &[UserVariable]) -> SpawnRequest {
+    let mut request = request.clone();
+    harden_open_ssl_environment(&mut request);
+    request.environment.extend(
+        hand_on
+            .iter()
+            .map(|variable| (String::from(variable.name), Some(variable.value.clone()))),
+    );
+    request
 }
 
 // The Launcher the swap uses to start the person's Katana (the health check, the relaunch): the
-// system one, with the person's OPENSSL_* values lent back to the process for the length of the
-// call, because the child inherits the environment of the moment it is started. The helper does
-// one thing at a time and verifies nothing while a child is being started or waited for (every
-// signature was checked before the first file moved: apply.rs, step 1), so nothing of this
-// process reads the variables while they are back.
+// system one, each request hardened and handed the person's OPENSSL_* values (hardened, above).
+// A variable the person had set to nothing is not handed on, so the child does not hold it at
+// all - which is what Windows makes of such a variable, and what the removal from this process
+// used to leave of it.
 struct HandOnLauncher {
     inner: Box<dyn Launcher>,
     variables: Vec<UserVariable>,
@@ -509,13 +481,12 @@ struct HandOnLauncher {
 
 impl Launcher for HandOnLauncher {
     fn run(&self, request: &SpawnRequest) -> Result<SpawnResult> {
-        let _lent = Lent::new(&self.variables);
-        self.inner.run(request)
+        self.inner.run(&hardened(request, &self.variables))
     }
 
     fn start_detached(&self, request: &SpawnRequest) -> Status {
-        let _lent = Lent::new(&self.variables);
-        self.inner.start_detached(request)
+        self.inner
+            .start_detached(&hardened(request, &self.variables))
     }
 }
 
@@ -925,20 +896,25 @@ fn bytes_from_hex(hex: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-// `removed` is what run() read before the hardening: the variables that were set when the
-// program started. Their names are printed (never their values), so that whoever runs the
-// self-test under a hostile environment can see that the variables reached this process and were
-// taken away, and not merely that none is set now.
+// `removed` is what run() read first thing: the variables that were set when the program
+// started. Their names are printed (never their values), so that whoever runs the self-test
+// under a hostile environment can see that the variables reached this process and are kept from
+// the programs it starts, and not merely that none was set.
 fn run_self_test(removed: &[UserVariable], build: Build) -> i32 {
     let mut problems: Vec<String> = Vec::new();
 
-    // The variables are gone from this process, not merely cleared in a copy of it.
+    // The variables are gone from what a program this one starts is handed. Asked of the
+    // environment itself, as the launcher builds it for the request every launch here is made
+    // with (hardened), nothing being handed on - not of this process's environment, which is
+    // left as it was and has no reader, and not of the request, which only says what should
+    // happen. The self-test that follows verifies with the variables still in this process.
+    let handed = child_environment(&hardened(&SpawnRequest::default(), &[]));
     let mut environment_cleared = true;
-    for name in OPENSSL_VARIABLES {
-        if open_ssl_variable_is_set(name) {
+    for name in OPEN_SSL_VARIABLES {
+        if variable_in(&handed, name).is_some() {
             environment_cleared = false;
             problems.push(format!(
-                "{name} is still set: the environment was not hardened"
+                "{name} would reach a program this one starts: the environment was not hardened"
             ));
         }
     }
@@ -1398,14 +1374,10 @@ fn run_with_services(
 }
 
 fn run(build: Build) -> i32 {
-    // FIRST: nothing in the environment moves the trust root (see the top). The values are read on
-    // the way, because the call removes them for good and the person's own Katana, started later,
-    // is owed them (signature.rs says to read them before the call).
+    // FIRST: the person's own values of the three variables, as the program was started with
+    // them. Every launch is hardened against whatever this process holds and handed these (see
+    // the top); nothing of this process's environment is changed, here or later.
     let user_variables = capture_open_ssl_variables();
-    if let Err(error) = harden_environment() {
-        write_error(format!("katana_updater: {}\n", error.describe()).as_bytes());
-        return EXIT_INTERNAL;
-    }
 
     // No box of the system's for THIS process to wait behind (see the top). The programs it starts
     // get the default mode from the launcher. The call is katana_update's, with its other

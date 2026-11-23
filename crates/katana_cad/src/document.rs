@@ -69,6 +69,7 @@
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use katana_commands::{
@@ -98,7 +99,7 @@ use crate::customisation_record::{
 use crate::customisation_state::{CustomisationOrigin, CustomisationState, customisation_faults};
 use crate::drawing::drafting::DraftingSettings;
 use crate::selection::SelectionSet;
-use crate::spatial_query::query_extents;
+use crate::spatial_query::{extent_follows_tables, query_extents};
 use crate::terrain::surface_document::SurfaceState;
 use crate::terrain::surface_style::{SurfaceStyleSet, built_in_surface_styles};
 
@@ -644,6 +645,79 @@ fn new_stack(model: &mut Model, logger: Option<Arc<Logger>>) -> (CommandStack, P
     (stack, published)
 }
 
+/// A command as the Document hands it to the stack: the command, and a note of
+/// any run of it that failed.
+///
+/// The spatial index follows the model by the changes a step PUBLISHES, and a
+/// step that fails publishes none: the stack drops what the model reported
+/// (CommandStack::execute). A command's contract is that a failed execute
+/// leaves the model as it found it and that an undo or a redo does not fail
+/// (katana_commands' command.rs), and while every command keeps it nothing is
+/// owed the index. One that does not - a part left changed, an undo that
+/// stopped half way (Transaction::undo returns at its first failure) - would
+/// leave the index describing a model that is no longer there, with nothing to
+/// say so: a query through it then missed what had moved into its reach, and,
+/// the broad phase believing the index's boxes outright (spatial_query.rs,
+/// for_each_candidate), was handed what had moved out of it. So a run that
+/// fails is noted here, and the Document builds the index again from the
+/// model as it is (step). validate() cannot change the model - it is
+/// given the context by shared reference - so a refusal there, which is what
+/// nearly every refused command is, notes nothing and costs nothing.
+struct Watched {
+    inner: CommandPtr,
+    ran_and_failed: Arc<AtomicBool>,
+}
+
+impl Watched {
+    fn noted(&self, status: Status) -> Status {
+        if status.is_err() {
+            self.ran_and_failed.store(true, Ordering::Relaxed);
+        }
+        status
+    }
+}
+
+impl Command for Watched {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn is_destructive(&self) -> bool {
+        self.inner.is_destructive()
+    }
+
+    fn validate(&self, context: &CommandContext<'_>) -> Status {
+        self.inner.validate(context)
+    }
+
+    fn execute(&mut self, context: &mut CommandContext<'_>) -> Status {
+        let status = self.inner.execute(context);
+        self.noted(status)
+    }
+
+    fn undo(&mut self, context: &mut CommandContext<'_>) -> Status {
+        let status = self.inner.undo(context);
+        self.noted(status)
+    }
+
+    fn redo(&mut self, context: &mut CommandContext<'_>) -> Status {
+        let status = self.inner.redo(context);
+        self.noted(status)
+    }
+
+    fn created_entities(&self) -> Vec<EntityId> {
+        self.inner.created_entities()
+    }
+}
+
+/// The tables a box of the spatial index can be drawn from: a dimension's box
+/// is what it draws, by the dimension style its layer names
+/// (spatial_query.rs, query_extents and extent_follows_tables), so the layers
+/// (for which style each names) and the dimension styles. A change of
+/// either moves such boxes without touching an entity
+/// (apply_to_spatial_index).
+const EXTENT_TABLES: u32 = DocumentChange::LAYERS | DocumentChange::DIMENSION_STYLES;
+
 /// The parts of a document a caller reads and changes at once: the model and
 /// its index beside a mutable selection and drafting settings, which Rust's
 /// borrows give only through one call.
@@ -675,6 +749,9 @@ pub struct Document {
     /// needs a few whatever the cell (apply_to_spatial_index, the overflow
     /// rule).
     pub(crate) index_oversized_at_rebuild: usize,
+    /// Set by a step's command when a run of it fails (Watched); read, and
+    /// cleared, when the step returns.
+    pub(crate) ran_and_failed: Arc<AtomicBool>,
     pub(crate) tables_seen: TableRevisions,
     pub(crate) store: Option<ProjectStore>,
     pub(crate) selection: SelectionSet,
@@ -715,6 +792,7 @@ impl Document {
             index: SpatialIndex::default(),
             index_chosen_for: 0,
             index_oversized_at_rebuild: 0,
+            ran_and_failed: Arc::default(),
             tables_seen: TableRevisions::default(),
             store: None,
             selection: SelectionSet::default(),
@@ -1136,7 +1214,10 @@ impl Document {
         // dimensions, leaders and labels that follow what it changed are
         // moved in the SAME undo step (annotation/associative.rs), so one
         // undo puts back the geometry and everything that followed it.
-        let command = with_associative_update(command);
+        let command: CommandPtr = Box::new(Watched {
+            inner: with_associative_update(command),
+            ran_and_failed: Arc::clone(&self.ran_and_failed),
+        });
         self.step(|stack, model| stack.execute(model, command))
     }
 
@@ -1163,18 +1244,26 @@ impl Document {
         // The stack publishes only a step that succeeded, so a refused
         // command moves nothing.
         let published = lock(&self.published).take();
-        if let Some(event) = published {
-            self.after_step(&event);
+        let ran_and_failed = self.ran_and_failed.swap(false, Ordering::Relaxed);
+        match published {
+            Some(event) => self.after_step(&event),
+            // A command ran and failed. It should have left the model as it
+            // was, and nothing says that it did (Watched): the index is built
+            // again from the model as it is - whole, since no change was
+            // reported that could be applied to it.
+            None if ran_and_failed => self.rebuild_spatial_index(),
+            None => {}
         }
         status
     }
 
     fn after_step(&mut self, event: &CommandEvent) {
-        self.apply_to_spatial_index(&event.changes);
+        // The tables before the index, which has boxes drawn from them.
+        let tables = self.tables_changed();
+        self.apply_to_spatial_index(&event.changes, tables);
         // The surfaces and their styles are not tables of the model: a step
         // that changed them says so by their generations.
-        let mut parts =
-            DocumentChange::HISTORY | self.tables_changed() | self.surface_parts_changed();
+        let mut parts = DocumentChange::HISTORY | tables | self.surface_parts_changed();
         // The road model's definitions.
         parts |= self.road_model_changed();
         if !event.changes.is_empty() {
@@ -1319,10 +1408,19 @@ impl Document {
 
     /// The index after one command: incremental for an ordinary edit, a whole
     /// rebuild when the drawing has doubled or halved since the cell was
-    /// chosen, or when boxes too big for the cell have piled up.
-    pub(crate) fn apply_to_spatial_index(&mut self, changes: &[ChangeEvent]) {
-        if changes.is_empty() {
-            return; // a table-only command: nothing the index holds moved
+    /// chosen, or when boxes too big for the cell have piled up. `tables` is
+    /// what tables_changed() said of the command.
+    pub(crate) fn apply_to_spatial_index(&mut self, changes: &[ChangeEvent], tables: u32) {
+        // THE BOXES DRAWN FROM A TABLE. A dimension's box is what it draws,
+        // and it draws by the dimension style its layer names: an edit of
+        // that style, or of the layer's choice of one, moves the box of every
+        // such dimension and reports no entity. Left where they were, a
+        // dimension restyled larger was culled from a view its label now
+        // reached into and could not be found there, until something else
+        // touched it or the project was opened again.
+        let restyled = tables & EXTENT_TABLES != 0;
+        if changes.is_empty() && !restyled {
+            return; // a command of some other table: nothing the index holds moved
         }
         let entities = self.model.entities.size();
         let resized =
@@ -1358,6 +1456,21 @@ impl Document {
                     }
                 }
             }
+        }
+        if restyled {
+            // Every such box, not only those of the layer or the style that
+            // changed: a table says that it changed, not where. One pass over
+            // the entities and one drawing of each dimension; insert()
+            // returns at once for a box that is the one already held, and
+            // takes out one that has become unusable, as a rebuild leaves it
+            // out.
+            let model = &self.model;
+            let index = &mut self.index;
+            model.entities.for_each(|entity| {
+                if extent_follows_tables(entity) {
+                    index.insert(entity.id, query_extents(model, entity));
+                }
+            });
         }
         // The overflow rule, above.
         if self.index.oversized_count() > 2 * self.index_oversized_at_rebuild + entities / 100 {

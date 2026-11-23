@@ -344,10 +344,10 @@ impl<'a> Exporter<'a> {
     fn run(mut self, surfaces: &[ExportSurface<'_>], meshes: &[ExportMesh<'_>]) -> DomainExport {
         let wanted: HashSet<EntityId> = self.options.entities.iter().copied().collect();
         let model = self.model;
-        for id in model.entities.ids() {
-            let Some(entity) = model.entities.find(id) else {
-                continue;
-            };
+        // One pass in entity order (EntityDatabase::iter), the order the
+        // strings are written in: a list of every id and a lookup of each
+        // visits the same entities in the same order, at a tree lookup each.
+        for entity in model.entities.iter() {
             if !wanted.is_empty() && !wanted.contains(&entity.id) {
                 continue;
             }

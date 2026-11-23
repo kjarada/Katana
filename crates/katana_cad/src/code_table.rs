@@ -20,13 +20,13 @@ use katana_core::text::{format_exact_real, is_ascii_space, lowered, trimmed};
 use katana_entity::layer_path::validate_layer_path;
 use katana_entity::tables::is_built_in_symbol_name;
 use katana_entity::{
-    Color, EntityId, EnumName, LineStyle, StyleLibrary, SurveyAttribute, SurveyMap,
+    Color, Entity, EntityId, EnumName, LineStyle, StyleLibrary, SurveyAttribute, SurveyMap,
     SurveyMatchKind, SurveyPipe, SurveyRule, SurveySection, SurveySymbol, SurveyTextStyle,
 };
 
 use crate::document::Document;
 use crate::survey_coding::{
-    CustomisationCoverage, SurveyCodingReport, SurveyStyleOutcome, find_code_property,
+    CustomisationCoverage, SurveyCodingReport, SurveyStyleOutcome, code_property_among,
     is_plain_linestyle, survey_code_of,
 };
 
@@ -730,7 +730,11 @@ pub struct CodeCensus {
 /// loaded map. Each distinct code is looked up once. (The C++ defaults
 /// `property` to empty.)
 pub fn code_census(document: &Document, property: &str) -> CodeCensus {
-    code_census_of(document, &document.model().entities.ids(), property)
+    // Every entity in entity order, in one pass: a list of every id handed to
+    // code_census_of was two lookups an entity (docs/performance.md, "The
+    // verbs' walks").
+    let entities: Vec<&Entity> = document.model().entities.iter().collect();
+    census_of(document, &entities, property)
 }
 
 /// The same over `ids` alone - what a scope took (CODE CENSUS <scope>). An
@@ -740,9 +744,19 @@ pub fn code_census(document: &Document, property: &str) -> CodeCensus {
 /// codeCensus.)
 pub fn code_census_of(document: &Document, ids: &[EntityId], property: &str) -> CodeCensus {
     let model = document.model();
+    let entities: Vec<&Entity> = ids
+        .iter()
+        .filter_map(|&id| model.entities.find(id))
+        .collect();
+    census_of(document, &entities, property)
+}
+
+// The census of `entities`, in the order given and each as often as it is
+// given: what both of the above count.
+fn census_of(document: &Document, entities: &[&Entity], property: &str) -> CodeCensus {
     let mut census = CodeCensus {
         property: if property.is_empty() {
-            find_code_property(model, ids)
+            code_property_among(entities.iter().copied())
         } else {
             String::from(property)
         },
@@ -750,10 +764,7 @@ pub fn code_census_of(document: &Document, ids: &[EntityId], property: &str) -> 
     };
 
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for &id in ids {
-        let Some(entity) = model.entities.find(id) else {
-            continue;
-        };
+    for &entity in entities {
         if let Some(code) = survey_code_of(entity, &census.property) {
             census.coded += 1;
             *counts.entry(String::from(code)).or_default() += 1;

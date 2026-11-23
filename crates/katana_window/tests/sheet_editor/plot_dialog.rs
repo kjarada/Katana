@@ -326,6 +326,7 @@ mod plot_dialog {
 
     #[test]
     fn plotting_keeps_the_choice_as_the_page_setup_in_one_step() {
+        let _turn = crate::support::plot_turn();
         let mut document = Document::new(None);
         for sheet in three_sheets().sheets {
             add_sheet(&mut document, sheet, None).expect("the sheet is added");
@@ -391,6 +392,7 @@ mod plot_dialog {
 
     #[test]
     fn the_editors_plot_buttons_open_it() {
+        let _turn = crate::support::plot_turn();
         let mut document = Document::new(None);
         for sheet in three_sheets().sheets {
             add_sheet(&mut document, sheet, None).expect("the sheet is added");

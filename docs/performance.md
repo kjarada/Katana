@@ -318,15 +318,18 @@ store; no lane is converted, so the bits are the bits. Where a kernel wrote
 through a masked store, the fill on AVX2 now writes a block the tile's row
 holds whole as a blend of the new pixels and the old (the other lanes given
 back unchanged, as NEON's fill already did), and a block past the row's end
-lane by lane; the text narrowing writes into a `[u8]` or a String's spare
-capacity through one slot trait instead of a raw pointer. What stays unsafe:
+lane by lane; the text narrowing writes into a `[u8]` through one slot
+trait instead of a raw pointer. What stays unsafe:
 in each crate's dispatch module (`text_kernels.rs`, the geometry, render,
 scene and packing `simd` entries) the call into a kernel, one line an entry
 under the one proof that the level is one the processor runs; the baseline
 facade's two entries into SSE2 or NEON, compiled only where the target has
-them; and, in `append_ascii_utf16`, the String's spare capacity reached
-through its `Vec` and its length set over what was written, since a safe
-append would validate or copy every byte a second time. Rejected:
+them. Until 2026-11-22 `append_ascii_utf16` also reached the String's spare
+capacity through its `Vec` and set its length over what was written, since
+a safe append validates and copies every byte a second time; it now narrows
+a block at a time into an array of its own and appends that as text
+(`docs/rust.md`, the third pass), at the price measured below ("The safe
+UTF-16 append"). Rejected:
 `transmute` between an array and a register (unsafe), `std::simd` (not
 stable), a crate that wraps the conversions (`safe_arch`, `bytemuck`: a new
 dependency for a dozen lines), and removing the kernels for their scalar
@@ -437,6 +440,14 @@ milliseconds, as min / median. The A/A column is the same base program under
 a second name: where it differs from the base, that is the machine. All seven
 were kept: each is outside its A/A spread.
 
+**The changes of 2026-11-22** - every subsection from "The index and the
+tables a box is drawn from" on - were measured the same way on 2026-11-23,
+on the same machine: the base is the commit before them with the benchmark
+files added, and the window's two programs were also built with one change
+at a time on that base, so each change has a figure of its own. All were
+kept. One of them is not a gain and was kept for another reason, with its
+price ("The safe UTF-16 append").
+
 ### The plan view's frames
 
 egui paints a frame for every pointer move anywhere in the window, and
@@ -458,6 +469,9 @@ card, for a picture the texture already held. Two changes, apart:
    buffers when they are equal and stops at the first difference when they
    are not, which for a pan is in the first rows; a frame that changes only
    the prompt band at the bottom pays nearly the whole pass for nothing.
+   (The key was made afterwards, for the frames that can have one, with the
+   comparison kept as the guard of every frame that is painted: "The plan
+   view's furniture on an unchanged frame", below.)
    Held by `view_ui::the_texture_is_given_the_picture_when_it_changes_and_only_then`
    (every picture handed over is the view's picture, a changed picture is
    always handed over, an unchanged one never).
@@ -484,8 +498,20 @@ table says.
 An idle frame costs half what it did (3.4 ms to 1.7 ms a frame), and a pan,
 which the comparison could only have slowed, is 6 to 8 % quicker: the kept
 buffer's gain is larger than the comparison's cost there. **The two changes
-were measured together, not apart**: what each gives alone is not known, and
-the pan's figure is the only evidence for the second.
+were measured together, not apart** on that day. On 2026-11-23 each was
+built without the other, and with neither, from the commit that has both
+(the same `plan_frames`, the same method):
+
+| ms, min / median | neither | kept texture alone | kept buffer alone | both |
+|---|---|---|---|---|
+| `idle_frames` | 102.73 / 111.13 | 78.80 / 91.95 | 77.56 / 84.43 | 55.32 / 61.43 |
+| `pan_frames` | 105.39 / 118.24 | 105.92 / 116.45 | 94.58 / 107.36 | 102.41 / 112.04 |
+| `uploads=` of `idle_frames` | 30 | 0 | 30 | 0 |
+
+Each takes about a quarter off an idle frame by itself (0.77 / 0.83 and
+0.76 / 0.76 of neither; A/A 0.99 / 0.94) and the two add up (0.54 / 0.55).
+On a pan the kept texture gives nothing, as it should - every frame is a new
+picture - and the kept buffer is the whole of the gain there (0.90 / 0.91).
 
 ### The labels' walk
 
@@ -644,43 +670,533 @@ the others were, the base being the commit before with the cell added.
 
 Changed / base 0.03 on both, A/A 1.00 / 0.99: 21 ms off the load of a
 drawing of 100 000 entities. **Not measured:** a whole load from a real
-database, where this is one part among the reading of the rows; no load
-benchmark exists yet.
+database, where this is one part among the reading of the rows; the
+benchmark for it was written afterwards ("A project saved and loaded",
+below).
+
+### The index and the tables a box is drawn from
+
+Not a change for speed: what had to be right before the next one could be
+made. The Document's spatial index stores a box an entity, when the entity
+changes (`Document::apply_to_spatial_index`). One kind's box is not its
+geometry's alone: a dimension's is what it draws, by the dimension style its
+layer names (`query_extents`, `crates/katana_cad/src/spatial_query.rs`). An
+edit of that style, or of the layer's choice of one, moves the box of every
+such dimension and reports no entity, and the index went on holding the old
+one: **a dimension restyled larger was culled from a view its label now
+reached into, and could not be found there**, until something touched it or
+the project was opened again. Every other kind was read for the same fault
+and has none: a text's, a label's, a leader's and a symbol point's box is
+made from the geometry alone (`bounding_box` of the entity layer takes
+nothing else), whatever style draws them.
+
+Two changes, both in `crates/katana_cad/src/document.rs`:
+
+1. **A step that changed the layers or the dimension styles stores every
+   dimension's box again**, after the entity changes it reported. The tables'
+   revisions say that a table changed (`tables_changed`, which the
+   notification already asked), not where, so it is every dimension: one pass
+   over the entities and one drawing of each dimension, for a step that
+   touches either table - a layer switched off included. Which kinds follow a
+   table is said in one place beside the box itself (`extent_follows_tables`).
+   **Rejected:** comparing the tables before and after to find the layers and
+   styles that moved, which would save the pass on a layer switched off and
+   needs a copy of both tables a step; storing no box for a dimension and
+   drawing it at every query, which is what the second test of the broad
+   phase did for every kind.
+2. **A step that ran and failed has the index built again.** The index
+   follows the changes a step publishes, and a failed step publishes none
+   (`CommandStack::execute` drops them). A command's contract is that a
+   failure leaves the model as it was, and one that broke it - or an undo
+   that stopped half way - left the index describing a model that was no
+   longer there. A refusal by `validate`, which cannot change the model and
+   is what nearly every refused command is, costs nothing; a failure after
+   that costs a rebuild. **Rejected:** trusting the contract, which every
+   command in the tree keeps as far as was read, because the next change
+   makes the broad phase believe the index outright.
+
+Held by `index_tables::a_dimension_restyled_larger_is_found_where_its_label_now_reaches`
+and its neighbours (the undo and the redo of a style edit, a layer given
+another style and taken off it, a command that fails after moving a line),
+whose windows are worked out by hand from the dimension's construction, and
+by `index_tables::the_index_answers_as_a_scan_through_generated_edits_of_entities_and_tables`:
+96 steps of entity and table edits over 60 dimensions and 120 lines, after
+each of which the index, the broad phase through it and the broad phase's
+scan are compared with a scan of every box as the model stands - for random
+windows, and for the windows that meet a restyled box only as it was or only
+as it is. Without the first change those tests fail; before it nothing
+compared the index with the model after a table edit.
+
+**What it costs** is not measured: a layer or dimension-style edit of a
+drawing with many dimensions (the pass, and a drawing of each); no cell of
+`drawing_passes` times it.
+
+### The broad phase's second extent
+
+Found on 2026-11-21 and left then, because it needed the section above
+first. `for_each_candidate` (`crates/katana_cad/src/spatial_query.rs`) is
+where a repaint, a pick, a snap, a box selection and the sheet checks narrow a
+query to the entities that could answer it. Through the index it asked
+`SpatialIndex::query_into`, which compares the query with each stored box,
+and then **worked every candidate's box out a second time and compared
+again**: a pass over the vertices of every polyline in view, and a whole
+drawing of every dimension (`build_dimension`), on every frame. The stored
+box is that box - the index is built from `query_extents` and nothing else -
+so the second test could only disagree where the index was stale, and there
+it hid half the fault (what had left the query's reach was dropped, what had
+entered it was still missed). With the index now kept to the model through
+table edits and failed steps, the candidates the index answers with are
+visited as they are; an id the model no longer has is still passed over.
+
+**Why it cannot change an answer.** The index's test and the dropped one are
+the same call, `Box2::intersects`, on the same two boxes whenever the stored
+box is what `query_extents` gives for the model as it stands. That holds
+after every way the Document's model changes, each read: a step that
+succeeds (every member of `EntityDatabase` that changes an entity reports it,
+and a change of the two tables a box is drawn from is seen by their
+revisions, which only a table's own members move); a step that fails (the
+index is built again unless the failure was a refusal before the command
+ran); a new and an opened drawing (built again; an open that fails has not
+touched the model, which `apply_to_model_consuming` builds aside). Every
+caller in the tree passes the Document's index with the Document's model, or
+an index built from the model it is asked with. **Not covered, and no
+different than before:** a query box or an entity box with an infinite
+coordinate, which the index does not hold and the scan does compare - the
+indexed and the scanned paths already differed there, with or without the
+second test.
+
+**Rejected:** keeping the second test for dimensions only, as the one kind
+whose box is not its geometry's - it would keep a drawing of every dimension
+in view on every frame to guard a case the section above removes.
+
+Held by the tests of the section above, which compare the broad phase
+through the index with a scan of every entity's box as the model stands:
+`index_tables::undoing_and_redoing_a_dimension_style_edit_moves_the_boxes_with_it`
+and the layer taken off its style are the cases a believed stale box would
+fail (a dimension handed out where it no longer reaches), and the generated
+steps ask at least 60 windows that only a box before a restyle meets, and
+count the random windows answered through the index rather than by the scan.
+The tests that were there already run every pick, snap and box selection
+both ways (`indexed_queries::picking_gives_the_same_answer_with_and_without_the_index`
+and its neighbours).
+
+`cargo bench --locked -p katana_cad --bench drawing_passes`
+(`crates/katana_cad/benches/drawing_passes.rs`): a Document of 100 000
+entities - one in fifty a dimension, the rest points, lines and polylines of
+12 vertices - asked through its index. The `count=` of a cell, the
+candidates visited, must be the same in both builds.
+
+| ms, min / median | base | base (A/A) | changed |
+|---|---|---|---|
+| `candidates_view` (200 windows of 1 % of the drawing) | 34.29 / 38.60 | 33.88 / 39.83 | 21.35 / 26.17 |
+| `candidates_cursor` (20 000 windows at the cursor) | 15.00 / 18.20 | | 9.74 / 11.76 |
+
+Changed / base 0.62 / 0.68 for a view's windows and 0.65 / 0.65 at the
+cursor (A/A 0.99 / 1.03); the same 207 990 and 40 867 candidates in both
+builds.
+
+### The verbs' walks
+
+Found on 2026-11-21 and left then. Eight passes over the whole drawing were
+written as the labels' walk had been: a list of every id, then a lookup of
+each - a tree lookup an entity where one pass over the map gives the same
+entities in the same order. Each now walks `EntityDatabase::iter`:
+
+- linework (`crates/katana_cad/src/linework.rs`), three: the points of a run
+  over the whole drawing, every point by its number for the joins, and the
+  coded lines the drawing already holds;
+- survey coding (`survey_coding.rs` beside it): the entities of a run over
+  the whole drawing, looked up once where they were looked up once for every
+  candidate name of the code property and once more to read the code;
+- the code census (`code_table.rs`): `code_census` of the drawing, which
+  handed every id to the census of a list;
+- the utility data (`utilities/utility_data.rs`): every point and run by its
+  line;
+- the archive export (`crates/katana_archive12d/src/domain_export.rs`) and
+  the IFC export (`crates/katana_ifc/src/drawing.rs`): the entities written.
+
+**None of them changes the drawing while it walks** - each holds the model
+by shared reference, which is why the walk can be borrowed - and none was
+left as a list for that reason. Where a verb takes either the whole drawing
+or the entities named, only the whole drawing's side changed: the named side
+still looks its ids up, in the order the verb always took them (sorted for
+linework, as given for coding and the census). `find_code_property` keeps
+its signature and stops at the first entity that carries a candidate, as
+before; it and the walks share one search (`code_property_among`).
+**Rejected:** `for_each`, which lends each entity for the visit only, where
+all of these keep what they walk.
+
+Held by the verbs' existing tests, and for the order of what they give by
+`entity_walks::linework_of_the_whole_drawing_is_the_linework_of_every_id_named`
+and its neighbours for coding and the census - 2 000 generated entities with
+gaps in their ids, the whole drawing's answer compared record for record with
+the unchanged named path's, and the drawings the two commands leave compared
+entity for entity -
+`entity_walks::a_line_the_drawing_holds_twice_is_reported_as_the_one_of_the_lower_id`,
+`utility_data::of_two_points_whose_line_was_deleted_the_one_of_the_lower_id_is_refused`,
+and a case of each export
+(`domain_export::entities_are_written_in_the_order_of_their_ids_whatever_ids_are_missing`,
+and the same name in `ifc_export_drawing`).
+
+`cargo bench --locked -p katana_cad --bench drawing_passes`: the Document of
+100 000 entities, of which 1 000 are coded survey points in 250 strings and
+none carries utility data, so that a cell is mostly its walk: on a drawing
+that is all survey the walk is a smaller share of the verb. The exports have
+no cell: neither crate has a benchmark, and each walk is one of these.
+
+| ms, min / median | base | changed |
+|---|---|---|
+| `linework` (three walks, 250 lines planned) | 15.19 / 17.81 | 3.46 / 4.25 |
+| `survey_codes` (1 000 entities coded, not executed) | 5.62 / 6.79 | 2.12 / 2.52 |
+| `code_census` | 4.90 / 6.00 | 1.39 / 1.77 |
+| `utility_read` (the walk alone) | 4.72 / 5.77 | 1.19 / 1.48 |
+
+Changed / base on the median 0.24, 0.37, 0.29 and 0.26 (A/A between 0.96 and
+1.06 in these cells); the `count=` of each is the same in both builds.
+
+### Global Modify's layers
+
+Found on 2026-11-21 and left then. `global_modify::match_entities` is what
+every scope and filter resolves through - Global Modify, and each verb that
+takes `LAYERS`, `VIEW`, `DRAWING` or `WHERE` - and for every entity it asked
+again what only the entity's layer decides: whether the layer is one of the
+scope's, whether a pattern takes its path, whether the layer is shown and
+whether the view hides it - a lookup of the layer in the table and a match of
+every pattern, 100 000 times for the two hundred answers a drawing of two
+hundred layers has. The match is now in two halves, the layer's and the
+entity's, and **the layer's half is asked once for a run of entities on one
+layer**: the name and the answer of the last layer asked about are kept for
+the length of the call. A scope and filter that ask nothing of a layer (the
+whole drawing or a selection, no pattern, not drawn-only) skip the half
+altogether.
+
+Nothing an entity is asked changed, only how often its layer is: the
+layer's half is a function of the model, the scope, the filter and the
+layer's name, none of which changes during the call, and the drawn rule is
+put together from the same two pieces `is_drawn` is (`is_layer_drawn` and the
+entity's own switch). The ids come out in the same order, sorted as before.
+**Rejected:** a map of every layer seen in the call, which would also serve a
+drawing whose layers alternate entity by entity - it costs a hash of the
+layer's name an entity, more than the half itself costs for a scope of one
+layer and no pattern, where the last layer costs one comparison of two names.
+Such a drawing gains nothing from this and pays that comparison.
+
+Held by `global_modify_layers::a_layers_scope_takes_what_the_rule_takes_entity_by_entity`
+and its neighbours for patterns, drawn-only, a view with hidden layers and an
+area, and a selection: 1 200 generated entities on nine nested layers whose
+names share prefixes of text, half in runs of twenty on a layer and half
+with no two neighbours on one, and the rule written out again in the test,
+entity by entity with nothing remembered, from the layers as the test made
+them. Every case must take some of the drawing and not all of it.
+
+`cargo bench --locked -p katana_cad --bench drawing_passes`: the 100 000
+entities in runs of 25 on 200 layers. The `count=` of a cell, the entities
+matched, must be the same in both builds.
+
+| ms, min / median | base | changed |
+|---|---|---|
+| `match_layers` (a branch with sublayers, two patterns, drawn only) | 7.07 / 7.71 | 2.63 / 2.92 |
+| `match_view` (a view hiding two layers of its own) | 9.43 / 9.92 | 3.09 / 3.38 |
+| `match_drawing` (no layer asked: the control, which must not move) | 2.30 / 2.86 | 1.36 / 1.95 |
+
+Changed / base 0.37 / 0.38 and 0.33 / 0.34 where a layer is asked about
+(A/A 1.00 to 1.03). **The control moved, and for the better** (0.59 / 0.68):
+it asks nothing of layers, so the remembered answer is not what it gained
+by - the walk is, which became one pass over the entities with the change
+(the same gain as "The verbs' walks"). The counts matched are the same.
+
+### A project saved and loaded
+
+No change, a benchmark: until it there was none that opened a database, so
+what "Checking a project's contents" and "Empty property maps" took off an
+open could be given only as milliseconds, not as a share of the open.
+`crates/katana_storage/benches/project_load.rs` generates a project of
+100 000 entities on 200 layers - lines and polylines of 12 vertices by turns,
+and one in fifty a surveyed point carrying three properties, so 98 % of the
+property columns hold the empty object - saves it once to a folder of its own
+under the system's temporary directory, removed when the run ends, and times
+`ProjectStore::load` alone (with its A/A pair), `ProjectStore::open` with the
+load and `apply_to_model_consuming` (what `Document::open` pays before it
+builds its index), and `ProjectStore::save` over the project. It uses only
+members the commit before "Changes of 2026-11-21" has, so it can be built
+against that commit to say what the seven changes above gave a whole open.
+**The times are the disk's as much as the code's**: a cell is a result only
+outside the spread of `load` against `load_again`.
+
+`cargo bench --locked -p katana_storage --bench project_load`, run on
+2026-11-23; the project is 19.3 MB on disk.
+
+| ms, min / median | this build | this build (A/A) |
+|---|---|---|
+| `load` (100 000 entities read) | 62.61 / 66.38 | 63.51 / 65.98 |
+| `open_load_apply` (what an open pays before its index) | 186.92 / 193.31 | |
+| `save` (the project rewritten) | 521.15 / 553.79 | |
+
+The build before the changes of 2026-11-22 reads the same (`load` 62.83 /
+65.96, `save` 525.28 / 557.60): none of them is on the path of an open or a
+save, and this is where the next one that is will be judged. A save costs
+eight times a load, which is the place to look first.
+
+### The plan view's furniture on an unchanged frame
+
+Written on 2026-11-22 and measured on 2026-11-23, as the two subsections
+after it were; each of the three is built alone on the base for its table.
+
+With the texture kept ("The plan view's frames"), a frame in which nothing
+changed still copied the kept drawing, painted the view's furniture over the
+copy and compared the picture with the last one, whole: three passes over
+every pixel of the view to learn that the screen was right. A key over what
+the furniture is painted from was rejected there until its inputs were
+listed, with a test for each. `FurnitureKey`
+(`crates/katana_window/src/viewport_widget.rs`) is that list. A paint whose
+drawing was kept and whose key is the last paint's keeps the picture: no
+copy, no furniture, nothing compared.
+
+| drawn over the drawing | painted from | where it is keyed |
+|---|---|---|
+| a running tool's preview, caption and prompt band | the tool, through a trait object (`ToolHost::feedback`) with no revision | **no key**: every frame of a running tool is painted |
+| the selection's grips | the list, the hot ones, the one under the cursor; the view's transform | the key; the drawing's key |
+| a grip pressed, dragged or picked up | the controller's target and whether it inserts, which it does not tell | **no key** |
+| the vertex a Ctrl-drag would add, over a segment middle | the plan painter | **no key** |
+| the band of a hovered grip's hint | the hovered grip; its entity | the key; the drawing's key (notifications, model revision) |
+| the empty drawing's hint | whether it shows, the view's size, the text size | the key |
+| the selection box | its two corners | the key |
+| the snap marker | the snap, the acquired points, the tracking path and its switch, a drafting aid's label, and the cursor where the marker draws at it | the key |
+| the fonts of the hint and the bands | View > Text Size | the key |
+
+The colours are constants of the build. **The cursor is in the key only
+where it is drawn.** With no tool running the one thing drawn at the cursor
+is the snap marker's tracking path and label; the marker now reads the
+cursor through one accessor (`SnapMarks::cursor_drawn`), which answers only
+then, and the key holds what the accessor answers. So the commonest frame
+of all - the pointer crossing a view with no tool running and no grip under
+it - is kept, as a frame made by a pointer elsewhere in the window is.
+
+**Rejected:** a revision counted by the tool host and by the grip
+controller, which would give a tool's and a drag's frames a key too. A
+tool's preview is worked out from the document and the cursor behind a
+trait, at every paint, and a count kept by its host would be a guess at
+when that answer changes: those frames are painted, and compared, as
+before. **Rejected:** dropping the whole-picture comparison now that there
+is a key. It stays as the guard of every frame that is painted - one with no
+key, and one whose key changed and whose picture did not.
+
+Held by `crates/katana_window/tests/plan_view/kept_furniture.rs`, a case an
+input of the key (fourteen). Each shows by `PlanView::furniture_paint_count`
+that the kept path is reached before the input changes and left when it
+does, and that the picture kept is, pixel for pixel, what a paint of
+everything gives - the kept drawing made stale first, so that nothing is
+kept. `kept_furniture::a_pointer_crossing_the_view_with_nothing_to_mark_keeps_the_picture`
+is the cursor's case, and
+`kept_furniture::a_running_tools_frames_are_always_painted` one of the three
+with no key.
+
+`cargo bench --locked -p katana_window --bench plan_frames`; the base is the
+build before this change.
+
+| ms, min / median | base | base (A/A) | changed | changed / base |
+|---|---|---|---|---|
+| `idle_frames` (30 frames, nothing changed) | 55.32 / 61.43 | 54.55 / 57.51 | 0.118 / 0.133 | 0.002 / 0.002 |
+| `pan_frames` (the control: every frame is painted, and makes a key it has no use for) | 102.41 / 112.04 | 100.44 / 108.05 | 101.70 / 111.02 | 0.99 / 0.99 |
+| `idle_frames_selected` (30 frames, 100 000 selected) | 79.63 / 93.30 | 82.22 / 90.86 | 26.74 / 27.34 | 0.34 / 0.29 |
+
+Thirty idle frames of the view cost 0.12 ms where they cost 55: nothing of
+the plan is done in a frame that changes nothing of it. The pan did not
+move. What is left of an idle frame with a large selection is the listing
+of the selection for the key, which the next subsection takes out; with
+both, and the rest of 2026-11-22, the build as committed gives `idle_frames`
+0.122 / 0.131, `idle_frames_selected` 5.51 / 5.76 and `pan_frames` 93.68 /
+107.00 (0.91 / 0.95 of the base, A/A 0.98 / 0.96).
+
+**Not measured by any cell:** frames of the pointer crossing the view, which
+were furniture frames and are now kept; `plan_frames` moves no pointer.
+
+### The selection in the plan view's key
+
+Not measured yet (see the subsection above).
+
+The kept drawing is keyed by the selection, because a caller may change the
+selection and only ask for a repaint, with no notification
+(`Document::notify_selection_changed`). To make that part of the key,
+`drawing_key` listed every selected id into a vector and hashed the list a
+byte at a time on every frame: at 100 000 selected, an allocation of
+800 000 bytes and 800 000 multiplications, each waiting on the one before,
+to learn that the selection was the one the last frame had. The view now
+keeps the selection it last saw (`selection_seen`) and compares the
+document's with it, set against set: two of one size id by id, stopping at
+the first that differs, nothing allocated; two of different sizes at once.
+The key holds a count of the changes found (`selection_revision`). **The
+price** is a second copy of the selection a plan view - eight bytes an id
+and the tree's nodes - copied once for each change of it.
+
+**Rejected:** hashing the ids through an iterator over the set, with no
+vector, which is what was first proposed. `SelectionSet`
+(`crates/katana_cad/src/selection.rs`) hands its ids out only as a vector,
+and by reading the hash, not the vector, is the larger part of the cost. A
+comparison also cannot take two selections for one, as a 64-bit hash could.
+**Nothing persists the key** or compares it across builds: it is private to
+the view and lives in memory, so that its selection part is now a count and
+not a hash changes nothing outside the view.
+
+Held by
+`view_ui::the_drawing_is_painted_again_for_a_selection_one_id_different_and_not_for_the_same_set`
+(the selection changed with no notification, which would repaint by itself:
+one id swapped for another with the count as it was paints the drawing
+again, the same set put again in another order does not).
+
+`cargo bench --locked -p katana_window --bench plan_frames`: a second view
+of the same 100 000 lines with every one selected; the base is the build
+before this change.
+
+| ms, min / median | base | base (A/A) | changed | changed / base |
+|---|---|---|---|---|
+| `idle_frames_selected` (30 frames, 100 000 selected) | 79.63 / 93.30 | 82.22 / 90.86 | 61.85 / 70.59 | 0.78 / 0.76 |
+| `idle_frames` (the control, nothing selected) | 55.32 / 61.43 | 54.55 / 57.51 | 53.43 / 61.50 | 0.97 / 1.00 |
+
+### The sheet editor's canvas
+
+Not measured yet (see two subsections above).
+
+The sheet editor's canvas (`crates/katana_window/src/sheet_editor.rs`) keeps
+the painted sheet as an image and paints it again only when the sheet, the
+zoom or the size changes. But every frame it made a new picture - the desk,
+that image laid down, the drawing area, the selection's outlines and
+handles, the rulers - converted it pixel by pixel into egui's colours and
+handed the whole of it to the texture, for a picture the texture already
+held. Two changes, apart:
+
+1. **The texture is given the picture only when the picture changed.** The
+   canvas keeps its last picture and counts a revision (`picture_revision`)
+   when a paint leaves it different; the editor converts and hands over only
+   a revision it has not shown (`canvas_shown`). The comparison is of whole
+   pictures, as the plan view's is, and saves the conversion and the upload,
+   not the paint. Held by
+   `kept_canvas::the_texture_is_given_the_canvas_when_it_changes_and_only_then`
+   (every frame is asked what it did: a canvas that is not the last frame's
+   is handed over once, whole, and is the canvas; one that is, is not handed
+   over).
+2. **The picture is kept when nothing it is painted from changed.** The
+   canvas's paint (`paint_over`) reads the canvas and nothing else - no
+   document - so what it is painted from can be listed: `CanvasKey`. The
+   painted sheet, by a count of its paints; the canvas's size and device
+   ratio, the zoom and where the paper is; the set and which sheet of it
+   (the paper, the viewports' rectangles and locks); the selected viewports
+   and the primary; the paper grid and its spacing; the rulers and the
+   cursor's place on the paper that they mark. The fonts and colours are
+   constants. A paint whose key is the last paint's paints nothing. **No
+   key while a drag is under way**: a drag's marks - the viewports' paint
+   going with the hand, the guides and the plate, the rubber band, a plan
+   panned inside its viewport, the paper under the hand - are read from a
+   dozen members the drag keeps changing, and those frames are painted and
+   compared as before. The key is exactly as good as the kept sheet image
+   the canvas already had: a change the editor does not see leaves both as
+   they were. Held by the ten cases after the first in
+   `crates/katana_window/tests/sheet_editor/kept_canvas.rs`, an input each,
+   which show by `SheetCanvas::paints` that the kept path is reached before
+   the input changes and left when it does, and that the picture kept is,
+   pixel for pixel, what a paint of everything gives.
+
+**Rejected:** a kept buffer for the picture, as the plan view has: the
+canvas's paint begins by filling the whole desk, so a buffer used again
+would be right, but it is a change of its own with its own measurement and
+is not made (Not done). **Rejected:** a key for a drag's frames: a drag is
+the one time the canvas changes at nearly every frame.
+
+`cargo bench --locked -p katana_window --bench sheet_frames`
+(`crates/katana_window/benches/sheet_frames.rs`): the whole editor through
+egui headless on a 1400 x 900 screen, over one A3 sheet of two plans of
+20 000 generated lines and a note. Headless, a texture handed over is only
+queued, so the upload itself is not in these times. The base is the build
+before both; change 1 alone is the build between them.
+
+| ms, min / median | base | base (A/A) | change 1 | changes 1 and 2 | 1 and 2 / base |
+|---|---|---|---|---|---|
+| `idle_frames` (30 frames, nothing changed) | 213.67 / 268.36 | 222.75 / 273.60 | 196.03 / 263.35 | 11.65 / 32.64 | 0.05 / 0.12 |
+| `select_frames` (10 frames, another viewport picked in each) | 83.42 / 91.71 | 87.97 / 92.95 | 83.43 / 94.47 | 88.27 / 93.81 | 1.06 / 1.02 |
+| `pointer_frames` (10 frames, the pointer moved across the paper in each) | 81.30 / 90.78 | 86.74 / 92.19 | 84.07 / 92.36 | 86.53 / 92.45 | 1.06 / 1.02 |
+| `uploads=` of `idle_frames` | 30 | 30 | 0 | 0 | |
+
+**Read the medians of `idle_frames`**: its minimum and its A/A twin's
+disagree in the changed build (11.65 and 31.87), so the minimum is no
+result; the medians agree (32.64 and 32.57, of 268.36). An idle frame of the
+editor costs an eighth of what it did. **Change 1 alone is not a result in
+these times** (0.92 / 0.98 against an A/A of 1.04 / 1.02): headless, the
+upload it saves is only queued, so what it saves here is the conversion,
+which the comparison it adds costs back. It was kept for the 30 uploads a
+second it saves the desktop and because change 2 stands on it. The frames
+that change the canvas are inside the A/A spread (1.06 / 1.02 against 1.05
+to 1.07 / 1.01 to 1.02): the price could not be told from the machine.
+
+`select_frames` and `pointer_frames` change the canvas in every frame, so
+both changes can only cost them: the comparison, and a key made and not
+matched. They are there to show that price. The frames are the whole
+editor's, its menus, list, properties and checks with the canvas, so the
+canvas's part is less than the whole of a figure.
+
+### The safe UTF-16 append
+
+Not a change made for speed: `append_ascii_utf16`
+(`crates/katana_core/src/text_kernels.rs`) lost its `unsafe` on 2026-11-22
+(`docs/rust.md`, the third pass). It reached into the String's spare
+capacity and set its length; it now narrows a block of 4 096 units into an
+array of its own and appends that as text, so every ASCII byte is checked
+and copied once more. The second pass had declined this form for want of a
+benchmark; this is the benchmark, and the price.
+
+`cargo bench --locked -p katana_core --bench decode_utf16`
+(`crates/katana_core/benches/decode_utf16.rs`): 4 000 000 units (8 MB) of a
+point file's lines through `decode_text`, at the AVX2 level.
+
+| ms, min / median | base | base (A/A) | changed | changed / base |
+|---|---|---|---|---|
+| `ascii_le` (no other character) | 0.629 / 0.708 | 0.617 / 0.708 | 0.776 / 0.865 | 1.23 / 1.22 |
+| `sparse_le` (a degree sign every 200 units) | 1.386 / 1.579 | 1.377 / 1.600 | 1.478 / 1.677 | 1.07 / 1.06 |
+| `dense_le` (another character every 8 units) | 4.227 / 4.365 | 4.235 / 4.376 | 7.053 / 7.236 | 1.67 / 1.66 |
+| `sparse_be` | 1.413 / 1.597 | | 1.465 / 1.635 | 1.04 / 1.02 |
+
+**It is slower, and was kept.** A fifth more on plain ASCII and two thirds
+more on a text with another character in every eight, against an A/A of
+1.00: 0.15 ms and 2.8 ms on 8 MB, of a file whose reading after the decode
+takes hundreds of times that. The owner's ask was the `unsafe` gone where
+it can go, and the two places it stays (the task pool's workers, the
+rasteriser's disjoint writes) stay for a tenth and two thirds of a frame,
+every frame; this is a few milliseconds once a file. Rejected: keeping the
+`unsafe` for the dense case alone (two paths to keep equal, for 3 ms).
+Reverting the one commit restores the old form.
 
 ### Found and left alone
 
 Hot spots read on 2026-11-21 and not changed, with what each would take:
 
-- **The plan view's copy and furniture on an unchanged frame.** With the
-  texture kept, an idle frame still copies the drawing, paints the furniture
-  and compares. Skipping all three needs a key over everything the furniture
-  reads (rejected above until someone lists it with a test for each input).
-- **The sheet editor repaints its whole canvas every frame**
-  (`crates/katana_window/src/sheet_editor.rs`, `paint_canvas`), and hands it
-  to its texture every frame. It needs what the plan view has: a kept picture
-  and a key that says when it is stale; the comparison used above would save
-  only the upload, the smaller part there.
-- **`for_each_candidate` works every candidate's extent out a second time**
-  (`crates/katana_cad/src/spatial_query.rs`): the index has already compared
-  the stored box, which is the same box unless the index is stale - and a
-  dimension's box depends on its style, which a table edit changes without
-  touching the entity. Dropping the second test changes answers in exactly
-  that case, so it needs the index refreshed on a dimension style's change
-  first.
-- **`drawing_key` lists the whole selection every frame**
-  (`crates/katana_window/src/viewport_widget.rs`): a vector of every selected
-  id, to hash it. An iterator over the set would do; a fraction of a
-  millisecond at 100 000 selected.
-- **Other lists of every id followed by a lookup each**, as the labels' walk
-  was: `crates/katana_cad/src/linework.rs` (three), `survey_coding.rs`,
-  `utilities/utility_data.rs` and `code_table.rs` in the same folder, and the
-  archive and IFC exports. Each is a verb's one pass, not a frame's, so each
-  is worth a few milliseconds a run at 100 000 entities; `EntityDatabase::iter`
-  is there for them.
-- **Global Modify's match** (`global_modify::match_entities`) resolves the
-  layer and matches the layer patterns for every entity; entities come in
-  runs on one layer, so remembering the last layer's answers would do. Read
-  as a few milliseconds at 100 000 entities and left: it runs once a command.
+- **Two more lists of every id followed by a lookup each**, read on
+  2026-11-22 while the eight of "The verbs' walks" were changed and left,
+  being outside that work's list: `label_entities`
+  (`crates/katana_cad/src/annotation/label_layout.rs`, what LABEL LAYOUT lays
+  out with no view) and `sheets_from_plot_frames`
+  (`crates/katana_cad/src/plotting/generators.rs`). Each holds the model by
+  shared reference and wants `EntityDatabase::iter` and nothing else; a
+  verb's one pass each.
+- **Every command walks every entity for the annotations that follow others**
+  (`associative_changes`, `crates/katana_cad/src/annotation/associative.rs`,
+  which `Document::execute` wraps every command in): one pass of the drawing
+  a command, and the resolution of each dimension, leader and label, whatever
+  the command changed - a click that draws one line in a drawing of 100 000
+  entities pays the pass. It would take the ids of the entities that follow
+  another kept beside the drawing, moved by the same change events the
+  spatial index reads, and a test that the kept ids give what the pass gives
+  after every kind of change; unmeasured.
+- **A layer or dimension-style edit draws every dimension again** to store
+  its box ("The index and the tables a box is drawn from"): switching a layer
+  off in a drawing of 10 000 dimensions pays 10 000 drawings for boxes that
+  did not move. Telling which layers changed their choice of style, and which
+  styles changed, needs the two tables as they were before the step;
+  unmeasured.
+- **A command that fails after it has run costs a rebuild of the index** (the
+  same section): right for a failure nothing is known about, and paid also by
+  a transaction whose later part is refused and which rolled back exactly.
+  Saving it needs the stack to hand over the changes of a failed step rather
+  than drop them, which is `crates/katana_commands/src/command_stack.rs`'s to
+  give.
 
 ## Not done
 
@@ -694,10 +1210,24 @@ Hot spots read on 2026-11-21 and not changed, with what each would take:
   `docs/plan_view.md`, "Meshes in plan"), the rasteriser's frame and the task
   pool's dispatch (`crates/katana_render/benches/rasterise.rs`), and the four
   of "Changes of 2026-11-21" above (`plan_frames`, `entity_database`,
-  `spatial_index`, `apply_contents`), measured there.
-- **The plan view's two changes were measured together.** What the kept
-  buffer gives without the kept texture, and the reverse, needs a build of
-  each alone (`plan_frames`).
+  `spatial_index`, `apply_contents`), measured there, with the four of
+  2026-11-22 (`sheet_frames`, `drawing_passes`, `project_load`,
+  `decode_utf16`).
+- **What a table edit costs the index is not measured** ("The index and the
+  tables a box is drawn from"): a cell that edits a dimension style of a
+  drawing with many dimensions would say.
+- **A running tool's frames, and a drag's, keep nothing.** The plan view
+  paints, and compares, every frame of a running tool and of a grip in hand,
+  and the sheet canvas every frame of a drag ("The plan view's furniture on
+  an unchanged frame", "The sheet editor's canvas"). A tool's frames could
+  be kept only if a tool said when its preview changes, which is every
+  tool's to say.
+- **`SelectionSet` has no iterator.** With one, the plan view could keep the
+  selection it last saw as a sorted vector and compare the set with it in
+  one walk of the tree, where it now walks two
+  ("The selection in the plan view's key").
+- **The sheet canvas makes a new picture for every frame it paints**, where
+  the plan view lays its own into a kept buffer.
 - **The safe kernels' speed is unmeasured.** The kernels were made safe on
   2026-11-20 rather than removed ("Safe kernels" above); that the folds into
   single loads and stores happened, and that no kernel slowed, needs the

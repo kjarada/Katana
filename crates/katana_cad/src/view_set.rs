@@ -480,6 +480,16 @@ impl ViewSet {
         Ok(self.views[last].as_mut())
     }
 
+    /// Whether `id` has been given out by this set - to a view open now or
+    /// closed since, or passed over when restore() opened a later one - so
+    /// that a queued event may still name it. restore() itself takes any id
+    /// that is not open; a caller restoring a saved workspace into a set that
+    /// has already had views asks this first, and gives such a view a new id
+    /// rather than one that was another view's.
+    pub fn issued(&self, id: ViewId) -> bool {
+        id != NO_VIEW && id < self.next
+    }
+
     /// Fails with NotFound for an id that is not open. Removing the active view
     /// activates the most recently active of the rest. A linked view leaves
     /// the link, which is dissolved when one member is left (unlink).

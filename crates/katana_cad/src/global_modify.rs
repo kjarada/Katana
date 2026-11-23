@@ -80,7 +80,7 @@ use katana_geometry::Box2;
 
 use crate::document::Document;
 use crate::layer_overrides::{LayerOverrides, NO_LAYER_OVERRIDES};
-use crate::selection::is_drawn;
+use crate::selection::is_layer_drawn;
 use crate::style_catalogue::check_linetype_name;
 use crate::symbol_assign::assign_symbol_to_points;
 
@@ -531,11 +531,57 @@ fn text_of(entity: &Entity) -> Option<&str> {
     }
 }
 
-fn passes(model: &Model, entity: &Entity, filter: &ModifyFilter) -> bool {
-    if !filter.types.is_empty() && !filter.types.contains(&entity.r#type()) {
+// THE TWO HALVES OF A MATCH. What a scope and a filter ask of an entity is
+// asked partly of the layer it is on - is the layer one of the scope's, does a
+// pattern take its path, is it shown, does the view hide it - and partly of
+// the entity itself. The halves are apart because the first has the same
+// answer for every entity of a layer, and a drawing's entities come in runs
+// on one layer (a survey's strings, an import's layers one after another):
+// asked of every entity, it was a lookup of the layer and a match of every
+// pattern 100 000 times for the couple of hundred answers there are
+// (docs/performance.md, "Global Modify's layers"). An entity is taken when
+// both halves take it, in whatever order they are asked: neither changes
+// anything.
+
+// The layer's half: what `scope` and `filter` ask of `layer`, the full path an
+// entity is on. The drawn rule's layer half is selection's is_layer_drawn,
+// which with the entity's own switch (entity_is_taken) is its is_drawn.
+fn layer_is_taken(model: &Model, scope: &ModifyScope, filter: &ModifyFilter, layer: &str) -> bool {
+    match scope.kind {
+        ScopeKind::Selection | ScopeKind::Drawing => {}
+        ScopeKind::View => {
+            let hidden: &LayerOverrides = scope.view.as_deref().unwrap_or(&NO_LAYER_OVERRIDES);
+            if !is_layer_drawn(&model.layers.resolve(layer), layer, hidden) {
+                return false;
+            }
+        }
+        ScopeKind::Layers => {
+            if !layer_in_scope(scope, layer) {
+                return false;
+            }
+        }
+    }
+    if !layer_passes_filter(filter, layer) {
         return false;
     }
-    if !layer_passes_filter(filter, &entity.layer) {
+    !filter.drawn_only || is_layer_drawn(&model.layers.resolve(layer), layer, &NO_LAYER_OVERRIDES)
+}
+
+// The entity's half: everything `scope` and `filter` ask that the layer alone
+// does not answer.
+fn entity_is_taken(scope: &ModifyScope, filter: &ModifyFilter, entity: &Entity) -> bool {
+    if scope.kind == ScopeKind::View {
+        // A view does not draw an entity that is switched off.
+        if !entity.visible {
+            return false;
+        }
+        if let Some(area) = scope.area
+            && !bounding_box(&entity.geometry).intersects(area)
+        {
+            return false;
+        }
+    }
+    if !filter.types.is_empty() && !filter.types.contains(&entity.r#type()) {
         return false;
     }
     if let Some(style) = &filter.style {
@@ -563,10 +609,48 @@ fn passes(model: &Model, entity: &Entity, filter: &ModifyFilter) -> bool {
             _ => return false,
         }
     }
-    if filter.drawn_only && !is_drawn(model, entity, &NO_LAYER_OVERRIDES) {
-        return false;
+    !filter.drawn_only || entity.visible
+}
+
+// One call's matching: the request, the layer's half remembered for the layer
+// last asked about, and what has been taken.
+struct Matching<'m> {
+    model: &'m Model,
+    scope: &'m ModifyScope,
+    filter: &'m ModifyFilter,
+    // Whether the layer's half asks anything: for the whole drawing or a
+    // selection with no layer pattern and no drawn-only it takes every layer,
+    // and is not asked.
+    layers_matter: bool,
+    // ONLY THE LAST LAYER, not every layer seen: a run costs one comparison
+    // of two names an entity, and a drawing whose layers alternate costs that
+    // comparison more than it did. A map of every layer seen would answer
+    // the alternating drawing too, at a hash of the name an entity - more
+    // than the half itself costs for a scope of one layer and no pattern.
+    last_layer: Option<(&'m str, bool)>,
+    matched: Vec<EntityId>,
+}
+
+impl<'m> Matching<'m> {
+    fn consider(&mut self, entity: &'m Entity) {
+        if self.takes_layer(&entity.layer) && entity_is_taken(self.scope, self.filter, entity) {
+            self.matched.push(entity.id);
+        }
     }
-    true
+
+    fn takes_layer(&mut self, layer: &'m str) -> bool {
+        if !self.layers_matter {
+            return true;
+        }
+        if let Some((last, taken)) = self.last_layer
+            && last == layer
+        {
+            return taken;
+        }
+        let taken = layer_is_taken(self.model, self.scope, self.filter, layer);
+        self.last_layer = Some((layer, taken));
+        taken
+    }
 }
 
 /// A Layers scope's layers against the drawing: InvalidArgument when it names
@@ -658,41 +742,30 @@ pub fn match_entities(
     let model = document.model();
     check_scope_layers(model, scope)?;
 
-    let mut matched = Vec::new();
-    let mut consider = |entity: &Entity| {
-        match scope.kind {
-            ScopeKind::Selection | ScopeKind::Drawing => {}
-            ScopeKind::View => {
-                let hidden: &LayerOverrides = scope.view.as_deref().unwrap_or(&NO_LAYER_OVERRIDES);
-                if !is_drawn(model, entity, hidden) {
-                    return;
-                }
-                if let Some(area) = scope.area
-                    && !bounding_box(&entity.geometry).intersects(area)
-                {
-                    return;
-                }
-            }
-            ScopeKind::Layers => {
-                if !layer_in_scope(scope, &entity.layer) {
-                    return;
-                }
-            }
-        }
-        if passes(model, entity, filter) {
-            matched.push(entity.id);
-        }
+    let mut matching = Matching {
+        model,
+        scope,
+        filter,
+        layers_matter: matches!(scope.kind, ScopeKind::View | ScopeKind::Layers)
+            || !filter.layers.is_empty()
+            || filter.drawn_only,
+        last_layer: None,
+        matched: Vec::new(),
     };
-
     if scope.kind == ScopeKind::Selection {
         for id in document.selection().ids() {
             if let Some(entity) = model.entities.find(id) {
-                consider(entity);
+                matching.consider(entity);
             }
         }
     } else {
-        model.entities.for_each(&mut consider);
+        // In entity order, as for_each visits; iter lends each entity for as
+        // long as the model, which the remembered layer's name needs.
+        for entity in model.entities.iter() {
+            matching.consider(entity);
+        }
     }
+    let mut matched = matching.matched;
     matched.sort_unstable();
     Ok(matched)
 }

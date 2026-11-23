@@ -2163,10 +2163,10 @@ pub fn tool_bar_strip(
             let hidden: Vec<usize> = (0..strip.items.len())
                 .filter(|&index| !layout.shown[index] && strip.items[index] != StripItem::Separator)
                 .collect();
-            egui::Area::new(egui::Id::new((
-                "katanaToolBarExpansion",
-                strip.name.as_str(),
-            )))
+            egui::Area::new(
+                // By the one name the window's shortcut pass knows it from a menu by.
+                expansion_layer(strip.name.as_str()).id,
+            )
             .order(egui::Order::Foreground)
             .fixed_pos(at)
             .show(&ctx, |ui| {
@@ -2205,6 +2205,17 @@ pub fn tool_bar_strip(
     );
     end_target(ui, bar);
     out
+}
+
+/// The layer the expansion of the strip named `strip` is drawn in - the row of the buttons its
+/// room hides: over the views, in the order egui draws menus in. It is no menu, though: it stays
+/// until its arrow is clicked again, and the window's keyboard shortcuts
+/// (main_window::shortcuts), which wait while a menu is open, tell it from one by this.
+pub fn expansion_layer(strip: &str) -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new(("katanaToolBarExpansion", strip)),
+    )
 }
 
 /// The cell an item is drawn in: its own size, but a separator across the whole of the bar's

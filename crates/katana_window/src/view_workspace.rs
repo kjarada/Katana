@@ -46,6 +46,19 @@
 //! THE CHROME is the workspace's own `DockChrome<ViewTab>`: the C++ shares the main window's, so
 //! one tray holds a minimised panel and a minimised view, and the window draws the workspace's
 //! tray buttons beside its own (`tray_actions`, `restore_view`).
+//!
+//! A FLOATING VIEW is a window inside the workspace at a rectangle the chrome keeps for it
+//! (`DockChrome::float_rect`), in points from the workspace's top left - so it holds while a
+//! panel beside the views is hidden, and is what a saved session records. Float lifts a view off
+//! its docked place; its title bar drags it; Maximise fills the workspace with it.
+//!
+//! A VIEW'S TITLE BAR HAS A SHORTCUT MENU (`BAR_MENU`): what its window buttons do, and the three
+//! tilings, each going the way the button or the View menu's item goes (`trigger_bar_menu`).
+//!
+//! THE VIEWS BETWEEN SESSIONS (`saved_views`, `restore_views`; docs/desktop.md, "The views
+//! between sessions"): which views are open, under the ids they had, what each shows, the link
+//! and the arrangement. What a view looks AT - its zoom, its camera, the layers it hides, its
+//! section - is a drawing's and is not kept with the window's.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -54,7 +67,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use egui::{Align, Layout, Pos2, Rect, Sense, Ui, UiBuilder, Vec2};
-use egui_dock::{DockState, Node, NodeIndex, SurfaceIndex, TabPath, Tree};
+use egui_dock::{DockState, Node, NodeIndex, TabPath, Tree};
 use katana_cad::interactive_tool::{ToolInput, tool_catalog};
 use katana_cad::scene::{MeshPlanDisplay, SceneMesh, SceneOptions, SceneSurface};
 use katana_cad::scope_verbs::{ScopeViewFn, scope_view_of};
@@ -69,6 +82,7 @@ use katana_cad::viewport_layout::{
 };
 use katana_cad::{CommandInterpreter, Document, ListenerHandle, SnapModes, SnapResult};
 use katana_core::error::make_error;
+use katana_core::json::Json;
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result, Status};
 use katana_entity::EntityId;
@@ -78,10 +92,10 @@ use katana_interop::ReferenceData;
 
 use crate::canvas::PointF;
 use crate::dock_chrome::{
-    ALWAYS, BAR_HEIGHT, ChromeIcons, ChromeRequest, DockChrome, DockRole, DockTab, DockTitleBar,
-    TitleBarButton,
+    ALWAYS, BAR_HEIGHT, BarFacts, ChromeIcons, ChromeRequest, DEFAULT_FLOAT, DockChrome, DockRole,
+    DockTab, DockTitleBar, TitleBarButton, WindowButton,
 };
-use crate::drive::action::Action;
+use crate::drive::action::{Action, Menu, MenuItem};
 use crate::drive::registry::{TargetKind, TargetSpec, begin_target, end_target};
 use crate::host::{Host, PickId, VerbOutcome, ViewAccess};
 use crate::render_view_widget::{GpuSession, RenderScene, RenderView, RenderViewEvent};
@@ -137,9 +151,112 @@ fn kind_icon(kind: ViewKind) -> &'static str {
     }
 }
 
+/// The tilings, where they are offered - View > Viewport Layout, the Window menu and a view's
+/// title bar menu: kind, action name, icon, tip. One table, so the three places show one action;
+/// each runs VIEWS TILE with the kind's word (`tiling_line`), as a typed line would.
+pub const TILINGS: [(TileKind, &str, &str, &str); 3] = [
+    (
+        TileKind::Grid,
+        "viewTile",
+        "LayoutTile",
+        "Give every open view a place of its own of equal size, in a grid; opens and closes none \
+         (VIEWS TILE)",
+    ),
+    (
+        TileKind::Columns,
+        "viewTileSideBySide",
+        "LayoutTileColumns",
+        "Put the open views side by side, each the same width; opens and closes none (VIEWS TILE \
+         COLUMNS)",
+    ),
+    (
+        TileKind::Rows,
+        "viewTileStacked",
+        "LayoutTileRows",
+        "Stack the open views one above the other, each the same height; opens and closes none \
+         (VIEWS TILE ROWS)",
+    ),
+];
+
+/// The line a tiling's item hands the window's executor: None for a name that is no tiling's.
+pub fn tiling_line(action: &str) -> Option<String> {
+    TILINGS
+        .iter()
+        .find(|(_, name, ..)| *name == action)
+        .map(|(kind, ..)| format!("VIEWS TILE {}", kind.word().to_ascii_uppercase()))
+}
+
+/// The tilings as a menu's rows, in the table's order.
+pub fn tiling_actions() -> Vec<Action> {
+    TILINGS
+        .into_iter()
+        .map(|(kind, name, icon, tip)| Action::new(name, kind.name()).icon(icon).tip(tip))
+        .collect()
+}
+
+/// A view's title bar menu as a drive target: a step presses one of its items in it.
+pub const BAR_MENU: &str = "ViewBarMenu";
+/// Its own items, by object name: what the bar's window buttons do, for the view it was opened on.
+pub const BAR_MENU_FLOAT: &str = "viewBarFloat";
+pub const BAR_MENU_MINIMISE: &str = "viewBarMinimise";
+pub const BAR_MENU_MAXIMISE: &str = "viewBarMaximise";
+pub const BAR_MENU_CLOSE: &str = "viewBarClose";
+
+/// The most views a saved session may name. More than anyone arranges on purpose - the tilings'
+/// own cases stop at twelve, and thirty-two tiled in the headless window's 794 point drawing area
+/// are six across, 129 points each, less than a view's bar needs for its always-shown buttons -
+/// and few enough that a damaged or hand-edited record cannot make the start open docks by the
+/// thousand, each with a widget and, in 3D, a scene of its own.
+pub const MOST_SAVED_VIEWS: usize = 32;
+/// The version `saved_views` writes; `restore_views` reads no other.
+pub const SAVED_VIEWS_VERSION: i64 = 1;
+/// The least a floating view is: room for its bar's always-shown buttons and a little drawing
+/// under it. A saved rectangle smaller than this is a damaged one.
+const LEAST_FLOAT: Vec2 = Vec2::new(120.0, 80.0);
+/// How much of a floating view's title bar stays inside the workspace when it is dragged or a
+/// saved rectangle is brought into a smaller window: enough of the title to press and drag back.
+const FLOAT_REACH: f32 = 60.0;
+/// How far a view lifts off its docked place when it is floated: a title bar's height down and
+/// across, so the place it left shows behind it.
+const FLOAT_LIFT: f32 = BAR_HEIGHT;
+
+/// `rect`, a floating view's in the workspace's own points, kept where its title bar can be
+/// reached in a workspace of `room`: its top inside, and FLOAT_REACH of its bar inside across.
+/// The rectangle keeps its size; a workspace with no room yet keeps it as it is.
+fn kept_in_reach(rect: Rect, room: Vec2) -> Rect {
+    if !room.x.is_finite() || !room.y.is_finite() || room.x <= 0.0 || room.y <= 0.0 {
+        return rect;
+    }
+    let reach = FLOAT_REACH.min(rect.width());
+    let x = rect
+        .min
+        .x
+        .clamp(reach - rect.width(), (room.x - reach).max(reach - rect.width()));
+    let y = rect.min.y.clamp(0.0, (room.y - BAR_HEIGHT).max(0.0));
+    Rect::from_min_size(Pos2::new(x, y), rect.size())
+}
+
+/// Where a view docked at `place` floats when its Float lifts it off: the same size less the
+/// lift, FLOAT_LIFT down and across from its corner, so it stays over the place it left and is
+/// seen to have come out of it.
+fn lifted(place: Rect) -> Rect {
+    let size = Vec2::new(
+        (place.width() - FLOAT_LIFT).max(LEAST_FLOAT.x),
+        (place.height() - FLOAT_LIFT).max(LEAST_FLOAT.y),
+    );
+    Rect::from_min_size(place.min + Vec2::splat(FLOAT_LIFT), size)
+}
+
 /// A view's dock object name: what the saved layout finds it by, and its drive target.
 pub fn dock_name(id: ViewId) -> String {
     format!("View{id}")
+}
+
+/// The egui Area view `id` floats in. The main window names the same Area to keep its own
+/// floating panels over a floating view that fills the workspace (`docking_ui`), so the id has
+/// this one definition.
+pub fn floating_view_area(id: ViewId) -> egui::Id {
+    egui::Id::new(("katanaFloatingView", id))
 }
 
 fn dock_id(name: &str) -> Option<ViewId> {
@@ -286,6 +403,15 @@ struct Inner {
     kind_choice: Option<(ViewId, ViewKind)>,
     /// The view whose kind menu a click outside it closed this frame (draw_kind_menu).
     kind_menu_dismissed: Option<ViewId>,
+    /// The pointer as the last frame saw it, in the window's points: where a bar's shortcut menu
+    /// opens and a floating view's drag starts, both asked once the frame is drawn.
+    pointer: Option<Pos2>,
+    /// A floating view being dragged by its title bar, and the pointer's offset from its corner.
+    float_drag: Option<(ViewId, Vec2)>,
+    /// The view whose title bar's shortcut menu is open, and where (the window's points); an
+    /// item chosen there, carried out after the frame.
+    bar_menu: Option<(ViewId, Pos2)>,
+    bar_menu_choice: Option<(ViewId, String)>,
     events: Vec<WorkspaceEvent>,
     /// Lines a bar or a transparent zoom asked for, run through the window's executor once
     /// nothing of the workspace is borrowed.
@@ -465,6 +591,95 @@ impl Inner {
         self.path_of(id).is_some_and(|path| !path.surface.is_main())
     }
 
+    /// Where a floating view is, in points from the workspace's top left - the chrome's record
+    /// of it; None for a view that does not float.
+    fn float_rect(&self, id: ViewId) -> Option<Rect> {
+        if !self.floating(id) {
+            return None;
+        }
+        let name = dock_name(id);
+        Some(
+            self.chrome
+                .as_ref()
+                .and_then(|chrome| chrome.float_rect(&name))
+                .unwrap_or(DEFAULT_FLOAT),
+        )
+    }
+
+    /// The workspace's size as last drawn; nothing before the first draw.
+    fn room(&self) -> Vec2 {
+        self.area.map_or(Vec2::ZERO, |area| area.size())
+    }
+
+    /// Where a view's dock is, docked or floating, in points from the workspace's top left: what
+    /// a menu or a popup of its bar is placed by. None for a view that is not in the dock area,
+    /// or before the first draw.
+    fn place_of(&self, id: ViewId) -> Option<Rect> {
+        self.float_rect(id)
+            .or_else(|| self.placements().get(&id).map(|placed| placed.rect))
+    }
+
+    /// The Float button: a docked view lifted off its place into a window over it, or a floating
+    /// one docked back where it came from.
+    fn toggle_floating(&mut self, views: &RefCell<ViewSet>, id: ViewId) {
+        let name = dock_name(id);
+        // A maximise ends first, so the place a view lifts off is its own and not the whole
+        // workspace it had filled.
+        if let Some(chrome) = &mut self.chrome {
+            let _ = chrome.unmaximise(&mut self.layout, &name);
+        }
+        let place = self.placements().get(&id).map(|placed| placed.rect);
+        let room = self.room();
+        if let Some(chrome) = &mut self.chrome {
+            chrome.toggle_floating(&mut self.layout, &name);
+            // The chrome knows nothing of where the dock stood: floating now, it is put over the
+            // place it left.
+            if let Some(place) = place {
+                let _ = chrome.set_float_rect(&name, kept_in_reach(lifted(place), room));
+            }
+        }
+        self.float_drag = None;
+        self.relayout(views);
+    }
+
+    /// The pointer as this frame has it: a floating view being dragged by its title bar goes
+    /// with it while the button is held - its bar kept where it can be reached - and stays where
+    /// it is when the button is let go.
+    fn drag_floating(&mut self, pointer: Option<Pos2>, down: bool) {
+        let Some((id, grip)) = self.float_drag else {
+            return;
+        };
+        match (pointer, self.area, self.float_rect(id)) {
+            (Some(pointer), Some(area), Some(rect)) => {
+                let corner = pointer - grip - area.min.to_vec2();
+                let moved = kept_in_reach(Rect::from_min_size(corner, rect.size()), area.size());
+                if let Some(chrome) = &mut self.chrome {
+                    let _ = chrome.set_float_rect(&dock_name(id), moved);
+                }
+            }
+            // Docked or closed meanwhile, or the pointer gone: there is nothing to drag.
+            _ => self.float_drag = None,
+        }
+        if !down {
+            self.float_drag = None;
+        }
+    }
+
+    /// A press on a floating view's title bar picks it up, by where on the bar the pointer is.
+    /// A maximised view fills the workspace and is not moved.
+    fn begin_float_drag(&mut self, id: ViewId) {
+        let maximised = self
+            .chrome
+            .as_ref()
+            .is_some_and(|chrome| chrome.is_maximised(&dock_name(id)));
+        self.float_drag = match (self.pointer, self.area, self.float_rect(id)) {
+            (Some(pointer), Some(area), Some(rect)) if !maximised => {
+                Some((id, pointer - (area.min + rect.min.to_vec2())))
+            }
+            _ => None,
+        };
+    }
+
     /// The docked views laid out in the area as last drawn.
     fn placements(&self) -> BTreeMap<ViewId, Placed> {
         let mut out = BTreeMap::new();
@@ -512,14 +727,24 @@ impl Inner {
     /// what a split or an arrangement left a view is what the next zoom of it frames, with no frame
     /// drawn between (the C++'s sendPostedEvents of the layout).
     fn relayout(&mut self, views: &RefCell<ViewSet>) {
-        let placed = self.placements();
+        // A floating view's dock is its window: sized as a docked one is, by its rectangle.
+        let mut places: BTreeMap<ViewId, Rect> = self
+            .placements()
+            .into_iter()
+            .map(|(id, placed)| (id, placed.rect))
+            .collect();
+        for view in &self.docks {
+            if let Some(rect) = self.float_rect(view.id) {
+                places.insert(view.id, rect);
+            }
+        }
         let mut set = views.borrow_mut();
         for view in &mut self.docks {
-            let (width, height) = match (self.fixed.get(&view.id), placed.get(&view.id)) {
+            let (width, height) = match (self.fixed.get(&view.id), places.get(&view.id)) {
                 (Some(&fixed), _) => fixed,
                 (None, Some(at)) => (
-                    at.rect.width().round() as i32,
-                    (at.rect.height() - BAR_HEIGHT).round().max(1.0) as i32,
+                    at.width().round() as i32,
+                    (at.height() - BAR_HEIGHT).round().max(1.0) as i32,
                 ),
                 (None, None) => continue,
             };
@@ -2189,6 +2414,10 @@ impl ViewWorkspace {
             kind_menu: None,
             kind_choice: None,
             kind_menu_dismissed: None,
+            pointer: None,
+            float_drag: None,
+            bar_menu: None,
+            bar_menu_choice: None,
             events: Vec::new(),
             lines: Rc::new(RefCell::new(Vec::new())),
             unbuilt: Vec::new(),
@@ -2334,16 +2563,61 @@ impl ViewWorkspace {
     }
 
     /// Maximise or Restore, as the view's own button does; pressing it activates the view first.
+    /// A docked view has the workspace to itself, the other docked views hidden; a floating one
+    /// fills the workspace over them, and Restore gives it back the rectangle it had.
     pub fn toggle_maximised(&self, id: ViewId) {
         let mut inner = self.inner();
         inner.activate(self.views_cell(), id);
         let name = dock_name(id);
-        let screen = inner.area.unwrap_or(Rect::NOTHING);
+        // The room a floating view fills, in the points its rectangle is kept in: from the
+        // workspace's top left. It was the workspace's place on the screen, which a rectangle
+        // read from its own corner would have drawn that far off it.
+        let screen = inner.area.map_or(Rect::NOTHING, |area| {
+            Rect::from_min_size(Pos2::ZERO, area.size())
+        });
         let Inner { chrome, layout, .. } = &mut *inner;
         if let Some(chrome) = chrome {
             chrome.toggle_maximised(layout, &name, screen);
         }
+        inner.float_drag = None;
         inner.relayout(self.views_cell());
+    }
+
+    /// Float or Dock, as the view's own button does: a docked view is lifted off its place into
+    /// a window over it, inside the workspace; a floating one goes back where it came from.
+    /// Pressing it is working in that view, which is made active first.
+    pub fn toggle_floating(&self, id: ViewId) {
+        let mut inner = self.inner();
+        inner.activate(self.views_cell(), id);
+        inner.toggle_floating(self.views_cell(), id);
+    }
+
+    /// Where floating view `id` is, in points from the workspace's top left; None for a view
+    /// that does not float.
+    pub fn float_rect(&self, id: ViewId) -> Option<Rect> {
+        self.inner().float_rect(id)
+    }
+
+    /// Puts floating view `id` at `rect` (points from the workspace's top left), as a drag of its
+    /// title bar does, its bar kept where it can be reached. False for a view that does not
+    /// float, a maximised one, and a rectangle that is no place.
+    pub fn set_float_rect(&self, id: ViewId, rect: Rect) -> bool {
+        let mut inner = self.inner();
+        let name = dock_name(id);
+        if !inner.floating(id) || !rect.is_finite() || !rect.is_positive() {
+            return false;
+        }
+        let room = inner.room();
+        let placed = match &mut inner.chrome {
+            Some(chrome) if !chrome.is_maximised(&name) => {
+                chrome.set_float_rect(&name, kept_in_reach(rect, room))
+            }
+            _ => false,
+        };
+        if placed {
+            inner.relayout(self.views_cell());
+        }
+        placed
     }
 
     pub fn is_maximised(&self, id: ViewId) -> bool {
@@ -3291,8 +3565,9 @@ impl ViewWorkspace {
                 return false;
             }
             let origin = inner.area.map_or(Pos2::ZERO, |area| area.min);
-            inner.placements().get(&id).map_or(origin, |placed| {
-                origin + Vec2::new(placed.rect.max.x, placed.rect.min.y + BAR_HEIGHT)
+            // Docked or floating: under the view's own bar, where its Layers button is.
+            inner.place_of(id).map_or(origin, |place| {
+                origin + Vec2::new(place.max.x, place.min.y + BAR_HEIGHT)
             })
         };
         let popup = ViewLayersPopup::new(self, document, reference, id, anchor);
@@ -3359,6 +3634,120 @@ impl ViewWorkspace {
         Some(result)
     }
 
+    // ---- a title bar's shortcut menu -------------------------------------------------------
+
+    /// The rows of view `id`'s title bar menu as it would show now: Float or Dock, Minimise,
+    /// Maximise or Restore and Close - the bar's own buttons, by `BAR_MENU_FLOAT` and its
+    /// siblings - then the three tilings, by the names the View menu has them under. None for a
+    /// view that is not open, or a workspace with no chrome.
+    pub fn bar_menu(&self, id: ViewId) -> Option<Menu> {
+        self.inner().bar_menu_rows(self.views_cell(), id)
+    }
+
+    /// Opens view `id`'s title bar menu, as a right-click on its bar does: at `at` (the window's
+    /// points), or under the bar's left end when no place is given - the door a run with no
+    /// pointer has. The view is made active: the menu acts on it. False for a view with no menu.
+    pub fn show_bar_menu(&self, id: ViewId, at: Option<Pos2>) -> bool {
+        let mut inner = self.inner();
+        if inner.bar_menu_rows(self.views_cell(), id).is_none() {
+            return false;
+        }
+        inner.activate(self.views_cell(), id);
+        let origin = inner.area.map_or(Pos2::ZERO, |area| area.min);
+        let under_bar = inner.place_of(id).map_or(origin, |place| {
+            origin + place.min.to_vec2() + Vec2::new(6.0, BAR_HEIGHT)
+        });
+        inner.kind_menu = None;
+        inner.bar_menu = Some((id, at.unwrap_or(under_bar)));
+        true
+    }
+
+    /// The view whose title bar menu is open; None when none is.
+    pub fn bar_menu_open(&self) -> Option<ViewId> {
+        self.inner().bar_menu.map(|(id, _)| id)
+    }
+
+    /// Item `name` of view `id`'s title bar menu chosen, as a click on it: each goes the way the
+    /// thing it stands for goes - Float, Minimise, Maximise and Close as the bar's own buttons
+    /// do, a tiling by its VIEWS TILE line through the window's executor, logged as a typed one
+    /// is. The menu closes. NotFound for a view with no menu and for a name it does not show.
+    pub fn trigger_bar_menu(
+        &self,
+        host: &mut dyn Host,
+        scenery: Scenery<'_>,
+        id: ViewId,
+        name: &str,
+    ) -> Status {
+        let Some(menu) = self.bar_menu(id) else {
+            return Err(no_such_view(id));
+        };
+        if !menu.actions().iter().any(|action| action.name == name) {
+            return Err(make_error(
+                ErrorCode::NotFound,
+                "a view's title bar menu has no such item",
+                name,
+            ));
+        }
+        self.inner().bar_menu = None;
+        let dock = dock_name(id);
+        match name {
+            BAR_MENU_FLOAT => self.chrome_request(host, scenery, ChromeRequest::Float(dock)),
+            BAR_MENU_MINIMISE => self.chrome_request(host, scenery, ChromeRequest::Minimise(dock)),
+            BAR_MENU_MAXIMISE => self.chrome_request(host, scenery, ChromeRequest::Maximise(dock)),
+            BAR_MENU_CLOSE => self.chrome_request(host, scenery, ChromeRequest::Close(dock)),
+            _ => {
+                if let Some(line) = tiling_line(name) {
+                    let _ = host.run(&line);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ---- the views between sessions --------------------------------------------------------
+
+    /// What a session keeps of the views, as text (JSON, `SAVED_VIEWS_VERSION`): each open view's
+    /// id and what it shows, in the order opened, whether it is linked and shows the selection's
+    /// ghosts, the active view, the docked arrangement - every split and its share, every
+    /// place's pages and the one in front - and each floating view's rectangle.
+    ///
+    /// A maximise is ended and every minimised view brought out of the tray first: both are a
+    /// session's passing states, not a layout (docs/desktop.md, "The dock chrome"), so the views
+    /// are recorded open, where they are or would come back to. This is called as the window
+    /// closes; called at another time it leaves the tray empty.
+    ///
+    /// Not recorded, because they are a drawing's and not the window's: where a view looks (its
+    /// plan centre and scale, its camera), the layers it hides, and its section. The paper style
+    /// scale is the project's already, by view id (VIEWS SCALE) - which is why the ids are kept.
+    pub fn saved_views(&self) -> String {
+        self.inner().saved_views(self.views_cell())
+    }
+
+    /// Opens the views `text` records (`saved_views`), arranged as they were: how many. A view
+    /// open now whose id the record names is kept as it is (its kind changed where the record's
+    /// differs) and every other is closed; each view the record names that is not open is opened
+    /// under its id, or under a new one when this session has given that id out already. A
+    /// section view comes back with nothing cut: the drawing it was cut from is not this one.
+    ///
+    /// Refused, and NOTHING changed, for a text that is not what `saved_views` writes - not
+    /// JSON, another version, more than `MOST_SAVED_VIEWS` views, a kind or a split it does not
+    /// know, an arrangement that does not place each view once - so a damaged or stale record
+    /// leaves the window the views it started with.
+    pub fn restore_views(&self, cx: &mut dyn PlanViewHost, text: &str) -> Result<usize> {
+        let saved = SavedViews::parse(text)?;
+        let restored = {
+            let mut inner = self.inner();
+            let restored = inner.restore_views(self.views_cell(), &saved, &mut *cx);
+            inner.drain_all(self.views_cell(), Some(&mut *cx));
+            restored
+        };
+        // A popup of a view that may be gone.
+        *self.shared.popup.borrow_mut() = None;
+        // The project's paper style scales are kept by view id: read again, for the ids back.
+        self.shared.notified.store(true, Ordering::Release);
+        Ok(restored)
+    }
+
     // ---- the frame -------------------------------------------------------------------------
 
     /// The workspace drawn into the rectangle `ui` has left: every docked view in its place with
@@ -3388,11 +3777,19 @@ impl ViewWorkspace {
                     chrome.refresh(layout);
                 }
             }
+            // The pointer, for what is asked once the frame is drawn (a bar's menu, the start
+            // of a drag), and a floating view in hand moved with it before it is drawn.
+            let (pointer, down) = ui.input(|input| {
+                (input.pointer.interact_pos(), input.pointer.primary_down())
+            });
+            inner.pointer = pointer;
+            inner.drag_floating(pointer, down);
             // The bars are brought up to date where what they show changes (a link, a kind, a
             // view's own settings, the active view), never at each frame: a tool a caller took
             // off a bar stays off, as the C++'s setToolWanted holds.
             draw_docks(&mut inner, views, ui, area, &mut cx, scenery);
             draw_kind_menu(&mut inner, views, ui, area);
+            draw_bar_menu(&mut inner, views, ui);
         }
         self.after_frame(host, scenery);
         self.dialogs_ui(ui, host);
@@ -3410,6 +3807,11 @@ impl ViewWorkspace {
         };
         for request in requests {
             self.chrome_request(host, scenery, request);
+        }
+        // An item of a bar's shortcut menu, carried out as a press of it is.
+        let item = self.inner().bar_menu_choice.take();
+        if let Some((id, name)) = item {
+            let _ = self.trigger_bar_menu(host, scenery, id, &name);
         }
         let chosen = self.inner().kind_choice.take();
         self.inner().kind_menu_dismissed = None;
@@ -3437,7 +3839,17 @@ impl ViewWorkspace {
         match request {
             ChromeRequest::Pressed(name) => {
                 if let Some(id) = dock_id(&name) {
-                    self.inner().activate(views, id);
+                    let mut inner = self.inner();
+                    inner.activate(views, id);
+                    // A floating view is moved by its title bar, as a window is.
+                    inner.begin_float_drag(id);
+                }
+            }
+            ChromeRequest::Menu(name) => {
+                if let Some(id) = dock_id(&name) {
+                    // A right-click on a view's bar is choosing that view: the menu acts on it.
+                    let at = self.inner().pointer;
+                    let _ = self.show_bar_menu(id, at);
                 }
             }
             ChromeRequest::Minimise(name) => {
@@ -3457,14 +3869,7 @@ impl ViewWorkspace {
             }
             ChromeRequest::Float(name) => {
                 if let Some(id) = dock_id(&name) {
-                    // Pressing a view's Float is working in that view.
-                    let mut inner = self.inner();
-                    inner.activate(views, id);
-                    let Inner { chrome, layout, .. } = &mut *inner;
-                    if let Some(chrome) = chrome {
-                        chrome.toggle_floating(layout, &name);
-                    }
-                    inner.relayout(views);
+                    self.toggle_floating(id);
                 }
             }
             ChromeRequest::Close(name) => {
@@ -3548,6 +3953,220 @@ impl Inner {
         drop(set);
         self.update_bar(views, id);
     }
+
+    // ---- a title bar's shortcut menu -------------------------------------------------------
+
+    /// The rows of view `id`'s title bar menu: what its window buttons do, worded as the buttons
+    /// are for the view's state now (Float is Dock while it floats, Maximise is Restore while it
+    /// is maximised), then the three tilings. None for a view that is not open or has no bar.
+    fn bar_menu_rows(&self, views: &RefCell<ViewSet>, id: ViewId) -> Option<Menu> {
+        self.find(id)?;
+        let name = dock_name(id);
+        let chrome = self.chrome.as_ref()?;
+        let bar = chrome.title_bar(&name)?;
+        let title = views.borrow().find(id).map(ViewSet::title)?;
+        // As the view is now, not as the last frame's refresh found it: the menu may be asked
+        // for between a Float and the next frame.
+        let facts = BarFacts {
+            floating: self.floating(id),
+            maximised: chrome.is_maximised(&name),
+        };
+        let mut menu = Menu::new(BAR_MENU, &title).section("This view");
+        let shown = bar.window_buttons();
+        for (item, which) in [
+            (BAR_MENU_FLOAT, WindowButton::Float),
+            (BAR_MENU_MINIMISE, WindowButton::Minimise),
+            (BAR_MENU_MAXIMISE, WindowButton::Maximise),
+            (BAR_MENU_CLOSE, WindowButton::Close),
+        ] {
+            // A button the bar does not have (a view that may not float) has no item either.
+            if !shown.contains(&which) {
+                continue;
+            }
+            let button = bar.window_button(which, facts);
+            menu.items.push(MenuItem::Action(
+                Action::new(item, &button.label)
+                    .icon(which.icon(facts))
+                    .tip(&button.tip),
+            ));
+        }
+        menu.items
+            .push(MenuItem::Section(String::from("Arrange the open views")));
+        menu.items
+            .extend(tiling_actions().into_iter().map(MenuItem::Action));
+        Some(menu)
+    }
+
+    // ---- the views between sessions --------------------------------------------------------
+
+    /// What a saved session records of the views (`ViewWorkspace::saved_views`).
+    fn saved_views(&mut self, views: &RefCell<ViewSet>) -> String {
+        // A maximise and the tray are a session's, not a layout's: every view is recorded open,
+        // in the place it has or would come back to.
+        if let Some(chrome) = &mut self.chrome {
+            chrome.unmaximise_all(&mut self.layout);
+            for name in chrome.minimised_names() {
+                let _ = chrome.restore(&mut self.layout, &name);
+            }
+            chrome.refresh(&mut self.layout);
+        }
+        self.relayout(views);
+        let set = views.borrow();
+        let records: Vec<Json> = set
+            .views()
+            .into_iter()
+            .filter(|state| self.find(state.id).is_some())
+            .map(|state| {
+                Json::object_of([
+                    ("id", Json::from(state.id)),
+                    ("kind", Json::from(kind_word(state.kind))),
+                    ("linked", Json::from(state.linked)),
+                    ("ghosts", Json::from(state.selection_ghosts)),
+                ])
+            })
+            .collect();
+        let docked = saved_node(self.layout.main_surface(), NodeIndex::root())
+            .map_or(Json::Null, |node| node.to_json());
+        let floating: Vec<Json> = self
+            .docks
+            .iter()
+            .filter_map(|view| self.float_rect(view.id).map(|rect| (view.id, rect)))
+            .map(|(id, rect)| {
+                Json::object_of([
+                    ("view", Json::from(id)),
+                    ("x", Json::from(f64::from(rect.min.x))),
+                    ("y", Json::from(f64::from(rect.min.y))),
+                    ("width", Json::from(f64::from(rect.width()))),
+                    ("height", Json::from(f64::from(rect.height()))),
+                ])
+            })
+            .collect();
+        Json::object_of([
+            ("version", Json::from(SAVED_VIEWS_VERSION)),
+            ("views", Json::Array(records)),
+            ("active", Json::from(set.active_id())),
+            ("docked", docked),
+            ("floating", Json::Array(floating)),
+        ])
+        .dump()
+    }
+
+    /// A view of a saved session opened again under the id it had - unless this session has
+    /// already given that id out, when it gets a new one: an id is never reused (ViewSet). Its
+    /// dock is placed by the arrangement being restored, not here.
+    fn open_restored(
+        &mut self,
+        views: &RefCell<ViewSet>,
+        id: ViewId,
+        kind: ViewKind,
+        cx: &mut dyn PlanViewHost,
+    ) -> ViewId {
+        let id = {
+            let mut set = views.borrow_mut();
+            let restored = if set.issued(id) {
+                None
+            } else {
+                set.restore(id, kind).ok().map(|state| state.id)
+            };
+            match restored {
+                Some(id) => id,
+                None => set.add(kind).id,
+            }
+        };
+        self.docks.push(View {
+            id,
+            plan: None,
+            render: None,
+            section: None,
+        });
+        self.install_chrome(views, id);
+        self.build_content(views, id, cx);
+        id
+    }
+
+    /// The views as `saved` has them (`ViewWorkspace::restore_views`): how many are open.
+    fn restore_views(
+        &mut self,
+        views: &RefCell<ViewSet>,
+        saved: &SavedViews,
+        cx: &mut dyn PlanViewHost,
+    ) -> usize {
+        // The views open now that the record names are kept, as the views they are; every other
+        // is closed.
+        let open: Vec<ViewId> = self.docks.iter().map(|view| view.id).collect();
+        for id in open.iter().copied() {
+            if !saved.views.iter().any(|view| view.id == id) {
+                let _ = self.close_view(views, id, cx);
+            }
+        }
+        // What the chrome keeps of a view that stays - a tray button, a maximise, where it
+        // floated from - is of the arrangement being replaced.
+        if let Some(chrome) = &mut self.chrome {
+            for id in &open {
+                chrome.forget(&mut self.layout, &dock_name(*id));
+            }
+        }
+        // Each recorded view open, under the id it has now.
+        let mut ids: BTreeMap<ViewId, ViewId> = BTreeMap::new();
+        for view in &saved.views {
+            let id = if self.find(view.id).is_some() {
+                let _ = self.set_view_kind(views, view.id, view.kind, cx);
+                view.id
+            } else {
+                self.open_restored(views, view.id, view.kind, cx)
+            };
+            ids.insert(view.id, id);
+        }
+        let now = |id: ViewId| ids.get(&id).copied().unwrap_or(id);
+        // The arrangement, made afresh: the docked tree with its shares and its pages in front,
+        // and a window for each floating view.
+        let mut layout: DockState<ViewTab> = DockState::new(Vec::new());
+        if let Some(docked) = &saved.docked {
+            *layout.main_surface_mut() = tree_of(docked, &now);
+        }
+        for (id, _) in &saved.floating {
+            let _ = layout.add_window(vec![ViewTab(dock_name(now(*id)))]);
+        }
+        self.layout = layout;
+        let room = self.room();
+        if let Some(chrome) = &mut self.chrome {
+            // The chrome sees which docks float, and gives each a rectangle to be put at.
+            chrome.refresh(&mut self.layout);
+            for (id, rect) in &saved.floating {
+                let _ = chrome.set_float_rect(&dock_name(now(*id)), kept_in_reach(*rect, room));
+            }
+        }
+        // Each view's own switches, the link and the active view.
+        let linked: Vec<ViewId> = saved
+            .views
+            .iter()
+            .filter(|view| view.linked && linkable(view.kind))
+            .map(|view| now(view.id))
+            .collect();
+        {
+            let mut set = views.borrow_mut();
+            let _ = set.unlink_all();
+            for view in &saved.views {
+                if let Some(state) = set.find_mut(now(view.id)) {
+                    state.selection_ghosts = view.ghosts;
+                }
+            }
+            // A link of one waits for a second view, which a new session has not been asked for.
+            if linked.len() > 1 {
+                let _ = set.link(&linked, None);
+            }
+            let _ = set.activate(now(saved.active));
+        }
+        self.float_drag = None;
+        self.bar_menu = None;
+        self.kind_menu = None;
+        self.link_changed(views, &linked);
+        self.update_active_marks(views);
+        self.relayout(views);
+        self.push(WorkspaceEvent::ActiveChanged);
+        self.push(WorkspaceEvent::ViewsChanged);
+        saved.views.len()
+    }
 }
 
 /// Draws the docked views in `area` and the floating ones over it.
@@ -3624,37 +4243,42 @@ fn draw_docks(
             draw_dock(inner, views, ui, dock, id, cx, scenery);
         }
     }
-    // The floating views, each a window inside the main window.
-    let floating: Vec<(ViewId, Rect)> = inner
-        .layout
-        .iter_surfaces_indexed()
-        .filter(|(index, _)| !index.is_main())
-        .filter_map(|(index, surface)| {
-            let tree = surface.node_tree()?;
-            let name = tree.iter().filter_map(Node::tabs).flatten().next()?.0.clone();
-            Some((index, name))
-        })
-        .filter_map(|(index, name)| {
-            let id = dock_id(&name)?;
-            Some((index, id))
-        })
-        .collect::<Vec<(SurfaceIndex, ViewId)>>()
-        .into_iter()
-        .filter_map(|(index, id)| {
-            inner
-                .layout
-                .get_window_state(index)
-                .map(|window| (id, window.rect()))
-        })
+    // The floating views, each a window inside the workspace at the rectangle the chrome keeps
+    // for it (points from the workspace's top left), in the order opened. A maximised one fills
+    // the workspace as it is now; any other is brought where its bar can be reached, which a
+    // workspace made smaller since (a panel shown, the window narrowed, a session restored on a
+    // smaller screen) may have left it out of.
+    let floating: Vec<ViewId> = inner
+        .docks
+        .iter()
+        .map(|view| view.id)
+        .filter(|&id| inner.floating(id))
         .collect();
-    for (id, rect) in floating {
-        let rect = if rect.is_finite() && rect.is_positive() {
-            rect
-        } else {
-            Rect::from_min_size(area.min + Vec2::splat(40.0), Vec2::new(400.0, 300.0))
+    for id in floating {
+        let Some(kept) = inner.float_rect(id) else {
+            continue;
         };
-        egui::Area::new(egui::Id::new(("katanaFloatingView", id)))
+        let name = dock_name(id);
+        let maximised = inner
+            .chrome
+            .as_ref()
+            .is_some_and(|chrome| chrome.is_maximised(&name));
+        let within = if maximised {
+            Rect::from_min_size(Pos2::ZERO, area.size())
+        } else {
+            kept_in_reach(kept, area.size())
+        };
+        if within != kept
+            && let Some(chrome) = &mut inner.chrome
+        {
+            let _ = chrome.set_float_rect(&name, within);
+        }
+        let rect = within.translate(area.min.to_vec2());
+        // Not constrained to the screen by egui: where the window may go is `kept_in_reach`'s to
+        // say, and an area egui had moved would be drawn off the rectangle its dock is laid out in.
+        egui::Area::new(floating_view_area(id))
             .fixed_pos(rect.min)
+            .constrain(false)
             .show(ui.ctx(), |ui| {
                 ui.set_min_size(rect.size());
                 ui.set_max_size(rect.size());
@@ -3783,7 +4407,9 @@ fn draw_kind_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui, area
     let Some(id) = inner.kind_menu else {
         return;
     };
-    let Some(at) = inner.placements().get(&id).map(|placed| placed.rect) else {
+    // A floating view's switcher opens its menu too: asked of the docked places alone, the menu
+    // of a floating view never opened.
+    let Some(at) = inner.place_of(id) else {
         inner.kind_menu = None;
         return;
     };
@@ -3818,6 +4444,457 @@ fn draw_kind_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui, area
         // it again in the frame that closed it.
         inner.kind_menu = None;
         inner.kind_menu_dismissed = Some(id);
+    }
+}
+
+/// The shortcut menu of the title bar it was opened on (`BAR_MENU`), drawn as every menu of the
+/// window is: a click on an item is carried out after the frame (`trigger_bar_menu`), a click
+/// outside it closes it, as a menu's does.
+fn draw_bar_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui) {
+    let Some((id, at)) = inner.bar_menu else {
+        return;
+    };
+    // Closed meanwhile, its view has no menu.
+    let Some(menu) = inner.bar_menu_rows(views, id) else {
+        inner.bar_menu = None;
+        return;
+    };
+    let mut chosen = None;
+    let shown = crate::shell::popup_menu(ui.ctx(), BAR_MENU, at, |ui| {
+        crate::drive::action::menu_items_ui(ui, &menu, &mut chosen);
+    });
+    let clicked_outside = ui.input(|input| {
+        input.pointer.any_click()
+            && input
+                .pointer
+                .interact_pos()
+                .is_some_and(|at| !shown.rect.contains(at))
+    });
+    if let Some(name) = chosen {
+        inner.bar_menu = None;
+        inner.bar_menu_choice = Some((id, name));
+    } else if clicked_outside {
+        inner.bar_menu = None;
+    }
+}
+
+// ---- the views between sessions ------------------------------------------------------------------
+
+/// One view of a saved session: the id it had, what it showed, and its own switches that are the
+/// window's and not a drawing's.
+#[derive(Clone, Debug, PartialEq)]
+struct SavedView {
+    id: ViewId,
+    kind: ViewKind,
+    linked: bool,
+    ghosts: bool,
+}
+
+/// The docked arrangement of a saved session: the dock tree as it was, a place holding its views
+/// in their tab order.
+#[derive(Clone, Debug, PartialEq)]
+enum SavedNode {
+    Leaf {
+        views: Vec<ViewId>,
+        /// The page shown.
+        front: ViewId,
+    },
+    Split {
+        /// True: `second` to the right of `first`; false: below it.
+        side_by_side: bool,
+        /// `first`'s share of the place, egui_dock's fraction.
+        share: f32,
+        first: Box<SavedNode>,
+        second: Box<SavedNode>,
+    },
+}
+
+/// A saved session's views, read and found whole: every id of the arrangement is a view of the
+/// list, and every view has one place.
+#[derive(Clone, Debug, PartialEq)]
+struct SavedViews {
+    /// In the order opened.
+    views: Vec<SavedView>,
+    active: ViewId,
+    /// None when no view was docked.
+    docked: Option<SavedNode>,
+    /// The floating views, each at its rectangle in points from the workspace's top left.
+    floating: Vec<(ViewId, Rect)>,
+}
+
+/// The word a saved view's kind is written with: VIEWS OPEN's.
+fn kind_word(kind: ViewKind) -> String {
+    kind.name().to_ascii_lowercase()
+}
+
+fn kind_from_word(word: &str) -> Option<ViewKind> {
+    KINDS
+        .into_iter()
+        .find(|kind| word.eq_ignore_ascii_case(kind.name()))
+}
+
+/// Why a saved session's views are not restored: `what` is wrong with the record.
+fn damaged(what: &str) -> Error {
+    make_error(
+        ErrorCode::ParseFailure,
+        "the saved views are damaged",
+        what,
+    )
+}
+
+/// A whole number, written as either of JSON's integers.
+fn whole(value: &Json) -> Option<u64> {
+    match value {
+        Json::NumberUnsigned(number) => Some(*number),
+        Json::NumberInteger(number) => u64::try_from(*number).ok(),
+        _ => None,
+    }
+}
+
+/// A view id: a whole number from 1.
+fn saved_id(value: &Json) -> Option<ViewId> {
+    whole(value)
+        .and_then(|number| ViewId::try_from(number).ok())
+        .filter(|id| *id != NO_VIEW)
+}
+
+/// A finite number, in points.
+fn points(value: &Json) -> Option<f32> {
+    if !value.is_number() {
+        return None;
+    }
+    value
+        .get::<f64>()
+        .ok()
+        .filter(|number| number.is_finite())
+        .map(|number| number as f32)
+}
+
+impl SavedNode {
+    fn to_json(&self) -> Json {
+        match self {
+            Self::Leaf { views, front } => Json::object_of([
+                (
+                    "views",
+                    Json::array_of(views.iter().map(|id| Json::from(*id))),
+                ),
+                ("front", Json::from(*front)),
+            ]),
+            Self::Split {
+                side_by_side,
+                share,
+                first,
+                second,
+            } => Json::object_of([
+                (
+                    "split",
+                    Json::from(if *side_by_side { "columns" } else { "rows" }),
+                ),
+                ("share", Json::from(f64::from(*share))),
+                ("first", first.to_json()),
+                ("second", second.to_json()),
+            ]),
+        }
+    }
+
+    /// The node `value` describes; `depth` is how far under the root it is. A tree of n places
+    /// is at most n - 1 deep, so one deeper than the views a session may name is no tree this
+    /// wrote, and is refused before it is followed further.
+    fn from_json(value: &Json, depth: usize) -> Result<Self> {
+        if depth > MOST_SAVED_VIEWS {
+            return Err(damaged(
+                "the arrangement is nested deeper than its views allow",
+            ));
+        }
+        if let Some(split) = value.find("split") {
+            let side_by_side = match split.as_str() {
+                Some("columns") => true,
+                Some("rows") => false,
+                _ => return Err(damaged("a split is columns or rows")),
+            };
+            // egui_dock takes a fraction from 0 to 1 and panics on any other; a place of no size
+            // at all (0 or 1) is no arrangement a person made.
+            let share = value
+                .find("share")
+                .and_then(points)
+                .filter(|share| *share > 0.0 && *share < 1.0)
+                .ok_or_else(|| damaged("a split's share is a number between 0 and 1"))?;
+            let part = |key: &str| -> Result<Box<Self>> {
+                let node = value
+                    .find(key)
+                    .ok_or_else(|| damaged("a split has a first and a second part"))?;
+                Ok(Box::new(Self::from_json(node, depth + 1)?))
+            };
+            return Ok(Self::Split {
+                side_by_side,
+                share,
+                first: part("first")?,
+                second: part("second")?,
+            });
+        }
+        let views = value
+            .find("views")
+            .and_then(Json::as_array)
+            .ok_or_else(|| damaged("a place lists its views"))?
+            .iter()
+            .map(|id| saved_id(id).ok_or_else(|| damaged("a view id is a whole number from 1")))
+            .collect::<Result<Vec<ViewId>>>()?;
+        let Some(&first) = views.first() else {
+            return Err(damaged("a place holds at least one view"));
+        };
+        // A front page the place does not hold is the first one's: no reason to refuse the rest.
+        let front = value
+            .find("front")
+            .and_then(saved_id)
+            .filter(|front| views.contains(front))
+            .unwrap_or(first);
+        Ok(Self::Leaf { views, front })
+    }
+
+    /// Every view the node holds, in place order.
+    fn collect_ids(&self, ids: &mut Vec<ViewId>) {
+        match self {
+            Self::Leaf { views, .. } => ids.extend(views.iter().copied()),
+            Self::Split { first, second, .. } => {
+                first.collect_ids(ids);
+                second.collect_ids(ids);
+            }
+        }
+    }
+
+    /// The views of its first place: the top left one.
+    fn first_leaf(&self) -> &[ViewId] {
+        match self {
+            Self::Leaf { views, .. } => views,
+            Self::Split { first, .. } => first.first_leaf(),
+        }
+    }
+}
+
+impl SavedViews {
+    /// Reads what `ViewWorkspace::saved_views` wrote, and holds it to what that writes: one
+    /// version, at most MOST_SAVED_VIEWS views of known kinds under ids used once, and an
+    /// arrangement that places each of them once and no other. Anything else is refused whole
+    /// with what is wrong, so that a damaged record changes nothing.
+    fn parse(text: &str) -> Result<Self> {
+        let json = Json::parse(text).map_err(|error| {
+            make_error(
+                ErrorCode::ParseFailure,
+                "the saved views are not JSON",
+                error.what,
+            )
+        })?;
+        let version = json
+            .find("version")
+            .and_then(whole)
+            .ok_or_else(|| damaged("there is no version"))?;
+        if i64::try_from(version).ok() != Some(SAVED_VIEWS_VERSION) {
+            return Err(make_error(
+                ErrorCode::Unsupported,
+                "the saved views are of a version this build does not read",
+                format!("{version}"),
+            ));
+        }
+        let records = json
+            .find("views")
+            .and_then(Json::as_array)
+            .ok_or_else(|| damaged("there is no list of views"))?;
+        if records.is_empty() {
+            return Err(damaged("the list of views is empty"));
+        }
+        if records.len() > MOST_SAVED_VIEWS {
+            return Err(make_error(
+                ErrorCode::InvalidArgument,
+                format!(
+                    "the saved views name {} views, and a session restores {MOST_SAVED_VIEWS} at \
+                     most",
+                    records.len()
+                ),
+                "",
+            ));
+        }
+        let mut views: Vec<SavedView> = Vec::with_capacity(records.len());
+        for record in records {
+            let id = record
+                .find("id")
+                .and_then(saved_id)
+                .ok_or_else(|| damaged("a view id is a whole number from 1"))?;
+            if views.iter().any(|view| view.id == id) {
+                return Err(damaged("a view id is named twice"));
+            }
+            let kind = record
+                .find("kind")
+                .and_then(Json::as_str)
+                .and_then(kind_from_word)
+                .ok_or_else(|| damaged("a view shows plan, 3d, section or elevation"))?;
+            views.push(SavedView {
+                id,
+                kind,
+                linked: record
+                    .find("linked")
+                    .and_then(Json::as_bool)
+                    .unwrap_or(false),
+                ghosts: record
+                    .find("ghosts")
+                    .and_then(Json::as_bool)
+                    .unwrap_or(true),
+            });
+        }
+        let docked = match json.find("docked") {
+            Some(node) if !node.is_null() => Some(SavedNode::from_json(node, 0)?),
+            _ => None,
+        };
+        let mut floating: Vec<(ViewId, Rect)> = Vec::new();
+        if let Some(windows) = json.find("floating").and_then(Json::as_array) {
+            for window in windows {
+                let id = window
+                    .find("view")
+                    .and_then(saved_id)
+                    .ok_or_else(|| damaged("a floating view is named by its id"))?;
+                let number = |key: &str| {
+                    window.find(key).and_then(points).ok_or_else(|| {
+                        damaged("a floating view has x, y, width and height in points")
+                    })
+                };
+                let (x, y, width, height) = (
+                    number("x")?,
+                    number("y")?,
+                    number("width")?,
+                    number("height")?,
+                );
+                if width < LEAST_FLOAT.x || height < LEAST_FLOAT.y {
+                    return Err(damaged("a floating view is smaller than a view can be"));
+                }
+                floating.push((
+                    id,
+                    Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, height)),
+                ));
+            }
+        }
+        // Every view in one place, and no place for a view the list does not have.
+        let mut placed: Vec<ViewId> = Vec::new();
+        if let Some(docked) = &docked {
+            docked.collect_ids(&mut placed);
+        }
+        placed.extend(floating.iter().map(|(id, _)| *id));
+        for (at, id) in placed.iter().enumerate() {
+            if !views.iter().any(|view| view.id == *id) {
+                return Err(damaged(
+                    "the arrangement places a view the list does not name",
+                ));
+            }
+            if placed[..at].contains(id) {
+                return Err(damaged("the arrangement places a view twice"));
+            }
+        }
+        if placed.len() != views.len() {
+            return Err(damaged(
+                "a view of the list has no place in the arrangement",
+            ));
+        }
+        // An active view the list does not have is the first one's: the rest is still good.
+        let active = json
+            .find("active")
+            .and_then(saved_id)
+            .filter(|active| views.iter().any(|view| view.id == *active))
+            .unwrap_or(views[0].id);
+        Ok(Self {
+            views,
+            active,
+            docked,
+            floating,
+        })
+    }
+}
+
+/// The docked arrangement under node `index` of `tree`, as a saved session records it; None for
+/// a node that holds no view. A split with a view on one side only is that side.
+fn saved_node(tree: &Tree<ViewTab>, index: NodeIndex) -> Option<SavedNode> {
+    if index.0 >= tree.len() {
+        return None;
+    }
+    match &tree[index] {
+        Node::Leaf(leaf) => {
+            let views: Vec<ViewId> = leaf
+                .tabs
+                .iter()
+                .filter_map(|tab| dock_id(&tab.0))
+                .collect();
+            let first = views.first().copied()?;
+            let front = leaf
+                .tabs
+                .get(leaf.active.0)
+                .and_then(|tab| dock_id(&tab.0))
+                .unwrap_or(first);
+            Some(SavedNode::Leaf { views, front })
+        }
+        Node::Horizontal(split) | Node::Vertical(split) => {
+            let side_by_side = matches!(&tree[index], Node::Horizontal(_));
+            match (
+                saved_node(tree, index.left()),
+                saved_node(tree, index.right()),
+            ) {
+                (Some(first), Some(second)) => Some(SavedNode::Split {
+                    side_by_side,
+                    // Inside what `restore_views` reads: egui_dock's own fractions are, and a
+                    // place dragged to nothing would otherwise make the record a refused one.
+                    share: split.fraction.clamp(0.01, 0.99),
+                    first: Box::new(first),
+                    second: Box::new(second),
+                }),
+                (Some(only), None) | (None, Some(only)) => Some(only),
+                (None, None) => None,
+            }
+        }
+        Node::Empty => None,
+    }
+}
+
+/// The dock tree `node` records, each view's dock named by the id it has now (`now`).
+fn tree_of(node: &SavedNode, now: &dyn Fn(ViewId) -> ViewId) -> Tree<ViewTab> {
+    let tabs = |views: &[ViewId]| -> Vec<ViewTab> {
+        views
+            .iter()
+            .map(|id| ViewTab(dock_name(now(*id))))
+            .collect()
+    };
+    let mut tree = Tree::new(tabs(node.first_leaf()));
+    grow(&mut tree, NodeIndex::root(), node, &tabs);
+    tree
+}
+
+/// Makes the place at `at` of `tree`, which holds the views of `node`'s first place, into the
+/// whole of `node`: a split cuts it, `first` keeping the place and `second` given the rest, and
+/// each is grown in turn; a place shows the page it showed.
+fn grow(
+    tree: &mut Tree<ViewTab>,
+    at: NodeIndex,
+    node: &SavedNode,
+    tabs: &dyn Fn(&[ViewId]) -> Vec<ViewTab>,
+) {
+    match node {
+        SavedNode::Leaf { views, front } => {
+            if let Some(page) = views.iter().position(|id| id == front)
+                && let Ok(leaf) = tree.leaf_mut(at)
+            {
+                let _ = leaf.set_active_tab(page);
+            }
+        }
+        SavedNode::Split {
+            side_by_side,
+            share,
+            first,
+            second,
+        } => {
+            let added = tabs(second.first_leaf());
+            let [kept, new] = if *side_by_side {
+                tree.split_right(at, *share, added)
+            } else {
+                tree.split_below(at, *share, added)
+            };
+            grow(tree, kept, first, tabs);
+            grow(tree, new, second, tabs);
+        }
     }
 }
 

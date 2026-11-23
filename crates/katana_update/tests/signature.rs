@@ -27,19 +27,22 @@
 //! key is TEST 1's A plus one order-8 point, encoded; "S + L" is TEST 2's S plus L, little-endian,
 //! in the signature's second half (it still satisfies 8*S*B = 8*R + 8*h*A, which is why only the
 //! explicit S < L test refuses it).
-
-#![allow(
-    unsafe_code,
-    reason = "Edition 2024 marks changing the environment unsafe, and the hardening cases set and restore the variables they test."
-)]
+//!
+//! THE HARDENING'S CASES change no environment of this process (they did, until 2026-11-22, when
+//! the hardening itself did). What a launch is told is put to environments written out by hand
+//! (environment_with reads none), and what a started program really holds is asked of a program:
+//! this one, started again with the variables set for it alone by the standard library's Command,
+//! which then makes the hardened launch itself and whose child reports what IT was handed.
 
 use katana_core::path_text::{path_from_utf8, read_file_bytes};
 use katana_core::{ErrorCode, Status};
 use katana_update::feed::MAX_SIGNATURE_BYTES;
+use katana_update::process::{SpawnRequest, environment_with};
 use katana_update::signature::{
     PublicKey, SignatureBytes, check_public_key, harden_open_ssl_environment, key_id_of,
     parse_public_key_hex, parse_signature_line, verify_ed25519,
 };
+use std::ffi::OsString;
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -304,75 +307,38 @@ static GENERATED: [Generated; 24] = [
 // ---- the environment ---------------------------------------------------------------------------
 
 const OPEN_SSL_VARIABLES: [&str; 3] = ["OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"];
+// The three as the program that makes the hardened launch holds them. Windows does not tell the
+// spellings of a name apart, so two are in another case there: the variables OpenSSL reads all
+// the same (tools/update_make_manifest.py tests the same for the openssl it runs).
+#[cfg(windows)]
+const HELD_SPELLINGS: [&str; 3] = ["OPENSSL_CONF", "OpenSSL_Modules", "OPENSSL_engines"];
+#[cfg(not(windows))]
+const HELD_SPELLINGS: [&str; 3] = OPEN_SSL_VARIABLES;
 // The one that marks the program started again by the configuration case.
 const HOSTILE_CHILD_MARKER: &str = "KATANA_T5_HOSTILE_CHILD";
-// The same for the program started by the inheritance case.
+// The same for the two programs of the inheritance case: the one that holds the variables and
+// makes the hardened launch, and the one that launch starts.
+const INHERITANCE_PARENT_MARKER: &str = "KATANA_T5_INHERITANCE_PARENT";
 const INHERITANCE_CHILD_MARKER: &str = "KATANA_T5_INHERITANCE_CHILD";
-// Every variable a case of this file sets, for the guard to put back whatever way the case ends.
-const VARIABLES_THE_TESTS_SET: [&str; 7] = [
-    "OPENSSL_CONF",
-    "OPENSSL_MODULES",
-    "OPENSSL_ENGINES",
-    "OPENSSL_CONF_INCLUDE",
-    "KATANA_T5_UNRELATED",
-    HOSTILE_CHILD_MARKER,
-    INHERITANCE_CHILD_MARKER,
-];
-
-fn set_variable(name: &str, value: &str) {
-    // SAFETY: only the cases that hold the environment's lock (RestoreOpenSslVariables) change the
-    // environment, and no other case of this program reads it.
-    unsafe { std::env::set_var(name, value) };
-}
-
-fn remove_variable(name: &str) {
-    // SAFETY: as set_variable.
-    unsafe { std::env::remove_var(name) };
-}
 
 fn variable(name: &str) -> Option<String> {
     std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
 }
 
-// Puts the variables back as they were, and holds the environment for one case at a time: the
-// cases of one program run on threads of one process here, where the C++ ran each in its own.
-struct RestoreOpenSslVariables {
-    saved: Vec<Option<std::ffi::OsString>>,
-    _lock: std::sync::MutexGuard<'static, ()>,
+// An environment written out by hand, as environment_with takes the one a launch starts from.
+fn environment(variables: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+    variables
+        .iter()
+        .map(|&(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect()
 }
 
-static ENVIRONMENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-impl RestoreOpenSslVariables {
-    fn new() -> Self {
-        let lock = ENVIRONMENT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Self {
-            saved: VARIABLES_THE_TESTS_SET
-                .iter()
-                .map(std::env::var_os)
-                .collect(),
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for RestoreOpenSslVariables {
-    fn drop(&mut self) {
-        for (name, saved) in VARIABLES_THE_TESTS_SET.iter().zip(&self.saved) {
-            match saved {
-                // SAFETY: the lock is still held (it is dropped after this body).
-                Some(value) => unsafe { std::env::set_var(name, value) },
-                None => remove_variable(name),
-            }
-        }
-    }
-}
-
-fn harden() -> Status {
-    // SAFETY: called only by cases that hold the environment's lock.
-    unsafe { harden_open_ssl_environment() }
+// What a hardened launch hands its program of `inherited`: a request that says nothing else,
+// hardened, put to environment_with.
+fn hardened_of(inherited: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+    let mut request = SpawnRequest::default();
+    harden_open_ssl_environment(&mut request);
+    environment_with(environment(inherited), &request.environment)
 }
 
 // A folder of the case's own (its name and the process's), removed when the case ends.
@@ -395,15 +361,64 @@ impl Drop for ScratchFolder {
     }
 }
 
-// Runs this test program on the one case `filter` names, with `folder` as its working directory;
-// its exit code (None when it could not be started or was ended by a signal) and both of its
-// streams. The child inherits this process's environment as it is now, which is what the cases
-// rely on.
-fn run_program_on_one_case(filter: &str, folder: &std::path::Path) -> (Option<i32>, String) {
+// The arguments that make this test program run the one case `filter` names.
+fn one_case(filter: &str) -> [&str; 4] {
+    [filter, "--exact", "--test-threads=1", "--nocapture"]
+}
+
+// Runs this test program on the one case `filter` names, with `folder` as its working directory
+// and `variables` set in its environment over what this process holds; its exit code (None when
+// it could not be started or was ended by a signal) and both of its streams. The variables are
+// set for the child alone, by the standard library's Command: this process's own environment is
+// not changed, which the cases on its other threads would see.
+fn run_program_on_one_case(
+    filter: &str,
+    folder: &std::path::Path,
+    variables: &[(&str, &str)],
+) -> (Option<i32>, String) {
     let program = std::env::current_exe().expect("this program's own path");
     match std::process::Command::new(&program)
-        .args([filter, "--exact", "--test-threads=1", "--nocapture"])
+        .args(one_case(filter))
         .current_dir(folder)
+        .envs(variables.iter().copied())
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) => {
+            let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&output.stderr));
+            (output.status.code(), text)
+        }
+        Err(error) => (None, format!("(not started: {error})")),
+    }
+}
+
+// Starts the program of `request` with the environment the request asks for and waits for it:
+// its exit code and what it printed. By the system launcher, whose making of the child's
+// environment is what the inheritance case is about.
+#[cfg(windows)]
+fn run_with_its_environment(request: &SpawnRequest) -> (Option<i32>, String) {
+    match katana_update::process::make_system_launcher().run(request) {
+        Ok(ran) if ran.timed_out => (None, String::from("(timed out)")),
+        Ok(ran) => (
+            Some(ran.exit_code),
+            String::from_utf8_lossy(&ran.output).into_owned(),
+        ),
+        Err(error) => (None, format!("(not started: {})", error.describe())),
+    }
+}
+
+// The same where the system launcher starts nothing yet (spawn_posix.rs): the child is handed,
+// by the standard library, exactly the environment child_environment answers for the request -
+// the one a launcher written for these systems is to hand over - and nothing of this process's
+// besides.
+#[cfg(not(windows))]
+fn run_with_its_environment(request: &SpawnRequest) -> (Option<i32>, String) {
+    match std::process::Command::new(&request.executable)
+        .args(&request.arguments)
+        .current_dir(&request.working_directory)
+        .env_clear()
+        .envs(katana_update::process::child_environment(request))
         .stdin(std::process::Stdio::null())
         .output()
     {
@@ -1549,38 +1564,51 @@ mod signature {
         assert_eq!(wrong_answers.load(Ordering::Relaxed), 0);
     }
 
+    // ---- the hardening: what a launch is told -----------------------------------------------
+    //
+    // harden_open_ssl_environment changes a request, and environment_with makes the request's
+    // changes to an environment that is handed to it. So these cases need no process to hold the
+    // variables: the environments are written out here, and what must be left of each is worked
+    // out by hand from the rule (the three are taken out, every other variable stays, in its
+    // place).
+
     #[test]
-    fn hardening_removes_the_three_open_ssl_variables_and_verification_still_works() {
-        let _restore = RestoreOpenSslVariables::new();
-        for name in OPEN_SSL_VARIABLES {
-            set_variable(name, "somewhere-an-attacker-chose");
-            assert!(
-                variable(name).is_some(),
-                "{name}: the test could not set it"
-            );
-        }
-        set_variable("OPENSSL_CONF_INCLUDE", "left alone"); // another variable: not this function's
-        set_variable("KATANA_T5_UNRELATED", "left alone");
-
-        let hardened = harden();
-        assert!(
-            hardened.is_ok(),
-            "{}",
-            hardened.map_or_else(|error| error.describe(), |()| String::new())
-        );
-        for name in OPEN_SSL_VARIABLES {
-            assert_eq!(variable(name), None, "{name}");
-        }
+    fn hardening_keeps_the_three_open_ssl_variables_from_a_started_program_and_verification_still_works()
+     {
+        let inherited = [
+            ("PATH", "somewhere"),
+            ("OPENSSL_CONF", "somewhere-an-attacker-chose"),
+            // Another variable, though its name begins like one of the three: not this function's.
+            ("OPENSSL_CONF_INCLUDE", "left alone"),
+            ("OPENSSL_MODULES", "somewhere-an-attacker-chose"),
+            ("KATANA_T5_UNRELATED", "left alone"),
+            ("OPENSSL_ENGINES", "somewhere-an-attacker-chose"),
+        ];
         assert_eq!(
-            variable("KATANA_T5_UNRELATED").as_deref(),
-            Some("left alone")
+            hardened_of(&inherited),
+            environment(&[
+                ("PATH", "somewhere"),
+                ("OPENSSL_CONF_INCLUDE", "left alone"),
+                ("KATANA_T5_UNRELATED", "left alone"),
+            ])
         );
-        assert!(variable("OPENSSL_CONF_INCLUDE").is_some());
-        remove_variable("OPENSSL_CONF_INCLUDE");
-        remove_variable("KATANA_T5_UNRELATED");
 
-        // Idempotent, and the library still does its job afterwards.
-        assert!(harden().is_ok());
+        // Idempotent: a second call leaves the request as the first made it.
+        let mut once = SpawnRequest::default();
+        harden_open_ssl_environment(&mut once);
+        let mut twice = once.clone();
+        harden_open_ssl_environment(&mut twice);
+        assert_eq!(twice, once);
+        // It changes what the request says of the environment and nothing else of it.
+        assert_eq!(
+            SpawnRequest {
+                environment: Vec::new(),
+                ..once
+            },
+            SpawnRequest::default()
+        );
+
+        // And the library still does its job afterwards.
         assert!(
             verify_ed25519(
                 &key_from_hex(RFC_VECTORS[1].public_key),
@@ -1593,14 +1621,13 @@ mod signature {
 
     #[test]
     fn hardening_with_nothing_set_changes_nothing() {
-        let _restore = RestoreOpenSslVariables::new();
-        for name in OPEN_SSL_VARIABLES {
-            remove_variable(name);
-        }
-        assert!(harden().is_ok());
-        for name in OPEN_SSL_VARIABLES {
-            assert_eq!(variable(name), None, "{name}");
-        }
+        let inherited = [
+            ("PATH", "somewhere"),
+            ("OPENSSL_CONF_INCLUDE", "left alone"),
+            ("KATANA_T5_UNRELATED", "left alone"),
+        ];
+        assert_eq!(hardened_of(&inherited), environment(&inherited));
+        assert_eq!(hardened_of(&[]), environment(&[]));
     }
 
     #[cfg(windows)]
@@ -1609,26 +1636,71 @@ mod signature {
         // Windows matches environment names without regard to case, so a variable spelled
         // "openssl_modules" is the one OpenSSL reads. (tools/update_make_manifest.py tests the
         // same for the openssl it runs.)
-        let _restore = RestoreOpenSslVariables::new();
-        set_variable("openssl_conf", "x");
-        set_variable("OpenSSL_Modules", "y");
-        set_variable("OPENSSL_engines", "z");
-        assert!(
-            variable("OPENSSL_CONF").is_some(),
-            "the premise: Windows folds the case"
+        let inherited = [
+            ("openssl_conf", "x"),
+            ("Path", "somewhere"),
+            ("OpenSSL_Modules", "y"),
+            ("OPENSSL_engines", "z"),
+        ];
+        assert_eq!(
+            hardened_of(&inherited),
+            environment(&[("Path", "somewhere")])
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn hardening_leaves_a_variable_spelled_in_another_case_where_a_name_is_its_bytes() {
+        // Off Windows `openssl_conf` is another variable than OPENSSL_CONF, one OpenSSL does not
+        // read (getenv matches bytes), and it is not the hardening's to take.
+        let inherited = [("openssl_conf", "x"), ("OPENSSL_CONF", "y")];
+        assert_eq!(hardened_of(&inherited), environment(&[("openssl_conf", "x")]));
+    }
+
+    #[test]
+    fn what_a_request_said_of_the_three_before_the_hardening_is_dropped_and_what_it_says_after_is_handed_on()
+     {
+        let inherited = [
+            ("OPENSSL_CONF", "what the process holds"),
+            ("PATH", "somewhere"),
+        ];
+        let mut request = SpawnRequest {
+            environment: vec![
+                (
+                    String::from("OPENSSL_MODULES"),
+                    Some(OsString::from("set before the hardening")),
+                ),
+                (
+                    String::from("KATANA_T5_UNRELATED"),
+                    Some(OsString::from("the request's own")),
+                ),
+            ],
+            ..SpawnRequest::default()
+        };
+        harden_open_ssl_environment(&mut request);
+        assert_eq!(
+            environment_with(environment(&inherited), &request.environment),
+            environment(&[
+                ("PATH", "somewhere"),
+                ("KATANA_T5_UNRELATED", "the request's own"),
+            ]),
+            "nothing set before the call survives it"
         );
 
-        assert!(harden().is_ok());
-        for name in [
-            "OPENSSL_CONF",
-            "openssl_conf",
-            "OPENSSL_MODULES",
-            "openssl_modules",
-            "OPENSSL_ENGINES",
-            "openssl_engines",
-        ] {
-            assert_eq!(variable(name), None, "{name}");
-        }
+        // The helper's hand-on: the person's own value, added after the call, is what the
+        // program holds - once, and not the value the process held.
+        request.environment.push((
+            String::from("OPENSSL_CONF"),
+            Some(OsString::from("the person's own")),
+        ));
+        assert_eq!(
+            environment_with(environment(&inherited), &request.environment),
+            environment(&[
+                ("PATH", "somewhere"),
+                ("KATANA_T5_UNRELATED", "the request's own"),
+                ("OPENSSL_CONF", "the person's own"),
+            ])
+        );
     }
 
     // ---- a configuration file named by the environment must not decide what verifies -----------
@@ -1639,14 +1711,22 @@ mod signature {
     // variable set and nothing having called libcrypto. The port's verifier reads no file at all;
     // the case is kept, the same way, so that it holds whatever library a later build links: the
     // child, started with the three variables naming a file that loads the base provider alone and
-    // two folders with nothing in them, must still verify RFC 8032 TEST 1 to 3. The child does not
-    // call harden_open_ssl_environment either, which would clear the variables and hide what is
-    // being shown.
+    // two folders with nothing in them, must still verify RFC 8032 TEST 1 to 3. Nothing takes the
+    // variables out of the child's environment before it verifies: harden_open_ssl_environment
+    // is about the programs a process starts and never changed this, since 2026-11-22, for the
+    // process that calls it - which is why this case, and not the hardening, is what stands
+    // between a hostile configuration and the verifier.
 
     #[test]
     fn a_configuration_file_named_by_the_environment_does_not_change_what_verifies() {
         if std::env::var_os(HOSTILE_CHILD_MARKER).is_some() {
-            // The child. RFC 8032 TEST 1 to 3 must verify.
+            // The child. The premise: it holds the variable while it verifies.
+            assert_eq!(
+                variable("OPENSSL_CONF").as_deref(),
+                Some("base_provider_only.cnf"),
+                "the child was not handed the configuration"
+            );
+            // RFC 8032 TEST 1 to 3 must verify.
             for vector in &RFC_VECTORS {
                 let status = verify_ed25519(
                     &key_from_hex(vector.public_key),
@@ -1677,16 +1757,17 @@ mod signature {
         )
         .expect("the configuration file can be written");
 
-        let _restore = RestoreOpenSslVariables::new();
-        // Relative names, resolved against the child's working directory (the scratch folder).
-        set_variable("OPENSSL_CONF", "base_provider_only.cnf");
-        set_variable("OPENSSL_MODULES", "no_modules_here");
-        set_variable("OPENSSL_ENGINES", "no_engines_here");
-        set_variable(HOSTILE_CHILD_MARKER, "1");
-
         let (exit_code, text) = run_program_on_one_case(
             "signature::a_configuration_file_named_by_the_environment_does_not_change_what_verifies",
             &scratch.path,
+            &[
+                // Relative names, resolved against the child's working directory (the scratch
+                // folder).
+                ("OPENSSL_CONF", "base_provider_only.cnf"),
+                ("OPENSSL_MODULES", "no_modules_here"),
+                ("OPENSSL_ENGINES", "no_engines_here"),
+                (HOSTILE_CHILD_MARKER, "1"),
+            ],
         );
         assert_eq!(exit_code, Some(0), "{text}");
         // One case ran in the child (a filter that matched nothing would also exit 0) and it
@@ -1696,15 +1777,22 @@ mod signature {
 
     // ---- what a program this one starts inherits -------------------------------------------------
     //
-    // harden_open_ssl_environment promises that afterwards a program the process starts holds none
-    // of the three variables, which is what the helper's relaunch of katana relies on. Reading them
-    // back proves only this process's view of its environment; this case starts the program again
-    // after the call, and the child reports what IT was handed.
+    // harden_open_ssl_environment promises that a program started with the request it hardened
+    // holds none of the three variables, which is what the helper's relaunch of katana starts
+    // from. The cases above prove the rule on environments written out by hand; this one proves
+    // it of processes. The test program is started again holding the three (the parent: the
+    // helper's place); that one hardens a request for itself and starts it through the launcher
+    // (the child), and the child reports what IT was handed. The parent also reports that the
+    // launch changed nothing of its own environment.
 
     #[test]
     fn hardening_leaves_none_of_the_three_variables_to_a_program_this_one_starts() {
+        const CASE: &str =
+            "signature::hardening_leaves_none_of_the_three_variables_to_a_program_this_one_starts";
+        const HOSTILE: &str = "somewhere-an-attacker-chose";
+
         if std::env::var_os(INHERITANCE_CHILD_MARKER).is_some() {
-            // The child. What it holds is what it inherited.
+            // The child. What it holds is what it was handed.
             for name in OPEN_SSL_VARIABLES {
                 assert_eq!(variable(name), None, "{name} reached the child");
             }
@@ -1712,33 +1800,72 @@ mod signature {
             for name in ["openssl_conf", "OpenSSL_Modules", "OPENSSL_engines"] {
                 assert_eq!(variable(name), None, "{name} reached the child");
             }
-            // The controls: the environment was inherited at all, and a variable of another name
-            // survived the call.
+            // The controls: the environment was handed over at all, and the variables of another
+            // name survived the hardening - one whose name only begins like one of the three too.
             assert_eq!(
                 variable("KATANA_T5_UNRELATED").as_deref(),
                 Some("inherited"),
                 "the child inherited nothing"
             );
+            assert_eq!(
+                variable("OPENSSL_CONF_INCLUDE").as_deref(),
+                Some("left alone")
+            );
+            return;
+        }
+
+        if std::env::var_os(INHERITANCE_PARENT_MARKER).is_some() {
+            // The parent. The premise: it holds the three, as a helper started under them does.
+            for name in OPEN_SSL_VARIABLES {
+                assert_eq!(
+                    variable(name).as_deref(),
+                    Some(HOSTILE),
+                    "{name}: the parent was not handed it"
+                );
+            }
+            let mut request = SpawnRequest {
+                executable: std::env::current_exe().expect("this program's own path"),
+                arguments: one_case(CASE).map(String::from).to_vec(),
+                working_directory: std::env::current_dir().expect("a working directory"),
+                timeout: std::time::Duration::from_secs(120),
+                // The request's own change, which the hardening leaves in it.
+                environment: vec![(
+                    String::from(INHERITANCE_CHILD_MARKER),
+                    Some(OsString::from("1")),
+                )],
+            };
+            harden_open_ssl_environment(&mut request);
+
+            let (exit_code, text) = run_with_its_environment(&request);
+            assert_eq!(exit_code, Some(0), "{text}");
+            assert!(text.contains(ONE_PASSED), "{text}");
+
+            // The launch was told; this process was not changed for it.
+            for name in OPEN_SSL_VARIABLES {
+                assert_eq!(
+                    variable(name).as_deref(),
+                    Some(HOSTILE),
+                    "{name}: the launch changed the environment of the program that made it"
+                );
+            }
+            assert_eq!(variable(INHERITANCE_CHILD_MARKER), None);
             return;
         }
 
         let scratch = ScratchFolder::new("inheritance");
         assert!(scratch.path.is_dir());
 
-        let _restore = RestoreOpenSslVariables::new();
-        for name in OPEN_SSL_VARIABLES {
-            set_variable(name, "somewhere-an-attacker-chose");
-        }
-        // Spelled in another case, which is the same variable on Windows.
-        #[cfg(windows)]
-        set_variable("openssl_conf", "somewhere-an-attacker-chose");
-        set_variable("KATANA_T5_UNRELATED", "inherited");
-        set_variable(INHERITANCE_CHILD_MARKER, "1");
-        assert!(harden().is_ok());
-
         let (exit_code, text) = run_program_on_one_case(
-            "signature::hardening_leaves_none_of_the_three_variables_to_a_program_this_one_starts",
+            CASE,
             &scratch.path,
+            &[
+                (HELD_SPELLINGS[0], HOSTILE),
+                (HELD_SPELLINGS[1], HOSTILE),
+                (HELD_SPELLINGS[2], HOSTILE),
+                ("OPENSSL_CONF_INCLUDE", "left alone"),
+                ("KATANA_T5_UNRELATED", "inherited"),
+                (INHERITANCE_PARENT_MARKER, "1"),
+            ],
         );
         assert_eq!(exit_code, Some(0), "{text}");
         assert!(text.contains(ONE_PASSED), "{text}");

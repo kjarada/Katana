@@ -4095,6 +4095,106 @@ mod launcher {
         );
     }
 
+    // ---- the child's environment -------------------------------------------------------------
+    //
+    // What a request says of the environment (process.rs, SpawnRequest::environment) is asked of
+    // a child: cmd.exe, which prints the variables it holds. OS is "Windows_NT" in every process
+    // of a Windows session (the system's own variable), and nothing cmd.exe needs to run.
+
+    fn printed(output: &[u8]) -> String {
+        String::from_utf8_lossy(output).into_owned()
+    }
+
+    #[test]
+    fn the_child_is_handed_the_variables_the_request_sets_and_the_rest_of_this_processs() {
+        let system_root = printed(&environment_variable(Some("SystemRoot")));
+        assert!(!system_root.is_empty(), "the premise: Windows names its folder");
+        let launcher = make_system_launcher();
+        let request = SpawnRequest {
+            environment: vec![(
+                String::from("KATANA_T7_HANDED"),
+                Some(std::ffi::OsString::from("to the child")),
+            )],
+            // No space before the ampersand: cmd.exe would print it.
+            ..cmd("echo %KATANA_T7_HANDED%& echo %SystemRoot%")
+        };
+        let result = launcher
+            .run(&request)
+            .unwrap_or_else(|error| panic!("{}", error.describe()));
+        assert_eq!(result.exit_code, 0, "{}", printed(&result.output));
+        let said = printed(&result.output);
+        let lines: Vec<&str> = said.lines().map(str::trim_end).collect();
+        assert_eq!(lines, ["to the child", system_root.as_str()]);
+        // The variable was the launch's: this process was not changed to hand it over.
+        assert_eq!(std::env::var_os("KATANA_T7_HANDED"), None);
+    }
+
+    #[test]
+    fn a_variable_the_request_takes_out_is_kept_from_the_child_however_its_name_is_spelled() {
+        assert_eq!(
+            environment_variable(Some("OS")),
+            b"Windows_NT",
+            "the premise: this process holds OS"
+        );
+        let launcher = make_system_launcher();
+        // The control: a child whose request says nothing inherits it.
+        let control = launcher.run(&cmd("echo [%OS%]")).expect("cmd runs");
+        assert!(
+            contains(&control.output, b"[Windows_NT]"),
+            "{}",
+            printed(&control.output)
+        );
+
+        let request = SpawnRequest {
+            // Spelled in another case than the system holds it in: the same variable to Windows.
+            environment: vec![(String::from("os"), None)],
+            ..cmd("echo [%OS%]")
+        };
+        let result = launcher.run(&request).expect("cmd runs");
+        // cmd.exe ran and printed its line, and the value is not in it (what it prints for a
+        // variable it does not hold is its own affair).
+        assert!(
+            contains(&result.output, b"["),
+            "{}",
+            printed(&result.output)
+        );
+        assert!(
+            !contains(&result.output, b"Windows_NT"),
+            "{}",
+            printed(&result.output)
+        );
+        // And this process still holds it.
+        assert_eq!(environment_variable(Some("OS")), b"Windows_NT");
+    }
+
+    #[test]
+    fn a_detached_child_is_handed_the_requests_environment_too() {
+        let scratch = Scratch::new("launcher-detached-environment");
+        let answer = scratch.join("handed.txt");
+        let launcher = make_system_launcher();
+        // The file is named relative to the working directory, as in the case below, so that
+        // nothing in the command needs a quote.
+        let request = SpawnRequest {
+            working_directory: scratch.path().to_path_buf(),
+            environment: vec![(
+                String::from("KATANA_T7_DETACHED"),
+                Some(std::ffi::OsString::from("handed-over")),
+            )],
+            ..cmd("echo %KATANA_T7_DETACHED%> handed.txt")
+        };
+        assert!(launcher.start_detached(&request).is_ok());
+        // The file is there before its line is: wait for the line.
+        let mut answered = Vec::new();
+        for _ in 0..100 {
+            answered = trim_line_ends(read_text(&answer));
+            if !answered.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(answered, b"handed-over");
+    }
+
     #[test]
     fn arguments_reach_the_program_whatever_they_hold() {
         if !powershell().exists() {

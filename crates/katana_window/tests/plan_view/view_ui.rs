@@ -203,4 +203,64 @@ mod view_ui {
         assert_eq!(view.size(), (400, 300));
         assert_eq!(document.selection().ids(), [line]);
     }
+
+    // docs/performance.md, "The selection in the plan view's key": the kept drawing is keyed by
+    // the selection itself, compared set against set at every paint. The selection is changed
+    // here with no notification - a notification repaints by itself - so only the comparison
+    // can tell: one id swapped for another, the count as it was, paints the drawing again, and
+    // the same set put again, in another order, does not.
+    #[test]
+    fn the_drawing_is_painted_again_for_a_selection_one_id_different_and_not_for_the_same_set() {
+        let mut document = Document::new(None);
+        let mut lines = Vec::new();
+        for row in [-5.0, 0.0, 5.0] {
+            document
+                .execute(create_line(
+                    Point2::new(-10.0, row),
+                    Point2::new(10.0, row),
+                    EntityAttributes::default(),
+                ))
+                .expect("the line is made");
+            lines.push(document.last_created_entities()[0]);
+        }
+        let mut state = plan_state();
+        state.plan_framed = true;
+        state.plan.center = Point2::new(0.0, 0.0);
+        state.plan.scale = 10.0;
+        let mut view = PlanView::new(&document, &mut state);
+        view.resize(&mut state, 400, 300);
+
+        document.selection_mut().set(vec![lines[0], lines[1]]);
+        let first_two = view.paint(&document, &mut state).clone();
+        let painted = view.drawing_paint_count();
+
+        // The same two, put again the other way round: the kept drawing.
+        document.selection_mut().set(vec![lines[1], lines[0]]);
+        assert!(*view.paint(&document, &mut state) == first_two);
+        assert_eq!(view.drawing_paint_count(), painted);
+
+        // Two still, the second swapped for the third: a count of the ids would not tell.
+        document.selection_mut().set(vec![lines[0], lines[2]]);
+        let outer_two = view.paint(&document, &mut state).clone();
+        assert_eq!(view.drawing_paint_count(), painted + 1);
+        assert!(outer_two != first_two);
+        let _ = view.paint(&document, &mut state);
+        assert_eq!(view.drawing_paint_count(), painted + 1);
+
+        // One id more, then that one taken out again: painted each time, and the two that are
+        // left are drawn as they were when they were first selected.
+        document.selection_mut().add(lines[1]);
+        let all_three = view.paint(&document, &mut state).clone();
+        assert_eq!(view.drawing_paint_count(), painted + 2);
+        assert!(all_three != outer_two);
+        document.selection_mut().remove(lines[1]);
+        assert!(*view.paint(&document, &mut state) == outer_two);
+        assert_eq!(view.drawing_paint_count(), painted + 3);
+
+        // And none: the selection the view began with before it was first painted.
+        document.selection_mut().clear();
+        let none = view.paint(&document, &mut state).clone();
+        assert_eq!(view.drawing_paint_count(), painted + 4);
+        assert!(none != outer_two);
+    }
 }

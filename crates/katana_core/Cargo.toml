@@ -11,6 +11,12 @@ publish.workspace = true
 default = ["simd-kernels"]
 simd-kernels = []
 
+# Decoding UTF-16, measured (docs/performance.md, "The safe UTF-16 append"): a plain program, no
+# benchmark library, so no crate is added for it.
+[[bench]]
+name = "decode_utf16"
+harness = false
+
 [dependencies]
 
 [lints]

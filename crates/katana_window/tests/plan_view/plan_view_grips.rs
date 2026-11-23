@@ -296,6 +296,25 @@ mod plan_view_grips {
         assert!(!claimed(&mut f));
     }
 
+    // Not a twin of a C++ case: the Rust window's shortcut pass (main_window::shortcuts) asks
+    // the view the same question for Escape, which Edit > Deselect holds.
+    #[test]
+    fn a_view_waiting_for_a_point_pick_claims_escape_from_the_windows_deselect() {
+        let mut f = Plan::over_polyline();
+        f.select();
+        assert!(
+            !f.claims(ViewKey::Escape, NONE),
+            "no pick waits: Escape is the window's Deselect"
+        );
+        f.view.await_point_pick(true);
+        assert!(f.claims(ViewKey::Escape, NONE), "the pick's Escape");
+        // Claimed, the press answers the pick with no point and clears nothing.
+        f.plain_key(ViewKey::Escape);
+        assert!(!f.view.point_pick_waiting());
+        assert!(f.document.selection().contains(f.polyline));
+        assert!(!f.claims(ViewKey::Escape, NONE));
+    }
+
     #[test]
     fn a_hot_vertex_whose_vertex_went_in_two_edits_between_paints_goes_too() {
         // Chosen, then two edits before the view paints again - a SCRIPT, lines pasted, an agent:

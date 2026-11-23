@@ -228,13 +228,23 @@ pub fn survey_code_of<'a>(entity: &'a Entity, property: &str) -> Option<&'a str>
 /// text; the first candidate when none does, so a report can still name what
 /// was looked for.
 pub fn find_code_property(model: &Model, subject: &[EntityId]) -> String {
+    code_property_among(subject.iter().filter_map(|&id| model.entities.find(id)))
+}
+
+/// find_code_property for a caller that has the entities in hand - every
+/// entity of a drawing walked once, where a list of every id would be a
+/// lookup an entity for each candidate tried. `entities` is walked afresh for
+/// each candidate, in its own order, and no further than the first that
+/// carries it.
+pub(crate) fn code_property_among<'a>(
+    entities: impl Iterator<Item = &'a Entity> + Clone,
+) -> String {
     for &candidate in code_property_candidates() {
-        for &id in subject {
-            if let Some(entity) = model.entities.find(id)
-                && survey_code_of(entity, candidate).is_some()
-            {
-                return String::from(candidate);
-            }
+        if entities
+            .clone()
+            .any(|entity| survey_code_of(entity, candidate).is_some())
+        {
+            return String::from(candidate);
         }
     }
     String::from(code_property_candidates()[0])
@@ -804,13 +814,21 @@ pub fn apply_survey_codes_to(
     let map = source.survey_map;
     let mut tally = SurveyCodingReport::default();
 
-    let subject = if options.ids.is_empty() {
-        model.entities.ids()
+    // Every entity, in entity order and in one pass (EntityDatabase::iter),
+    // or the ones named, in the order they were named and as often. Looked up
+    // once here: the code property is found among them and the codes are
+    // read from them, and a list of ids was a lookup an entity for each.
+    let subject: Vec<&Entity> = if options.ids.is_empty() {
+        model.entities.iter().collect()
     } else {
-        options.ids.clone()
+        options
+            .ids
+            .iter()
+            .filter_map(|&id| model.entities.find(id))
+            .collect()
     };
     let property = if options.property.is_empty() {
-        find_code_property(model, &subject)
+        code_property_among(subject.iter().copied())
     } else {
         options.property.clone()
     };
@@ -820,16 +838,13 @@ pub fn apply_survey_codes_to(
     // code rather than once per entity: a survey of 30,000 points is a few
     // hundred codes, and each lookup combines every rule that matches.
     let mut entities_by_code: BTreeMap<String, Vec<EntityId>> = BTreeMap::new();
-    for &id in &subject {
-        let Some(entity) = model.entities.find(id) else {
-            continue;
-        };
+    for &entity in &subject {
         if let Some(code) = survey_code_of(entity, &property) {
             tally.coded += 1;
             entities_by_code
                 .entry(code_to_look_up(map, entity, code))
                 .or_default()
-                .push(id);
+                .push(entity.id);
         }
     }
 

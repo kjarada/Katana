@@ -17,7 +17,7 @@
 //!   signed by openssl);
 //! * exit codes are the table at the top of src/lib.rs, which is a design document and not a log;
 //! * the self-test's signature is RFC 8032 TEST 3, and the hostile configuration is shown to be
-//!   hostile by a program that does not harden (the openssl command, when it is installed).
+//!   hostile by a program that reads it (the openssl command, when it is installed).
 //!
 //! WHAT A TEST HERE NEVER DOES:
 //!
@@ -288,6 +288,7 @@ fn run_program_in(
         arguments,
         working_directory: working_directory.to_path_buf(),
         timeout,
+        ..SpawnRequest::default()
     };
     match make_system_launcher().run(&request) {
         Ok(ran) => ran,
@@ -2083,8 +2084,10 @@ mod helper_program {
                     "cleared",
                     "{name}, {what}"
                 );
-                // The variables reached the program and it took them away: "cleared" alone would
-                // also be the answer of a program that was never handed them.
+                // The variables reached the program and it keeps them from the programs it
+                // starts: "cleared" alone would also be the answer of a program that was never
+                // handed them. Its own environment still holds them while it verifies, so the
+                // ed25519 line above is the verifier's answer under the hostile values.
                 assert_eq!(
                     value_of(&said, "openssl_removed"),
                     removed,
@@ -2097,9 +2100,10 @@ mod helper_program {
     #[test]
     fn the_hostile_configuration_breaks_a_program_that_reads_it() {
         let _serial = serial();
-        // The control of the case above: a program that does not harden its environment is broken
-        // by this configuration, so the helper's pass is the helper's doing and not a configuration
-        // that does nothing. The program is the openssl command, where one of version 3 or later is
+        // The control of the case above: a program that reads the configuration its environment
+        // names is broken by this one, so the helper's pass - with the variables in its own
+        // environment while it verifies - is the helper's doing and not a configuration that
+        // does nothing. The program is the openssl command, where one of version 3 or later is
         // installed and works; the release tools' tests need one too (tests/update/CMakeLists.txt).
         // Without one the case is skipped on a developer's machine and FAILS on a build service: a
         // control that skips there would leave the case above with nothing to show it means
@@ -2863,9 +2867,10 @@ mod helper_swap {
             );
 
             // The new version was started for its health check, from the install, with the
-            // person's OPENSSL_CONF handed on (the helper itself ran without it), and with the
-            // helper's RunOnce entry in place at that moment: it names the helper copy and the
-            // install.
+            // person's OPENSSL_CONF handed on (by the launch's own request: the helper keeps the
+            // variable from the programs it starts and hands the person's value on, and nothing
+            // in the helper reads it), and with the helper's RunOnce entry in place at that
+            // moment: it names the helper copy and the install.
             let log = world.stub_log();
             let lines = lines_of(&log);
             assert!(!lines.is_empty(), "{log}");

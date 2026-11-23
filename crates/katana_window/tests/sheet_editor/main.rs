@@ -10,6 +10,9 @@
 //! by its object name is driven by that name through the harness, the editor drawn in its target
 //! `sheetEditor` and each dialog in its own. Where the C++ test changed the drawing directly, the
 //! twin does the same on the host's drawing, and the editor follows it at its next look.
+//!
+//! `kept_canvas` is not a twin: it holds the canvas's kept picture, which the Rust editor has and
+//! the C++ had no need of (a QWidget repaints only what is asked).
 
 #![allow(
     clippy::float_cmp,
@@ -26,6 +29,7 @@ pub mod window_support;
 mod support;
 
 mod generate_dialog;
+mod kept_canvas;
 mod legend_properties;
 mod plan_grid_editor;
 mod plot_dialog;

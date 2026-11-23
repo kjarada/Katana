@@ -1420,8 +1420,9 @@ itself, in other digits, and its `erf` and `ln_gamma` are not stable; the
 declarations are already `safe fn`, but the `unsafe extern` block is what
 the lint counts); the updater's hardening of its OpenSSL variables and the
 lending of them to each launch (`crates/katana_updater/src/lib.rs`,
-`crates/katana_update/src/signature.rs`), which change the process's
-environment; the console's code page and wide reading, the module list on
+`crates/katana_update/src/signature.rs`), which changed the process's
+environment (made what a launch is told by the third pass, below, and
+safe); the console's code page and wide reading, the module list on
 macOS and Windows, the error boxes (moved behind katana_update's wrapper by
 the second pass, below), the registry and the Windows test
 oracles (Credential Manager, process token, byte-range lock, the C locale).
@@ -1518,7 +1519,8 @@ address, not an empty slice's.
 What is not confined, and why: `crates/katana_update/src/signature.rs`'s
 OpenSSL hardening is an `unsafe fn` whose caller promises that no other
 thread uses the environment; it calls no foreign function, and its contract
-is part of its public signature (the section above, and Not done). The
+is part of its public signature (the section above; made safe on
+2026-11-22, "The third pass" below). The
 update crate's tests reach the Credential Manager, the command-line parser,
 a held file, the console and the error mode behind the code's back, as
 oracles independent of the wrappers they check (`apply.rs`,
@@ -1790,7 +1792,8 @@ katana_core's three named above, katana_gis's
 `crates/katana_gis/tests/gdal_core/gdal_pdal_adapters.rs`, the update
 crate's (above) and `crates/katana_updater/tests/helper.rs`. The cases that
 set the hardening's variables (`crates/katana_update/tests/signature.rs`)
-change the real environment because that is what the hardening reads.
+change the real environment because that is what the hardening reads (they
+change none since the third pass, below).
 
 Looked at and left, with the reason:
 
@@ -1800,7 +1803,7 @@ Looked at and left, with the reason:
   or narrowing into a byte vector made a String after (every byte validated
   again, or copied). Each is more work per byte of the text decoder's inner
   loop; a candidate only with a benchmark, which the text kernels do not
-  have (Not done).
+  have (Not done). (Made safe by the third pass, below, and measured since.)
 - **The SIMD entries.** A kernel is a safe function of slices already; what
   is left is the language's rule about the call. Compiling the whole crate
   with the feature would make them safe and stop the program starting on a
@@ -1815,9 +1818,189 @@ Looked at and left, with the reason:
 - **The hardening.** Taking the three variables out of this process is what
   keeps the OpenSSL in it from reading them; it is not a child's
   environment, so a child's safe one does not reach it. Lending the values
-  to a launch could be the request's own environment (Not done).
+  to a launch could be the request's own environment (Not done). (Wrong in
+  its premise, as the third pass found: there is no OpenSSL in the helper.)
 - **std's whole-file `try_lock` for the hashing test's byte-range lock.** It
   locks the whole file, and the case needs a read that fails part way.
+
+### The third pass: the second's leftovers (2026-11-22)
+
+What the second pass named as left, and its table read once more. Not
+built when written: the integration build's clippy and suite are the
+evidence.
+
+**The updater's hardening is what a launch is told, and safe.** The second
+pass left `harden_open_ssl_environment` an `unsafe fn` on the ground that it
+keeps "the OpenSSL in this process" from reading OPENSSL_CONF,
+OPENSSL_MODULES and OPENSSL_ENGINES. Read to the end, there is none:
+
+- the verifier is ed25519-dalek and curve25519-dalek, which read no file
+  and no variable; katana_core has no dependency at all, and katana_update's
+  others are miniz_oxide and, on Windows, windows-sys;
+- the helper imports the operating system's DLLs alone, which two tests
+  read from its import table (`crates/katana_updater/tests/helper.rs`,
+  `crates/katana_updater/tests/shipped.rs`);
+- katana, katana_cli and katana_mcp, which do share a process with an
+  OpenSSL (GDAL's libcurl), never called it.
+
+So the removal protected no reader in the process that made it, and the
+programs the helper starts - the person's Katana, for its health check and
+at the end - were lent the person's values back for the length of each
+launch, by two more changes of the environment before and two after. What a
+child held was the person's own values; what the process paid was an unsafe
+contract in the update layer's public interface and four unsafe sites.
+
+Now a launch carries its own environment. `SpawnRequest` has an
+`environment`: changes to what the child inherits, a variable set or taken
+out, made in order by `katana_update::process::environment_with`, the names
+matched as the system matches them (Windows without regard to case, by
+CompareStringOrdinal, which is what std uses for a child's variables).
+`harden_open_ssl_environment` takes the request and tells it to start its
+program without the three; the helper's launcher hardens every request and
+then adds the person's values, read first thing in the program. The Windows
+launcher builds the block CreateProcessW takes from
+`katana_update::process::child_environment` - sorted by name as the system's
+documentation asks, ending in two NULs by construction - and a request that
+changes nothing is still handed no block, so the engine's launches of the
+helper are the call they were. No process's environment is changed, by the
+program or by its tests: the helper's function that wrote a variable and its
+guard that lent the values are gone, and
+`crates/katana_update/tests/signature.rs` lost its `allow(unsafe_code)`, its
+lock and its restoring guard (the variables a case needs are set for the
+child it starts, by std's `Command`).
+
+What a child of the helper holds is unchanged, a variable the person had set
+to nothing included (not handed on, so not held, which is what the removal
+left of it). What is new: the helper's process keeps the variables it was
+started with, so its self-test and its verification run with them present;
+`--selftest` asks the environment a hardened launch hands over, with
+nothing handed on, whether the three are gone from it, and prints the same
+two lines about them. The helper's exit 30 no longer has "the environment
+could not be hardened" among its causes: a request cannot fail to be told.
+
+What was weighed against it: the removal was also a guard for a library that
+reads those variables being linked into the helper one day. That guard is
+gone, and it is said so where the function is documented. In its place: the
+import-table tests refuse such a library as a DLL, and the two cases that
+verify under a hostile configuration now do so with the variables really in
+the process, where the removal used to take them away first - so they test
+the verifier, not the guard.
+
+Rejected:
+
+- **Leaving it `unsafe`**, called first thing before any thread exists. That
+  call's proof was sound, but the lending was not a first-thing call: it
+  changed the environment around every launch, on the promise that the
+  helper never has a second thread.
+- **The launcher keeping the three from every child.** The engine's
+  launches are of the helper, which must be handed the person's values or
+  it has nothing to hand on; the helper's tests start it under hostile
+  values through the same launcher.
+- **Dropping the hardening as a no-op**, since the values are handed back.
+  They are handed back as the helper read them at its start, by a decision
+  written in each request; a variable the person had set to nothing, and
+  anything that changed the helper's environment after its start, do not
+  reach a child. And the self-test's two lines are a contract its tests
+  hold it to.
+- **std's `Command` for the launch**, which can keep a variable from a
+  child: rejected for the launcher on 2026-11-19, for the reasons under
+  "Unsafe confined to FFI modules".
+- **A self-test that starts a program** to ask it what it holds: a mode of
+  the helper that starts the helper, on the copy the preflight is about to
+  trust, and nothing to start where the launcher refuses (Linux). It asks
+  the function every launch's block is made from; that the block reaches
+  the child is the tests' to show.
+
+The tests. Of three processes - the test starts itself holding the three,
+that one makes the hardened launch through the system launcher, and the
+child reports what it holds: none of them, in any spelling on Windows, and
+the other variables all there; the middle one reports that its own
+environment was not changed:
+`signature::hardening_leaves_none_of_the_three_variables_to_a_program_this_one_starts`.
+On environments written out by hand:
+`signature::hardening_keeps_the_three_open_ssl_variables_from_a_started_program_and_verification_still_works`,
+`signature::what_a_request_said_of_the_three_before_the_hardening_is_dropped_and_what_it_says_after_is_handed_on`,
+the two spelling cases beside them, and the rule's own cases in
+`crates/katana_update/tests/contract.rs`. The launcher's, asked of cmd.exe:
+`launcher::the_child_is_handed_the_variables_the_request_sets_and_the_rest_of_this_processs`,
+`launcher::a_variable_the_request_takes_out_is_kept_from_the_child_however_its_name_is_spelled`
+and
+`launcher::a_detached_child_is_handed_the_requests_environment_too`.
+And the block's own, beside the wrappers:
+`an_environment_block_ends_each_variable_with_a_nul_and_itself_with_one_more`,
+`a_child_started_with_a_block_holds_its_variables_and_not_this_processs`,
+`the_block_of_a_request_holds_this_processs_variables_with_the_changes_in_name_order`
+and
+`a_change_no_program_can_be_handed_is_refused_before_anything_is_started`.
+The helper's own cases are unchanged in what they expect.
+
+**`append_ascii_utf16` is safe, and its cost was measured the day after.** The decoder
+of UTF-16 narrowed each run of ASCII straight into its String's spare
+capacity, reached through the String's vector and taken into its length by
+`set_len`: two unsafe blocks. It now narrows a block of 4096 units into a
+byte array the decode keeps (`crates/katana_core/src/text_encoding.rs`) and
+appends the block as text. The text is the same byte for byte and so is the
+count returned; the kernels (`crates/katana_core/src/simd/`) are untouched,
+and their steps of 32 fall where they fell. What it costs: a String takes
+bytes only as a `str`, so every narrowed byte is checked to be UTF-8 by std
+(a check ASCII cannot fail) and copied once more, both within the 12 KiB a
+step works in. That is more work per byte of a hot loop, which is why the
+second pass left it; it is taken now, the owner having asked for the unsafe
+to go, in a commit of its own so that it can be put back alone if a
+measurement says so. **Measured on 2026-11-23** by a bench target added for
+it (`crates/katana_core/benches/decode_utf16.rs`; figures in
+`docs/performance.md`, "The safe UTF-16 append"): 8 MB of UTF-16 decodes a
+fifth slower when it is all ASCII and two thirds slower with another
+character in every eight units, 0.15 ms and 2.8 ms on the file. It was
+kept: a few milliseconds once a file, for two unsafe blocks gone.
+
+Rejected: a push per unit (a capacity check and a length store per byte); a
+zero-filled String truncated after (a String's bytes cannot be written in
+place without unsafe either); the whole text narrowed into a byte vector and
+made a String at the end (the same check, over all of the text in memory a
+second time, where the block's is over bytes still in the cache); a scratch
+made inside the function (a text dense with other characters asks for a run
+at every one of them, and would clear 4 KiB each time). The slot trait the
+kernels write through is left with one implementer, a byte of a slice;
+making the kernels plain functions of a byte slice is an edit of the two
+kernel files and changes nothing they do.
+
+The tests (`crates/katana_core/tests/simd_text.rs`):
+`simd_text::the_narrowing_kernel_equals_the_unit_loop_at_every_length_with_a_non_ascii_unit_at_every_place`
+(every length to 100 and every place in it, three units that are not ASCII
+each in its own way, both byte orders; the kernel and the unit loop each
+held to bytes worked out in the test, between guards);
+`simd_text::ascii_runs_longer_than_the_append_block_decode_as_they_are_written_at_every_level`
+(runs that end before, on and after one block and two, the other character
+at the edges of a step and of a block) and
+`simd_text::a_character_that_is_not_ascii_at_every_other_unit_decodes_past_the_append_block`.
+The decoding cases that were there hold unchanged.
+
+**The table, read once more.** No site of it beyond what this pass changed
+has a safe form today without a new crate or a measured loss:
+
+- the 25 SIMD entries are the language's rule about calling a
+  target-feature function, as the second pass says;
+- kill with signal 0 (`crates/katana_update/src/posix.rs`) could be a look
+  at /proc on Linux, but the module is compiled for macOS too, which has
+  none;
+- the module lists, the ANSI code page, the console, the descriptors and the
+  registry read are calls std has no form of, each with its SAFETY comment;
+- libm waits for std, as recorded.
+
+The SAFETY comments of the update layer's Win32 wrappers
+(`crates/katana_update/src/win32/`), of its POSIX call and of the helper's
+stub were read against what each call requires - a terminated name, a
+buffer of the length told, a handle open for the call and closed once - and
+each states it; the two CreateProcessW calls' were extended for the
+environment block.
+
+**The count.** Counted as the second pass counted: 56 before, 50 after. The
+four of "The process's environment" and the two of "A String's spare
+capacity" are gone, and those two rows of the table with them; the SIMD
+entries (25) and the C library and the system (25) stand as listed. The
+Win32 wrappers gained no block: the environment is one more argument of the
+two CreateProcessW calls they already made.
 
 ## The toolchains
 
@@ -2708,23 +2891,23 @@ what it would take.
     `StyleManagerDialog::set_object_name`); a manager made on its own keeps
     `layerManager` and `styleManager`, which its twins drive it by.
 - **What is left of removing `unsafe`** (the owner's ask of 2026-11-16, taken
-  on 2026-11-19 to 21: "Unsafe that calls no C library, removed", "Unsafe
+  on 2026-11-19 to 22: "Unsafe that calls no C library, removed", "Unsafe
   confined to FFI modules", "GDAL's unsafe confined to katana_gis's FFI
-  modules" and "The second pass over what was left", above, the last with
-  the table of every site that remains). Kept on purpose, measured: the task pool's warm workers
+  modules", "The second pass over what was left", with the table of every
+  site that remained, and "The third pass", with the count since, above).
+  Kept on purpose, measured: the task pool's warm workers
   and the rasteriser's disjoint writes, whose safe forms cost a frame some
-  two-thirds and a tenth. Left: the updater's OpenSSL hardening
-  (`harden_open_ssl_environment`, still an `unsafe fn`), which takes
-  `SpawnRequest` carrying an environment for the child and the self-test
-  asking of the children what it now asks of the process; libm's four
+  two-thirds and a tenth. Left: libm's four
   functions until std's `erf` and `ln_gamma` are stable (`asinh` would stay,
   std's digits differ); the FFI modules themselves, which no Rust can make
   safe - only a safe crate in place of our own bindings (`rusqlite`, `proj`,
   `gdal`, `curl`), each a new dependency for the owner to agree, and none
   covering GDAL's algorithm framework or PDAL, whose shims stay; then
   `#![forbid(unsafe_code)]` in every crate with no FFI module. Not measured:
-  the text kernels, the GPU packing and the raster sampler's per-sample band
-  lookup, for want of a benchmark.
+  the text kernels at each level (the safe `append_ascii_utf16` of
+  2026-11-22 is, at AVX2: `docs/performance.md`, "The safe UTF-16 append"),
+  the GPU packing and the raster sampler's
+  per-sample band lookup, for want of a benchmark.
 - **The toolbars' natural widths along the top are 2 to 22 points off the
   C++'s** (`--check-toolbar-fit`; the test passes, its rows still fit), the
   last difference the window gate showed. Matching them is laying out as Qt

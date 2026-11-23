@@ -10,48 +10,117 @@
 //! 283,143 794 x 549; the left column 39,143 240 x 663 whole; the panels 240 wide and the command
 //! line 110 high with 4 between two docks.
 
-use egui::{Pos2, Rect, Vec2, pos2, vec2};
+use egui::{Event, Modifiers, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
 use katana_window::MainWindow;
 use katana_window::drive::headless::Headless;
 use katana_window::main_window::docking::{
-    DockingAction, LEAST_PANEL, PANEL_SIZE, WINDOW_PANELS, WindowPanels, is_placeable,
-    kept_inside, parse_action,
+    DockingAction, FARTHEST, LEAST_PANEL, PANEL_SIZE, PanelPlace, WINDOW_PANELS, WindowPanels,
+    is_placeable, kept_inside, next_to_raise, panel_place_from_text, panel_place_text,
+    parse_action, raise_in,
 };
+use katana_window::main_window::docking_ui::floating_panel_layer;
 use katana_window::main_window::layout;
 
 use super::tool_bar_docking::{click_bar_button, drag, drawn, settled};
 
 /// A rectangle by its corner and its size, as the design writes one ("39,143 240 x 312").
-fn at(x: f32, y: f32, width: f32, height: f32) -> Rect {
+pub(crate) fn at(x: f32, y: f32, width: f32, height: f32) -> Rect {
     Rect::from_min_size(pos2(x, y), vec2(width, height))
 }
 
 /// Whether two rectangles are the same to within the half point a pixel snap may take.
-fn same(a: Rect, b: Rect) -> bool {
+pub(crate) fn same(a: Rect, b: Rect) -> bool {
     (a.min - b.min).abs().max_elem() <= 0.5 && (a.max - b.max).abs().max_elem() <= 0.5
 }
 
 /// What a floating panel may cover in the headless window: under the 26 point menu bar and over
 /// the 24 point status bar.
-fn bounds() -> Rect {
+pub(crate) fn bounds() -> Rect {
     Rect::from_min_max(pos2(0.0, 26.0), pos2(1360.0, 836.0))
 }
 
-fn floats(window: &MainWindow, dock: &str) -> bool {
+pub(crate) fn floats(window: &MainWindow, dock: &str) -> bool {
     window.ui.docking.window_panels.is_floating(dock)
 }
 
-fn is_drawn(headless: &Headless, target: &str) -> bool {
+pub(crate) fn is_drawn(headless: &Headless, target: &str) -> bool {
     headless.snapshot().target(target).is_some()
 }
 
-fn float_button_text(headless: &Headless, dock: &str) -> String {
+pub(crate) fn float_button_text(headless: &Headless, dock: &str) -> String {
     headless
         .snapshot()
         .control(dock, "DockFloatButton")
         .unwrap_or_else(|| panic!("{dock} has its Float button"))
         .text
         .clone()
+}
+
+/// The pointer clicked at `at` as a person clicks: moved there, pressed and let go a frame
+/// later, with no move between. Three frames, a twentieth of a second on the runner's clock
+/// (a sixtieth a frame: drive::headless).
+pub(crate) fn click_at(window: &mut MainWindow, headless: &mut Headless, at: Pos2) {
+    headless.push_event(Event::PointerMoved(at));
+    let _ = headless.frame(window);
+    for pressed in [true, false] {
+        headless.push_event(Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        let _ = headless.frame(window);
+    }
+}
+
+/// `click_at`, and the window drawn until it is idle.
+pub(crate) fn click_and_settle(window: &mut MainWindow, headless: &mut Headless, at: Pos2) {
+    click_at(window, headless, at);
+    headless
+        .settle(window)
+        .unwrap_or_else(|problem| panic!("{problem}"));
+}
+
+/// Two clicks at `at`, the second let go a twentieth of a second after the first and at the same
+/// point: inside egui's double click, which is two clicks let go within 0.3 seconds and 6 points
+/// of each other (egui 0.36's `InputOptions`: `max_double_click_delay`, `max_click_dist`). Then
+/// the window drawn until it is idle.
+pub(crate) fn double_click_at(window: &mut MainWindow, headless: &mut Headless, at: Pos2) {
+    click_at(window, headless, at);
+    click_and_settle(window, headless, at);
+}
+
+/// Frames drawn until `seconds` have passed on the runner's clock, a sixtieth a frame: time
+/// passes for egui only as frames are drawn.
+pub(crate) fn wait(window: &mut MainWindow, headless: &mut Headless, seconds: f32) {
+    let frames = (seconds * 60.0).ceil() as usize;
+    for _ in 0..frames {
+        let _ = headless.frame(window);
+    }
+}
+
+/// A point on a panel's title, clear of the sizing strip along its top and of the buttons at its
+/// right: where its bar is pressed, dragged and double-clicked.
+pub(crate) fn title_of(panel: Rect) -> Pos2 {
+    pos2(panel.min.x + 60.0, panel.min.y + 13.0)
+}
+
+/// Whether the floating panel `dock` is what egui has on top at `at`: what a person sees there,
+/// and what a press there reaches.
+pub(crate) fn on_top_at(headless: &Headless, dock: &str, at: Pos2) -> bool {
+    headless.context().layer_id_at(at) == Some(floating_panel_layer(dock))
+}
+
+/// The window's order of its floating panels, the lowest first.
+pub(crate) fn stacking(window: &MainWindow) -> Vec<String> {
+    window
+        .ui
+        .docking
+        .window_panels
+        .stacking()
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 mod window_panels {
@@ -460,10 +529,470 @@ mod window_panels {
         window.trigger("viewPanelFloatSurfacesDock").expect("floated");
         assert!(window.ui.docks.surfaces);
     }
+
+    // ---- a double click on a title ------------------------------------------------------------
+
+    #[test]
+    fn a_double_click_on_a_docked_panels_title_floats_it_and_one_on_the_floating_title_docks_it() {
+        let mut window = MainWindow::new();
+        let mut headless = settled(&mut window);
+        let docked = drawn(&headless, "LayersDock");
+        assert!(same(docked, at(39.0, 143.0, 240.0, 312.0)), "{docked:?}");
+
+        double_click_at(&mut window, &mut headless, title_of(docked));
+        assert!(floats(&window, "LayersDock"), "a double click on the title is its Float");
+        // Where its Float button puts it: 24 points down and along, at its docked size.
+        let floating = drawn(&headless, "LayersDock");
+        assert!(same(floating, at(63.0, 167.0, 240.0, 312.0)), "{floating:?}");
+        assert_eq!(float_button_text(&headless, "LayersDock"), "Dock");
+        // And the docked layout closed up, as for the button.
+        let column = drawn(&headless, "ReferenceDataDock");
+        assert!(same(column, at(39.0, 143.0, 240.0, 663.0)), "{column:?}");
+
+        // A person's next double click comes later than this: egui reads a click let go within
+        // twice its double-click time (0.6 seconds) of the click before the last as the third of
+        // a triple click, which is not a double click.
+        wait(&mut window, &mut headless, 0.7);
+        double_click_at(&mut window, &mut headless, title_of(floating));
+        assert!(!floats(&window, "LayersDock"), "and on the floating title, its Dock");
+        assert!(same(drawn(&headless, "LayersDock"), docked), "back in its place");
+        assert_eq!(float_button_text(&headless, "LayersDock"), "Float");
+        assert!(
+            window.ui.docking.panel_drag.is_none(),
+            "the presses of the double click have left no drag behind"
+        );
+    }
+
+    #[test]
+    fn a_double_click_floats_the_command_line_and_properties_as_it_does_layers() {
+        // The panels at the other two places of the geometry: under the views, and at the right.
+        for (dock, place) in [
+            ("CommandLineDock", at(283.0, 696.0, 794.0, 110.0)),
+            ("PropertiesDock", at(1081.0, 143.0, 240.0, 663.0)),
+        ] {
+            let mut window = MainWindow::new();
+            let mut headless = settled(&mut window);
+            let docked = drawn(&headless, dock);
+            assert!(same(docked, place), "{dock}: {docked:?}");
+            double_click_at(&mut window, &mut headless, title_of(docked));
+            assert!(floats(&window, dock), "{dock} floats");
+            let floating = drawn(&headless, dock);
+            assert!(bounds().contains_rect(floating), "{dock}: {floating:?}");
+            assert!(
+                (floating.size() - docked.size()).abs().max_elem() <= 0.5,
+                "{dock} at its docked size: {floating:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_clicks_on_a_title_too_far_apart_in_time_or_place_are_not_a_double_click() {
+        // Later than egui's 0.3 seconds: two clicks, and a docked panel's title is pressed to no
+        // end.
+        let mut window = MainWindow::new();
+        let mut headless = settled(&mut window);
+        let docked = drawn(&headless, "LayersDock");
+        click_at(&mut window, &mut headless, title_of(docked));
+        wait(&mut window, &mut headless, 0.4);
+        click_and_settle(&mut window, &mut headless, title_of(docked));
+        assert!(!floats(&window, "LayersDock"), "0.4 seconds apart is two clicks");
+        assert!(same(drawn(&headless, "LayersDock"), docked));
+
+        // Farther apart than egui's 6 points, at once: two clicks again. A fresh window, so that
+        // no click of the case above is counted with these.
+        let mut window = MainWindow::new();
+        let mut headless = settled(&mut window);
+        let docked = drawn(&headless, "LayersDock");
+        click_at(&mut window, &mut headless, title_of(docked));
+        click_and_settle(&mut window, &mut headless, title_of(docked) + vec2(10.0, 0.0));
+        assert!(!floats(&window, "LayersDock"), "10 points apart is two clicks");
+        assert!(same(drawn(&headless, "LayersDock"), docked));
+    }
+
+    // ---- what a floating panel does at the edges of what it can be ----------------------------
+
+    #[test]
+    fn a_floating_panel_at_its_least_size_takes_the_pointer_inside_its_rectangle_and_nowhere_else() {
+        // The least a panel is sized to, 160 x 96: its bar's 26 points and 70 for contents that,
+        // docked, have 240 x 300 or more. What does not fit is cut at the panel's edge, and the
+        // views beside it are still the pointer's.
+        let small = at(600.0, 300.0, 160.0, 96.0);
+        for dock in WINDOW_PANELS {
+            let mut window = MainWindow::new();
+            // Placing a panel shows it, whichever tool or menu item would.
+            window
+                .trigger(&format!("viewPanelPlace:{dock}:float:600,300,160,96"))
+                .unwrap_or_else(|error| panic!("{dock}: {}", error.describe()));
+            let headless = settled(&mut window);
+            let shown = drawn(&headless, dock);
+            assert!(same(shown, small), "{dock}: {shown:?}");
+            assert!(on_top_at(&headless, dock, small.center()), "{dock}: inside is the panel's");
+            // 10 points outside each edge, and 100 below, where a tall panel's contents ran on.
+            for (side, outside) in [
+                ("left", pos2(590.0, 348.0)),
+                ("right", pos2(770.0, 348.0)),
+                ("above", pos2(680.0, 290.0)),
+                ("below", pos2(680.0, 406.0)),
+                ("far below", pos2(680.0, 496.0)),
+            ] {
+                assert!(
+                    !on_top_at(&headless, dock, outside),
+                    "{dock}: {side} of the panel is not the panel's"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_made_smaller_brings_a_floating_panel_inside_and_made_large_again_returns_it() {
+        // A place that fits the headless window's 1360 x 860 and not a laptop's 1280 x 720.
+        let asked = at(1050.0, 450.0, 260.0, 340.0);
+        let mut window = MainWindow::new();
+        window
+            .trigger("viewPanelPlace:LayersDock:float:1050,450,260,340")
+            .expect("floated");
+        // In the smaller window the panel may cover 26 to 696 down and 0 to 1280 across, so its
+        // corner comes back to 1280 - 260 and 696 - 340.
+        let mut laptop = Headless::with_screen(1280.0, 720.0, 1.0);
+        laptop
+            .settle(&mut window)
+            .unwrap_or_else(|problem| panic!("{problem}"));
+        let inside = drawn(&laptop, "LayersDock");
+        assert!(same(inside, at(1020.0, 356.0, 260.0, 340.0)), "{inside:?}");
+        assert_eq!(
+            window.ui.docking.window_panels.floating_rect("LayersDock"),
+            Some(asked),
+            "what is kept is where the person put it"
+        );
+
+        // Large again, it is where it was put. Another runner is another egui context, which the
+        // window themes as it did its first.
+        window.ui.themed = false;
+        let headless = settled(&mut window);
+        let back = drawn(&headless, "LayersDock");
+        assert!(same(back, asked), "{back:?}");
+    }
+
+    #[test]
+    fn a_panel_dragged_in_a_smaller_window_goes_from_where_it_is_drawn_not_where_it_was_kept() {
+        let mut window = MainWindow::new();
+        window
+            .trigger("viewPanelPlace:LayersDock:float:1050,450,260,340")
+            .expect("floated");
+        let mut laptop = Headless::with_screen(1280.0, 720.0, 1.0);
+        laptop
+            .settle(&mut window)
+            .unwrap_or_else(|problem| panic!("{problem}"));
+        let before = drawn(&laptop, "LayersDock");
+        assert!(same(before, at(1020.0, 356.0, 260.0, 340.0)), "{before:?}");
+        // 100 points up and to the left, by its title.
+        let by = vec2(-100.0, -100.0);
+        drag(&mut window, &mut laptop, title_of(before), title_of(before) + by);
+        let after = drawn(&laptop, "LayersDock");
+        assert!(same(after, before.translate(by)), "{before:?} -> {after:?}");
+        assert_eq!(
+            window.ui.docking.window_panels.floating_rect("LayersDock"),
+            Some(at(920.0, 256.0, 260.0, 340.0)),
+            "and that is its place from here on"
+        );
+    }
+
+    #[test]
+    fn a_minimised_panel_comes_back_to_the_column_its_neighbour_left_meanwhile() {
+        let mut window = MainWindow::new();
+        let mut headless = settled(&mut window);
+        click_bar_button(&mut window, &mut headless, "LayersDock", "DockMinimiseButton");
+        // Reference Data closed while Layers is in the tray: the left column has no panel, and
+        // the views start at the Draw column's 39.
+        click_bar_button(&mut window, &mut headless, "ReferenceDataDock", "DockCloseButton");
+        let views = window.ui.docking.drawing;
+        assert!(same(views, at(39.0, 143.0, 1038.0, 549.0)), "{views:?}");
+        assert!(headless.snapshot().control_anywhere("RestoreLayersDock").is_some());
+
+        click_bar_button(&mut window, &mut headless, "MinimisedToolBar", "RestoreLayersDock");
+        // Layers alone has the column it shared: 39,143 240 x 663.
+        let layers = drawn(&headless, "LayersDock");
+        assert!(same(layers, at(39.0, 143.0, 240.0, 663.0)), "{layers:?}");
+        assert!(!is_drawn(&headless, "ReferenceDataDock"), "Reference Data stays closed");
+        assert!(headless.snapshot().target("MinimisedToolBar").is_none(), "the tray is empty");
+    }
+
+    #[test]
+    fn a_place_far_past_any_window_keeps_the_size_asked_and_is_drawn_inside() {
+        let mut window = MainWindow::new();
+        // The largest whole number the action's text holds, for the corner.
+        window
+            .trigger("viewPanelPlace:LayersDock:float:2147483647,2147483647,300,200")
+            .expect("a whole number is a place");
+        let headless = settled(&mut window);
+        // Against the right edge and the status bar's top: 1360 - 300 and 836 - 200.
+        let shown = drawn(&headless, "LayersDock");
+        assert!(same(shown, at(1060.0, 636.0, 300.0, 200.0)), "{shown:?}");
+        // What is kept, and what a headless run reads, is a corner a float still counts points at.
+        assert_eq!(
+            window.ui.docking.window_panels.floating_rect("LayersDock"),
+            Some(at(8_388_608.0, 8_388_608.0, 300.0, 200.0))
+        );
+        let report = window.docking_report("windowPanels").expect("reported");
+        assert!(
+            report.contains("LayersDock=float:8388608,8388608,300,200"),
+            "{report}"
+        );
+        // And the saved layout brings back the same.
+        let text = layout::layout_text(&window);
+        let mut restored = MainWindow::new();
+        assert!(layout::restore_layout(&mut restored, &text), "{text}");
+        assert_eq!(
+            restored.ui.docking.window_panels.floating_rect("LayersDock"),
+            Some(at(8_388_608.0, 8_388_608.0, 300.0, 200.0))
+        );
+
+        // As far the other way: against the left edge, under the menu bar.
+        let mut window = MainWindow::new();
+        window
+            .trigger("viewPanelPlace:LayersDock:float:-2147483648,-2147483648,300,200")
+            .expect("a whole number is a place");
+        let headless = settled(&mut window);
+        let shown = drawn(&headless, "LayersDock");
+        assert!(same(shown, at(0.0, 26.0, 300.0, 200.0)), "{shown:?}");
+    }
+
+    #[test]
+    fn a_place_that_is_not_whole_numbers_is_no_action_and_moves_nothing() {
+        let mut window = MainWindow::new();
+        for place in [
+            "nan,0,300,200",
+            "0,inf,300,200",
+            "0,0,-inf,200",
+            "0,0,300,NaN",
+            "1e3,0,300,200",
+            "1.5,0,300,200",
+            // Past what a 32-bit whole number holds.
+            "99999999999,0,300,200",
+            "0,0,300,99999999999",
+            "0,0,300",
+            "0,0,300,200,5",
+            "",
+        ] {
+            let name = format!("viewPanelPlace:LayersDock:float:{place}");
+            assert_eq!(parse_action(&name), None, "{name}");
+            assert!(window.trigger(&name).is_err(), "{name} is refused");
+        }
+        assert_eq!(window.ui.docking.window_panels, WindowPanels::default());
+    }
 }
 
 mod window_panels_model {
     use super::*;
+
+    fn names(order: &[&str]) -> Vec<String> {
+        order.iter().map(|name| String::from(*name)).collect()
+    }
+
+    /// Every order of `items`, by Heap's algorithm (B. R. Heap, 1963).
+    fn permutations(items: &[&str]) -> Vec<Vec<String>> {
+        fn heap(k: usize, items: &mut [String], out: &mut Vec<Vec<String>>) {
+            if k <= 1 {
+                out.push(items.to_vec());
+                return;
+            }
+            heap(k - 1, items, out);
+            for i in 0..k - 1 {
+                if k.is_multiple_of(2) {
+                    items.swap(i, k - 1);
+                } else {
+                    items.swap(0, k - 1);
+                }
+                heap(k - 1, items, out);
+            }
+        }
+        let mut items = names(items);
+        let mut out = Vec::new();
+        heap(items.len(), &mut items, &mut out);
+        out
+    }
+
+    #[test]
+    fn the_floating_panels_are_listed_from_the_lowest_and_one_floated_goes_on_top() {
+        let mut panels = WindowPanels::default();
+        assert!(panels.stacking().is_empty());
+        let rect = at(100.0, 200.0, 240.0, 300.0);
+        for dock in ["LayersDock", "PropertiesDock", "CommandLineDock"] {
+            assert!(panels.float(dock, rect));
+        }
+        assert_eq!(panels.stacking(), ["LayersDock", "PropertiesDock", "CommandLineDock"]);
+        // Moved or sized, a panel keeps its place in the order: the press that moved it is what
+        // brought it up.
+        assert!(panels.float("LayersDock", at(300.0, 250.0, 260.0, 320.0)));
+        assert_eq!(panels.stacking(), ["LayersDock", "PropertiesDock", "CommandLineDock"]);
+        // Docked, it leaves the order; floated again, it is on top.
+        assert!(panels.dock("PropertiesDock"));
+        assert_eq!(panels.stacking(), ["LayersDock", "CommandLineDock"]);
+        assert!(panels.float("PropertiesDock", rect));
+        assert_eq!(panels.stacking(), ["LayersDock", "CommandLineDock", "PropertiesDock"]);
+    }
+
+    #[test]
+    fn a_panel_brought_up_is_over_the_rest_which_keep_their_order() {
+        let mut panels = WindowPanels::default();
+        let rect = at(100.0, 200.0, 240.0, 300.0);
+        for dock in ["LayersDock", "PropertiesDock", "CommandLineDock", "SurfacesDock"] {
+            panels.float(dock, rect);
+        }
+        assert!(panels.raise("PropertiesDock"));
+        assert_eq!(
+            panels.stacking(),
+            ["LayersDock", "CommandLineDock", "SurfacesDock", "PropertiesDock"]
+        );
+        assert!(!panels.raise("PropertiesDock"), "on top already");
+        assert!(!panels.raise("VerticesDock"), "docked: it has no place in the order");
+        assert!(!panels.raise("NoSuchDock"));
+        assert_eq!(panels.stacking().len(), 4, "nothing changed");
+        // Its rectangle goes with it.
+        panels.float("LayersDock", at(1.0, 2.0, 300.0, 400.0));
+        assert!(panels.raise("LayersDock"));
+        assert_eq!(panels.floating_rect("LayersDock"), Some(at(1.0, 2.0, 300.0, 400.0)));
+        assert_eq!(panels.stacking().last(), Some(&"LayersDock"));
+    }
+
+    #[test]
+    fn panels_brought_up_together_are_over_the_rest_and_as_they_were_among_themselves() {
+        // egui's rule for the Areas that ask for the top in one frame (egui 0.36, Areas::end_pass:
+        // "If several layers want to be on top, they will keep their relative order").
+        let mut panels = WindowPanels::default();
+        let rect = at(100.0, 200.0, 240.0, 300.0);
+        for dock in ["LayersDock", "PropertiesDock", "CommandLineDock", "SurfacesDock"] {
+            panels.float(dock, rect);
+        }
+        // Named in the other order: the order they are brought up in is the one they had.
+        panels.raise_together(&names(&["CommandLineDock", "LayersDock", "VerticesDock"]));
+        assert_eq!(
+            panels.stacking(),
+            ["PropertiesDock", "SurfacesDock", "LayersDock", "CommandLineDock"]
+        );
+        // All of them, as a restored layout's are when they are first drawn: no change.
+        let before = panels.clone();
+        panels.raise_together(&names(&WINDOW_PANELS));
+        assert_eq!(panels, before);
+        // None: no change.
+        panels.raise_together(&[]);
+        assert_eq!(panels, before);
+
+        let mut order = vec![1, 2, 3, 4, 5, 6];
+        raise_in(&mut order, |n| n % 2 == 0);
+        assert_eq!(order, [1, 3, 5, 2, 4, 6]);
+        let mut none: Vec<i32> = Vec::new();
+        raise_in(&mut none, |_| true);
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn bringing_up_the_panel_named_each_time_reaches_any_order_from_any_other() {
+        let docks = ["LayersDock", "PropertiesDock", "CommandLineDock", "SurfacesDock"];
+        let orders = permutations(&docks);
+        // 4! orders, each once: the premise that every pair below is a different case.
+        assert_eq!(orders.len(), 24);
+        for (index, order) in orders.iter().enumerate() {
+            assert!(!orders[..index].contains(order), "{order:?} twice");
+        }
+        let mut most = 0;
+        let mut none_needed = 0;
+        for wanted in &orders {
+            for start in &orders {
+                let mut stacked = start.clone();
+                let mut moves = 0;
+                // What the window does, a frame each: the panel named is brought up, alone.
+                while let Some(dock) = next_to_raise(&stacked, wanted) {
+                    raise_in(&mut stacked, |each| *each == dock);
+                    moves += 1;
+                    assert!(moves <= 3, "{start:?} -> {wanted:?}: one fewer than the panels");
+                }
+                assert_eq!(&stacked, wanted, "from {start:?}");
+                most = most.max(moves);
+                if moves == 0 {
+                    none_needed += 1;
+                }
+            }
+        }
+        // The cases are reached: an order already right needs no move - each of the 24 against
+        // itself - and one where the panel wanted second stands under the one wanted lowest
+        // needs all three.
+        assert_eq!(none_needed, 24);
+        assert_eq!(most, 3);
+        // By hand: Layers is to go under the others, which are in their order.
+        assert_eq!(
+            next_to_raise(
+                &names(&["PropertiesDock", "LayersDock", "CommandLineDock"]),
+                &names(&["LayersDock", "PropertiesDock", "CommandLineDock"])
+            ),
+            Some(String::from("PropertiesDock")),
+            "nothing goes under: what is to be over Layers is brought up, lowest first"
+        );
+        assert_eq!(next_to_raise(&[], &[]), None);
+        // A panel egui has and the window does not show is passed over.
+        assert_eq!(
+            next_to_raise(
+                &names(&["LayersDock", "VerticesDock", "PropertiesDock"]),
+                &names(&["LayersDock", "PropertiesDock"])
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_floating_place_is_read_back_as_it_was_written_however_far_it_is() {
+        // Two corners of single-precision numbers hold whole points only to 2^24 (IEEE 754
+        // binary32, a 24-bit significand); a corner and a size within 2^23 each keep both.
+        assert_eq!(FARTHEST, 8_388_608.0);
+        let far = panel_place_from_text("float:2147483647,2147483647,300,200");
+        assert_eq!(far, Some(PanelPlace::Floating(at(FARTHEST, FARTHEST, 300.0, 200.0))));
+        let near = panel_place_from_text("float:-2147483648,-2147483648,300,200");
+        assert_eq!(near, Some(PanelPlace::Floating(at(-FARTHEST, -FARTHEST, 300.0, 200.0))));
+        let huge = panel_place_from_text("float:0,0,2147483647,2147483647");
+        assert_eq!(huge, Some(PanelPlace::Floating(at(0.0, 0.0, FARTHEST, FARTHEST))));
+        // Written and read again, each is itself, its size whole.
+        for place in [far, near, huge].into_iter().flatten() {
+            let text = panel_place_text(&place);
+            assert_eq!(panel_place_from_text(&text), Some(place), "{text}");
+            let PanelPlace::Floating(rect) = place else {
+                panic!("{place:?} floats");
+            };
+            assert!(is_placeable(rect), "{rect:?}");
+            assert!(bounds().contains_rect(kept_inside(rect, bounds())), "{rect:?}");
+        }
+        // An everyday place is untouched.
+        assert_eq!(
+            panel_place_from_text("float:400,300,260,340"),
+            Some(PanelPlace::Floating(at(400.0, 300.0, 260.0, 340.0)))
+        );
+        // And what is no place is none, far or near.
+        for not in [
+            "float:nan,0,300,200",
+            "float:inf,0,300,200",
+            "float:99999999999,0,300,200",
+            "float:0,0,0,200",
+            "float:0,0,300,-2147483648",
+        ] {
+            assert_eq!(panel_place_from_text(not), None, "{not}");
+        }
+    }
+
+    #[test]
+    fn a_rectangle_whose_width_is_past_any_number_is_still_kept_inside_the_window() {
+        // Finite corners, and a width and a height that are not: 6.0e38 is past the largest
+        // single-precision number, 3.4028235e38.
+        let vast = Rect::from_min_max(pos2(-3.0e38, -3.0e38), pos2(3.0e38, 3.0e38));
+        assert!(vast.width().is_infinite(), "the premise: its width overflows");
+        assert_eq!(kept_inside(vast, bounds()), bounds());
+        // Floated, it is drawn as the window's size, and written as numbers a text holds.
+        let mut panels = WindowPanels::default();
+        assert!(panels.float("LayersDock", vast));
+        let text = panel_place_text(&PanelPlace::Floating(vast));
+        assert!(
+            panel_place_from_text(&text).is_some(),
+            "{text} is read back as a place"
+        );
+    }
 
     #[test]
     fn a_panel_floated_is_at_its_rectangle_and_docked_again_keeps_it_for_the_next_float() {

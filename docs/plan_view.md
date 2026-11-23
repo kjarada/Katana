@@ -275,12 +275,16 @@ previews, the snap marker, the selection box, the prompt. The key
 (`viewport_widget::DrawingKey`) holds the transform and device ratio, the
 number of document notifications (every command, undo, selection, library
 and current-layer change), the model revision, the library generation, a
-fingerprint of the selection's ids (a caller that changes the selection and
-only repaints still sees it), fingerprints of the reference layers' and
+count of the selections the view has seen - each paint compares the selection
+with the one the paint before it saw, so a caller that changes the selection
+and only repaints still sees it - fingerprints of the reference layers' and
 meshes' visibility, style and face colours and the Meshes Seen from Above switch (the panels change those without a
 notification), the view's hidden layers and references, the grid, the
 line option and the view's ghost switch (below). A mouse move, a snap marker
-or a rubber band then costs the furniture, not the drawing.
+or a rubber band then costs the furniture, not the drawing; and a paint whose
+furniture too would be drawn from what the last one's was keeps the whole
+picture (`viewport_widget::FurnitureKey`; docs/performance.md, "The plan
+view's furniture on an unchanged frame").
 
 ### Surfaces
 

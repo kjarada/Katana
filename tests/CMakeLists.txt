@@ -2784,6 +2784,20 @@ if(KATANA_TEST_WINDOW)
             "-DEXPECT=tiled=3 kind=columns docked=0 minimised=0.*tiled=3 kind=rows docked=0 minimised=0.*tiled=3 kind=grid docked=0 minimised=0.*VIEWS TILE takes GRID, COLUMNS or ROWS, not 'DIAGONAL'"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/views_tiled_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The Window menu (docs/desktop.md, "The Window menu"): it lists the three
+    # tilings and every open view by its title, each with its status tip; an
+    # item makes its view the active one by the VIEWS ACTIVATE line, and is
+    # then the one ticked. The 3D view is opened by its line, which makes it
+    # the active one, so the plan's item has something to change.
+    add_test(NAME qt_the_window_menu_lists_the_open_views_and_activates_one_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>VIEWS OPEN 3d|?windowMenu|?windowView1|*windowView1|>VIEWS|?windowView1|?windowView2"
+            "-DEXPECT=windowMenu: Window: Tile \\[[^]]+\\] ; Tile Side by Side \\[[^]]+\\] ; Tile Stacked \\[[^]]+\\] ; Plan 1 \\[[^]]*VIEWS ACTIVATE 1[^]]*\\] ; 3D 1 \\[[^]]*VIEWS ACTIVATE 2[^]]*\\][\r\n]+windowView1: Plan 1, unchecked.*view=1 kind=plan title=\"Plan 1\" active=yes.*view=2 kind=3d title=\"3D 1\" active=no.*windowView1: Plan 1, checked[\r\n]+windowView2: 3D 1, unchecked"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/window_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # And out again: UNLINK of one of two leaves the other alone, which is no
     # link, so both leave, a ZOOM moves one view only and the buttons show
     # the open chain.
@@ -3018,6 +3032,19 @@ if(KATANA_TEST_WINDOW)
             "-DDRIVE=*viewTextSizeLarge|?viewTextSizeLarge|?viewTextSizeStandard|*viewToolBarIconsLarge|?viewToolBarIconsLarge|*viewToolBarNames|?viewToolBarNames|*viewPanelLayers|*viewResetLayout|?viewPanelLayers|?viewMenu"
             "-DEXPECT=Text size: large\\..*viewTextSizeLarge: Large, checked.*viewTextSizeStandard: Standard, unchecked.*viewToolBarIconsLarge: Large Icons, checked.*viewToolBarNames: Show Toolbar Names, unchecked.*The panels and toolbars are back where a new window has them\\..*viewPanelLayers: Layers, checked.*viewMenu: View: .*Toolbars \\[.*Text Size \\[.*Reset Window Layout \\["
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/window_section_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The window's own panels floated by a step each, and their order over
+    # one another read back (docs/desktop.md, "The window's own panels float
+    # and minimise"): the one placed last is on top, Float of one that floats
+    # already brings it up as a press does, its rectangle is as it was
+    # placed, and Reset Window Layout docks them all, so none has an order.
+    add_test(NAME qt_the_windows_floating_panels_are_in_the_order_last_brought_up_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=?windowPanelOrder|*viewPanelPlace:LayersDock:float:300,200,260,340|*viewPanelPlace:PropertiesDock:float:400,260,260,340|?windowPanelOrder|*viewPanelFloatLayersDock|?windowPanelOrder|?windowPanels|*viewResetLayout|?windowPanelOrder"
+            "-DEXPECT=windowPanelOrder: none.*windowPanelOrder: LayersDock PropertiesDock.*windowPanelOrder: PropertiesDock LayersDock.*LayersDock=float:300,200,260,340.*windowPanelOrder: none"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/window_panel_order_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every menu item, in every submenu, has an icon to find it by and a
     # status tip saying what it does (--check-menus, MainWindow::menuGaps):
@@ -3280,6 +3307,7 @@ if(KATANA_TEST_WINDOW)
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_linked_plan_views_zoom_together_headless
                          qt_views_tile_by_the_line_and_by_the_menu_headless
+                         qt_the_window_menu_lists_the_open_views_and_activates_one_headless
                          qt_unlinking_one_of_two_views_unlinks_both_headless
                          qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless
                          qt_a_selection_shows_as_a_ghost_where_the_view_hides_its_layer_headless
@@ -3301,6 +3329,7 @@ if(KATANA_TEST_WINDOW)
                          qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_headless
                          qt_every_toolbar_menu_sign_is_drawn_clear_of_its_icon_with_large_icons_and_a_tool_running_headless
                          qt_the_window_section_sizes_the_text_and_toolbars_and_resets_the_layout_headless
+                         qt_the_windows_floating_panels_are_in_the_order_last_brought_up_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

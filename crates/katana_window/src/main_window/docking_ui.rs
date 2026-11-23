@@ -45,6 +45,23 @@
 //! views - these panels' places are the geometry's (Layers over Reference Data at the left,
 //! Properties at the right, the command line under the views), not a side a person chooses, and
 //! a drop near an edge that put the panel somewhere else than that edge would read as a miss.
+//!
+//! THEIR ORDER OVER ONE ANOTHER is the window's (`WindowPanels::stacking`), the one pressed or
+//! shown last on top, and egui's Areas follow it (`MainWindow::stack_floating_panels`). egui keeps
+//! an order of its own for its Areas, changed by a press or a first showing and by nothing a
+//! program can read back, so the window notes each frame which panels egui brings up - by egui's
+//! own three conditions, asked of egui - and so knows egui's order among them; where that parts
+//! from the window's it brings up one panel a frame until they agree (`docking::next_to_raise`).
+//! Rejected: one Area for every floating panel, drawn in the window's order - its rectangle
+//! would be the union of the panels', and the pointer between two panels would be the Area's
+//! and not the view's under it; and leaving the order to egui, which cannot be saved.
+//!
+//! A FLOATING VIEW THAT IS MAXIMISED fills the views' area, in an Area of the order these are
+//! drawn in, so pressed it came over every floating panel, torn-off menu and floating toolbar of
+//! the window and hid them until it was restored. It is the views' area while it is maximised,
+//! as the docked views are, and the window's own floating things stay over it: in any frame in
+//! which it comes to the top they are brought up with it, which leaves them as they were among
+//! themselves and over it (`MainWindow::keep_over_filling_views`).
 
 use std::collections::BTreeMap;
 
@@ -57,8 +74,8 @@ use super::docking::{
     DRAG_THRESHOLD, DockingAction, DropSpot, DropZones, FLOAT_HEADER, FLOAT_STEP, FLOAT_WIDTH,
     FloatAt, FlowItem, LEAST_PANEL, NEW_LINE_ZONE, PANEL_SIZE, PanelDrag, PanelPlace, Places,
     Side, WINDOW_PANELS, apply_drop, drop_spot, flow_columns, is_window_panel, kept_inside,
-    last_line, line_members, menu_panel_icon, panel_dock_name, panel_drop_side, panel_menu,
-    panel_place_text, spot_at, spot_outline,
+    last_line, line_members, menu_panel_icon, next_to_raise, panel_dock_name, panel_drop_side,
+    panel_menu, panel_place_text, raise_in, spot_at, spot_outline,
 };
 use super::layout::{self, BarLines, Geometry, natural_width};
 use super::window::MainWindow;
@@ -188,6 +205,53 @@ fn resize_handles_ui(ui: &Ui, rect: Rect, dock: &str) -> Option<Rect> {
     }
     resized
 }
+
+/// The layer window panel `dock` floats in: its Area's. What egui has on top at a point is asked
+/// by layer (`egui::Context::layer_id_at`), and a layer is what is brought up.
+pub fn floating_panel_layer(dock: &str) -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Middle,
+        egui::Id::new(("katanaFloatingPanel", dock)),
+    )
+}
+
+/// The layer torn-off menu `menu`'s panel floats in.
+fn torn_off_menu_layer(menu: &str) -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Middle, egui::Id::new(("katanaTornOffMenu", menu)))
+}
+
+/// The layer toolbar `bar` floats in.
+fn floating_bar_layer(bar: &str) -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Middle,
+        egui::Id::new(("katanaFloatingToolBar", bar)),
+    )
+}
+
+/// The layer view `id` floats in, as the workspace that draws it says: the window's floating
+/// panels are kept over a maximised floating view by raising them above this layer.
+fn floating_view_layer(id: katana_cad::view_set::ViewId) -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Middle, crate::view_workspace::floating_view_area(id))
+}
+
+/// Whether egui brings `layer`'s Area to the top in this frame for a press on it: the pointer
+/// pressed, and this the layer on top where it is - the test egui's Area makes when it is shown
+/// (egui 0.36's `pointer_pressed_on_area`), asked the same way.
+fn pressed_on_layer(ctx: &egui::Context, layer: egui::LayerId) -> bool {
+    ctx.pointer_interact_pos().is_some_and(|at| {
+        ctx.input(|input| input.pointer.any_pressed()) && ctx.layer_id_at(at) == Some(layer)
+    })
+}
+
+/// Whether `layer`'s Area was not drawn in the frame before: egui brings up an Area it shows
+/// anew.
+fn shown_anew(ctx: &egui::Context, layer: egui::LayerId) -> bool {
+    !ctx.memory(|memory| memory.areas().visible_last_frame(&layer))
+}
+
+/// Where the window keeps, in egui's memory, the order egui has the floating panels in: with the
+/// context whose order it is, so a window drawn by another context starts from none.
+const PANEL_STACK_KEY: &str = "katanaFloatingPanelStack";
 
 /// The opacity of the accent filling a drop target under its outline (`drags_ui`): enough to
 /// read as a place over a plan's lines, faint enough that what is under it still shows.
@@ -387,8 +451,14 @@ impl MainWindow {
         kept_inside(rect, self.float_bounds())
     }
 
-    /// Window panel `dock` floated at `rect`, or (None) where its Float button would put it, and
-    /// shown; a panel floating already is left where it is by None.
+    /// Window panel `dock` floated at `rect`, or (None) where its Float button would put it,
+    /// shown, and over the other floating panels; a panel floating already is left where it is
+    /// by None, and brought up.
+    ///
+    /// Brought up, as a press on it brings it up: this is the door a `*` step and an agent have
+    /// for what the pointer does by pressing, and a panel placed under another would be an action
+    /// that showed nothing. Rejected: an action of its own to bring a panel up - Float and Place
+    /// already say "this panel, here".
     pub fn float_window_panel(&mut self, dock: &str, rect: Option<Rect>) -> Status {
         if !is_window_panel(dock) {
             return Err(no_window_panel(dock));
@@ -404,6 +474,7 @@ impl MainWindow {
                 dock,
             ));
         }
+        self.ui.docking.window_panels.raise(dock);
         self.show_placed_window_panel(dock);
         Ok(())
     }
@@ -541,13 +612,20 @@ impl MainWindow {
             .cloned()
             .collect();
         let ctx = ui.ctx().clone();
-        for (dock, rect) in floating {
+        // The panels egui brings up in this frame, by its own conditions (egui 0.36's
+        // `Area::begin`): shown anew, the pointer pressed on it, or its own rectangle clicked.
+        let mut brought_up: Vec<String> = Vec::new();
+        // In the window's order, the lowest first: panels first shown together - a restored
+        // layout's - are put in egui's order as they are drawn.
+        for (dock, rect) in &floating {
             // Where it is drawn, not what is kept: a rectangle saved in a larger window comes
             // back inside this one, and returns to its place when the window is large again.
-            let rect = kept_inside(rect, bounds);
+            let rect = kept_inside(*rect, bounds);
+            let layer = floating_panel_layer(dock);
+            let mut up = shown_anew(&ctx, layer) || pressed_on_layer(&ctx, layer);
             let mut resized = None;
-            egui::Area::new(egui::Id::new(("katanaFloatingPanel", dock.as_str())))
-                .order(egui::Order::Middle)
+            let area = egui::Area::new(layer.id)
+                .order(layer.order)
                 .fixed_pos(rect.min)
                 .constrain(false)
                 .show(&ctx, |ui| {
@@ -558,16 +636,143 @@ impl MainWindow {
                     // Without it the Area is as large as what the panel's contents take, and
                     // under a short Properties list the rest of the panel would be the plan's.
                     let _ = ui.allocate_rect(rect, Sense::hover());
-                    self.window_panel_at(ui, rect, &dock);
-                    resized = resize_handles_ui(ui, rect, &dock);
+                    // And no more than the panel is the Area's: the panel is drawn in a child
+                    // that takes no room of the Area, so contents that need more than a panel
+                    // drawn small has - clipped to it, and not seen past its edge - do not
+                    // stretch the Area over the view beside it, where it would take the
+                    // presses meant for the view.
+                    let mut body = ui.new_child(
+                        UiBuilder::new()
+                            .max_rect(rect)
+                            .id_salt("katanaFloatingPanelBody"),
+                    );
+                    self.window_panel_at(&mut body, rect, dock);
+                    resized = resize_handles_ui(ui, rect, dock);
                 });
+            up |= area.response.clicked() || area.response.dragged();
+            if up {
+                brought_up.push(dock.clone());
+            }
             if let Some(rect) = resized {
                 self.ui
                     .docking
                     .window_panels
-                    .float(&dock, kept_inside(rect, bounds));
+                    .float(dock, kept_inside(rect, bounds));
             }
         }
+        let shown: Vec<String> = floating.into_iter().map(|(dock, _)| dock).collect();
+        self.stack_floating_panels(&ctx, &shown, brought_up);
+    }
+
+    /// The floating panels' order over one another kept as the window has it
+    /// (`WindowPanels::stacking`), after a frame drew those `shown` and egui brought
+    /// `brought_up` of them to the top (see the module comment, THEIR ORDER).
+    ///
+    /// The window's order follows egui first: a panel pressed, or put back, is on top in both.
+    /// Then egui is made to follow the window where they have parted, one panel a frame.
+    fn stack_floating_panels(
+        &mut self,
+        ctx: &egui::Context,
+        shown: &[String],
+        mut brought_up: Vec<String>,
+    ) {
+        if shown.is_empty() {
+            // No panel floats: the menus and toolbars that do are still kept over such a view.
+            let _ = self.keep_over_filling_views(ctx, shown);
+            return;
+        }
+        self.ui
+            .docking
+            .window_panels
+            .raise_together(&brought_up);
+        let key = egui::Id::new(PANEL_STACK_KEY);
+        let mut stacked: Vec<String> = ctx.data(|data| data.get_temp(key)).unwrap_or_default();
+        // A panel new to egui is put last in its order, as it is first drawn.
+        for dock in shown {
+            if !stacked.contains(dock) {
+                stacked.push(dock.clone());
+            }
+        }
+        let wanted: Vec<String> = self
+            .ui
+            .docking
+            .window_panels
+            .floating
+            .iter()
+            .map(|(dock, _)| dock)
+            .filter(|dock| shown.contains(dock))
+            .cloned()
+            .collect();
+        let have: Vec<String> = stacked
+            .iter()
+            .filter(|dock| shown.contains(dock))
+            .cloned()
+            .collect();
+        let next = next_to_raise(&have, &wanted);
+        if self.keep_over_filling_views(ctx, shown) {
+            // Every shown panel was brought up, which leaves them as they were among themselves:
+            // the one panel that would put their order right waits for a frame of its own.
+            brought_up = shown.to_vec();
+            if next.is_some() {
+                ctx.request_repaint();
+            }
+        } else if let Some(dock) = next {
+            ctx.move_to_top(floating_panel_layer(&dock));
+            // The order is put right a panel a frame, and shown as it is.
+            ctx.request_repaint();
+            if !brought_up.contains(&dock) {
+                brought_up.push(dock);
+            }
+        }
+        raise_in(&mut stacked, |dock| brought_up.contains(dock));
+        ctx.data_mut(|data| data.insert_temp(key, stacked));
+    }
+
+    /// The window's own floating things - its panels `shown`, its torn-off menus and its
+    /// toolbars - brought up with a floating view that is maximised, in a frame in which that
+    /// view comes to the top: it has just become one - maximised, or put back from the tray,
+    /// where it was no floating view - or is pressed (egui's own test of a press, asked of
+    /// egui). Brought up together they stay as they were among themselves and over the view
+    /// (`docking::raise_in`, egui's rule). True when they were brought up in this frame.
+    ///
+    /// Both happen in one frame and are over, so nothing here asks for one frame after another,
+    /// as asking egui whether the view's Area was drawn before would, of a view the workspace
+    /// held and did not draw.
+    ///
+    /// Rejected: bringing them up in every frame while a view fills the area, which would also
+    /// put them over a dialog opened since; and drawing the panels in egui's foreground order,
+    /// over every menu and modal dialog of the window. What is still covered: a dialog that is
+    /// not modal, which is not the window's to bring up from here.
+    fn keep_over_filling_views(&mut self, ctx: &egui::Context, shown: &[String]) -> bool {
+        let workspace = &self.exec.workspace;
+        let filling: Vec<katana_cad::view_set::ViewId> = workspace
+            .view_ids()
+            .into_iter()
+            .filter(|&id| workspace.is_floating(id) && workspace.is_maximised(id))
+            .collect();
+        let before = std::mem::replace(&mut self.ui.docking.views_filling, filling.clone());
+        let comes_up = filling
+            .iter()
+            .any(|&id| !before.contains(&id) || pressed_on_layer(ctx, floating_view_layer(id)));
+        if !comes_up {
+            return false;
+        }
+        for dock in shown {
+            ctx.move_to_top(floating_panel_layer(dock));
+        }
+        // Those drawn in this frame only: a layer brought up is one egui takes to be shown.
+        for panel in &self.ui.docking.panels.open {
+            if matches!(panel.place, PanelPlace::Floating(_)) {
+                ctx.move_to_top(torn_off_menu_layer(&panel.menu));
+            }
+        }
+        for (bar, place) in self.bar_places() {
+            if matches!(place, BarPlace::Floating(_)) && self.ui.bars.shown(&bar) {
+                ctx.move_to_top(floating_bar_layer(&bar));
+            }
+        }
+        ctx.request_repaint();
+        true
     }
 
     /// The object name of the toolbar `key` names: its object name, or its title without spaces
@@ -843,7 +1048,20 @@ impl MainWindow {
     /// `windowPanels` reports the window's own panels, `<Dock>=docked` or
     /// `<Dock>=float:<x>,<y>,<width>,<height>` each, with `;minimised` after one in the tray and
     /// `;hidden` after one closed. A panel's own name is left to the report its dock always had.
+    ///
+    /// `windowPanelOrder` reports the floating panels' order over one another, their docks' names
+    /// from the lowest to the one on top (`LayersDock PropertiesDock`), or `none` when no panel
+    /// floats. A report of its own: `windowPanels` lists every panel in one fixed order, which a
+    /// run already reads by.
     pub fn docking_report(&self, name: &str) -> Option<String> {
+        if name == "windowPanelOrder" {
+            let order = self.ui.docking.window_panels.stacking();
+            return Some(if order.is_empty() {
+                String::from("none")
+            } else {
+                order.join(" ")
+            });
+        }
         if name == "windowPanels" {
             let panels = &self.ui.docking.window_panels;
             let parts: Vec<String> = WINDOW_PANELS
@@ -1095,8 +1313,9 @@ impl MainWindow {
                 .bar_drag
                 .as_ref()
                 .is_some_and(|(name, _)| *name == bar.name);
-            egui::Area::new(egui::Id::new(("katanaFloatingToolBar", bar.name.as_str())))
-                .order(egui::Order::Middle)
+            let layer = floating_bar_layer(&bar.name);
+            egui::Area::new(layer.id)
+                .order(layer.order)
                 .fixed_pos(corner)
                 .constrain(false)
                 .show(&ctx, |ui| {
@@ -1370,8 +1589,9 @@ impl MainWindow {
             );
             let rect = Rect::from_min_size(corner, rect.size());
             let mut resized = None;
-            egui::Area::new(egui::Id::new(("katanaTornOffMenu", menu.as_str())))
-                .order(egui::Order::Middle)
+            let layer = torn_off_menu_layer(&menu);
+            egui::Area::new(layer.id)
+                .order(layer.order)
                 .fixed_pos(corner)
                 .constrain(false)
                 .show(&ctx, |ui| {

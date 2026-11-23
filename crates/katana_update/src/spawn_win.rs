@@ -21,21 +21,26 @@
 //! (SEM_FAILCRITICALERRORS), and CREATE_DEFAULT_ERROR_MODE keeps the child from inheriting the
 //! setting, so the child behaves as it would if the user had started it.
 //!
+//! The child's environment is this process's, copied by the system, unless the request changes it
+//! (process.rs, SpawnRequest::environment): then the child is handed a block made here of
+//! child_environment's variables, and this process's own environment is not touched.
+//!
 //! The calls themselves are win32::process's safe wrappers (docs/rust.md, "Unsafe confined to FFI
 //! modules", which also says why std::process::Command does not replace them).
 
 use crate::command_line::command_line;
 use crate::fsops::path_text;
-use crate::process::{Launcher, SpawnRequest, SpawnResult, utf8_from_wide};
+use crate::process::{Launcher, SpawnRequest, SpawnResult, child_environment, utf8_from_wide};
 use crate::win32::WideName;
 use crate::win32::process::{
-    InheritedHandles, bytes_waiting, command_line_arguments, exit_code, null_device_for_reading,
-    output_pipe, read_pipe, set_error_mode, start_alone, start_inheriting, terminate,
-    token_elevation_type, wait,
+    EnvironmentBlock, InheritedHandles, bytes_waiting, command_line_arguments,
+    compare_ordinal_ignoring_case, exit_code, null_device_for_reading, output_pipe, read_pipe,
+    set_error_mode, start_alone, start_inheriting, terminate, token_elevation_type, wait,
 };
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result, Status};
-use std::ffi::OsString;
+use std::cmp::Ordering;
+use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::OwnedHandle;
 use std::path::{Path, PathBuf};
@@ -57,6 +62,10 @@ const SEM_NOGPFAULTERRORBOX: u32 = 0x2;
 const SEM_NOOPENFILEERRORBOX: u32 = 0x8000;
 const WAIT_OBJECT_0: u32 = 0;
 const TOKEN_ELEVATION_TYPE_FULL: i32 = 2;
+// What CompareStringOrdinal answers (winnls.h).
+const CSTR_LESS_THAN: i32 = 1;
+const CSTR_EQUAL: i32 = 2;
+const CSTR_GREATER_THAN: i32 = 3;
 
 // A path with the separators of the platform. cmd.exe reads its own command line for "/"
 // switches and does not skip the quoted name of the program: a program path with a forward slash
@@ -99,6 +108,62 @@ fn command_of(request: &SpawnRequest) -> Result<WideName> {
 fn directory_of(request: &SpawnRequest) -> Option<WideName> {
     let directory = preferred(&request.working_directory);
     (!directory.as_os_str().is_empty()).then(|| wide_terminated(&directory))
+}
+
+// Whether two spellings name one environment variable (process.rs, is_variable). Windows keeps
+// and finds a variable without regard to the case of its name, folding it with the system's
+// upper-case table, which is the comparison CompareStringOrdinal makes when told to ignore case
+// (the standard library matches the names of a child's variables with the same call).
+pub(crate) fn same_variable_name(held: &OsStr, name: &str) -> bool {
+    let held: Vec<u16> = held.encode_wide().collect();
+    let name: Vec<u16> = name.encode_utf16().collect();
+    compare_ordinal_ignoring_case(&held, &name) == CSTR_EQUAL
+}
+
+// The order of two variables' names in an environment block: by name, without regard to case,
+// in the order of the code units.
+fn name_order(a: &[u16], b: &[u16]) -> Ordering {
+    match compare_ordinal_ignoring_case(a, b) {
+        CSTR_LESS_THAN => Ordering::Less,
+        CSTR_EQUAL => Ordering::Equal,
+        CSTR_GREATER_THAN => Ordering::Greater,
+        // A name too long for the call to count, which no environment holds: by its units.
+        _ => a.cmp(b),
+    }
+}
+
+// The child's environment as CreateProcessW takes it. None - the system then hands the child a
+// copy of this process's, as it always did - for a request that changes nothing. For one that
+// does, the block of child_environment's variables, sorted as the system's documentation asks
+// of a block that is handed to it ("Changing Environment Variables": alphabetically by name,
+// without regard to case, in Unicode order), which is also how the standard library sorts the
+// block it makes for a child. A change no program can be handed is refused here, before
+// anything is started: a NUL would end the block where it stands, and "=" in a name would move
+// the end of the name.
+fn environment_of(request: &SpawnRequest) -> Result<Option<EnvironmentBlock>> {
+    if request.environment.is_empty() {
+        return Ok(None);
+    }
+    for (name, value) in &request.environment {
+        let value_is_text = value
+            .as_ref()
+            .is_none_or(|value| !value.encode_wide().any(|unit| unit == 0));
+        if name.is_empty() || name.contains(['=', '\0']) || !value_is_text {
+            return Err(make_error(
+                ErrorCode::InvalidArgument,
+                "an environment variable of the launch is not one a program can be handed",
+                name.clone(),
+            ));
+        }
+    }
+    let mut variables: Vec<(Vec<u16>, Vec<u16>)> = child_environment(request)
+        .iter()
+        .map(|(name, value)| (name.encode_wide().collect(), value.encode_wide().collect()))
+        .collect();
+    // Stable: two names the comparison takes for one (none, in an environment the system kept)
+    // stay in the order they came in.
+    variables.sort_by(|a, b| name_order(&a.0, &b.0));
+    Ok(Some(EnvironmentBlock::from_variables(&variables)))
 }
 
 fn start_error(error: u32, program: &Path) -> Error {
@@ -166,6 +231,7 @@ struct WindowsLauncher;
 impl Launcher for WindowsLauncher {
     fn run(&self, request: &SpawnRequest) -> Result<SpawnResult> {
         let mut command = command_of(request)?;
+        let environment = environment_of(request)?;
 
         let (reader, writer) =
             output_pipe().map_err(|error| start_error(error, &request.executable))?;
@@ -184,6 +250,7 @@ impl Launcher for WindowsLauncher {
                 &program,
                 &mut command,
                 directory.as_ref(),
+                environment.as_ref(),
                 CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_DEFAULT_ERROR_MODE,
                 &inherited,
             )
@@ -218,6 +285,7 @@ impl Launcher for WindowsLauncher {
 
     fn start_detached(&self, request: &SpawnRequest) -> Status {
         let mut command = command_of(request)?;
+        let environment = environment_of(request)?;
 
         let program = wide_terminated(&preferred(&request.executable));
         let directory = directory_of(request);
@@ -234,11 +302,16 @@ impl Launcher for WindowsLauncher {
                 &program,
                 &mut command,
                 directory.as_ref(),
+                environment.as_ref(),
                 common | CREATE_BREAKAWAY_FROM_JOB,
             ) {
-                Err(ERROR_ACCESS_DENIED) => {
-                    start_alone(&program, &mut command, directory.as_ref(), common)
-                }
+                Err(ERROR_ACCESS_DENIED) => start_alone(
+                    &program,
+                    &mut command,
+                    directory.as_ref(),
+                    environment.as_ref(),
+                    common,
+                ),
                 started => started,
             }
         };
@@ -307,5 +380,109 @@ mod tests {
         let after = set_error_mode(before);
 
         assert_eq!(after, 0x8003 | (before & SEM_NOALIGNMENTFAULTEXCEPT));
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    fn changing(changes: &[(&str, Option<&str>)]) -> SpawnRequest {
+        SpawnRequest {
+            environment: changes
+                .iter()
+                .map(|&(name, value)| (String::from(name), value.map(OsString::from)))
+                .collect(),
+            ..SpawnRequest::default()
+        }
+    }
+
+    // The `name=value` strings of a block, in the block's order.
+    fn variables_of(block: &EnvironmentBlock) -> Vec<String> {
+        block
+            .units()
+            .split(|&unit| unit == 0)
+            .filter(|variable| !variable.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect()
+    }
+
+    #[test]
+    fn two_spellings_of_a_name_are_one_variable_and_a_longer_name_is_another() {
+        assert!(same_variable_name(OsStr::new("openssl_conf"), "OPENSSL_CONF"));
+        assert!(same_variable_name(OsStr::new("OPENSSL_CONF"), "OPENSSL_CONF"));
+        assert!(!same_variable_name(
+            OsStr::new("OPENSSL_CONF_INCLUDE"),
+            "OPENSSL_CONF"
+        ));
+        assert!(!same_variable_name(OsStr::new("OPENSSL_CON"), "OPENSSL_CONF"));
+    }
+
+    // "a" is U+0061 and "B" U+0042: by their units "B" comes first, and without regard to case
+    // "a" does, being compared as "A", U+0041.
+    #[test]
+    fn names_are_ordered_without_regard_to_case_and_a_prefix_comes_first() {
+        assert_eq!(name_order(&wide("a"), &wide("B")), Ordering::Less);
+        assert_eq!(name_order(&wide("B"), &wide("a")), Ordering::Greater);
+        assert_eq!(name_order(&wide("Path"), &wide("PATH")), Ordering::Equal);
+        assert_eq!(name_order(&wide("PATH"), &wide("PATHEXT")), Ordering::Less);
+    }
+
+    #[test]
+    fn a_request_that_changes_nothing_is_handed_no_block_so_the_system_copies_this_processs() {
+        let block = environment_of(&SpawnRequest::default()).expect("nothing to refuse");
+        assert_eq!(block, None);
+    }
+
+    #[test]
+    fn a_change_no_program_can_be_handed_is_refused_before_anything_is_started() {
+        for (what, change) in [
+            ("an empty name", ("", Some("x"))),
+            ("a name with an equals sign", ("A=B", Some("x"))),
+            ("a name with a NUL, taken out", ("A\0B", None)),
+            ("a value with a NUL", ("KATANA_SPAWN_T", Some("x\0y"))),
+        ] {
+            let refused = environment_of(&changing(&[change])).expect_err(what);
+            assert_eq!(refused.code, ErrorCode::InvalidArgument, "{what}");
+        }
+    }
+
+    #[test]
+    fn the_block_of_a_request_holds_this_processs_variables_with_the_changes_in_name_order() {
+        assert!(
+            std::env::var_os("SystemRoot").is_some(),
+            "the premise: this process holds SystemRoot, which the request takes out"
+        );
+        let block = environment_of(&changing(&[
+            ("KATANA_SPAWN_T_C", Some("3")),
+            ("katana_spawn_t_b", Some("2")),
+            ("KATANA_SPAWN_T_A", Some("1")),
+            // Spelled as no process holds it: the same variable all the same.
+            ("SYSTEMroot", None),
+        ]))
+        .expect("nothing to refuse")
+        .expect("a request that changes something is handed a block");
+        let variables = variables_of(&block);
+
+        // The three stand together and in the order of their names, the lower-case one between
+        // the two it would follow were case regarded.
+        let first = variables
+            .iter()
+            .position(|variable| variable == "KATANA_SPAWN_T_A=1")
+            .expect("the variable set last is in the block");
+        assert_eq!(
+            variables[first..first + 3],
+            ["KATANA_SPAWN_T_A=1", "katana_spawn_t_b=2", "KATANA_SPAWN_T_C=3"]
+        );
+        // What the request took out is gone, and what it did not name is there: every variable
+        // this process holds but that one, and nothing more than those and the three.
+        assert!(
+            !variables
+                .iter()
+                .any(|variable| variable.to_ascii_lowercase().starts_with("systemroot=")),
+            "{variables:?}"
+        );
+        assert_eq!(variables.len(), std::env::vars_os().count() - 1 + 3);
+        // The end the system looks for.
+        assert!(block.units().ends_with(&[0, 0]));
     }
 }

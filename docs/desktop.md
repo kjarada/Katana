@@ -20,8 +20,9 @@ switches that run the window headlessly are `docs/headless.md`.
 The window (`MainWindow`, `crates/katana_window/src/main_window/window.rs`) is a workspace of views, with dockable Layers, Properties, Command Line and
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, BIM, GIS,
-Help (`katana_window::main_window::actions::compose`; each menu has a control name, `fileMenu` to
-`helpMenu`; BIM, `bimMenu`, is the road model's - `docs/road_design.md`). File is the drawing as a file, what comes into it and goes out
+Window, Help (`katana_window::main_window::actions::compose`; each menu has a control name, `fileMenu` to
+`helpMenu`; BIM, `bimMenu`, is the road model's - `docs/road_design.md`; Window, `windowMenu`, is
+the views' - "The Window menu", below). File is the drawing as a file, what comes into it and goes out
 of it - every import and every export, under two submenus - and the
 program's Settings ("The File menu", below); the managers of what a
 customisation brings are in Format and in Survey > Survey Coding ("The Format
@@ -1833,6 +1834,157 @@ The tool actions built from the catalogue have no underlined letters; their
 aliases are in their tooltips. Help > Keyboard Shortcuts lists the keys for a
 person ("The Command Reference and the keyboard shortcuts", below).
 
+**A key reaches its action (2026-11-22).** Until then it did not. Every
+action of the main window carried its key, the menus printed it and the check
+above reasoned about it, but nothing read the keyboard for them: egui's
+`consume_shortcut` was called in one place in the whole program, the sheet
+editor's own pass, and Ctrl+S, Ctrl+Z and F9 did nothing in the main window.
+The views answered only their own keys.
+
+`MainWindow::shortcut_pass`
+(`crates/katana_window/src/main_window/shortcuts.rs`) is the one place a key
+becomes an action, called once from the frame, after the frame's rows are
+composed and before anything is drawn. It reads the rows of that frame - the
+menus' actions and then the toolbars', the order of `Composed::actions` - so
+an action a menu or a workbench gains is reached by its key with nothing
+added to the pass, and a greyed action leaves its key alone. The action a press reaches is put with the frame's clicks and
+triggered after the frame by `MainWindow::trigger`: the path a click on its
+menu item takes, logged and undoable as that is. `shortcuts::taken` says
+which actions the last press reached, for a driver and the tests.
+
+It runs BEFORE the widgets, and takes each press that is an action's out of
+the frame's events. egui hands a frame's key events to every widget that asks
+and takes none away by itself: left in, the P of Ctrl+P also switched a
+focused 3D view's projection, the plan view's own Delete erased the selection
+before `ERASE` ran and was refused, and the command line's field undid its
+own text at the Ctrl+Z that undid the drawing. Run after the widgets, the
+pass could only add an action to what a widget had already done with the
+key: rejected.
+
+Who has a key, in the order asked:
+
+1. **Something in front.** A modal dialog (egui's modal layer, which the
+   dialog frame sets), an open menu, a toolbar's flyout, a view's Layers popup
+   or a context menu (each an area of `Order::Foreground`, read as the last
+   frame drew it), or the sheet editor shown over the window, whose own pass
+   takes its keys: no action of the main window runs. Escape closes what is
+   open and does not also clear the selection behind it. A toolbar's
+   expansion - the row of the buttons its room hides - is drawn in that order
+   too but is no menu: it stays until its arrow is clicked again, so it is
+   told apart (`flyout_button::expansion_layer`), or the keys were dead for
+   as long as a bar stood expanded.
+2. **A text box.** A dialog's field, a panel's filter or a number being typed
+   keeps the keys that type and edit in it: every key with no Ctrl or Alt
+   that is not a function key (Delete and Escape among them), the keys that
+   move and delete whatever is held with them, and Ctrl+A, C, V, X, Y and Z.
+   Ctrl+S and F8 pressed in a field still save and switch Ortho. The command
+   line's field keeps only the plain keys: it is the drawing's keyboard -
+   what is typed anywhere goes to it, and it has the keyboard again after
+   every typed line - so Ctrl+Z there undoes the drawing, as in any CAD
+   program, and Ctrl+A selects the drawing. Of the plain keys it does not
+   keep Delete while it holds no text: nothing is there for Delete to take,
+   and it is Erase Selection's. Escape pressed in a text box has already
+   taken the keyboard from it when the frame starts (egui's focus), so the
+   pass remembers which widget had the keyboard when the last pass ended: the
+   command line answers its own Escape, clearing what is typed and cancelling
+   in the drawing, and Deselect on top of that cancelled twice at one press -
+   the running tool ended and the selection went with it.
+3. **The plan view**, asked whether it claims the key
+   (`PlanView::shortcut_override`, the rule the drawing tools were written
+   to): Ctrl+Z while a tool runs, which steps the tool back and never undoes
+   under it; Delete on a hot vertex or in a vertex tool; and, new with the
+   pass, Escape while a point pick waits, which Deselect would have left
+   waiting. The view asked is the one with the keyboard, else the one a typed
+   line goes to (the running tool's, else the active plan view): with the
+   keyboard on the command line, where it is after a tool is started by its
+   alias, Ctrl+Z is still the tool's, and is handed to that view as its own
+   key press.
+4. **The action**, when it is enabled.
+
+So Delete and Escape over a plan view are now Edit > Erase Selection's and
+Edit > Deselect's unless the view claims them: one path for the key wherever
+the keyboard is, the `ERASE` line in the log as a click on the item puts it
+there. Leaving a focused view its own Delete and Escape was rejected: it kept
+two ways to erase, one logged and one not, and left the view's claim - which
+`docs/drawing.md` and `docs/tools.md` describe as the rule - asked by nobody.
+
+A press is matched to a sequence by egui's own rule
+(`egui::Modifiers::matches_logically`, as the sheet editor's pass matches):
+Ctrl is Cmd on a Mac, and a Shift the keyboard layout needs to reach the key
+does not unmake the sequence; exact matching was rejected for that. Two
+things are added. A sequence that names Shift is reached before one that
+leaves it out, so Ctrl+Shift+S is Save As and never Save. And Alt is matched
+exactly: Windows reports AltGr as Ctrl+Alt, and AltGr+E typed into the
+command line is a character, not Zoom Extents (the plan view's typed text
+has the same exemption).
+
+A held key runs its action once. The system's repeats of it are still that
+action's key and reach nothing else, but only Undo and Redo run again at
+each: stepping through the history is what holding Ctrl+Z is for, while a
+toggle - the grid, Ortho, the projection - would end wherever the repeats
+stopped, and New, Save and a dialog's action have nothing to do twice.
+
+Rejected as the test for "a text box has the keyboard":
+`egui::Context::egui_wants_keyboard_input`, which the sheet editor's pass
+uses. It is true whenever ANY widget has the keyboard - a view that was
+clicked, the command line after a typed line - which in the main window is
+nearly always, and the keys would have stayed dead.
+
+What the pass keeps between frames is on the egui context, in a plugin
+beside the drive registry's: it is egui's focus it remembers, read as each
+pass ends.
+
+Tested with real key events through the headless runner
+(`crates/katana_window/tests/main_window/keyboard_shortcuts.rs`):
+`keyboard_shortcuts::ctrl_z_undoes_the_line_just_drawn_and_ctrl_y_draws_it_again`,
+`keyboard_shortcuts::f9_switches_the_3d_view_between_perspective_and_orthographic`,
+`keyboard_shortcuts::a_key_whose_action_is_disabled_runs_nothing`,
+`keyboard_shortcuts::every_enabled_shortcut_of_a_new_window_reaches_its_own_action_and_no_other`
+(the whole table, a new window for each key),
+`keyboard_shortcuts::a_held_key_runs_its_action_once_and_a_held_ctrl_z_steps_on_through_the_history`,
+`keyboard_shortcuts::in_a_dialogs_field_delete_and_escape_are_the_fields_and_reach_no_action`,
+`keyboard_shortcuts::with_the_command_line_focused_ctrl_and_function_keys_still_reach_their_actions`,
+`keyboard_shortcuts::delete_on_the_command_line_edits_what_is_typed_and_erases_the_selection_once_it_is_empty`,
+`keyboard_shortcuts::escape_on_the_command_line_is_the_command_lines_own_and_runs_deselect_no_second_time`,
+`keyboard_shortcuts::under_a_modal_dialog_no_shortcut_runs`,
+`keyboard_shortcuts::while_a_menu_is_open_the_keys_are_the_menus`,
+`keyboard_shortcuts::with_the_sheet_editor_in_front_the_main_windows_actions_take_no_key`,
+`keyboard_shortcuts::delete_in_a_focused_plan_view_erases_the_selection_once_through_erase`,
+`keyboard_shortcuts::delete_with_a_hot_vertex_takes_the_vertex_and_leaves_the_polyline`,
+`keyboard_shortcuts::ctrl_z_while_a_tool_runs_steps_the_tool_back_and_undoes_nothing_under_it`,
+`keyboard_shortcuts::escape_ends_a_waiting_point_pick_and_keeps_the_selection`
+and
+`keyboard_shortcuts::ctrl_p_over_the_3d_view_opens_plot_and_is_not_also_the_views_p`;
+the view's new claim in
+`plan_view_grips::a_view_waiting_for_a_point_pick_claims_escape_from_the_windows_deselect`.
+
+**Not done, the keys.**
+
+- No process-level test presses a key: the headless grammar has no key step
+  (`docs/headless.md`, "Not done"), so the real window's keys are covered
+  in the crate's tests only, through the same runner and the same frame.
+- Quit's Ctrl+Q (it has the key off Windows, and never in a headless window)
+  is pressed by no test: a window that is not headless saves the person's
+  settings as it closes.
+- The menus' Alt letters, which the check above counts, open nothing: egui
+  has no mnemonics, and the pass reads only the actions' sequences.
+- Done the same day: the sheet editor's own pass stopped at
+  `egui_wants_keyboard_input`, which is true whenever anything has the
+  focus, so its actions' keys were dead while its canvas had the keyboard -
+  and the canvas takes it as the editor is shown. It now asks whether a text
+  box has it (`text_edit_focused`), held by
+  `keyboard_shortcuts::home_fits_the_page_in_the_sheet_editor_while_its_canvas_has_the_keyboard`.
+  The editor's pass is still its own, with none of the main window's rules
+  for a key an Area in front should keep; one pass for both is not done.
+- Copy, cut and paste reach egui as events of their own, not as key presses
+  (egui-winit), so an action given Ctrl+C, X or V would not be reached by its
+  key. None of the main window's has one; the Properties tree answers the
+  copy event itself.
+- A focused 3D view takes 0 to 5, P and E whatever is held with them, so
+  Ctrl+E pressed over it while Zoom Extents is greyed is still the view's E.
+- With a context menu open over a plan view that has the keyboard, Escape
+  closes the menu and is still read by the view, as before the pass.
+
 `katana --screenshot` grabs the window headlessly so that the look can be
 reviewed, and the same run can drive the menus and dialogs step by step:
 `docs/headless.md`.
@@ -2131,7 +2283,11 @@ droppable between two views. Rejected alternatives:
 Not done: a view floats as a window inside the main window, and cannot go
 out onto another screen, as the C++'s floating docks could; egui_dock floats
 a tab inside its own window (`docs/rust.md`, "Decisions waiting on the
-owner"). The Float button's tooltip still says it can.
+owner"). The Float and Maximise buttons' tooltips say what a floating view
+does here and no more ("The dock chrome", below): Maximise's said it filled
+"the screen this window is on", and Float's that the bar could be dragged
+back over the window "to dock it anywhere", neither of which this window
+does.
 
 **A view's state lives in `katana_cad::view_set::ViewSet`, not in its widget.** `ViewState`
 holds the kind, the 3D camera, the plan zoom, the layers hidden in that view,
@@ -2241,8 +2397,11 @@ presets below them under "Presets":
 | Tile Side by Side | `viewTileSideBySide` | `VIEWS TILE COLUMNS` | one row |
 | Tile Stacked | `viewTileStacked` | `VIEWS TILE ROWS` | one column |
 
-Each item hands its line to the window's executor (`tiling_line` in
-`crates/katana_window/src/main_window/actions.rs`), so a click, a typed
+The same three actions are in the Window menu and in every view's title bar
+menu (below): one table of them, `TILINGS` in
+`crates/katana_window/src/view_workspace.rs`, from which each place makes
+its rows (`tiling_actions`), so the three cannot drift. Each item hands its
+line to the window's executor (`tiling_line`, beside the table), so a click, a typed
 line, a script and `katana --command` take one path, logged, with one reply:
 `tiled=3 kind=grid docked=1 minimised=0` - the views arranged, how many of
 them were floating and were docked, and how many stayed in the tray
@@ -2346,15 +2505,227 @@ view docked; a minimised one left in the tray and brought back onto the
 tiling; a maximise undone; one view and none; each menu item giving the
 layout its typed line gives).
 
-Not done: a tiling is not kept between sessions, because no layout of the
-VIEWS is (below, "The dock chrome"); a view's title bar has no shortcut menu
-to offer Tile from, and there is no Window menu; a floating view's own
-rectangle is not kept through a minimise (egui_dock's window state is never
-drawn here, so it has none to give), so a minimised floating view restored
-after a tiling may come back docked. The real window is driven through it
+A tiling is kept between sessions with the rest of the arrangement ("The
+views between sessions", below); Tile is offered from a view's title bar
+menu and from the Window menu (the two sections below); and a minimised
+floating view comes back floating at the rectangle it had, after a tiling
+as before one ("The dock chrome": "Where a floating view is"). The real
+window is driven through it
 by `qt_views_tile_by_the_line_and_by_the_menu_headless` (three views tiled
 by the typed line and by two of the menu's items, and a kind the verb does
 not know refused by name).
+
+### A view's title bar menu
+
+A right-click on a view's title bar, anywhere that is not one of its
+buttons, opens a menu (`BAR_MENU`, the Menu target `ViewBarMenu`) under the
+pointer and makes that view the active one - the menu acts on the view it
+was opened on:
+
+| Item | Name | What it does |
+| --- | --- | --- |
+| Float, or Dock while the view floats | `viewBarFloat` | the bar's Float button |
+| Minimise | `viewBarMinimise` | the bar's Minimise button |
+| Maximise, or Restore while it is maximised | `viewBarMaximise` | the bar's Maximise button |
+| Close | `viewBarClose` | the bar's Close button |
+| Tile, Tile Side by Side, Tile Stacked | `viewTile`, `viewTileSideBySide`, `viewTileStacked` | `VIEWS TILE`, `VIEWS TILE COLUMNS`, `VIEWS TILE ROWS` |
+
+**It has no command of its own.** A button's item is handed to the very
+function the button's press is (`ViewWorkspace::trigger_bar_menu` makes the
+`ChromeRequest` the button makes), so the two cannot differ; its text, icon
+and tip are the button's own for the view's state now
+(`DockTitleBar::window_button`, `WindowButton::icon`), which is how the item
+reads Dock on a floating view without a second table of words. A tiling's
+item is the View menu's action, from the one table, and runs its line
+through the window's executor. A button the bar does not show (a view that
+may not float) has no item.
+
+The chrome only says that the bar was right-clicked (`ChromeRequest::Menu`,
+for a view's bar; a panel's bar asks for none, and its menu is the main
+window's to decide); the workspace shows the menu, as it shows the kind
+switcher's. *Rejected:* egui's own context menu on the bar's response, which
+would keep the menu's state in egui, where a run with no pointer cannot open
+it and a test cannot ask whether it is open; and items that run verbs of
+their own (a `VIEWS FLOAT`, a `VIEWS CLOSE`), which would make four verbs for
+what a title bar already does - the window buttons have none today, and the
+menu is another way to press them, not a new surface. Should an agent need
+to float or close a view by a line, the verbs are the thing to add, and the
+buttons and these items would then run them.
+
+Without a pointer the menu is opened by `ViewWorkspace::show_bar_menu` and
+an item chosen by its name in the target, as the tests do
+(`crates/katana_window/tests/workspace/view_bar_menu.rs`, `view_bar_menu::*`:
+a real right-click opens it at the pointer and a click outside closes it; a
+right-click on a button opens nothing; the words follow the view's state;
+each button's item does what the button does and a tiling's runs its line;
+a refused line moves nothing). Not done: the headless runner has no step
+that right-clicks a control, so a `-DDRIVE` list cannot open this menu; it
+does not need to - every item is reached by the step that presses the bar's
+button (`%View2|!DockFloatButton`) or triggers the tiling (`*viewTile`) -
+and a step for a right-click would be the step engine's to add
+(`crates/katana_window/src/drive/steps.rs`).
+
+### The Window menu
+
+The menu bar has a Window menu (`windowMenu`, before Help): the three
+tilings under "Arrange the open views", then every open view by its title
+under "Open views", in the order opened, the active one ticked, each with
+the icon of what it shows.
+
+| Item | Name | Line |
+| --- | --- | --- |
+| Tile, Tile Side by Side, Tile Stacked | `viewTile`, `viewTileSideBySide`, `viewTileStacked` | `VIEWS TILE ...` |
+| a view's title ("Plan 1", "3D 1") | `windowView` and the view's id (`windowView2`) | `VIEWS ACTIVATE <id>` |
+
+A view's item hands `VIEWS ACTIVATE <id>` to the window's executor
+(`window_view_id` in `crates/katana_window/src/main_window/actions.rs`
+reads the id from the name), so choosing a view is logged as the typed line
+is and does what the line does: the view is made active, brought out of the
+tray when it is minimised, and to the front of its tabs when it is a page
+behind another (`docs/cad.md`, "The window's views: VIEWS and ZOOM"). The
+tilings are the actions View > Viewport Layout shows - one action in two
+menus, by the one name, so `*viewTile` finds
+one - and the menu is made again from the views at every frame, as every
+menu is, so there is no list to keep in step.
+
+*Rejected:* a Close View item. Closing a view has no action and no verb
+(only its bar's button, and now its bar's menu); a menu item that closed
+"the active view" would be a third way with no line behind it. *Rejected:*
+Cascade, for the reason given under the tilings. *Rejected:* moving the
+tilings out of View > Viewport Layout: scripts and the headless tests
+trigger them there, and a person looks for "arrange" in both.
+
+The menu needed no table of its own beyond its row in the menu bar: it is
+torn off, reported (`?windowMenu`), checked for an icon and a tip on every
+item (`--check-menus`) and for a letter no other menu has (Alt+W,
+`--check-shortcuts`) by the code that does so for every menu; the list the
+tool menus take their letters from (in `MainWindow::with_gpu`) names it, so a
+tool category given a menu of its own cannot take W. Tested in
+`crates/katana_window/tests/workspace/window_menu.rs` (`window_menu::*`:
+its place and its letter, its rows for one view and for three, an item
+activating its view through the line and bringing one out of the tray, a
+name for a view that is not open refused, the tilings equal to the View
+menu's, the menu torn off) and, in the real window, by
+`qt_the_window_menu_lists_the_open_views_and_activates_one_headless`.
+
+### The views between sessions
+
+The owner's ask was for a good way to arrange the views; an arrangement
+that is gone at the next start has to be made again every morning. The
+window now saves its views as it closes and opens them again before it is
+first shown, in the person's settings beside the panels' layout
+(`VIEWS_KEY`, `window/views`; `restore_saved_views` and `save_session` in
+`crates/katana_window/src/main_window/layout.rs`). The record is the
+workspace's own, a JSON text with a version
+(`ViewWorkspace::saved_views`, `ViewWorkspace::restore_views`,
+`SAVED_VIEWS_VERSION`):
+
+```
+{"version":1,
+ "views":[{"id":1,"kind":"plan","linked":false,"ghosts":true},
+          {"id":2,"kind":"3d","linked":false,"ghosts":true},
+          {"id":3,"kind":"section","linked":false,"ghosts":true}],
+ "active":2,
+ "docked":{"split":"columns","share":0.5,
+           "first":{"views":[1],"front":1},
+           "second":{"views":[2],"front":2}},
+ "floating":[{"view":3,"x":150,"y":70,"width":320,"height":240}]}
+```
+
+**What is kept is the window's:** which views are open and what each shows
+(the words `VIEWS OPEN` takes), in the order opened; the active view; the
+link (which plan views pan and zoom together) and each view's ghost switch;
+and the arrangement - the dock tree with every split's direction and share
+(egui_dock's fraction, so the places come back to the point), every place's
+views in their tab order and the page in front, and each floating view's
+rectangle in points from the workspace's top left.
+
+**The views come back under the ids they had.** `ViewSet::restore` opens a
+view under a given id and never gives it out again, which is what it was
+written for. The ids matter beyond tidiness: the project keeps each plan
+view's paper style scale by view id (`VIEWS SCALE`, `docs/cad.md`), so until
+now the scale a person gave "view 2" was lost to them at the next start,
+when the only view was view 1; with the ids back, the project's scales find
+their views again (the workspace reads them afresh after a restore). An id
+this session has already given out - a view opened and closed before the
+restore, which only a test or a later caller does; a new window has given
+out 1 alone, to the plan view that is kept - is not given to a restored
+view, which gets the next free one (`ViewSet::issued`): an event queued for
+the closed view must not find another.
+
+**What is not kept is a drawing's:** where a view looks (a plan's centre and
+scale, a 3D view's camera), the layers it hides of its own, and a section
+view's cut. The settings are the person's, not the project's, and the
+window starts on a new drawing or on a project it is about to open:
+
+- every Open frames every view (`zoom_extents_all`), so a kept centre and
+  scale would be overwritten before it was seen - and on a NEW drawing it
+  would leave the view looking at the last project's coordinates, where
+  nothing the person then draws at the origin can be seen;
+- a view's hidden layers are names of one drawing's layers; they are pruned
+  against the drawing at its next change (`prune_view_layers`), which on a
+  new window is against an empty one, and where a name happened to survive
+  into another project the view would hide a layer there that nobody hid;
+- a section is a measured picture of one drawing's surfaces. A section view
+  comes back as a section view with nothing cut.
+
+Keeping those belongs with the PROJECT, as the paper style scale is kept
+(a metadata key by view id), with Open framing only the views it has no
+place for: recorded here under Not done.
+
+**Minimised and maximised are not kept** (the decision under "The dock
+chrome" stands: the tray is a session's, a maximise a passing state).
+Saving ends every maximise and brings every minimised view out of the tray,
+so each is recorded open, in the place it has or would come back to; this
+runs as the window closes. *Rejected:* working that out on a copy, to leave
+the tray as it is - the chrome's records cannot be copied (its icons are a
+closure's), and the window is going away.
+
+**Restoring never fails the start.** The record is read and held to what the
+writer writes before anything is changed - one version; at most
+`MOST_SAVED_VIEWS` views (32: more than anyone arranges on purpose - the
+tilings' own cases stop at twelve, and 32 tiled in the headless window's
+drawing area are 129 points wide, less than a view's bar needs - and few
+enough that a damaged or hand-edited record cannot open docks by the
+thousand at start, each with a widget and, in 3D, a scene); kinds and splits
+it knows; ids used once; a share between 0 and 1 (egui_dock panics on any
+other); a tree no deeper than its views can make; a floating rectangle no
+smaller than a view can be; and an arrangement that gives every view one
+place and no other view any. Anything else is refused whole, the reason
+logged ("The views of the last session were not restored: ..."), and the
+window keeps the one plan view it started with. Two things are mended
+rather than refused, since the rest is still whole: an active view or a
+front page the record does not have is the first one's. A settings file
+with no `window/views` key - every one saved before this - restores as it
+did. A floating rectangle saved in a larger window is brought where its
+title bar can be reached when it is drawn.
+
+**Why a key of its own and not a member of the layout.** The layout's
+version did not need to move, and the layout's checks restore layouts into
+a RUNNING window (`check_tool_bar_fit` restores four, `check_session_restore`
+one): a layout that carried the views would close and open them under the
+steps that follow, whose targets are the docks' names. A headless run reads
+and writes neither key, as before.
+
+Tested in `crates/katana_window/tests/workspace/view_session.rs`
+(`view_session::*`: a record written by hand, so the reader is held to the
+format above and not to the writer; a half and two quarters, a group of
+tabs with its front page and a floating view, and a tiling with the link
+and a ghost switch, each restored into a new workspace, in the places
+worked by hand and saving again as the text it was restored from; a link of
+one, a minimise and a maximise not kept; what a view looks at not kept; a
+view open now kept or closed or changed in kind; an id already given out
+not reused; twenty-two damaged records each refused with its reason and
+nothing changed; 33 views refused and 32 restored; `window_view_session::*`:
+the window saving and a new window restoring, a settings file without the
+key, a damaged key said in the log, a layout restored leaving the views
+alone, a headless window writing nothing).
+
+Not done: where a view looks, its own hidden layers and its section, which
+want a place in the project (above); a floating view's rectangle is in
+points of the workspace, so a session restored on a smaller screen brings
+the window into reach but does not make it smaller; and a view's place on
+ANOTHER screen, which waits on the owner with floating itself.
 
 ### Toolbars that dock and float, menus that tear off
 
@@ -2603,7 +2974,11 @@ a tray button.
   where it stood, 24 points down and along and at its docked size, and from
   then on where it last floated. Its button reads Dock while it floats
   (`DockChrome::set_floating`) and puts it back in its place of the
-  geometry, as a second double click does.
+  geometry, as a second double click does. A double click is egui's: two
+  clicks let go within 0.3 seconds and 6 points of each other. A third
+  within 0.6 seconds of the first is a triple click and does nothing more,
+  so a panel floated by a double click is not docked again by the same
+  burst of clicks.
 * **Moved and sized.** A floating panel is dragged by its title bar and
   sized by any of its four edges and four corners, the controls
   `<Dock>Resize<Part>` (`LayersDockResizeLeft` ... `BottomRight`), by the
@@ -2617,7 +2992,61 @@ a tray button.
   row), and half off the edge it has lost the part they came for. The
   rectangle kept is the one asked; it is brought inside when it is drawn, so
   one saved in a larger window returns to its place when the window is
-  large again.
+  large again. The panel is the pointer's inside its rectangle and nowhere
+  else: its Area is made exactly the panel's size, whatever its contents
+  take - they are drawn in a child that takes no room of the Area, and cut
+  at the panel's edge - so a panel drawn down to its least size, whose
+  contents need more, does not take the presses meant for the view beside
+  it.
+* **Their order over one another** is the window's own state, not egui's:
+  the list of floating panels in `WindowPanels` is in that order, the lowest
+  first and the one on top last (`WindowPanels::stacking`). A panel floated
+  goes on top; a press anywhere on a panel brings it up, and so does putting
+  it back from the tray or from View > Panels; moved or sized, it keeps its
+  place, since the press that moved it brought it up. egui keeps an order
+  of its own for the Areas the panels are drawn in, which a program can
+  neither read nor set: it has one call, which brings a layer to the top
+  (`egui::Context::move_to_top`), and layers brought up in one frame keep
+  the order they had. So in every frame the window asks egui which panels
+  it is bringing up - one shown anew, one pressed, one clicked, egui's own
+  three conditions - moves them in a list of its own as egui will
+  (`docking::raise_in`), and so knows egui's order among the panels; where
+  that has parted from the window's, it brings up one panel a frame until
+  they agree (`docking::next_to_raise`, in
+  `MainWindow::stack_floating_panels`: at most one frame fewer than there
+  are panels). They part when a layout is restored over panels already
+  drawn, when an action brings a panel up, and when panels are shown again
+  together, which egui puts back in the order it remembered. The list that
+  follows egui is kept in egui's memory, so a window drawn by another
+  context starts from none.
+* **Under a view that is maximised.** A docked view maximised is the views'
+  area, under every floating panel as before, and its Restore gives back
+  the views it hid with the panels untouched. A floating view maximised
+  fills the views' area in an Area of the order the panels are drawn in, so
+  the press that maximised it left it over every floating panel, torn-off
+  menu and floating toolbar of the window, and they were hidden until it
+  was restored. It is the views' area while it is maximised, as the docked
+  views are: in any frame in which such a view comes to the top - it has
+  just been maximised or put back from the tray, or is pressed - the window
+  brings its own floating things up with it, which leaves them as they were among
+  themselves and over it (`MainWindow::keep_over_filling_views`). The
+  view's layer is named there a second time (`floating_view_layer`), since
+  the workspace does not say it; should the two part, the test of this
+  fails.
+* **F9 from a floating panel.** F9 is View > Toggle Perspective, which acts
+  on the 3D view whichever view was clicked last
+  (`ViewSet::most_recent`). The C++'s floating dock was a window of its
+  own, and its case held that the main window's shortcuts still reached
+  from it. Here a floating panel is an Area of the one window and has no
+  keyboard of its own, so what is held is the pointer's half: a click in a
+  floating panel is the panel's and not the view's under it - the active
+  view is who it was - and the action F9 names still toggles the 3D view's
+  projection after it. The key itself was another matter, found while
+  reading for this and not a panel's: nothing in the main window read the
+  keyboard for a menu's shortcut, so F9 pressed anywhere toggled nothing.
+  That was mended the same day ("A key reaches its action", above), and
+  `keyboard_shortcuts::f9_switches_the_3d_view_between_perspective_and_orthographic`
+  presses the key.
 * **Reference Data and Surfaces** share a place as two tabs. Floating
   either floats that one page under its own title; the other has the place
   to itself, with no tabs. Docked again, it is the page in front.
@@ -2640,11 +3069,22 @@ a tray button.
   (`docking::parse_action`, through `MainWindow::docking_action`, the door
   the toolbars' and menus' actions use). Float and Dock show a hidden
   panel; Minimise of a panel not shown and Restore of one not minimised are
-  refused with the reason. They are not menu items: the title bar is the
-  mouse's way. `?windowPanels` reports each panel
-  (`LayersDock=float:63,167,240,312 PropertiesDock=docked;minimised ...`).
+  refused with the reason. Float of a panel that floats already, and Place,
+  bring it over the other floating panels: they are the door a step and an
+  agent have for what the pointer does by pressing. They are not menu
+  items: the title bar is the mouse's way. `?windowPanels` reports each
+  panel
+  (`LayersDock=float:63,167,240,312 PropertiesDock=docked;minimised ...`),
+  and `?windowPanelOrder` the floating ones from the lowest to the one on
+  top (`LayersDock PropertiesDock`, or `none`).
   View > Panels' toggles (`viewPanelLayers` ...) begin with the same word;
-  a name is one of these only when a panel's dock follows the prefix.
+  a name is one of these only when a panel's dock follows the prefix. A
+  place is whole numbers a 32-bit integer holds; anything else ("nan",
+  "1.5", a number past it) is no action and is refused as any unknown name
+  is. A corner or a size past 8 388 608 points (`docking::FARTHEST`, 2^23)
+  is brought to it: a rectangle is two corners of single-precision numbers,
+  which hold whole points only to 2^24, and a panel placed at
+  2147483647,2147483647 300 x 200 came back 256 x 256.
 * **Kept between sessions.** The layout's `"windowPanels"`
   (`["LayersDock=float:400,300,260,340"]`) names the panels that float; a
   panel not named is docked. It is a key added to version 3, not a version
@@ -2653,7 +3093,13 @@ a tray button.
   docked, so neither build refuses the other's layout, where a new version
   would have had every older build refuse the whole layout for the sake of
   where one panel floats. A minimised panel is saved shown, at its place,
-  and comes back open, as a minimised torn-off menu does.
+  and comes back open, as a minimised torn-off menu does. The order of the
+  list is the panels' order over one another, the one on top last: nothing
+  was added to the file for it. A layout saved before the order was kept
+  (2026-11-22) lists its panels in the order they were floated, and
+  restores in the order it lists - which is the order egui gave panels
+  first drawn together, so the window opens as that build opened it. View >
+  Reset Window Layout docks every panel, and none has a place in an order.
 
 **Rejected.**
 
@@ -2687,6 +3133,34 @@ a tray button.
   trays are a session's, and a window that opens with its panels hidden
   behind buttons in the status bar is harder to read than one that opens
   with them shown.
+* *Leaving the panels' order to egui* (as it was until 2026-11-22): the
+  last one pressed was on top, but the order was nowhere the window could
+  save it or a headless run read it, and two panels put back together came
+  back in an order egui remembered from before a Reset.
+* *A list of the order beside the list of floating panels*, in the model
+  and as a key of its own in the saved layout: two lists of the same panels
+  to keep in step, and a second key, for what the order of one list says.
+* *One Area for every floating panel*, drawn in the window's order, which
+  would need nothing of egui's order: an Area's rectangle is what says the
+  pointer is over it, and one Area's would be the union of the panels', so
+  the views between two panels would be the Area's.
+* *Bringing every panel up in every frame, in the window's order*: layers
+  brought up in one frame keep the order they had, so it would put nothing
+  in order, and it would hold the panels over every torn-off menu, floating
+  toolbar and dialog for good. One panel a frame, and only while the orders
+  differ, moves nothing else.
+* *An action of its own to bring a panel up*: Float and Place already say
+  "this panel, here", and a panel placed under another would be an action
+  that showed nothing.
+* *The window's floating things brought up in every frame while a floating
+  view is maximised*: it would also put them over a dialog opened since,
+  for as long as the view stayed maximised. And *the panels in egui's
+  foreground order*, over the views whatever is pressed: that is the order
+  of the menus and the modal dialogs, which a panel would then cover.
+* *Refusing a place far past any window*: a rectangle saved in a larger
+  window is kept as it was asked on purpose, and where "larger" ends is not
+  the action's to say. The corner is brought to the last point a rectangle
+  still holds its size at, and the panel is drawn inside the window.
 
 Tested in `crates/katana_window/tests/main_window/panel_floating.rs`, the
 window's cases with real pointer events (`Event::PointerButton`, as the
@@ -2697,15 +3171,42 @@ at the window's corner, a drag of each edge and a corner, Minimise and the
 tray's button from docked and from floating, View > Panels' tick, the
 Reference Data and Surfaces pair, the saved layout there and back, a layout
 saved before this, and the plain model (`window_panels_model`) with
-rectangles that are not rectangles.
+rectangles that are not rectangles. Since 2026-11-22 also: a double click
+on a docked title and on a floating one, two presses and releases at one
+point a twentieth of a second apart (the runner's clock moves a sixtieth of
+a second a frame, so the tests wait by drawing frames), and two clicks too
+far apart in time or in place, which are not one; every panel at its least
+size taking the pointer inside its rectangle and nowhere else; the window
+drawn 1280 x 720 and 1360 x 860 again; a minimised panel put back into a
+column its neighbour left; places far past any window and places that are
+not whole numbers. `crates/katana_window/tests/main_window/panel_stacking.rs`
+holds the order - what egui has on top is asked of egui, by the layer
+uppermost at a point two panels cover
+(`docking_ui::floating_panel_layer`) - after a press on a lower panel, an
+action, a put-back from the tray, a layout saved and restored, one restored
+over panels already drawn, one saved before the order was kept, and a
+Reset; and a docked and a floating view maximised under a floating panel,
+by their own Maximise buttons.
+`crates/katana_window/tests/main_window/panel_tool_docks.rs` holds Vertices
+and the survey points, each shown as a person shows it (View > Panels >
+Vertices and the Edit Vertices tool; Survey > Point Manager): floated,
+docked, minimised and put back with the pointer, closed and hidden with no
+trace left in the tray or over the views, and the right column shared in
+halves and thirds. One process test reads the order from the program:
+`qt_the_windows_floating_panels_are_in_the_order_last_brought_up_headless`.
 
 **Not done.** A floating panel stays inside the main window, as a floating
-view, toolbar and menu do. A double click on a title is the chrome's own
-request and has no pointer test of its own (two clicks within egui's
-double-click time). Vertices and the survey points float and minimise by
-the same code but have no window test: each needs its tool's state to be
-shown. The floating panels' order over one another is egui's (the last one
-pressed is on top) and is not saved.
+view, toolbar and menu do. A floating view that is maximised still covers
+a dialog that is not modal when it is pressed, as any floating view does:
+the window brings up only its own panels, menus and toolbars with it. The
+whole remedy is the workspace's - a floating view that is maximised drawn
+as the views' area is, not in an Area over it - and would retire
+`MainWindow::keep_over_filling_views`. The regression tests of 2026-11-22
+were written without being run against the code before each fix, the
+session that wrote them being one that does not build: that the least-size
+case fails without the Area held to the panel's size, and the maximised
+floating view's without the panels brought up with it, is argued from
+egui's source, not watched.
 
 ### Linked views: a design view and an as-built view that move together
 
@@ -3203,9 +3704,11 @@ where the icon is and its Layers button among the tools. The views' dock
 area is egui_dock's: the workspace draws each tab through
 `DockChrome::dock_ui` and applies what its buttons asked once the area has
 been drawn (`DockChrome::apply`), since egui_dock holds its `DockState`
-while it draws. A view is dragged by egui_dock's own tab, not by this bar
-(where the C++'s was dragged by its bar); a double click on the bar is the
-Float button. The four panels are laid out by the main window itself
+while it draws. A docked view is not dragged at all - the workspace draws
+the docks itself, and egui_dock's tab drag belongs to the dock area it does
+not use - and a floating view is moved by its bar, as a window is; a double
+click on the bar is the Float button, and a right-click opens the view's
+menu ("A view's title bar menu"). The four panels are laid out by the main window itself
 (`crates/katana_window/src/main_window/layout.rs`), at the C++ window's
 geometry, and wear the same bar; what its Float and Minimise do for them is
 in "The window's own panels float and minimise".
@@ -3231,6 +3734,51 @@ every split and its share - is kept with it and given back whole when the
 tabs open then are the tabs open now; otherwise the dock is put in the first
 place there is.
 
+**Where a floating view is, is the chrome's to keep**
+(`DockChrome::float_rect`, `DockChrome::set_float_rect`), in points from the
+workspace's top left. It was read from egui_dock's window state, which holds
+a rectangle only while egui_dock's own dock area draws the window - and the
+workspace draws its views itself, so the rectangle was never there
+(its window state answered with no rectangle, always). What a person saw of that:
+every floating view was drawn at one place, 40, 40, 400 by 300, so two
+floated views lay exactly on each other; Maximise on a floating view set a
+size nothing read, and filled nothing; and a minimised floating view was
+recorded with no rectangle, so its tray button brought it back DOCKED, in
+the first place there was, whenever a view had been closed or the views
+arranged meanwhile. Now:
+
+- **Float lifts a view off its place:** the window stands over the place the
+  docked view had, its far corner where the docked view's was and its near
+  corner a title bar's height down and across, so it is seen to have come
+  out of that place and the place shows behind it. Dock - the same button -
+  puts it back where it came from. *Rejected:* egui_dock's own choice, the
+  place's corner at eight tenths of its size, which leaves the bar exactly
+  over the bar it left; and one fixed size for every float, which is what
+  the defect looked like.
+- **Its title bar moves it**, while the button is held; it cannot be put
+  where its bar is out of reach (its top stays inside the workspace, and 60
+  points of its bar across), and a window made smaller since brings it back
+  into reach as it is drawn.
+- **Maximise fills the workspace with it**, over the docked views, which are
+  not hidden; Restore gives it back the rectangle it had. It follows the
+  workspace's size while it is maximised, and is not moved by its bar.
+- **Minimise keeps the rectangle with the tray's record**, and the tray
+  button brings the view back floating there - when its neighbours have
+  changed too, which is the case that docked it.
+- **A tiling docks a floating view** (by design: "Tiling the open views"),
+  after which it has no window; a minimised floating view is not tiled and
+  keeps its own.
+
+The rectangle is in the workspace's points, not the screen's, so a floating
+view keeps its place over the drawing when a panel beside the views is
+hidden or floated, and is what a saved session records ("The views between
+sessions"). *Not done:* sizing a floating view by its edges - it has the
+size it lifted off with, or a maximise - which wants the edge strips the
+window's own floating panels have
+(`crates/katana_window/src/main_window/docking_ui.rs`) made the chrome's, so
+that both use one; and a floating view leaving the main window, which waits
+on the owner.
+
 **Rejected: rolling a dock up to its title bar.** Measured offscreen in the
 C++'s 1360 x 860 window: Properties alone in the right area, rolled up, took
 the whole column with it - 270 x 770 became 131 x 26, and the column's space
@@ -3241,7 +3789,7 @@ else.
 
 **Maximise (views only).** A docked view hides every other docked view of its
 window until it is restored, which gives back the sizes they had; a floating
-view fills the window it floats in. A maximise is a temporary state, not a
+view fills the workspace, over the docked views (above). A maximise is a temporary state, not a
 layout: the workspace undoes every docked maximise before it opens or
 arranges views (a split made while the others were hidden would be made
 against the wrong neighbours), a tray restore of a docked view ends a
@@ -3275,16 +3823,41 @@ Tested in `crates/katana_window/tests/workspace/view_chrome.rs` (`view_chrome::*
 each test shown failing without its fix. The window tests build the real
 window (`crates/katana_window/tests/main_window/`): the panels' bars - their
 Float, Minimise and the tray's restore - are held there since 2026-11-21
-("The window's own panels float and minimise"), but no case is written yet
-for F9 from a floating panel and a floating maximise, which the C++ tested
-only in a hand-run harness. Not done: a Window menu; keeping the VIEWS between
-sessions - the panels' places are kept (`MainWindow::save_session` and
+("The window's own panels float and minimise"), and since 2026-11-22 so are
+a floating panel under a maximised view and F9 with a floating panel (the
+same section, "Under a view that is maximised" and "F9 from a floating
+panel"). A floating view's cases are
+in `crates/katana_window/tests/workspace/view_floating.rs`
+(`view_floating::*`: a view floated stands over the place it left and docks
+back into it; two floated views each over their own; a drag by the title
+bar with real pointer events, and the reach rule; a floating maximise
+filling the workspace over the docked views and restoring its rectangle; a
+minimised floating view back from the tray at its rectangle - plainly,
+after a tiling, and after a neighbour was closed; a tiling docking one; the
+kind switcher's menu opening under a floating view's own bar, which it
+never did, the menu having been placed by the docked places alone). Each
+asserts a rectangle that is not the one default place, so each fails with
+the rectangle read from egui_dock as it was.
+
+**F9 and a floating view** (`floating_view_keys::*`, the same file). F9 is
+View > Toggle Perspective's key (`viewTogglePerspective`), and the action
+acts on the 3D view the person used last (`ViewSet::most_recent`), wherever
+the active view is: triggered with a floating 3D view it turns that view
+orthographic and back, and triggered from a floating PLAN view it reaches
+the docked 3D view and leaves the plan active. Both cases trigger the action
+by its name, as a click on its item and a `*` step do: when they were
+written the window answered to no action's key at all, which reading the
+window for them found and which was mended the same day ("A key reaches its
+action"); the key itself is pressed in that section's tests.
+
+Keeping the VIEWS between sessions is done ("The views between sessions"):
+a maximise is ended and the tray emptied as they are saved, which is what
+"everything is unmaximised before a layout is saved" always asked for. The
+panels' places are kept as before (`MainWindow::save_session` and
 `restore_layout`), and which docks are minimised is not, by decision (the
-tray is a session's; `minimised_names` and `minimise_named` are there should
-the views' ever be kept), and the saved
-layout does not see the views' docks, which are the workspace's own area's,
-so a maximised view needs no `unmaximise_all` before it; a layout that kept
-the views would; a floating active view left minimised during an arrange
+tray is a session's; `minimised_names` and `minimise_named` are the
+chrome's still, and the views' saving uses the first). Not done: a floating
+active view left minimised during an arrange
 stays hidden and active, since only the tray button (`DockChrome::restore`)
 restores it. The Survey
 Point Manager dock (`SurveyPointsDock`) wears the chrome now that

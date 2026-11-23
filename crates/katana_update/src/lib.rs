@@ -9,9 +9,9 @@
 //! (a fake's record, [`FaultFs`]'s counters) keeps it in a `Cell` or a `RefCell`.
 //!
 //! The system calls behind the real seams are in two modules of their own, `win32` (one child
-//! per area) and `posix`, the crate's only unsafe code but for signature.rs's environment
-//! hardening, whose caller's promise is part of its signature (docs/rust.md, "Unsafe confined to
-//! FFI modules").
+//! per area) and `posix`, the crate's only unsafe code (docs/rust.md, "Unsafe confined to FFI
+//! modules"; the hardening of signature.rs changed this process's environment and was an
+//! `unsafe fn` until 2026-11-22, when it became what a launch is told: "The third pass").
 
 pub mod apply;
 pub mod check;
@@ -101,8 +101,9 @@ pub use paths::{
 };
 pub use plan::{FREE_SPACE_FACTOR, Plan, PlannedFile, plan};
 pub use process::{
-    Launcher, ProcessOps, RunningProgram, SpawnRequest, SpawnResult, make_system_launcher,
-    process_is_elevated, utf8_arguments,
+    EnvironmentChange, Launcher, ProcessOps, RunningProgram, SpawnRequest, SpawnResult,
+    child_environment, environment_with, make_system_launcher, process_is_elevated,
+    utf8_arguments, variable_in,
 };
 pub use process::{make_system_process_ops, running_programs};
 pub use ranges::{
@@ -115,8 +116,9 @@ pub use recover::{
 pub use registry::make_system_registry_ops;
 pub use registry::{RUN_ONCE_NAME, RegistryOps};
 pub use signature::{
-    PublicKey, SignatureBytes, SignatureLine, check_public_key, key_id_of, parse_public_key_hex,
-    parse_signature_line, verify_ed25519,
+    OPEN_SSL_VARIABLES, PublicKey, SignatureBytes, SignatureLine, check_public_key,
+    harden_open_ssl_environment, key_id_of, parse_public_key_hex, parse_signature_line,
+    verify_ed25519,
 };
 pub use stage::{
     PreparedApply, STAGED_MANIFEST_NAME, STAGED_SIGNATURE_NAME, preflight, preflight_with, stage,

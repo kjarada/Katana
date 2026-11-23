@@ -377,11 +377,12 @@ impl<'b, 'a, 'm> DrawingWriter<'b, 'a, 'm> {
 
     fn write(&mut self) {
         let model = self.model;
+        // One pass in entity order (EntityDatabase::iter), the order the
+        // products are written in: a list of every id and a lookup of each
+        // visits the same entities in the same order, at a tree lookup each.
         let mut chosen: Vec<&'m Entity> = Vec::new();
-        for id in model.entities.ids() {
-            if let Some(entity) = model.entities.find(id)
-                && self.selected(entity)
-            {
+        for entity in model.entities.iter() {
+            if self.selected(entity) {
                 chosen.push(entity);
             }
         }

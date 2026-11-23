@@ -2124,6 +2124,7 @@ impl<'a> Applier<'a> {
                 self.request.transaction.clone(),
             ],
             timeout: self.services.timings.health_wait,
+            ..SpawnRequest::default()
         };
 
         let ran = match self.services.launcher.run(&start) {

@@ -43,6 +43,7 @@ const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
 const HANDLE_FLAG_INHERIT: u32 = 0x1;
 const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x0002_0002;
 const STARTF_USESTDHANDLES: u32 = 0x100;
+const CREATE_UNICODE_ENVIRONMENT: u32 = 0x400;
 const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
 const TOKEN_QUERY: u32 = 0x8;
 const TOKEN_ELEVATION_TYPE_CLASS: i32 = 18; // TokenElevationType of TOKEN_INFORMATION_CLASS
@@ -281,14 +282,65 @@ impl Drop for InheritedHandles<'_> {
     }
 }
 
+/// The environment a child is started with, as CreateProcessW takes one that is wide
+/// (CREATE_UNICODE_ENVIRONMENT): each variable as `name=value` and a NUL, and one more NUL after
+/// the last. Whatever it is made of, its last two units are NULs, and the system reads no
+/// further than the first two it meets.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct EnvironmentBlock(Vec<u16>);
+
+impl EnvironmentBlock {
+    /// The block of `variables`, each a name and a value, in the order given. A NUL inside one
+    /// would end the block there - early, never late: the caller keeps them out (spawn_win's
+    /// environment_of).
+    pub(crate) fn from_variables(variables: &[(Vec<u16>, Vec<u16>)]) -> EnvironmentBlock {
+        let mut units = Vec::new();
+        for (name, value) in variables {
+            units.extend_from_slice(name);
+            units.push(u16::from(b'='));
+            units.extend_from_slice(value);
+            units.push(0);
+        }
+        // An environment of no variables is two NULs too: the system reads the end of a
+        // variable and then the end of the block, and there is no variable to end.
+        if variables.is_empty() {
+            units.push(0);
+        }
+        units.push(0);
+        EnvironmentBlock(units)
+    }
+
+    fn as_ptr(&self) -> *const core::ffi::c_void {
+        self.0.as_ptr().cast()
+    }
+
+    /// The block's units, for the launcher's tests to read what a child would be handed.
+    #[cfg(test)]
+    pub(crate) fn units(&self) -> &[u16] {
+        &self.0
+    }
+}
+
+// The flags of a launch with `environment`: a block is wide, and the system must be told, or it
+// reads it as text of the ANSI code page.
+fn flags_with(flags: u32, environment: Option<&EnvironmentBlock>) -> u32 {
+    if environment.is_some() {
+        flags | CREATE_UNICODE_ENVIRONMENT
+    } else {
+        flags
+    }
+}
+
 /// CreateProcessW of `program` with `command` as its command line (which the call may write
 /// into), every handle in `inherited` inherited and no other, input and output as `inherited`
-/// says, in `directory` (None: this process's), with `flags` and EXTENDED_STARTUPINFO_PRESENT.
+/// says, in `directory` (None: this process's), with the environment `environment` (None: a
+/// copy of this process's, made by the system), with `flags` and EXTENDED_STARTUPINFO_PRESENT.
 /// Err with the system's error, read at once.
 pub(crate) fn start_inheriting(
     program: &WideName,
     command: &mut WideName,
     directory: Option<&WideName>,
+    environment: Option<&EnvironmentBlock>,
     flags: u32,
     inherited: &InheritedHandles<'_>,
 ) -> Result<Started, u32> {
@@ -302,7 +354,9 @@ pub(crate) fn start_inheriting(
     let mut information = PROCESS_INFORMATION::default();
     // SAFETY: every pointer is to a NUL-terminated wide string (WideName) or a structure that
     // outlives the call; the command line is a mutable buffer of the caller's, which the call
-    // writes within; the attribute list is initialised and names two handles open for the call.
+    // writes within; the attribute list is initialised and names two handles open for the call;
+    // the environment is null or a block that ends in two NULs (EnvironmentBlock), borrowed for
+    // the call, which copies it, and the flags say that it is wide.
     let created = unsafe {
         CreateProcessW(
             program.as_ptr(),
@@ -310,8 +364,8 @@ pub(crate) fn start_inheriting(
             null(),
             null(),
             1,
-            flags | EXTENDED_STARTUPINFO_PRESENT,
-            null(),
+            flags_with(flags, environment) | EXTENDED_STARTUPINFO_PRESENT,
+            environment.map_or(null(), EnvironmentBlock::as_ptr),
             directory.map_or(null(), WideName::as_ptr),
             &raw const startup.StartupInfo,
             &raw mut information,
@@ -325,11 +379,13 @@ pub(crate) fn start_inheriting(
 }
 
 /// CreateProcessW of `program` with `command`, inheriting nothing, no standard handles given, in
-/// `directory` (None: this process's), with `flags`. Err with the system's error, read at once.
+/// `directory` (None: this process's), with the environment `environment` (None: a copy of this
+/// process's), with `flags`. Err with the system's error, read at once.
 pub(crate) fn start_alone(
     program: &WideName,
     command: &mut WideName,
     directory: Option<&WideName>,
+    environment: Option<&EnvironmentBlock>,
     flags: u32,
 ) -> Result<Started, u32> {
     let startup = STARTUPINFOW {
@@ -337,7 +393,10 @@ pub(crate) fn start_alone(
         ..Default::default()
     };
     let mut information = PROCESS_INFORMATION::default();
-    // SAFETY: as in start_inheriting, with no attribute list and no handle inherited.
+    // SAFETY: as in start_inheriting - the names NUL-terminated, the command line a buffer the
+    // call writes within, the structures outliving the call, the environment null or a block
+    // that ends in two NULs and is said to be wide - with no attribute list and no handle
+    // inherited.
     let created = unsafe {
         CreateProcessW(
             program.as_ptr(),
@@ -345,8 +404,8 @@ pub(crate) fn start_alone(
             null(),
             null(),
             0,
-            flags,
-            null(),
+            flags_with(flags, environment),
+            environment.map_or(null(), EnvironmentBlock::as_ptr),
             directory.map_or(null(), WideName::as_ptr),
             &raw const startup,
             &raw mut information,
@@ -522,7 +581,7 @@ mod tests {
         let input = null_device_for_reading();
         let inherited = InheritedHandles::new(input.as_ref(), &writer).expect("the list");
         // CREATE_NO_WINDOW.
-        let child = start_inheriting(&program, &mut command, None, 0x0800_0000, &inherited)
+        let child = start_inheriting(&program, &mut command, None, None, 0x0800_0000, &inherited)
             .expect("cmd.exe starts");
         drop(inherited);
         drop(writer);
@@ -540,6 +599,91 @@ mod tests {
         }
         assert!(output.starts_with(b"here"), "{output:?}");
         assert_eq!(exit_code(&child.process), Some(7));
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    // The layout is CreateProcessW's description of lpEnvironment, written out by hand: each
+    // variable `name=value` and a NUL, then one more NUL; a per-drive directory, whose name
+    // begins with "=", is a variable like another.
+    #[test]
+    fn an_environment_block_ends_each_variable_with_a_nul_and_itself_with_one_more() {
+        let block = EnvironmentBlock::from_variables(&[
+            (wide("A"), wide("1")),
+            (wide("=C:"), wide("C:\\x")),
+            (wide("EMPTY"), wide("")),
+        ]);
+        assert_eq!(block.0, wide("A=1\0=C:=C:\\x\0EMPTY=\0\0"));
+        // With no variable there is still an end of a variable and an end of the block to find.
+        assert_eq!(EnvironmentBlock::from_variables(&[]).0, vec![0, 0]);
+    }
+
+    // 0x400 is CREATE_UNICODE_ENVIRONMENT and 0x0800_0000 CREATE_NO_WINDOW (winbase.h).
+    #[test]
+    fn a_launch_handed_a_block_is_told_that_it_is_wide_and_one_handed_none_is_told_nothing_more() {
+        let block = EnvironmentBlock::from_variables(&[]);
+        assert_eq!(flags_with(0x0800_0000, Some(&block)), 0x0800_0400);
+        assert_eq!(flags_with(0x0800_0000, None), 0x0800_0000);
+    }
+
+    #[test]
+    fn a_child_started_with_a_block_holds_its_variables_and_not_this_processs() {
+        use std::os::windows::ffi::OsStrExt;
+        let system = std::env::var_os("SystemRoot").expect("Windows names its folder");
+        assert!(
+            std::env::var_os("PATH").is_some(),
+            "the premise: this process holds a PATH, which the block does not"
+        );
+        let program = std::path::Path::new(&system).join("System32").join("cmd.exe");
+        let program = WideName::from_units(program.as_os_str().encode_wide().collect());
+        // `set` with no argument prints every variable the process holds, one a line.
+        let mut command = WideName::from_text("cmd.exe /c set");
+        let block = EnvironmentBlock::from_variables(&[
+            (wide("KATANA_BLOCK_ONE"), wide("handed over")),
+            (wide("SystemRoot"), system.encode_wide().collect()),
+        ]);
+        let (reader, writer) = output_pipe().expect("a pipe");
+        let input = null_device_for_reading();
+        let inherited = InheritedHandles::new(input.as_ref(), &writer).expect("the list");
+        // CREATE_NO_WINDOW.
+        let child = start_inheriting(
+            &program,
+            &mut command,
+            None,
+            Some(&block),
+            0x0800_0000,
+            &inherited,
+        )
+        .expect("cmd.exe starts");
+        drop(inherited);
+        drop(writer);
+        assert_eq!(wait(&child.process, 30_000), WAIT_OBJECT_0);
+        let mut output = Vec::new();
+        let mut buffer = [0u8; 256];
+        while let Some(waiting) = bytes_waiting(&reader) {
+            if waiting == 0 {
+                break;
+            }
+            match read_pipe(&reader, &mut buffer) {
+                Some(got) if got > 0 => output.extend_from_slice(&buffer[..got as usize]),
+                _ => break,
+            }
+        }
+        let text = String::from_utf8_lossy(&output).into_owned();
+        assert!(
+            text.lines().any(|line| line == "KATANA_BLOCK_ONE=handed over"),
+            "{text}"
+        );
+        // cmd.exe gives itself a PATHEXT when it is handed none, so the name is matched whole.
+        assert!(
+            !text
+                .lines()
+                .any(|line| line.to_ascii_lowercase().starts_with("path=")),
+            "{text}"
+        );
+        assert_eq!(exit_code(&child.process), Some(0));
     }
 
     #[test]

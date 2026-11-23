@@ -688,3 +688,150 @@ mod update_arguments {
         assert_eq!(arguments, given);
     }
 }
+
+// ---- the environment a launch hands its program (process.rs) --------------------------------------
+//
+// environment_with reads no environment: the one a launch starts from is written out here, and
+// what must be left of it is worked out by hand from the rule the module states - a change takes
+// every variable of its name out and, with a value, adds it at the end; the rest keep their
+// places; the changes are made in order.
+
+mod launch_environment {
+    use katana_update::process::{
+        EnvironmentChange, SpawnRequest, child_environment, environment_with, variable_in,
+    };
+    use std::ffi::{OsStr, OsString};
+
+    fn environment(variables: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+        variables
+            .iter()
+            .map(|&(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect()
+    }
+
+    fn set(name: &str, value: &str) -> EnvironmentChange {
+        (String::from(name), Some(OsString::from(value)))
+    }
+
+    fn take_out(name: &str) -> EnvironmentChange {
+        (String::from(name), None)
+    }
+
+    #[test]
+    fn no_change_leaves_the_environment_as_it_was_handed_in() {
+        let inherited = [("B", "2"), ("A", "1"), ("EMPTY", "")];
+        assert_eq!(
+            environment_with(environment(&inherited), &[]),
+            environment(&inherited)
+        );
+        assert_eq!(environment_with(environment(&[]), &[]), environment(&[]));
+    }
+
+    #[test]
+    fn a_variable_taken_out_is_gone_and_the_others_keep_their_places() {
+        let inherited = [("A", "1"), ("B", "2"), ("C", "3")];
+        assert_eq!(
+            environment_with(environment(&inherited), &[take_out("B")]),
+            environment(&[("A", "1"), ("C", "3")])
+        );
+        // One that is not there is no error and no change.
+        assert_eq!(
+            environment_with(environment(&inherited), &[take_out("D")]),
+            environment(&inherited)
+        );
+    }
+
+    #[test]
+    fn a_variable_set_replaces_the_one_of_its_name_and_stands_at_the_end() {
+        let inherited = [("A", "1"), ("B", "2"), ("C", "3")];
+        assert_eq!(
+            environment_with(environment(&inherited), &[set("A", "new"), set("D", "4")]),
+            environment(&[("B", "2"), ("C", "3"), ("A", "new"), ("D", "4")])
+        );
+        // Set to nothing is a variable that is there and holds nothing: not one taken out.
+        assert_eq!(
+            environment_with(environment(&[("A", "1")]), &[set("A", "")]),
+            environment(&[("A", "")])
+        );
+    }
+
+    #[test]
+    fn changes_are_made_in_order_so_the_last_word_on_a_variable_stands() {
+        let inherited = [("A", "1")];
+        assert_eq!(
+            environment_with(
+                environment(&inherited),
+                &[set("A", "first"), take_out("A"), set("B", "2")]
+            ),
+            environment(&[("B", "2")])
+        );
+        assert_eq!(
+            environment_with(environment(&inherited), &[take_out("A"), set("A", "last")]),
+            environment(&[("A", "last")])
+        );
+    }
+
+    // Windows keeps one variable whatever the case of its name; elsewhere a name is its bytes.
+    #[cfg(windows)]
+    #[test]
+    fn a_change_reaches_the_variable_however_its_name_is_spelled_on_windows() {
+        let inherited = [("Path", "p"), ("windir", "w")];
+        assert_eq!(
+            environment_with(environment(&inherited), &[take_out("PATH"), set("WINDIR", "x")]),
+            environment(&[("WINDIR", "x")])
+        );
+        assert_eq!(
+            variable_in(&environment(&inherited), "PATH"),
+            Some(OsStr::new("p"))
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_change_reaches_only_the_variable_spelled_as_it_is_where_a_name_is_its_bytes() {
+        let inherited = [("Path", "p"), ("PATH", "q")];
+        assert_eq!(
+            environment_with(environment(&inherited), &[take_out("PATH")]),
+            environment(&[("Path", "p")])
+        );
+        assert_eq!(
+            variable_in(&environment(&inherited), "PATH"),
+            Some(OsStr::new("q"))
+        );
+    }
+
+    #[test]
+    fn a_variable_is_found_by_its_whole_name_and_one_set_to_nothing_is_found() {
+        let held = environment(&[("OPENSSL_CONF_INCLUDE", "i"), ("EMPTY", "")]);
+        assert_eq!(variable_in(&held, "OPENSSL_CONF"), None);
+        assert_eq!(
+            variable_in(&held, "OPENSSL_CONF_INCLUDE"),
+            Some(OsStr::new("i"))
+        );
+        assert_eq!(variable_in(&held, "EMPTY"), Some(OsStr::new("")));
+        assert_eq!(variable_in(&[], "EMPTY"), None);
+    }
+
+    // The one function that reads this process's environment: with a request that changes
+    // nothing it answers what the standard library reads, and a request's changes are made to
+    // that. The variable is the case's own, so no other case and nothing of the machine holds it.
+    #[test]
+    fn the_environment_of_a_request_is_this_processs_with_the_requests_changes() {
+        let unchanged = child_environment(&SpawnRequest::default());
+        assert_eq!(unchanged, std::env::vars_os().collect::<Vec<_>>());
+        assert_eq!(variable_in(&unchanged, "KATANA_T8_OF_THE_REQUEST"), None);
+
+        let request = SpawnRequest {
+            environment: vec![set("KATANA_T8_OF_THE_REQUEST", "handed over")],
+            ..SpawnRequest::default()
+        };
+        let changed = child_environment(&request);
+        assert_eq!(
+            variable_in(&changed, "KATANA_T8_OF_THE_REQUEST"),
+            Some(OsStr::new("handed over"))
+        );
+        assert_eq!(changed.len(), unchanged.len() + 1);
+        // Nothing of this process was changed to make it.
+        assert_eq!(std::env::var_os("KATANA_T8_OF_THE_REQUEST"), None);
+    }
+}

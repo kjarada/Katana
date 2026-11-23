@@ -484,7 +484,19 @@ siblings (the dock's name, Resize, then Top, Right, Bottom, TopLeft, TopRight,
 BottomLeft or BottomRight), and a minimised one's button in the status
 bar's tray is `%MinimisedToolBar|!RestoreLayersDock`. `?windowPanels` prints
 where each is: `LayersDock=float:63,167,240,312 PropertiesDock=docked;minimised
-... SurfacesDock=docked;hidden`.
+... SurfacesDock=docked;hidden`. The floating panels lie over one another in
+an order the window keeps, the one floated, pressed or put back last on top:
+`?windowPanelOrder` prints their docks from the lowest to the one on top
+(`LayersDock PropertiesDock`), or `none` when no panel floats, and a Float
+step for a panel that floats already (`*viewPanelFloatLayersDock`), or a
+Place step, brings it over the others - a run's way to do what a press on
+the panel does. A place's four numbers are whole ones a 32-bit integer
+holds; a step with any other (`nan`, `1.5`) is refused as a name the window
+does not know, and a corner or a size past 8388608 points is brought to
+it. Vertices and the survey points are hidden until their own actions show
+them (`*actionVerticesPanel`, `*surveyPointManager`), and a Float or Place
+step shows one as well. The order is read by
+`qt_the_windows_floating_panels_are_in_the_order_last_brought_up_headless`.
 
 **The pointer.** A headless run has no mouse, and a tool's preview and its
 picks follow one: before the pointer steps a run could start Insert Vertex
@@ -814,12 +826,15 @@ A modal box in a headless run is a hang until the test's timeout. So
   result, are the window tests' (`crates/katana_window/tests/update/update_dialog.rs`,
   `UpdateDialog` and `UpdateDecisions`), and the way from a check to a swap is
   the update system's own end-to-end tests'.
-- No step presses a key into a view (`&KEY` was proposed for a view's own
-  keys: Delete on a hot vertex, Ctrl held over a grip). Enter reaches a view
-  through `>` alone; the rest is tested in the window's own tests
-  (`crates/katana_window/tests/`) with real key events, where the
-  window's shortcut map is not in the way, so Delete through that map is not
-  driven end to end.
+- No step presses a key, into a view or as an action's shortcut (`&KEY` was
+  proposed for a view's own keys: Delete on a hot vertex, Ctrl held over a
+  grip). Enter reaches a view through `>` alone. The view's keys are tested
+  on a bare view (`crates/katana_window/tests/plan_view/`), and the whole
+  way from a key through the window's shortcut pass to an action or to the
+  view - Delete on a hot vertex among them - in
+  `crates/katana_window/tests/main_window/keyboard_shortcuts.rs`, with real
+  key events sent to the window through this runner's own frames
+  (`desktop.md`, "A key reaches its action"); no process test presses one.
 - No step drags: `+` is a press and a release at one point. A grip drag is
   a click to pick the grip up and a second click to put it down.
 - A `--fill` of a list selects the row, as a click on its text does, but never

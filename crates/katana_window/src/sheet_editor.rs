@@ -433,6 +433,62 @@ pub(crate) enum Drag {
 // SheetCanvas
 // ============================================================================
 
+/// The set a picture was painted from. Held, so the document cannot change it in place: two
+/// keys holding one set are the same without reading it, and a set made again with the same
+/// sheets is the same by them.
+#[derive(Debug)]
+struct ShownSet(Arc<SheetSet>);
+
+impl PartialEq for ShownSet {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0 == other.0
+    }
+}
+
+/// Everything the canvas's picture is painted from on a frame with no drag under way
+/// (`SheetCanvas::picture_key`). A paint whose key is the last paint's keeps the picture: the
+/// sheet is not laid down again, no mark is painted over it and nothing is compared
+/// (docs/performance.md, "The sheet editor's canvas").
+///
+/// THE PICTURE'S INPUTS, each with where it is keyed. `paint_over` reads the canvas and nothing
+/// else - no document - and draws:
+///
+/// * **the desk and the painted sheet** - the image by the count of its paints (`render` is its
+///   one writer, and paints it again for a change of the document the editor has seen, of the
+///   zoom, the place or the size); the canvas's size and device ratio, the zoom, where the
+///   paper is and where the image was painted, here;
+/// * **the drawing area, the selection's outlines and handles, and the words of an editor
+///   with no sheet** - the set and which sheet of it (the paper, each viewport's rectangle and
+///   whether it is locked), the selected ids and the primary, here;
+/// * **the paper grid** - whether it shows and its spacing, here;
+/// * **the rulers** - whether they show, and the cursor's place on the paper that they mark,
+///   here; the selection's span from the rectangles above;
+/// * **a drag's own marks** - the viewports' paint going with the hand, the guides and the
+///   plate, the rubber band, a plan's drawing panned inside it, the paper moving under a hand -
+///   read from a dozen members a drag keeps changing: NO KEY while one is under way, and every
+///   such frame is painted.
+///
+/// The fonts and colours are constants of the build. A new mark on the canvas needs its input
+/// here, or its frame given no key, and a case in tests/sheet_editor/kept_canvas.rs.
+#[derive(Debug, PartialEq)]
+pub(crate) struct CanvasKey {
+    image_serial: u64,
+    width: f64,
+    height: f64,
+    ratio: f64,
+    zoom: f64,
+    origin: PointF,
+    image_origin: PointF,
+    set: ShownSet,
+    sheet: usize,
+    selected: String,
+    selection: Vec<String>,
+    snap_grid: bool,
+    grid_mm: f64,
+    rulers: bool,
+    cursor_paper: Option<Point2>,
+}
+
 /// The paper: one sheet, painted and edited.
 pub struct SheetCanvas {
     pub(crate) source: SourceProvider,
@@ -458,6 +514,19 @@ pub struct SheetCanvas {
     pub(crate) version: u64,
     pub(crate) image_version: u64,
     pub(crate) renders: i32,
+    /// The last paint whole: the painted sheet with the canvas's own marks over it.
+    pub(crate) picture: Image,
+    /// Counted by each paint that left `picture` different from what it was. The editor converts
+    /// the picture and hands it to its texture only when this has moved: a frame is painted for
+    /// every pointer move anywhere in the window, and most leave the canvas's picture exactly
+    /// as it was (docs/performance.md, "The sheet editor's canvas").
+    pub(crate) picture_revision: u64,
+    /// Counted by every `render`: which painted sheet a picture was laid over.
+    pub(crate) image_serial: u64,
+    /// What `picture` was painted from, when that has a key (`CanvasKey`); None after a paint
+    /// that had none, so the paint after it is never kept.
+    pub(crate) picture_key: Option<CanvasKey>,
+    pub(crate) picture_paints: u64,
 
     pub(crate) drag: Drag,
     pub(crate) handle: usize,
@@ -525,6 +594,11 @@ impl SheetCanvas {
             version: 1,
             image_version: 0,
             renders: 0,
+            picture: Image::default(),
+            picture_revision: 0,
+            image_serial: 0,
+            picture_key: None,
+            picture_paints: 0,
             drag: Drag::None,
             handle: 0,
             press_widget: PointF::new(0.0, 0.0),
@@ -594,6 +668,13 @@ impl SheetCanvas {
     /// How many times the sheet has been painted, for tests of the cache.
     pub fn renders(&self) -> i32 {
         self.renders
+    }
+
+    /// How many times the canvas's own marks have been painted over the sheet, for the tests
+    /// that prove a frame with nothing changed keeps the picture and a frame with anything
+    /// changed does not.
+    pub fn paints(&self) -> u64 {
+        self.picture_paints
     }
 
     pub fn snaps_to_grid(&self) -> bool {
@@ -799,6 +880,7 @@ impl SheetCanvas {
     // ---- painting --------------------------------------------------------------------------
 
     fn render(&mut self, document: &Document) {
+        self.image_serial += 1;
         let ratio = self.ratio;
         let width = ((self.width * ratio) as i64).max(1) as u32;
         let height = ((self.height * ratio) as i64).max(1) as u32;
@@ -854,6 +936,12 @@ impl SheetCanvas {
     /// has changed since the last paint, and over it the drawing area, the selection, the
     /// handles, a drag's guides and plate, the rubber band and the rulers. In device pixels.
     pub fn paint(&mut self, document: &Document) -> Image {
+        self.paint_kept(document);
+        self.picture.clone()
+    }
+
+    /// `paint`, into the canvas's own `picture`, which the editor shows without a copy.
+    pub(crate) fn paint_kept(&mut self, document: &Document) {
         if !self.fitted && self.current_sheet().is_some() {
             self.fit_page();
         }
@@ -870,6 +958,12 @@ impl SheetCanvas {
         {
             self.render(document);
         }
+        // The sheet as it was painted and the marks to go over it both what the last paint's
+        // were: the picture is that paint's, to the pixel, and is kept as it is.
+        let key = self.picture_key();
+        if key.is_some() && key == self.picture_key {
+            return;
+        }
         let mut frame = Image::new(width, height);
         let this = &*self;
         RasterCanvas::paint_image(&mut frame, &mut |canvas: &mut dyn Canvas| {
@@ -877,7 +971,39 @@ impl SheetCanvas {
             this.paint_over(canvas);
         });
         frame.set_device_pixel_ratio(ratio);
-        frame
+        // Compared whole, pixel for pixel: a comparison of the pictures cannot be wrong about
+        // whether the texture still holds what the canvas shows.
+        if frame != self.picture {
+            self.picture = frame;
+            self.picture_revision += 1;
+        }
+        self.picture_key = key;
+        self.picture_paints += 1;
+    }
+
+    /// The key of the picture a paint is about to make; None while a drag is under way, whose
+    /// frames have no key and are always painted (`CanvasKey` says why).
+    fn picture_key(&self) -> Option<CanvasKey> {
+        if self.drag != Drag::None {
+            return None;
+        }
+        Some(CanvasKey {
+            image_serial: self.image_serial,
+            width: self.width,
+            height: self.height,
+            ratio: self.ratio,
+            zoom: self.zoom,
+            origin: self.origin,
+            image_origin: self.image_origin,
+            set: ShownSet(Arc::clone(&self.set)),
+            sheet: self.sheet,
+            selected: self.selected.clone(),
+            selection: self.selection.clone(),
+            snap_grid: self.snap_grid,
+            grid_mm: self.grid_mm,
+            rulers: self.rulers,
+            cursor_paper: self.cursor_paper,
+        })
     }
 
     /// The last paint laid down with its top-left at `at`, in logical pixels.
@@ -2771,6 +2897,8 @@ pub struct SheetEditor {
     pub(crate) picture_serial: u64,
     pub(crate) textures: BTreeMap<String, (u64, egui::TextureHandle)>,
     pub(crate) canvas_texture: Option<egui::TextureHandle>,
+    /// The canvas's `picture_revision` whose pixels the texture holds; None before the first.
+    pub(crate) canvas_shown: Option<u64>,
     pub(crate) thumbnails_due: Option<Instant>,
     /// Whether the window's executor runs the lines (setCommandRunner): the host's `run`.
     pub(crate) runner: bool,
@@ -2844,6 +2972,7 @@ impl SheetEditor {
             picture_serial: 0,
             textures: BTreeMap::new(),
             canvas_texture: None,
+            canvas_shown: None,
             thumbnails_due: None,
             runner: false,
             headless: false,
@@ -5551,7 +5680,10 @@ impl SheetEditor {
     /// The window's shortcuts: each enabled action whose key was pressed, unless a text box has
     /// the keyboard (a disabled action, and a box being typed in, leave the key alone).
     fn shortcut_pass(&mut self, ui: &mut Ui, host: &mut dyn Host) {
-        if ui.ctx().egui_wants_keyboard_input() {
+        // A TEXT BOX, not any widget: egui's `egui_wants_keyboard_input` is true whenever anything
+        // has the focus, and the canvas takes it as the editor is shown, so asked that way no
+        // key of the editor's reached its action until the focus was lost (found 2026-11-22).
+        if ui.ctx().text_edit_focused() {
             return;
         }
         for action in self.actions(&*host) {
@@ -5712,21 +5844,35 @@ impl SheetEditor {
             });
         }
         if ui.is_rect_visible(rect) {
-            let picture = self.paint_canvas(&*host).to_color_image();
+            self.observe(&*host);
+            self.canvas.paint_kept(host.document());
+            let revision = self.canvas.picture_revision;
+            // One texture for the canvas's life, its pixels replaced by each paint that changed
+            // them, as the plan view's are (viewport_widget.rs): converting a picture and
+            // handing it over is a pass over every pixel and a whole upload to the graphics
+            // card, which a frame that painted the same picture again has no use for.
             let texture = match &mut self.canvas_texture {
                 Some(texture) => {
-                    texture.set(picture, egui::TextureOptions::NEAREST);
+                    if self.canvas_shown != Some(revision) {
+                        texture.set(
+                            self.canvas.picture.to_color_image(),
+                            egui::TextureOptions::NEAREST,
+                        );
+                    }
                     texture.id()
                 }
                 None => {
-                    let texture =
-                        ui.ctx()
-                            .load_texture("sheetCanvas", picture, egui::TextureOptions::NEAREST);
+                    let texture = ui.ctx().load_texture(
+                        "sheetCanvas",
+                        self.canvas.picture.to_color_image(),
+                        egui::TextureOptions::NEAREST,
+                    );
                     let id = texture.id();
                     self.canvas_texture = Some(texture);
                     id
                 }
             };
+            self.canvas_shown = Some(revision);
             ui.painter().image(
                 texture,
                 rect,

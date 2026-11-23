@@ -35,6 +35,12 @@ harness = false
 name = "plan_frames"
 harness = false
 
+# The sheet editor's frames, measured (docs/performance.md, "The sheet editor's canvas"): the
+# same kind of program.
+[[bench]]
+name = "sheet_frames"
+harness = false
+
 [dependencies]
 katana_app.workspace = true
 katana_archive12d.workspace = true

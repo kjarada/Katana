@@ -18,7 +18,11 @@
 //! * `paint_zoomed`: `paint_plan` of a hundredth of the drawing's area, the drawing with no
 //!   label style;
 //! * `paint_zoomed_label_style`: the same paint of the same lines in a drawing that has one
-//!   label style (and no label), which is what makes the painter look for labels.
+//!   label style (and no label), which is what makes the painter look for labels;
+//! * `idle_frames_selected`: `IDLE_FRAMES` frames with nothing changed of a second view of the
+//!   same lines with every one of them selected - the selection is part of what the kept drawing
+//!   is keyed by, and every frame looks at it (docs/performance.md, "The selection in the plan
+//!   view's key").
 //!
 //! Prints one `cell=... min_ms=... median_ms=... samples=...` line a cell; the frame cells'
 //! lines end with how many times the view's picture was handed to its texture in the last
@@ -189,6 +193,18 @@ impl Window {
         window
     }
 
+    /// Every line selected, announced as a person's selection is, and the frame that draws it.
+    fn select_all(&mut self) {
+        let mut ids = Vec::with_capacity(LINES);
+        self.document
+            .model()
+            .entities
+            .for_each(|entity| ids.push(entity.id));
+        self.document.selection_mut().set(ids);
+        self.document.notify_selection_changed();
+        let _ = self.frame();
+    }
+
     /// One frame; whether the view's picture was handed to its texture in it.
     fn frame(&mut self) -> bool {
         let place = self.harness.screen();
@@ -233,6 +249,8 @@ fn main() {
     let lines = lines();
     let (plain, plain_index) = model_of(&lines, false);
     let (labelled, labelled_index) = model_of(&lines, true);
+    let mut selected = Window::new(lines.clone());
+    selected.select_all();
     let mut window = Window::new(lines);
     let mut cache = PlanPaintCache::default();
     let mut image = Image::new(WIDTH as u32, HEIGHT as u32);
@@ -243,6 +261,7 @@ fn main() {
         "paint_zoomed",
         "paint_zoomed_label_style",
         "idle_frames_again",
+        "idle_frames_selected",
     ];
     // A cell's samples, and the count its last sample gave: uploads, or entities drawn.
     let mut samples: Vec<(&str, Vec<f64>, usize)> =
@@ -262,6 +281,7 @@ fn main() {
                     "paint_zoomed_label_style" => {
                         paint(&labelled, &labelled_index, nudge, &mut cache, &mut image)
                     }
+                    "idle_frames_selected" => selected.frames(IDLE_FRAMES, 0.0),
                     _ => window.frames(IDLE_FRAMES, 0.0),
                 };
                 if let Some((_, kept, last)) = samples.iter_mut().find(|(name, _, _)| *name == cell)

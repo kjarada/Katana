@@ -12,6 +12,11 @@
 //!
 //! Each gtest suite is a module inside its file's module, named as
 //! tools/check_rust_parity.py expects.
+//!
+//! Written for the Rust, with no C++ twin: `index_tables`, the index and the
+//! broad phase against an exhaustive scan through table edits and failed
+//! commands (docs/performance.md, "The index and the tables a box is drawn
+//! from").
 
 #![allow(
     clippy::excessive_precision,
@@ -29,6 +34,7 @@ pub mod surface_test_support;
 mod customisation_record;
 mod dimension_draw;
 mod document_index;
+mod index_tables;
 mod indexed_queries;
 mod section;
 mod surface_document;

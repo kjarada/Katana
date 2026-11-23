@@ -139,6 +139,137 @@ mod simd_text {
         }
     }
 
+    // The ASCII unit a generated run holds at `index`: the 95 printable characters in turn, so
+    // that no two lanes of a kernel's step hold the same byte and one written to another's
+    // place shows.
+    fn ascii_unit(index: usize) -> u16 {
+        0x20 + (index % 0x5f) as u16
+    }
+
+    #[test]
+    fn the_narrowing_kernel_equals_the_unit_loop_at_every_length_with_a_non_ascii_unit_at_every_place()
+     {
+        use katana_core::text_kernels::{narrow_ascii_utf16, narrow_ascii_utf16_scalar};
+        // Not ASCII, each in its own way: the lowest such unit; one whose low byte is zero; and
+        // one whose two bytes are both below 0x80, which a test of each byte's top bit passes.
+        let breakers = [0x0080u16, 0x0100, 0x7f41];
+        let level = kernel_level();
+        let mut compared = 0;
+        // 0 to 100 units: every tail of 0 to 31 units after no whole step of 32, after one, two
+        // and three, and the unit that is not ASCII in every lane of both registers of a step.
+        for length in 0..=100usize {
+            // `at == length`: the run is ASCII to its end, which no choice of unit changes.
+            for at in 0..=length {
+                for breaker in breakers {
+                    if at == length && breaker != breakers[0] {
+                        continue;
+                    }
+                    for little in [true, false] {
+                        let mut units: Vec<u16> = (0..length).map(ascii_unit).collect();
+                        if at < length {
+                            units[at] = breaker;
+                        }
+                        let bytes = utf16(&units, little, false);
+                        let mut output = vec![0x55u8; length + 2];
+                        let mut reference = output.clone();
+                        let count = at_simd_level(level, || {
+                            narrow_ascii_utf16(&bytes, length, little, &mut output[1..])
+                        });
+                        let scalar =
+                            narrow_ascii_utf16_scalar(&bytes, length, little, &mut reference[1..]);
+                        // Worked out here and read from neither: the run before the unit as
+                        // its low bytes, between a guard before it and guards to the end.
+                        let mut expected = vec![0x55u8; length + 2];
+                        for (index, slot) in expected[1..=at].iter_mut().enumerate() {
+                            *slot = ascii_unit(index) as u8;
+                        }
+                        let what = format!("{length} units, {breaker:#06x} at {at}, {little}");
+                        assert_eq!(count, at, "{what}");
+                        assert_eq!(scalar, at, "{what}");
+                        assert_eq!(output, expected, "{what}");
+                        assert_eq!(reference, expected, "{what}");
+                        compared += 1;
+                    }
+                }
+            }
+        }
+        // 5151 pairs of a length and a place, 101 of them with no such unit (one run each) and
+        // the rest with each of the three, in both byte orders.
+        assert_eq!(compared, (5050 * 3 + 101) * 2);
+    }
+
+    #[test]
+    fn ascii_runs_longer_than_the_append_block_decode_as_they_are_written_at_every_level() {
+        // The decoder appends a run 4096 units at a time (text_kernels.rs, APPEND_BLOCK): runs
+        // that end just before, on and after one block, a kernel step past it and two blocks,
+        // with the one character that is not ASCII at the edges of a step and of a block.
+        let lengths = [4095usize, 4096, 4097, 4127, 4128, 4129, 8191, 8192, 8193];
+        let places = [
+            0usize, 1, 31, 32, 4063, 4064, 4095, 4096, 4097, 4127, 4128, 8191, 8192,
+        ];
+        let mut decoded = 0;
+        for length in lengths {
+            // `None`: the run is ASCII to its end.
+            let cases = places
+                .iter()
+                .copied()
+                .filter(|&at| at < length)
+                .map(Some)
+                .chain([None]);
+            for at in cases {
+                for little in [true, false] {
+                    let mut units: Vec<u16> = (0..length).map(ascii_unit).collect();
+                    let mut expected: String = (0..length)
+                        .map(|index| char::from(ascii_unit(index) as u8))
+                        .collect();
+                    if let Some(at) = at {
+                        units[at] = 0x00e9;
+                        // Every character before it is one byte, so the place is the byte's.
+                        expected.replace_range(at..at + 1, "\u{e9}");
+                    }
+                    let bytes = utf16(&units, little, true);
+                    for level in [SimdLevel::Scalar, kernel_level()] {
+                        let outcome = decode_at(level, &bytes);
+                        assert!(outcome.ok, "{}", outcome.text);
+                        // Not assert_eq: a failure would print two texts of 8000 characters.
+                        assert!(
+                            outcome.text == expected,
+                            "{length} units, the character at {at:?}, {little}, {level}"
+                        );
+                        decoded += 1;
+                    }
+                }
+            }
+        }
+        // 96 pairs of a length and a place (7, 8, 9, 10, 11, 12, 12, 13 and 14 for the nine
+        // lengths, the run with no such character counted in), two byte orders, two levels.
+        assert_eq!(decoded, 96 * 2 * 2);
+    }
+
+    #[test]
+    fn a_character_that_is_not_ascii_at_every_other_unit_decodes_past_the_append_block() {
+        // 5000 runs of one ASCII unit each: more runs than a block holds units, so the scratch
+        // the decoder narrows into is used again and again from its start.
+        let units: Vec<u16> = (0..10_000usize)
+            .map(|index| {
+                if index.is_multiple_of(2) {
+                    u16::from(b'a')
+                } else {
+                    0x00e9
+                }
+            })
+            .collect();
+        let expected = "a\u{e9}".repeat(5000);
+        for little in [true, false] {
+            let bytes = utf16(&units, little, true);
+            for level in [SimdLevel::Scalar, kernel_level()] {
+                let outcome = decode_at(level, &bytes);
+                assert!(outcome.ok, "{}", outcome.text);
+                assert!(outcome.text == expected, "{little}, {level}");
+            }
+        }
+    }
+
     #[test]
     fn an_ascii_run_longer_than_a_block_is_narrowed_byte_for_byte_at_every_level() {
         let units = [

@@ -8,6 +8,13 @@ license.workspace = true
 publish.workspace = true
 build = "build.rs"
 
+# The passes over a drawing, measured (docs/performance.md, "The broad phase's second extent",
+# "The verbs' walks", "Global Modify's layers"): a plain program, no benchmark library, so no
+# crate is added for it.
+[[bench]]
+name = "drawing_passes"
+harness = false
+
 [dependencies]
 katana_commands.workspace = true
 katana_core.workspace = true

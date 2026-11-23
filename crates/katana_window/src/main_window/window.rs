@@ -289,6 +289,8 @@ impl MainWindow {
                 ("terrainMenu", "&Terrain"),
                 ("bimMenu", "&BIM"),
                 ("gisMenu", "&GIS"),
+                // views2: the Window menu (main_window::actions), so no made menu takes its letter.
+                ("windowMenu", "&Window"),
                 ("helpMenu", "&Help"),
             ]
             .into_iter()
@@ -862,6 +864,12 @@ impl MainWindow {
         {
             let kind = *kind;
             exec.with_parts(|workspace, parts| workspace.arrange(parts, kind));
+            return;
+        }
+        // views2: Window > a view's title, through the verb a typed line runs - logged, and the
+        // view brought out of the tray or to the front of its tabs as VIEWS ACTIVATE brings it.
+        if let Some(id) = super::actions::window_view_id(name) {
+            let _ = exec.run_verb_line(&format!("VIEWS ACTIVATE {id}"));
             return;
         }
         if let Some(shown) = name.strip_prefix("viewShows")

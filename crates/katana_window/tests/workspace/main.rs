@@ -25,13 +25,21 @@ mod support;
 mod customisation_workbench;
 mod general_texts;
 mod start_dialog;
+// Not a twin: a view's title bar shortcut menu.
+mod view_bar_menu;
 mod view_chrome;
+// Not a twin: where a floating view is, through a drag, a maximise and the tray.
+mod view_floating;
 mod view_focus;
 mod view_layers_popup;
 mod view_links;
 mod view_scale;
 mod view_selection;
+// Not a twin: the views kept between sessions.
+mod view_session;
 // Not a twin: tiling the open views (the owner's request of 2026-11-21).
 mod view_tiling;
+// Not a twin: the Window menu.
+mod window_menu;
 mod workspace_tools;
 mod workspace_views;

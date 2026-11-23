@@ -9,7 +9,11 @@
 //! view, drawing, layers, library, selection, reference layers and meshes are all as they were
 //! only lays that image down and draws the view's own furniture over it (tool previews, the snap
 //! marker, the selection box, the prompt). A mouse move then costs the furniture, not the
-//! drawing: measured on a 27.6k-entity survey drawing it was a whole repaint every move.
+//! drawing: measured on a 27.6k-entity survey drawing it was a whole repaint every move. And a
+//! paint whose furniture too would be drawn from exactly what the last was - no tool running, no
+//! grip in hand, the grips, the selection box and the snap marker as they were (`FurnitureKey`) -
+//! keeps the whole picture and draws nothing: egui paints a frame for every pointer move
+//! anywhere in the window.
 //!
 //! THE RUST SHAPE. The C++ widget keeps `Document&` and `ViewState&` for its life, is sent Qt
 //! events, and tells the window what happened through `std::function` hooks. Here:
@@ -39,6 +43,7 @@
 //! on a resize until the user pans or zooms; a view rebuilt over the same state starts without
 //! it, which errs on the side of keeping the zoom.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -50,7 +55,7 @@ use std::time::Instant;
 use katana_cad::annotation::leader_presets::leader_context;
 use katana_cad::dimension_draw::resolve_dimension_style;
 use katana_cad::drawing::drafting::{TrackingPoints, constrain, track_acquired};
-use katana_cad::drawing::grips::{Grip, grip_at};
+use katana_cad::drawing::grips::{Grip, GripKind, grip_at};
 use katana_cad::drawing::vertex_editing::read_polyline;
 use katana_cad::interactive_tool::{PICK_APERTURE_PIXELS, SNAP_APERTURE_PIXELS, ToolInput};
 use katana_cad::plot::fit_scale;
@@ -63,7 +68,7 @@ use katana_cad::view_set::ViewState;
 use katana_cad::view_transform::{DEFAULT_GRID_PIXELS, ViewTransform, grid_spacing};
 use katana_cad::{
     BoxSelectionMode, Document, DocumentParts, LayerOverrides, ListenerHandle, PlotSettings,
-    SelectionFilter, SnapRequest, SnapResult,
+    SelectionFilter, SelectionSet, SnapRequest, SnapResult,
 };
 use katana_commands::{CommandPtr, delete_entities};
 use katana_core::error::make_error;
@@ -93,8 +98,8 @@ use crate::plan_painter::{
     PlanSource, mesh_plan_display, paint_plan, paint_plan_geometry, plan_drawn_bounds,
     plan_source_of, plot_plan_to_pdf,
 };
-use crate::theme::palette;
-use crate::theme::style::{overlay_font, ui_font};
+use crate::theme::palette::{self, TextSize};
+use crate::theme::style::{overlay_font, text_size, ui_font};
 use crate::tools::tool_host::{Outcome, ToolHost, text_hook};
 use crate::view_focus::{FocusPrevious, FocusReason, focus_chooses_view};
 
@@ -504,6 +509,7 @@ struct DrawingKey {
     notifications: u64,
     model_revision: u64,
     library_generation: u64,
+    /// The view's count of the selections it has seen (`selection_revision`), not the ids.
     selection: u64,
     references: u64,
     meshes: u64,
@@ -512,6 +518,81 @@ struct DrawingKey {
     grid: bool,
     thin_lines: bool,
     ghosts: bool,
+}
+
+/// Everything the view's furniture is painted from beyond what the kept drawing is keyed by
+/// (`DrawingKey`), on a frame that has a key at all (`PlanView::furniture_key`). A paint whose
+/// drawing was kept and whose key is the last paint's keeps the picture: no copy of the drawing,
+/// no furniture painted, nothing compared (docs/performance.md, "The plan view's furniture on an
+/// unchanged frame").
+///
+/// THE FURNITURE'S INPUTS, each with where it is keyed. Over a copy of the drawing `paint` draws:
+///
+/// * **a running tool's preview, caption and prompt band** - read from the tool through a trait
+///   object (`ToolHost::feedback` and `prompt`), which has no revision to key. NO KEY while a
+///   tool runs: every such frame is painted, so what only a tool's frame reads (the typed line,
+///   whether the pointer has been seen, the current layer and style, the dimension styles)
+///   needs none;
+/// * **the grips of the selection** (`GripController::paint`) - the list, the hot ones and the
+///   one under the cursor, here; where each is drawn, by the view's transform and size, in the
+///   DrawingKey. A grip pressed, dragged or picked up draws the drag's preview and its prompt
+///   from what the controller does not tell (its target, whether it inserts): NO KEY. Nor with
+///   Ctrl held over a segment middle, where the vertex a drag would add is drawn by the plan
+///   painter;
+/// * **the band of a hovered grip's hint** (`GripController::hover_hint`) - the hovered grip,
+///   here; its entity, in the DrawingKey (the document's notifications and model revision);
+/// * **the empty drawing's hint** - whether it shows, here; the view's size and the text size
+///   it is laid out in, here;
+/// * **the selection box** - its two corners, here;
+/// * **the snap marker** (`draw_snap_marker`) - everything in `SnapMarks`, here, but the
+///   transform (the DrawingKey's); the cursor only where the marker draws at it
+///   (`SnapMarks::cursor_drawn`);
+/// * **the fonts of the hint and the bands** - the text size (View > Text Size), here; the
+///   faces are loaded once. The colours are constants of the build (theme's palette,
+///   feedback_painter's overlay).
+///
+/// A new thing drawn over the drawing needs its input here, or its frame given no key, and a
+/// case in tests/plan_view/kept_furniture.rs.
+#[derive(Debug, PartialEq)]
+struct FurnitureKey<'a> {
+    width: i32,
+    height: i32,
+    text_size: TextSize,
+    empty_hint: bool,
+    /// Lent while the key is compared, and copied only when a paint keeps it: a selection can
+    /// offer twenty thousand grips.
+    grips: Cow<'a, [Grip]>,
+    hot: Vec<Grip>,
+    hovered: Option<Grip>,
+    selection_box: Option<(PointF, PointF)>,
+    object_tracking: bool,
+    acquired: Vec<Point2>,
+    tracking_from: Option<Point2>,
+    tracking_label: String,
+    active_snap: Option<SnapResult>,
+    cursor: Option<Point2>,
+}
+
+impl FurnitureKey<'_> {
+    /// The key with its own copy of what it was lent, to keep beside the picture it is for.
+    fn into_kept(self) -> FurnitureKey<'static> {
+        FurnitureKey {
+            width: self.width,
+            height: self.height,
+            text_size: self.text_size,
+            empty_hint: self.empty_hint,
+            grips: Cow::Owned(self.grips.into_owned()),
+            hot: self.hot,
+            hovered: self.hovered,
+            selection_box: self.selection_box,
+            object_tracking: self.object_tracking,
+            acquired: self.acquired,
+            tracking_from: self.tracking_from,
+            tracking_label: self.tracking_label,
+            active_snap: self.active_snap,
+            cursor: self.cursor,
+        }
+    }
 }
 
 /// What the tool host said through its hooks during one call, taken by the view after it.
@@ -571,6 +652,17 @@ struct SnapMarks<'a> {
     active_snap: Option<SnapResult>,
 }
 
+impl SnapMarks<'_> {
+    /// The cursor, where the marker draws at it: the far end of the tracking path and the place
+    /// of a drafting aid's label. With neither, the cursor is no part of what the marker draws,
+    /// which is what lets a pointer crossing the view leave the kept picture as it was
+    /// (`FurnitureKey`): so the marker reads the cursor through this and nowhere else.
+    fn cursor_drawn(&self) -> Option<Point2> {
+        (self.tracking_from.is_some() || !self.tracking_label.is_empty())
+            .then_some(self.cursor_world)
+    }
+}
+
 fn polygon(canvas: &mut dyn Canvas, points: &[PointF]) {
     canvas.draw_polygon(points, FillRule::default());
 }
@@ -606,17 +698,20 @@ fn draw_snap_marker(canvas: &mut dyn Canvas, marks: &SnapMarks<'_>) {
             canvas.draw_line(offset(a, -4.0, 0.0), offset(a, 4.0, 0.0));
             canvas.draw_line(offset(a, 0.0, -4.0), offset(a, 0.0, 4.0));
         }
-        if let Some(from) = marks.tracking_from {
+        if let (Some(from), Some(cursor)) = (marks.tracking_from, marks.cursor_drawn()) {
             canvas.set_pen(styled_pen(colour, 1.0, PenStyle::Dot));
             canvas.draw_line(
                 to_screen_through(&marks.plan, from),
-                to_screen_through(&marks.plan, marks.cursor_world),
+                to_screen_through(&marks.plan, cursor),
             );
         }
     }
-    if !marks.tracking_label.is_empty() && unsnapped {
+    if !marks.tracking_label.is_empty()
+        && unsnapped
+        && let Some(cursor) = marks.cursor_drawn()
+    {
         // A drafting aid's tooltip: what constrained the point.
-        let p = to_screen_through(&marks.plan, marks.cursor_world);
+        let p = to_screen_through(&marks.plan, cursor);
         canvas.set_pen(Pen::new(colour));
         canvas.set_font(overlay_font(11));
         canvas.draw_text(offset(p, 12.0, 18.0), marks.tracking_label);
@@ -899,6 +994,13 @@ pub struct PlanView {
     /// The drawing as last painted, and what it was painted for.
     drawing: Image,
     drawing_key: Option<DrawingKey>,
+    /// The selection the drawing was last keyed for, and how many times a paint has found the
+    /// document's another. The selection is announced (Document::notify_selection_changed), but
+    /// a caller that changes it and only asks for a repaint must still see it drawn, so every
+    /// paint looks: set against set, in place, where it used to list every selected id into a
+    /// vector and hash the list (docs/performance.md, "The selection in the plan view's key").
+    selection_seen: SelectionSet,
+    selection_revision: u64,
     drawing_paints: usize,
     /// Counted when the window says its reference data changed.
     reference_revision: u64,
@@ -915,6 +1017,10 @@ pub struct PlanView {
     /// into it, where a fresh copy of the drawing each frame allocated, and first touched, a
     /// whole frame of memory.
     spare: Image,
+    /// What the furniture of `picture` was painted from, when that has a key (`FurnitureKey`);
+    /// None after a paint that had none, so the paint after it never keeps the picture.
+    furniture: Option<FurnitureKey<'static>>,
+    furniture_paints: usize,
 
     panning: bool,
     last_mouse: PointF,
@@ -980,6 +1086,8 @@ impl PlanView {
             raster: Arc::new(CanvasRasterBackend),
             drawing: Image::default(),
             drawing_key: None,
+            selection_seen: SelectionSet::default(),
+            selection_revision: 0,
             drawing_paints: 0,
             reference_revision: 0,
             last_frame_ms: 0.0,
@@ -987,6 +1095,8 @@ impl PlanView {
             picture: Image::default(),
             picture_revision: 0,
             spare: Image::default(),
+            furniture: None,
+            furniture_paints: 0,
             panning: false,
             last_mouse: PointF::default(),
             box_start: None,
@@ -1174,6 +1284,13 @@ impl PlanView {
     /// not repaint it.
     pub fn drawing_paint_count(&self) -> usize {
         self.drawing_paints
+    }
+
+    /// How many times the furniture has been painted over the drawing, for the tests that prove
+    /// a frame with nothing changed keeps the picture and a frame with anything changed does
+    /// not.
+    pub fn furniture_paint_count(&self) -> usize {
+        self.furniture_paints
     }
 
     /// The last paint, whole, and the last time the drawing was painted, in milliseconds.
@@ -2258,6 +2375,11 @@ impl PlanView {
     /// polyline. So is Delete while a tool runs that takes it (a vertex tool): the polyline the
     /// tool is editing is selected - its chosen vertex's grips needed that, and the tool selects
     /// what it has just edited - and Erase took the whole string from under it.
+    ///
+    /// Escape while a point pick waits is the VIEW's: it answers the pick with no point. The
+    /// window's Deselect holds Escape, and taking it there cleared the selection and left the
+    /// dialog that asked still waiting for its point. Every other Escape is Deselect's, which
+    /// cancels in the view as the view's own Escape does.
     pub fn shortcut_override(
         &mut self,
         cx: &dyn PlanViewHost,
@@ -2265,6 +2387,10 @@ impl PlanView {
         key: ViewKey,
         modifiers: KeyModifiers,
     ) -> bool {
+        // As `key_press` takes it: whatever is held with it.
+        if self.point_pick && key == ViewKey::Escape {
+            return true;
+        }
         self.lend_tools(state);
         let document = cx.document();
         if self.tools.active() && key == ViewKey::Z && modifiers.is_undo() {
@@ -2508,15 +2634,19 @@ impl PlanView {
         }
     }
 
-    fn drawing_key(&self, cx: &dyn PlanViewHost, state: &ViewState) -> DrawingKey {
-        let document = cx.document();
-        // The selection is announced (Document::notify_selection_changed), but a caller that
-        // changes it and only asks for a repaint must still see it drawn: a selection is the
-        // ids, in order, and hashing even a whole drawing's is a fraction of a millisecond.
-        let mut selection = Fingerprint::new();
-        for id in document.selection().ids() {
-            selection.add(id);
+    /// The count of the selections this view has seen, moved when `selection` is not the one
+    /// the last paint saw. Two sets of one size are compared id by id with nothing allocated; a
+    /// changed one is copied, once a change.
+    fn selection_revision_for(&mut self, selection: &SelectionSet) -> u64 {
+        if *selection != self.selection_seen {
+            self.selection_seen.clone_from(selection);
+            self.selection_revision += 1;
         }
+        self.selection_revision
+    }
+
+    fn drawing_key(&self, cx: &dyn PlanViewHost, state: &ViewState, selection: u64) -> DrawingKey {
+        let document = cx.document();
         let mut references = Fingerprint::new();
         references.add(self.reference_revision);
         if let Some(reference) = cx.reference() {
@@ -2565,7 +2695,7 @@ impl PlanView {
             notifications: self.notified(),
             model_revision: document.model_revision(),
             library_generation: document.library_generation(),
-            selection: selection.value,
+            selection,
             references: references.value,
             meshes: meshes.value,
             layers: state.layers.clone(),
@@ -2629,7 +2759,8 @@ impl PlanView {
         // something it depends on changes. The image is the view's size in DEVICE pixels, so on
         // a scaled display it is as sharp as painting the view directly, and laying it down is a
         // copy.
-        let key = self.drawing_key(cx, state);
+        let selection = self.selection_revision_for(document.selection());
+        let key = self.drawing_key(cx, state, selection);
         let stale = self.drawing_key.as_ref() != Some(&key) || self.drawing.is_null();
         if stale {
             let drawing_timer = Instant::now();
@@ -2665,21 +2796,34 @@ impl PlanView {
             self.grips
                 .refresh(document, Some(&state.layers), self.notified());
         }
+        // Made before the picture, so the furniture's key reads the very marks the snap marker
+        // is drawn from.
+        let marks = SnapMarks {
+            plan: state.plan,
+            object_tracking: document.drafting().object_tracking,
+            acquired: self.tracking.points(),
+            tracking_from: self.tracking_from,
+            cursor_world: self.cursor_world,
+            tracking_label: &self.tracking_label,
+            active_snap: self.active_snap,
+        };
+        // The drawing kept, and the furniture to be drawn from exactly what the last paint's
+        // was: the picture is that paint's, to the pixel, and is kept as it is. What a paint
+        // with a key leaves beside the picture - no preview, no prompt band - is what the last
+        // one left.
+        let furniture = self.furniture_key(&marks);
+        let kept = !stale && furniture.is_some() && self.furniture.as_ref() == furniture.as_ref();
+        let furniture = furniture.map(FurnitureKey::into_kept);
+        if kept {
+            self.frame_done(frame_timer, stale);
+            return &self.picture;
+        }
         let mut picture = std::mem::take(&mut self.spare);
         picture.copy_from(&self.drawing);
         let mut preview_count = 0;
         let mut preview_counts = PreviewCounts::default();
         let mut prompt_band = String::new();
         {
-            let marks = SnapMarks {
-                plan: state.plan,
-                object_tracking: document.drafting().object_tracking,
-                acquired: self.tracking.points(),
-                tracking_from: self.tracking_from,
-                cursor_world: self.cursor_world,
-                tracking_label: &self.tracking_label,
-                active_snap: self.active_snap,
-            };
             let unsnapped = self
                 .active_snap
                 .is_none_or(|snap| snap.mode == SnapMode::Grid);
@@ -2861,17 +3005,61 @@ impl PlanView {
                 }
             });
         }
-        // Compared whole, pixel for pixel, never guessed from what was asked to be drawn: the
-        // furniture depends on the tool, the grips, the snap and the typed line, and a key
-        // over all of those that missed one would leave the screen showing a stale picture.
+        // Compared whole, pixel for pixel, never guessed from what was asked to be drawn: a
+        // paint that came this far had no key (a tool's preview, a grip in hand) or a key that
+        // had changed, and a changed key does not always change the picture (a grip made hot
+        // that lies outside the view changes the key and not a pixel).
         if picture != self.picture {
             self.picture_revision += 1;
         }
         self.spare = std::mem::replace(&mut self.picture, picture);
+        self.furniture = furniture;
+        self.furniture_paints += 1;
         self.last_preview_count = preview_count;
         self.last_preview_counts = preview_counts;
         self.prompt_band = prompt_band;
+        self.frame_done(frame_timer, stale);
+        &self.picture
+    }
 
+    /// The key of the furniture a paint is about to draw, from the marks its snap marker will be
+    /// drawn from; None for a frame whose furniture has no key and is always painted
+    /// (`FurnitureKey` says which, and why).
+    fn furniture_key(&self, marks: &SnapMarks<'_>) -> Option<FurnitureKey<'_>> {
+        let grips = &self.grips;
+        let adds_a_vertex = grips.ctrl()
+            && grips
+                .hovered()
+                .is_some_and(|grip| grip.kind == GripKind::SegmentMid);
+        if self.tools.active()
+            || grips.base().is_some()
+            || grips.active()
+            || grips.pressed()
+            || adds_a_vertex
+        {
+            return None;
+        }
+        Some(FurnitureKey {
+            width: self.width,
+            height: self.height,
+            text_size: text_size(),
+            empty_hint: self.empty_hint_shown,
+            grips: Cow::Borrowed(grips.grips()),
+            hot: grips.hot().to_vec(),
+            hovered: grips.hovered(),
+            selection_box: self.box_start.map(|start| (start, self.box_end)),
+            object_tracking: marks.object_tracking,
+            acquired: marks.acquired.to_vec(),
+            tracking_from: marks.tracking_from,
+            tracking_label: String::from(marks.tracking_label),
+            active_snap: marks.active_snap,
+            cursor: marks.cursor_drawn(),
+        })
+    }
+
+    /// The end of every paint, one that kept the picture too: its time, and its statistics
+    /// raised.
+    fn frame_done(&mut self, frame_timer: Instant, stale: bool) {
         self.last_frame_ms = frame_timer.elapsed().as_secs_f64() * 1.0e3;
         // The drawing's own time, and this frame's when it only laid the kept drawing down: a
         // mouse move reads "kept", a pan the drawing.
@@ -2890,7 +3078,6 @@ impl PlanView {
             )
         };
         self.events.push(PlanViewEvent::FrameStats(stats));
-        &self.picture
     }
 
     /// Plots the drawing as this view shows it - its hidden layers and reference layers - through

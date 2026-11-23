@@ -725,6 +725,7 @@ fn recover_with_unguarded(
             String::from_utf8_lossy(&katana_core::path_text::path_to_utf8(&root)).into_owned(),
         ],
         timeout: HELPER_RUN_LIMIT,
+        ..SpawnRequest::default()
     };
     let ran = launcher.run(&request).map_err(|error| {
         make_error(

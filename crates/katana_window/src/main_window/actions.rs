@@ -2,6 +2,8 @@
 //! in the C++ (makeAction) and shared by a menu and a toolbar - and every workbench's, composed in
 //! the C++'s order (buildActions, buildGisActions, buildSurveyActions, buildFormatActions,
 //! buildToolActions, buildViewMenu, buildDocks, buildWindowMenu).
+//! The Window menu is the Rust window's own: the tilings and the open views (docs/desktop.md, "The
+//! Window menu").
 //!
 //! A row carries what a QAction carried that changes - its check, whether it is enabled, Undo's
 //! text - so the rows are made again from the window's state whenever they are asked for (each
@@ -20,7 +22,7 @@ use egui::{Key, KeyboardShortcut, Modifiers};
 use katana_cad::snapping::SnapModes;
 use katana_cad::view_link::linkable;
 use katana_cad::view_verbs::{ZoomRequestKind, zoom_takes};
-use katana_cad::viewport_layout::{LayoutKind, TileKind, ViewKind};
+use katana_cad::viewport_layout::{LayoutKind, ViewKind};
 use katana_entity::EnumName;
 use katana_render::camera::{StandardView, to_string as standard_view_name};
 
@@ -570,39 +572,20 @@ pub const LAYOUTS: [(LayoutKind, &str, &str, &str); 6] = [
     ),
 ];
 
-/// The tilings View > Viewport Layout offers above its presets: kind, action name, icon, tip. Each
-/// runs VIEWS TILE with the kind's word (`tiling_line`), as a typed line would.
-pub const TILINGS: [(TileKind, &str, &str, &str); 3] = [
-    (
-        TileKind::Grid,
-        "viewTile",
-        "LayoutTile",
-        "Give every open view a place of its own of equal size, in a grid; opens and closes none \
-         (VIEWS TILE)",
-    ),
-    (
-        TileKind::Columns,
-        "viewTileSideBySide",
-        "LayoutTileColumns",
-        "Put the open views side by side, each the same width; opens and closes none (VIEWS TILE \
-         COLUMNS)",
-    ),
-    (
-        TileKind::Rows,
-        "viewTileStacked",
-        "LayoutTileRows",
-        "Stack the open views one above the other, each the same height; opens and closes none \
-         (VIEWS TILE ROWS)",
-    ),
-];
+// The tilings - View > Viewport Layout's and the Window menu's, and a view's title bar menu's -
+// are the workspace's one table, which that menu is made from too: one action wherever it is
+// shown, and one line for it.
+pub use crate::view_workspace::{tiling_actions, tiling_line};
 
-/// The line a tiling's menu item hands the window's executor: None for a name that is no
-/// tiling's.
-pub fn tiling_line(action: &str) -> Option<String> {
-    TILINGS
-        .iter()
-        .find(|(_, name, ..)| *name == action)
-        .map(|(kind, ..)| format!("VIEWS TILE {}", kind.word().to_ascii_uppercase()))
+/// The object name of the Window menu's item for view `id`: it makes that view the active one.
+pub const WINDOW_VIEW_ACTION: &str = "windowView";
+
+/// The view a Window menu item's name stands for: None for any other name.
+pub fn window_view_id(action: &str) -> Option<katana_cad::view_set::ViewId> {
+    action
+        .strip_prefix(WINDOW_VIEW_ACTION)
+        .and_then(|id| id.parse().ok())
+        .filter(|id| *id != katana_cad::view_set::NO_VIEW)
 }
 
 /// The kinds View > Active Viewport Shows offers.
@@ -1174,11 +1157,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     layout_menu
         .items
         .push(MenuItem::Section(String::from("Arrange the open views")));
-    for (kind, name, icon, tip) in TILINGS {
-        layout_menu
-            .items
-            .push(MenuItem::Action(act(name, icon, kind.name(), tip)));
-    }
+    layout_menu
+        .items
+        .extend(tiling_actions().into_iter().map(MenuItem::Action));
     layout_menu
         .items
         .push(MenuItem::Section(String::from("Presets")));
@@ -1445,6 +1426,46 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .action(online.clone());
     append(&mut gis, ui.geo_menus.gis());
 
+    // ---- Window -----------------------------------------------------------------------------
+    // The views as a list (the owner's ask of 2026-11-21 for "a good way to arrange them"): the
+    // tilings, the very actions View > Viewport Layout shows, and every open view by its title,
+    // the active one ticked. An item makes its view the active one by the line a person would
+    // type, VIEWS ACTIVATE <id>, which brings it out of the tray or to the front of its tabs
+    // too. No Close View: closing a view has no action and no verb, only its bar's button and
+    // its bar's menu.
+    let mut window_menu = Menu::new("windowMenu", "&Window").section("Arrange the open views");
+    window_menu
+        .items
+        .extend(tiling_actions().into_iter().map(MenuItem::Action));
+    window_menu
+        .items
+        .push(MenuItem::Section(String::from("Open views")));
+    {
+        let views = exec.workspace.view_set();
+        let views = views.borrow();
+        let active_view = views.active_id();
+        for state in views.views() {
+            let id = state.id;
+            let title = katana_cad::view_set::ViewSet::title(state);
+            let icon = KINDS
+                .iter()
+                .find(|(kind, ..)| *kind == state.kind)
+                .map_or("ViewPlan", |(_, icon, _)| *icon);
+            window_menu.items.push(MenuItem::Action(
+                act(
+                    &format!("{WINDOW_VIEW_ACTION}{id}"),
+                    icon,
+                    &title,
+                    &format!(
+                        "Make {title} the active view, bringing it out of the tray or to the \
+                         front of its tabs (VIEWS ACTIVATE {id})"
+                    ),
+                )
+                .checkable(id == active_view),
+            ));
+        }
+    }
+
     // ---- Help -------------------------------------------------------------------------------
     let help = Menu::new("helpMenu", "&Help")
         .section("Reference")
@@ -1541,7 +1562,7 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     // ---- the menu bar, in the order a CAD user reads it --------------------------------------
     let mut menus = vec![file, edit, view, draw, modify, annotate];
     menus.extend(made);
-    menus.extend([format, survey, terrain, bim, gis, help]);
+    menus.extend([format, survey, terrain, bim, gis, window_menu, help]);
 
     // ---- the toolbars, in the order makeToolBar made them -------------------------------------
     let mut bars: Vec<(ToolBar, BarPlace)> = Vec::new();

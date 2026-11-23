@@ -1144,10 +1144,10 @@ fn points_by_number<'a>(
     number_property: &str,
 ) -> BTreeMap<String, Vec<&'a Entity>> {
     let mut by_number: BTreeMap<String, Vec<&'a Entity>> = BTreeMap::new();
-    for id in model.entities.ids() {
-        let Some(entity) = model.entities.find(id) else {
-            continue;
-        };
+    // One pass in entity order (EntityDatabase::iter): a list of every id and
+    // a lookup of each visits the same entities in the same order, at a tree
+    // lookup an entity (docs/performance.md, "The verbs' walks").
+    for entity in model.entities.iter() {
         if matches!(entity.geometry, Geometry::Point(_)) {
             let number = point_number_of(entity, number_property);
             if !number.is_empty() {
@@ -1242,10 +1242,10 @@ impl<'a> LineBuilder<'a> {
         }
         if skip_drawn {
             // Only the ones that carry a code: a line drawn here always does,
-            // and most of a drawing's polylines carry none.
-            for id in model.entities.ids() {
-                if let Some(entity) = model.entities.find(id)
-                    && matches!(entity.geometry, Geometry::Polyline(_))
+            // and most of a drawing's polylines carry none. In entity order,
+            // which is the order drawn_already takes the first of several in.
+            for entity in model.entities.iter() {
+                if matches!(entity.geometry, Geometry::Polyline(_))
                     && code_of(entity, &builder.property).is_some()
                 {
                     let identity = builder.identity_of(entity);
@@ -1545,19 +1545,28 @@ pub(crate) fn process_linework_to(
 
     // In entity order whatever order they were given in: that IS the entity
     // order a string may be joined in, and it makes the report deterministic.
-    let mut subject = if options.ids.is_empty() {
-        model.entities.ids()
-    } else {
-        options.ids.clone()
-    };
-    subject.sort_unstable();
-    subject.dedup();
-
     let mut points: Vec<&Entity> = Vec::new();
-    for &id in &subject {
-        match model.entities.find(id) {
-            Some(entity) if matches!(entity.geometry, Geometry::Point(_)) => points.push(entity),
-            _ => report.not_points += 1,
+    if options.ids.is_empty() {
+        // Every entity: the drawing's own order is entity order, so one pass
+        // over it is the sorted list of every id looked up one by one.
+        for entity in model.entities.iter() {
+            if matches!(entity.geometry, Geometry::Point(_)) {
+                points.push(entity);
+            } else {
+                report.not_points += 1;
+            }
+        }
+    } else {
+        let mut subject = options.ids.clone();
+        subject.sort_unstable();
+        subject.dedup();
+        for &id in &subject {
+            match model.entities.find(id) {
+                Some(entity) if matches!(entity.geometry, Geometry::Point(_)) => {
+                    points.push(entity);
+                }
+                _ => report.not_points += 1,
+            }
         }
     }
     let property = if options.property.is_empty() {

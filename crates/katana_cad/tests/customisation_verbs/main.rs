@@ -15,6 +15,10 @@
 //! expects. The one case that changes the working folder is in the target
 //! tests/customisation_verbs_env instead, which holds one lock around it: the working folder is
 //! the process's, and this binary runs its tests on parallel threads.
+//!
+//! Written for the Rust, with no C++ twin: `global_modify_layers`, what a scope and a filter
+//! take against the rule written out entity by entity (docs/performance.md, "Global Modify's
+//! layers").
 
 #![allow(
     clippy::module_inception,
@@ -29,6 +33,7 @@ mod customisation_verbs;
 mod definition_edit;
 mod document_status;
 mod global_modify;
+mod global_modify_layers;
 mod hatch_set_verb;
 mod linework_verbs;
 mod survey_code_verbs;

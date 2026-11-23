@@ -16,6 +16,10 @@
 //!
 //! Each gtest suite is a module inside its file's module, named as
 //! tools/check_rust_parity.py expects.
+//!
+//! Written for the Rust, with no C++ twin: `entity_walks`, the survey verbs
+//! over the whole drawing against the same verbs over every id named
+//! (docs/performance.md, "The verbs' walks").
 
 #![allow(
     clippy::excessive_precision,
@@ -27,6 +31,7 @@
     reason = "Inner module names identify the C++ suites for the parity checker."
 )]
 
+mod entity_walks;
 mod linework;
 mod linework_code_names;
 mod linework_features;

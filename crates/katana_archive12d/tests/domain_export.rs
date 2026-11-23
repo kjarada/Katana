@@ -174,6 +174,41 @@ mod domain_export {
         near(text.rotation, PI / 2.0, 1e-12);
     }
 
+    // The export walks the drawing once, in entity order (docs/performance.md,
+    // "The verbs' walks"): the strings are written by ascending id, across
+    // the gaps deleted entities leave.
+    #[test]
+    fn entities_are_written_in_the_order_of_their_ids_whatever_ids_are_missing() {
+        // Entity k starts at the easting (37 k) mod 401, so the eastings say
+        // which entity each string is and are in no order of their own.
+        let easting = |id: EntityId| ((id * 37) % 401) as f64;
+        let mut model = Model::default();
+        for id in 1..=400 {
+            let x = easting(id);
+            let added = add_geometry(
+                &mut model,
+                Segment2::new(Point2::new(x, 0.0), Point2::new(x, 5.0)),
+                "0",
+            );
+            assert_eq!(added, id);
+        }
+        for id in (7..=400).step_by(7) {
+            assert!(model.entities.remove(id).is_ok());
+        }
+        let kept: Vec<EntityId> = (1..=400).filter(|id: &EntityId| !id.is_multiple_of(7)).collect();
+
+        let (back, exported) = round_trip(&model, &[]);
+        assert_eq!(exported.entities_written, kept.len());
+        assert_eq!(back.entities.len(), kept.len());
+        for (entity, id) in back.entities.iter().zip(&kept) {
+            assert_eq!(
+                shape::<Segment2>(&entity.geometry).start.x,
+                easting(*id),
+                "entity {id}"
+            );
+        }
+    }
+
     #[test]
     fn an_arc_keeps_its_hand_and_which_of_the_two_arcs_it_is() {
         // Quarter turns about the origin from (10,0): counter-clockwise to

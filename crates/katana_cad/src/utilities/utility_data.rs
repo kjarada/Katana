@@ -685,10 +685,9 @@ pub fn read_utility_data(model: &Model, matched: &[EntityId]) -> Result<UtilityD
     // place along a line - but say no line: a utility.line deleted or emptied
     // by hand. Never ignored, or a line would be read short of them.
     let mut strays: Vec<&Entity> = Vec::new();
-    for id in model.entities.ids() {
-        let Some(entity) = model.entities.find(id) else {
-            continue;
-        };
+    // One pass in entity order (EntityDatabase::iter), which is the order the
+    // strays are refused in and a line's points are read in.
+    for entity in model.entities.iter() {
         let Some(line) = line_of(entity) else {
             if is_stray_vertex(entity) {
                 strays.push(entity);

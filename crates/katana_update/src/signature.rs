@@ -37,15 +37,17 @@
 //! with R compared as bytes; it also refuses an R of small order, which no signer that follows
 //! RFC 8032 makes, and which a key and an S that passed the checks above cannot make verify.
 //! OpenSSL's own environment (OPENSSL_CONF and the rest) has no twin: nothing in this verifier
-//! reads a file or loads code, so hardening only removes the variables, for the programs this one
-//! starts.
+//! reads a file or loads code, so hardening only keeps the variables from the programs this one
+//! starts (harden_open_ssl_environment), and leaves this process's environment as it is.
 
 use crate::feed::MAX_SIGNATURE_BYTES;
+use crate::process::{SpawnRequest, is_variable};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::traits::IsIdentity;
 use ed25519_dalek::{Signature, VerifyingKey};
 use katana_core::error::make_error;
 use katana_core::{Error, ErrorCode, Result, Status};
+use std::ffi::OsStr;
 
 pub type PublicKey = [u8; 32];
 pub type SignatureBytes = [u8; 64];
@@ -388,48 +390,48 @@ pub fn check_public_key(key: &PublicKey) -> Status {
     Ok(())
 }
 
-/// The first thing the helper's main() does: removes OPENSSL_CONF, OPENSSL_MODULES and
-/// OPENSSL_ENGINES from this process's environment. The C++ also starts libcrypto without reading
-/// a configuration file; the port's verifier reads none, so the variables matter only to the
-/// programs this one starts, which inherit none of them. Not called by katana, katana_cli or
-/// katana_mcp: they share a process with an HTTP library and a toolkit that read those variables
-/// for their own reasons. Idempotent. Internal if one of the three variables is still set
-/// afterwards (the other two are removed all the same). The helper that relaunches katana reads
-/// them BEFORE this call if it means to hand the user's own values on, and builds the child's
-/// environment from that copy.
+/// The three variables that make OpenSSL read a file or load code from a place the environment
+/// names (a configuration, a provider module, an engine). The same list as
+/// tools/update_make_manifest.py gives the openssl it runs.
+pub const OPEN_SSL_VARIABLES: [&str; 3] = ["OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"];
+
+fn is_open_ssl_variable(name: &str) -> bool {
+    OPEN_SSL_VARIABLES
+        .iter()
+        .any(|variable| is_variable(OsStr::new(name), variable))
+}
+
+/// The hardening, as a launch is told it: the program of `request` is started WITHOUT
+/// OPENSSL_CONF, OPENSSL_MODULES and OPENSSL_ENGINES, whatever this process holds of them and
+/// however their names are spelled where the system does not tell the spellings apart (Windows).
+/// What the request already said of the three is dropped, so nothing set before the call
+/// survives it and a second call changes nothing. A caller that means to hand the person's own
+/// values on - the helper, to the person's Katana - adds them to the request AFTER this call,
+/// from the copy it read itself. Every other variable, OPENSSL_CONF_INCLUDE among them, is the
+/// request's as it was.
 ///
-/// # Safety
+/// Until 2026-11-22 this removed the three from this process's environment, which is what the
+/// C++ did for the libcrypto in its own process. Here they have no reader in the process that
+/// calls this: the verifier above reads no file and loads no code, and the helper links nothing
+/// that consults the environment for itself (it imports the operating system's DLLs alone,
+/// which the tests read from its import table). The programs it starts are the only place the
+/// variables can reach, so a launch is where they are stopped, and this process's environment
+/// is never changed - the change was an `unsafe fn` (std::env::remove_var: another thread may be
+/// reading the environment), and it hid from the helper's own self-test whether the verifier
+/// would have minded them. The day a library that reads them is linked into the helper this is
+/// not enough; the cases that run the verifier and the helper's self-test with a hostile
+/// configuration in their own environment (tests/signature.rs, the helper's tests/helper.rs)
+/// are what would show it, now that nothing takes the variables away before they run.
 ///
-/// No other thread may read or write the environment while this runs (the C++'s "not thread-safe
-/// against other threads reading the environment, so call it before starting any"): it changes
-/// the environment, which std::env::remove_var requires of its caller.
-#[allow(
-    unsafe_code,
-    reason = "Edition 2024 marks changing the environment unsafe; the caller's promise is this function's"
-)]
-pub unsafe fn harden_open_ssl_environment() -> Status {
-    // The three variables that make OpenSSL read a file or load code from a place the environment
-    // names (a configuration, a provider module, an engine). The same list as
-    // tools/update_make_manifest.py gives the openssl it runs.
-    const VARIABLES: [&str; 3] = ["OPENSSL_CONF", "OPENSSL_MODULES", "OPENSSL_ENGINES"];
-    let mut still_set: Option<&str> = None;
-    for name in VARIABLES {
-        // SAFETY: the caller promises that no other thread reads or writes the environment while
-        // this runs (the function's safety contract). On Windows the name is matched without
-        // regard to case, as Windows matches it.
-        unsafe { std::env::remove_var(name) };
-        // Trusted on its own word as little as the C++ trusts the return value: the variable is
-        // looked for, and a survivor is reported after the others have had their turn.
-        if std::env::var_os(name).is_some() && still_set.is_none() {
-            still_set = Some(name);
-        }
-    }
-    if let Some(name) = still_set {
-        return Err(make_error(
-            ErrorCode::Internal,
-            "an OpenSSL environment variable could not be removed",
-            name,
-        ));
-    }
-    Ok(())
+/// Not for the launches katana, katana_cli and katana_mcp make: those start the helper, which is
+/// owed the person's values so that it can hand them on.
+pub fn harden_open_ssl_environment(request: &mut SpawnRequest) {
+    request
+        .environment
+        .retain(|(name, _)| !is_open_ssl_variable(name));
+    request.environment.extend(
+        OPEN_SSL_VARIABLES
+            .iter()
+            .map(|&name| (String::from(name), None)),
+    );
 }

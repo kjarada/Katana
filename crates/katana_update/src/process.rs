@@ -17,6 +17,15 @@
 //! A program's file path is a PathBuf; arguments are UTF-8 and reach the child as given (Windows:
 //! quoted by the CreateProcessW rules; never through a shell).
 //!
+//! THE CHILD'S ENVIRONMENT is this process's unless the request says otherwise, and what it says
+//! is data of the request (SpawnRequest::environment): a variable set for the child, or kept from
+//! it. The launcher builds the child's environment from that (child_environment) and hands it to
+//! the system with the program. THIS PROCESS'S OWN ENVIRONMENT IS NEVER CHANGED FOR A LAUNCH:
+//! changing it is unsafe in a process with a second thread (edition 2024 says so of
+//! std::env::set_var), and a variable set "for the length of the call" is one every other launch
+//! and every reader of that moment sees too. The helper's hardening is such a request
+//! (signature.rs, harden_open_ssl_environment).
+//!
 //! WHAT THE WINDOWS SCAN ANSWERS (the helper's process_scan_win gives the reasons):
 //! - holders_under: the processes STARTED FROM a file under the root, and for each
 //!   RunningProgram::image is that executable - never a module it loaded: what must not live
@@ -37,6 +46,7 @@
 //!   0, and a number wider than a process id, are not.
 
 use katana_core::{Result, Status};
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -59,6 +69,12 @@ pub trait ProcessOps {
     fn holders_under(&self, root: &Path) -> Result<Vec<RunningProgram>>;
 }
 
+/// One thing a launch changes in the environment its program is handed: the variable named is
+/// set to the value, or, with no value, kept from the child. The name is matched as the system
+/// matches one (Windows: without regard to case), so a change of OPENSSL_CONF is a change of
+/// `openssl_conf` there.
+pub type EnvironmentChange = (String, Option<OsString>);
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SpawnRequest {
     pub executable: PathBuf,
@@ -67,6 +83,11 @@ pub struct SpawnRequest {
     pub working_directory: PathBuf,
     /// Waiting spawns only: kill the child and report timed_out after this long.
     pub timeout: Duration,
+    /// What the child's environment differs from this process's by, made in the order given
+    /// (child_environment). Empty: the child inherits ours as it is. A name that is empty or
+    /// holds "=" or a NUL, and a value that holds a NUL, are InvalidArgument when the program is
+    /// started: no system can hand a program such a variable.
+    pub environment: Vec<EnvironmentChange>,
 }
 
 impl Default for SpawnRequest {
@@ -76,8 +97,59 @@ impl Default for SpawnRequest {
             arguments: Vec::new(),
             working_directory: PathBuf::new(),
             timeout: Duration::from_millis(60_000),
+            environment: Vec::new(),
         }
     }
+}
+
+// Whether `held`, the name a variable has in an environment, names the variable `name`, as the
+// system that keeps the environment matches the two: Windows without regard to case, by the
+// table its file names are folded with; elsewhere a name is its bytes.
+pub(crate) fn is_variable(held: &OsStr, name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        crate::spawn_win::same_variable_name(held, name)
+    }
+    #[cfg(not(windows))]
+    {
+        held == OsStr::new(name)
+    }
+}
+
+/// `inherited` with `changes` made in order: a change takes every variable of its name out
+/// (however the name is spelled where the system does not tell the spellings apart), and one
+/// with a value then adds the variable, under the change's own spelling, at the end. The
+/// variables no change names keep their order. It reads no environment: the one a launch starts
+/// from is handed in, so that the rule can be put to variables no process needs to hold.
+pub fn environment_with(
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+    changes: &[EnvironmentChange],
+) -> Vec<(OsString, OsString)> {
+    let mut variables: Vec<(OsString, OsString)> = inherited.into_iter().collect();
+    for (name, value) in changes {
+        variables.retain(|(held, _)| !is_variable(held, name));
+        if let Some(value) = value {
+            variables.push((OsString::from(name), value.clone()));
+        }
+    }
+    variables
+}
+
+/// The environment the program of `request` is started with: this process's as it is when this
+/// is called, with the request's changes made (environment_with). The system launcher builds
+/// the environment of every program whose request changes anything from exactly this, so what
+/// this answers is what such a child is handed; it changes nothing of this process.
+pub fn child_environment(request: &SpawnRequest) -> Vec<(OsString, OsString)> {
+    environment_with(std::env::vars_os(), &request.environment)
+}
+
+/// The value the variable `name` has in `environment`, the name matched as the system matches
+/// one; None when the environment does not hold it.
+pub fn variable_in<'a>(environment: &'a [(OsString, OsString)], name: &str) -> Option<&'a OsStr> {
+    environment
+        .iter()
+        .find(|(held, _)| is_variable(held, name))
+        .map(|(_, value)| value.as_os_str())
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

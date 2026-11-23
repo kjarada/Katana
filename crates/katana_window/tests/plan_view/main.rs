@@ -7,7 +7,8 @@
 //! The view is driven alone, as the C++ tests drive a ViewportWidget with no window: its events
 //! are its own methods at a pixel of the view (support.rs), and what it paints is read from its
 //! picture. `view_ui` is not a twin: it draws the view through egui in the harness, to hold that
-//! the egui adaptor sends the same events to the same pixels.
+//! the egui adaptor sends the same events to the same pixels. Nor is `kept_furniture`: it holds the
+//! key a paint keeps its whole picture by, an input a case.
 
 #![allow(
     clippy::float_cmp,
@@ -23,6 +24,7 @@ pub mod window_support;
 
 mod support;
 
+mod kept_furniture;
 mod plan_context_menu;
 mod plan_painter;
 mod plan_view;

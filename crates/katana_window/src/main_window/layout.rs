@@ -32,6 +32,8 @@
 //! and the window's own panels that float (`layout_json`), with a version as saveState had one. A
 //! version 3 layout saved before the panels could float names none, and all are docked. A version
 //! 2 layout, the rows alone, is carried over with every other toolbar as built. A headless run reads and writes none of it.
+//! The views - which are open and how they are arranged - are kept beside the layout under
+//! `window/views`, in the workspace's own form (`VIEWS_KEY`, `restore_saved_views`).
 //!
 //! THE OLDER BUILD'S LAYOUT (decided here, for --check-session-restore and --check-toolbar-fit):
 //! a version 1 layout in the Rust's own form - every toolbar of the second row, Surface Edit and
@@ -63,6 +65,12 @@ use crate::tools::flyout_button::{
 
 pub const LAYOUT_KEY: &str = "window/layout";
 pub const MINIMISED_KEY: &str = "window/minimised";
+/// views2: the views as the session left them - which are open, what each shows and how they are
+/// arranged - in the workspace's own versioned form (`ViewWorkspace::saved_views`). A key beside
+/// the layout's, not a member of it: the layout's checks restore layouts into a running window
+/// (`check_tool_bar_fit`), which must not close and open its views, and a settings file without
+/// the key is one saved before the views were kept, whose window starts with the one plan view.
+pub const VIEWS_KEY: &str = "window/views";
 pub const TEXT_SIZE_KEY: &str = "appearance/textSize";
 pub const TOOL_BAR_ICONS_KEY: &str = "appearance/toolBarIcons";
 pub const TOOL_BAR_NAMES_KEY: &str = "appearance/toolBarNames";
@@ -821,14 +829,47 @@ pub fn restore_session(window: &mut MainWindow) {
     if let Some(layout) = layout {
         let _ = restore_layout(window, &layout);
     }
+    restore_saved_views(window); // views2
+}
+
+/// views2: the views the settings keep (`VIEWS_KEY`) opened and arranged as the last session left
+/// them. Without the key - a settings file from before the views were kept - and for a record
+/// the workspace refuses (damaged, of another version, naming too many views), the window keeps
+/// the one plan view it started with; a refusal is said in the command log, and never stops the
+/// start. The views are given their title bars first: a floating view's rectangle is its bar's
+/// chrome's to keep, and the first frame would otherwise give them only after this.
+pub fn restore_saved_views(window: &mut MainWindow) {
+    let Some(saved) = window.exec.settings.text(VIEWS_KEY).map(String::from) else {
+        return;
+    };
+    if !window.exec.workspace.has_chrome() {
+        window
+            .exec
+            .workspace
+            .set_chrome(super::panels::chrome_icons());
+    }
+    let restored = window
+        .exec
+        .with_parts(|workspace, parts| workspace.restore_views(parts, &saved));
+    if let Err(error) = restored {
+        window.exec.log_message(
+            &format!(
+                "The views of the last session were not restored: {}.",
+                error.describe()
+            ),
+            false,
+        );
+    }
 }
 
 /// MainWindow::saveSession: the layout and the minimised panels, in the person's settings file.
 pub fn save_session(window: &mut MainWindow) {
     let rows = current_rows(window);
     let layout = layout_json(window, LAYOUT_VERSION, &rows);
+    let views = window.exec.workspace.saved_views(); // views2
     let settings = &mut window.exec.settings;
     settings.set_text(LAYOUT_KEY, &layout);
+    settings.set_text(VIEWS_KEY, &views); // views2
     settings.set(MINIMISED_KEY, SettingValue::List(Vec::new()));
     settings.set_text(
         MESHES_IN_PLAN_KEY,
