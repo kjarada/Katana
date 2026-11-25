@@ -64,8 +64,30 @@ bash tools/build_visible.sh wsl test -R Docs    # the runner's suite only, ctest
 bash tools/build_visible.sh                     # the same phases natively on Windows: all
 bash tools/build_visible.sh cargo               #   ... the Rust workspace alone
 bash tools/build_visible.sh test -R '^cli\.'    #   ... the runner's suite only
+bash tools/build_visible.sh targets             # the release's targets this machine cannot run, compiled
 bash tools/build_visible.sh close               # close this checkout's finished windows
 ```
+
+**The other targets, compiled here** (`targets`; the owner's request of
+2026-11-25, "github workflow is slow try to build here first for all
+targets"). The release builds five targets; a Windows machine with WSL runs
+two of them, Windows x86-64 natively and Linux x86-64 in WSL. The other
+three - Windows ARM64 (`aarch64-pc-windows-gnullvm`), Linux ARM64
+(`aarch64-unknown-linux-gnu`) and macOS on Apple silicon
+(`aarch64-apple-darwin`) - it cannot run, so `targets` compiles them: Clippy
+with warnings as errors, every target (`--all-targets`) of every crate that
+needs no native library of the target's. Those are found from the manifests
+at each run: a crate is left out when it, or anything it depends on, tests'
+dependencies included, is `katana_gis` or `katana_pointcloud`, whose GDAL and
+PDAL shims want the target's C++ compiler and libraries - so they, `interop`,
+`app`, `gpu` and the window wait for the release run. It uses rustup's
+toolchain, whose Rust has the other targets' standard libraries (`rustup
+target add aarch64-pc-windows-gnullvm aarch64-unknown-linux-gnu
+aarch64-apple-darwin`, once), put first on `PATH` for the run, in its own
+target folder (`target/targets`). Its first run found the NEON kernels had
+never met a compiler: an unused assignment in `katana_core`'s UTF-8
+validator, and two of Clippy's lints in `katana_render`'s vertex transform,
+each of which would have failed every ARM64 and macOS job of a release.
 
 Without `wsl` the phases are the same and run natively in MSYS2 UCRT64
 ("Windows", below); with it they run in the WSL distribution. A WSL run's

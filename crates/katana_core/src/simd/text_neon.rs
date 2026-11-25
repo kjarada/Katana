@@ -103,10 +103,13 @@ pub(crate) fn valid_utf8(bytes: &[u8]) -> i32 {
             let fourth = vqsubq_u8(prev3, vdupq_n_u8(0xf0 - 0x80));
             let wanted = vandq_u8(vorrq_u8(third, fourth), vdupq_n_u8(0x80));
             errors = vorrq_u8(errors, veorq_u8(wanted, pair_errors));
-            open = vqsubq_u8(input, open_at_end);
             prior = input;
         }};
     }
+    // What is still open at the end of a run of blocks is the last block's alone: it is taken
+    // once, after the run's last check, where taking it in each check left three of every four
+    // values unread (an unused assignment, which -D warnings refuses: found by the first
+    // compile for ARM64, 2026-11-25, tools/build_visible.sh targets).
     let mut index = 0;
     while size - index >= 64 {
         let first = block_at(bytes, index);
@@ -122,6 +125,7 @@ pub(crate) fn valid_utf8(bytes: &[u8]) -> i32 {
             check!(second);
             check!(third);
             check!(fourth);
+            open = vqsubq_u8(fourth, open_at_end);
             if vmaxvq_u8(errors) != 0 {
                 return 0;
             }
@@ -136,12 +140,15 @@ pub(crate) fn valid_utf8(bytes: &[u8]) -> i32 {
             prior = block;
         } else {
             check!(block);
+            open = vqsubq_u8(block, open_at_end);
         }
         index += 16;
     }
     if index < size {
         prior = block_at(bytes, size - 32);
-        check!(block_at(bytes, size - 16));
+        let last = block_at(bytes, size - 16);
+        check!(last);
+        open = vqsubq_u8(last, open_at_end);
     }
     let _ = prior;
     i32::from(vmaxvq_u8(vorrq_u8(errors, open)) == 0)

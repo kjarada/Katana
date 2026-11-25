@@ -21,6 +21,11 @@
 #   tools/build_visible.sh [wsl] test [ctest args]   the runner's suite only, against the
 #                                                    programs the last build made, e.g.
 #                                                    test -R PlanContextMenu
+#   tools/build_visible.sh targets                   the release's targets this machine
+#                                                    cannot run (ARM64 Windows and Linux,
+#                                                    macOS), compiled: Clippy of every crate
+#                                                    below the GDAL and PDAL shims, on
+#                                                    Windows, with rustup's toolchain
 #   tools/build_visible.sh close                     close this checkout's windows whose run
 #                                                    has ended
 #   tools/build_visible.sh prune                     delete the WSL build folders of
@@ -136,8 +141,14 @@ main() {
     phase="${1:-all}"
     case "$phase" in
         all | cargo | test) ;;
+        targets)
+            if [ "$host" = wsl ]; then
+                echo "targets runs on Windows, with rustup's toolchain: tools/build_visible.sh targets" >&2
+                return 2
+            fi
+            ;;
         *)
-            echo "usage: tools/build_visible.sh [wsl] [all | cargo [cargo test arguments...] | test [ctest arguments...]] | close | prune" >&2
+            echo "usage: tools/build_visible.sh [wsl] [all | cargo [cargo test arguments...] | test [ctest arguments...]] | targets | close | prune" >&2
             return 2
             ;;
     esac
@@ -235,6 +246,10 @@ main() {
 steps() {
     local runner="$1" programs="$2" phase="$3"
     shift 3
+    if [ "$phase" = targets ]; then
+        target_steps
+        return
+    fi
     if [ "$phase" = cargo ]; then
         # With arguments, only those tests: `cargo -p katana_window --test codes NAME`
         # (cargo test's own arguments, after --locked --release), shown in full.
@@ -262,6 +277,63 @@ steps() {
         tested=1
     fi
     return "$tested"
+}
+
+# The release builds five targets (.github/workflows/release.yml); this machine runs two of
+# them, Windows x86-64 here and Linux x86-64 in WSL. The other three - Windows and Linux on
+# ARM64, and macOS on ARM64 - are compiled here, not run: Clippy with warnings as errors, every
+# target of every crate that needs no native library of the target's, so the ARM-only SIMD
+# kernels and the macOS-only code meet a compiler before a release run does (the owner's
+# request of 2026-11-25: "github workflow is slow try to build here first for all targets").
+# Left out, with what reaches them: katana_gis and katana_pointcloud compile their GDAL and
+# PDAL shims with the target's C++ compiler against its libraries, which this machine has not
+# got, so they, and every crate that depends on them, wait for the release run. rustup's
+# toolchain, not UCRT64's, since only rustup gives a Rust the other targets' standard
+# libraries (`rustup target add` each of TARGETS); its own target folder, so the two
+# toolchains never rebuild each other's work.
+TARGETS=(aarch64-pc-windows-gnullvm aarch64-unknown-linux-gnu aarch64-apple-darwin)
+target_steps() {
+    local cargo="${KATANA_TARGETS_CARGO:-$HOME/.cargo/bin/cargo}" packages=() code=0
+    # The crates that need no shim, by their manifests: a crate is out when it, or anything it
+    # depends on (tests' dependencies included, as --all-targets compiles the tests), is one of
+    # the two crates with a shim. Read each time, so a crate added is checked with no list to keep.
+    # Python on Windows ends its lines with CR LF, and "-p<CR>" is not -p: the CRs go.
+    mapfile -t packages < <(python -I - << 'EOF' | tr -d '\r'
+import glob, tomllib
+crates = {}
+for path in glob.glob('crates/*/Cargo.toml'):
+    manifest = tomllib.load(open(path, 'rb'))
+    crates[manifest['package']['name']] = {
+        name for section in ('dependencies', 'dev-dependencies', 'build-dependencies')
+        for name in manifest.get(section, {})}
+def native(crate, seen=()):
+    if crate in ('katana_gis', 'katana_pointcloud'):
+        return True
+    return any(native(other, seen + (crate,)) for other in crates.get(crate, ())
+               if other in crates and other not in seen)
+for crate in sorted(crates):
+    if not native(crate):
+        print('-p')
+        print(crate)
+EOF
+    )
+    if [ "${#packages[@]}" -eq 0 ]; then
+        echo "== no crate to check: could not read the manifests" >&2
+        return 1
+    fi
+    # rustup's proxies first on PATH: cargo runs the rustc, cargo-clippy and clippy-driver it
+    # finds there, and UCRT64's, which the window puts first, have no other target's std.
+    export PATH="$(dirname "$cargo"):$PATH"
+    echo "== cargo: $cargo, $("$cargo" --version), $(rustc --version)"
+    echo "== crates: $(printf '%s ' "${packages[@]}" | sed 's/-p //g')"
+    export CLIPPY_CONF_DIR="$PWD"
+    local target
+    for target in "${TARGETS[@]}"; do
+        echo "== cargo clippy --locked --target $target --all-targets -- -D warnings"
+        "$cargo" clippy --manifest-path Cargo.toml --locked --target "$target" \
+            --target-dir target/targets "${packages[@]}" --all-targets -- -D warnings || code=1
+    done
+    return "$code"
 }
 
 # The test runner (the root CMakeLists.txt; docs/building.md): configured with

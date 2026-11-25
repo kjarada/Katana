@@ -83,7 +83,7 @@ pub(super) fn transform_vertices(
     let widthf = vdupq_n_f32(width);
     let heightf = vdupq_n_f32(height);
 
-    for (step, p) in positions[..whole].chunks_exact(4).enumerate() {
+    for (step, p) in positions[..whole].as_chunks::<4>().0.iter().enumerate() {
         let i = 4 * step;
         // Two vertices at a time in double: their clip coordinates, x, y,
         // z, w as float pairs, and their clip codes.
@@ -165,17 +165,18 @@ pub(super) fn transform_vertices(
             f32x4_lanes(sz),
             f32x4_lanes(inv_w),
         ];
-        for k in 0..4 {
-            let vertex = i + k;
-            let word = colors.get(vertex).copied().unwrap_or(0xFFFF_FFFF);
-            clip[vertex] = ClipVertex {
+        // Lane k of every vector is vertex i + k: the four slots it fills, in order.
+        let slots = clip[i..i + 4].iter_mut().zip(&mut screen[i..i + 4]);
+        for (k, (clip_vertex, screen_vertex)) in slots.enumerate() {
+            let word = colors.get(i + k).copied().unwrap_or(0xFFFF_FFFF);
+            *clip_vertex = ClipVertex {
                 x: lanes[0][k],
                 y: lanes[1][k],
                 z: lanes[2][k],
                 w: lanes[3][k],
                 color: word,
             };
-            screen[vertex] = ScreenVertex {
+            *screen_vertex = ScreenVertex {
                 x: lanes[4][k],
                 y: lanes[5][k],
                 z: lanes[6][k],

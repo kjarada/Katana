@@ -224,6 +224,10 @@ watches (below, "Show the build"); never type them into Claude's shell.
       `wsl cargo -p katana_window --test workspace maximis`);
     - `bash tools/build_visible.sh wsl test [ctest arguments]` - the process
       tests only, e.g. `wsl test -R docs`.
+    - `bash tools/build_visible.sh targets` - the release's three targets this
+      machine cannot run (ARM64 Windows and Linux, macOS), compiled with
+      rustup's toolchain: Clippy of every crate below the GDAL and PDAL shims
+      (`docs/building.md`, "The other targets, compiled here").
   - Then wait with ONE Bash command run with `run_in_background`, which
     notifies you when the run ends:
 
