@@ -2629,15 +2629,16 @@ mod helper_imports {
         // toolchain, or the case above would pass on a reader that cannot see it. The C++'s
         // control was its own test program, which linked libstdc++ as a DLL; a Rust test program
         // links its standard library statically and imports only Windows' DLLs, so the control
-        // is the toolchain's own C++ runtime, on PATH as the build has the environment's bin:
-        // UCRT64's libstdc++-6.dll, which imports the toolchain's libgcc and winpthread, or, on
-        // Windows on ARM, CLANGARM64's libc++.dll - that environment has no GCC (the release
-        // workflow's Windows job) - which imports LLVM's libunwind.dll. Only libstdc++ was
-        // looked for until the first ARM64 run of the release, 2026-11-25, which had none.
+        // is a DLL of the toolchain's, on PATH as the build has the environment's bin: UCRT64's
+        // libstdc++-6.dll, which imports the toolchain's libgcc and winpthread, or, on Windows
+        // on ARM, where CLANGARM64 has no GCC, libcurl-4.dll (GDAL's own dependency, so in
+        // every environment that builds Katana), which imports the toolchain's TLS and
+        // compression DLLs. CLANGARM64's own C++ runtime, libc++.dll, is no control: the
+        // release's second run, 2026-11-25, showed it imports Windows' DLLs alone.
         let control = std::env::var_os("PATH")
             .and_then(|path| {
                 let folders: Vec<_> = std::env::split_paths(&path).collect();
-                ["libstdc++-6.dll", "libc++.dll"].iter().find_map(|runtime| {
+                ["libstdc++-6.dll", "libcurl-4.dll"].iter().find_map(|runtime| {
                     folders
                         .iter()
                         .map(|folder| folder.join(runtime))
@@ -2645,7 +2646,7 @@ mod helper_imports {
                 })
             })
             .expect(
-                "the toolchain's C++ runtime on PATH: libstdc++-6.dll (MSYS2 UCRT64's bin) or                  libc++.dll (CLANGARM64's), as the build has it",
+                "a DLL of the toolchain's on PATH: libstdc++-6.dll (MSYS2 UCRT64's bin) or                  libcurl-4.dll (CLANGARM64's), as the build has it",
             );
         let imported = imported_libraries(&control);
         assert!(!imported.is_empty());

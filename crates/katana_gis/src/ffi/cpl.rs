@@ -432,6 +432,19 @@ pub(crate) fn set_config_option(key: &CStr, value: &CStr) {
     unsafe { CPLSetConfigOption(key.as_ptr(), value.as_ptr()) };
 }
 
+/// Sets the process's environment variable `name` to `value` unless it is set already: for a
+/// library GDAL loads that reads its settings from the environment alone, and never through
+/// GDAL's configuration (Arrow's memory pool, gdal_registry).
+pub(crate) fn set_environment_default(name: &str, value: &str) {
+    if std::env::var_os(name).is_some() {
+        return;
+    }
+    // SAFETY: called once, from gdal_registry's Once, before GDAL is registered and so before
+    // GDAL or anything it loads has started a thread that reads the environment; the standard
+    // library's own readers are kept out by its lock.
+    unsafe { std::env::set_var(name, value) };
+}
+
 /// `CPLGetThreadLocalConfigOption(key, NULL)`, copied: None when this thread
 /// has not set it.
 pub(crate) fn thread_local_config_option(key: &CStr) -> Option<CString> {

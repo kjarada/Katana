@@ -27,6 +27,14 @@ use crate::ffi::{cpl, dataset, error};
 pub(crate) fn ensure_registered() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
+        // Arrow, which GDAL's GeoParquet and Arrow drivers load, allocates from the C library
+        // and not from the mimalloc built into it. In conda-forge's libarrow 25 that allocator's
+        // per-thread start (mi_thread_init) crashed a thread writing a GeoParquet - a
+        // segmentation fault in 2 of 40 runs of the interop tests here, and in both Linux jobs
+        // of a release run (2026-11-25; docs/interop.md, "Threading"). Arrow reads the
+        // choice from the environment alone, once, when it is first used; a choice a person
+        // has made is kept.
+        cpl::set_environment_default("ARROW_DEFAULT_MEMORY_POOL", "system");
         locate_gdal_data();
         locate_certificates();
         // GDAL's PROJ pointed at its data before the drivers are registered,

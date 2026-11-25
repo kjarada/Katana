@@ -587,6 +587,20 @@ invalidates all the others. Process exit frees it, which costs nothing.
 
 A `GdalDataset` is not thread-safe; use one per thread.
 
+**Arrow's allocator.** GDAL's GeoParquet and Arrow drivers load Apache Arrow,
+which allocates from a mimalloc built into it. In conda-forge's libarrow 25
+(the Linux toolchain's) that allocator's per-thread start, `mi_thread_init`,
+crashed a thread writing a GeoParquet: a segmentation fault in 2 of 40 runs
+of `katana_interop`'s tests in WSL, and in both Linux jobs of the release's
+second run (2026-11-25), found under gdb in
+`formats::flat_geobuf_geo_parquet_kmz_gpx_and_csv_wkt_round_trip` - so an
+export from the program could have crashed the same way. `ensure_registered()`
+now sets `ARROW_DEFAULT_MEMORY_POOL=system` before GDAL is registered, unless
+the variable is set already: Arrow reads the choice from the environment
+alone, once, and then allocates from the C library. After it, 150 runs of the
+same tests passed. *Rejected:* running those tests on one thread, which
+would hide the crash in the tests and leave it in the program.
+
 ## Point-cloud level of detail: COPC, not a bespoke octree
 
 The original plan asked Katana to build a spatial hierarchy for point clouds.
